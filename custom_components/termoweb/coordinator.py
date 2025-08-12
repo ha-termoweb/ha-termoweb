@@ -8,7 +8,7 @@ from aiohttp import ClientError
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import TermoWebClient, TermoWebRateLimitError, TermoWebAuthError
+from .api import TermoWebAuthError, TermoWebClient, TermoWebRateLimitError
 from .const import MIN_POLL_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
@@ -126,4 +126,93 @@ class TermoWebCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):  # 
             self.update_interval = timedelta(seconds=self._backoff)
             raise UpdateFailed(f"Rate limited; backing off to {self._backoff}s") from err
         except (ClientError, TermoWebAuthError) as err:
+            raise UpdateFailed(f"API error: {err}") from err
+
+
+class TermoWebPmoEnergyCoordinator(
+    DataUpdateCoordinator[dict[str, dict[str, Any]]]
+):  # dev_id -> pmo energy
+    """Poll PMO energy counters and expose kWh totals."""
+
+    def __init__(self, hass: HomeAssistant, client: TermoWebClient) -> None:
+        super().__init__(
+            hass,
+            logger=_LOGGER,
+            name="termoweb_pmo_energy",
+            update_interval=timedelta(minutes=15),
+        )
+        self.client = client
+
+    async def _async_update_data(self) -> dict[str, dict[str, Any]]:
+        try:
+            devices: list[dict[str, Any]] = await self.client.list_devices()
+            if not isinstance(devices, list):
+                devices = []
+
+            result: dict[str, dict[str, Any]] = {}
+            for dev in devices:
+                if not isinstance(dev, dict):
+                    continue
+
+                dev_id = str(
+                    dev.get("dev_id")
+                    or dev.get("id")
+                    or dev.get("serial_id")
+                    or ""
+                ).strip()
+                if not dev_id:
+                    continue
+
+                prev_dev = (self.data or {}).get(dev_id, {})
+                prev_energy = (
+                    (prev_dev.get("pmo") or {}).get("energy_total") or {}
+                )
+                energy_map: dict[str, float] = dict(prev_energy)
+
+                try:
+                    nodes = await self.client.get_nodes(dev_id)
+                except Exception:
+                    nodes = None
+
+                node_list = nodes.get("nodes") if isinstance(nodes, dict) else None
+                if isinstance(node_list, list):
+                    for node in node_list:
+                        if not isinstance(node, dict):
+                            continue
+                        if (node.get("type") or "").lower() != "pmo":
+                            continue
+                        addr = str(node.get("addr"))
+                        prev_val = energy_map.get(addr)
+                        try:
+                            samples = await self.client.get_pmo_samples(dev_id, addr)
+                            samp_list = (
+                                samples.get("samples")
+                                if isinstance(samples, dict)
+                                else None
+                            )
+                            if isinstance(samp_list, list) and samp_list:
+                                last = samp_list[-1]
+                                counter_wh = _as_float(last.get("counter"))
+                                if counter_wh is not None:
+                                    kwh = counter_wh / 1000.0
+                                    if prev_val is not None and kwh < prev_val:
+                                        _LOGGER.warning(
+                                            "PMO energy counter reset for %s addr %s: %s -> %s",
+                                            dev_id,
+                                            addr,
+                                            prev_val,
+                                            kwh,
+                                        )
+                                    energy_map[addr] = kwh
+                        except (ClientError, TermoWebAuthError, TermoWebRateLimitError):
+                            if prev_val is not None:
+                                energy_map[addr] = prev_val
+
+                result[dev_id] = {
+                    "dev_id": dev_id,
+                    "pmo": {"energy_total": energy_map},
+                }
+
+            return result
+        except (ClientError, TermoWebAuthError, TermoWebRateLimitError) as err:
             raise UpdateFailed(f"API error: {err}") from err

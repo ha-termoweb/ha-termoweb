@@ -302,3 +302,22 @@ class TermoWebClient:
         headers = await self._authed_headers()
         path = f"/api/v2/devs/{dev_id}/htr/{addr}/settings"
         return await self._request("POST", path, headers=headers, json=payload)
+
+    async def get_pmo_samples(
+        self,
+        dev_id: str,
+        addr: str | int,
+        *,
+        start: int | None = None,
+        end: int | None = None,
+    ) -> Any:
+        """Return historical samples for a PMO node."""
+        if end is None:
+            end = int(time.time())
+        if start is None:
+            start = end - 86400
+        headers = await self._authed_headers()
+        path = (
+            f"/api/v2/devs/{dev_id}/pmo/{addr}/samples?start={int(start)}&end={int(end)}"
+        )
+        return await self._request("GET", path, headers=headers)

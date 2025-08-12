@@ -19,7 +19,7 @@ from .const import (
     STRETCHED_POLL_INTERVAL,
     signal_ws_status,
 )
-from .coordinator import TermoWebCoordinator
+from .coordinator import TermoWebCoordinator, TermoWebPmoEnergyCoordinator
 from .ws_client_legacy import TermoWebWSLegacyClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -39,11 +39,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     client = TermoWebClient(session, username, password)
     coordinator = TermoWebCoordinator(hass, client, base_interval)
+    pmo_coordinator = TermoWebPmoEnergyCoordinator(hass, client)
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = data = {
         "client": client,
         "coordinator": coordinator,
+        "pmo_coordinator": pmo_coordinator,
         "base_poll_interval": max(base_interval, MIN_POLL_INTERVAL),
         "stretched": False,
         "ws_tasks": {},     # dev_id -> asyncio.Task
@@ -112,6 +114,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # First refresh (inventory etc.)
     await coordinator.async_config_entry_first_refresh()
+    await pmo_coordinator.async_config_entry_first_refresh()
 
     # Always-on push: start for all current devices
     for dev_id in (coordinator.data or {}).keys():
