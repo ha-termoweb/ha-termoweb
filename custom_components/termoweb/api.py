@@ -13,6 +13,8 @@ from .const import (
     BASIC_AUTH_B64,
     DEVS_PATH,
     NODES_PATH_FMT,
+    PMO_POWER_PATH_FMT,
+    PMO_SAMPLES_PATH_FMT,
     TOKEN_PATH,
     USER_AGENT,
 )
@@ -46,7 +48,9 @@ def _redact_bearer(text: str | None) -> str:
 class TermoWebClient:
     """Thin async client for the TermoWeb cloud (HA-safe)."""
 
-    def __init__(self, session: aiohttp.ClientSession, username: str, password: str) -> None:
+    def __init__(
+        self, session: aiohttp.ClientSession, username: str, password: str
+    ) -> None:
         self._session = session
         self._username = username
         self._password = password
@@ -70,7 +74,9 @@ class TermoWebClient:
 
         for attempt in range(2):
             try:
-                async with self._session.request(method, url, headers=headers, timeout=timeout, **kwargs) as resp:
+                async with self._session.request(
+                    method, url, headers=headers, timeout=timeout, **kwargs
+                ) as resp:
                     ctype = resp.headers.get("Content-Type", "")
                     body_text: Optional[str]
                     try:
@@ -91,10 +97,15 @@ class TermoWebClient:
                         if API_LOG_PREVIEW:
                             _LOGGER.debug(
                                 "HTTP %s -> %s, ctype=%s, body[0:200]=%r",
-                                url, resp.status, ctype, (_redact_bearer(body_text) or "")[:200],
+                                url,
+                                resp.status,
+                                ctype,
+                                (_redact_bearer(body_text) or "")[:200],
                             )
                         else:
-                            _LOGGER.debug("HTTP %s -> %s, ctype=%s", url, resp.status, ctype)
+                            _LOGGER.debug(
+                                "HTTP %s -> %s, ctype=%s", url, resp.status, ctype
+                            )
 
                     if resp.status == 401:
                         if attempt == 0:
@@ -108,12 +119,17 @@ class TermoWebClient:
                         raise TermoWebRateLimitError("Rate limited")
                     if resp.status >= 400:
                         raise aiohttp.ClientResponseError(
-                            resp.request_info, resp.history,
-                            status=resp.status, message=body_text, headers=resp.headers
+                            resp.request_info,
+                            resp.history,
+                            status=resp.status,
+                            message=body_text,
+                            headers=resp.headers,
                         )
 
                     # Try JSON first; fall back to text
-                    if "application/json" in ctype or (body_text and body_text[:1] in ("{", "[")):
+                    if "application/json" in ctype or (
+                        body_text and body_text[:1] in ("{", "[")
+                    ):
                         try:
                             return await resp.json(content_type=None)
                         except Exception:
@@ -123,7 +139,12 @@ class TermoWebClient:
             except (TermoWebAuthError, TermoWebRateLimitError):
                 raise
             except Exception as e:
-                _LOGGER.error("Request %s %s failed (sanitized): %s", method, url, _redact_bearer(str(e)))
+                _LOGGER.error(
+                    "Request %s %s failed (sanitized): %s",
+                    method,
+                    url,
+                    _redact_bearer(str(e)),
+                )
                 raise
         raise TermoWebAuthError("Unauthorized")
 
@@ -152,7 +173,11 @@ class TermoWebClient:
             _LOGGER.debug(
                 "Token POST %s for user domain=%s",
                 url,
-                self._username.split("@")[-1] if "@" in self._username else "<no-domain>",
+                (
+                    self._username.split("@")[-1]
+                    if "@" in self._username
+                    else "<no-domain>"
+                ),
             )
             async with self._session.post(
                 url, data=data, headers=headers, timeout=aiohttp.ClientTimeout(total=25)
@@ -160,14 +185,19 @@ class TermoWebClient:
                 _LOGGER.debug("Token resp status=%s", resp.status)
 
                 if resp.status in (400, 401):
-                    raise TermoWebAuthError(f"Invalid credentials or client auth failed (status {resp.status})")
+                    raise TermoWebAuthError(
+                        f"Invalid credentials or client auth failed (status {resp.status})"
+                    )
                 if resp.status == 429:
                     raise TermoWebRateLimitError("Rate limited on token endpoint")
                 if resp.status >= 400:
                     text = await resp.text()
                     raise aiohttp.ClientResponseError(
-                        resp.request_info, resp.history,
-                        status=resp.status, message=text, headers=resp.headers
+                        resp.request_info,
+                        resp.history,
+                        status=resp.status,
+                        message=text,
+                        headers=resp.headers,
                     )
 
                 js = await resp.json(content_type=None)
@@ -207,7 +237,9 @@ class TermoWebClient:
                 return [d for d in data["devs"] if isinstance(d, dict)]
             if isinstance(data.get("devices"), list):
                 return [d for d in data["devices"] if isinstance(d, dict)]
-        _LOGGER.debug("Unexpected /devs shape (%s); returning empty list", type(data).__name__)
+        _LOGGER.debug(
+            "Unexpected /devs shape (%s); returning empty list", type(data).__name__
+        )
         return []
 
     async def device_connected(self, dev_id: str) -> Optional[bool]:
@@ -226,15 +258,25 @@ class TermoWebClient:
         path = f"/api/v2/devs/{dev_id}/htr/{addr}/settings"
         return await self._request("GET", path, headers=headers)
 
+    async def get_pmo_power(self, dev_id: str, addr: str | int) -> Any:
+        """Return real-time power for a power monitor node."""
+        headers = await self._authed_headers()
+        path = f"/api/v2/devs/{dev_id}/pmo/{addr}/power"
+        return await self._request("GET", path, headers=headers)
+
     async def set_htr_settings(
         self,
         dev_id: str,
         addr: str | int,
         *,
-        mode: Optional[str] = None,          # "auto" | "manual" | "off"
-        stemp: Optional[float] = None,       # target setpoint (in current units)
-        prog: Optional[List[int]] = None,    # full 168-element weekly program (0=cold,1=night,2=day)
-        ptemp: Optional[List[float]] = None, # preset temperatures [cold, night, day] (in current units)
+        mode: Optional[str] = None,  # "auto" | "manual" | "off"
+        stemp: Optional[float] = None,  # target setpoint (in current units)
+        prog: Optional[
+            List[int]
+        ] = None,  # full 168-element weekly program (0=cold,1=night,2=day)
+        ptemp: Optional[
+            List[float]
+        ] = None,  # preset temperatures [cold, night, day] (in current units)
         units: str = "C",
     ) -> Any:
         """
@@ -290,7 +332,9 @@ class TermoWebClient:
         # Preset temperatures – validate length and convert to strings
         if ptemp is not None:
             if not isinstance(ptemp, list) or len(ptemp) != 3:
-                raise ValueError("ptemp must be a list of three numeric values [cold, night, day]")
+                raise ValueError(
+                    "ptemp must be a list of three numeric values [cold, night, day]"
+                )
             formatted: List[str] = []
             for v in ptemp:
                 try:
@@ -303,21 +347,35 @@ class TermoWebClient:
         path = f"/api/v2/devs/{dev_id}/htr/{addr}/settings"
         return await self._request("POST", path, headers=headers, json=payload)
 
-    async def get_pmo_samples(
-        self,
-        dev_id: str,
-        addr: str | int,
-        *,
-        start: int | None = None,
-        end: int | None = None,
-    ) -> Any:
-        """Return historical samples for a PMO node."""
-        if end is None:
-            end = int(time.time())
-        if start is None:
-            start = end - 86400
+    async def get_pmo_power(self, dev_id: str, addr: str | int) -> Optional[float]:
+        """Return live power for a PMO node in watts."""
         headers = await self._authed_headers()
-        path = (
-            f"/api/v2/devs/{dev_id}/pmo/{addr}/samples?start={int(start)}&end={int(end)}"
+        path = PMO_POWER_PATH_FMT.format(dev_id=dev_id, addr=addr)
+        data = await self._request("GET", path, headers=headers)
+        if isinstance(data, dict):
+            power = data.get("power")
+            try:
+                return float(power)
+            except (TypeError, ValueError):
+                _LOGGER.debug(
+                    "Unexpected power payload for %s/%s: %s", dev_id, addr, data
+                )
+        return None
+
+    async def get_pmo_samples(
+        self, dev_id: str, addr: str | int, start: int, end: int
+    ) -> List[Dict[str, Any]]:
+        """Return historical samples for a PMO node."""
+        headers = await self._authed_headers()
+        path = PMO_SAMPLES_PATH_FMT.format(dev_id=dev_id, addr=addr)
+        params = {"start": start, "end": end}
+        data = await self._request("GET", path, headers=headers, params=params)
+        if isinstance(data, dict) and isinstance(data.get("samples"), list):
+            return [s for s in data["samples"] if isinstance(s, dict)]
+        _LOGGER.debug(
+            "Unexpected samples payload for PMO %s/%s: %s",
+            dev_id,
+            addr,
+            type(data).__name__,
         )
-        return await self._request("GET", path, headers=headers)
+        return []

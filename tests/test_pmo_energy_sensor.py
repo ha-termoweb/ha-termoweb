@@ -33,9 +33,21 @@ class DataUpdateCoordinator:  # pragma: no cover - minimal stub
         self.name = name
         self.update_interval = update_interval
         self.data = None
+        self._listeners: list = []
 
     def __class_getitem__(cls, item):  # pragma: no cover - minimal stub
         return cls
+
+    async def async_config_entry_first_refresh(self) -> None:
+        self.data = await self._async_update_data()
+
+    def async_set_updated_data(self, data) -> None:
+        self.data = data
+        for cb in list(self._listeners):
+            cb()
+
+    def async_add_listener(self, cb) -> None:
+        self._listeners.append(cb)
 
 
 class UpdateFailed(Exception):
@@ -72,7 +84,11 @@ sys.modules["homeassistant.components"] = ha_components
 
 ha_sensor = types.ModuleType("homeassistant.components.sensor")
 ha_sensor.SensorEntity = type("SensorEntity", (), {})
-ha_sensor.SensorDeviceClass = type("SensorDeviceClass", (), {"ENERGY": "energy", "TEMPERATURE": "temperature"})
+ha_sensor.SensorDeviceClass = type(
+    "SensorDeviceClass",
+    (),
+    {"ENERGY": "energy", "TEMPERATURE": "temperature", "POWER": "power"},
+)
 ha_sensor.SensorStateClass = type("SensorStateClass", (), {"TOTAL_INCREASING": "total_increasing", "MEASUREMENT": "measurement"})
 sys.modules["homeassistant.components.sensor"] = ha_sensor
 ha_components.sensor = ha_sensor
@@ -111,12 +127,12 @@ def test_wh_to_kwh_conversion() -> None:
         client = AsyncMock()
         client.list_devices.return_value = [{"dev_id": "1"}]
         client.get_nodes.return_value = {"nodes": [{"type": "pmo", "addr": 1}]}
-        client.get_pmo_samples.return_value = {"samples": [{"counter": "12345"}]}
+        client.get_pmo_samples.return_value = [{"counter": "12345"}]
 
         coordinator = TermoWebPmoEnergyCoordinator(MagicMock(), client)
         coordinator.data = await coordinator._async_update_data()
 
-        sensor = TermoWebPmoEnergyTotal(coordinator, "entry", "1", "1", "name", "uid")
+        sensor = TermoWebPmoEnergyTotal(coordinator, "1", "1", "name", "uid")
         assert sensor.native_value == pytest.approx(12.345)
 
     asyncio.run(run())
@@ -142,12 +158,12 @@ def test_counter_reset_detection() -> None:
         client.list_devices.return_value = [{"dev_id": "1"}]
         client.get_nodes.return_value = {"nodes": [{"type": "pmo", "addr": 1}]}
 
-        client.get_pmo_samples.return_value = {"samples": [{"counter": "1000"}]}
+        client.get_pmo_samples.return_value = [{"counter": "1000"}]
         coordinator = TermoWebPmoEnergyCoordinator(MagicMock(), client)
         coordinator.data = await coordinator._async_update_data()
         assert coordinator.data["1"]["pmo"]["energy_total"]["1"] == pytest.approx(1.0)
 
-        client.get_pmo_samples.return_value = {"samples": [{"counter": "100"}]}
+        client.get_pmo_samples.return_value = [{"counter": "100"}]
         coordinator.data = await coordinator._async_update_data()
         assert coordinator.data["1"]["pmo"]["energy_total"]["1"] == pytest.approx(0.1)
 

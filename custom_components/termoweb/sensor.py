@@ -4,8 +4,8 @@ import logging
 from typing import Any, Optional
 
 from homeassistant.components.sensor import (
-    SensorDeviceClass,
     SensorEntity,
+    SensorDeviceClass,
     SensorStateClass,
 )
 from homeassistant.const import UnitOfTemperature
@@ -15,15 +15,20 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_data
+from .coordinator import TermoWebPmoPowerCoordinator, TermoWebPmoEnergyCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    """Set up temperature and PMO energy sensors."""
+    """Set up temperature, PMO power, and energy sensors."""
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
-    pmo_coord = data["pmo_coordinator"]
+    pmo_energy_coord: TermoWebPmoEnergyCoordinator = data["pmo_coordinator"]
+    client = data["client"]
+    pmo_power_coord = TermoWebPmoPowerCoordinator(hass, client, coordinator, entry.entry_id)
+    data["pmo_power_coordinator"] = pmo_power_coord
+    await pmo_power_coord.async_config_entry_first_refresh()
 
     added: set[str] = set()
 
@@ -41,10 +46,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                     continue
                 ntype = (node.get("type") or "").lower()
                 addr = str(node.get("addr"))
-                base_name = (
-                    (node.get("name") or f"Node {addr}").strip() or f"Node {addr}"
-                )
-
+                base_name = (node.get("name") or f"Node {addr}").strip() or f"Node {addr}"
                 if ntype == "htr":
                     unique_id = f"{DOMAIN}:{dev_id}:htr:{addr}:temp"
                     if unique_id in added:
@@ -57,21 +59,39 @@ async def async_setup_entry(hass, entry, async_add_entities):
                     )
                     added.add(unique_id)
                 elif ntype == "pmo":
-                    unique_id = f"{dev_id}:pmo:{addr}:energy_total"
-                    if unique_id in added:
-                        continue
-                    ent_name = f"{base_name} Energy Total"
-                    new_entities.append(
-                        TermoWebPmoEnergyTotal(
-                            pmo_coord, entry.entry_id, dev_id, addr, ent_name, unique_id
+                    power_uid = f"{DOMAIN}:{dev_id}:pmo:{addr}:power"
+                    if power_uid not in added:
+                        ent_name = f"{base_name} Power"
+                        new_entities.append(
+                            TermoWebPmoPower(
+                                pmo_power_coord,
+                                entry.entry_id,
+                                dev_id,
+                                addr,
+                                ent_name,
+                                power_uid,
+                            )
                         )
-                    )
-                    added.add(unique_id)
+                        added.add(power_uid)
+                    energy_uid = f"{dev_id}:pmo:{addr}:energy_total"
+                    if energy_uid not in added:
+                        ent_name = f"{base_name} Energy Total"
+                        new_entities.append(
+                            TermoWebPmoEnergyTotal(
+                                pmo_energy_coord,
+                                dev_id,
+                                addr,
+                                ent_name,
+                                energy_uid,
+                            )
+                        )
+                        added.add(energy_uid)
 
         if new_entities:
             _LOGGER.debug("Adding %d TermoWeb sensors", len(new_entities))
             async_add_entities(new_entities)
 
+    # Add now and on subsequent coordinator updates
     await build_and_add()
 
     def _on_coordinator_update() -> None:
@@ -131,7 +151,7 @@ class TermoWebHeaterTemp(CoordinatorEntity, SensorEntity):
         if payload.get("dev_id") != self._dev_id:
             return
         addr = payload.get("addr")
-        if addr is not None and addr != self._addr:
+        if addr is not None and str(addr) != self._addr:
             return
         # Thread-safe state update
         self.schedule_update_ha_state()
@@ -156,16 +176,16 @@ class TermoWebHeaterTemp(CoordinatorEntity, SensorEntity):
         }
 
 
-class TermoWebPmoEnergyTotal(CoordinatorEntity, SensorEntity):
-    """Total energy sensor for a PMO node."""
+class TermoWebPmoPower(CoordinatorEntity, SensorEntity):
+    """Power sensor for PMO nodes."""
 
-    _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_native_unit_of_measurement = "kWh"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "W"
 
     def __init__(
         self,
-        coordinator,
+        coordinator: TermoWebPmoPowerCoordinator,
         entry_id: str,
         dev_id: str,
         addr: str,
@@ -178,6 +198,67 @@ class TermoWebPmoEnergyTotal(CoordinatorEntity, SensorEntity):
         self._addr = addr
         self._attr_name = name
         self._attr_unique_id = unique_id
+        self._unsub_ws = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self._unsub_ws = async_dispatcher_connect(
+            self.hass, signal_ws_data(self._entry_id), self._on_ws_data
+        )
+        self.async_on_remove(lambda: self._unsub_ws() if self._unsub_ws else None)
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(identifiers={(DOMAIN, self._dev_id)})
+
+    @callback
+    def _on_ws_data(self, payload: dict) -> None:
+        if payload.get("kind") != "pmo_power":
+            return
+        if payload.get("dev_id") != self._dev_id:
+            return
+        addr = payload.get("addr")
+        if addr is not None and addr != self._addr:
+            return
+        self.schedule_update_ha_state()
+
+    @property
+    def native_value(self) -> Optional[float]:
+        dev = (self.coordinator.data or {}).get(self._dev_id, {})
+        return (
+            dev.get("pmo", {})
+            .get("power", {})
+            .get(self._addr)
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "dev_id": self._dev_id,
+            "addr": self._addr,
+        }
+
+
+class TermoWebPmoEnergyTotal(CoordinatorEntity, SensorEntity):
+    """Total energy sensor for a PMO node."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = "kWh"
+
+    def __init__(
+        self,
+        coordinator: TermoWebPmoEnergyCoordinator,
+        dev_id: str,
+        addr: str,
+        name: str,
+        unique_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._dev_id = dev_id
+        self._addr = addr
+        self._attr_name = name
+        self._attr_unique_id = unique_id
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -185,10 +266,12 @@ class TermoWebPmoEnergyTotal(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self) -> Optional[float]:
-        data = (self.coordinator.data or {}).get(self._dev_id, {})
-        pmo = data.get("pmo") or {}
-        energy = (pmo.get("energy_total") or {}).get(self._addr)
-        return energy
+        dev = (self.coordinator.data or {}).get(self._dev_id, {})
+        return (
+            dev.get("pmo", {})
+            .get("energy_total", {})
+            .get(self._addr)
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

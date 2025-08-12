@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 import aiohttp
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .api import TermoWebClient
@@ -297,6 +297,7 @@ class TermoWebWSLegacyClient:
         # Apply updates to coordinator.data in-place to keep shape compatible with current entities.
         updated_nodes = False
         updated_addrs: List[str] = []
+        updated_pmo_power: List[str] = []
 
         for item in batch:
             if not isinstance(item, dict):
@@ -356,6 +357,21 @@ class TermoWebWSLegacyClient:
                 if isinstance(body, dict):
                     adv_map[addr] = body
 
+            elif "/pmo/" in path and path.endswith("/power"):
+                addr = path.split("/pmo/")[1].split("/")[0]
+                power_map: Dict[str, Any] = dev_map.setdefault("pmo", {}).setdefault("power", {})
+                val = None
+                if isinstance(body, dict):
+                    body = body.get("power")
+                try:
+                    if body is not None:
+                        val = float(body)
+                except Exception:
+                    val = None
+                if val is not None:
+                    power_map[addr] = val
+                    updated_pmo_power.append(addr)
+
             else:
                 # Other top-level paths, store compactly under raw
                 raw = dev_map.setdefault("raw", {})
@@ -369,6 +385,8 @@ class TermoWebWSLegacyClient:
             async_dispatcher_send(self.hass, signal_ws_data(self.entry_id), {**payload_base, "addr": None, "kind": "nodes"})
         for addr in set(updated_addrs):
             async_dispatcher_send(self.hass, signal_ws_data(self.entry_id), {**payload_base, "addr": addr, "kind": "htr_settings"})
+        for addr in set(updated_pmo_power):
+            async_dispatcher_send(self.hass, signal_ws_data(self.entry_id), {**payload_base, "addr": addr, "kind": "pmo_power"})
 
     # ----------------- Helpers -----------------
 
