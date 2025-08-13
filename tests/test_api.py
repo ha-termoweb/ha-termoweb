@@ -7,6 +7,7 @@ import types
 from pathlib import Path
 from typing import Any, Dict
 from unittest.mock import MagicMock
+import pytest
 
 # Provide a minimal aiohttp stub for the module import
 aiohttp_stub = types.ModuleType("aiohttp")
@@ -126,6 +127,52 @@ def test_token_refresh(monkeypatch) -> None:
         token2 = await client._ensure_token()
         assert token2 == "t2"
         assert session.post.call_count == 2
+
+    asyncio.run(_run())
+
+
+def test_get_htr_samples_success() -> None:
+    async def _run() -> None:
+        session = MagicMock()
+        session.post.return_value = MockResponse(
+            200,
+            {"access_token": "tok", "expires_in": 3600},
+            headers={"Content-Type": "application/json"},
+        )
+        session.request.return_value = MockResponse(
+            200,
+            {"samples": [{"t": 1000, "counter": "1.5"}]},
+            headers={"Content-Type": "application/json"},
+        )
+
+        client = TermoWebClient(session, "user", "pass")
+        samples = await client.get_htr_samples("dev", "A", 0, 10)
+
+        assert samples == [{"t": 1000, "counter": "1.5"}]
+        params = session.request.call_args[1]["params"]
+        assert params == {"start": 0, "end": 10}
+
+    asyncio.run(_run())
+
+
+def test_get_htr_samples_404() -> None:
+    async def _run() -> None:
+        session = MagicMock()
+        session.post.return_value = MockResponse(
+            200,
+            {"access_token": "tok", "expires_in": 3600},
+            headers={"Content-Type": "application/json"},
+        )
+        session.request.return_value = MockResponse(
+            404,
+            {},
+            headers={"Content-Type": "application/json"},
+        )
+
+        client = TermoWebClient(session, "user", "pass")
+        with pytest.raises(aiohttp.ClientResponseError) as err:
+            await client.get_htr_samples("dev", "A", 0, 10)
+        assert err.value.status == 404
 
     asyncio.run(_run())
 
