@@ -1,18 +1,15 @@
 from __future__ import annotations
 
 import logging
-import time
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
-from aiohttp import ClientError, ClientResponseError
+from aiohttp import ClientError
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.core import callback
 
-from .api import TermoWebClient, TermoWebRateLimitError, TermoWebAuthError
-from .const import MIN_POLL_INTERVAL, signal_ws_data
+from .api import TermoWebAuthError, TermoWebClient, TermoWebRateLimitError
+from .const import MIN_POLL_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -131,158 +128,3 @@ class TermoWebCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):  # 
             raise UpdateFailed(f"Rate limited; backing off to {self._backoff}s") from err
         except (ClientError, TermoWebAuthError) as err:
             raise UpdateFailed(f"API error: {err}") from err
-
-
-class TermoWebPmoPowerCoordinator(
-    DataUpdateCoordinator[Dict[str, Dict[str, Any]]]
-):
-    """Coordinator polling real-time power for PMO nodes."""
-
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        client: TermoWebClient,
-        base: TermoWebCoordinator,
-        entry_id: str,
-    ) -> None:
-        super().__init__(
-            hass,
-            logger=_LOGGER,
-            name="termoweb_pmo_power",
-            update_interval=timedelta(seconds=60),
-        )
-        self.client = client
-        self._base = base
-        self.addr_set: dict[str, set[str]] = {}
-        self._unsub = async_dispatcher_connect(
-            hass, signal_ws_data(entry_id), self._on_ws_data
-        )
-        self._unsupported: set[tuple[str, str]] = set()
-
-    async def _async_update_data(self) -> Dict[str, Dict[str, Any]]:
-        base_data = self._base.data or {}
-        data: Dict[str, Dict[str, Any]] = dict(self.data or {})
-        for dev_id, dev in base_data.items():
-            nodes = dev.get("nodes") or {}
-            node_list = nodes.get("nodes") if isinstance(nodes, dict) else None
-            pmo_addrs: list[str] = []
-            if isinstance(node_list, list):
-                for node in node_list:
-                    if (
-                        isinstance(node, dict)
-                        and (node.get("type") or "").lower() == "pmo"
-                    ):
-                        pmo_addrs.append(str(node.get("addr")))
-            if not pmo_addrs:
-                pmo_addrs = dev.get("htr", {}).get("addrs") or []
-            for addr in pmo_addrs:
-                self.addr_set.setdefault(dev_id, set()).add(addr)
-                if (dev_id, addr) in self._unsupported:
-                    continue
-                try:
-                    power = await self.client.get_pmo_power(dev_id, addr)
-                except ClientResponseError as err:
-                    _LOGGER.debug(
-                        "PMO power error for %s/%s: %s", dev_id, addr, err
-                    )
-                    continue
-                except Exception:
-                    continue
-                if power is None:
-                    _LOGGER.debug("PMO power unsupported for %s/%s", dev_id, addr)
-                    self._unsupported.add((dev_id, addr))
-                    continue
-                val = _as_float(power)
-                if val is None:
-                    continue
-                dev_map = (
-                    data.setdefault(dev_id, {})
-                    .setdefault("pmo", {})
-                    .setdefault("power", {})
-                )
-                dev_map[addr] = val
-        return data
-
-    @callback
-    def _on_ws_data(self, payload: dict) -> None:
-        if payload.get("kind") != "pmo_power":
-            return
-        dev_id = payload.get("dev_id")
-        addr = payload.get("addr")
-        val = _as_float(payload.get("value"))
-        if val is None:
-            return
-        data: Dict[str, Dict[str, Any]] = dict(self.data or {})
-        dev_map = data.setdefault(dev_id, {}).setdefault("pmo", {}).setdefault("power", {})
-        dev_map[addr] = val
-        if dev_id is not None and addr is not None:
-            self.addr_set.setdefault(dev_id, set()).add(addr)
-            _LOGGER.debug("WS set PMO power %s/%s to %s", dev_id, addr, val)
-        self.async_set_updated_data(data)
-
-
-class TermoWebPmoEnergyCoordinator(
-    DataUpdateCoordinator[Dict[str, Dict[str, Any]]],
-):
-    """Coordinator polling cumulative energy for PMO nodes."""
-
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        client: TermoWebClient,
-        base: TermoWebCoordinator,
-    ) -> None:
-        super().__init__(
-            hass,
-            logger=_LOGGER,
-            name="termoweb_pmo_energy",
-            update_interval=timedelta(minutes=15),
-        )
-        self.client = client
-        self._base = base
-        self.addr_set: dict[str, set[str]] = {}
-
-    async def _async_update_data(self) -> Dict[str, Dict[str, Any]]:
-        base_data = self._base.data or {}
-        data: Dict[str, Dict[str, Any]] = dict(self.data or {})
-        end = int(time.time())
-        start = end - 3600
-        for dev_id, dev in base_data.items():
-            nodes = dev.get("nodes") or {}
-            node_list = nodes.get("nodes") if isinstance(nodes, dict) else None
-            pmo_addrs: list[str] = []
-            if isinstance(node_list, list):
-                for node in node_list:
-                    if (
-                        isinstance(node, dict)
-                        and (node.get("type") or "").lower() == "pmo"
-                    ):
-                        pmo_addrs.append(str(node.get("addr")))
-            if not pmo_addrs:
-                pmo_addrs = dev.get("htr", {}).get("addrs") or []
-            for addr in pmo_addrs:
-                self.addr_set.setdefault(dev_id, set()).add(addr)
-                try:
-                    samples = await self.client.get_pmo_samples(dev_id, addr, start, end)
-                except ClientResponseError as err:
-                    _LOGGER.debug("PMO energy error for %s/%s: %s", dev_id, addr, err)
-                    continue
-                except Exception:
-                    continue
-                dev_map = (
-                    data.setdefault(dev_id, {})
-                    .setdefault("pmo", {})
-                    .setdefault("energy", {})
-                )
-                if not samples:
-                    _LOGGER.debug(
-                        "PMO energy samples empty for %s/%s", dev_id, addr
-                    )
-                    dev_map[addr] = None
-                    continue
-                latest = max(samples, key=lambda s: s.get("t") or 0)
-                val = _as_float(latest.get("counter"))
-                if val is None:
-                    continue
-                dev_map[addr] = val
-        return data
