@@ -33,10 +33,20 @@ def _as_float(value: Any) -> Optional[float]:
     return None
 
 
-class TermoWebCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):  # dev_id -> per-device data
+class TermoWebCoordinator(
+    DataUpdateCoordinator[Dict[str, Dict[str, Any]]]
+):  # dev_id -> per-device data
     """Polls TermoWeb and exposes a per-device dict used by platforms."""
 
-    def __init__(self, hass: HomeAssistant, client: TermoWebClient, base_interval: int) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        client: TermoWebClient,
+        base_interval: int,
+        dev_id: str,
+        device: dict[str, Any],
+        nodes: dict[str, Any],
+    ) -> None:
         super().__init__(
             hass,
             logger=_LOGGER,
@@ -46,76 +56,59 @@ class TermoWebCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):  # 
         self.client = client
         self._base_interval = max(base_interval, MIN_POLL_INTERVAL)
         self._backoff = 0  # seconds
-        self._rr_index: dict[str, int] = {}  # per-device round-robin index for heater settings
+        self._rr_index: dict[str, int] = {}
+        self._dev_id = dev_id
+        self._device = device or {}
+        self._nodes = nodes or {}
+
+    def _addrs(self) -> list[str]:
+        node_list = self._nodes.get("nodes") if isinstance(self._nodes, dict) else None
+        addrs: list[str] = []
+        if isinstance(node_list, list):
+            for n in node_list:
+                if isinstance(n, dict) and (n.get("type") or "").lower() == "htr":
+                    addrs.append(str(n.get("addr")))
+        return addrs
 
     async def _async_update_data(self) -> Dict[str, Dict[str, Any]]:
+        dev_id = self._dev_id
+        addrs = self._addrs()
         try:
-            devices: List[Dict[str, Any]] = await self.client.list_devices()
-            if not isinstance(devices, list):
-                devices = []
+            prev_dev = (self.data or {}).get(dev_id, {})
+            prev_htr = prev_dev.get("htr") or {}
+            settings_map: Dict[str, Any] = dict(prev_htr.get("settings") or {})
 
-            result: Dict[str, Dict[str, Any]] = {}
-            for dev in devices:
-                if not isinstance(dev, dict):
-                    continue
+            if addrs:
+                start = self._rr_index.get(dev_id, 0) % len(addrs)
+                count = min(HTR_SETTINGS_PER_CYCLE, len(addrs))
+                for k in range(count):
+                    idx = (start + k) % len(addrs)
+                    addr = addrs[idx]
+                    try:
+                        js = await self.client.get_htr_settings(dev_id, addr)
+                        if isinstance(js, dict):
+                            settings_map[addr] = js
+                    except (ClientError, TermoWebRateLimitError, TermoWebAuthError):
+                        # keep previous settings on error
+                        pass
+                self._rr_index[dev_id] = (start + count) % len(addrs)
 
-                dev_id = str(dev.get("dev_id") or dev.get("id") or dev.get("serial_id") or "").strip()
-                if not dev_id:
-                    continue
+            dev_name = (self._device.get("name") or f"Device {dev_id}").strip()
 
-                # Fetch nodes; tolerate failures
-                try:
-                    nodes = await self.client.get_nodes(dev_id)
-                except Exception:
-                    nodes = None
-
-                # Prepare carry-over cache of heater settings for this device
-                prev_dev = (self.data or {}).get(dev_id, {})
-                prev_htr = prev_dev.get("htr") or {}
-                settings_map: Dict[str, Any] = dict(prev_htr.get("settings") or {})
-
-                # Determine heater addresses for this device
-                addrs: list[str] = []
-                node_list = nodes.get("nodes") if isinstance(nodes, dict) else None
-                if isinstance(node_list, list):
-                    for n in node_list:
-                        if isinstance(n, dict) and (n.get("type") or "").lower() == "htr":
-                            addrs.append(str(n.get("addr")))
-
-                # Round-robin fetch: at most HTR_SETTINGS_PER_CYCLE items
-                if addrs:
-                    start = self._rr_index.get(dev_id, 0) % len(addrs)
-                    count = min(HTR_SETTINGS_PER_CYCLE, len(addrs))
-                    for k in range(count):
-                        idx = (start + k) % len(addrs)
-                        addr = addrs[idx]
-                        try:
-                            js = await self.client.get_htr_settings(dev_id, addr)
-                            if isinstance(js, dict):
-                                settings_map[addr] = js
-                        except (ClientError, TermoWebRateLimitError, TermoWebAuthError):
-                            # On error, keep old cached settings for that addr
-                            pass
-                    # advance pointer
-                    self._rr_index[dev_id] = (start + count) % len(addrs)
-
-                # Build device entry
-                dev_name = (dev.get("name") or f"Device {dev_id}").strip()
-                connected: Optional[bool] = True if nodes is not None else None
-
-                result[dev_id] = {
+            result = {
+                dev_id: {
                     "dev_id": dev_id,
                     "name": dev_name,
-                    "raw": dev,
-                    "connected": connected,
-                    "nodes": nodes,
+                    "raw": self._device,
+                    "connected": True,
+                    "nodes": self._nodes,
                     "htr": {
                         "addrs": addrs,
-                        "settings": settings_map,  # addr -> HtrSettings JSON
+                        "settings": settings_map,
                     },
                 }
+            }
 
-            # Reset backoff on success
             if self._backoff:
                 self._backoff = 0
                 self.update_interval = timedelta(seconds=self._base_interval)
@@ -123,8 +116,10 @@ class TermoWebCoordinator(DataUpdateCoordinator[Dict[str, Dict[str, Any]]]):  # 
             return result
 
         except TermoWebRateLimitError as err:
-            # Exponential backoff up to 1 hour
-            self._backoff = min(max(self._base_interval, (self._backoff or self._base_interval) * 2), 3600)
+            self._backoff = min(
+                max(self._base_interval, (self._backoff or self._base_interval) * 2),
+                3600,
+            )
             self.update_interval = timedelta(seconds=self._backoff)
             raise UpdateFailed(f"Rate limited; backing off to {self._backoff}s") from err
         except (ClientError, TermoWebAuthError) as err:
@@ -136,7 +131,13 @@ class TermoWebHeaterEnergyCoordinator(
 ):  # dev_id -> per-device data
     """Polls heater energy counters and exposes energy and power per heater."""
 
-    def __init__(self, hass: HomeAssistant, client: TermoWebClient) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        client: TermoWebClient,
+        dev_id: str,
+        addrs: list[str],
+    ) -> None:
         super().__init__(
             hass,
             logger=_LOGGER,
@@ -144,84 +145,59 @@ class TermoWebHeaterEnergyCoordinator(
             update_interval=timedelta(minutes=15),
         )
         self.client = client
+        self._dev_id = dev_id
+        self._addrs = addrs
         self._last: dict[tuple[str, str], tuple[float, float]] = {}
 
     async def _async_update_data(self) -> Dict[str, Dict[str, Any]]:
+        dev_id = self._dev_id
+        addrs = self._addrs
         try:
-            devices: List[Dict[str, Any]] = await self.client.list_devices()
-            if not isinstance(devices, list):
-                devices = []
+            energy_map: Dict[str, float] = {}
+            power_map: Dict[str, float] = {}
 
-            result: Dict[str, Dict[str, Any]] = {}
-            for dev in devices:
-                if not isinstance(dev, dict):
-                    continue
-
-                dev_id = str(
-                    dev.get("dev_id") or dev.get("id") or dev.get("serial_id") or ""
-                ).strip()
-                if not dev_id:
-                    continue
-
+            for addr in addrs:
+                now = time.time()
+                start = now - 3600  # fetch recent samples
                 try:
-                    nodes = await self.client.get_nodes(dev_id)
-                except Exception:
-                    nodes = None
+                    samples = await self.client.get_htr_samples(dev_id, addr, start, now)
+                except (ClientError, TermoWebRateLimitError, TermoWebAuthError):
+                    samples = []
 
-                addrs: list[str] = []
-                node_list = nodes.get("nodes") if isinstance(nodes, dict) else None
-                if isinstance(node_list, list):
-                    for n in node_list:
-                        if isinstance(n, dict) and (n.get("type") or "").lower() == "htr":
-                            addrs.append(str(n.get("addr")))
+                if not samples:
+                    continue
 
-                energy_map: Dict[str, float] = {}
-                power_map: Dict[str, float] = {}
+                last = samples[-1]
+                counter = _as_float(last.get("counter"))
+                t = _as_float(last.get("t"))
+                if counter is None or t is None:
+                    continue
 
-                for addr in addrs:
-                    now = time.time()
-                    start = now - 3600  # fetch recent samples
-                    try:
-                        samples = await self.client.get_htr_samples(dev_id, addr, start, now)
-                    except (
-                        ClientError,
-                        TermoWebRateLimitError,
-                        TermoWebAuthError,
-                    ):
-                        samples = []
+                energy_map[addr] = counter
 
-                    if not samples:
-                        continue
-
-                    last = samples[-1]
-                    counter = _as_float(last.get("counter"))
-                    t = _as_float(last.get("t"))
-                    if counter is None or t is None:
-                        continue
-
-                    energy_map[addr] = counter
-
-                    prev = self._last.get((dev_id, addr))
-                    if prev:
-                        prev_t, prev_counter = prev
-                        if counter < prev_counter or t <= prev_t:
-                            self._last[(dev_id, addr)] = (t, counter)
-                            continue
-                        dt_hours = (t - prev_t) / 3600
-                        if dt_hours > 0:
-                            power = (counter - prev_counter) / dt_hours * 1000
-                            power_map[addr] = power
+                prev = self._last.get((dev_id, addr))
+                if prev:
+                    prev_t, prev_counter = prev
+                    if counter < prev_counter or t <= prev_t:
                         self._last[(dev_id, addr)] = (t, counter)
-                    else:
-                        self._last[(dev_id, addr)] = (t, counter)
+                        continue
+                    dt_hours = (t - prev_t) / 3600
+                    if dt_hours > 0:
+                        power = (counter - prev_counter) / dt_hours * 1000
+                        power_map[addr] = power
+                    self._last[(dev_id, addr)] = (t, counter)
+                else:
+                    self._last[(dev_id, addr)] = (t, counter)
 
-                result[dev_id] = {
+            result: Dict[str, Dict[str, Any]] = {
+                dev_id: {
                     "dev_id": dev_id,
                     "htr": {
                         "energy": energy_map,
                         "power": power_map,
                     },
                 }
+            }
 
             return result
 

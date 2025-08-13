@@ -38,12 +38,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     version = integration.version or "unknown"
 
     client = TermoWebClient(session, username, password)
-    coordinator = TermoWebCoordinator(hass, client, base_interval)
+    devices = await client.list_devices()
+    dev = devices[0] if isinstance(devices, list) and devices else {}
+    dev_id = str(
+        dev.get("dev_id") or dev.get("id") or dev.get("serial_id") or ""
+    ).strip()
+    nodes = await client.get_nodes(dev_id)
+    addrs: list[str] = []
+    node_list = nodes.get("nodes") if isinstance(nodes, dict) else None
+    if isinstance(node_list, list):
+        for n in node_list:
+            if isinstance(n, dict) and (n.get("type") or "").lower() == "htr":
+                addrs.append(str(n.get("addr")))
+
+    coordinator = TermoWebCoordinator(hass, client, base_interval, dev_id, dev, nodes)
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = data = {
         "client": client,
         "coordinator": coordinator,
+        "dev_id": dev_id,
+        "nodes": nodes,
+        "htr_addrs": addrs,
         "base_poll_interval": max(base_interval, MIN_POLL_INTERVAL),
         "stretched": False,
         "ws_tasks": {},     # dev_id -> asyncio.Task

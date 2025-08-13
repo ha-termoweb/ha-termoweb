@@ -34,42 +34,26 @@ async def async_setup_entry(hass, entry, async_add_entities):
     """Discover heater nodes and create climate entities."""
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
+    dev_id = data["dev_id"]
+    nodes = data["nodes"]
+    addrs: list[str] = data["htr_addrs"]
 
-    added: set[str] = set()
-
-    async def build_and_add() -> None:
-        new_entities: list[TermoWebHeater] = []
-        data_now = coordinator.data or {}
-        for dev_id, dev in data_now.items():
-            nodes = dev.get("nodes") or {}
-            node_list = nodes.get("nodes") if isinstance(nodes, dict) else None
-            if not isinstance(node_list, list):
-                continue
-            for node in node_list:
-                if not isinstance(node, dict):
-                    continue
-                if (node.get("type") or "").lower() != "htr":
-                    continue
+    name_map: dict[str, str] = {}
+    node_list = nodes.get("nodes") if isinstance(nodes, dict) else None
+    if isinstance(node_list, list):
+        for node in node_list:
+            if isinstance(node, dict) and (node.get("type") or "").lower() == "htr":
                 addr = str(node.get("addr"))
-                unique_id = f"{DOMAIN}:{dev_id}:htr:{addr}"
-                if unique_id in added:
-                    continue
                 name = (node.get("name") or f"Heater {addr}").strip()
-                new_entities.append(TermoWebHeater(coordinator, entry.entry_id, dev_id, addr, name))
-                added.add(unique_id)
+                name_map[addr] = name
 
-        if new_entities:
-            _LOGGER.debug("Adding %d TermoWeb heater entities", len(new_entities))
-            async_add_entities(new_entities)
-
-    # Initial populate
-    await build_and_add()
-
-    # Add entities if more devices/nodes appear later
-    def _on_coordinator_update() -> None:
-        hass.async_create_task(build_and_add())
-
-    coordinator.async_add_listener(_on_coordinator_update)
+    new_entities = [
+        TermoWebHeater(coordinator, entry.entry_id, dev_id, addr, name_map.get(addr, f"Heater {addr}"))
+        for addr in addrs
+    ]
+    if new_entities:
+        _LOGGER.debug("Adding %d TermoWeb heater entities", len(new_entities))
+        async_add_entities(new_entities)
 
     # -------------------- Register entity services --------------------
     platform = entity_platform.async_get_current_platform()

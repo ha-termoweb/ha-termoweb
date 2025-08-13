@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.helpers.entity import DeviceInfo
@@ -16,31 +15,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
     """Expose only a safe 'Force refresh' hub-level button per device."""
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
-    client = data.get("client")
-
-    # Build one button per device we know about
-    new: list[ButtonEntity] = []
-    for dev_id, dev in (coordinator.data or {}).items():
-        new.append(TermoWebRefreshButton(coordinator, dev_id))
-    if new:
-        async_add_entities(new)
-
-    # If devices appear later, add a button then
-    def _on_update():
-        cur_ids = {e.unique_id for e in new}
-        to_add: list[ButtonEntity] = []
-        for dev_id, dev in (coordinator.data or {}).items():
-            uid = f"{DOMAIN}:{dev_id}:refresh"
-            if uid in cur_ids:
-                continue
-            entity = TermoWebRefreshButton(coordinator, dev_id)
-            to_add.append(entity)
-            cur_ids.add(uid)
-        if to_add:
-            async_add_entities(to_add)
-            new.extend(to_add)
-
-    coordinator.async_add_listener(_on_update)
+    dev_id = data["dev_id"]
+    async_add_entities([TermoWebRefreshButton(coordinator, dev_id)])
 
 
 class TermoWebRefreshButton(CoordinatorEntity, ButtonEntity):

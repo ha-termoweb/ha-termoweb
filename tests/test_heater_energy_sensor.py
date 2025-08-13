@@ -197,8 +197,6 @@ signal_ws_data = __import__(f"{package}.const", fromlist=["signal_ws_data"]).sig
 def test_coordinator_and_sensors() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.list_devices = AsyncMock(return_value=[{"dev_id": "1"}])
-        client.get_nodes = AsyncMock(return_value={"nodes": [{"type": "htr", "addr": "A"}]})
         client.get_htr_samples = AsyncMock(
             side_effect=[
                 [{"t": 1000, "counter": "1.0"}],
@@ -207,7 +205,7 @@ def test_coordinator_and_sensors() -> None:
         )
 
         hass = HomeAssistant()
-        coord = TermoWebHeaterEnergyCoordinator(hass, client)  # type: ignore[arg-type]
+        coord = TermoWebHeaterEnergyCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
 
         await coord.async_refresh()
         await coord.async_refresh()

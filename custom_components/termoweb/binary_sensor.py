@@ -17,28 +17,11 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up one connectivity binary sensor per TermoWeb hub (dev_id)."""
-    coord: TermoWebCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    added_ids: set[str] = hass.data[DOMAIN][entry.entry_id].setdefault(
-        "added_binary_ids", set()
-    )
-
-    @callback
-    def _add_entities() -> None:
-        # Add exactly one sensor per dev_id (the hub)
-        for dev_id, _data in (coord.data or {}).items():
-            uid = f"{dev_id}_online"
-            if uid in added_ids:
-                continue
-            try:
-                ent = TermoWebDeviceOnlineBinarySensor(coord, entry.entry_id, dev_id)
-                async_add_entities([ent])
-                added_ids.add(uid)
-            except Exception as exc:
-                _LOGGER.error("Failed to add hub binary sensor dev_id=%s: %s", dev_id, exc)
-
-    coord.async_add_listener(_add_entities)
-    if coord.data:
-        _add_entities()
+    data = hass.data[DOMAIN][entry.entry_id]
+    coord: TermoWebCoordinator = data["coordinator"]
+    dev_id = data["dev_id"]
+    ent = TermoWebDeviceOnlineBinarySensor(coord, entry.entry_id, dev_id)
+    async_add_entities([ent])
 
 
 class TermoWebDeviceOnlineBinarySensor(
