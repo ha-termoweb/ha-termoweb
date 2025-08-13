@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Final
 
 # Domain
@@ -23,6 +24,9 @@ DEFAULT_POLL_INTERVAL: Final = 120  # seconds
 MIN_POLL_INTERVAL: Final = 30  # seconds
 MAX_POLL_INTERVAL: Final = 3600  # seconds
 STRETCHED_POLL_INTERVAL: Final = 2700  # seconds (45 minutes) when WS healthy ≥5m
+
+# Heater energy polling interval when relying on push updates
+HTR_ENERGY_UPDATE_INTERVAL: Final = timedelta(hours=1)
 
 # UA / locale (matches app loosely; helps avoid quirky WAF rules)
 USER_AGENT: Final = "TermoWeb/2.5.1 (Android; HomeAssistant Integration)"
