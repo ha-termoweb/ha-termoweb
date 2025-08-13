@@ -128,6 +128,7 @@ class TermoWebWSLegacyClient:
                 await self._connect_ws(sid)
                 await self._join_namespace()
                 await self._send_snapshot_request()
+                await self._subscribe_htr_samples()
                 self._connected_since = time.time()
                 self._healthy_since = None
                 self._update_status("connected")
@@ -225,6 +226,15 @@ class TermoWebWSLegacyClient:
         payload = {"name": "dev_data", "args": []}
         await self._send_text(f"5::{WS_NAMESPACE}:{json.dumps(payload, separators=(',', ':'))}")
 
+    async def _subscribe_htr_samples(self) -> None:
+        """Request push updates for heater energy samples."""
+        addrs = self._coordinator._addrs() if hasattr(self._coordinator, "_addrs") else []
+        for addr in addrs:
+            payload = {"name": "subscribe", "args": [f"/htr/{addr}/samples"]}
+            await self._send_text(
+                f"5::{WS_NAMESPACE}:{json.dumps(payload, separators=(',', ':'))}"
+            )
+
     # ----------------- Loops -----------------
 
     async def _heartbeat_loop(self) -> None:
@@ -297,6 +307,7 @@ class TermoWebWSLegacyClient:
         # Apply updates to coordinator.data in-place to keep shape compatible with current entities.
         updated_nodes = False
         updated_addrs: List[str] = []
+        sample_addrs: List[str] = []
 
         for item in batch:
             if not isinstance(item, dict):
@@ -356,6 +367,10 @@ class TermoWebWSLegacyClient:
                 if isinstance(body, dict):
                     adv_map[addr] = body
 
+            elif "/htr/" in path and path.endswith("/samples"):
+                addr = path.split("/htr/")[1].split("/")[0]
+                sample_addrs.append(addr)
+
             else:
                 # Other top-level paths, store compactly under raw
                 raw = dev_map.setdefault("raw", {})
@@ -372,6 +387,12 @@ class TermoWebWSLegacyClient:
                 self.hass,
                 signal_ws_data(self.entry_id),
                 {**payload_base, "addr": addr, "kind": "htr_settings"},
+            )
+        for addr in set(sample_addrs):
+            async_dispatcher_send(
+                self.hass,
+                signal_ws_data(self.entry_id),
+                {**payload_base, "addr": addr, "kind": "htr_samples"},
             )
 
     # ----------------- Helpers -----------------

@@ -55,6 +55,9 @@ class DataUpdateCoordinator:  # pragma: no cover - minimal stub
     async def async_config_entry_first_refresh(self) -> None:
         await self.async_refresh()
 
+    async def async_request_refresh(self) -> None:
+        await self.async_refresh()
+
     def async_add_listener(self, *_args) -> None:
         return None
 
@@ -93,6 +96,25 @@ api_stub.TermoWebRateLimitError = TermoWebRateLimitError
 api_stub.time = _time
 sys.modules[f"{package}.api"] = api_stub
 
+# Dispatcher stub
+ha_dispatcher = types.ModuleType("homeassistant.helpers.dispatcher")
+_dispatchers: Dict[str, list] = {}
+
+
+def async_dispatcher_connect(_hass, signal: str, callback):  # pragma: no cover
+    _dispatchers.setdefault(signal, []).append(callback)
+    return lambda: None
+
+
+def dispatcher_send(signal: str, payload: dict) -> None:
+    for cb in list(_dispatchers.get(signal, [])):
+        cb(payload)
+
+
+ha_dispatcher.async_dispatcher_connect = async_dispatcher_connect
+ha_dispatcher.dispatcher_send = dispatcher_send
+sys.modules["homeassistant.helpers.dispatcher"] = ha_dispatcher
+
 # Load coordinator module
 COORD_PATH = (
     Path(__file__).resolve().parents[1] / "custom_components" / "termoweb" / "coordinator.py"
@@ -109,6 +131,10 @@ sys.modules[f"{package}.coordinator"] = coord_module
 spec.loader.exec_module(coord_module)
 
 TermoWebHeaterEnergyCoordinator = coord_module.TermoWebHeaterEnergyCoordinator
+signal_ws_data = __import__(f"{package}.const", fromlist=["signal_ws_data"]).signal_ws_data
+HTR_ENERGY_UPDATE_INTERVAL = __import__(
+    f"{package}.const", fromlist=["HTR_ENERGY_UPDATE_INTERVAL"]
+).HTR_ENERGY_UPDATE_INTERVAL
 
 
 def test_power_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -170,5 +196,39 @@ def test_counter_reset(monkeypatch: pytest.MonkeyPatch) -> None:
 
         assert coord.data["1"]["htr"]["energy"]["A"] == 1.0
         assert "A" not in coord.data["1"]["htr"]["power"]
+
+    asyncio.run(_run())
+
+
+def test_update_interval_constant() -> None:
+    hass = HomeAssistant()
+    client = types.SimpleNamespace()
+    coord = TermoWebHeaterEnergyCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
+    assert coord.update_interval == HTR_ENERGY_UPDATE_INTERVAL
+
+
+def test_ws_driven_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_htr_samples = AsyncMock(
+            return_value=[{"t": 1000, "counter": "1.0"}]
+        )
+
+        hass = HomeAssistant()
+        coord = TermoWebHeaterEnergyCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
+
+        await coord.async_refresh()
+        assert coord.data["1"]["htr"]["energy"]["A"] == 1.0
+
+        client.get_htr_samples = AsyncMock(
+            return_value=[{"t": 2000, "counter": "2.0"}]
+        )
+
+        async_dispatcher_connect(hass, signal_ws_data("entry"), lambda payload: asyncio.create_task(coord.async_request_refresh()) if payload.get("kind") == "htr_samples" else None)
+
+        dispatcher_send(signal_ws_data("entry"), {"dev_id": "1", "addr": "A", "kind": "htr_samples"})
+        await asyncio.sleep(0)
+
+        assert coord.data["1"]["htr"]["energy"]["A"] == 2.0
 
     asyncio.run(_run())
