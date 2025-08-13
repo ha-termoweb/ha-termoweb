@@ -209,18 +209,15 @@ class TermoWebPmoPowerCoordinator(
             return
         dev_id = payload.get("dev_id")
         addr = payload.get("addr")
-        base_val = (
-            (self._base.data or {})
-            .get(dev_id, {})
-            .get("pmo", {})
-            .get("power", {})
-            .get(addr)
-        )
+        val = _as_float(payload.get("value"))
+        if val is None:
+            return
         data: Dict[str, Dict[str, Any]] = dict(self.data or {})
         dev_map = data.setdefault(dev_id, {}).setdefault("pmo", {}).setdefault("power", {})
-        dev_map[addr] = base_val
+        dev_map[addr] = val
         if dev_id is not None and addr is not None:
             self.addr_set.setdefault(dev_id, set()).add(addr)
+            _LOGGER.debug("WS set PMO power %s/%s to %s", dev_id, addr, val)
         self.async_set_updated_data(data)
 
 
