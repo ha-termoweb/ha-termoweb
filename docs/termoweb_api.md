@@ -1,183 +1,154 @@
-# TermoWeb Cloud API — Confirmed Subset (updated 2025-08-10)
+# TermoWeb Cloud API — REST & WebSocket (capture‑verified, 2025‑08‑13)
 
-**Scope**  
-This document lists only the endpoints and fields we have verified end-to-end from the Android app and live traffic, sufficient for the Home Assistant integration.
+**Base host**: `https://control.termoweb.net`  
+**Auth**: Bearer token obtained via **POST `/client/token`** (basic client credentials + password grant).  
+**Content type**: JSON for all REST endpoints (request/response).
 
-## Base
-- Host: `https://control.termoweb.net`
-- JSON everywhere.
-- Typical headers (not required, but good hygiene):
-  - `User-Agent: TermoWeb/2.5.1 (HomeAssistant Integration)`
-  - `Accept-Language: en-IE,en;q=0.8`
-  - `Accept: application/json`
+> This document reflects endpoints and behaviours seen in live traffic from the official Android app on 2025‑08‑13. The vendor’s app traffic is treated as authoritative.
+
 
 ## Auth
-**POST `/client/token`** (basic client auth) → 200 JSON
-- Request body (form-encoded): `username`, `password`, `grant_type=password`
-- Response: `{ "access_token": "<opaque>" }`
-- Use `Authorization: Bearer <access_token>` for subsequent requests.
 
----
+### POST `/client/token`
+- **Headers**
+  - `Authorization: Basic <base64(client_id:client_secret)>`
+  - `Content-Type: application/x-www-form-urlencoded`
+- **Body**: `grant_type=password&username=<email>&password=<pwd>`
+- **200 Response**
+  ```json
+  {
+    "access_token": "<opaque>",
+    "token_type": "Bearer",
+    "expires_in": 604800,
+    "scope": "/user:W /devs/*:W"
+  }
+  ```
 
-## Devices and heaters
+Use `Authorization: Bearer <access_token>` for the endpoints below.
 
-### Get heater settings
-**GET `/api/v2/devs/{dev_id}/htr/{addr}/settings`** → 200 JSON
 
-Representative shape (additional fields may be present):
+## Devices
+
+### GET `/api/v2/devs/`
+Returns devices you own and invitations.
+```json
+{ "devs": [ { "dev_id": "cec9...bb35", "name": "Hub", "fw_version": "1.34", "serial_id": "8010" } ], "invited_to": [] }
+```
+
+### GET `/api/v2/devs/{dev_id}/mgr/nodes`
+Returns discovered nodes (heaters, etc.).
+```json
+{ "nodes": [ { "type":"htr","addr":2,"name":"Living room ","installed":true,"lost":false,"hw_version":"1.5","fw_version":"1.13"} ] }
+```
+
+### GET `/api/v2/devs/{dev_id}/mgr/rtc/time`
+Hub RTC snapshot.
+```json
+{ "y":2025,"n":7,"d":13,"h":15,"m":1,"s":31,"w":3 }
+```
+
+### GET `/api/v2/devs/{dev_id}/geo_data`
+Location & timezone for the hub.
+```json
+{ "country":"IE","state":"Dublin","city":"Dublin ","tz_code":"Europe/Dublin","zip":"D07AA00" }
+```
+
+### GET `/api/v2/devs/{dev_id}/storage`
+Misc persistent data.
+```json
+{ "location_data": {}, "RGPD_time": "Mon Dec 23 2024 11:56:54 GMT+0000 ", "version": 2 }
+```
+
+### GET `/api/v2/devs/{dev_id}/htr_system/power_limit`
+System power limit (string).
+```json
+{ "power_limit": "0" }
+```
+
+
+## Heaters (htr)
+
+### GET `/api/v2/devs/{dev_id}/htr/{addr}/settings`
+Representative response:
 ```json
 {
-  "name": "Heater 1",
-  "state": "on",
-  "mode": "auto",             // "auto"|"manual"|"off"
-  "units": "C",               // "C"|"F"
-  "stemp": "21.0",            // may appear as string or number server-side
-  "mtemp": "20.8",
-  "ptemp": ["10.0","22.0","23.0"],   // presets: [cold, night, day]
-  "prog":  [0,0,0,0,0,0,0, 1,1,2,2,2, ... 168 values ...],
-  "priority": 1,
-  "max_power": 1000,
-  "addr": 1
+  "name":"Guest bedroom ",
+  "priority":0,
+  "prog":[ /* 168 ints (Mon 00→Sun 23), values 0/1/2 = cold/night/day */ ],
+  "units":"C",
+  "ptemp":["10.0","16.0","21.0"],       // [cold, night, day]
+  "mtemp":"25.7",                       // ambient
+  "stemp":"10.0",                       // setpoint (manual)
+  "mode":"off",                         // "auto"|"manual"|"off"
+  "max_power":"974",
+  "state":"off",
+  "true_radiant_active":false,
+  "window_state_active":false,
+  "sync_status":"ok"
 }
 ```
 
-**Schedule semantics (`prog`)**
-- `prog` is a **168-element** array of integers, one per hour for a 7×24 week grid.
-- **Indexing:** index `0` maps to **Monday 00:00–01:00**, then hour-by-hour through the week (Mon→Sun).
-- **Values:** `0` = **cold**, `1` = **night**, `2` = **day**.
-- The corresponding temperatures are in `ptemp = [cold, night, day]`.
+**Type quirks**
+- Many numeric fields are returned as strings (e.g. `"stemp"`, `"max_power"`). Preserve one decimal place when writing temperatures.
 
-**Preset temperatures (`ptemp`)**
-- Length 3, **[cold, night, day]**.
-- Server accepts and often returns temperatures as **strings with one decimal**. Treat as strings when writing to avoid `400` on some backends.
-
-### Write heater settings (partial updates allowed)
-**POST `/api/v2/devs/{dev_id}/htr/{addr}/settings`** → 201 (Accepted)
-
-Send only the fields you intend to change (server merges).
-
-Common fields:
-- `mode`: `"auto"|"manual"|"off"`
-- `stemp`: when setting manual setpoint, send as **string with one decimal**, e.g. `"16.0"`
-- `units`: `"C"` or `"F"`
-- `ptemp`: array of 3 **strings** with one decimal, e.g. `["10.0","22.0","23.0"]`
-- `prog`: array of **168 integers**, each in `{0,1,2}`
-
-**Examples**
-
-Set manual mode with setpoint:
+### POST `/api/v2/devs/{dev_id}/htr/{addr}/settings`
+Partial updates; server merges and replies **201** with `{}`.
+Common bodies:
 ```json
-{ "mode": "manual", "stemp": "20.0", "units": "C" }
+{ "mode":"manual","units":"C","stemp":"11.5" }
+{ "mode":"auto" }
+{ "units":"C","prog":[ /* 168 values in {0,1,2} */ ] }
 ```
 
-Switch to auto (program) mode:
+### GET `/api/v2/devs/{dev_id}/htr/{addr}/advanced_setup`
 ```json
-{ "mode": "auto", "units": "C" }
+{ "control_mode":4, "units":"C", "true_radiant_enabled":false, "window_mode_enabled":false, "sync_status":"ok" }
 ```
 
-Update preset temperatures (cold, night, day):
-```json
-{ "ptemp": ["10.0","22.0","23.0"], "units": "C" }
-```
 
-Update the full weekly schedule (tri-state grid):
-```json
-{ "prog": [0,0,0,0,0,0,0, 1,1,2,2,2, ... 168 values ...], "units": "C" }
-```
+## Samples (history)
 
-**Notes**
-- If you send `stemp` for a manual setpoint, include `mode:"manual"` in the same POST.
-- Always include `units` in writes for consistency.
-- The server accepts **partial writes**; do not send unrelated fields to avoid clobbering concurrent changes.
-
----
-
-## Advanced setup (read)
-**GET `/api/v2/devs/{dev_id}/htr/{addr}/advanced_setup`** → 200 JSON  
-Opaque feature flags (e.g. window mode, true radiant). We currently read-only.
-
----
-
-## Realtime (Socket.IO 0.9, legacy)
-Handshake:
-```
-GET /socket.io/1/?token=<Bearer>&dev_id=<dev_id>&t=<ms>
-→ "<sid>:<hb>:<disc>:websocket,xhr-polling"
-```
-WebSocket:
-```
-wss://control.termoweb.net/socket.io/1/websocket/<sid>?token=...&dev_id=...
-```
-Join namespace:
-```
-1::/api/v2/socket_io
-```
-Heartbeat:
-- Server sends `2::`; client replies `2::` every ~25–30s.
-
-Snapshot:
-```
-5::/api/v2/socket_io:{"name":"dev_data","args":[]}
-```
-Push (batched deltas):
-```
-5::/api/v2/socket_io:{"name":"data","args":[ [ { "path":"...", "body":{...} }, ... ] ]}
-```
-Observed paths:
-- `/htr/<addr>/settings`
-- `/htr/<addr>/advanced_setup`
-- `/mgr/nodes`
-- `/geo_data`
-- `/htr_system/power_limit`
-
-We rely on these events to echo state after writes; a timed fallback refresh is recommended if echo is delayed.
-
----
-
-
----
-
-## Historical samples (temperature & energy)
-
-**GET** `/api/v2/devs/{dev_id}/{node_type}/{addr}/samples?start={unix}&end={unix}`
-
-- `node_type`: `htr`, `thm`, or `pmo` (lowercase).
-- `start`/`end`: UNIX seconds. Query whole windows (e.g. start-of-day to start-of-next-day) for app-like results.
-- **Response**
+### GET `/api/v2/devs/{dev_id}/{node_type}/{addr}/samples?start=<unix>&end=<unix>`
+- `node_type`: observed `htr`
+- Response:
 ```json
 {
   "samples": [
-    { "t": 1453420800, "temp": "20.0", "counter": "1015816.00" }
+    { "t": 1755039600, "temp": "25.3", "counter": "2635097.00" }
   ]
 }
 ```
-- **Fields**
-  - `t`: UNIX seconds.
-  - `temp`: ambient temperature (often string).
-  - `counter`: cumulative energy in **Wh** (monotonic; often string).
-- **Energy computation**
-  - kWh per interval = `(counter[i] - counter[i-1]) / 1000`.
-  - Aggregate per hour/day/month on the client (this matches the Android app's charts).
-- **Observed cadence**
-  - `htr`/`thm`: ~3600 s.
-  - `pmo`: ~900 s.
-- **Type quirks**
-  - Numbers may be strings; parse with Decimal/float before math.
+- `counter` is a cumulative **Wh** total (monotonic). kWh delta between samples = `(Δcounter)/1000`.
 
-**Example**
-```bash
-curl -H "Authorization: Bearer $TOKEN"   "https://control.termoweb.net/api/v2/devs/$DEV/htr/$ADDR/samples?start=$START&end=$END"
+Observed cadence for `htr`: ~3600 s.
+
+
+## Real‑time (legacy Socket.IO 0.9)
+
+### Handshake
 ```
+GET /socket.io/1/?token=<Bearer>&dev_id=<dev_id>&t=<ms>
+→ "<sid>:60:60:websocket,xhr-polling"
+```
+
+### WebSocket URL
+```
+wss://control.termoweb.net/socket.io/1/websocket/<sid>?token=...&dev_id=...
+```
+
+### Namespace & heartbeats
+- Join: `1::/api/v2/socket_io`
+- Heartbeat: server sends `2::`, reply `2::` about every 25–30 s.
+
+### Events (typical)
+- Request snapshot: `5::/api/v2/socket_io:{"name":"dev_data","args":[]}`
+- Batched deltas pushed as: `5::/api/v2/socket_io:{"name":"data","args":[ [ { "path":"...", "body":{...} } ] ]}`
+
+Observed paths in pushes: `/htr/<addr>/settings`, `/htr/<addr>/advanced_setup`, `/mgr/nodes`, `/geo_data`, `/htr_system/power_limit`.
 
 ---
 
-## PMO real‑time power
-
-**GET** `/api/v2/devs/{dev_id}/pmo/{addr}/power` →
-```json
-{ "power": 1245 }
-```
-
-Notes:
-- Useful for live tiles; history should come from `/samples` deltas.
-- For HA energy sensors, expose the **counter/1000** (kWh) as a `state_class: total_increasing` sensor and compute consumption deltas for period summaries.
+### Notes / gotchas
+- Always send temperatures as strings with one decimal (e.g. `"20.0"`), otherwise some backends return `400`.
+- POST `/htr/*/settings` returns **201** `{}` and echoes via WebSocket shortly after; do a timed fallback poll if needed.
+- Schedules: 168‑element `prog` array with values `{0,1,2}` mapping to presets `[cold, night, day]` in `ptemp`.

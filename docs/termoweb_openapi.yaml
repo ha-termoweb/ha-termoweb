@@ -1,184 +1,177 @@
 openapi: 3.0.3
 info:
-  title: TermoWeb Cloud API (Confirmed Endpoints)
-  version: "1.0.0"
-  description: |
-    Confirmed REST endpoints and shapes (APK v2.5.1 + live tests). This file focuses on
-    the heater settings, including writable weekly schedule (`prog`) and preset temperatures (`ptemp`).
-
+  title: "TermoWeb Cloud (capture\u2011verified)"
+  version: '2025-08-13'
+  description: "REST endpoints observed from the official Android app on 2025\u2011\
+    08\u201113. Socket.IO is documented at a high level."
 servers:
-  - url: https://control.termoweb.net
-
+- url: https://control.termoweb.net
 components:
   securitySchemes:
-    basicClientAuth:
+    basicAuth:
       type: http
       scheme: basic
     bearerAuth:
       type: http
       scheme: bearer
-      bearerFormat: opaque
-
-  parameters:
-    DevId:
-      in: path
-      name: dev_id
-      required: true
-      schema: { type: string }
-    Addr:
-      in: path
-      name: addr
-      required: true
-      schema:
-        oneOf:
-        - type: integer
-        - type: string
-    NodeType:
-      in: path
-      name: node_type
-      required: true
-      description: Node family. Lowercase path segment.
-      schema:
-        type: string
-        enum:
-        - htr
-        - thm
-        - pmo
-    Start:
-      in: query
-      name: start
-      required: true
-      description: Start of range, UNIX seconds (inclusive).
-      schema:
-        type: integer
-        format: int64
-        example: 1738291200
-    End:
-      in: query
-      name: end
-      required: true
-      description: End of range, UNIX seconds (exclusive in practice; app uses start-of-next-period).
-      schema:
-        type: integer
-        format: int64
-        example: 1738377600
+      bearerFormat: JWT
   schemas:
-    ErrorResponse:
+    TokenResponse:
       type: object
-      additionalProperties: true
       properties:
-        error:
-          oneOf: [ { type: string }, { type: integer } ]
-        error_code:
-          oneOf: [ { type: string }, { type: integer } ]
-        message:
+        access_token:
           type: string
-
-    ProgValue:
-      type: integer
-      enum: [0, 1, 2]
-      description: 0=cold, 1=night, 2=day
-
-    HtrSettings:
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+          example: 604800
+        scope:
+          type: string
+      required:
+      - access_token
+      - token_type
+      - expires_in
+    Device:
       type: object
-      additionalProperties: true
       properties:
-        name: { type: string }
-        state:
+        dev_id:
           type: string
-          enum: [on, off]
-        mode:
+        name:
           type: string
-          enum: [auto, manual, off]
-        units:
+        fw_version:
           type: string
-          enum: [C, F]
-        stemp:
-          description: May be returned as string or number by the server
-          oneOf:
-            - { type: string, pattern: "^[0-9]+(\\.[0-9])?$" }
-            - { type: number }
-        mtemp:
-          oneOf:
-            - { type: string, pattern: "^[0-9]+(\\.[0-9])?$" }
-            - { type: number }
-        ptemp:
-          description: Preset temperatures [cold, night, day]
+        serial_id:
+          type: string
+    NodesResponse:
+      type: object
+      properties:
+        nodes:
           type: array
-          minItems: 3
-          maxItems: 3
           items:
-            oneOf:
-              - { type: string, pattern: "^[0-9]+(\\.[0-9])?$" }
-              - { type: number }
-          example: ["10.0","22.0","23.0"]
+            type: object
+            properties:
+              type:
+                type: string
+                example: htr
+              addr:
+                type: integer
+              name:
+                type: string
+              installed:
+                type: boolean
+              lost:
+                type: boolean
+              hw_version:
+                type: string
+              fw_version:
+                type: string
+            additionalProperties: true
+    HeaterSettings:
+      type: object
+      properties:
+        name:
+          type: string
+        priority:
+          type: integer
         prog:
-          description: 7x24 program; index 0 = Monday 00:00–01:00; values 0/1/2 map to cold/night/day
           type: array
+          items:
+            type: integer
+            enum:
+            - 0
+            - 1
+            - 2
           minItems: 168
           maxItems: 168
-          items: { $ref: '#/components/schemas/ProgValue' }
-        priority: { type: integer }
-        max_power: { type: integer }
-        addr:
-          oneOf: [{ type: string }, { type: integer }]
-
-    HtrWrite:
-      type: object
-      additionalProperties: true
-      properties:
-        mode:
-          type: string
-          enum: [auto, manual, off]
-        # IMPORTANT: send stemp as STRING with one decimal when setting manual setpoint
-        stemp:
-          type: string
-          pattern: "^[0-9]+(\\.[0-9])?$"
-          example: "20.0"
+          description: "168 hourly entries (Mon 00\u2192Sun 23). 0=cold, 1=night,\
+            \ 2=day."
         units:
           type: string
-          enum: [C, F]
-          example: C
+          enum:
+          - C
+          - F
         ptemp:
-          description: Write preset temps as strings with one decimal for compatibility
           type: array
-          minItems: 3
-          maxItems: 3
           items:
             type: string
-            pattern: "^[0-9]+(\\.[0-9])?$"
-          example: ["10.0","22.0","23.0"]
-        prog:
-          description: Full weekly schedule; must be 168 integers with values 0/1/2
+          minItems: 3
+          maxItems: 3
+          description: '[cold, night, day] temperatures as strings with one decimal.'
+        mtemp:
+          type: string
+          description: Ambient temperature
+        stemp:
+          type: string
+          description: Manual setpoint
+        mode:
+          type: string
+          enum:
+          - auto
+          - manual
+          - 'off'
+        max_power:
+          type: string
+        state:
+          type: string
+        true_radiant_active:
+          type: boolean
+        window_state_active:
+          type: boolean
+        sync_status:
+          type: string
+      additionalProperties: true
+    HeaterSettingsWrite:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum:
+          - auto
+          - manual
+          - 'off'
+        stemp:
+          type: string
+          description: Setpoint, string with one decimal
+        units:
+          type: string
+          enum:
+          - C
+          - F
+        ptemp:
           type: array
+          items:
+            type: string
+          minItems: 3
+          maxItems: 3
+        prog:
+          type: array
+          items:
+            type: integer
+            enum:
+            - 0
+            - 1
+            - 2
           minItems: 168
           maxItems: 168
-          items:
-            $ref: '#/components/schemas/ProgValue'
-    SamplePoint:
+      additionalProperties: false
+    AdvancedSetup:
       type: object
-      description: One historical sample.
       properties:
-        t:
+        control_mode:
           type: integer
-          format: int64
-          description: UNIX seconds timestamp.
-          example: 1453420800
-        temp:
-          oneOf:
-          - type: string
-            pattern: ^[0-9]+(\.[0-9])?$
-          - type: number
-          description: Ambient temperature. Often returned as string with one decimal.
-          example: '20.0'
-        counter:
-          oneOf:
-          - type: string
-            pattern: ^[0-9]+(\.[0-9]{1,2})?$
-          - type: number
-          description: Monotonic energy counter in Wh. Often returned as string with
-            two decimals.
-          example: '1015816.00'
+        units:
+          type: string
+          enum:
+          - C
+          - F
+        true_radiant_enabled:
+          type: boolean
+        window_mode_enabled:
+          type: boolean
+        sync_status:
+          type: string
       additionalProperties: true
     SamplesResponse:
       type: object
@@ -186,33 +179,55 @@ components:
         samples:
           type: array
           items:
-            $ref: '#/components/schemas/SamplePoint'
-    PowerResponse:
-      type: object
-      properties:
-        power:
-          type: number
-          description: Instantaneous active power in watts.
-          example: 1245
+            type: object
+            properties:
+              t:
+                type: integer
+                description: UNIX seconds
+              temp:
+                type: string
+              counter:
+                type: string
+                description: Cumulative Wh
+            required:
+            - t
 paths:
   /client/token:
     post:
-      summary: Obtain bearer token
+      summary: Obtain access token (password grant)
       security:
-        - basicClientAuth: []
+      - basicAuth: []
       requestBody:
         required: true
         content:
           application/x-www-form-urlencoded:
             schema:
               type: object
-              required: [username, password, grant_type]
               properties:
-                username: { type: string }
-                password: { type: string }
                 grant_type:
                   type: string
-                  enum: [password]
+                  enum:
+                  - password
+                username:
+                  type: string
+                password:
+                  type: string
+              required:
+              - grant_type
+              - username
+              - password
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+  /api/v2/devs/:
+    get:
+      summary: List devices
+      security:
+      - bearerAuth: []
       responses:
         '200':
           description: OK
@@ -220,294 +235,232 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [access_token]
                 properties:
-                  access_token: { type: string }
-
-  /api/v2/devs/{dev_id}/htr/{addr}/settings:
+                  devs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Device'
+                  invited_to:
+                    type: array
+                    items:
+                      type: object
+  /api/v2/devs/{dev_id}/mgr/nodes:
     get:
-      summary: Read heater settings/state
-      security: [ { bearerAuth: [] } ]
+      summary: Nodes in the system
+      security:
+      - bearerAuth: []
       parameters:
-        - $ref: '#/components/parameters/DevId'
-        - $ref: '#/components/parameters/Addr'
-      responses:
-        '200':
-          description: Current settings/state
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HtrSettings'
-
-    post:
-      summary: Update heater settings (partial allowed)
-      description: |
-        Send only fields that need to change. For manual setpoint, include both mode="manual" and stemp as a string.
-        When updating the weekly schedule, send the full 168-element `prog` array.
-      security: [ { bearerAuth: [] } ]
-      parameters:
-        - $ref: '#/components/parameters/DevId'
-        - $ref: '#/components/parameters/Addr'
-      requestBody:
+      - name: dev_id
+        in: path
         required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/HtrWrite'
-            examples:
-              manual_setpoint:
-                summary: Switch to manual with setpoint
-                value: { mode: manual, stemp: "20.0", units: C }
-              auto_mode:
-                summary: Switch to auto (program)
-                value: { mode: auto, units: C }
-              write_ptemp:
-                summary: Update preset temps
-                value: { ptemp: ["10.0","22.0","23.0"], units: C }
-              write_prog:
-                summary: Update weekly schedule
-                value:
-                  units: C
-                  prog:
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 1
-                  - 1
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 1
-                  - 1
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 1
-                  - 1
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 1
-                  - 1
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 1
-                  - 1
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 1
-                  - 1
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 1
-                  - 1
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 1
-                  - 1
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 1
-                  - 1
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 1
-                  - 1
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 1
-                  - 1
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 1
-                  - 1
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 1
-                  - 1
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 2
-                  - 1
-                  - 1
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
-                  - 0
+        schema:
+          type: string
       responses:
-        '201':
-          description: Accepted
-        '400':
-          description: Bad request (e.g. wrong types or invalid lengths)
+        '200':
+          description: OK
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '401':
-          description: Unauthorized
-        '429':
-          description: Rate limited
-
-  /api/v2/devs/{dev_id}/htr/{addr}/advanced_setup:
+                $ref: '#/components/schemas/NodesResponse'
+  /api/v2/devs/{dev_id}/mgr/rtc/time:
     get:
-      summary: Read advanced flags (opaque)
-      security: [ { bearerAuth: [] } ]
+      summary: Hub RTC time
+      security:
+      - bearerAuth: []
       parameters:
-        - $ref: '#/components/parameters/DevId'
-        - $ref: '#/components/parameters/Addr'
+      - name: dev_id
+        in: path
+        required: true
+        schema:
+          type: string
       responses:
         '200':
-          description: Opaque flags
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  y:
+                    type: integer
+                  n:
+                    type: integer
+                  d:
+                    type: integer
+                  h:
+                    type: integer
+                  m:
+                    type: integer
+                  s:
+                    type: integer
+                  w:
+                    type: integer
+  /api/v2/devs/{dev_id}/geo_data:
+    get:
+      summary: Hub geodata and tz
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: dev_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
           content:
             application/json:
               schema:
                 type: object
                 additionalProperties: true
-  /api/v2/devs/{dev_id}/{node_type}/{addr}/samples:
+  /api/v2/devs/{dev_id}/storage:
     get:
-      summary: Historical samples (temp & energy counter)
-      description: 'Returns samples for a node (`htr`, `thm`, or `pmo`) within the
-        requested time window.
-
-        - `counter` is a cumulative Wh value (monotonic); derive kWh by summing deltas
-        and dividing by 1000.
-
-        - Observed cadence: `htr`/`thm` ~3600 s; `pmo` ~900 s.
-
-        - Numeric values may arrive as strings; parse accordingly.'
+      summary: Hub persistent storage blob
       security:
       - bearerAuth: []
       parameters:
-      - $ref: '#/components/parameters/DevId'
-      - $ref: '#/components/parameters/NodeType'
-      - $ref: '#/components/parameters/Addr'
-      - $ref: '#/components/parameters/Start'
-      - $ref: '#/components/parameters/End'
-      responses:
-        '200':
-          description: Samples for the requested range
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SamplesResponse'
-  /api/v2/devs/{dev_id}/pmo/{addr}/power:
-    get:
-      summary: Real‑time power (PMO)
-      description: Instantaneous power in watts for a power monitor node.
-      security:
-      - bearerAuth: []
-      parameters:
-      - $ref: '#/components/parameters/DevId'
-      - $ref: '#/components/parameters/Addr'
+      - name: dev_id
+        in: path
+        required: true
+        schema:
+          type: string
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PowerResponse'
-        '404':
-          description: Not a PMO node or not available
+                type: object
+                additionalProperties: true
+  /api/v2/devs/{dev_id}/htr_system/power_limit:
+    get:
+      summary: System power limit
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: dev_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  power_limit:
+                    type: string
+  /api/v2/devs/{dev_id}/htr/{addr}/settings:
+    get:
+      summary: Read heater settings
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: dev_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: addr
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HeaterSettings'
+    post:
+      summary: Update heater settings (partial)
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: dev_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: addr
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeaterSettingsWrite'
+      responses:
+        '201':
+          description: Accepted (empty JSON body)
+  /api/v2/devs/{dev_id}/htr/{addr}/advanced_setup:
+    get:
+      summary: Read heater advanced setup
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: dev_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: addr
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvancedSetup'
+  /api/v2/devs/{dev_id}/{node_type}/{addr}/samples:
+    get:
+      summary: Historical samples (temperature, energy)
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: dev_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: node_type
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - htr
+      - name: addr
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: start
+        in: query
+        required: true
+        schema:
+          type: integer
+      - name: end
+        in: query
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SamplesResponse'
