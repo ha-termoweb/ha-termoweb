@@ -13,9 +13,6 @@ CONNECTED_PATH_FMT: Final = (
     "/api/v2/devs/{dev_id}/connected"  # some fw return 404; we tolerate
 )
 NODES_PATH_FMT: Final = "/api/v2/devs/{dev_id}/mgr/nodes"
-PMO_POWER_PATH_FMT: Final = "/api/v2/devs/{dev_id}/pmo/{addr}/power"
-PMO_SAMPLES_PATH_FMT: Final = "/api/v2/devs/{dev_id}/pmo/{addr}/samples"
-# NOTE: Old APKs referenced /thm/*; confirmed irrelevant here, so not exposed.
 
 # Public client creds (from APK v2.5.1)
 BASIC_AUTH_B64: Final = "NTIxNzJkYzg0ZjYzZDZjNzU5MDAwMDA1OmJ4djRaM3hVU2U="

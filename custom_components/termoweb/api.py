@@ -13,8 +13,6 @@ from .const import (
     BASIC_AUTH_B64,
     DEVS_PATH,
     NODES_PATH_FMT,
-    PMO_POWER_PATH_FMT,
-    PMO_SAMPLES_PATH_FMT,
     TOKEN_PATH,
     USER_AGENT,
 )
@@ -363,55 +361,3 @@ class TermoWebClient:
         path = f"/api/v2/devs/{dev_id}/htr/{addr}/settings"
         return await self._request("POST", path, headers=headers, json=payload)
 
-    async def get_pmo_power(self, dev_id: str, addr: str | int) -> Optional[float]:
-        """Return live power for a PMO node in watts."""
-        headers = await self._authed_headers()
-        path = PMO_POWER_PATH_FMT.format(dev_id=dev_id, addr=addr)
-        try:
-            data = await self._request(
-                "GET", path, headers=headers, ignore_statuses={404}
-            )
-        except aiohttp.ClientResponseError as err:
-            if err.status == 404:
-                _LOGGER.debug("PMO power unsupported for %s/%s", dev_id, addr)
-                return None
-            raise
-        if isinstance(data, dict):
-            power = data.get("power")
-            try:
-                return float(power)
-            except (TypeError, ValueError):
-                _LOGGER.debug(
-                    "Unexpected power payload for %s/%s: %s", dev_id, addr, data
-                )
-        return None
-
-    async def get_pmo_samples(
-        self, dev_id: str, addr: str | int, start: int, end: int
-    ) -> List[Dict[str, Any]]:
-        """Return historical samples for a PMO node."""
-        headers = await self._authed_headers()
-        path = PMO_SAMPLES_PATH_FMT.format(dev_id=dev_id, addr=addr)
-        params = {"start": start, "end": end}
-        try:
-            data = await self._request(
-                "GET",
-                path,
-                headers=headers,
-                params=params,
-                ignore_statuses={404},
-            )
-        except aiohttp.ClientResponseError as err:
-            if err.status == 404:
-                _LOGGER.debug("PMO samples unsupported for %s/%s", dev_id, addr)
-                return []
-            raise
-        if isinstance(data, dict) and isinstance(data.get("samples"), list):
-            return [s for s in data["samples"] if isinstance(s, dict)]
-        _LOGGER.debug(
-            "Unexpected samples payload for PMO %s/%s: %s",
-            dev_id,
-            addr,
-            type(data).__name__,
-        )
-        return []
