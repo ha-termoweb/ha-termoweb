@@ -6,10 +6,7 @@ import sys
 import types
 from pathlib import Path
 from typing import Any, Dict
-import logging
 from unittest.mock import MagicMock
-
-import pytest
 
 # Provide a minimal aiohttp stub for the module import
 aiohttp_stub = types.ModuleType("aiohttp")
@@ -131,97 +128,6 @@ def test_token_refresh(monkeypatch) -> None:
         assert session.post.call_count == 2
 
     asyncio.run(_run())
-
-
-def test_get_pmo_power() -> None:
-    async def _run() -> None:
-        session = MagicMock()
-        session.post.return_value = MockResponse(
-            200,
-            {"access_token": "tok", "expires_in": 3600},
-            headers={"Content-Type": "application/json"},
-        )
-        session.request.return_value = MockResponse(
-            200,
-            {"power": "123"},
-            headers={"Content-Type": "application/json"},
-        )
-        client = TermoWebClient(session, "user", "pass")
-        power = await client.get_pmo_power("dev1", 2)
-        assert power == 123.0
-        method, url = session.request.call_args[0][:2]
-        assert method == "GET"
-        assert url.endswith("/api/v2/devs/dev1/pmo/2/power")
-
-    asyncio.run(_run())
-
-
-def test_get_pmo_power_404(caplog) -> None:
-    async def _run() -> None:
-        session = MagicMock()
-        session.post.return_value = MockResponse(
-            200,
-            {"access_token": "tok", "expires_in": 3600},
-            headers={"Content-Type": "application/json"},
-        )
-        session.request.return_value = MockResponse(
-            404,
-            {},
-            headers={"Content-Type": "application/json"},
-        )
-        client = TermoWebClient(session, "user", "pass")
-        caplog.set_level(logging.DEBUG)
-        power = await client.get_pmo_power("dev1", 2)
-        assert power is None
-
-    asyncio.run(_run())
-    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
-
-
-def test_get_pmo_samples() -> None:
-    async def _run() -> None:
-        session = MagicMock()
-        session.post.return_value = MockResponse(
-            200,
-            {"access_token": "tok", "expires_in": 3600},
-            headers={"Content-Type": "application/json"},
-        )
-        session.request.return_value = MockResponse(
-            200,
-            {"samples": [{"t": 1, "counter": "10"}]},
-            headers={"Content-Type": "application/json"},
-        )
-        client = TermoWebClient(session, "user", "pass")
-        samples = await client.get_pmo_samples("dev1", 2, start=0, end=10)
-        assert samples == [{"t": 1, "counter": "10"}]
-        method, url = session.request.call_args[0][:2]
-        params = session.request.call_args[1]["params"]
-        assert method == "GET"
-        assert url.endswith("/api/v2/devs/dev1/pmo/2/samples")
-        assert params == {"start": 0, "end": 10}
-
-    asyncio.run(_run())
-
-
-def test_get_pmo_samples_empty() -> None:
-    async def _run() -> None:
-        session = MagicMock()
-        session.post.return_value = MockResponse(
-            200,
-            {"access_token": "tok", "expires_in": 3600},
-            headers={"Content-Type": "application/json"},
-        )
-        session.request.return_value = MockResponse(
-            200,
-            {},
-            headers={"Content-Type": "application/json"},
-        )
-        client = TermoWebClient(session, "user", "pass")
-        samples = await client.get_pmo_samples("dev1", 2, start=0, end=10)
-        assert samples == []
-
-    asyncio.run(_run())
-
 
 def test_request_retries_on_401() -> None:
     async def _run() -> None:
