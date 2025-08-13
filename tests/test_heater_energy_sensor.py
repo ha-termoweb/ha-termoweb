@@ -129,6 +129,18 @@ class SensorEntity:  # pragma: no cover - minimal entity
     def async_on_remove(self, func) -> None:  # pragma: no cover - store callback
         self._on_remove = func
 
+    @property
+    def device_class(self) -> str | None:
+        return getattr(self, "_attr_device_class", None)
+
+    @property
+    def state_class(self) -> str | None:
+        return getattr(self, "_attr_state_class", None)
+
+    @property
+    def native_unit_of_measurement(self) -> str | None:
+        return getattr(self, "_attr_native_unit_of_measurement", None)
+
 
 class SensorDeviceClass:  # pragma: no cover - simple container
     ENERGY = "energy"
@@ -220,8 +232,14 @@ def test_coordinator_and_sensors() -> None:
         await energy_sensor.async_added_to_hass()
         await power_sensor.async_added_to_hass()
 
+        assert energy_sensor.device_class == SensorDeviceClass.ENERGY
+        assert energy_sensor.state_class == SensorStateClass.TOTAL_INCREASING
+        assert energy_sensor.native_unit_of_measurement == "kWh"
+
         assert energy_sensor.native_value == pytest.approx(0.0015)
         assert power_sensor.native_value == pytest.approx(2000.0, rel=1e-3)
+
+        first_value: float = energy_sensor.native_value  # type: ignore[assignment]
 
         energy_sensor.schedule_update_ha_state = MagicMock()
         power_sensor.schedule_update_ha_state = MagicMock()
@@ -232,6 +250,7 @@ def test_coordinator_and_sensors() -> None:
 
         energy_sensor.schedule_update_ha_state.assert_called_once()
         power_sensor.schedule_update_ha_state.assert_called_once()
+        assert energy_sensor.native_value >= first_value
         assert energy_sensor.native_value == pytest.approx(0.002)
         assert power_sensor.native_value == pytest.approx(123.0)
 
