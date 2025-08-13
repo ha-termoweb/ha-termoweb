@@ -12,6 +12,7 @@ from .const import (
     API_BASE,
     BASIC_AUTH_B64,
     DEVS_PATH,
+    HTR_SAMPLES_PATH_FMT,
     NODES_PATH_FMT,
     TOKEN_PATH,
     USER_AGENT,
@@ -360,4 +361,37 @@ class TermoWebClient:
         headers = await self._authed_headers()
         path = f"/api/v2/devs/{dev_id}/htr/{addr}/settings"
         return await self._request("POST", path, headers=headers, json=payload)
+
+    async def get_htr_samples(
+        self,
+        dev_id: str,
+        addr: str | int,
+        start: int | float,
+        end: int | float,
+    ) -> List[Dict[str, str | int]]:
+        """Return heater samples as list of {"t", "counter"} dicts."""
+        headers = await self._authed_headers()
+        path = HTR_SAMPLES_PATH_FMT.format(dev_id=dev_id, addr=addr)
+        params = {"start": int(start), "end": int(end)}
+        data = await self._request("GET", path, headers=headers, params=params)
+
+        if isinstance(data, dict) and isinstance(data.get("samples"), list):
+            samples: List[Dict[str, str | int]] = []
+            for item in data["samples"]:
+                if not isinstance(item, dict):
+                    _LOGGER.debug("Unexpected htr sample item: %r", item)
+                    continue
+                t = item.get("t")
+                counter = item.get("counter")
+                if isinstance(t, (int, float)) and counter is not None:
+                    samples.append({"t": int(t), "counter": str(counter)})
+                else:
+                    _LOGGER.debug("Unexpected htr sample shape: %s", item)
+            return samples
+
+        _LOGGER.debug(
+            "Unexpected htr samples payload (%s); returning empty list",
+            type(data).__name__,
+        )
+        return []
 
