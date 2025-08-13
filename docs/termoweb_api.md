@@ -32,7 +32,7 @@ Use `Authorization: Bearer <access_token>` for the endpoints below.
 ### GET `/api/v2/devs/`
 Returns devices you own and invitations.
 ```json
-{ "devs": [ { "dev_id": "cec9...bb35", "name": "Hub", "fw_version": "1.34", "serial_id": "8010" } ], "invited_to": [] }
+{ "devs": [ { "dev_id": "abcdef...", "name": "Hub", "fw_version": "1.34", "serial_id": "1234" } ], "invited_to": [] }
 ```
 
 ### GET `/api/v2/devs/{dev_id}/mgr/nodes`
@@ -50,13 +50,13 @@ Hub RTC snapshot.
 ### GET `/api/v2/devs/{dev_id}/geo_data`
 Location & timezone for the hub.
 ```json
-{ "country":"IE","state":"Dublin","city":"Dublin ","tz_code":"Europe/Dublin","zip":"D07AA00" }
+{ "country":"FR","state":"Paris","city":"Paris","tz_code":"Europe/Paris","zip":"4321" }
 ```
 
 ### GET `/api/v2/devs/{dev_id}/storage`
 Misc persistent data.
 ```json
-{ "location_data": {}, "RGPD_time": "Mon Dec 23 2024 11:56:54 GMT+0000 ", "version": 2 }
+{ "location_data": {}, "RGPD_time": "Mon Dec 23 2024 11:56:54 UTC", "version": 2 }
 ```
 
 ### GET `/api/v2/devs/{dev_id}/htr_system/power_limit`
@@ -70,7 +70,7 @@ System power limit (string).
 
 ### GET `/api/v2/devs/{dev_id}/htr/{addr}/settings`
 Representative response:
-```json
+```
 {
   "name":"Guest bedroom ",
   "priority":0,
