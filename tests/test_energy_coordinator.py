@@ -114,8 +114,6 @@ TermoWebHeaterEnergyCoordinator = coord_module.TermoWebHeaterEnergyCoordinator
 def test_power_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.list_devices = AsyncMock(return_value=[{"dev_id": "1"}])
-        client.get_nodes = AsyncMock(return_value={"nodes": [{"type": "htr", "addr": "A"}]})
         client.get_htr_samples = AsyncMock(
             side_effect=[
                 [{"t": 1000, "counter": "1.0"}],
@@ -124,7 +122,7 @@ def test_power_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
         hass = HomeAssistant()
-        coord = TermoWebHeaterEnergyCoordinator(hass, client)  # type: ignore[arg-type]
+        coord = TermoWebHeaterEnergyCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
 
         fake_time = 1000.0
 
@@ -149,8 +147,6 @@ def test_power_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_counter_reset(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.list_devices = AsyncMock(return_value=[{"dev_id": "1"}])
-        client.get_nodes = AsyncMock(return_value={"nodes": [{"type": "htr", "addr": "A"}]})
         client.get_htr_samples = AsyncMock(
             side_effect=[
                 [{"t": 1000, "counter": "5.0"}],
@@ -159,7 +155,7 @@ def test_counter_reset(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
         hass = HomeAssistant()
-        coord = TermoWebHeaterEnergyCoordinator(hass, client)  # type: ignore[arg-type]
+        coord = TermoWebHeaterEnergyCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
 
         fake_time = 1000.0
 

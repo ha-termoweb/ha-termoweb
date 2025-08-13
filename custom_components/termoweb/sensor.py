@@ -24,112 +24,64 @@ async def async_setup_entry(hass, entry, async_add_entities):
     """Set up sensors for each heater node."""
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
+    dev_id = data["dev_id"]
+    nodes = data["nodes"]
+    addrs: list[str] = data["htr_addrs"]
 
     energy_coordinator: TermoWebHeaterEnergyCoordinator | None = data.get(
-        "energy_coordinator"
+        "energy_coordinator",
     )
     if energy_coordinator is None:
-        energy_coordinator = TermoWebHeaterEnergyCoordinator(hass, data["client"])
+        energy_coordinator = TermoWebHeaterEnergyCoordinator(
+            hass, data["client"], dev_id, addrs
+        )
         data["energy_coordinator"] = energy_coordinator
         await energy_coordinator.async_config_entry_first_refresh()
 
-    added: set[str] = set()
+    name_map: dict[str, str] = {}
+    node_list = nodes.get("nodes") if isinstance(nodes, dict) else None
+    if isinstance(node_list, list):
+        for node in node_list:
+            if isinstance(node, dict) and (node.get("type") or "").lower() == "htr":
+                addr = str(node.get("addr"))
+                base = (node.get("name") or f"Node {addr}").strip() or f"Node {addr}"
+                name_map[addr] = base
 
-    async def build_and_add() -> None:
-        new_entities: list[SensorEntity] = []
-        data_now = coordinator.data or {}
-        energy_now = energy_coordinator.data or {}
+    new_entities: list[SensorEntity] = []
+    for addr in addrs:
+        base_name = name_map.get(addr, f"Node {addr}")
+        uid_temp = f"{DOMAIN}:{dev_id}:htr:{addr}:temp"
+        new_entities.append(
+            TermoWebHeaterTemp(
+                coordinator, entry.entry_id, dev_id, addr, f"{base_name} Temperature", uid_temp
+            )
+        )
+        uid_energy = f"{DOMAIN}:{dev_id}:htr:{addr}:energy"
+        new_entities.append(
+            TermoWebHeaterEnergyTotal(
+                energy_coordinator,
+                entry.entry_id,
+                dev_id,
+                addr,
+                f"{base_name} Energy",
+                uid_energy,
+            )
+        )
+        uid_power = f"{DOMAIN}:{dev_id}:htr:{addr}:power"
+        new_entities.append(
+            TermoWebHeaterPower(
+                energy_coordinator,
+                entry.entry_id,
+                dev_id,
+                addr,
+                f"{base_name} Power",
+                uid_power,
+            )
+        )
 
-        for dev_id, dev in data_now.items():
-            nodes = dev.get("nodes") or {}
-            node_list = nodes.get("nodes") if isinstance(nodes, dict) else None
-            if isinstance(node_list, list):
-                for node in node_list:
-                    if not isinstance(node, dict):
-                        continue
-                    ntype = (node.get("type") or "").lower()
-                    if ntype != "htr":
-                        continue
-                    addr = str(node.get("addr"))
-                    base_name = (node.get("name") or f"Node {addr}").strip() or f"Node {addr}"
-                    unique_id = f"{DOMAIN}:{dev_id}:htr:{addr}:temp"
-                    if unique_id in added:
-                        continue
-                    ent_name = f"{base_name} Temperature"
-                    new_entities.append(
-                        TermoWebHeaterTemp(
-                            coordinator, entry.entry_id, dev_id, addr, ent_name, unique_id
-                        )
-                    )
-                    added.add(unique_id)
-
-        dev_ids = set(data_now.keys()) | set(energy_now.keys())
-        for dev_id in dev_ids:
-            nodes = (data_now.get(dev_id, {}).get("nodes") or {})
-            node_list = nodes.get("nodes") if isinstance(nodes, dict) else None
-            name_map: dict[str, str] = {}
-            if isinstance(node_list, list):
-                for node in node_list:
-                    if not isinstance(node, dict):
-                        continue
-                    if (node.get("type") or "").lower() != "htr":
-                        continue
-                    addr = str(node.get("addr"))
-                    base_name = (node.get("name") or f"Node {addr}").strip() or f"Node {addr}"
-                    name_map[addr] = base_name
-
-            addrs: set[str] = set(name_map.keys())
-            htr_main = (data_now.get(dev_id, {}).get("htr") or {}).get("addrs") or []
-            addrs.update(str(a) for a in htr_main)
-            htr_energy = (energy_now.get(dev_id, {}).get("htr") or {})
-            energy_map = htr_energy.get("energy") or {}
-            power_map = htr_energy.get("power") or {}
-            addrs.update(str(a) for a in energy_map.keys())
-            addrs.update(str(a) for a in power_map.keys())
-
-            for addr in addrs:
-                base_name = name_map.get(addr, f"Node {addr}")
-                unique_id = f"{DOMAIN}:{dev_id}:htr:{addr}:energy"
-                if unique_id not in added:
-                    ent_name = f"{base_name} Energy"
-                    new_entities.append(
-                        TermoWebHeaterEnergyTotal(
-                            energy_coordinator,
-                            entry.entry_id,
-                            dev_id,
-                            addr,
-                            ent_name,
-                            unique_id,
-                        )
-                    )
-                    added.add(unique_id)
-
-                unique_id = f"{DOMAIN}:{dev_id}:htr:{addr}:power"
-                if unique_id not in added:
-                    ent_name = f"{base_name} Power"
-                    new_entities.append(
-                        TermoWebHeaterPower(
-                            energy_coordinator,
-                            entry.entry_id,
-                            dev_id,
-                            addr,
-                            ent_name,
-                            unique_id,
-                        )
-                    )
-                    added.add(unique_id)
-
-        if new_entities:
-            _LOGGER.debug("Adding %d TermoWeb sensors", len(new_entities))
-            async_add_entities(new_entities)
-
-    await build_and_add()
-
-    def _on_coordinator_update() -> None:
-        hass.async_create_task(build_and_add())
-
-    coordinator.async_add_listener(_on_coordinator_update)
-    energy_coordinator.async_add_listener(_on_coordinator_update)
+    if new_entities:
+        _LOGGER.debug("Adding %d TermoWeb sensors", len(new_entities))
+        async_add_entities(new_entities)
 
 
 class TermoWebHeaterTemp(CoordinatorEntity, SensorEntity):
