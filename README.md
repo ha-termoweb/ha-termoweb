@@ -82,8 +82,15 @@ ha-termoweb/ha-termoweb
 ---
 
 ## Tips
-- **Voice control:** Expose heater entities via Home Assistant’s Google or Alexa integrations.  
+- **Voice control:** Expose heater entities via Home Assistant’s Google or Alexa integrations.
 - **Automations idea:** Lower temperature when nobody’s home; switch to **Off** if a window sensor is open for 10+ minutes.
+
+## Energy monitoring & history
+- Each heater provides an **Energy** sensor in kWh and the integration adds a **Total Energy** sensor aggregating all heaters.
+- Add these sensors in **Settings → Dashboards → Energy** to include them in Home Assistant’s Energy Dashboard.
+- Energy counters are fetched hourly from TermoWeb.
+- Use the `termoweb.import_energy_history` service (Developer Tools → Services) to backfill past consumption after installing the integration.
+- No extra configuration is required beyond selecting the sensors in the Energy Dashboard.
 
 ---
 

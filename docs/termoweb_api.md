@@ -122,6 +122,14 @@ Common bodies:
 
 Observed cadence for `htr`: ~3600 s.
 
+### Home Assistant energy integration
+
+- Each heater’s `counter` value maps to a Home Assistant **Energy** sensor, and an aggregate sensor sums all heater counters for whole-home tracking.
+- Add these sensors in **Settings → Dashboards → Energy** so they appear in the Energy Dashboard.
+- The integration polls this endpoint hourly. When the cloud emits optional `htr/samples` WebSocket events, sensors update as those pushes arrive.
+- Call the `termoweb.import_energy_history` service to backfill past samples into Home Assistant’s statistics database.
+
+
 
 ## Real‑time (legacy Socket.IO 0.9)
 
