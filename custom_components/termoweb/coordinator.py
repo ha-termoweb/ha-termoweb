@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import TermoWebAuthError, TermoWebClient, TermoWebRateLimitError
-from .const import MIN_POLL_INTERVAL
+from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -142,7 +142,7 @@ class TermoWebHeaterEnergyCoordinator(
             hass,
             logger=_LOGGER,
             name="termoweb-htr-energy",
-            update_interval=timedelta(minutes=15),
+            update_interval=HTR_ENERGY_UPDATE_INTERVAL,
         )
         self.client = client
         self._dev_id = dev_id
