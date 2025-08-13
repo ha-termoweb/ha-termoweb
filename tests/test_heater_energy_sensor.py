@@ -203,6 +203,7 @@ spec2.loader.exec_module(sensor_module)
 TermoWebHeaterEnergyCoordinator = coord_module.TermoWebHeaterEnergyCoordinator
 TermoWebHeaterEnergyTotal = sensor_module.TermoWebHeaterEnergyTotal
 TermoWebHeaterPower = sensor_module.TermoWebHeaterPower
+TermoWebTotalEnergy = sensor_module.TermoWebTotalEnergy
 signal_ws_data = __import__(f"{package}.const", fromlist=["signal_ws_data"]).signal_ws_data
 
 
@@ -253,5 +254,45 @@ def test_coordinator_and_sensors() -> None:
         assert energy_sensor.native_value >= first_value
         assert energy_sensor.native_value == pytest.approx(0.002)
         assert power_sensor.native_value == pytest.approx(123.0)
+
+    asyncio.run(_run())
+
+
+def test_total_energy_sensor() -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_htr_samples = AsyncMock(
+            side_effect=[
+                [{"t": 1000, "counter": "1.0"}],
+                [{"t": 1000, "counter": "2.0"}],
+            ]
+        )
+
+        hass = HomeAssistant()
+        coord = TermoWebHeaterEnergyCoordinator(hass, client, "1", ["A", "B"])  # type: ignore[arg-type]
+
+        await coord.async_refresh()
+
+        total_sensor = TermoWebTotalEnergy(coord, "entry", "1", "Total Energy", "tot")
+        total_sensor.hass = hass
+        await total_sensor.async_added_to_hass()
+
+        assert total_sensor.device_class == SensorDeviceClass.ENERGY
+        assert total_sensor.state_class == SensorStateClass.TOTAL_INCREASING
+        assert total_sensor.native_unit_of_measurement == "kWh"
+
+        assert total_sensor.native_value == pytest.approx(0.003)
+
+        first_value: float = total_sensor.native_value  # type: ignore[assignment]
+
+        total_sensor.schedule_update_ha_state = MagicMock()
+
+        coord.data["1"]["htr"]["energy"]["A"] = 1.5
+        coord.data["1"]["htr"]["energy"]["B"] = 2.5
+        dispatcher_send(signal_ws_data("entry"), {"dev_id": "1", "addr": "A"})
+
+        total_sensor.schedule_update_ha_state.assert_called_once()
+        assert total_sensor.native_value >= first_value
+        assert total_sensor.native_value == pytest.approx(0.004)
 
     asyncio.run(_run())

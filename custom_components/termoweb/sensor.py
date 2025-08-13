@@ -79,6 +79,18 @@ async def async_setup_entry(hass, entry, async_add_entities):
             )
         )
 
+    uid_total = f"{DOMAIN}:{dev_id}:energy_total"
+    new_entities.append(
+        TermoWebTotalEnergy(
+        
+            energy_coordinator,
+            entry.entry_id,
+            dev_id,
+            "Total Energy",
+            uid_total,
+        )
+    )
+
     if new_entities:
         _LOGGER.debug("Adding %d TermoWeb sensors", len(new_entities))
         async_add_entities(new_entities)
@@ -290,5 +302,70 @@ class TermoWebHeaterPower(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {"dev_id": self._dev_id, "addr": self._addr}
+
+
+class TermoWebTotalEnergy(CoordinatorEntity, SensorEntity):
+    """Total energy consumption across all heaters."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = "kWh"
+
+    def __init__(
+        self,
+        coordinator: TermoWebHeaterEnergyCoordinator,
+        entry_id: str,
+        dev_id: str,
+        name: str,
+        unique_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._entry_id = entry_id
+        self._dev_id = dev_id
+        self._attr_name = name
+        self._attr_unique_id = unique_id
+        self._unsub_ws = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self._unsub_ws = async_dispatcher_connect(
+            self.hass, signal_ws_data(self._entry_id), self._on_ws_data
+        )
+        self.async_on_remove(lambda: self._unsub_ws() if self._unsub_ws else None)
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(identifiers={(DOMAIN, self._dev_id)})
+
+    @callback
+    def _on_ws_data(self, payload: dict) -> None:
+        if payload.get("dev_id") != self._dev_id:
+            return
+        self.schedule_update_ha_state()
+
+    @property
+    def available(self) -> bool:
+        d = (self.coordinator.data or {}).get(self._dev_id)
+        return d is not None
+
+    @property
+    def native_value(self) -> Optional[float]:
+        d = (self.coordinator.data or {}).get(self._dev_id, {})
+        energy = (d.get("htr") or {}).get("energy") or {}
+        total = 0.0
+        found = False
+        for val in energy.values():
+            try:
+                total += float(val)
+                found = True
+            except (TypeError, ValueError):
+                continue
+        if not found:
+            return None
+        return total / 1000
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"dev_id": self._dev_id}
 
 
