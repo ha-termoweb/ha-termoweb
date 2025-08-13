@@ -241,7 +241,9 @@ def test_ws_event_updates_sensor() -> None:
 
         base.data["dev1"]["pmo"]["power"]["1"] = 7.0
         async_dispatcher_send(
-            hass, signal_ws_data("entry"), {"dev_id": "dev1", "addr": "1", "kind": "pmo_power"}
+            hass,
+            signal_ws_data("entry"),
+            {"dev_id": "dev1", "addr": "1", "kind": "pmo_power", "value": 7.0},
         )
         assert coord.data["dev1"]["pmo"]["power"]["1"] == 7.0
 
@@ -250,7 +252,9 @@ def test_ws_event_updates_sensor() -> None:
         await ent.async_added_to_hass()
         ent.schedule_update_ha_state = MagicMock()
         async_dispatcher_send(
-            hass, signal_ws_data("entry"), {"dev_id": "dev1", "addr": "1", "kind": "pmo_power"}
+            hass,
+            signal_ws_data("entry"),
+            {"dev_id": "dev1", "addr": "1", "kind": "pmo_power", "value": 7.0},
         )
         assert ent.schedule_update_ha_state.call_count == 1
 

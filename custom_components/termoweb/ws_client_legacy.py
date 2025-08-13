@@ -297,7 +297,7 @@ class TermoWebWSLegacyClient:
         # Apply updates to coordinator.data in-place to keep shape compatible with current entities.
         updated_nodes = False
         updated_addrs: List[str] = []
-        updated_pmo_power: List[str] = []
+        updated_pmo_power: Dict[str, float] = {}
 
         for item in batch:
             if not isinstance(item, dict):
@@ -360,7 +360,7 @@ class TermoWebWSLegacyClient:
             elif "/pmo/" in path and path.endswith("/power"):
                 addr = path.split("/pmo/")[1].split("/")[0]
                 power_map: Dict[str, Any] = dev_map.setdefault("pmo", {}).setdefault("power", {})
-                val = None
+                val: float | None = None
                 if isinstance(body, dict):
                     body = body.get("power")
                 try:
@@ -370,7 +370,7 @@ class TermoWebWSLegacyClient:
                     val = None
                 if val is not None:
                     power_map[addr] = val
-                    updated_pmo_power.append(addr)
+                    updated_pmo_power[addr] = val
 
             else:
                 # Other top-level paths, store compactly under raw
@@ -385,8 +385,12 @@ class TermoWebWSLegacyClient:
             async_dispatcher_send(self.hass, signal_ws_data(self.entry_id), {**payload_base, "addr": None, "kind": "nodes"})
         for addr in set(updated_addrs):
             async_dispatcher_send(self.hass, signal_ws_data(self.entry_id), {**payload_base, "addr": addr, "kind": "htr_settings"})
-        for addr in set(updated_pmo_power):
-            async_dispatcher_send(self.hass, signal_ws_data(self.entry_id), {**payload_base, "addr": addr, "kind": "pmo_power"})
+        for addr, val in updated_pmo_power.items():
+            async_dispatcher_send(
+                self.hass,
+                signal_ws_data(self.entry_id),
+                {**payload_base, "addr": addr, "kind": "pmo_power", "value": val},
+            )
 
     # ----------------- Helpers -----------------
 
