@@ -28,6 +28,7 @@ from .const import (
     signal_ws_status,
 )
 from .coordinator import TermoWebCoordinator
+from .utils import extract_heater_addrs
 from .ws_client_legacy import TermoWebWSLegacyClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -333,12 +334,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         dev.get("dev_id") or dev.get("id") or dev.get("serial_id") or ""
     ).strip()
     nodes = await client.get_nodes(dev_id)
-    addrs: list[str] = []
-    node_list = nodes.get("nodes") if isinstance(nodes, dict) else None
-    if isinstance(node_list, list):
-        for n in node_list:
-            if isinstance(n, dict) and (n.get("type") or "").lower() == "htr":
-                addrs.append(str(n.get("addr")))
+    addrs = extract_heater_addrs(nodes)
 
     coordinator = TermoWebCoordinator(hass, client, base_interval, dev_id, dev, nodes)
 

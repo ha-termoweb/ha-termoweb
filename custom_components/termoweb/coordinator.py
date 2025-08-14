@@ -11,6 +11,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import TermoWebAuthError, TermoWebClient, TermoWebRateLimitError
 from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
+from .utils import extract_heater_addrs
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -62,13 +63,7 @@ class TermoWebCoordinator(
         self._nodes = nodes or {}
 
     def _addrs(self) -> list[str]:
-        node_list = self._nodes.get("nodes") if isinstance(self._nodes, dict) else None
-        addrs: list[str] = []
-        if isinstance(node_list, list):
-            for n in node_list:
-                if isinstance(n, dict) and (n.get("type") or "").lower() == "htr":
-                    addrs.append(str(n.get("addr")))
-        return addrs
+        return extract_heater_addrs(self._nodes)
 
     async def _async_update_data(self) -> Dict[str, Dict[str, Any]]:
         dev_id = self._dev_id
