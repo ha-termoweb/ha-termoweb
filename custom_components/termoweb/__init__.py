@@ -6,10 +6,30 @@ from datetime import datetime, timedelta, timezone
 import time
 from typing import Any, Dict, Iterable
 
-from homeassistant.components.recorder.statistics import (
-    async_import_statistics,
-    async_update_statistics_metadata,
-)
+try:
+    from homeassistant.components.recorder.statistics import (
+        async_import_statistics,
+        async_update_statistics_metadata,
+    )
+
+    def _store_statistics(
+        hass: HomeAssistant, metadata: dict[str, Any], stats: list[dict[str, Any]]
+    ) -> None:
+        """Insert statistics using new recorder helpers."""
+        async_update_statistics_metadata(hass, metadata)
+        stat_list = [{"statistic_id": metadata["statistic_id"], **s} for s in stats]
+        async_import_statistics(hass, stat_list)
+
+except Exception:  # pragma: no cover - fallback for older HA
+    from homeassistant.components.recorder.statistics import (
+        async_add_external_statistics,
+    )
+
+    def _store_statistics(
+        hass: HomeAssistant, metadata: dict[str, Any], stats: list[dict[str, Any]]
+    ) -> None:
+        """Insert statistics using legacy recorder helper."""
+        async_add_external_statistics(hass, metadata, stats)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
@@ -171,12 +191,10 @@ async def _async_import_energy_history(
         }
         _LOGGER.debug("%s: adding %d stats entries", addr, len(stats))
         try:
-            async_update_statistics_metadata(hass, metadata)
-            stat_list = [{"statistic_id": entity_id, **s} for s in stats]
-            async_import_statistics(hass, stat_list)
+            _store_statistics(hass, metadata, stats)
         except Exception as err:  # pragma: no cover - log & continue
             _LOGGER.exception(
-                "%s: async_import_statistics failed: %s",
+                "%s: statistics insert failed: %s",
                 addr,
                 err,
             )
