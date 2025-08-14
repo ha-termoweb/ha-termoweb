@@ -90,8 +90,10 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch):
     # Recorder statistics stub
     recorder = types.ModuleType("homeassistant.components.recorder")
     stats = types.ModuleType("homeassistant.components.recorder.statistics")
-    add_stats = Mock()
-    stats.async_add_external_statistics = add_stats
+    import_stats = Mock()
+    update_meta = Mock()
+    stats.async_import_statistics = import_stats
+    stats.async_update_statistics_metadata = update_meta
     sys.modules.setdefault("homeassistant.components", types.ModuleType("homeassistant.components"))
     sys.modules["homeassistant.components.recorder"] = recorder
     sys.modules["homeassistant.components.recorder.statistics"] = stats
@@ -159,7 +161,15 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch):
     sys.modules[f"{package}.__init__"] = init_module
     spec.loader.exec_module(init_module)
 
-    return init_module, const_module, add_stats, ConfigEntry, HomeAssistant, ent_reg
+    return (
+        init_module,
+        const_module,
+        import_stats,
+        update_meta,
+        ConfigEntry,
+        HomeAssistant,
+        ent_reg,
+    )
 
 
 def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -167,7 +177,8 @@ def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
         (
             mod,
             const,
-            add_stats,
+            import_stats,
+            update_meta,
             ConfigEntry,
             HomeAssistant,
             ent_reg,
@@ -214,10 +225,11 @@ def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
         assert first_call == ("dev", "A", 259_200, 345_600)
         assert second_call == ("dev", "A", 172_800, 259_200)
 
-        add_stats.assert_called_once()
-        args = add_stats.call_args[0]
-        assert args[1]["statistic_id"] == "sensor.dev_A_energy"
-        stats_list = args[2]
+        update_meta.assert_called_once()
+        import_stats.assert_called_once()
+        args = import_stats.call_args[0]
+        stats_list = args[1]
+        assert all(s["statistic_id"] == "sensor.dev_A_energy" for s in stats_list)
         assert [s["sum"] for s in stats_list] == [pytest.approx(0.001), pytest.approx(0.002)]
         assert entry.options[mod.OPTION_ENERGY_HISTORY_IMPORTED] is True
         assert entry.options[mod.OPTION_ENERGY_HISTORY_PROGRESS] == {"A": 172_800}
@@ -231,7 +243,8 @@ def test_import_energy_history_reset_and_subset(monkeypatch: pytest.MonkeyPatch)
         (
             mod,
             const,
-            add_stats,
+            import_stats,
+            update_meta,
             ConfigEntry,
             HomeAssistant,
             ent_reg,
@@ -279,7 +292,8 @@ def test_import_energy_history_reset_and_subset(monkeypatch: pytest.MonkeyPatch)
         await mod._async_import_energy_history(hass, entry, ["A"], reset_progress=True)
 
         client.get_htr_samples.assert_awaited_once_with("dev", "A", 86_400, 172_800)
-        add_stats.assert_called_once()
+        update_meta.assert_called_once()
+        import_stats.assert_called_once()
         progress = entry.options[mod.OPTION_ENERGY_HISTORY_PROGRESS]
         assert progress == {"A": 86_400, "B": 0}
         assert entry.options[mod.OPTION_ENERGY_HISTORY_IMPORTED] is True
@@ -292,7 +306,8 @@ def test_setup_defers_import_until_started(monkeypatch: pytest.MonkeyPatch) -> N
         (
             mod,
             const,
-            add_stats,
+            import_stats,
+            update_meta,
             ConfigEntry,
             HomeAssistant,
             _,

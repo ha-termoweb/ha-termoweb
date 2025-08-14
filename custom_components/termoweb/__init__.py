@@ -7,7 +7,8 @@ import time
 from typing import Any, Dict, Iterable
 
 from homeassistant.components.recorder.statistics import (
-    async_add_external_statistics,
+    async_import_statistics,
+    async_update_statistics_metadata,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
@@ -170,10 +171,12 @@ async def _async_import_energy_history(
         }
         _LOGGER.debug("%s: adding %d stats entries", addr, len(stats))
         try:
-            async_add_external_statistics(hass, metadata, stats)
+            async_update_statistics_metadata(hass, metadata)
+            stat_list = [{"statistic_id": entity_id, **s} for s in stats]
+            async_import_statistics(hass, stat_list)
         except Exception as err:  # pragma: no cover - log & continue
             _LOGGER.exception(
-                "%s: async_add_external_statistics failed: %s",
+                "%s: async_import_statistics failed: %s",
                 addr,
                 err,
             )
