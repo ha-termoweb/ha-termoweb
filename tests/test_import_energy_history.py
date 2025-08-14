@@ -41,7 +41,39 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch):
     dispatcher = types.ModuleType("homeassistant.helpers.dispatcher")
     dispatcher.async_dispatcher_connect = lambda hass, sig, cb: (lambda: None)
     entity_registry = types.ModuleType("homeassistant.helpers.entity_registry")
-    entity_registry.async_get = lambda hass: None
+
+    class EntityEntry:
+        def __init__(self, entity_id: str, name: str) -> None:
+            self.entity_id = entity_id
+            self.original_name = name
+
+    class EntityRegistry:
+        def __init__(self) -> None:
+            self._by_uid: dict[tuple[str, str, str], str] = {}
+            self._by_entity: dict[str, EntityEntry] = {}
+
+        def add(
+            self,
+            entity_id: str,
+            domain: str,
+            platform: str,
+            unique_id: str,
+            name: str,
+        ) -> None:
+            self._by_uid[(domain, platform, unique_id)] = entity_id
+            self._by_entity[entity_id] = EntityEntry(entity_id, name)
+
+        def async_get_entity_id(
+            self, domain: str, platform: str, unique_id: str
+        ) -> str | None:
+            return self._by_uid.get((domain, platform, unique_id))
+
+        def async_get(self, entity_id: str) -> EntityEntry | None:
+            return self._by_entity.get(entity_id)
+
+    ent_reg = EntityRegistry()
+
+    entity_registry.async_get = lambda hass: ent_reg
     helpers.aiohttp_client = aiohttp_client
     helpers.entity_registry = entity_registry
     sys.modules["homeassistant.helpers"] = helpers
@@ -127,12 +159,19 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch):
     sys.modules[f"{package}.__init__"] = init_module
     spec.loader.exec_module(init_module)
 
-    return init_module, const_module, add_stats, ConfigEntry, HomeAssistant
+    return init_module, const_module, add_stats, ConfigEntry, HomeAssistant, ent_reg
 
 
 def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
-        mod, const, add_stats, ConfigEntry, HomeAssistant = await _load_module(monkeypatch)
+        (
+            mod,
+            const,
+            add_stats,
+            ConfigEntry,
+            HomeAssistant,
+            ent_reg,
+        ) = await _load_module(monkeypatch)
 
         hass = HomeAssistant()
         hass.data = {const.DOMAIN: {}}
@@ -154,6 +193,8 @@ def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
             "htr_addrs": ["A"],
             "config_entry": entry,
         }
+        uid = f"{const.DOMAIN}:dev:htr:A:energy"
+        ent_reg.add("sensor.dev_A_energy", "sensor", const.DOMAIN, uid, "A energy")
 
         fake_now = 4 * 86_400
         monotonic_counter = itertools.count(start=1, step=2)
@@ -175,7 +216,7 @@ def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
 
         add_stats.assert_called_once()
         args = add_stats.call_args[0]
-        assert args[1]["statistic_id"] == f"{const.DOMAIN}:dev_htr_A_energy"
+        assert args[1]["statistic_id"] == "sensor.dev_A_energy"
         stats_list = args[2]
         assert [s["sum"] for s in stats_list] == [pytest.approx(0.001), pytest.approx(0.002)]
         assert entry.options[mod.OPTION_ENERGY_HISTORY_IMPORTED] is True
@@ -187,7 +228,14 @@ def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_import_energy_history_reset_and_subset(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
-        mod, const, add_stats, ConfigEntry, HomeAssistant = await _load_module(monkeypatch)
+        (
+            mod,
+            const,
+            add_stats,
+            ConfigEntry,
+            HomeAssistant,
+            ent_reg,
+        ) = await _load_module(monkeypatch)
 
         hass = HomeAssistant()
         hass.data = {const.DOMAIN: {}}
@@ -213,6 +261,10 @@ def test_import_energy_history_reset_and_subset(monkeypatch: pytest.MonkeyPatch)
             "htr_addrs": ["A", "B"],
             "config_entry": entry,
         }
+        uidA = f"{const.DOMAIN}:dev:htr:A:energy"
+        uidB = f"{const.DOMAIN}:dev:htr:B:energy"
+        ent_reg.add("sensor.dev_A_energy", "sensor", const.DOMAIN, uidA, "A energy")
+        ent_reg.add("sensor.dev_B_energy", "sensor", const.DOMAIN, uidB, "B energy")
 
         fake_now = 2 * 86_400
         monotonic_counter = itertools.count(start=1, step=2)
@@ -237,7 +289,14 @@ def test_import_energy_history_reset_and_subset(monkeypatch: pytest.MonkeyPatch)
 
 def test_setup_defers_import_until_started(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
-        mod, const, add_stats, ConfigEntry, HomeAssistant = await _load_module(monkeypatch)
+        (
+            mod,
+            const,
+            add_stats,
+            ConfigEntry,
+            HomeAssistant,
+            _,
+        ) = await _load_module(monkeypatch)
 
         hass = HomeAssistant()
         hass.data = {const.DOMAIN: {}}

@@ -108,6 +108,7 @@ async def _async_import_energy_history(
             _LOGGER.debug("%s: error fetching samples: %s", addr, err)
             return []
 
+    ent_reg: er.EntityRegistry | None = er.async_get(hass)
     for addr in target_addrs:
         _LOGGER.debug("%s: importing history for heater %s", dev_id, addr)
         stats: list[dict[str, Any]] = []
@@ -151,11 +152,20 @@ async def _async_import_energy_history(
             _LOGGER.debug("%s: no samples fetched", addr)
             continue
 
+        uid = f"{DOMAIN}:{dev_id}:htr:{addr}:energy"
+        entity_id = ent_reg.async_get_entity_id("sensor", DOMAIN, uid) if ent_reg else None
+        if not entity_id:
+            _LOGGER.debug("%s: no energy sensor found", addr)
+            continue
+        _LOGGER.debug("%s: inserting statistics for %s", addr, entity_id)
+        ent_entry = ent_reg.async_get(entity_id) if ent_reg else None
+        name = getattr(ent_entry, "original_name", None) or entity_id
+
         metadata = {
             "source": DOMAIN,
-            "statistic_id": f"{DOMAIN}:{dev_id}_htr_{addr}_energy",
+            "statistic_id": entity_id,
             "unit_of_measurement": "kWh",
-            "name": f"{dev_id} {addr} energy",
+            "name": name,
             "has_sum": True,
         }
         _LOGGER.debug("%s: adding %d stats entries", addr, len(stats))
