@@ -235,8 +235,8 @@ def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
         update_meta.assert_called_once()
         import_stats.assert_called_once()
         args = import_stats.call_args[0]
-        stats_list = args[1]
-        assert all(s["statistic_id"] == "sensor.dev_A_energy" for s in stats_list)
+        assert args[1]["statistic_id"] == "sensor.dev_A_energy"
+        stats_list = args[2]
         assert [s["sum"] for s in stats_list] == [pytest.approx(0.001), pytest.approx(0.002)]
         assert entry.options[mod.OPTION_ENERGY_HISTORY_IMPORTED] is True
         assert entry.options[mod.OPTION_ENERGY_HISTORY_PROGRESS] == {"A": 172_800}

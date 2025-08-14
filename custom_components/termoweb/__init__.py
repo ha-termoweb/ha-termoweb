@@ -17,8 +17,7 @@ try:
     ) -> None:
         """Insert statistics using new recorder helpers."""
         async_update_statistics_metadata(hass, metadata)
-        stat_list = [{"statistic_id": metadata["statistic_id"], **s} for s in stats]
-        async_import_statistics(hass, stat_list)
+        async_import_statistics(hass, metadata, stats)
 
 except Exception:  # pragma: no cover - fallback for older HA
     from homeassistant.components.recorder.statistics import (
