@@ -42,6 +42,11 @@ _SAMPLES_QUERY_LOCK = asyncio.Lock()
 _LAST_SAMPLES_QUERY = 0.0
 
 
+def _iso_date(ts: int) -> str:
+    """Convert unix timestamp to ISO date."""
+    return datetime.fromtimestamp(ts, timezone.utc).date().isoformat()
+
+
 async def _async_import_energy_history(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -81,7 +86,7 @@ async def _async_import_energy_history(
         _LOGGER.debug("%s: energy history already imported", entry.entry_id)
         return
 
-    _LOGGER.debug("%s: importing hourly samples down to %s", dev_id, target)
+    _LOGGER.debug("%s: importing hourly samples down to %s", dev_id, _iso_date(target))
 
     async def _rate_limited_fetch(addr: str, start: int, stop: int) -> list[dict[str, Any]]:
         global _LAST_SAMPLES_QUERY
@@ -90,12 +95,12 @@ async def _async_import_energy_history(
             wait = 1 - (now - _LAST_SAMPLES_QUERY)
             if wait > 0:
                 _LOGGER.debug(
-                    "%s/%s: sleeping %.2fs before query", addr, start, wait
+                    "%s/%s: sleeping %.2fs before query", addr, _iso_date(start), wait
                 )
                 await asyncio.sleep(wait)
             _LAST_SAMPLES_QUERY = time.monotonic()
         _LOGGER.debug(
-            "%s: requesting samples %s-%s", addr, start, stop
+            "%s: requesting samples %s-%s", addr, _iso_date(start), _iso_date(stop)
         )
         try:
             return await client.get_htr_samples(dev_id, addr, start, stop)
@@ -112,7 +117,11 @@ async def _async_import_energy_history(
             samples = await _rate_limited_fetch(addr, chunk_start, start_ts)
 
             _LOGGER.debug(
-                "%s: fetched %d samples for %s-%s", addr, len(samples), chunk_start, start_ts
+                "%s: fetched %d samples for %s-%s",
+                addr,
+                len(samples),
+                _iso_date(chunk_start),
+                _iso_date(start_ts),
             )
 
             for sample in samples:
