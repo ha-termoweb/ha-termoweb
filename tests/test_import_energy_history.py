@@ -5,11 +5,11 @@ import importlib.util
 import itertools
 import sys
 import types
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from datetime import datetime, timezone
 
 
 async def _load_module(monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False):
