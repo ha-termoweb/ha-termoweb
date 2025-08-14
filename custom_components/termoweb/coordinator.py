@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from aiohttp import ClientError
 from homeassistant.core import HomeAssistant
@@ -165,12 +165,20 @@ class TermoWebHeaterEnergyCoordinator(
                     samples = []
 
                 if not samples:
+                    _LOGGER.debug(
+                        "No energy samples for device %s heater %s", dev_id, addr
+                    )
                     continue
 
                 last = samples[-1]
                 counter = _as_float(last.get("counter"))
                 t = _as_float(last.get("t"))
                 if counter is None or t is None:
+                    _LOGGER.debug(
+                        "Latest sample missing 't' or 'counter' for device %s heater %s",
+                        dev_id,
+                        addr,
+                    )
                     continue
 
                 energy_map[addr] = counter
