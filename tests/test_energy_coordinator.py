@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import sys
+import time as _time
 import types
 from pathlib import Path
 from typing import Any, Dict
@@ -75,7 +76,6 @@ sys.modules["homeassistant.helpers.update_coordinator"] = uc
 # Stub API module
 package = "custom_components.termoweb"
 api_stub = types.ModuleType(f"{package}.api")
-import time as _time
 
 
 class TermoWebClient:  # pragma: no cover - placeholder
