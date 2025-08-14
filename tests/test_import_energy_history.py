@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from datetime import datetime, timezone
 
 
 async def _load_module(monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False):
@@ -94,6 +95,9 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False)
     sys.modules["homeassistant.components.recorder"] = recorder
     sys.modules["homeassistant.components.recorder.statistics"] = stats
 
+    last_stats = AsyncMock(return_value={})
+    stats.async_get_last_statistics = last_stats
+
     if legacy:
         add_stats = Mock()
         stats.async_add_external_statistics = add_stats
@@ -173,6 +177,7 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False)
         const_module,
         import_stats,
         update_meta,
+        last_stats,
         ConfigEntry,
         HomeAssistant,
         ent_reg,
@@ -186,6 +191,7 @@ def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
             const,
             import_stats,
             update_meta,
+            last_stats,
             ConfigEntry,
             HomeAssistant,
             ent_reg,
@@ -201,8 +207,11 @@ def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
         client = types.SimpleNamespace()
         client.get_htr_samples = AsyncMock(
             side_effect=[
-                [{"t": 259_200, "counter": "1.0"}],
-                [{"t": 172_800, "counter": "2.0"}],
+                [
+                    {"t": 345_600, "counter": "3.0"},
+                    {"t": 259_200, "counter": "2.0"},
+                ],
+                [{"t": 172_800, "counter": "1.0"}],
             ]
         )
         hass.data[const.DOMAIN][entry.entry_id] = {
@@ -223,24 +232,117 @@ def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
                 time=lambda: fake_now, monotonic=lambda: next(monotonic_counter)
             ),
         )
+        monkeypatch.setattr(
+            mod,
+            "datetime",
+            types.SimpleNamespace(
+                now=lambda tz=None: datetime.fromtimestamp(fake_now, tz),
+                fromtimestamp=datetime.fromtimestamp,
+            ),
+        )
+
+        captured: dict = {}
+        monkeypatch.setattr(
+            mod,
+            "_store_statistics",
+            lambda _h, m, s: captured.update(meta=m, stats=s),
+        )
 
         await mod._async_import_energy_history(hass, entry)
 
         assert client.get_htr_samples.await_count == 2
         first_call = client.get_htr_samples.await_args_list[0][0]
         second_call = client.get_htr_samples.await_args_list[1][0]
-        assert first_call == ("dev", "A", 259_200, 345_600)
-        assert second_call == ("dev", "A", 172_800, 259_200)
+        assert first_call == ("dev", "A", 259_199, 345_599)
+        assert second_call == ("dev", "A", 172_799, 259_199)
 
-        update_meta.assert_called_once()
-        import_stats.assert_called_once()
-        args = import_stats.call_args[0]
-        assert args[1]["statistic_id"] == "sensor.dev_A_energy"
-        stats_list = args[2]
+        last_stats.assert_called_once()
+        assert captured["meta"]["statistic_id"] == "sensor.dev_A_energy"
+        stats_list = captured["stats"]
         assert [s["sum"] for s in stats_list] == [pytest.approx(0.001), pytest.approx(0.002)]
         assert entry.options[mod.OPTION_ENERGY_HISTORY_IMPORTED] is True
-        assert entry.options[mod.OPTION_ENERGY_HISTORY_PROGRESS] == {"A": 172_800}
+        assert entry.options[mod.OPTION_ENERGY_HISTORY_PROGRESS] == {"A": 172_799}
         assert entry.options["max_history_retrieved"] == 2
+
+    asyncio.run(_run())
+
+
+def test_import_energy_history_with_existing_stats(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        (
+            mod,
+            const,
+            import_stats,
+            update_meta,
+            last_stats,
+            ConfigEntry,
+            HomeAssistant,
+            ent_reg,
+        ) = await _load_module(monkeypatch)
+
+        hass = HomeAssistant()
+        hass.data = {const.DOMAIN: {}}
+        hass.config_entries = types.SimpleNamespace(
+            async_update_entry=lambda entry, *, options: entry.options.update(options)
+        )
+
+        entry = ConfigEntry("1", options={"max_history_retrieved": 2})
+        client = types.SimpleNamespace()
+        client.get_htr_samples = AsyncMock(
+            side_effect=[
+                [
+                    {"t": 345_600, "counter": "3.0"},
+                    {"t": 259_200, "counter": "2.0"},
+                ],
+                [{"t": 172_800, "counter": "1.0"}],
+            ]
+        )
+        hass.data[const.DOMAIN][entry.entry_id] = {
+            "client": client,
+            "dev_id": "dev",
+            "htr_addrs": ["A"],
+            "config_entry": entry,
+        }
+        uid = f"{const.DOMAIN}:dev:htr:A:energy"
+        ent_reg.add("sensor.dev_A_energy", "sensor", const.DOMAIN, uid, "A energy")
+
+        last_stats.return_value = {"sensor.dev_A_energy": [{"sum": 1.0}]}
+
+        fake_now = 4 * 86_400
+        monotonic_counter = itertools.count(start=1, step=2)
+        monkeypatch.setattr(
+            mod,
+            "time",
+            types.SimpleNamespace(
+                time=lambda: fake_now, monotonic=lambda: next(monotonic_counter)
+            ),
+        )
+        monkeypatch.setattr(
+            mod,
+            "datetime",
+            types.SimpleNamespace(
+                now=lambda tz=None: datetime.fromtimestamp(fake_now, tz),
+                fromtimestamp=datetime.fromtimestamp,
+            ),
+        )
+
+        captured: dict = {}
+        monkeypatch.setattr(
+            mod,
+            "_store_statistics",
+            lambda _h, m, s: captured.update(meta=m, stats=s),
+        )
+
+        await mod._async_import_energy_history(hass, entry)
+
+        last_stats.assert_called_once()
+        stats_list = captured["stats"]
+        assert [s["sum"] for s in stats_list] == [
+            pytest.approx(1.001),
+            pytest.approx(1.002),
+        ]
 
     asyncio.run(_run())
 
@@ -252,6 +354,7 @@ def test_import_energy_history_legacy(monkeypatch: pytest.MonkeyPatch) -> None:
             const,
             add_stats,
             _,
+            last_stats,
             ConfigEntry,
             HomeAssistant,
             ent_reg,
@@ -266,7 +369,10 @@ def test_import_energy_history_legacy(monkeypatch: pytest.MonkeyPatch) -> None:
         entry = ConfigEntry("1", options={"max_history_retrieved": 1})
         client = types.SimpleNamespace()
         client.get_htr_samples = AsyncMock(
-            return_value=[{"t": 86_400, "counter": "1.0"}]
+            return_value=[
+                {"t": 172_800, "counter": "2.0"},
+                {"t": 86_400, "counter": "1.0"},
+            ]
         )
         hass.data[const.DOMAIN][entry.entry_id] = {
             "client": client,
@@ -287,12 +393,20 @@ def test_import_energy_history_legacy(monkeypatch: pytest.MonkeyPatch) -> None:
             ),
         )
 
+        captured: dict = {}
+        monkeypatch.setattr(
+            mod,
+            "_store_statistics",
+            lambda _h, m, s: captured.update(meta=m, stats=s),
+        )
+
         await mod._async_import_energy_history(hass, entry)
 
-        add_stats.assert_called_once()
-        _, meta, stats = add_stats.call_args[0]
-        assert meta["statistic_id"] == "sensor:dev_A_energy"
-        assert meta["source"] == "sensor"
+        last_stats.assert_called_once()
+        meta = captured["meta"]
+        stats = captured["stats"]
+        assert meta["statistic_id"] == "sensor.dev_A_energy"
+        assert meta["source"] == "recorder"
         assert stats[0]["sum"] == pytest.approx(0.001)
 
     asyncio.run(_run())
@@ -305,6 +419,7 @@ def test_import_energy_history_reset_and_subset(monkeypatch: pytest.MonkeyPatch)
             const,
             import_stats,
             update_meta,
+            last_stats,
             ConfigEntry,
             HomeAssistant,
             ent_reg,
@@ -348,14 +463,21 @@ def test_import_energy_history_reset_and_subset(monkeypatch: pytest.MonkeyPatch)
                 time=lambda: fake_now, monotonic=lambda: next(monotonic_counter)
             ),
         )
+        monkeypatch.setattr(
+            mod,
+            "datetime",
+            types.SimpleNamespace(
+                now=lambda tz=None: datetime.fromtimestamp(fake_now, tz),
+                fromtimestamp=datetime.fromtimestamp,
+            ),
+        )
 
         await mod._async_import_energy_history(hass, entry, ["A"], reset_progress=True)
 
-        client.get_htr_samples.assert_awaited_once_with("dev", "A", 86_400, 172_800)
-        update_meta.assert_called_once()
-        import_stats.assert_called_once()
+        client.get_htr_samples.assert_awaited_once_with("dev", "A", 86_399, 172_799)
+        last_stats.assert_called_once()
         progress = entry.options[mod.OPTION_ENERGY_HISTORY_PROGRESS]
-        assert progress == {"A": 86_400, "B": 0}
+        assert progress == {"A": 86_399, "B": 0}
         assert entry.options[mod.OPTION_ENERGY_HISTORY_IMPORTED] is True
 
     asyncio.run(_run())
@@ -368,6 +490,7 @@ def test_setup_defers_import_until_started(monkeypatch: pytest.MonkeyPatch) -> N
             const,
             import_stats,
             update_meta,
+            last_stats,
             ConfigEntry,
             HomeAssistant,
             _,
