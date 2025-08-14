@@ -16,6 +16,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_data
 from .coordinator import TermoWebHeaterEnergyCoordinator
+from .util import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -130,17 +131,6 @@ class TermoWebHeaterTemp(CoordinatorEntity, SensorEntity):
         settings = (htr.get("settings") or {}).get(self._addr)
         return settings if isinstance(settings, dict) else None
 
-    @staticmethod
-    def _f(val: Any) -> Optional[float]:
-        try:
-            if val is None:
-                return None
-            if isinstance(val, (int, float)):
-                return float(val)
-            s = str(val).strip()
-            return float(s) if s else None
-        except Exception:
-            return None
 
     @callback
     def _on_ws_data(self, payload: dict) -> None:
@@ -160,7 +150,7 @@ class TermoWebHeaterTemp(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self) -> Optional[float]:
         s = self._settings() or {}
-        return self._f(s.get("mtemp"))
+        return float_or_none(s.get("mtemp"))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
