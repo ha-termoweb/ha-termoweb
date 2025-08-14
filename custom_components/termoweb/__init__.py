@@ -25,7 +25,6 @@ from .const import (
     DOMAIN,
     MIN_POLL_INTERVAL,
     STRETCHED_POLL_INTERVAL,
-    signal_ws_data,
     signal_ws_status,
 )
 from .coordinator import TermoWebCoordinator
@@ -127,7 +126,14 @@ async def _async_import_energy_history(
     )
 
     day = 24 * 3600
-    now_ts = int(time.time())
+    # Determine the end of the import window.  To avoid importing
+    # partial data for the current day (which can cause negative
+    # consumption readings in the Energy dashboard), we import only up to
+    # the start of today (00:00 in UTC).  Live polling of the sensors
+    # will provide today's consumption incrementally.
+    now_dt = datetime.now(timezone.utc)
+    start_of_today = now_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    now_ts = int(start_of_today.timestamp())
     if max_days is None:
         max_days = int(
             entry.options.get(OPTION_MAX_HISTORY_RETRIEVED, DEFAULT_MAX_HISTORY_DAYS)
@@ -383,16 +389,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unsub = async_dispatcher_connect(hass, signal_ws_status(entry.entry_id), _on_ws_status)
     data["unsub_ws_status"] = unsub
 
-    def _on_ws_data(payload: dict) -> None:
-        if payload.get("kind") == "htr_samples":
-            energy_coordinator = data.get("energy_coordinator")
-            if energy_coordinator:
-                energy_coordinator.update_interval = HTR_ENERGY_UPDATE_INTERVAL
-                hass.async_create_task(energy_coordinator.async_request_refresh())
-
-    unsub_data = async_dispatcher_connect(hass, signal_ws_data(entry.entry_id), _on_ws_data)
-    data["unsub_ws_data"] = unsub_data
-
     # First refresh (inventory etc.)
     await coordinator.async_config_entry_first_refresh()
 
@@ -505,8 +501,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if "unsub_ws_status" in rec and callable(rec["unsub_ws_status"]):
         rec["unsub_ws_status"]()
-    if "unsub_ws_data" in rec and callable(rec["unsub_ws_data"]):
-        rec["unsub_ws_data"]()
 
     ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
