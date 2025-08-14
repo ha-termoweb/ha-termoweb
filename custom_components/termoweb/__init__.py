@@ -528,4 +528,3 @@ async def async_update_entry_options(hass: HomeAssistant, entry: ConfigEntry) ->
     """Handle options updates; recompute interval if needed."""
     rec = hass.data[DOMAIN][entry.entry_id]
     rec["recalc_poll"]()
-    
