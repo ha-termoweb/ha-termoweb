@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import timedelta
-from typing import Any, Dict
+from datetime import datetime, timedelta, timezone
+import time
+from typing import Any, Dict, Iterable
 
+from homeassistant.components.recorder.statistics import (
+    async_add_external_statistics,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import aiohttp_client
+from homeassistant.helpers import aiohttp_client, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.loader import async_get_integration
 
@@ -25,6 +29,134 @@ from .ws_client_legacy import TermoWebWSLegacyClient
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["button", "binary_sensor", "climate", "sensor"]
+
+OPTION_ENERGY_HISTORY_IMPORTED = "energy_history_imported"
+OPTION_ENERGY_HISTORY_PROGRESS = "energy_history_progress"
+OPTION_MAX_HISTORY_RETRIEVED = "max_history_retrieved"
+
+DEFAULT_MAX_HISTORY_DAYS = 365
+
+# Guard htr/samples API usage
+_SAMPLES_QUERY_LOCK = asyncio.Lock()
+_LAST_SAMPLES_QUERY = 0.0
+
+
+async def _async_import_energy_history(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    addrs: Iterable[str] | None = None,
+    *,
+    reset_progress: bool = False,
+    max_days: int | None = None,
+) -> None:
+    """Fetch historical hourly samples and insert statistics."""
+    rec = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if not rec:
+        _LOGGER.debug("%s: no record found for energy import", entry.entry_id)
+        return
+    client: TermoWebClient = rec["client"]
+    dev_id: str = rec["dev_id"]
+    all_addrs: list[str] = rec.get("htr_addrs", [])
+    target_addrs = all_addrs if addrs is None else [a for a in all_addrs if a in set(str(x) for x in addrs)]
+
+    day = 24 * 3600
+    now_ts = int(time.time())
+    if max_days is None:
+        max_days = int(entry.options.get(OPTION_MAX_HISTORY_RETRIEVED, DEFAULT_MAX_HISTORY_DAYS))
+    target = now_ts - max_days * day
+    progress: Dict[str, int] = dict(entry.options.get(OPTION_ENERGY_HISTORY_PROGRESS, {}))
+
+    if reset_progress:
+        if addrs is None:
+            progress.clear()
+        else:
+            for addr in target_addrs:
+                progress.pop(addr, None)
+        options = dict(entry.options)
+        options[OPTION_ENERGY_HISTORY_PROGRESS] = progress
+        options.pop(OPTION_ENERGY_HISTORY_IMPORTED, None)
+        hass.config_entries.async_update_entry(entry, options=options)
+    elif entry.options.get(OPTION_ENERGY_HISTORY_IMPORTED):
+        _LOGGER.debug("%s: energy history already imported", entry.entry_id)
+        return
+
+    _LOGGER.debug("%s: importing hourly samples down to %s", dev_id, target)
+
+    async def _rate_limited_fetch(addr: str, start: int, stop: int) -> list[dict[str, Any]]:
+        global _LAST_SAMPLES_QUERY
+        async with _SAMPLES_QUERY_LOCK:
+            now = time.monotonic()
+            wait = 1 - (now - _LAST_SAMPLES_QUERY)
+            if wait > 0:
+                _LOGGER.debug(
+                    "%s/%s: sleeping %.2fs before query", addr, start, wait
+                )
+                await asyncio.sleep(wait)
+            _LAST_SAMPLES_QUERY = time.monotonic()
+        _LOGGER.debug(
+            "%s: requesting samples %s-%s", addr, start, stop
+        )
+        try:
+            return await client.get_htr_samples(dev_id, addr, start, stop)
+        except Exception as err:  # pragma: no cover - defensive
+            _LOGGER.debug("%s: error fetching samples: %s", addr, err)
+            return []
+
+    for addr in target_addrs:
+        _LOGGER.debug("%s: importing history for heater %s", dev_id, addr)
+        stats: list[dict[str, Any]] = []
+        start_ts = int(progress.get(addr, now_ts))
+        while start_ts > target:
+            chunk_start = max(start_ts - day, target)
+            samples = await _rate_limited_fetch(addr, chunk_start, start_ts)
+
+            _LOGGER.debug(
+                "%s: fetched %d samples for %s-%s", addr, len(samples), chunk_start, start_ts
+            )
+
+            for sample in samples:
+                t = sample.get("t")
+                counter = sample.get("counter")
+                try:
+                    ts = int(t)
+                    kwh = float(counter) / 1000.0
+                except (TypeError, ValueError):
+                    _LOGGER.debug("%s: invalid sample %s", addr, sample)
+                    continue
+                stats.append(
+                    {
+                        "start": datetime.fromtimestamp(ts, timezone.utc),
+                        "state": kwh,
+                        "sum": kwh,
+                    }
+                )
+
+            start_ts = chunk_start
+            progress[addr] = start_ts
+            options = dict(entry.options)
+            options[OPTION_ENERGY_HISTORY_PROGRESS] = progress
+            hass.config_entries.async_update_entry(entry, options=options)
+
+        if not stats:
+            _LOGGER.debug("%s: no samples fetched", addr)
+            continue
+
+        metadata = {
+            "source": DOMAIN,
+            "statistic_id": f"{DOMAIN}:{dev_id}:htr:{addr}:energy",
+            "unit_of_measurement": "kWh",
+            "name": f"{dev_id} {addr} energy",
+            "has_sum": True,
+        }
+        _LOGGER.debug("%s: adding %d stats entries", addr, len(stats))
+        await async_add_external_statistics(hass, metadata, stats)
+
+    options = dict(entry.options)
+    options[OPTION_ENERGY_HISTORY_PROGRESS] = progress
+    if all(progress.get(addr, now_ts) <= target for addr in all_addrs):
+        options[OPTION_ENERGY_HISTORY_IMPORTED] = True
+    hass.config_entries.async_update_entry(entry, options=options)
+    _LOGGER.debug("%s: energy import complete", entry.entry_id)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -60,6 +192,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "dev_id": dev_id,
         "nodes": nodes,
         "htr_addrs": addrs,
+        "config_entry": entry,
         "base_poll_interval": max(base_interval, MIN_POLL_INTERVAL),
         "stretched": False,
         "ws_tasks": {},     # dev_id -> asyncio.Task
@@ -142,6 +275,63 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator.async_add_listener(_on_coordinator_updated)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    async def _service_import_energy_history(call) -> None:
+        _LOGGER.debug("service import_energy_history called")
+        reset = bool(call.data.get("reset_progress", False))
+        max_days = call.data.get("max_history_retrieval")
+        ent_ids = call.data.get("entity_id")
+        tasks = []
+        if ent_ids:
+            ent_reg = er.async_get(hass)
+            if isinstance(ent_ids, str):
+                ent_ids = [ent_ids]
+            entry_map: Dict[str, set[str]] = {}
+            for eid in ent_ids:
+                er_ent = ent_reg.async_get(eid)
+                if not er_ent or er_ent.platform != DOMAIN:
+                    continue
+                parts = (er_ent.unique_id or "").split(":")
+                if len(parts) >= 4 and parts[0] == DOMAIN and parts[2] == "htr":
+                    entry_map.setdefault(er_ent.config_entry_id, set()).add(parts[3])
+            for entry_id, addr_set in entry_map.items():
+                ent = hass.config_entries.async_get_entry(entry_id)
+                if ent:
+                    tasks.append(
+                        _async_import_energy_history(
+                            hass,
+                            ent,
+                            addr_set,
+                            reset_progress=reset,
+                            max_days=max_days,
+                        )
+                    )
+        else:
+            for rec in hass.data.get(DOMAIN, {}).values():
+                ent: ConfigEntry | None = rec.get("config_entry")
+                if ent:
+                    tasks.append(
+                        _async_import_energy_history(
+                            hass,
+                            ent,
+                            None,
+                            reset_progress=reset,
+                            max_days=max_days,
+                        )
+                    )
+        if tasks:
+            _LOGGER.debug("import_energy_history: awaiting %d tasks", len(tasks))
+            await asyncio.gather(*tasks)
+
+    if not hass.services.has_service(DOMAIN, "import_energy_history"):
+        hass.services.async_register(
+            DOMAIN, "import_energy_history", _service_import_energy_history
+        )
+
+    if not entry.options.get(OPTION_ENERGY_HISTORY_IMPORTED):
+        _LOGGER.debug("%s: scheduling initial energy import", entry.entry_id)
+        hass.async_create_task(_async_import_energy_history(hass, entry))
+
     _LOGGER.info("TermoWeb setup complete (v%s)", version)
     return True
 
