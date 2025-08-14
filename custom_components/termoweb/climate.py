@@ -17,7 +17,6 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers import entity_platform
-from homeassistant.helpers import config_validation as cv
 import voluptuous as vol
 
 from .const import DOMAIN, signal_ws_data
