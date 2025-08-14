@@ -151,7 +151,7 @@ async def _async_import_energy_history(
         }
         _LOGGER.debug("%s: adding %d stats entries", addr, len(stats))
         try:
-            await async_add_external_statistics(hass, metadata, stats)
+            async_add_external_statistics(hass, metadata, stats)
         except Exception as err:  # pragma: no cover - log & continue
             _LOGGER.exception(
                 "%s: async_add_external_statistics failed: %s",

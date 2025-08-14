@@ -6,7 +6,7 @@ import itertools
 import sys
 import types
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -58,7 +58,7 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch):
     # Recorder statistics stub
     recorder = types.ModuleType("homeassistant.components.recorder")
     stats = types.ModuleType("homeassistant.components.recorder.statistics")
-    add_stats = AsyncMock()
+    add_stats = Mock()
     stats.async_add_external_statistics = add_stats
     sys.modules.setdefault("homeassistant.components", types.ModuleType("homeassistant.components"))
     sys.modules["homeassistant.components.recorder"] = recorder
@@ -173,8 +173,8 @@ def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
         assert first_call == ("dev", "A", 259_200, 345_600)
         assert second_call == ("dev", "A", 172_800, 259_200)
 
-        add_stats.assert_awaited_once()
-        args = add_stats.await_args[0]
+        add_stats.assert_called_once()
+        args = add_stats.call_args[0]
         assert args[1]["statistic_id"] == f"{const.DOMAIN}:dev_htr_A_energy"
         stats_list = args[2]
         assert [s["sum"] for s in stats_list] == [pytest.approx(0.001), pytest.approx(0.002)]
@@ -227,7 +227,7 @@ def test_import_energy_history_reset_and_subset(monkeypatch: pytest.MonkeyPatch)
         await mod._async_import_energy_history(hass, entry, ["A"], reset_progress=True)
 
         client.get_htr_samples.assert_awaited_once_with("dev", "A", 86_400, 172_800)
-        add_stats.assert_awaited_once()
+        add_stats.assert_called_once()
         progress = entry.options[mod.OPTION_ENERGY_HISTORY_PROGRESS]
         assert progress == {"A": 86_400, "B": 0}
         assert entry.options[mod.OPTION_ENERGY_HISTORY_IMPORTED] is True
