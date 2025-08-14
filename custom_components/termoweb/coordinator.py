@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 import time
-from typing import Any, Dict, List, Optional
+from datetime import timedelta
+from typing import Any, Dict, Optional
 
 from aiohttp import ClientError
 from homeassistant.core import HomeAssistant
