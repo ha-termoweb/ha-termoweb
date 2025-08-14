@@ -132,8 +132,17 @@ async def _async_import_energy_history(
     # the start of today (00:00 in UTC).  Live polling of the sensors
     # will provide today's consumption incrementally.
     now_dt = datetime.now(timezone.utc)
+    # Compute the start of today (midnight) in UTC.  We subtract one second from
+    # this value when determining the end of the import window so that the
+    # 00:00 sample of the current day is not included.  Without this
+    # adjustment, the importer will fetch a sample at exactly midnight for
+    # the current day.  Home Assistant treats this sample as part of the
+    # next day's statistics, and because most meters reset at midnight, the
+    # resulting `sum` becomes lower than the previous day's final `sum`,
+    # producing a negative consumption bar.  By subtracting one second we
+    # ensure the final range end is 23:59:59 of the previous day.
     start_of_today = now_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-    now_ts = int(start_of_today.timestamp())
+    now_ts = int(start_of_today.timestamp()) - 1
     if max_days is None:
         max_days = int(
             entry.options.get(OPTION_MAX_HISTORY_RETRIEVED, DEFAULT_MAX_HISTORY_DAYS)
