@@ -175,7 +175,7 @@ def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
 
         add_stats.assert_awaited_once()
         args = add_stats.await_args[0]
-        assert args[1]["statistic_id"] == f"{const.DOMAIN}:dev:htr:A:energy"
+        assert args[1]["statistic_id"] == f"{const.DOMAIN}:dev_htr_A_energy"
         stats_list = args[2]
         assert [s["sum"] for s in stats_list] == [pytest.approx(0.001), pytest.approx(0.002)]
         assert entry.options[mod.OPTION_ENERGY_HISTORY_IMPORTED] is True
@@ -294,7 +294,9 @@ def test_setup_defers_import_until_started(monkeypatch: pytest.MonkeyPatch) -> N
         assert not called
 
         for cb in listeners:
-            cb(None)
+            res = cb(None)
+            if asyncio.iscoroutine(res):
+                await res
         await asyncio.gather(*tasks)
 
         assert called

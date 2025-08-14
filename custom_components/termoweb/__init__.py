@@ -35,7 +35,7 @@ OPTION_ENERGY_HISTORY_IMPORTED = "energy_history_imported"
 OPTION_ENERGY_HISTORY_PROGRESS = "energy_history_progress"
 OPTION_MAX_HISTORY_RETRIEVED = "max_history_retrieved"
 
-DEFAULT_MAX_HISTORY_DAYS = 365
+DEFAULT_MAX_HISTORY_DAYS = 7
 
 # Guard htr/samples API usage
 _SAMPLES_QUERY_LOCK = asyncio.Lock()
@@ -144,7 +144,7 @@ async def _async_import_energy_history(
 
         metadata = {
             "source": DOMAIN,
-            "statistic_id": f"{DOMAIN}:{dev_id}:htr:{addr}:energy",
+            "statistic_id": f"{DOMAIN}:{dev_id}_htr_{addr}_energy",
             "unit_of_measurement": "kWh",
             "name": f"{dev_id} {addr} energy",
             "has_sum": True,
@@ -332,11 +332,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not entry.options.get(OPTION_ENERGY_HISTORY_IMPORTED):
         _LOGGER.debug("%s: scheduling initial energy import", entry.entry_id)
 
-        def _schedule_import(_event: Any | None = None) -> None:
-            hass.async_create_task(_async_import_energy_history(hass, entry))
+        async def _schedule_import(_event: Any | None = None) -> None:
+            await _async_import_energy_history(hass, entry)
 
         if hass.is_running:
-            _schedule_import()
+            hass.async_create_task(_schedule_import())
         else:
             hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _schedule_import)
 

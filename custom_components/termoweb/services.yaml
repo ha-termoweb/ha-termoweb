@@ -70,6 +70,7 @@ import_energy_history:
       description: >-
         Number of days of history to retrieve. Overrides the configured
         default for this import only.
+      default: 7
       selector:
         number:
           min: 1
