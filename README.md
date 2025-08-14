@@ -105,8 +105,18 @@ ha-termoweb/ha-termoweb
 ## Privacy & Security
 
 - Credentials stay in Home Assistant.  
-- Access tokens are **redacted** from logs.  
+- Access tokens are **redacted** from logs.
 - This project is **not affiliated** with S&P, ATC, Ecotermi/Linea Plus, EHC, or TermoWeb.
+
+---
+
+## Development
+
+Run tests with coverage:
+
+```bash
+uv run pytest --cov=custom_components/termoweb --cov-report=term-missing
+```
 
 ---
 
