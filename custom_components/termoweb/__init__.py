@@ -223,6 +223,34 @@ async def _async_import_energy_history(
         # Sort all samples chronologically so that we can compute deltas properly.
         all_samples_sorted = sorted(all_samples, key=lambda s: s.get("t", 0))
 
+        # Resolve the entity_id for the heater's energy sensor
+        uid = f"{DOMAIN}:{dev_id}:htr:{addr}:energy"
+        entity_id = (
+            ent_reg.async_get_entity_id("sensor", DOMAIN, uid) if ent_reg else None
+        )
+        if not entity_id:
+            _LOGGER.debug("%s: no energy sensor found", addr)
+            continue
+
+        # Determine existing cumulative sum before the earliest sample
+        earliest_ts = int(all_samples_sorted[0].get("t", 0))
+        earliest_start_dt = datetime.fromtimestamp(earliest_ts, timezone.utc).replace(
+            minute=0, second=0, microsecond=0
+        )
+        sum_offset = 0.0
+        try:
+            from homeassistant.components.recorder.statistics import (
+                async_get_last_statistics,
+            )
+
+            existing = await async_get_last_statistics(
+                hass, 1, [entity_id], start_time=earliest_start_dt
+            )
+            if existing and (vals := existing.get(entity_id)):
+                sum_offset = float(vals[0].get("sum") or 0.0)
+        except Exception as err:  # pragma: no cover - defensive
+            _LOGGER.debug("%s: error fetching last statistics: %s", addr, err)
+
         stats: List[Dict[str, Any]] = []
         sum_kwh: float = 0.0
         previous_kwh: Optional[float] = None
@@ -248,21 +276,15 @@ async def _async_import_energy_history(
                 previous_kwh = kwh
                 continue
             sum_kwh += delta
-            stats.append({"start": start_dt, "state": None, "sum": sum_kwh})
+            stats.append(
+                {"start": start_dt, "state": None, "sum": sum_kwh + sum_offset}
+            )
             previous_kwh = kwh
 
         if not stats:
             _LOGGER.debug("%s: no positive deltas found", addr)
             continue
 
-        # Resolve the entity_id for the heater's energy sensor
-        uid = f"{DOMAIN}:{dev_id}:htr:{addr}:energy"
-        entity_id = (
-            ent_reg.async_get_entity_id("sensor", DOMAIN, uid) if ent_reg else None
-        )
-        if not entity_id:
-            _LOGGER.debug("%s: no energy sensor found", addr)
-            continue
         _LOGGER.debug("%s: inserting statistics for %s", addr, entity_id)
         ent_entry = ent_reg.async_get(entity_id) if ent_reg else None
         name = getattr(ent_entry, "original_name", None) or entity_id
