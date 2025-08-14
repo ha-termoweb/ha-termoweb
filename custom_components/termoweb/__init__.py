@@ -29,7 +29,11 @@ except Exception:  # pragma: no cover - fallback for older HA
         hass: HomeAssistant, metadata: dict[str, Any], stats: list[dict[str, Any]]
     ) -> None:
         """Insert statistics using legacy recorder helper."""
-        async_add_external_statistics(hass, metadata, stats)
+        stat_id: str = metadata["statistic_id"]
+        domain, obj_id = stat_id.split(".", 1)
+        ext_meta = dict(metadata)
+        ext_meta.update({"statistic_id": f"{domain}:{obj_id}", "source": domain})
+        async_add_external_statistics(hass, ext_meta, stats)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
