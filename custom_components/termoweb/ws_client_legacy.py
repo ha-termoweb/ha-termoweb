@@ -143,7 +143,15 @@ class TermoWebWSLegacyClient:
                 break
             except Exception as e:
                 # Avoid noisy logs; just one INFO per failure with brief cause.
-                _LOGGER.info("WS %s: connection error (%s); will retry", self.dev_id, type(e).__name__)
+                _LOGGER.info(
+                    "WS %s: connection error (%s: %s); will retry",
+                    self.dev_id,
+                    type(e).__name__,
+                    e,
+                )
+                _LOGGER.debug(
+                    "WS %s: connection error details", self.dev_id, exc_info=True
+                )
             finally:
                 # Clean up this attempt
                 if self._hb_task:
