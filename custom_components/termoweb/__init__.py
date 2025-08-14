@@ -150,7 +150,14 @@ async def _async_import_energy_history(
             "has_sum": True,
         }
         _LOGGER.debug("%s: adding %d stats entries", addr, len(stats))
-        await async_add_external_statistics(hass, metadata, stats)
+        try:
+            await async_add_external_statistics(hass, metadata, stats)
+        except Exception as err:  # pragma: no cover - log & continue
+            _LOGGER.exception(
+                "%s: async_add_external_statistics failed: %s",
+                addr,
+                err,
+            )
 
     options = dict(entry.options)
     options[OPTION_ENERGY_HISTORY_PROGRESS] = progress
@@ -322,7 +329,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     )
         if tasks:
             _LOGGER.debug("import_energy_history: awaiting %d tasks", len(tasks))
-            await asyncio.gather(*tasks)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for res in results:
+                if isinstance(res, Exception):
+                    _LOGGER.exception("import_energy_history task failed: %s", res)
 
     if not hass.services.has_service(DOMAIN, "import_energy_history"):
         hass.services.async_register(
