@@ -14,7 +14,7 @@ async_import_statistics = None  # type: ignore
 async_update_statistics_metadata = None  # type: ignore
 from aiohttp import ClientError
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED8
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client, entity_registry as er
@@ -30,6 +30,7 @@ from .const import (
     signal_ws_status,
 )
 from .coordinator import TermoWebCoordinator
+from .utils import extract_heater_addrs
 from .ws_client_legacy import TermoWebWSLegacyClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -82,7 +83,7 @@ def _store_statistics(
         return
 
     # Fall back to external statistics API.  Import only when needed.
-    from homeassistant.components.recorder.statistics import (
+    from homeassistant.components.recorder.statistics import (8
         async_add_external_statistics,
     )
 
@@ -346,20 +347,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     dev_id = str(
         dev.get("dev_id") or dev.get("id") or dev.get("serial_id") or ""
     ).strip()
-    try:
-        nodes = await client.get_nodes(dev_id)
-    except TermoWebAuthError as err:
-        _LOGGER.info("get_nodes auth error: %s", err)
-        raise ConfigEntryAuthFailed from err
-    except (ClientError, TermoWebRateLimitError, asyncio.TimeoutError) as err:
-        _LOGGER.info("get_nodes connection error: %s", err)
-        raise ConfigEntryNotReady from err
-    addrs: list[str] = []
-    node_list = nodes.get("nodes") if isinstance(nodes, dict) else None
-    if isinstance(node_list, list):
-        for n in node_list:
-            if isinstance(n, dict) and (n.get("type") or "").lower() == "htr":
-                addrs.append(str(n.get("addr")))
+    nodes = await client.get_nodes(dev_id)
+    addrs = extract_heater_addrs(nodes)
 
     coordinator = TermoWebCoordinator(hass, client, base_interval, dev_id, dev, nodes)
 

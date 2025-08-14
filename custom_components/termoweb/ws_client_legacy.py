@@ -20,6 +20,7 @@ from .const import (
     signal_ws_data,
     signal_ws_status,
 )
+from .utils import extract_heater_addrs
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -349,13 +350,7 @@ class TermoWebWSLegacyClient:
                 # body is nodes payload
                 if isinstance(body, dict):
                     dev_map["nodes"] = body
-                    # keep addrs in sync
-                    addrs: list[str] = []
-                    nl = body.get("nodes")
-                    if isinstance(nl, list):
-                        for n in nl:
-                            if isinstance(n, dict) and (n.get("type") or "").lower() == "htr":
-                                addrs.append(str(n.get("addr")))
+                    addrs = extract_heater_addrs(body)
                     dev_map.setdefault("htr", {}).setdefault("settings", {})
                     dev_map["htr"]["addrs"] = addrs
                     updated_nodes = True
