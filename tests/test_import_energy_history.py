@@ -31,6 +31,10 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch):
     ha_cfg.ConfigEntry = ConfigEntry
     sys.modules["homeassistant.config_entries"] = ha_cfg
 
+    ha_const = types.ModuleType("homeassistant.const")
+    ha_const.EVENT_HOMEASSISTANT_STARTED = "homeassistant_started"
+    sys.modules["homeassistant.const"] = ha_const
+
     helpers = types.ModuleType("homeassistant.helpers")
     aiohttp_client = types.ModuleType("homeassistant.helpers.aiohttp_client")
     aiohttp_client.async_get_clientsession = lambda hass: None
@@ -68,19 +72,45 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch):
 
     api_stub = types.ModuleType(f"{package}.api")
     class TermoWebClient:  # pragma: no cover - placeholder
-        pass
+        def __init__(self, session, username, password):
+            self.session = session
+            self.username = username
+            self.password = password
+
+        async def list_devices(self):
+            return [{"dev_id": "dev"}]
+
+        async def get_nodes(self, dev_id):
+            return {"nodes": [{"type": "htr", "addr": "A"}]}
+
     api_stub.TermoWebClient = TermoWebClient
     sys.modules[f"{package}.api"] = api_stub
 
     coord_stub = types.ModuleType(f"{package}.coordinator")
     class TermoWebCoordinator:  # pragma: no cover - placeholder
-        pass
+        def __init__(self, hass, client, base_interval, dev_id, dev, nodes):
+            self.data = {}
+
+        async def async_config_entry_first_refresh(self):
+            return
+
+        def async_add_listener(self, cb):
+            return
+
     coord_stub.TermoWebCoordinator = TermoWebCoordinator
     sys.modules[f"{package}.coordinator"] = coord_stub
 
     ws_stub = types.ModuleType(f"{package}.ws_client_legacy")
     class TermoWebWSLegacyClient:  # pragma: no cover - placeholder
-        pass
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            return asyncio.create_task(asyncio.sleep(0))
+
+        async def stop(self):
+            return
+
     ws_stub.TermoWebWSLegacyClient = TermoWebWSLegacyClient
     sys.modules[f"{package}.ws_client_legacy"] = ws_stub
 
@@ -201,5 +231,72 @@ def test_import_energy_history_reset_and_subset(monkeypatch: pytest.MonkeyPatch)
         progress = entry.options[mod.OPTION_ENERGY_HISTORY_PROGRESS]
         assert progress == {"A": 86_400, "B": 0}
         assert entry.options[mod.OPTION_ENERGY_HISTORY_IMPORTED] is True
+
+    asyncio.run(_run())
+
+
+def test_setup_defers_import_until_started(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        mod, const, add_stats, ConfigEntry, HomeAssistant = await _load_module(monkeypatch)
+
+        hass = HomeAssistant()
+        hass.data = {const.DOMAIN: {}}
+        tasks = []
+
+        def async_create_task(coro):
+            task = asyncio.create_task(coro)
+            tasks.append(task)
+            return task
+
+        listeners = []
+
+        class Bus:
+            def async_listen_once(self, event, cb):
+                listeners.append(cb)
+
+        hass.bus = Bus()
+        hass.async_create_task = async_create_task
+        hass.is_running = False
+        hass.config_entries = types.SimpleNamespace(
+            async_update_entry=lambda entry, *, options: entry.options.update(options),
+            async_forward_entry_setups=AsyncMock(return_value=None),
+        )
+
+        class Services:
+            def __init__(self):
+                self._svcs = {}
+
+            def has_service(self, domain, service):
+                return service in self._svcs.get(domain, set())
+
+            def async_register(self, domain, service, func):
+                self._svcs.setdefault(domain, set()).add(service)
+
+        hass.services = Services()
+
+        entry = ConfigEntry("1", data={"username": "u", "password": "p"})
+        hass.data[const.DOMAIN][entry.entry_id] = {
+            "client": object(),
+            "dev_id": "dev",
+            "htr_addrs": ["A"],
+            "config_entry": entry,
+        }
+
+        called = False
+
+        async def fake_import(*args, **kwargs):
+            nonlocal called
+            called = True
+
+        monkeypatch.setattr(mod, "_async_import_energy_history", fake_import)
+
+        assert await mod.async_setup_entry(hass, entry) is True
+        assert not called
+
+        for cb in listeners:
+            cb(None)
+        await asyncio.gather(*tasks)
+
+        assert called
 
     asyncio.run(_run())

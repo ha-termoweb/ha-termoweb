@@ -10,6 +10,7 @@ from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import aiohttp_client, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -330,7 +331,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if not entry.options.get(OPTION_ENERGY_HISTORY_IMPORTED):
         _LOGGER.debug("%s: scheduling initial energy import", entry.entry_id)
-        hass.async_create_task(_async_import_energy_history(hass, entry))
+
+        def _schedule_import(_event: Any | None = None) -> None:
+            hass.async_create_task(_async_import_energy_history(hass, entry))
+
+        if hass.is_running:
+            _schedule_import()
+        else:
+            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _schedule_import)
 
     _LOGGER.info("TermoWeb setup complete (v%s)", version)
     return True
