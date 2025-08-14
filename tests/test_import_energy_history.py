@@ -5,11 +5,11 @@ import importlib.util
 import itertools
 import sys
 import types
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from datetime import datetime, timezone
 
 
 async def _load_module(monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False):
@@ -35,6 +35,17 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False)
     ha_const = types.ModuleType("homeassistant.const")
     ha_const.EVENT_HOMEASSISTANT_STARTED = "homeassistant_started"
     sys.modules["homeassistant.const"] = ha_const
+
+    ha_exc = types.ModuleType("homeassistant.exceptions")
+    class ConfigEntryAuthFailed(Exception):
+        pass
+
+    class ConfigEntryNotReady(Exception):
+        pass
+
+    ha_exc.ConfigEntryAuthFailed = ConfigEntryAuthFailed
+    ha_exc.ConfigEntryNotReady = ConfigEntryNotReady
+    sys.modules["homeassistant.exceptions"] = ha_exc
 
     helpers = types.ModuleType("homeassistant.helpers")
     aiohttp_client = types.ModuleType("homeassistant.helpers.aiohttp_client")
@@ -129,6 +140,14 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False)
             return {"nodes": [{"type": "htr", "addr": "A"}]}
 
     api_stub.TermoWebClient = TermoWebClient
+    class TermoWebAuthError(Exception):  # pragma: no cover - placeholder
+        pass
+
+    class TermoWebRateLimitError(Exception):  # pragma: no cover - placeholder
+        pass
+
+    api_stub.TermoWebAuthError = TermoWebAuthError
+    api_stub.TermoWebRateLimitError = TermoWebRateLimitError
     sys.modules[f"{package}.api"] = api_stub
 
     coord_stub = types.ModuleType(f"{package}.coordinator")

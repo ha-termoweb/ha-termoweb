@@ -17,10 +17,10 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers import entity_platform
-from homeassistant.helpers import config_validation as cv
 import voluptuous as vol
 
 from .const import DOMAIN, signal_ws_data
+from .util import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -153,17 +153,6 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
         settings = (htr.get("settings") or {}).get(self._addr)
         return settings if isinstance(settings, dict) else None
 
-    @staticmethod
-    def _f(v: Any) -> Optional[float]:
-        try:
-            if v is None:
-                return None
-            if isinstance(v, (int, float)):
-                return float(v)
-            s = str(v).strip()
-            return float(s) if s else None
-        except Exception:
-            return None
 
     def _units(self) -> str:
         s = self._settings() or {}
@@ -233,12 +222,12 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
     @property
     def current_temperature(self) -> Optional[float]:
         s = self._settings() or {}
-        return self._f(s.get("mtemp"))
+        return float_or_none(s.get("mtemp"))
 
     @property
     def target_temperature(self) -> Optional[float]:
         s = self._settings() or {}
-        return self._f(s.get("stemp"))
+        return float_or_none(s.get("stemp"))
 
     @property
     def min_temp(self) -> float:
@@ -276,7 +265,7 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
             ptemp = s.get("ptemp")
             try:
                 if isinstance(ptemp, (list, tuple)) and 0 <= slot < len(ptemp):
-                    attrs["program_setpoint"] = self._f(ptemp[slot])
+                    attrs["program_setpoint"] = float_or_none(ptemp[slot])
             except Exception:
                 pass
 

@@ -12,14 +12,16 @@ from typing import Any, Dict, Iterable, List, Optional
 # async_import_statistics.  See _store_statistics for details.
 async_import_statistics = None  # type: ignore
 async_update_statistics_metadata = None  # type: ignore
+from aiohttp import ClientError
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED8
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.loader import async_get_integration
 
-from .api import TermoWebClient
+from .api import TermoWebAuthError, TermoWebClient, TermoWebRateLimitError
 from .const import (
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
@@ -81,7 +83,7 @@ def _store_statistics(
         return
 
     # Fall back to external statistics API.  Import only when needed.
-    from homeassistant.components.recorder.statistics import (
+    from homeassistant.components.recorder.statistics import (8
         async_add_external_statistics,
     )
 
@@ -328,7 +330,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     version = integration.version or "unknown"
 
     client = TermoWebClient(session, username, password)
-    devices = await client.list_devices()
+    try:
+        devices = await client.list_devices()
+    except TermoWebAuthError as err:
+        _LOGGER.info("list_devices auth error: %s", err)
+        raise ConfigEntryAuthFailed from err
+    except (ClientError, TermoWebRateLimitError, asyncio.TimeoutError) as err:
+        _LOGGER.info("list_devices connection error: %s", err)
+        raise ConfigEntryNotReady from err
+
+    if not devices:
+        _LOGGER.info("list_devices returned no devices")
+        raise ConfigEntryNotReady
+
     dev = devices[0] if isinstance(devices, list) and devices else {}
     dev_id = str(
         dev.get("dev_id") or dev.get("id") or dev.get("serial_id") or ""
