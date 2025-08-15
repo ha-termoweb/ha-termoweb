@@ -14,7 +14,7 @@ async_import_statistics = None  # type: ignore
 async_update_statistics_metadata = None  # type: ignore
 from aiohttp import ClientError
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_STARTED8
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client, entity_registry as er
@@ -83,7 +83,7 @@ def _store_statistics(
         return
 
     # Fall back to external statistics API.  Import only when needed.
-    from homeassistant.components.recorder.statistics import (8
+    from homeassistant.components.recorder.statistics import (
         async_add_external_statistics,
     )
 
