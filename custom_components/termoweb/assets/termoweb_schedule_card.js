@@ -74,6 +74,9 @@
       this._dragging = false;
       this._paintValue = null;
       this._boundMouseUp = () => this._onMouseUp();
+
+      // Available TermoWeb heater entities
+      this._entities = [];
     }
 
     setConfig(config) {
@@ -87,6 +90,18 @@
     set hass(hass) {
       this._hass = hass;
       if (!this._config) return;
+
+      // Collect available TermoWeb heater entities
+      this._entities = Object.entries(hass.states)
+        .filter(([eid, st]) => {
+          if (!eid.startsWith("climate.")) return false;
+          const a = st?.attributes || {};
+          return Array.isArray(a.prog) && a.prog.length === 168;
+        })
+        .map(([eid, st]) => ({
+          id: eid,
+          name: st.attributes?.friendly_name || st.attributes?.name || eid,
+        }));
 
       const st = hass.states[this._config.entity];
       this._stateObj = st || null;
@@ -294,6 +309,10 @@
 
       const frozen = nowMs() < this._freezeUntil;
 
+      const entityOptions = (this._entities || [])
+        .map((e) => `<option value="${e.id}" ${e.id === this._config?.entity ? "selected" : ""}>${e.name}</option>`)
+        .join("\n");
+
       root.innerHTML = `
         <style>
           :host { display:block; }
@@ -317,6 +336,13 @@
             color: ${COLORS.text};
             padding: 5px 8px;
           }
+          select {
+            border-radius: 6px;
+            border: 1px solid ${COLORS.border};
+            background: var(--secondary-background-color, #2b2b2b);
+            color: ${COLORS.text};
+            padding: 3px 4px;
+          }
           .footer { display:flex;justify-content:flex-end;gap:8px;margin-top:10px; flex-wrap: wrap; }
           button { background: var(--secondary-background-color, #2b2b2b); color: ${COLORS.text}; border: 1px solid ${COLORS.border}; border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
           button:hover { filter: brightness(1.1); }
@@ -328,7 +354,7 @@
           <div class="header">
             <div>${title}</div>
             <div class="sub">
-              ${this._config?.entity ?? ""}
+              <select id="entitySelect">${entityOptions}</select>
               ${dirtyBadge}
               ${frozen ? `<span class="chip">waiting for device update…</span>` : ``}
               <button id="refreshBtn" title="Refresh from current state">Refresh</button>
@@ -364,6 +390,16 @@
 
       // Bind Refresh
       root.getElementById("refreshBtn")?.addEventListener("click", () => this._refreshFromState());
+
+      // Bind entity selector
+      root.getElementById("entitySelect")?.addEventListener("change", (ev) => {
+        const newEntity = ev.target.value;
+        if (newEntity && newEntity !== this._config.entity) {
+          this._config.entity = newEntity;
+          this._stateObj = this._hass?.states?.[newEntity] || null;
+          this._revert();
+        }
+      });
 
       // Bind preset inputs to set dirty flag
       root.getElementById("tw_p_cold")?.addEventListener("input", () => { this._dirtyPresets = true; });
