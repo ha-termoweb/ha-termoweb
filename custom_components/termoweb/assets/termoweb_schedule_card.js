@@ -443,10 +443,19 @@
         }
       });
 
-      // Bind preset inputs to set dirty flag
-      root.getElementById("tw_p_cold")?.addEventListener("input", () => { this._dirtyPresets = true; });
-      root.getElementById("tw_p_night")?.addEventListener("input", () => { this._dirtyPresets = true; });
-      root.getElementById("tw_p_day")?.addEventListener("input", () => { this._dirtyPresets = true; });
+      // Bind preset inputs to update local state and set dirty flag
+      root.getElementById("tw_p_cold")?.addEventListener("input", () => {
+        this._ptempLocal[0] = this._parseInputNum("tw_p_cold");
+        this._dirtyPresets = true;
+      });
+      root.getElementById("tw_p_night")?.addEventListener("input", () => {
+        this._ptempLocal[1] = this._parseInputNum("tw_p_night");
+        this._dirtyPresets = true;
+      });
+      root.getElementById("tw_p_day")?.addEventListener("input", () => {
+        this._ptempLocal[2] = this._parseInputNum("tw_p_day");
+        this._dirtyPresets = true;
+      });
 
       // Bind preset save
       root.getElementById("savePresetsBtn")?.addEventListener("click", () => this._savePresets());
