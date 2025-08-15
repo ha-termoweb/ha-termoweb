@@ -78,7 +78,12 @@
 
       // Available TermoWeb heater entities
       this._entities = [];
+
+      // Track copy selectors
+      this._copyFrom = 0;
+      this._copyTo = "All";
       this._entity = null; // currently selected entity
+
     }
 
     setConfig(config) {
@@ -337,7 +342,13 @@
         .map((e) => `<option value="${e.id}" ${e.id === this._entity ? "selected" : ""}>${e.name}</option>`)
         .join("\n");
 
-      const dayOptions = DAY_NAMES.map((d, i) => `<option value="${i}">${d}</option>`).join("\n");
+      const copyFromOptions = DAY_NAMES
+        .map((d, i) => `<option value="${i}" ${i === this._copyFrom ? "selected" : ""}>${d}</option>`)
+        .join("\n");
+      const copyToDayOptions = DAY_NAMES
+        .map((d, i) => `<option value="${i}" ${(typeof this._copyTo === "number" && i === this._copyTo) ? "selected" : ""}>${d}</option>`)
+        .join("\n");
+      const copyAllSelected = this._copyTo === "All" ? "selected" : "";
 
       root.innerHTML = `
         <style>
@@ -417,8 +428,8 @@
           ${this._renderGridShell()}
 
           <div class="row">
-            <label>Copy From <select id="copyFromSel">${dayOptions}</select></label>
-            <label>Copy To <select id="copyToSel"><option value="All">All</option>${dayOptions}</select></label>
+            <label>Copy From <select id="copyFromSel">${copyFromOptions}</select></label>
+            <label>Copy To <select id="copyToSel"><option value="All" ${copyAllSelected}>All</option>${copyToDayOptions}</select></label>
             <button id="copyBtn">Copy</button>
           </div>
 
@@ -469,14 +480,16 @@
       root.getElementById("revertBtn")?.addEventListener("click", () => this._revert());
       root.getElementById("saveBtn")?.addEventListener("click", () => this._saveSchedule());
 
+      root.getElementById("copyFromSel")?.addEventListener("change", (ev) => {
+        this._copyFrom = Number(ev.target.value);
+      });
+      root.getElementById("copyToSel")?.addEventListener("change", (ev) => {
+        const v = ev.target.value;
+        this._copyTo = v === "All" ? "All" : Number(v);
+      });
+
       root.getElementById("copyBtn")?.addEventListener("click", () => {
-        const fromEl = root.getElementById("copyFromSel");
-        const toEl = root.getElementById("copyToSel");
-        if (!fromEl || !toEl) return;
-        const from = Number(fromEl.value);
-        const toVal = toEl.value;
-        const to = toVal === "All" ? "All" : Number(toVal);
-        this._copyDay(from, to);
+        this._copyDay(this._copyFrom, this._copyTo);
         this._dirtyProg = true;
         this._renderGridOnly();
       });
