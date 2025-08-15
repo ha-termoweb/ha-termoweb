@@ -78,13 +78,15 @@
 
       // Available TermoWeb heater entities
       this._entities = [];
+      this._entity = null; // currently selected entity
     }
 
     setConfig(config) {
-      if (!config || !config.entity) {
-        throw new Error("termoweb-schedule-card: 'entity' is required");
+      if (!config) {
+        throw new Error("termoweb-schedule-card: invalid configuration");
       }
       this._config = config;
+      this._entity = config.entity || null;
       this._render();
     }
 
@@ -104,7 +106,12 @@
           name: st.attributes?.friendly_name || st.attributes?.name || eid,
         }));
 
-      const st = hass.states[this._config.entity];
+      if (!this._entity && this._entities.length > 0) {
+        this._entity = this._entities[0].id;
+        if (this._config) this._config.entity = this._entity;
+      }
+
+      const st = this._entity ? hass.states[this._entity] : undefined;
       this._stateObj = st || null;
 
       const canHydrateNow = this._canHydrateFromState();
@@ -211,7 +218,7 @@
 
     _revert() {
       // Force re-hydrate from current HA state
-      const st = this._hass?.states?.[this._config.entity];
+      const st = this._hass?.states?.[this._entity];
       const attrs = st?.attributes || {};
       if (Array.isArray(attrs.prog) && attrs.prog.length === 168) {
         this._progLocal = attrs.prog.slice();
@@ -228,7 +235,7 @@
 
     _refreshFromState() {
       // Manual refresh, ignoring freeze; useful if user wants to sync now
-      const st = self._hass?.states?.[this._config.entity];
+      const st = self._hass?.states?.[this._entity];
       const attrs = st?.attributes || {};
       if (Array.isArray(attrs.prog) && attrs.prog.length === 168) {
         this._progLocal = attrs.prog.slice();
@@ -262,7 +269,7 @@
       const payload = [cold, night, day];
       try {
         await this._hass.callService("termoweb", "set_preset_temperatures", {
-          entity_id: this._config.entity,
+          entity_id: this._entity,
           ptemp: payload.slice(),
         });
         this._ptempLocal = payload.slice();
@@ -294,7 +301,7 @@
       const body = this._progLocal.slice();
       try {
         await this._hass.callService("termoweb", "set_schedule", {
-          entity_id: this._config.entity,
+          entity_id: this._entity,
           prog: body,
         });
         this._dirtyProg = false;
@@ -314,7 +321,7 @@
 
       const title =
         (this._stateObj?.attributes?.friendly_name || this._stateObj?.attributes?.name) ||
-        this._config?.entity || "TermoWeb schedule";
+        this._entity || "TermoWeb schedule";
 
       const hasProg = Array.isArray(this._progLocal) && this._progLocal.length === 168;
       const units = this._units();
@@ -327,7 +334,7 @@
       const frozen = nowMs() < this._freezeUntil;
 
       const entityOptions = (this._entities || [])
-        .map((e) => `<option value="${e.id}" ${e.id === this._config?.entity ? "selected" : ""}>${e.name}</option>`)
+        .map((e) => `<option value="${e.id}" ${e.id === this._entity ? "selected" : ""}>${e.name}</option>`)
         .join("\n");
 
       const dayOptions = DAY_NAMES.map((d, i) => `<option value="${i}">${d}</option>`).join("\n");
@@ -428,7 +435,8 @@
       // Bind entity selector
       root.getElementById("entitySelect")?.addEventListener("change", (ev) => {
         const newEntity = ev.target.value;
-        if (newEntity && newEntity !== this._config.entity) {
+        if (newEntity && newEntity !== this._entity) {
+          this._entity = newEntity;
           this._config.entity = newEntity;
           this._stateObj = this._hass?.states?.[newEntity] || null;
           this._revert();
