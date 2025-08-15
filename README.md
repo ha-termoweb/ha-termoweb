@@ -34,9 +34,12 @@ _Not supported:_ brands using different apps/backends (for example “Ducaheat/D
 ## What you can do in Home Assistant
 
 - Turn heaters **On/Off** and set **target temperature**.
-- Choose **Auto** or **Manual** (as “presets” in HA).
-- See room temperature and heating state.
-- Use **automations**, **scenes**, and **voice assistants** (via HA’s Google/Alexa integrations).
+- Choose **Auto** or **Manual** mode.
+- See live room temperature and heating state (every heater is also a temperature sensor)
+- View and change the weekly schedule and temperature presets
+- See cumulative energy use and import energy use history from TermoWeb.
+- Add energy sensors to the HA energy dashboard so you can see current and historical use/cost. 
+- Use HA **automations**, **scenes**, and **voice assistants** (including HA’s Google/Alexa integrations).
 
 ---
 
@@ -84,6 +87,10 @@ ha-termoweb/ha-termoweb
 ## Tips
 - **Voice control:** Expose heater entities via Home Assistant’s Google or Alexa integrations.
 - **Automations idea:** Lower temperature when nobody’s home; switch to **Off** if a window sensor is open for 10+ minutes.
+
+## Install custom weekly schedule card
+
+See instructions in custom_components/termoweb/assets, to install the card and create a dashboard.
 
 ## Energy monitoring & history
 - Each heater provides an **Energy** sensor in kWh and the integration adds a **Total Energy** sensor aggregating all heaters.
