@@ -73,6 +73,7 @@
       // painting
       this._dragging = false;
       this._paintValue = null;
+      this._selectedMode = 0;
       this._boundMouseUp = () => this._onMouseUp();
 
       // Available TermoWeb heater entities
@@ -152,7 +153,6 @@
       return (u === "F" || u === "C") ? u : "C";
     }
     _idx(day, hour) { return day * 24 + hour; }
-    _cycle(v) { return (v + 1) % 3; }
     _copyDay(fromDay, toDay) {
       if (!this._progLocal) return;
       const copyTo = (d) => {
@@ -183,7 +183,7 @@
     _onCellClick(day, hour) {
       if (!this._progLocal) return;
       const i = this._idx(day, hour);
-      this._progLocal[i] = this._cycle(Number(this._progLocal[i] || 0));
+      this._progLocal[i] = this._selectedMode;
       this._dirtyProg = true;
       this._renderGridOnly();
     }
@@ -191,7 +191,7 @@
       if (!this._progLocal) return;
       this._dragging = true;
       const i = this._idx(day, hour);
-      const next = this._cycle(Number(this._progLocal[i] || 0));
+      const next = this._selectedMode;
       this._paintValue = next;
       this._progLocal[i] = next;
       this._dirtyProg = true;
@@ -347,6 +347,9 @@
           .legend { display:flex;gap:12px;align-items:center;flex-wrap:wrap;color:${COLORS.label}; font-size: 12px; }
           .legend .swatch { display:inline-block;width:14px;height:14px;border-radius:4px;border:1px solid ${COLORS.border};vertical-align:-2px;margin-right:6px; }
           .row { display:flex; gap:10px; align-items:center; margin-top:10px; flex-wrap: wrap; color:${COLORS.label}; }
+          .modeToggle { display:flex; gap:8px; margin-top:10px; }
+          .modeToggle button { flex:1; padding:8px 0; border-radius:8px; border:2px solid ${COLORS.border}; color:${COLORS.text}; cursor:pointer; font-weight:600; opacity:0.6; }
+          .modeToggle button.active { opacity:1; border-color:${COLORS.text}; }
           input[type="number"] {
             width: 72px;
             border-radius: 8px;
@@ -396,6 +399,12 @@
             <button id="savePresetsBtn">Save Presets</button>
           </div>
 
+          <div class="modeToggle">
+            <button id="modeCold" class="${this._selectedMode === 0 ? 'active' : ''}" style="background:${COLORS[0]}">Cold</button>
+            <button id="modeNight" class="${this._selectedMode === 1 ? 'active' : ''}" style="background:${COLORS[1]}">Night</button>
+            <button id="modeDay" class="${this._selectedMode === 2 ? 'active' : ''}" style="background:${COLORS[2]}">Day</button>
+          </div>
+
           ${!hasProg ? `<div class="warn" style="margin-top:8px;">This entity has no valid 'prog' (expected 168 ints).</div>` : ""}
 
           ${this._renderGridShell()}
@@ -433,6 +442,11 @@
 
       // Bind preset save
       root.getElementById("savePresetsBtn")?.addEventListener("click", () => this._savePresets());
+
+      // Bind mode buttons
+      root.getElementById("modeCold")?.addEventListener("click", () => { this._selectedMode = 0; this._render(); });
+      root.getElementById("modeNight")?.addEventListener("click", () => { this._selectedMode = 1; this._render(); });
+      root.getElementById("modeDay")?.addEventListener("click", () => { this._selectedMode = 2; this._render(); });
 
       // Bind schedule buttons
       root.getElementById("revertBtn")?.addEventListener("click", () => this._revert());
