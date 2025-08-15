@@ -100,6 +100,15 @@ Then, add the Lovelace resource in the UI (see step A‑3).
 
 ---
 
+## Using the card
+
+- **Heater dropdown** – select which TermoWeb climate entity to edit when multiple heaters are available.
+- **Day-copy controls** – choose a source and target day (or all days) to duplicate schedules in one click.
+- **Paint mode buttons** – pick Cold, Night, or Day then drag across the grid to set hours.
+- The card still uses manual **Refresh** and an edit-**freeze** window; click Refresh or wait for the freeze to expire to re-sync with Home Assistant.
+
+---
+
 ## Verify it works
 
 1. Open **Developer Tools → States**, pick your climate entity, and confirm it has `prog` and `ptemp` attributes.
