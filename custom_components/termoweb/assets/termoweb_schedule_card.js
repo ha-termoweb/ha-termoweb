@@ -153,6 +153,23 @@
     }
     _idx(day, hour) { return day * 24 + hour; }
     _cycle(v) { return (v + 1) % 3; }
+    _copyDay(fromDay, toDay) {
+      if (!this._progLocal) return;
+      const copyTo = (d) => {
+        for (let h = 0; h < 24; h++) {
+          const src = this._idx(fromDay, h);
+          const dst = this._idx(d, h);
+          this._progLocal[dst] = this._progLocal[src];
+        }
+      };
+      if (toDay === "All") {
+        for (let d = 0; d < 7; d++) {
+          if (d !== fromDay) copyTo(d);
+        }
+      } else if (Number.isInteger(toDay) && toDay >= 0 && toDay < 7) {
+        copyTo(toDay);
+      }
+    }
     _toast(msg) {
       const el = document.createElement("div");
       el.textContent = msg;
@@ -313,6 +330,8 @@
         .map((e) => `<option value="${e.id}" ${e.id === this._config?.entity ? "selected" : ""}>${e.name}</option>`)
         .join("\n");
 
+      const dayOptions = DAY_NAMES.map((d, i) => `<option value="${i}">${d}</option>`).join("\n");
+
       root.innerHTML = `
         <style>
           :host { display:block; }
@@ -381,6 +400,12 @@
 
           ${this._renderGridShell()}
 
+          <div class="row">
+            <label>Copy From <select id="copyFromSel">${dayOptions}</select></label>
+            <label>Copy To <select id="copyToSel"><option value="All">All</option>${dayOptions}</select></label>
+            <button id="copyBtn">Copy</button>
+          </div>
+
           <div class="footer">
             <button id="revertBtn">Revert</button>
             <button id="saveBtn">Save</button>
@@ -412,6 +437,18 @@
       // Bind schedule buttons
       root.getElementById("revertBtn")?.addEventListener("click", () => this._revert());
       root.getElementById("saveBtn")?.addEventListener("click", () => this._saveSchedule());
+
+      root.getElementById("copyBtn")?.addEventListener("click", () => {
+        const fromEl = root.getElementById("copyFromSel");
+        const toEl = root.getElementById("copyToSel");
+        if (!fromEl || !toEl) return;
+        const from = Number(fromEl.value);
+        const toVal = toEl.value;
+        const to = toVal === "All" ? "All" : Number(toVal);
+        this._copyDay(from, to);
+        this._dirtyProg = true;
+        this._renderGridOnly();
+      });
 
       // Paint cells
       this._renderGridOnly();
