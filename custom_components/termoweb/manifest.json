@@ -1,6 +1,7 @@
 {
   "domain": "termoweb",
   "name": "TermoWeb",
+  "after_dependencies": ["recorder"],
   "codeowners": [
     "@ha-termoweb"
   ],
