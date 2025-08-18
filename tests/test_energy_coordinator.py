@@ -131,6 +131,7 @@ sys.modules[f"{package}.coordinator"] = coord_module
 spec.loader.exec_module(coord_module)
 
 TermoWebHeaterEnergyCoordinator = coord_module.TermoWebHeaterEnergyCoordinator
+TermoWebCoordinator = coord_module.TermoWebCoordinator
 signal_ws_data = __import__(f"{package}.const", fromlist=["signal_ws_data"]).signal_ws_data
 HTR_ENERGY_UPDATE_INTERVAL = __import__(
     f"{package}.const", fromlist=["HTR_ENERGY_UPDATE_INTERVAL"]
@@ -230,5 +231,38 @@ def test_ws_driven_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
         await asyncio.sleep(0)
 
         assert coord.data["1"]["htr"]["energy"]["A"] == 2.0
+
+    asyncio.run(_run())
+
+
+def test_coordinator_timeout() -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_htr_settings = AsyncMock(side_effect=asyncio.TimeoutError)
+
+        hass = HomeAssistant()
+        nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
+        coord = TermoWebCoordinator(
+            hass, client, 30, "1", {}, nodes  # type: ignore[arg-type]
+        )
+
+        with pytest.raises(UpdateFailed, match="API timeout"):
+            await coord.async_refresh()
+
+    asyncio.run(_run())
+
+
+def test_heater_energy_timeout() -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_htr_samples = AsyncMock(side_effect=asyncio.TimeoutError)
+
+        hass = HomeAssistant()
+        coord = TermoWebHeaterEnergyCoordinator(
+            hass, client, "1", ["A"]  # type: ignore[arg-type]
+        )
+
+        with pytest.raises(UpdateFailed, match="API timeout"):
+            await coord.async_refresh()
 
     asyncio.run(_run())
