@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import importlib.util
 import itertools
 import sys
@@ -17,9 +18,20 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False)
 
     # Stub Home Assistant modules
     ha_core = types.ModuleType("homeassistant.core")
+
     class HomeAssistant:  # pragma: no cover - minimal stub
         pass
+
+    def callback(func):  # pragma: no cover - minimal stub
+        return func
+
+    class ServiceCall:  # pragma: no cover - minimal stub
+        def __init__(self, data=None):
+            self.data = data or {}
+
     ha_core.HomeAssistant = HomeAssistant
+    ha_core.callback = callback
+    ha_core.ServiceCall = ServiceCall
     sys.modules["homeassistant"] = types.ModuleType("homeassistant")
     sys.modules["homeassistant.core"] = ha_core
 
@@ -34,6 +46,12 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False)
 
     ha_const = types.ModuleType("homeassistant.const")
     ha_const.EVENT_HOMEASSISTANT_STARTED = "homeassistant_started"
+
+    class UnitOfTemperature:  # pragma: no cover - minimal stub
+        CELSIUS = "°C"
+
+    ha_const.UnitOfTemperature = UnitOfTemperature
+    ha_const.ATTR_TEMPERATURE = "temperature"
     sys.modules["homeassistant.const"] = ha_const
 
     ha_exc = types.ModuleType("homeassistant.exceptions")
@@ -92,6 +110,71 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False)
     sys.modules["homeassistant.helpers.aiohttp_client"] = aiohttp_client
     sys.modules["homeassistant.helpers.dispatcher"] = dispatcher
     sys.modules["homeassistant.helpers.entity_registry"] = entity_registry
+
+    climate = types.ModuleType("homeassistant.components.climate")
+
+    class ClimateEntity:  # pragma: no cover - minimal stub
+        async def async_will_remove_from_hass(self) -> None:
+            return
+
+    class HVACMode:  # pragma: no cover - minimal stub
+        HEAT = "heat"
+        OFF = "off"
+
+    class HVACAction:  # pragma: no cover - minimal stub
+        HEATING = "heating"
+        IDLE = "idle"
+        OFF = "off"
+
+    class ClimateEntityFeature:  # pragma: no cover - minimal stub
+        TARGET_TEMPERATURE = 1
+        PRESET_MODE = 2
+
+    climate.ClimateEntity = ClimateEntity
+    climate.HVACMode = HVACMode
+    climate.HVACAction = HVACAction
+    climate.ClimateEntityFeature = ClimateEntityFeature
+    sys.modules.setdefault("homeassistant.components", types.ModuleType("homeassistant.components"))
+    sys.modules["homeassistant.components.climate"] = climate
+
+    helpers_entity = types.ModuleType("homeassistant.helpers.entity")
+
+    class DeviceInfo(dict):  # pragma: no cover - minimal stub
+        pass
+
+    helpers_entity.DeviceInfo = DeviceInfo
+    sys.modules["homeassistant.helpers.entity"] = helpers_entity
+
+    entity_platform = types.ModuleType("homeassistant.helpers.entity_platform")
+    entity_platform.async_get_current_platform = lambda: types.SimpleNamespace(
+        async_register_entity_service=lambda *args, **kwargs: None
+    )
+    sys.modules["homeassistant.helpers.entity_platform"] = entity_platform
+
+    helpers_update_coordinator = types.ModuleType(
+        "homeassistant.helpers.update_coordinator"
+    )
+
+    class CoordinatorEntity:  # pragma: no cover - minimal stub
+        def __init__(self, coordinator):
+            self.coordinator = coordinator
+
+        async def async_will_remove_from_hass(self) -> None:
+            return
+
+    helpers_update_coordinator.CoordinatorEntity = CoordinatorEntity
+    sys.modules["homeassistant.helpers.update_coordinator"] = (
+        helpers_update_coordinator
+    )
+
+    ha_util = types.ModuleType("homeassistant.util")
+    dt = types.ModuleType("homeassistant.util.dt")
+    dt.now = lambda: datetime.utcnow()
+    ha_util.dt = dt
+    sys.modules["homeassistant.util"] = ha_util
+    sys.modules["homeassistant.util.dt"] = dt
+
+    sys.modules["voluptuous"] = types.ModuleType("voluptuous")
 
     loader = types.ModuleType("homeassistant.loader")
     async def async_get_integration(hass, domain):
@@ -576,5 +659,34 @@ def test_setup_defers_import_until_started(monkeypatch: pytest.MonkeyPatch) -> N
         await asyncio.gather(*tasks)
 
         assert called
+
+    asyncio.run(_run())
+
+
+def test_refresh_fallback_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        (
+            mod,
+            const,
+            _import_stats,
+            _update_meta,
+            _last_stats,
+            ConfigEntry,
+            HomeAssistant,
+            _ent_reg,
+        ) = await _load_module(monkeypatch)
+
+        climate_mod = importlib.import_module("custom_components.termoweb.climate")
+        coordinator = types.SimpleNamespace(async_request_refresh=AsyncMock())
+        heater = climate_mod.TermoWebHeater(coordinator, "1", "dev", "A", "Heater A")
+        heater.hass = HomeAssistant()
+        heater._schedule_refresh_fallback()
+        task = heater._refresh_fallback
+        assert task is not None
+        await asyncio.sleep(0)
+        await heater.async_will_remove_from_hass()
+        await asyncio.sleep(0)
+        assert task.cancelled()
+        assert heater._refresh_fallback is None
 
     asyncio.run(_run())

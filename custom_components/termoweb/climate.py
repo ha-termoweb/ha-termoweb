@@ -127,6 +127,8 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
         self._attr_unique_id = f"{DOMAIN}:{dev_id}:htr:{addr}"
         self._unsub_ws = None
 
+        self._refresh_fallback: Optional[asyncio.Task] = None
+
         # pending write aggregation
         self._pending_mode: Optional[str] = None
         self._pending_stemp: Optional[float] = None
@@ -138,6 +140,12 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
             self.hass, signal_ws_data(self._entry_id), self._on_ws_data
         )
         self.async_on_remove(lambda: self._unsub_ws() if self._unsub_ws else None)
+
+    async def async_will_remove_from_hass(self) -> None:
+        if self._refresh_fallback:
+            self._refresh_fallback.cancel()
+            self._refresh_fallback = None
+        await super().async_will_remove_from_hass()
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -487,7 +495,10 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
         self._schedule_refresh_fallback()
 
     def _schedule_refresh_fallback(self) -> None:
-        async def _fallback():
+        if self._refresh_fallback and not self._refresh_fallback.done():
+            self._refresh_fallback.cancel()
+
+        async def _fallback() -> None:
             await asyncio.sleep(_WS_ECHO_FALLBACK_REFRESH)
             try:
                 await self.coordinator.async_request_refresh()
@@ -499,4 +510,6 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
                     str(e),
                 )
 
-        asyncio.create_task(_fallback())
+        self._refresh_fallback = asyncio.create_task(
+            _fallback(), name=f"termoweb-fallback-{self._dev_id}-{self._addr}"
+        )
