@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
@@ -15,8 +16,12 @@ def float_or_none(value: Any) -> float | None:
         if value is None:
             return None
         if isinstance(value, (int, float)):
-            return float(value)
-        string_val = str(value).strip()
-        return float(string_val) if string_val else None
+            num = float(value)
+        else:
+            string_val = str(value).strip()
+            if not string_val:
+                return None
+            num = float(string_val)
+        return num if math.isfinite(num) else None
     except Exception:
         return None
