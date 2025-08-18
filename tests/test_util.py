@@ -13,6 +13,10 @@ from custom_components.termoweb.util import float_or_none
         ("123", 123.0),
         (5, 5.0),
         ("   ", None),
+        ("nan", None),
+        ("inf", None),
+        (float("nan"), None),
+        (float("inf"), None),
     ],
 )
 def test_float_or_none(value, expected) -> None:
