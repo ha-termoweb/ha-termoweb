@@ -27,6 +27,14 @@ _LOGGER = logging.getLogger(__name__)
 HandshakeResult = Tuple[str, int]  # (sid, heartbeat_timeout_s)
 
 
+class HandshakeError(RuntimeError):
+    def __init__(self, status: int, url: str, body_snippet: str) -> None:
+        super().__init__(f"handshake failed (status={status})")
+        self.status = status
+        self.url = url
+        self.body_snippet = body_snippet
+
+
 @dataclass
 class WSStats:
     frames_total: int = 0
@@ -142,6 +150,20 @@ class TermoWebWSLegacyClient:
 
             except asyncio.CancelledError:
                 break
+            except HandshakeError as e:
+                # Avoid noisy logs; just one INFO per failure with brief cause.
+                _LOGGER.info(
+                    "WS %s: connection error (%s: %s); will retry",
+                    self.dev_id,
+                    type(e).__name__,
+                    e,
+                )
+                _LOGGER.debug(
+                    "WS %s: handshake error url=%s body=%r",
+                    self.dev_id,
+                    e.url,
+                    e.body_snippet,
+                )
             except Exception as e:
                 # Avoid noisy logs; just one INFO per failure with brief cause.
                 _LOGGER.info(
@@ -198,17 +220,21 @@ class TermoWebWSLegacyClient:
                     _LOGGER.info("WS %s: handshake 401; refreshing token", self.dev_id)
                     await self._force_refresh_token()
                     token = await self._get_token()
-                    url = f"{API_BASE}/socket.io/1/?token={token}&dev_id={self.dev_id}&t={int(time.time()*1000)}"
-                    async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp2:
+                    url = (
+                        f"{API_BASE}/socket.io/1/?token={token}&dev_id={self.dev_id}&t={int(time.time()*1000)}"
+                    )
+                    async with self._session.get(
+                        url, timeout=aiohttp.ClientTimeout(total=15)
+                    ) as resp2:
                         body = await resp2.text()
                         if resp2.status >= 400:
-                            raise RuntimeError(f"handshake failed (status={resp2.status})")
+                            raise HandshakeError(resp2.status, url, body[:100])
                         sid, hb = self._parse_handshake_body(body)
                         self._backoff_idx = 0  # success resets backoff
                         return sid, hb
 
                 if resp.status >= 400:
-                    raise RuntimeError(f"handshake failed (status={resp.status})")
+                    raise HandshakeError(resp.status, url, body[:100])
 
                 sid, hb = self._parse_handshake_body(body)
                 self._backoff_idx = 0  # success resets backoff
