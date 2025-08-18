@@ -67,6 +67,7 @@ class TermoWebWSLegacyClient:
         api_client: TermoWebClient,
         coordinator,  # TermoWebCoordinator; typed as Any to avoid import cycle
         session: aiohttp.ClientSession | None = None,
+        handshake_fail_threshold: int = 5,
     ) -> None:
         self.hass = hass
         self.entry_id = entry_id
@@ -87,6 +88,9 @@ class TermoWebWSLegacyClient:
         self._backoff_idx = 0
 
         self._stats = WSStats()
+        self._hs_fail_count: int = 0
+        self._hs_fail_start: float = 0.0
+        self._hs_fail_threshold: int = handshake_fail_threshold
 
     # ----------------- Public control -----------------
 
@@ -132,6 +136,8 @@ class TermoWebWSLegacyClient:
         while not self._closing:
             try:
                 sid, hb_timeout = await self._handshake()
+                self._hs_fail_count = 0
+                self._hs_fail_start = 0.0
                 # keep client-side send interval well under server timeout
                 self._hb_send_interval = max(5.0, min(30.0, hb_timeout * 0.45))
                 await self._connect_ws(sid)
@@ -151,6 +157,9 @@ class TermoWebWSLegacyClient:
             except asyncio.CancelledError:
                 break
             except HandshakeError as e:
+                self._hs_fail_count += 1
+                if self._hs_fail_count == 1:
+                    self._hs_fail_start = time.time()
                 # Avoid noisy logs; just one INFO per failure with brief cause.
                 _LOGGER.info(
                     "WS %s: connection error (%s: %s); will retry",
@@ -158,6 +167,16 @@ class TermoWebWSLegacyClient:
                     type(e).__name__,
                     e,
                 )
+                if self._hs_fail_count >= self._hs_fail_threshold:
+                    elapsed = time.time() - self._hs_fail_start
+                    _LOGGER.warning(
+                        "WS %s: handshake failed %d times over %.1f s",
+                        self.dev_id,
+                        self._hs_fail_count,
+                        elapsed,
+                    )
+                    self._hs_fail_count = 0
+                    self._hs_fail_start = 0.0
                 _LOGGER.debug(
                     "WS %s: handshake error url=%s body=%r",
                     self.dev_id,
