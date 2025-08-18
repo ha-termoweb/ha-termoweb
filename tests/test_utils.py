@@ -7,10 +7,7 @@ from pathlib import Path
 
 
 UTILS_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "custom_components"
-    / "termoweb"
-    / "utils.py"
+    Path(__file__).resolve().parents[1] / "custom_components" / "termoweb" / "utils.py"
 )
 
 
@@ -43,3 +40,12 @@ def test_extract_heater_addrs() -> None:
     }
 
     assert extract(nodes) == ["A", "1"]
+
+
+def test_extract_heater_addrs_deduplicates() -> None:
+    utils = _load_utils()
+    extract = utils.extract_heater_addrs
+
+    nodes = {"nodes": [{"type": "htr", "addr": "A"}, {"type": "HTR", "addr": "A"}]}
+
+    assert extract(nodes) == ["A"]

@@ -10,11 +10,12 @@ def extract_heater_addrs(nodes: dict[str, Any] | None) -> list[str]:
     `/mgr/nodes` endpoint and extracts the `addr` of all entries
     whose `type` is `htr` (case-insensitive).
     """
-    addrs: list[str] = []
+    addrs: dict[str, None] = {}
     if isinstance(nodes, dict):
         node_list = nodes.get("nodes")
         if isinstance(node_list, list):
             for n in node_list:
                 if isinstance(n, dict) and (n.get("type") or "").lower() == "htr":
-                    addrs.append(str(n.get("addr")))
-    return addrs
+                    addr = str(n.get("addr"))
+                    addrs.setdefault(addr)
+    return list(addrs)
