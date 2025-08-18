@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
 import time
@@ -113,6 +114,8 @@ class TermoWebCoordinator(
 
             return result
 
+        except asyncio.TimeoutError as err:
+            raise UpdateFailed("API timeout") from err
         except TermoWebRateLimitError as err:
             self._backoff = min(
                 max(self._base_interval, (self._backoff or self._base_interval) * 2),
@@ -207,5 +210,7 @@ class TermoWebHeaterEnergyCoordinator(
 
             return result
 
+        except asyncio.TimeoutError as err:
+            raise UpdateFailed("API timeout") from err
         except (ClientError, TermoWebRateLimitError, TermoWebAuthError) as err:
             raise UpdateFailed(f"API error: {err}") from err
