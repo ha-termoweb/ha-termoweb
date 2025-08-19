@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
-from homeassistant.components.binary_sensor import BinarySensorEntity, BinarySensorDeviceClass
-import logging
+from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
+    BinarySensorEntity,
+)
 from homeassistant.core import callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_status
 from .coordinator import TermoWebCoordinator
@@ -32,12 +35,14 @@ class TermoWebDeviceOnlineBinarySensor(
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _attr_should_poll = False
 
-    def __init__(self, coordinator: TermoWebCoordinator, entry_id: str, dev_id: str) -> None:
+    def __init__(
+        self, coordinator: TermoWebCoordinator, entry_id: str, dev_id: str
+    ) -> None:
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._dev_id = str(dev_id)
         data = coordinator.data.get(self._dev_id, {}) or {}
-        base_name = (data.get("name") or self._dev_id)
+        base_name = data.get("name") or self._dev_id
         try:
             base_name = str(base_name).strip()
         except Exception:
@@ -65,9 +70,11 @@ class TermoWebDeviceOnlineBinarySensor(
     @property
     def device_info(self) -> DeviceInfo:
         data = (self.coordinator.data or {}).get(self._dev_id, {}) or {}
-        version = (self.hass.data.get(DOMAIN, {}).get(self._entry_id, {}) or {}).get("version")
+        version = (self.hass.data.get(DOMAIN, {}).get(self._entry_id, {}) or {}).get(
+            "version"
+        )
         model = (data.get("raw") or {}).get("model") or "Gateway/Controller"
-        name = (data.get("name") or self._dev_id)
+        name = data.get("name") or self._dev_id
         try:
             name = str(name).strip()
         except Exception:

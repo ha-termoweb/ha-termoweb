@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import importlib.util
+from pathlib import Path
 import sys
 import types
-from pathlib import Path
 
+import pytest
+
+from custom_components.termoweb.utils import float_or_none
 
 UTILS_PATH = (
     Path(__file__).resolve().parents[1] / "custom_components" / "termoweb" / "utils.py"
@@ -49,3 +52,25 @@ def test_extract_heater_addrs_deduplicates() -> None:
     nodes = {"nodes": [{"type": "htr", "addr": "A"}, {"type": "HTR", "addr": "A"}]}
 
     assert extract(nodes) == ["A"]
+
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        (None, None),
+        ("abc", None),
+        ("123", 123.0),
+        (5, 5.0),
+        ("   ", None),
+        (float("nan"), None),
+        (float("inf"), None),
+    ],
+)
+def test_float_or_none(value, expected) -> None:
+    assert float_or_none(value) == expected
+
+
+@pytest.mark.parametrize("value", ["nan", "inf"])
+def test_float_or_none_non_finite_strings(value) -> None:
+    assert float_or_none(value) is None

@@ -2,25 +2,25 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from homeassistant.components.climate import (
     ClimateEntity,
-    HVACMode,
-    HVACAction,
     ClimateEntityFeature,
+    HVACAction,
+    HVACMode,
 )
-from homeassistant.const import UnitOfTemperature, ATTR_TEMPERATURE
-from homeassistant.core import callback, ServiceCall
+from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
+from homeassistant.core import ServiceCall, callback
+from homeassistant.helpers import entity_platform
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
-from homeassistant.helpers import entity_platform
 import voluptuous as vol
 
 from .const import DOMAIN, signal_ws_data
-from .util import float_or_none
+from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     platform = entity_platform.async_get_current_platform()
 
     # Explicit callables ensure dispatch and let us add clear logs when invoked.
-    async def _svc_set_schedule(entity: "TermoWebHeater", call: ServiceCall) -> None:
+    async def _svc_set_schedule(entity: TermoWebHeater, call: ServiceCall) -> None:
         prog = call.data.get("prog")
         _LOGGER.info(
             "entity-service termoweb.set_schedule -> %s prog_len=%s",
@@ -68,7 +68,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         )
         await entity.async_set_schedule(prog)
 
-    async def _svc_set_preset_temperatures(entity: "TermoWebHeater", call: ServiceCall) -> None:
+    async def _svc_set_preset_temperatures(entity: TermoWebHeater, call: ServiceCall) -> None:
         if "ptemp" in call.data:
             args = {"ptemp": call.data.get("ptemp")}
         else:
@@ -127,12 +127,12 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
         self._attr_unique_id = f"{DOMAIN}:{dev_id}:htr:{addr}"
         self._unsub_ws = None
 
-        self._refresh_fallback: Optional[asyncio.Task] = None
+        self._refresh_fallback: asyncio.Task | None = None
 
         # pending write aggregation
-        self._pending_mode: Optional[str] = None
-        self._pending_stemp: Optional[float] = None
-        self._write_task: Optional[asyncio.Task] = None
+        self._pending_mode: str | None = None
+        self._pending_stemp: float | None = None
+        self._write_task: asyncio.Task | None = None
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -168,10 +168,10 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
         return "C" if u not in ("C", "F") else u
 
     @staticmethod
-    def _slot_label(v: int) -> Optional[str]:
+    def _slot_label(v: int) -> str | None:
         return {0: "cold", 1: "night", 2: "day"}.get(v)
 
-    def _current_prog_slot(self, s: dict[str, Any]) -> Optional[int]:
+    def _current_prog_slot(self, s: dict[str, Any]) -> int | None:
         prog = s.get("prog")
         if not isinstance(prog, list) or len(prog) < 168:
             return None
@@ -212,7 +212,7 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
         return HVACMode.HEAT
 
     @property
-    def hvac_action(self) -> Optional[HVACAction]:
+    def hvac_action(self) -> HVACAction | None:
         s = self._settings() or {}
         state = (s.get("state") or "").lower()
         if not state:
@@ -222,18 +222,18 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
         return HVACAction.HEATING
 
     @property
-    def preset_mode(self) -> Optional[str]:
+    def preset_mode(self) -> str | None:
         s = self._settings() or {}
         mode = (s.get("mode") or "").lower()
         return mode if mode in self._attr_preset_modes else None
 
     @property
-    def current_temperature(self) -> Optional[float]:
+    def current_temperature(self) -> float | None:
         s = self._settings() or {}
         return float_or_none(s.get("mtemp"))
 
     @property
-    def target_temperature(self) -> Optional[float]:
+    def target_temperature(self) -> float | None:
         s = self._settings() or {}
         return float_or_none(s.get("stemp"))
 

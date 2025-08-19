@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+from pathlib import Path
 import sys
 import types
-from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import MagicMock
+
 import pytest
 
 # Provide a minimal aiohttp stub for the module import
@@ -67,7 +68,7 @@ class MockResponse:
         status: int,
         json_data: Any,
         *,
-        headers: Dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
         text_data: str = "",
     ) -> None:
         self.status = status
@@ -77,7 +78,7 @@ class MockResponse:
         self.request_info = None
         self.history = ()
 
-    async def __aenter__(self) -> "MockResponse":
+    async def __aenter__(self) -> MockResponse:
         return self
 
     async def __aexit__(
