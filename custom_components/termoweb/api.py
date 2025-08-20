@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable
 import logging
 import time
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any
 
 import aiohttp
 
@@ -53,7 +54,7 @@ class TermoWebClient:
         self._session = session
         self._username = username
         self._password = password
-        self._access_token: Optional[str] = None
+        self._access_token: str | None = None
         self._token_obtained_at: float = 0.0
         self._token_expiry: float = 0.0
         self._lock = asyncio.Lock()
@@ -66,8 +67,7 @@ class TermoWebClient:
         ignore_statuses: Iterable[int] = (),
         **kwargs,
     ) -> Any:
-        """
-        Perform an HTTP request; return JSON when possible, else text.
+        """Perform an HTTP request; return JSON when possible, else text.
         Errors are logged WITHOUT secrets; callers receive raised exceptions.
         """
         headers = kwargs.pop("headers", {})
@@ -85,7 +85,7 @@ class TermoWebClient:
                     method, url, headers=headers, timeout=timeout, **kwargs
                 ) as resp:
                     ctype = resp.headers.get("Content-Type", "")
-                    body_text: Optional[str]
+                    body_text: str | None
                     try:
                         body_text = await resp.text()
                     except Exception:
@@ -105,19 +105,18 @@ class TermoWebClient:
                             resp.status,
                             _redact_bearer(body_text),
                         )
+                    elif API_LOG_PREVIEW:
+                        _LOGGER.debug(
+                            "HTTP %s -> %s, ctype=%s, body[0:200]=%r",
+                            url,
+                            resp.status,
+                            ctype,
+                            (_redact_bearer(body_text) or "")[:200],
+                        )
                     else:
-                        if API_LOG_PREVIEW:
-                            _LOGGER.debug(
-                                "HTTP %s -> %s, ctype=%s, body[0:200]=%r",
-                                url,
-                                resp.status,
-                                ctype,
-                                (_redact_bearer(body_text) or "")[:200],
-                            )
-                        else:
-                            _LOGGER.debug(
-                                "HTTP %s -> %s, ctype=%s", url, resp.status, ctype
-                            )
+                        _LOGGER.debug(
+                            "HTTP %s -> %s, ctype=%s", url, resp.status, ctype
+                        )
 
                     if resp.status == 401:
                         if attempt == 0:
@@ -235,7 +234,7 @@ class TermoWebClient:
                     self._token_expiry = self._token_obtained_at + 3600
                 return token
 
-    async def _authed_headers(self) -> Dict[str, str]:
+    async def _authed_headers(self) -> dict[str, str]:
         token = await self._ensure_token()
         return {
             "Authorization": f"Bearer {token}",
@@ -246,7 +245,7 @@ class TermoWebClient:
 
     # ----------------- Public API -----------------
 
-    async def list_devices(self) -> List[Dict[str, Any]]:
+    async def list_devices(self) -> list[dict[str, Any]]:
         """Return normalized device list: [{'dev_id', ...}, ...]."""
         headers = await self._authed_headers()
         data = await self._request("GET", DEVS_PATH, headers=headers)
@@ -263,7 +262,7 @@ class TermoWebClient:
         )
         return []
 
-    async def device_connected(self, dev_id: str) -> Optional[bool]:
+    async def device_connected(self, dev_id: str) -> bool | None:
         """Deprecated: connected endpoint often 404s; return None."""
         return None
 
@@ -284,18 +283,15 @@ class TermoWebClient:
         dev_id: str,
         addr: str | int,
         *,
-        mode: Optional[str] = None,  # "auto" | "manual" | "off"
-        stemp: Optional[float] = None,  # target setpoint (in current units)
-        prog: Optional[
-            List[int]
-        ] = None,  # full 168-element weekly program (0=cold,1=night,2=day)
-        ptemp: Optional[
-            List[float]
-        ] = None,  # preset temperatures [cold, night, day] (in current units)
+        mode: str | None = None,  # "auto" | "manual" | "off"
+        stemp: float | None = None,  # target setpoint (in current units)
+        prog: list[int]
+        | None = None,  # full 168-element weekly program (0=cold,1=night,2=day)
+        ptemp: list[float]
+        | None = None,  # preset temperatures [cold, night, day] (in current units)
         units: str = "C",
     ) -> Any:
-        """
-        Update heater settings.
+        """Update heater settings.
 
         Supported fields (all optional):
 
@@ -316,7 +312,7 @@ class TermoWebClient:
         """
 
         # Always include units
-        payload: Dict[str, Any] = {"units": units}
+        payload: dict[str, Any] = {"units": units}
 
         # Mode
         if mode is not None:
@@ -333,7 +329,7 @@ class TermoWebClient:
         if prog is not None:
             if not isinstance(prog, list) or len(prog) != 168:
                 raise ValueError("prog must be a list of 168 integers (0, 1, or 2)")
-            normalized: List[int] = []
+            normalized: list[int] = []
             for v in prog:
                 try:
                     iv = int(v)
@@ -350,7 +346,7 @@ class TermoWebClient:
                 raise ValueError(
                     "ptemp must be a list of three numeric values [cold, night, day]"
                 )
-            formatted: List[str] = []
+            formatted: list[str] = []
             for v in ptemp:
                 try:
                     formatted.append(f"{float(v):.1f}")
@@ -366,9 +362,9 @@ class TermoWebClient:
         self,
         dev_id: str,
         addr: str | int,
-        start: int | float,
-        end: int | float,
-    ) -> List[Dict[str, str | int]]:
+        start: float,
+        end: float,
+    ) -> list[dict[str, str | int]]:
         """Return heater samples as list of {"t", "counter"} dicts."""
         headers = await self._authed_headers()
         path = HTR_SAMPLES_PATH_FMT.format(dev_id=dev_id, addr=addr)
@@ -376,7 +372,7 @@ class TermoWebClient:
         data = await self._request("GET", path, headers=headers, params=params)
 
         if isinstance(data, dict) and isinstance(data.get("samples"), list):
-            samples: List[Dict[str, str | int]] = []
+            samples: list[dict[str, str | int]] = []
             for item in data["samples"]:
                 if not isinstance(item, dict):
                     _LOGGER.debug("Unexpected htr sample item: %r", item)
@@ -394,4 +390,3 @@ class TermoWebClient:
             type(data).__name__,
         )
         return []
-

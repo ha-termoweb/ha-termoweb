@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import asyncio
-import logging
 from datetime import timedelta
+import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 from aiohttp import ClientError
 from homeassistant.core import HomeAssistant
@@ -20,7 +19,7 @@ _LOGGER = logging.getLogger(__name__)
 HTR_SETTINGS_PER_CYCLE = 1
 
 
-def _as_float(value: Any) -> Optional[float]:
+def _as_float(value: Any) -> float | None:
     """Safely convert a value to float."""
     if isinstance(value, (int, float)):
         return float(value)
@@ -36,7 +35,7 @@ def _as_float(value: Any) -> Optional[float]:
 
 
 class TermoWebCoordinator(
-    DataUpdateCoordinator[Dict[str, Dict[str, Any]]]
+    DataUpdateCoordinator[dict[str, dict[str, Any]]]
 ):  # dev_id -> per-device data
     """Polls TermoWeb and exposes a per-device dict used by platforms."""
 
@@ -66,13 +65,13 @@ class TermoWebCoordinator(
     def _addrs(self) -> list[str]:
         return extract_heater_addrs(self._nodes)
 
-    async def _async_update_data(self) -> Dict[str, Dict[str, Any]]:
+    async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         dev_id = self._dev_id
         addrs = self._addrs()
         try:
             prev_dev = (self.data or {}).get(dev_id, {})
             prev_htr = prev_dev.get("htr") or {}
-            settings_map: Dict[str, Any] = dict(prev_htr.get("settings") or {})
+            settings_map: dict[str, Any] = dict(prev_htr.get("settings") or {})
 
             if addrs:
                 start = self._rr_index.get(dev_id, 0) % len(addrs)
@@ -89,7 +88,6 @@ class TermoWebCoordinator(
                             "Error fetching settings for heater %s: %s", addr, err, exc_info=err
                         )
                         # keep previous settings on error
-                        pass
                 self._rr_index[dev_id] = (start + count) % len(addrs)
 
             dev_name = (self._device.get("name") or f"Device {dev_id}").strip()
@@ -114,7 +112,7 @@ class TermoWebCoordinator(
 
             return result
 
-        except asyncio.TimeoutError as err:
+        except TimeoutError as err:
             raise UpdateFailed("API timeout") from err
         except TermoWebRateLimitError as err:
             self._backoff = min(
@@ -128,7 +126,7 @@ class TermoWebCoordinator(
 
 
 class TermoWebHeaterEnergyCoordinator(
-    DataUpdateCoordinator[Dict[str, Dict[str, Any]]]
+    DataUpdateCoordinator[dict[str, dict[str, Any]]]
 ):  # dev_id -> per-device data
     """Polls heater energy counters and exposes energy and power per heater."""
 
@@ -150,12 +148,12 @@ class TermoWebHeaterEnergyCoordinator(
         self._addrs = addrs
         self._last: dict[tuple[str, str], tuple[float, float]] = {}
 
-    async def _async_update_data(self) -> Dict[str, Dict[str, Any]]:
+    async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         dev_id = self._dev_id
         addrs = self._addrs
         try:
-            energy_map: Dict[str, float] = {}
-            power_map: Dict[str, float] = {}
+            energy_map: dict[str, float] = {}
+            power_map: dict[str, float] = {}
 
             for addr in addrs:
                 now = time.time()
@@ -198,7 +196,7 @@ class TermoWebHeaterEnergyCoordinator(
                 else:
                     self._last[(dev_id, addr)] = (t, counter)
 
-            result: Dict[str, Dict[str, Any]] = {
+            result: dict[str, dict[str, Any]] = {
                 dev_id: {
                     "dev_id": dev_id,
                     "htr": {
@@ -210,7 +208,7 @@ class TermoWebHeaterEnergyCoordinator(
 
             return result
 
-        except asyncio.TimeoutError as err:
+        except TimeoutError as err:
             raise UpdateFailed("API timeout") from err
         except (ClientError, TermoWebRateLimitError, TermoWebAuthError) as err:
             raise UpdateFailed(f"API error: {err}") from err

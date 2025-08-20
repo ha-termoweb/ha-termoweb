@@ -1,30 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 import json
 import logging
 import random
 import time
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .api import TermoWebClient
-from .const import (
-    API_BASE,
-    DOMAIN,
-    WS_NAMESPACE,
-    signal_ws_data,
-    signal_ws_status,
-)
+from .const import API_BASE, DOMAIN, WS_NAMESPACE, signal_ws_data, signal_ws_status
 from .utils import extract_heater_addrs
 
 _LOGGER = logging.getLogger(__name__)
 
-HandshakeResult = Tuple[str, int]  # (sid, heartbeat_timeout_s)
+HandshakeResult = tuple[str, int]  # (sid, heartbeat_timeout_s)
 
 
 class HandshakeError(RuntimeError):
@@ -40,12 +34,11 @@ class WSStats:
     frames_total: int = 0
     events_total: int = 0
     last_event_ts: float = 0.0
-    last_paths: List[str] | None = None
+    last_paths: list[str] | None = None
 
 
 class TermoWebWSLegacyClient:
-    """
-    Minimal read-only Socket.IO 0.9 client for TermoWeb cloud.
+    """Minimal read-only Socket.IO 0.9 client for TermoWeb cloud.
 
     Behavior:
       - GET /socket.io/1/ handshake (with token/dev_id query)
@@ -75,14 +68,14 @@ class TermoWebWSLegacyClient:
         self._client = api_client
         self._coordinator = coordinator
         self._session = session or api_client._session  # reuse HA session
-        self._task: Optional[asyncio.Task] = None
-        self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
+        self._task: asyncio.Task | None = None
+        self._ws: aiohttp.ClientWebSocketResponse | None = None
 
         self._closing = False
         self._connected_since: float | None = None
         self._healthy_since: float | None = None
         self._hb_send_interval: float = 27.0  # default; refined from handshake timeout
-        self._hb_task: Optional[asyncio.Task] = None
+        self._hb_task: asyncio.Task | None = None
 
         self._backoff_seq = [5, 10, 30, 120, 300]  # seconds
         self._backoff_idx = 0
@@ -223,8 +216,7 @@ class TermoWebWSLegacyClient:
     # ----------------- Protocol steps -----------------
 
     async def _handshake(self) -> HandshakeResult:
-        """
-        GET /socket.io/1/?token=<Bearer>&dev_id=<dev_id>&t=<ms>
+        """GET /socket.io/1/?token=<Bearer>&dev_id=<dev_id>&t=<ms>
         Returns: <sid>:<hb>:<disc>:websocket,xhr-polling
         """
         token = await self._get_token()
@@ -349,9 +341,8 @@ class TermoWebWSLegacyClient:
 
     # ----------------- Event handling -----------------
 
-    def _handle_event(self, evt: Dict[str, Any]) -> None:
-        """
-        Expecting: {"name": "data", "args": [ [ {"path": "...", "body": {...}}, ... ] ]}
+    def _handle_event(self, evt: dict[str, Any]) -> None:
+        """Expecting: {"name": "data", "args": [ [ {"path": "...", "body": {...}}, ... ] ]}
         """
         if not isinstance(evt, dict):
             return
@@ -363,11 +354,11 @@ class TermoWebWSLegacyClient:
         if not isinstance(batch, list):
             return
 
-        paths: List[str] = []
+        paths: list[str] = []
         # Apply updates to coordinator.data in-place to keep shape compatible with current entities.
         updated_nodes = False
-        updated_addrs: List[str] = []
-        sample_addrs: List[str] = []
+        updated_addrs: list[str] = []
+        sample_addrs: list[str] = []
 
         for item in batch:
             if not isinstance(item, dict):
@@ -379,7 +370,7 @@ class TermoWebWSLegacyClient:
             paths.append(path)
 
             # Normalize
-            dev_map: Dict[str, Any] = (self._coordinator.data or {}).get(self.dev_id) or {}
+            dev_map: dict[str, Any] = (self._coordinator.data or {}).get(self.dev_id) or {}
             if not dev_map:
                 # Seed minimal structure if coordinator has not put this dev yet
                 dev_map = {
@@ -409,7 +400,7 @@ class TermoWebWSLegacyClient:
             elif "/htr/" in path and path.endswith("/settings"):
                 # /api/v2/devs/{dev_id}/htr/{addr}/settings => push path uses '/htr/<addr>/settings'
                 addr = path.split("/htr/")[1].split("/")[0]
-                settings_map: Dict[str, Any] = dev_map.setdefault("htr", {}).setdefault("settings", {})
+                settings_map: dict[str, Any] = dev_map.setdefault("htr", {}).setdefault("settings", {})
                 if isinstance(body, dict):
                     settings_map[addr] = body
                     updated_addrs.append(addr)
@@ -417,7 +408,7 @@ class TermoWebWSLegacyClient:
             elif "/htr/" in path and path.endswith("/advanced_setup"):
                 # Store for diagnostics/future; entities ignore for now
                 addr = path.split("/htr/")[1].split("/")[0]
-                adv_map: Dict[str, Any] = dev_map.setdefault("htr", {}).setdefault("advanced", {})
+                adv_map: dict[str, Any] = dev_map.setdefault("htr", {}).setdefault("advanced", {})
                 if isinstance(body, dict):
                     adv_map[addr] = body
 
@@ -490,14 +481,14 @@ class TermoWebWSLegacyClient:
         s["status"] = status
         s["last_event_at"] = self._stats.last_event_ts or None
         s["healthy_since"] = self._healthy_since
-        s["healthy_minutes"] = int(((now - self._healthy_since) / 60)) if self._healthy_since else 0
+        s["healthy_minutes"] = int((now - self._healthy_since) / 60) if self._healthy_since else 0
         s["frames_total"] = self._stats.frames_total
         s["events_total"] = self._stats.events_total
 
         # Dispatch a status update so the hub entity & setup logic can react (e.g., stretch polling)
         async_dispatcher_send(self.hass, signal_ws_status(self.entry_id), {"dev_id": self.dev_id, "status": status})
 
-    def _mark_event(self, *, paths: Optional[List[str]]) -> None:
+    def _mark_event(self, *, paths: list[str] | None) -> None:
         now = time.time()
         self._stats.last_event_ts = now
         if paths:

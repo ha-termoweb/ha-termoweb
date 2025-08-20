@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
-import voluptuous as vol
 from aiohttp import ClientError
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry
@@ -11,14 +10,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import aiohttp_client
 from homeassistant.loader import async_get_integration
+import voluptuous as vol
 
-from .api import TermoWebClient, TermoWebAuthError, TermoWebRateLimitError
-from .const import (
-    DOMAIN,
-    DEFAULT_POLL_INTERVAL,
-    MIN_POLL_INTERVAL,
-    MAX_POLL_INTERVAL,
-)
+from .api import TermoWebAuthError, TermoWebClient, TermoWebRateLimitError
+from .const import DEFAULT_POLL_INTERVAL, DOMAIN, MAX_POLL_INTERVAL, MIN_POLL_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -103,7 +98,7 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Reconfigure username/password and poll interval (no use_push)."""
         entry_id = self.context.get("entry_id")
-        entry: Optional[ConfigEntry] = self.hass.config_entries.async_get_entry(entry_id) if entry_id else None
+        entry: ConfigEntry | None = self.hass.config_entries.async_get_entry(entry_id) if entry_id else None
         if entry is None:
             return self.async_abort(reason="no_config_entry")
 
@@ -174,7 +169,11 @@ class TermoWebOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        from .const import DEFAULT_POLL_INTERVAL, MIN_POLL_INTERVAL, MAX_POLL_INTERVAL  # local import to avoid circulars
+        from .const import (  # local import to avoid circulars
+            DEFAULT_POLL_INTERVAL,
+            MAX_POLL_INTERVAL,
+            MIN_POLL_INTERVAL,
+        )
         current_poll = int(self.entry.options.get("poll_interval", self.entry.data.get("poll_interval", DEFAULT_POLL_INTERVAL)))
         schema = vol.Schema(
             {
