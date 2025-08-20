@@ -309,12 +309,18 @@ class TermoWebWSLegacyClient:
 
         while True:
             msg = await ws.receive()
-            if msg.type == aiohttp.WSMsgType.CLOSED:
-                raise RuntimeError("ws closed")
-            if msg.type == aiohttp.WSMsgType.CLOSE:
-                raise RuntimeError("ws closing")
+            if msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSE):
+                exc = ws.exception()
+                if exc is not None:
+                    raise exc
+                raise RuntimeError(
+                    f"websocket closed: code={ws.close_code} reason={msg.extra}"
+                )
             if msg.type == aiohttp.WSMsgType.ERROR:
-                raise RuntimeError("ws error")
+                exc = ws.exception()
+                if exc is not None:
+                    raise exc
+                raise RuntimeError("websocket error")
             if msg.type not in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
                 continue
 
