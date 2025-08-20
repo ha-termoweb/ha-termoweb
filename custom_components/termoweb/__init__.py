@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable
+from datetime import UTC, datetime, timedelta, timezone
 import logging
 import time
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 
 # Import of recorder statistics helpers is deferred until runtime in
 # _store_statistics to avoid ImportError on Home Assistant versions
@@ -50,11 +51,11 @@ _LAST_SAMPLES_QUERY = 0.0
 
 def _iso_date(ts: int) -> str:
     """Convert unix timestamp to ISO date."""
-    return datetime.fromtimestamp(ts, timezone.utc).date().isoformat()
+    return datetime.fromtimestamp(ts, UTC).date().isoformat()
 
 
 def _store_statistics(
-    hass: HomeAssistant, metadata: Dict[str, Any], stats: List[Dict[str, Any]]
+    hass: HomeAssistant, metadata: dict[str, Any], stats: list[dict[str, Any]]
 ) -> None:
     """Insert statistics using recorder helpers.
 
@@ -90,10 +91,12 @@ def _store_statistics(
     stat_id: str = metadata["statistic_id"]
     domain, obj_id = stat_id.split(".", 1)
     ext_meta = dict(metadata)
-    ext_meta.update({
-        "statistic_id": f"{domain}:{obj_id}",
-        "source": domain,
-    })
+    ext_meta.update(
+        {
+            "statistic_id": f"{domain}:{obj_id}",
+            "source": domain,
+        }
+    )
     async_add_external_statistics(hass, ext_meta, stats)
 
 
@@ -134,7 +137,7 @@ async def _async_import_energy_history(
     # consumption readings in the Energy dashboard), we import only up to
     # the start of today (00:00 in UTC).  Live polling of the sensors
     # will provide today's consumption incrementally.
-    now_dt = datetime.now(timezone.utc)
+    now_dt = datetime.now(UTC)
     # Compute the start of today (midnight) in UTC.  We subtract one second from
     # this value when determining the end of the import window so that the
     # 00:00 sample of the current day is not included.  Without this
@@ -151,7 +154,7 @@ async def _async_import_energy_history(
             entry.options.get(OPTION_MAX_HISTORY_RETRIEVED, DEFAULT_MAX_HISTORY_DAYS)
         )
     target = now_ts - max_days * day
-    progress: Dict[str, int] = dict(
+    progress: dict[str, int] = dict(
         entry.options.get(OPTION_ENERGY_HISTORY_PROGRESS, {})
     )
 
@@ -171,7 +174,9 @@ async def _async_import_energy_history(
 
     _LOGGER.debug("%s: importing hourly samples down to %s", dev_id, _iso_date(target))
 
-    async def _rate_limited_fetch(addr: str, start: int, stop: int) -> list[dict[str, Any]]:
+    async def _rate_limited_fetch(
+        addr: str, start: int, stop: int
+    ) -> list[dict[str, Any]]:
         global _LAST_SAMPLES_QUERY
         async with _SAMPLES_QUERY_LOCK:
             now = time.monotonic()
@@ -237,7 +242,7 @@ async def _async_import_energy_history(
 
         # Determine existing cumulative sum before the earliest sample
         earliest_ts = int(all_samples_sorted[0].get("t", 0))
-        earliest_start_dt = datetime.fromtimestamp(earliest_ts, timezone.utc).replace(
+        earliest_start_dt = datetime.fromtimestamp(earliest_ts, UTC).replace(
             minute=0, second=0, microsecond=0
         )
         sum_offset = 0.0
@@ -254,9 +259,9 @@ async def _async_import_energy_history(
         except Exception as err:  # pragma: no cover - defensive
             _LOGGER.debug("%s: error fetching last statistics: %s", addr, err)
 
-        stats: List[Dict[str, Any]] = []
+        stats: list[dict[str, Any]] = []
         sum_kwh: float = 0.0
-        previous_kwh: Optional[float] = None
+        previous_kwh: float | None = None
         for sample in all_samples_sorted:
             t = sample.get("t")
             counter = sample.get("counter")
@@ -267,7 +272,7 @@ async def _async_import_energy_history(
                 _LOGGER.debug("%s: invalid sample %s", addr, sample)
                 continue
             # Align start time to the top of the hour
-            start_dt = datetime.fromtimestamp(ts, timezone.utc).replace(
+            start_dt = datetime.fromtimestamp(ts, UTC).replace(
                 minute=0, second=0, microsecond=0
             )
             if previous_kwh is None:
@@ -322,7 +327,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     username = entry.data["username"]
     password = entry.data["password"]
     base_interval = int(
-        entry.options.get("poll_interval", entry.data.get("poll_interval", DEFAULT_POLL_INTERVAL))
+        entry.options.get(
+            "poll_interval", entry.data.get("poll_interval", DEFAULT_POLL_INTERVAL)
+        )
     )
 
     # DRY version: read from manifest
@@ -335,7 +342,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except TermoWebAuthError as err:
         _LOGGER.info("list_devices auth error: %s", err)
         raise ConfigEntryAuthFailed from err
-    except (ClientError, TermoWebRateLimitError, asyncio.TimeoutError) as err:
+    except (TimeoutError, ClientError, TermoWebRateLimitError) as err:
         _LOGGER.info("list_devices connection error: %s", err)
         raise ConfigEntryNotReady from err
 
@@ -369,8 +376,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     async def _start_ws(dev_id: str) -> None:
-        tasks: Dict[str, asyncio.Task] = data["ws_tasks"]
-        clients: Dict[str, TermoWebWSLegacyClient] = data["ws_clients"]
+        tasks: dict[str, asyncio.Task] = data["ws_tasks"]
+        clients: dict[str, TermoWebWSLegacyClient] = data["ws_clients"]
         if dev_id in tasks and not tasks[dev_id].done():
             return
         ws_client = clients.get(dev_id)
@@ -390,12 +397,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     def _recalc_poll_interval() -> None:
         """Stretch polling if all running WS clients report healthy; else restore."""
         stretched = data["stretched"]
-        tasks: Dict[str, asyncio.Task] = data["ws_tasks"]
-        state: Dict[str, Dict[str, Any]] = data["ws_state"]
+        tasks: dict[str, asyncio.Task] = data["ws_tasks"]
+        state: dict[str, dict[str, Any]] = data["ws_state"]
 
         if not tasks:
             if stretched:
-                coordinator.update_interval = timedelta(seconds=data["base_poll_interval"])
+                coordinator.update_interval = timedelta(
+                    seconds=data["base_poll_interval"]
+                )
                 data["stretched"] = False
             return
 
@@ -413,13 +422,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             coordinator.update_interval = timedelta(seconds=STRETCHED_POLL_INTERVAL)
             data["stretched"] = True
             _LOGGER.info(
-                "WS: healthy for ≥5m; stretching REST polling to %ss", STRETCHED_POLL_INTERVAL
+                "WS: healthy for ≥5m; stretching REST polling to %ss",
+                STRETCHED_POLL_INTERVAL,
             )
         elif (not all_healthy) and stretched:
             coordinator.update_interval = timedelta(seconds=data["base_poll_interval"])
             data["stretched"] = False
             _LOGGER.info(
-                "WS: no longer healthy; restoring REST polling to %ss", data["base_poll_interval"]
+                "WS: no longer healthy; restoring REST polling to %ss",
+                data["base_poll_interval"],
             )
 
     data["recalc_poll"] = _recalc_poll_interval
@@ -427,7 +438,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     def _on_ws_status(_payload: dict) -> None:
         _recalc_poll_interval()
 
-    unsub = async_dispatcher_connect(hass, signal_ws_status(entry.entry_id), _on_ws_status)
+    unsub = async_dispatcher_connect(
+        hass, signal_ws_status(entry.entry_id), _on_ws_status
+    )
     data["unsub_ws_status"] = unsub
 
     # First refresh (inventory etc.)
@@ -457,7 +470,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ent_reg = er.async_get(hass)
             if isinstance(ent_ids, str):
                 ent_ids = [ent_ids]
-            entry_map: Dict[str, set[str]] = {}
+            entry_map: dict[str, set[str]] = {}
             for eid in ent_ids:
                 er_ent = ent_reg.async_get(eid)
                 if not er_ent or er_ent.platform != DOMAIN:

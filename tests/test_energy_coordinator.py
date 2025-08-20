@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+from pathlib import Path
 import sys
 import time as _time
 import types
-from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -48,7 +48,7 @@ class DataUpdateCoordinator:  # pragma: no cover - minimal stub
         self.logger = logger
         self.name = name
         self.update_interval = update_interval
-        self.data: Dict[str, Dict[str, Any]] | None = None
+        self.data: dict[str, dict[str, Any]] | None = None
 
     async def async_refresh(self) -> None:
         self.data = await self._async_update_data()
@@ -98,7 +98,7 @@ sys.modules[f"{package}.api"] = api_stub
 
 # Dispatcher stub
 ha_dispatcher = types.ModuleType("homeassistant.helpers.dispatcher")
-_dispatchers: Dict[str, list] = {}
+_dispatchers: dict[str, list] = {}
 
 
 def async_dispatcher_connect(_hass, signal: str, callback):  # pragma: no cover

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -16,7 +16,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_data
 from .coordinator import TermoWebHeaterEnergyCoordinator
-from .util import float_or_none
+from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     uid_total = f"{DOMAIN}:{dev_id}:energy_total"
     new_entities.append(
         TermoWebTotalEnergy(
-        
+
             energy_coordinator,
             entry.entry_id,
             dev_id,
@@ -148,7 +148,7 @@ class TermoWebHeaterTemp(CoordinatorEntity, SensorEntity):
         return d.get("nodes") is not None
 
     @property
-    def native_value(self) -> Optional[float]:
+    def native_value(self) -> float | None:
         s = self._settings() or {}
         return float_or_none(s.get("mtemp"))
 
@@ -212,7 +212,7 @@ class TermoWebHeaterEnergyTotal(CoordinatorEntity, SensorEntity):
         return d is not None
 
     @property
-    def native_value(self) -> Optional[float]:
+    def native_value(self) -> float | None:
         d = (self.coordinator.data or {}).get(self._dev_id, {})
         energy = (d.get("htr") or {}).get("energy") or {}
         val = energy.get(self._addr)
@@ -278,7 +278,7 @@ class TermoWebHeaterPower(CoordinatorEntity, SensorEntity):
         return d is not None
 
     @property
-    def native_value(self) -> Optional[float]:
+    def native_value(self) -> float | None:
         d = (self.coordinator.data or {}).get(self._dev_id, {})
         power = (d.get("htr") or {}).get("power") or {}
         val = power.get(self._addr)
@@ -339,7 +339,7 @@ class TermoWebTotalEnergy(CoordinatorEntity, SensorEntity):
         return d is not None
 
     @property
-    def native_value(self) -> Optional[float]:
+    def native_value(self) -> float | None:
         d = (self.coordinator.data or {}).get(self._dev_id, {})
         energy = (d.get("htr") or {}).get("energy") or {}
         total = 0.0
