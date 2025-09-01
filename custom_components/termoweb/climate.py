@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, cast
+from typing import Any
 
 from homeassistant.components.climate import (
     ClimateEntity,
@@ -23,10 +23,6 @@ from .const import DOMAIN, signal_ws_data
 from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
-
-# Ensure a MANUAL HVAC mode constant is available
-if not hasattr(HVACMode, "MANUAL"):
-    HVACMode.MANUAL = cast(HVACMode, "manual")  # type: ignore[attr-defined]
 
 # Small debounce so multiple UI events coalesce
 _WRITE_DEBOUNCE = 0.2
@@ -117,7 +113,7 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
     """HA climate entity representing a single TermoWeb heater."""
 
     _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
-    _attr_hvac_modes = [HVACMode.OFF, HVACMode.MANUAL, HVACMode.AUTO]
+    _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT, HVACMode.AUTO]
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
 
     def __init__(self, coordinator, entry_id: str, dev_id: str, addr: str, name: str) -> None:
@@ -213,7 +209,9 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
             return HVACMode.OFF
         if mode == "auto":
             return HVACMode.AUTO
-        return HVACMode.MANUAL
+        if mode == "manual":
+            return HVACMode.HEAT
+        return HVACMode.HEAT
 
     @property
     def hvac_action(self) -> HVACAction | None:
@@ -391,13 +389,13 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
 
         t = max(5.0, min(30.0, t))
         self._pending_stemp = t
-        self._pending_mode = HVACMode.MANUAL  # required by backend for setpoint acceptance
+        self._pending_mode = HVACMode.HEAT  # required by backend for setpoint acceptance
         _LOGGER.info(
             "Queue write: dev=%s addr=%s stemp=%.1f mode=%s (batching %.1fs)",
             self._dev_id,
             self._addr,
             t,
-            HVACMode.MANUAL,
+            HVACMode.HEAT,
             _WRITE_DEBOUNCE,
         )
         await self._ensure_write_task()
@@ -428,8 +426,8 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
             await self._ensure_write_task()
             return
 
-        if hvac_mode == HVACMode.MANUAL:
-            self._pending_mode = HVACMode.MANUAL
+        if hvac_mode == HVACMode.HEAT:
+            self._pending_mode = HVACMode.HEAT
             if self._pending_stemp is None:
                 cur = self.target_temperature
                 if cur is not None:
@@ -438,7 +436,7 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
                 "Queue write: dev=%s addr=%s mode=%s stemp=%s (batching %.1fs)",
                 self._dev_id,
                 self._addr,
-                HVACMode.MANUAL,
+                HVACMode.HEAT,
                 self._pending_stemp,
                 _WRITE_DEBOUNCE,
             )
@@ -464,9 +462,9 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
         # Normalize to backend rules:
         # - If stemp present but mode is not, force manual.
         # - If mode=manual but stemp missing, include current target.
-        if stemp is not None and (mode is None or mode != HVACMode.MANUAL):
-            mode = HVACMode.MANUAL
-        if mode == HVACMode.MANUAL and stemp is None:
+        if stemp is not None and (mode is None or mode != HVACMode.HEAT):
+            mode = HVACMode.HEAT
+        if mode == HVACMode.HEAT and stemp is None:
             current = self.target_temperature
             if current is not None:
                 stemp = float(current)
@@ -475,16 +473,27 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
             return
 
         client = self._client()
+        mode_api = None
+        if mode is not None:
+            mode_api = {
+                HVACMode.OFF: "off",
+                HVACMode.AUTO: "auto",
+                HVACMode.HEAT: "manual",
+            }.get(mode, str(mode))
         try:
             _LOGGER.info(
                 "POST htr settings dev=%s addr=%s mode=%s stemp=%s",
                 self._dev_id,
                 self._addr,
-                mode,
+                mode_api,
                 stemp,
             )
             await client.set_htr_settings(
-                self._dev_id, self._addr, mode=mode, stemp=stemp, units=self._units()
+                self._dev_id,
+                self._addr,
+                mode=mode_api,
+                stemp=stemp,
+                units=self._units(),
             )
         except Exception as e:
             status = getattr(e, "status", None)
@@ -493,7 +502,7 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
                 "Write failed dev=%s addr=%s mode=%s stemp=%s: status=%s body=%s",
                 self._dev_id,
                 self._addr,
-                mode,
+                mode_api,
                 stemp,
                 status,
                 (str(body)[:200] if body else ""),
