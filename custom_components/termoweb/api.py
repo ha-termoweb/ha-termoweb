@@ -316,7 +316,10 @@ class TermoWebClient:
 
         # Mode
         if mode is not None:
-            payload["mode"] = mode
+            mode_str = str(mode).lower()
+            if mode_str == "heat":
+                mode_str = "manual"
+            payload["mode"] = mode_str
 
         # Manual setpoint – format as string with one decimal
         if stemp is not None:
