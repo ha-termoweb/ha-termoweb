@@ -112,11 +112,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
 class TermoWebHeater(CoordinatorEntity, ClimateEntity):
     """HA climate entity representing a single TermoWeb heater."""
 
-    _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.PRESET_MODE
-    _attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
+    _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
+    _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT, HVACMode.AUTO]
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
-    # Server exposes "auto" (program) and "manual". "off" is an hvac_mode.
-    _attr_preset_modes = ["auto", "manual"]
 
     def __init__(self, coordinator, entry_id: str, dev_id: str, addr: str, name: str) -> None:
         super().__init__(coordinator)
@@ -130,7 +128,7 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
         self._refresh_fallback: asyncio.Task | None = None
 
         # pending write aggregation
-        self._pending_mode: str | None = None
+        self._pending_mode: HVACMode | None = None
         self._pending_stemp: float | None = None
         self._write_task: asyncio.Task | None = None
 
@@ -209,6 +207,10 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
         mode = (s.get("mode") or "").lower()
         if mode == "off":
             return HVACMode.OFF
+        if mode == "auto":
+            return HVACMode.AUTO
+        if mode == "manual":
+            return HVACMode.HEAT
         return HVACMode.HEAT
 
     @property
@@ -220,12 +222,6 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
         if state in ("off", "idle", "standby"):
             return HVACAction.IDLE if self.hvac_mode != HVACMode.OFF else HVACAction.OFF
         return HVACAction.HEATING
-
-    @property
-    def preset_mode(self) -> str | None:
-        s = self._settings() or {}
-        mode = (s.get("mode") or "").lower()
-        return mode if mode in self._attr_preset_modes else None
 
     @property
     def current_temperature(self) -> float | None:
@@ -247,9 +243,12 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
 
     @property
     def icon(self) -> str | None:
-        """Dynamic radiator icon: disabled when OFF, radiator when heating, radiator (idle) otherwise."""
-        if self.hvac_mode == HVACMode.OFF:
+        """Dynamic icon: calendar-clock for AUTO, radiator otherwise."""
+        mode = self.hvac_mode
+        if mode == HVACMode.OFF:
             return "mdi:radiator-disabled"
+        if mode == HVACMode.AUTO:
+            return "mdi:calendar-clock"
         if self.hvac_action == HVACAction.HEATING:
             return "mdi:radiator"
         return "mdi:radiator"
@@ -390,53 +389,61 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
 
         t = max(5.0, min(30.0, t))
         self._pending_stemp = t
-        self._pending_mode = "manual"  # required by backend for setpoint acceptance
+        self._pending_mode = HVACMode.HEAT  # required by backend for setpoint acceptance
         _LOGGER.info(
-            "Queue write: dev=%s addr=%s stemp=%.1f mode=manual (batching %.1fs)",
+            "Queue write: dev=%s addr=%s stemp=%.1f mode=%s (batching %.1fs)",
             self._dev_id,
             self._addr,
             t,
+            HVACMode.HEAT,
             _WRITE_DEBOUNCE,
         )
         await self._ensure_write_task()
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        """Set off/heat. For HEAT prefer 'auto' unless user changes setpoint or preset."""
+        """Post off/auto/manual."""
         if hvac_mode == HVACMode.OFF:
-            self._pending_mode = "off"
-        else:
-            self._pending_mode = "auto"
-        _LOGGER.info(
-            "Queue write: dev=%s addr=%s mode=%s (batching %.1fs)",
-            self._dev_id,
-            self._addr,
-            self._pending_mode,
-            _WRITE_DEBOUNCE,
-        )
-        await self._ensure_write_task()
-
-    async def async_set_preset_mode(self, preset_mode: str) -> None:
-        """Set 'auto' or 'manual'. For 'manual' include a setpoint."""
-        preset_mode = (preset_mode or "").lower()
-        if preset_mode not in self._attr_preset_modes:
-            _LOGGER.error("Unsupported preset_mode=%r", preset_mode)
+            self._pending_mode = HVACMode.OFF
+            _LOGGER.info(
+                "Queue write: dev=%s addr=%s mode=%s (batching %.1fs)",
+                self._dev_id,
+                self._addr,
+                HVACMode.OFF,
+                _WRITE_DEBOUNCE,
+            )
+            await self._ensure_write_task()
             return
 
-        self._pending_mode = preset_mode
-        if preset_mode == "manual" and self._pending_stemp is None:
-            cur = self.target_temperature
-            if cur is not None:
-                self._pending_stemp = float(cur)
+        if hvac_mode == HVACMode.AUTO:
+            self._pending_mode = HVACMode.AUTO
+            _LOGGER.info(
+                "Queue write: dev=%s addr=%s mode=%s (batching %.1fs)",
+                self._dev_id,
+                self._addr,
+                HVACMode.AUTO,
+                _WRITE_DEBOUNCE,
+            )
+            await self._ensure_write_task()
+            return
 
-        _LOGGER.info(
-            "Queue write: dev=%s addr=%s mode=%s stemp=%s (batching %.1fs)",
-            self._dev_id,
-            self._addr,
-            self._pending_mode,
-            self._pending_stemp,
-            _WRITE_DEBOUNCE,
-        )
-        await self._ensure_write_task()
+        if hvac_mode == HVACMode.HEAT:
+            self._pending_mode = HVACMode.HEAT
+            if self._pending_stemp is None:
+                cur = self.target_temperature
+                if cur is not None:
+                    self._pending_stemp = float(cur)
+            _LOGGER.info(
+                "Queue write: dev=%s addr=%s mode=%s stemp=%s (batching %.1fs)",
+                self._dev_id,
+                self._addr,
+                HVACMode.HEAT,
+                self._pending_stemp,
+                _WRITE_DEBOUNCE,
+            )
+            await self._ensure_write_task()
+            return
+
+        _LOGGER.error("Unsupported hvac_mode=%s", hvac_mode)
 
     async def _ensure_write_task(self) -> None:
         if self._write_task and not self._write_task.done():
@@ -455,9 +462,9 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
         # Normalize to backend rules:
         # - If stemp present but mode is not, force manual.
         # - If mode=manual but stemp missing, include current target.
-        if stemp is not None and (mode is None or mode != "manual"):
-            mode = "manual"
-        if mode == "manual" and stemp is None:
+        if stemp is not None and (mode is None or mode != HVACMode.HEAT):
+            mode = HVACMode.HEAT
+        if mode == HVACMode.HEAT and stemp is None:
             current = self.target_temperature
             if current is not None:
                 stemp = float(current)
@@ -466,16 +473,27 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
             return
 
         client = self._client()
+        mode_api = None
+        if mode is not None:
+            mode_api = {
+                HVACMode.OFF: "off",
+                HVACMode.AUTO: "auto",
+                HVACMode.HEAT: "manual",
+            }.get(mode, str(mode))
         try:
             _LOGGER.info(
                 "POST htr settings dev=%s addr=%s mode=%s stemp=%s",
                 self._dev_id,
                 self._addr,
-                mode,
+                mode_api,
                 stemp,
             )
             await client.set_htr_settings(
-                self._dev_id, self._addr, mode=mode, stemp=stemp, units=self._units()
+                self._dev_id,
+                self._addr,
+                mode=mode_api,
+                stemp=stemp,
+                units=self._units(),
             )
         except Exception as e:
             status = getattr(e, "status", None)
@@ -484,7 +502,7 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
                 "Write failed dev=%s addr=%s mode=%s stemp=%s: status=%s body=%s",
                 self._dev_id,
                 self._addr,
-                mode,
+                mode_api,
                 stemp,
                 status,
                 (str(body)[:200] if body else ""),
