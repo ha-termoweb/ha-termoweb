@@ -227,8 +227,12 @@ def test_coordinator_and_sensors() -> None:
         power = coord.data["1"]["htr"]["power"]["A"]
         assert power == pytest.approx(2000.0, rel=1e-3)
 
-        energy_sensor = TermoWebHeaterEnergyTotal(coord, "entry", "1", "A", "Energy", "e1")
-        power_sensor = TermoWebHeaterPower(coord, "entry", "1", "A", "Power", "p1")
+        energy_sensor = TermoWebHeaterEnergyTotal(
+            coord, "entry", "1", "A", "Energy", "e1", "Heater"
+        )
+        power_sensor = TermoWebHeaterPower(
+            coord, "entry", "1", "A", "Power", "p1", "Heater"
+        )
         energy_sensor.hass = power_sensor.hass = hass
         await energy_sensor.async_added_to_hass()
         await power_sensor.async_added_to_hass()

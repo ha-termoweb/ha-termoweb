@@ -54,7 +54,13 @@ async def async_setup_entry(hass, entry, async_add_entities):
         uid_temp = f"{DOMAIN}:{dev_id}:htr:{addr}:temp"
         new_entities.append(
             TermoWebHeaterTemp(
-                coordinator, entry.entry_id, dev_id, addr, f"{base_name} Temperature", uid_temp
+                coordinator,
+                entry.entry_id,
+                dev_id,
+                addr,
+                f"{base_name} Temperature",
+                uid_temp,
+                base_name,
             )
         )
         uid_energy = f"{DOMAIN}:{dev_id}:htr:{addr}:energy"
@@ -66,6 +72,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 addr,
                 f"{base_name} Energy",
                 uid_energy,
+                base_name,
             )
         )
         uid_power = f"{DOMAIN}:{dev_id}:htr:{addr}:power"
@@ -77,6 +84,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 addr,
                 f"{base_name} Power",
                 uid_power,
+                base_name,
             )
         )
 
@@ -104,13 +112,23 @@ class TermoWebHeaterTemp(CoordinatorEntity, SensorEntity):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
 
-    def __init__(self, coordinator, entry_id: str, dev_id: str, addr: str, name: str, unique_id: str) -> None:
+    def __init__(
+        self,
+        coordinator,
+        entry_id: str,
+        dev_id: str,
+        addr: str,
+        name: str,
+        unique_id: str,
+        device_name: str,
+    ) -> None:
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._dev_id = dev_id
         self._addr = addr
         self._attr_name = name
         self._attr_unique_id = unique_id
+        self._device_name = device_name
         self._unsub_ws = None
 
     async def async_added_to_hass(self) -> None:
@@ -122,8 +140,13 @@ class TermoWebHeaterTemp(CoordinatorEntity, SensorEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
-        # Attach to the existing hub device (like climate + button)
-        return DeviceInfo(identifiers={(DOMAIN, self._dev_id)})
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._dev_id, self._addr)},
+            name=self._device_name,
+            manufacturer="TermoWeb",
+            model="Heater",
+            via_device=(DOMAIN, self._dev_id),
+        )
 
     def _settings(self) -> dict[str, Any] | None:
         d = (self.coordinator.data or {}).get(self._dev_id, {})
@@ -177,6 +200,7 @@ class TermoWebHeaterEnergyTotal(CoordinatorEntity, SensorEntity):
         addr: str,
         name: str,
         unique_id: str,
+        device_name: str,
     ) -> None:
         super().__init__(coordinator)
         self._entry_id = entry_id
@@ -184,6 +208,7 @@ class TermoWebHeaterEnergyTotal(CoordinatorEntity, SensorEntity):
         self._addr = addr
         self._attr_name = name
         self._attr_unique_id = unique_id
+        self._device_name = device_name
         self._unsub_ws = None
 
     async def async_added_to_hass(self) -> None:
@@ -195,7 +220,13 @@ class TermoWebHeaterEnergyTotal(CoordinatorEntity, SensorEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
-        return DeviceInfo(identifiers={(DOMAIN, self._dev_id)})
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._dev_id, self._addr)},
+            name=self._device_name,
+            manufacturer="TermoWeb",
+            model="Heater",
+            via_device=(DOMAIN, self._dev_id),
+        )
 
     @callback
     def _on_ws_data(self, payload: dict) -> None:
@@ -243,6 +274,7 @@ class TermoWebHeaterPower(CoordinatorEntity, SensorEntity):
         addr: str,
         name: str,
         unique_id: str,
+        device_name: str,
     ) -> None:
         super().__init__(coordinator)
         self._entry_id = entry_id
@@ -250,6 +282,7 @@ class TermoWebHeaterPower(CoordinatorEntity, SensorEntity):
         self._addr = addr
         self._attr_name = name
         self._attr_unique_id = unique_id
+        self._device_name = device_name
         self._unsub_ws = None
 
     async def async_added_to_hass(self) -> None:
@@ -261,7 +294,13 @@ class TermoWebHeaterPower(CoordinatorEntity, SensorEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
-        return DeviceInfo(identifiers={(DOMAIN, self._dev_id)})
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._dev_id, self._addr)},
+            name=self._device_name,
+            manufacturer="TermoWeb",
+            model="Heater",
+            via_device=(DOMAIN, self._dev_id),
+        )
 
     @callback
     def _on_ws_data(self, payload: dict) -> None:

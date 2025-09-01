@@ -92,7 +92,7 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._abort_if_unique_id_configured()
 
         data = {"username": username, "password": password, "poll_interval": poll_interval}
-        title = f"Termoweb ({username})"
+        title = f"TermoWeb ({username})"
         return self.async_create_entry(title=title, data=data)
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> FlowResult:

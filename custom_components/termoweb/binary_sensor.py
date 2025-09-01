@@ -41,13 +41,7 @@ class TermoWebDeviceOnlineBinarySensor(
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._dev_id = str(dev_id)
-        data = coordinator.data.get(self._dev_id, {}) or {}
-        base_name = data.get("name") or self._dev_id
-        try:
-            base_name = str(base_name).strip()
-        except Exception:
-            base_name = str(self._dev_id)
-        self._attr_name = f"{base_name} Online"
+        self._attr_name = "TermoWeb Gateway Online"
         self._attr_unique_id = f"{self._dev_id}_online"
         self._unsub_ws = None
 
@@ -74,15 +68,10 @@ class TermoWebDeviceOnlineBinarySensor(
             "version"
         )
         model = (data.get("raw") or {}).get("model") or "Gateway/Controller"
-        name = data.get("name") or self._dev_id
-        try:
-            name = str(name).strip()
-        except Exception:
-            name = str(self._dev_id)
         return DeviceInfo(
             identifiers={(DOMAIN, self._dev_id)},
-            name=name,
-            manufacturer="ATC / Termoweb",
+            name="TermoWeb Gateway",
+            manufacturer="TermoWeb",
             model=str(model),
             sw_version=str(version) if version is not None else None,
             configuration_url="https://control.termoweb.net",

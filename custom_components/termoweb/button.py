@@ -32,7 +32,13 @@ class TermoWebRefreshButton(CoordinatorEntity, ButtonEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
-        return DeviceInfo(identifiers={(DOMAIN, self._dev_id)})
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._dev_id)},
+            name="TermoWeb Gateway",
+            manufacturer="TermoWeb",
+            model="Gateway/Controller",
+            configuration_url="https://control.termoweb.net",
+        )
 
     async def async_press(self) -> None:
         await self.coordinator.async_request_refresh()
