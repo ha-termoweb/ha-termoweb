@@ -211,3 +211,28 @@ def test_request_retries_on_401() -> None:
         assert second_headers["Authorization"] == "Bearer new"
 
     asyncio.run(_run())
+
+
+def test_set_htr_settings_translates_heat(monkeypatch) -> None:
+    async def _run() -> None:
+        session = MagicMock()
+        client = TermoWebClient(session, "user", "pass")
+
+        async def fake_headers() -> dict[str, str]:
+            return {}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        captured: dict[str, Any] = {}
+
+        async def fake_request(method: str, path: str, **kwargs) -> Any:
+            captured["json"] = kwargs.get("json")
+            return {}
+
+        monkeypatch.setattr(client, "_request", fake_request)
+
+        await client.set_htr_settings("dev", 1, mode="heat", stemp=21.0)
+
+        assert captured["json"]["mode"] == "manual"
+
+    asyncio.run(_run())
