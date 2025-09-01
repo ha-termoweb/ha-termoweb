@@ -141,6 +141,14 @@ class SensorEntity:  # pragma: no cover - minimal entity
     def native_unit_of_measurement(self) -> str | None:
         return getattr(self, "_attr_native_unit_of_measurement", None)
 
+    @property
+    def name(self) -> str | None:
+        return getattr(self, "_attr_name", None)
+
+    @property
+    def has_entity_name(self) -> bool:
+        return getattr(self, "_attr_has_entity_name", False)
+
 
 class SensorDeviceClass:  # pragma: no cover - simple container
     ENERGY = "energy"
@@ -240,9 +248,13 @@ def test_coordinator_and_sensors() -> None:
         assert energy_sensor.device_class == SensorDeviceClass.ENERGY
         assert energy_sensor.state_class == SensorStateClass.TOTAL_INCREASING
         assert energy_sensor.native_unit_of_measurement == "kWh"
+        assert energy_sensor.name == "Energy"
+        assert energy_sensor.has_entity_name is True
 
         assert energy_sensor.native_value == pytest.approx(0.0015)
         assert power_sensor.native_value == pytest.approx(2000.0, rel=1e-3)
+        assert power_sensor.name == "Power"
+        assert power_sensor.has_entity_name is True
 
         first_value: float = energy_sensor.native_value  # type: ignore[assignment]
 

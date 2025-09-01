@@ -70,7 +70,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 entry.entry_id,
                 dev_id,
                 addr,
-                f"{base_name} Energy",
+                "Energy",
                 uid_energy,
                 base_name,
             )
@@ -82,7 +82,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 entry.entry_id,
                 dev_id,
                 addr,
-                f"{base_name} Power",
+                "Power",
                 uid_power,
                 base_name,
             )
@@ -191,6 +191,7 @@ class TermoWebHeaterEnergyTotal(CoordinatorEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_native_unit_of_measurement = "kWh"
+    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -265,6 +266,7 @@ class TermoWebHeaterPower(CoordinatorEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "W"
+    _attr_has_entity_name = True
 
     def __init__(
         self,
