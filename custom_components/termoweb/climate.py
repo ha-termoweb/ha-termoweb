@@ -147,7 +147,13 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
-        return DeviceInfo(identifiers={(DOMAIN, self._dev_id)})
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._dev_id, self._addr)},
+            name=self._attr_name,
+            manufacturer="TermoWeb",
+            model="Heater",
+            via_device=(DOMAIN, self._dev_id),
+        )
 
     # -------------------- Helpers --------------------
     def _client(self):

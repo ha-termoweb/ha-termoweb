@@ -19,15 +19,15 @@ For someone who runs Home Assistant and already uses the **TermoWeb** mobile app
 
 These product lines are documented to work with the **TermoWeb** portal/app:
 
-- **S&P — Soler & Palau**: “**Termoweb**” kits and **EMI-TECH Termoweb** radiators.  
-- **Ecotermi / Linea Plus**: **Serie Termoweb** radiators.  
+- **S&P — Soler & Palau**: “**TermoWeb**” kits and **EMI-TECH TermoWeb** radiators.
+- **Ecotermi / Linea Plus**: **Serie TermoWeb** radiators.
 - **EHC — Electric Heating Company**: **eco SAVE** Smart Gateway kits that register on the TermoWeb portal.
 - **ATC (UK/Ireland)**: **Sun Ray Wifi** radiators with Wifi gateway.
 
 
 > If a brand isn’t listed but the user signs in at **control.termoweb.net** (or **control2.termoweb.net**) with an app called **TermoWeb**, this integration should work.
 
-_Not supported:_ brands using different apps/backends (for example “Ducaheat/Ducasa”’s own “Termoweb” app, which is a separate system).
+_Not supported:_ brands using different apps/backends (for example “Ducaheat/Ducasa”’s own “TermoWeb” app, which is a separate system).
 
 ---
 
@@ -129,5 +129,5 @@ uv run pytest --cov=custom_components/termoweb --cov-report=term-missing
 
 ## Search keywords
 
-*Home Assistant TermoWeb, TermoWeb heaters Home Assistant, ATC radiators, S&P TermoWeb Home Assistant, Soler & Palau Termoweb, Ecotermi Termoweb, Linea Plus Termoweb, Electric Heating Company eco SAVE Home Assistant, eco SAVE Smart Gateway Home Assistant*
+*Home Assistant TermoWeb, TermoWeb heaters Home Assistant, ATC radiators, S&P TermoWeb Home Assistant, Soler & Palau TermoWeb, Ecotermi TermoWeb, Linea Plus TermoWeb, Electric Heating Company eco SAVE Home Assistant, eco SAVE Smart Gateway Home Assistant*
 
