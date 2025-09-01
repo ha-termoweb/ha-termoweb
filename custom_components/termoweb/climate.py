@@ -48,7 +48,13 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 name_map[addr] = name
 
     new_entities = [
-        TermoWebHeater(coordinator, entry.entry_id, dev_id, addr, name_map.get(addr, f"Heater {addr}"))
+        TermoWebHeater(
+            coordinator,
+            entry.entry_id,
+            dev_id,
+            addr,
+            name_map.get(addr, f"Heater {addr}"),
+        )
         for addr in addrs
     ]
     if new_entities:
@@ -68,7 +74,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
         )
         await entity.async_set_schedule(prog)
 
-    async def _svc_set_preset_temperatures(entity: TermoWebHeater, call: ServiceCall) -> None:
+    async def _svc_set_preset_temperatures(
+        entity: TermoWebHeater, call: ServiceCall
+    ) -> None:
         if "ptemp" in call.data:
             args = {"ptemp": call.data.get("ptemp")}
         else:
@@ -116,7 +124,9 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
     _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT, HVACMode.AUTO]
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
 
-    def __init__(self, coordinator, entry_id: str, dev_id: str, addr: str, name: str) -> None:
+    def __init__(
+        self, coordinator, entry_id: str, dev_id: str, addr: str, name: str
+    ) -> None:
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._dev_id = dev_id
@@ -165,7 +175,6 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
         settings = (htr.get("settings") or {}).get(self._addr)
         return settings if isinstance(settings, dict) else None
 
-
     def _units(self) -> str:
         s = self._settings() or {}
         u = (s.get("units") or "C").upper()
@@ -183,6 +192,8 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
         idx = now.weekday() * 24 + now.hour
         try:
             return int(prog[idx])
+        except asyncio.CancelledError:
+            raise
         except Exception:
             return None
 
@@ -250,7 +261,8 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
     @property
     def icon(self) -> str | None:
         """Dynamic icon: radiator-off when off, radiator-disabled when idle,
-        radiator when heating"""
+        radiator when heating
+        """
         if self.hvac_mode == HVACMode.OFF:
             return "mdi:radiator-off"
         if self.hvac_action == HVACAction.HEATING:
@@ -279,6 +291,8 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
             try:
                 if isinstance(ptemp, (list, tuple)) and 0 <= slot < len(ptemp):
                     attrs["program_setpoint"] = float_or_none(ptemp[slot])
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 pass
 
@@ -289,20 +303,35 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
         """Write the 7x24 tri-state program to the device."""
         # Validate defensively even though the schema should catch most issues
         if not isinstance(prog, list) or len(prog) != 168:
-            _LOGGER.error("Invalid prog length for dev=%s addr=%s", self._dev_id, self._addr)
+            _LOGGER.error(
+                "Invalid prog length for dev=%s addr=%s", self._dev_id, self._addr
+            )
             return
         try:
             prog2 = [int(x) for x in prog]
             if any(x not in (0, 1, 2) for x in prog2):
                 raise ValueError("prog values must be 0/1/2")
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
-            _LOGGER.error("Invalid prog for dev=%s addr=%s: %s", self._dev_id, self._addr, e)
+            _LOGGER.error(
+                "Invalid prog for dev=%s addr=%s: %s", self._dev_id, self._addr, e
+            )
             return
 
         client = self._client()
         try:
-            await client.set_htr_settings(self._dev_id, self._addr, prog=prog2, units=self._units())
-            _LOGGER.debug("Schedule write OK dev=%s addr=%s (prog_len=%d)", self._dev_id, self._addr, len(prog2))
+            await client.set_htr_settings(
+                self._dev_id, self._addr, prog=prog2, units=self._units()
+            )
+            _LOGGER.debug(
+                "Schedule write OK dev=%s addr=%s (prog_len=%d)",
+                self._dev_id,
+                self._addr,
+                len(prog2),
+            )
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             status = getattr(e, "status", None)
             body = getattr(e, "body", None) or getattr(e, "message", None) or str(e)
@@ -324,9 +353,18 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
             if isinstance(cur, dict):
                 cur["prog"] = list(prog2)
                 self.async_write_ha_state()
-                _LOGGER.debug("Optimistic prog applied dev=%s addr=%s", self._dev_id, self._addr)
+                _LOGGER.debug(
+                    "Optimistic prog applied dev=%s addr=%s", self._dev_id, self._addr
+                )
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
-            _LOGGER.debug("Optimistic prog update failed dev=%s addr=%s: %s", self._dev_id, self._addr, e)
+            _LOGGER.debug(
+                "Optimistic prog update failed dev=%s addr=%s: %s",
+                self._dev_id,
+                self._addr,
+                e,
+            )
 
         # Expect WS echo; schedule refresh if it doesn't arrive soon.
         self._schedule_refresh_fallback()
@@ -338,23 +376,42 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
         else:
             try:
                 p = [kwargs["cold"], kwargs["night"], kwargs["day"]]
+            except asyncio.CancelledError:
+                raise
             except Exception:
-                _LOGGER.error("Preset temperatures require either ptemp[3] or cold/night/day fields")
+                _LOGGER.error(
+                    "Preset temperatures require either ptemp[3] or cold/night/day fields"
+                )
                 return
 
         if not isinstance(p, list) or len(p) != 3:
-            _LOGGER.error("Invalid ptemp length for dev=%s addr=%s", self._dev_id, self._addr)
+            _LOGGER.error(
+                "Invalid ptemp length for dev=%s addr=%s", self._dev_id, self._addr
+            )
             return
         try:
             p2 = [float(x) for x in p]
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
-            _LOGGER.error("Invalid ptemp values for dev=%s addr=%s: %s", self._dev_id, self._addr, e)
+            _LOGGER.error(
+                "Invalid ptemp values for dev=%s addr=%s: %s",
+                self._dev_id,
+                self._addr,
+                e,
+            )
             return
 
         client = self._client()
         try:
-            await client.set_htr_settings(self._dev_id, self._addr, ptemp=p2, units=self._units())
-            _LOGGER.debug("Preset write OK dev=%s addr=%s ptemp=%s", self._dev_id, self._addr, p2)
+            await client.set_htr_settings(
+                self._dev_id, self._addr, ptemp=p2, units=self._units()
+            )
+            _LOGGER.debug(
+                "Preset write OK dev=%s addr=%s ptemp=%s", self._dev_id, self._addr, p2
+            )
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             status = getattr(e, "status", None)
             body = getattr(e, "body", None) or getattr(e, "message", None) or str(e)
@@ -376,9 +433,18 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
             if isinstance(cur, dict):
                 cur["ptemp"] = [f"{t:.1f}" if isinstance(t, float) else t for t in p2]
                 self.async_write_ha_state()
-                _LOGGER.debug("Optimistic ptemp applied dev=%s addr=%s", self._dev_id, self._addr)
+                _LOGGER.debug(
+                    "Optimistic ptemp applied dev=%s addr=%s", self._dev_id, self._addr
+                )
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
-            _LOGGER.debug("Optimistic ptemp update failed dev=%s addr=%s: %s", self._dev_id, self._addr, e)
+            _LOGGER.debug(
+                "Optimistic ptemp update failed dev=%s addr=%s: %s",
+                self._dev_id,
+                self._addr,
+                e,
+            )
 
         # Expect WS echo; schedule refresh if it doesn't arrive soon.
         self._schedule_refresh_fallback()
@@ -395,7 +461,9 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
 
         t = max(5.0, min(30.0, t))
         self._pending_stemp = t
-        self._pending_mode = HVACMode.HEAT  # required by backend for setpoint acceptance
+        self._pending_mode = (
+            HVACMode.HEAT
+        )  # required by backend for setpoint acceptance
         _LOGGER.info(
             "Queue write: dev=%s addr=%s stemp=%.1f mode=%s (batching %.1fs)",
             self._dev_id,
@@ -455,7 +523,8 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
         if self._write_task and not self._write_task.done():
             return
         self._write_task = asyncio.create_task(
-            self._write_after_debounce(), name=f"termoweb-write-{self._dev_id}-{self._addr}"
+            self._write_after_debounce(),
+            name=f"termoweb-write-{self._dev_id}-{self._addr}",
         )
 
     async def _write_after_debounce(self) -> None:
@@ -501,6 +570,8 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
                 stemp=stemp,
                 units=self._units(),
             )
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             status = getattr(e, "status", None)
             body = getattr(e, "body", None) or getattr(e, "message", None) or str(e)
@@ -526,6 +597,8 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
             await asyncio.sleep(_WS_ECHO_FALLBACK_REFRESH)
             try:
                 await self.coordinator.async_request_refresh()
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
                 _LOGGER.error(
                     "Refresh fallback failed dev=%s addr=%s: %s",
