@@ -177,6 +177,27 @@ def test_get_htr_samples_404() -> None:
 
     asyncio.run(_run())
 
+def test_request_ignore_status_returns_none() -> None:
+    async def _run() -> None:
+        session = MagicMock()
+        session.post.return_value = MockResponse(
+            200,
+            {"access_token": "tok", "expires_in": 3600},
+            headers={"Content-Type": "application/json"},
+        )
+        session.request.return_value = MockResponse(
+            404,
+            {},
+            headers={"Content-Type": "application/json"},
+        )
+
+        client = TermoWebClient(session, "user", "pass")
+        result = await client._request(
+            "GET", "/missing", headers={}, ignore_statuses=(404,)
+        )
+        assert result is None
+
+    asyncio.run(_run())
 
 def test_request_retries_on_401() -> None:
     async def _run() -> None:
