@@ -91,7 +91,9 @@ class TermoWebWSLegacyClient:
         if self._task and not self._task.done():
             return self._task
         self._closing = False
-        self._task = self.hass.loop.create_task(self._runner(), name=f"{DOMAIN}-ws-{self.dev_id}")
+        self._task = self.hass.loop.create_task(
+            self._runner(), name=f"{DOMAIN}-ws-{self.dev_id}"
+        )
         return self._task
 
     async def stop(self) -> None:
@@ -106,7 +108,9 @@ class TermoWebWSLegacyClient:
             self._hb_task = None
         if self._ws:
             try:
-                await self._ws.close(code=aiohttp.WSCloseCode.GOING_AWAY, message=b"client stop")
+                await self._ws.close(
+                    code=aiohttp.WSCloseCode.GOING_AWAY, message=b"client stop"
+                )
             except Exception:
                 pass
             self._ws = None
@@ -205,8 +209,12 @@ class TermoWebWSLegacyClient:
                     break
 
                 # Backoff with jitter
-                delay = self._backoff_seq[min(self._backoff_idx, len(self._backoff_seq) - 1)]
-                self._backoff_idx = min(self._backoff_idx + 1, len(self._backoff_seq) - 1)
+                delay = self._backoff_seq[
+                    min(self._backoff_idx, len(self._backoff_seq) - 1)
+                ]
+                self._backoff_idx = min(
+                    self._backoff_idx + 1, len(self._backoff_seq) - 1
+                )
                 jitter = random.uniform(0.8, 1.2)
                 await asyncio.sleep(delay * jitter)
 
@@ -223,33 +231,38 @@ class TermoWebWSLegacyClient:
         t_ms = int(time.time() * 1000)
         url = f"{API_BASE}/socket.io/1/?token={token}&dev_id={self.dev_id}&t={t_ms}"
 
-        async with asyncio.timeout(15):
-            async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                body = await resp.text()
-                if resp.status == 401:
-                    # Token expired; refresh once and retry
-                    _LOGGER.info("WS %s: handshake 401; refreshing token", self.dev_id)
-                    await self._force_refresh_token()
-                    token = await self._get_token()
-                    url = (
-                        f"{API_BASE}/socket.io/1/?token={token}&dev_id={self.dev_id}&t={int(time.time()*1000)}"
-                    )
-                    async with self._session.get(
-                        url, timeout=aiohttp.ClientTimeout(total=15)
-                    ) as resp2:
-                        body = await resp2.text()
-                        if resp2.status >= 400:
-                            raise HandshakeError(resp2.status, url, body[:100])
-                        sid, hb = self._parse_handshake_body(body)
-                        self._backoff_idx = 0  # success resets backoff
-                        return sid, hb
+        try:
+            async with asyncio.timeout(15):
+                async with self._session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    body = await resp.text()
+                    if resp.status == 401:
+                        # Token expired; refresh once and retry
+                        _LOGGER.info(
+                            "WS %s: handshake 401; refreshing token", self.dev_id
+                        )
+                        await self._force_refresh_token()
+                        token = await self._get_token()
+                        url = f"{API_BASE}/socket.io/1/?token={token}&dev_id={self.dev_id}&t={int(time.time() * 1000)}"
+                        async with self._session.get(
+                            url, timeout=aiohttp.ClientTimeout(total=15)
+                        ) as resp2:
+                            body = await resp2.text()
+                            if resp2.status >= 400:
+                                raise HandshakeError(resp2.status, url, body[:100])
+                            sid, hb = self._parse_handshake_body(body)
+                            self._backoff_idx = 0  # success resets backoff
+                            return sid, hb
 
-                if resp.status >= 400:
-                    raise HandshakeError(resp.status, url, body[:100])
+                    if resp.status >= 400:
+                        raise HandshakeError(resp.status, url, body[:100])
 
-                sid, hb = self._parse_handshake_body(body)
-                self._backoff_idx = 0  # success resets backoff
-                return sid, hb
+                    sid, hb = self._parse_handshake_body(body)
+                    self._backoff_idx = 0  # success resets backoff
+                    return sid, hb
+        except (asyncio.TimeoutError, aiohttp.ClientError) as error:
+            raise HandshakeError(-1, url, str(error)) from error
 
     async def _connect_ws(self, sid: str) -> None:
         token = await self._get_token()
@@ -270,11 +283,15 @@ class TermoWebWSLegacyClient:
     async def _send_snapshot_request(self) -> None:
         # 5::/api/v2/socket_io:{"name":"dev_data","args":[]}
         payload = {"name": "dev_data", "args": []}
-        await self._send_text(f"5::{WS_NAMESPACE}:{json.dumps(payload, separators=(',', ':'))}")
+        await self._send_text(
+            f"5::{WS_NAMESPACE}:{json.dumps(payload, separators=(',', ':'))}"
+        )
 
     async def _subscribe_htr_samples(self) -> None:
         """Request push updates for heater energy samples."""
-        addrs = self._coordinator._addrs() if hasattr(self._coordinator, "_addrs") else []
+        addrs = (
+            self._coordinator._addrs() if hasattr(self._coordinator, "_addrs") else []
+        )
         for addr in addrs:
             payload = {"name": "subscribe", "args": [f"/htr/{addr}/samples"]}
             await self._send_text(
@@ -316,7 +333,11 @@ class TermoWebWSLegacyClient:
             if msg.type not in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
                 continue
 
-            data = msg.data if isinstance(msg.data, str) else msg.data.decode("utf-8", "ignore")
+            data = (
+                msg.data
+                if isinstance(msg.data, str)
+                else msg.data.decode("utf-8", "ignore")
+            )
             self._stats.frames_total += 1
 
             # Socket.IO 0.9 frames
@@ -342,8 +363,7 @@ class TermoWebWSLegacyClient:
     # ----------------- Event handling -----------------
 
     def _handle_event(self, evt: dict[str, Any]) -> None:
-        """Expecting: {"name": "data", "args": [ [ {"path": "...", "body": {...}}, ... ] ]}
-        """
+        """Expecting: {"name": "data", "args": [ [ {"path": "...", "body": {...}}, ... ] ]}"""
         if not isinstance(evt, dict):
             return
         name = evt.get("name")
@@ -370,7 +390,9 @@ class TermoWebWSLegacyClient:
             paths.append(path)
 
             # Normalize
-            dev_map: dict[str, Any] = (self._coordinator.data or {}).get(self.dev_id) or {}
+            dev_map: dict[str, Any] = (self._coordinator.data or {}).get(
+                self.dev_id
+            ) or {}
             if not dev_map:
                 # Seed minimal structure if coordinator has not put this dev yet
                 dev_map = {
@@ -400,7 +422,9 @@ class TermoWebWSLegacyClient:
             elif "/htr/" in path and path.endswith("/settings"):
                 # /api/v2/devs/{dev_id}/htr/{addr}/settings => push path uses '/htr/<addr>/settings'
                 addr = path.split("/htr/")[1].split("/")[0]
-                settings_map: dict[str, Any] = dev_map.setdefault("htr", {}).setdefault("settings", {})
+                settings_map: dict[str, Any] = dev_map.setdefault("htr", {}).setdefault(
+                    "settings", {}
+                )
                 if isinstance(body, dict):
                     settings_map[addr] = body
                     updated_addrs.append(addr)
@@ -408,7 +432,9 @@ class TermoWebWSLegacyClient:
             elif "/htr/" in path and path.endswith("/advanced_setup"):
                 # Store for diagnostics/future; entities ignore for now
                 addr = path.split("/htr/")[1].split("/")[0]
-                adv_map: dict[str, Any] = dev_map.setdefault("htr", {}).setdefault("advanced", {})
+                adv_map: dict[str, Any] = dev_map.setdefault("htr", {}).setdefault(
+                    "advanced", {}
+                )
                 if isinstance(body, dict):
                     adv_map[addr] = body
 
@@ -426,7 +452,11 @@ class TermoWebWSLegacyClient:
         self._mark_event(paths=paths)
         payload_base = {"dev_id": self.dev_id, "ts": self._stats.last_event_ts}
         if updated_nodes:
-            async_dispatcher_send(self.hass, signal_ws_data(self.entry_id), {**payload_base, "addr": None, "kind": "nodes"})
+            async_dispatcher_send(
+                self.hass,
+                signal_ws_data(self.entry_id),
+                {**payload_base, "addr": None, "kind": "nodes"},
+            )
         for addr in set(updated_addrs):
             async_dispatcher_send(
                 self.hass,
@@ -481,12 +511,18 @@ class TermoWebWSLegacyClient:
         s["status"] = status
         s["last_event_at"] = self._stats.last_event_ts or None
         s["healthy_since"] = self._healthy_since
-        s["healthy_minutes"] = int((now - self._healthy_since) / 60) if self._healthy_since else 0
+        s["healthy_minutes"] = (
+            int((now - self._healthy_since) / 60) if self._healthy_since else 0
+        )
         s["frames_total"] = self._stats.frames_total
         s["events_total"] = self._stats.events_total
 
         # Dispatch a status update so the hub entity & setup logic can react (e.g., stretch polling)
-        async_dispatcher_send(self.hass, signal_ws_status(self.entry_id), {"dev_id": self.dev_id, "status": status})
+        async_dispatcher_send(
+            self.hass,
+            signal_ws_status(self.entry_id),
+            {"dev_id": self.dev_id, "status": status},
+        )
 
     def _mark_event(self, *, paths: list[str] | None) -> None:
         now = time.time()
@@ -504,6 +540,10 @@ class TermoWebWSLegacyClient:
                 self._stats.last_paths = uniq
 
         # Health heuristic: connected and alive for ≥ 300s => healthy
-        if self._connected_since and not self._healthy_since and (now - self._connected_since) >= 300:
+        if (
+            self._connected_since
+            and not self._healthy_since
+            and (now - self._connected_since) >= 300
+        ):
             self._healthy_since = now
             self._update_status("healthy")
