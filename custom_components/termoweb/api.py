@@ -158,6 +158,8 @@ class TermoWebClient:
                         _redact_bearer(str(e)),
                     )
                 raise
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
                 _LOGGER.error(
                     "Request %s %s failed (sanitized): %s",
