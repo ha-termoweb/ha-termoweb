@@ -177,6 +177,7 @@ def test_get_htr_samples_404() -> None:
 
     asyncio.run(_run())
 
+
 def test_request_retries_on_401() -> None:
     async def _run() -> None:
         session = MagicMock()
@@ -234,5 +235,21 @@ def test_set_htr_settings_translates_heat(monkeypatch) -> None:
         await client.set_htr_settings("dev", 1, mode="heat", stemp=21.0)
 
         assert captured["json"]["mode"] == "manual"
+
+    asyncio.run(_run())
+
+
+def test_set_htr_settings_invalid_units(monkeypatch) -> None:
+    async def _run() -> None:
+        session = MagicMock()
+        client = TermoWebClient(session, "user", "pass")
+
+        async def fake_headers() -> dict[str, str]:
+            raise AssertionError("_authed_headers should not be called")
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        with pytest.raises(ValueError):
+            await client.set_htr_settings("dev", 1, units="K")
 
     asyncio.run(_run())
