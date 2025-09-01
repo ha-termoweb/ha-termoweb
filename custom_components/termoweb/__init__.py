@@ -192,6 +192,8 @@ async def _async_import_energy_history(
         )
         try:
             return await client.get_htr_samples(dev_id, addr, start, stop)
+        except asyncio.CancelledError:  # pragma: no cover - allow cancellation
+            raise
         except Exception as err:  # pragma: no cover - defensive
             _LOGGER.debug("%s: error fetching samples: %s", addr, err)
             return []
@@ -256,6 +258,8 @@ async def _async_import_energy_history(
             )
             if existing and (vals := existing.get(entity_id)):
                 sum_offset = float(vals[0].get("sum") or 0.0)
+        except asyncio.CancelledError:  # pragma: no cover - allow cancellation
+            raise
         except Exception as err:  # pragma: no cover - defensive
             _LOGGER.debug("%s: error fetching last statistics: %s", addr, err)
 
@@ -507,6 +511,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.debug("import_energy_history: awaiting %d tasks", len(tasks))
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for res in results:
+                if isinstance(res, asyncio.CancelledError):
+                    raise res
                 if isinstance(res, Exception):
                     _LOGGER.exception("import_energy_history task failed: %s", res)
 
