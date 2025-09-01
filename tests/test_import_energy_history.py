@@ -118,8 +118,9 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False)
             return
 
     class HVACMode:  # pragma: no cover - minimal stub
-        HEAT = "heat"
+        MANUAL = "manual"
         OFF = "off"
+        AUTO = "auto"
 
     class HVACAction:  # pragma: no cover - minimal stub
         HEATING = "heating"
