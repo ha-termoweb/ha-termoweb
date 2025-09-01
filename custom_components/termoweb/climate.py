@@ -243,14 +243,14 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
 
     @property
     def icon(self) -> str | None:
-        """Dynamic icon: calendar-clock for AUTO, radiator otherwise."""
-        mode = self.hvac_mode
-        if mode == HVACMode.OFF:
-            return "mdi:radiator-disabled"
-        if mode == HVACMode.AUTO:
-            return "mdi:calendar-clock"
+        """Dynamic icon: radiator-off when off, radiator-disabled when idle,
+        radiator when heating"""
+        if self.hvac_mode == HVACMode.OFF:
+            return "mdi:radiator-off"
         if self.hvac_action == HVACAction.HEATING:
             return "mdi:radiator"
+        if self.hvac_action == HVACAction.IDLE:
+            return "mdi:radiator-disabled"
         return "mdi:radiator"
 
     @property
