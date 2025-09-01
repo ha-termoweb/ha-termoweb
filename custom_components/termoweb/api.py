@@ -66,9 +66,12 @@ class TermoWebClient:
         *,
         ignore_statuses: Iterable[int] = (),
         **kwargs,
-    ) -> Any:
-        """Perform an HTTP request; return JSON when possible, else text.
-        Errors are logged WITHOUT secrets; callers receive raised exceptions.
+    ) -> Any | None:
+        """Perform an HTTP request.
+
+        Return JSON when possible, otherwise text. HTTP statuses listed in
+        ``ignore_statuses`` are logged and yield ``None`` instead of raising an
+        exception. Errors are logged WITHOUT secrets.
         """
         headers = kwargs.pop("headers", {})
         ignore_statuses = set(ignore_statuses)
@@ -128,6 +131,8 @@ class TermoWebClient:
                         raise TermoWebAuthError("Unauthorized")
                     if resp.status == 429:
                         raise TermoWebRateLimitError("Rate limited")
+                    if resp.status in ignore_statuses:
+                        return None
                     if resp.status >= 400:
                         raise aiohttp.ClientResponseError(
                             resp.request_info,
