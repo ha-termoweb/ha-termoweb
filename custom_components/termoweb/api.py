@@ -318,8 +318,13 @@ class TermoWebClient:
         overwriting unrelated settings on the device.
         """
 
+        # Validate units
+        unit_str: str = units.upper()
+        if unit_str not in {"C", "F"}:
+            raise ValueError(f"Invalid units: {units}")
+
         # Always include units
-        payload: dict[str, Any] = {"units": units}
+        payload: dict[str, Any] = {"units": unit_str}
 
         # Mode
         if mode is not None:
