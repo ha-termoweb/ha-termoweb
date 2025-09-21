@@ -88,6 +88,24 @@
 
       this._hasRendered = false;
 
+      this._els = {
+        title: null,
+        entitySelect: null,
+        dirtyBadge: null,
+        freezeBadge: null,
+        unitsLabel: null,
+        presetInputs: { cold: null, night: null, day: null },
+        modeButtons: { cold: null, night: null, day: null },
+        refreshBtn: null,
+        copyFromSel: null,
+        copyToSel: null,
+        copyBtn: null,
+        revertBtn: null,
+        saveBtn: null,
+        progWarn: null,
+      };
+      this._gridCells = null;
+
     }
 
     setConfig(config) {
@@ -181,7 +199,7 @@
       const entityChanged = prevEntity !== this._entity;
       const entityOptionsChanged = prevEntityOptionsKey !== nextEntityOptionsKey;
       if (!this._hasRendered || entityChanged || entityOptionsChanged || hydrated) {
-        this._render();
+        this._render({ forceFull: !this._hasRendered || entityChanged });
       } else {
         this._updateStatusIndicators();
       }
@@ -208,16 +226,36 @@
 
     _updateStatusIndicators() {
       if (!this._hasRendered) return;
-      const root = this.shadowRoot;
-      if (!root) return;
-
       const dirty = this._dirtyProg || this._dirtyPresets;
-      const dirtyEl = root.getElementById("tw_dirtyBadge");
-      if (dirtyEl) dirtyEl.style.display = dirty ? "" : "none";
+      const dirtyEl = this._els.dirtyBadge;
+      if (dirtyEl) dirtyEl.hidden = !dirty;
 
       const waiting = this._isFrozen();
-      const waitEl = root.getElementById("tw_freezeBadge");
-      if (waitEl) waitEl.style.display = waiting ? "" : "none";
+      const waitEl = this._els.freezeBadge;
+      if (waitEl) waitEl.hidden = !waiting;
+    }
+
+    _syncEntityOptions() {
+      const select = this._els.entitySelect;
+      if (!select) return;
+      const optionsKey = this._entityOptionsKey || "";
+      if (select._twOptionsKey !== optionsKey) {
+        select.innerHTML = (this._entities || [])
+          .map((e) => `<option value="${e.id}">${e.name}</option>`)
+          .join("");
+        select._twOptionsKey = optionsKey;
+      }
+      if (this._entity && select.value !== this._entity) {
+        select.value = this._entity;
+      }
+    }
+
+    _updateModeButtons() {
+      const buttons = this._els.modeButtons;
+      if (!buttons) return;
+      if (buttons.cold) buttons.cold.classList.toggle("active", this._selectedMode === 0);
+      if (buttons.night) buttons.night.classList.toggle("active", this._selectedMode === 1);
+      if (buttons.day) buttons.day.classList.toggle("active", this._selectedMode === 2);
     }
 
     getCardSize() { return 16; }
@@ -392,7 +430,7 @@
     }
 
     // ---------- render ----------
-    _render() {
+    _render({ forceFull = false } = {}) {
       const root = this.shadowRoot;
       if (!root) return;
 
@@ -405,173 +443,208 @@
       const stepAttr = units === "F" ? "1" : "0.5";
       const [cold, night, day] = this._ptempLocal ?? [null, null, null];
 
-      const dirtyStyle = (this._dirtyProg || this._dirtyPresets) ? "" : "display:none;";
-      const frozen = this._isFrozen();
-      const frozenStyle = frozen ? "" : "display:none;";
+      if (!this._hasRendered || forceFull) {
+        const copyOptions = DAY_NAMES.map((d, i) => `<option value="${i}">${d}</option>`).join("");
+        const gridShell = this._renderGridShell();
 
-      const entityOptions = (this._entities || [])
-        .map((e) => `<option value="${e.id}" ${e.id === this._entity ? "selected" : ""}>${e.name}</option>`)
-        .join("\n");
+        root.innerHTML = `
+          <style>
+            :host { display:block; }
+            .card { padding: 12px; color: ${COLORS.text}; }
+            .header { display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-weight:600; }
+            .sub { color: ${COLORS.subtext}; font-size: 12px; display:flex; align-items:center; gap:8px; }
+            .dirty { color: var(--warning-color, #ffa000); font-size: 11px; }
+            .grid { display: grid; grid-template-columns: 56px repeat(7, 1fr); gap: 6px; margin-top: 8px; }
+            .hour { color: ${COLORS.label}; font-size: 12px; text-align: right; padding: 4px 6px; }
+            .dayhdr { color: ${COLORS.label}; font-size: 12px; text-align: center; padding: 4px 0 8px 0; }
+            .cell { background: ${COLORS.cellBg}; border: 1px solid ${COLORS.border}; height: 20px; border-radius: 6px; cursor: pointer; transition: filter .06s; }
+            .cell:hover { filter: brightness(1.08); }
+            .legend { display:flex;gap:12px;align-items:center;flex-wrap:wrap;color:${COLORS.label}; font-size: 12px; }
+            .legend .swatch { display:inline-block;width:14px;height:14px;border-radius:4px;border:1px solid ${COLORS.border};vertical-align:-2px;margin-right:6px; }
+            .row { display:flex; gap:10px; align-items:center; margin-top:10px; flex-wrap: wrap; color:${COLORS.label}; }
+            .modeToggle { display:flex; gap:8px; margin-top:10px; }
+            .modeToggle button { flex:1; padding:8px 0; border-radius:8px; border:2px solid ${COLORS.border}; color:${COLORS.text}; cursor:pointer; font-weight:600; opacity:0.6; }
+            .modeToggle button.active { opacity:1; border-color:${COLORS.text}; }
+            input[type="number"] {
+              width: 72px;
+              border-radius: 8px;
+              border: 1px solid ${COLORS.border};
+              background: var(--secondary-background-color, #2b2b2b);
+              color: ${COLORS.text};
+              padding: 5px 8px;
+            }
+            select {
+              border-radius: 6px;
+              border: 1px solid ${COLORS.border};
+              background: var(--secondary-background-color, #2b2b2b);
+              color: ${COLORS.text};
+              padding: 3px 4px;
+            }
+            .footer { display:flex;justify-content:flex-end;gap:8px;margin-top:10px; flex-wrap: wrap; }
+            button { background: var(--secondary-background-color, #2b2b2b); color: ${COLORS.text}; border: 1px solid ${COLORS.border}; border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+            button:hover { filter: brightness(1.1); }
+            .warn { color: var(--error-color, #ef5350); }
+            .chip { padding:2px 6px; border:1px solid ${COLORS.border}; border-radius: 10px; font-size:11px; }
+          </style>
 
-      const copyFromOptions = DAY_NAMES
-        .map((d, i) => `<option value="${i}" ${i === this._copyFrom ? "selected" : ""}>${d}</option>`)
-        .join("\n");
-      const copyToDayOptions = DAY_NAMES
-        .map((d, i) => `<option value="${i}" ${(typeof this._copyTo === "number" && i === this._copyTo) ? "selected" : ""}>${d}</option>`)
-        .join("\n");
-      const copyAllSelected = this._copyTo === "All" ? "selected" : "";
-
-      root.innerHTML = `
-        <style>
-          :host { display:block; }
-          .card { padding: 12px; color: ${COLORS.text}; }
-          .header { display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-weight:600; }
-          .sub { color: ${COLORS.subtext}; font-size: 12px; display:flex; align-items:center; gap:8px; }
-          .dirty { color: var(--warning-color, #ffa000); font-size: 11px; }
-          .grid { display: grid; grid-template-columns: 56px repeat(7, 1fr); gap: 6px; margin-top: 8px; }
-          .hour { color: ${COLORS.label}; font-size: 12px; text-align: right; padding: 4px 6px; }
-          .dayhdr { color: ${COLORS.label}; font-size: 12px; text-align: center; padding: 4px 0 8px 0; }
-          .cell { background: ${COLORS.cellBg}; border: 1px solid ${COLORS.border}; height: 20px; border-radius: 6px; cursor: pointer; transition: filter .06s; }
-          .cell:hover { filter: brightness(1.08); }
-          .legend { display:flex;gap:12px;align-items:center;flex-wrap:wrap;color:${COLORS.label}; font-size: 12px; }
-          .legend .swatch { display:inline-block;width:14px;height:14px;border-radius:4px;border:1px solid ${COLORS.border};vertical-align:-2px;margin-right:6px; }
-          .row { display:flex; gap:10px; align-items:center; margin-top:10px; flex-wrap: wrap; color:${COLORS.label}; }
-          .modeToggle { display:flex; gap:8px; margin-top:10px; }
-          .modeToggle button { flex:1; padding:8px 0; border-radius:8px; border:2px solid ${COLORS.border}; color:${COLORS.text}; cursor:pointer; font-weight:600; opacity:0.6; }
-          .modeToggle button.active { opacity:1; border-color:${COLORS.text}; }
-          input[type="number"] {
-            width: 72px;
-            border-radius: 8px;
-            border: 1px solid ${COLORS.border};
-            background: var(--secondary-background-color, #2b2b2b);
-            color: ${COLORS.text};
-            padding: 5px 8px;
-          }
-          select {
-            border-radius: 6px;
-            border: 1px solid ${COLORS.border};
-            background: var(--secondary-background-color, #2b2b2b);
-            color: ${COLORS.text};
-            padding: 3px 4px;
-          }
-          .footer { display:flex;justify-content:flex-end;gap:8px;margin-top:10px; flex-wrap: wrap; }
-          button { background: var(--secondary-background-color, #2b2b2b); color: ${COLORS.text}; border: 1px solid ${COLORS.border}; border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
-          button:hover { filter: brightness(1.1); }
-          .warn { color: var(--error-color, #ef5350); }
-          .chip { padding:2px 6px; border:1px solid ${COLORS.border}; border-radius: 10px; font-size:11px; }
-        </style>
-
-        <ha-card class="card">
-          <div class="header">
-            <div>${title}</div>
-            <div class="sub">
-              <select id="entitySelect">${entityOptions}</select>
-              <span id="tw_dirtyBadge" class="dirty" style="${dirtyStyle}">● unsaved</span>
-              <span id="tw_freezeBadge" class="chip" style="${frozenStyle}">waiting for device update…</span>
-              <button id="refreshBtn" title="Refresh from current state">Refresh</button>
+          <ha-card class="card">
+            <div class="header">
+              <div id="tw_title"></div>
+              <div class="sub">
+                <select id="entitySelect"></select>
+                <span id="tw_dirtyBadge" class="dirty" hidden>● unsaved</span>
+                <span id="tw_freezeBadge" class="chip" hidden>waiting for device update…</span>
+                <button id="refreshBtn" title="Refresh from current state">Refresh</button>
+              </div>
             </div>
-          </div>
 
-          <!-- Legend -->
-          <div class="legend">
-            <span><span class="swatch" style="background:${COLORS[0]}"></span>Cold</span>
-            <span><span class="swatch" style="background:${COLORS[2]}"></span>Day</span>
-            <span><span class="swatch" style="background:${COLORS[1]}"></span>Night</span>
-            <span>Units: ${units}</span>
-          </div>
+            <div class="legend">
+              <span><span class="swatch" style="background:${COLORS[0]}"></span>Cold</span>
+              <span><span class="swatch" style="background:${COLORS[2]}"></span>Day</span>
+              <span><span class="swatch" style="background:${COLORS[1]}"></span>Night</span>
+              <span id="tw_units"></span>
+            </div>
 
-          <!-- Preset editors -->
-          <div class="row">
-            <label>Cold <input id="tw_p_cold" type="number" step="${stepAttr}" value="${cold ?? ""}"></label>
-            <label>Night <input id="tw_p_night" type="number" step="${stepAttr}" value="${night ?? ""}"></label>
-            <label>Day <input id="tw_p_day" type="number" step="${stepAttr}" value="${day ?? ""}"></label>
-            <button id="savePresetsBtn">Save Presets</button>
-          </div>
+            <div class="row">
+              <label>Cold <input id="tw_p_cold" type="number"></label>
+              <label>Night <input id="tw_p_night" type="number"></label>
+              <label>Day <input id="tw_p_day" type="number"></label>
+              <button id="savePresetsBtn">Save Presets</button>
+            </div>
 
-          <div class="modeToggle">
-            <button id="modeCold" class="${this._selectedMode === 0 ? 'active' : ''}" style="background:${COLORS[0]}">Cold</button>
-            <button id="modeNight" class="${this._selectedMode === 1 ? 'active' : ''}" style="background:${COLORS[1]}">Night</button>
-            <button id="modeDay" class="${this._selectedMode === 2 ? 'active' : ''}" style="background:${COLORS[2]}">Day</button>
-          </div>
+            <div class="modeToggle">
+              <button id="modeCold" style="background:${COLORS[0]}">Cold</button>
+              <button id="modeNight" style="background:${COLORS[1]}">Night</button>
+              <button id="modeDay" style="background:${COLORS[2]}">Day</button>
+            </div>
 
-          ${!hasProg ? `<div class="warn" style="margin-top:8px;">This entity has no valid 'prog' (expected 168 ints).</div>` : ""}
+            <div id="tw_prog_warn" class="warn" style="margin-top:8px;" hidden>This entity has no valid 'prog' (expected 168 ints).</div>
 
-          ${this._renderGridShell()}
+            ${gridShell}
 
-          <div class="row">
-            <label>Copy From <select id="copyFromSel">${copyFromOptions}</select></label>
-            <label>Copy To <select id="copyToSel"><option value="All" ${copyAllSelected}>All</option>${copyToDayOptions}</select></label>
-            <button id="copyBtn">Copy</button>
-          </div>
+            <div class="row">
+              <label>Copy From <select id="copyFromSel">${copyOptions}</select></label>
+              <label>Copy To <select id="copyToSel"><option value="All">All</option>${copyOptions}</select></label>
+              <button id="copyBtn">Copy</button>
+            </div>
 
-          <div class="footer">
-            <button id="revertBtn">Revert</button>
-            <button id="saveBtn">Save</button>
-          </div>
-        </ha-card>
-      `;
+            <div class="footer">
+              <button id="revertBtn">Revert</button>
+              <button id="saveBtn">Save</button>
+            </div>
+          </ha-card>
+        `;
 
-      // Bind Refresh
-      root.getElementById("refreshBtn")?.addEventListener("click", () => this._refreshFromState());
+        this._els = {
+          title: root.getElementById("tw_title"),
+          entitySelect: root.getElementById("entitySelect"),
+          dirtyBadge: root.getElementById("tw_dirtyBadge"),
+          freezeBadge: root.getElementById("tw_freezeBadge"),
+          unitsLabel: root.getElementById("tw_units"),
+          presetInputs: {
+            cold: root.getElementById("tw_p_cold"),
+            night: root.getElementById("tw_p_night"),
+            day: root.getElementById("tw_p_day"),
+          },
+          modeButtons: {
+            cold: root.getElementById("modeCold"),
+            night: root.getElementById("modeNight"),
+            day: root.getElementById("modeDay"),
+          },
+          refreshBtn: root.getElementById("refreshBtn"),
+          copyFromSel: root.getElementById("copyFromSel"),
+          copyToSel: root.getElementById("copyToSel"),
+          copyBtn: root.getElementById("copyBtn"),
+          revertBtn: root.getElementById("revertBtn"),
+          saveBtn: root.getElementById("saveBtn"),
+          progWarn: root.getElementById("tw_prog_warn"),
+        };
 
-      // Bind entity selector
-      root.getElementById("entitySelect")?.addEventListener("change", (ev) => {
-        const newEntity = ev.target.value;
-        if (newEntity && newEntity !== this._entity) {
-          this._entity = newEntity;
-          this._config.entity = newEntity;
-          this._stateObj = this._hass?.states?.[newEntity] || null;
-          this._revert();
-        }
-      });
+        this._gridCells = Array.from(root.querySelectorAll(".cell"));
 
-      // Bind preset inputs to update local state and set dirty flag
-      root.getElementById("tw_p_cold")?.addEventListener("input", () => {
-        this._ptempLocal[0] = this._parseInputNum("tw_p_cold");
-        this._dirtyPresets = true;
-        this._updateStatusIndicators();
-      });
-      root.getElementById("tw_p_night")?.addEventListener("input", () => {
-        this._ptempLocal[1] = this._parseInputNum("tw_p_night");
-        this._dirtyPresets = true;
-        this._updateStatusIndicators();
-      });
-      root.getElementById("tw_p_day")?.addEventListener("input", () => {
-        this._ptempLocal[2] = this._parseInputNum("tw_p_day");
-        this._dirtyPresets = true;
-        this._updateStatusIndicators();
-      });
+        this._els.refreshBtn?.addEventListener("click", () => this._refreshFromState());
 
-      // Bind preset save
-      root.getElementById("savePresetsBtn")?.addEventListener("click", () => this._savePresets());
+        this._els.entitySelect?.addEventListener("change", (ev) => {
+          const newEntity = ev.target.value;
+          if (newEntity && newEntity !== this._entity) {
+            this._entity = newEntity;
+            this._config.entity = newEntity;
+            this._stateObj = this._hass?.states?.[newEntity] || null;
+            this._revert();
+          }
+        });
 
-      // Bind mode buttons
-      root.getElementById("modeCold")?.addEventListener("click", () => { this._selectedMode = 0; this._render(); });
-      root.getElementById("modeNight")?.addEventListener("click", () => { this._selectedMode = 1; this._render(); });
-      root.getElementById("modeDay")?.addEventListener("click", () => { this._selectedMode = 2; this._render(); });
+        this._els.presetInputs.cold?.addEventListener("input", () => {
+          this._ptempLocal[0] = this._parseInputNum("tw_p_cold");
+          this._dirtyPresets = true;
+          this._updateStatusIndicators();
+        });
+        this._els.presetInputs.night?.addEventListener("input", () => {
+          this._ptempLocal[1] = this._parseInputNum("tw_p_night");
+          this._dirtyPresets = true;
+          this._updateStatusIndicators();
+        });
+        this._els.presetInputs.day?.addEventListener("input", () => {
+          this._ptempLocal[2] = this._parseInputNum("tw_p_day");
+          this._dirtyPresets = true;
+          this._updateStatusIndicators();
+        });
 
-      // Bind schedule buttons
-      root.getElementById("revertBtn")?.addEventListener("click", () => this._revert());
-      root.getElementById("saveBtn")?.addEventListener("click", () => this._saveSchedule());
+        root.getElementById("savePresetsBtn")?.addEventListener("click", () => this._savePresets());
 
-      root.getElementById("copyFromSel")?.addEventListener("change", (ev) => {
-        this._copyFrom = Number(ev.target.value);
-      });
-      root.getElementById("copyToSel")?.addEventListener("change", (ev) => {
-        const v = ev.target.value;
-        this._copyTo = v === "All" ? "All" : Number(v);
-      });
+        this._els.modeButtons.cold?.addEventListener("click", () => { this._selectedMode = 0; this._render(); });
+        this._els.modeButtons.night?.addEventListener("click", () => { this._selectedMode = 1; this._render(); });
+        this._els.modeButtons.day?.addEventListener("click", () => { this._selectedMode = 2; this._render(); });
 
-      root.getElementById("copyBtn")?.addEventListener("click", () => {
-        this._copyDay(this._copyFrom, this._copyTo);
-        this._dirtyProg = true;
-        this._renderGridOnly();
-        this._updateStatusIndicators();
-      });
+        this._els.revertBtn?.addEventListener("click", () => this._revert());
+        this._els.saveBtn?.addEventListener("click", () => this._saveSchedule());
 
-      // Paint cells
+        this._els.copyFromSel?.addEventListener("change", (ev) => {
+          this._copyFrom = Number(ev.target.value);
+        });
+        this._els.copyToSel?.addEventListener("change", (ev) => {
+          const v = ev.target.value;
+          this._copyTo = v === "All" ? "All" : Number(v);
+        });
+
+        this._els.copyBtn?.addEventListener("click", () => {
+          this._copyDay(this._copyFrom, this._copyTo);
+          this._dirtyProg = true;
+          this._renderGridOnly();
+          this._updateStatusIndicators();
+        });
+
+        this._hasRendered = true;
+      }
+
+      if (this._els.title) this._els.title.textContent = title;
+
+      this._syncEntityOptions();
+
+      if (this._els.unitsLabel) this._els.unitsLabel.textContent = `Units: ${units}`;
+
+      const presetInputs = this._els.presetInputs;
+      if (presetInputs) {
+        const activeEl = this.shadowRoot.activeElement;
+        const presetValues = [cold, night, day];
+        [presetInputs.cold, presetInputs.night, presetInputs.day].forEach((inputEl, idx) => {
+          if (!inputEl) return;
+          if (inputEl.step !== stepAttr) inputEl.step = stepAttr;
+          const target = presetValues[idx];
+          if (!(this._dirtyPresets && activeEl === inputEl)) {
+            const valueStr = (target === null || target === undefined) ? "" : String(target);
+            if (inputEl.value !== valueStr) inputEl.value = valueStr;
+          }
+        });
+      }
+
+      if (this._els.copyFromSel) this._els.copyFromSel.value = String(this._copyFrom);
+      if (this._els.copyToSel) this._els.copyToSel.value = this._copyTo === "All" ? "All" : String(this._copyTo);
+
+      if (this._els.progWarn) this._els.progWarn.hidden = hasProg;
+
+      this._updateModeButtons();
       this._renderGridOnly();
-      this._hasRendered = true;
       this._updateStatusIndicators();
     }
 
@@ -592,12 +665,9 @@
     }
 
     _renderGridOnly() {
-      const root = this.shadowRoot;
-      if (!root) return;
-      const cells = root.querySelectorAll(".cell");
-      if (!cells || !this._progLocal || this._progLocal.length !== 168) return;
+      if (!Array.isArray(this._gridCells) || !this._progLocal || this._progLocal.length !== 168) return;
 
-      cells.forEach((cell) => {
+      this._gridCells.forEach((cell) => {
         const d = Number(cell.getAttribute("data-d"));
         const h = Number(cell.getAttribute("data-h"));
         const idx = this._idx(d, h);
