@@ -106,7 +106,7 @@
       const prevEntity = this._entity;
 
       // Collect available TermoWeb heater entities
-      this._entities = Object.entries(hass.states)
+      const entities = Object.entries(hass.states)
         .filter(([eid, st]) => {
           if (!eid.startsWith("climate.")) return false;
           const a = st?.attributes || {};
@@ -115,10 +115,18 @@
         .map(([eid, st]) => ({
           id: eid,
           name: st.attributes?.friendly_name || st.attributes?.name || eid,
-        }));
+        }))
+        .sort((a, b) => {
+          const nameCmp = (a.name || "").localeCompare(b.name || "");
+          if (nameCmp !== 0) return nameCmp;
+          return a.id.localeCompare(b.id);
+        });
+
+      this._entities = entities;
 
       const prevEntityOptionsKey = this._entityOptionsKey;
-      this._entityOptionsKey = JSON.stringify(this._entities.map((e) => `${e.id}|${e.name}`));
+      const nextEntityOptionsKey = JSON.stringify(entities.map((e) => `${e.id}|${e.name}`));
+      this._entityOptionsKey = nextEntityOptionsKey;
 
       if (!this._entity && this._entities.length > 0) {
         this._entity = this._entities[0].id;
@@ -171,7 +179,7 @@
       }
 
       const entityChanged = prevEntity !== this._entity;
-      const entityOptionsChanged = prevEntityOptionsKey !== this._entityOptionsKey;
+      const entityOptionsChanged = prevEntityOptionsKey !== nextEntityOptionsKey;
       if (!this._hasRendered || entityChanged || entityOptionsChanged || hydrated) {
         this._render();
       } else {
