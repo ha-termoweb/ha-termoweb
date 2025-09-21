@@ -71,6 +71,9 @@
       // Last-sent payloads to detect echo
       this._lastSent = { prog: null, ptemp: null };
 
+      // Track which preset input is actively being edited (focus index: 0=cold,1=night,2=day)
+      this._editingPresetIdx = -1;
+
       // painting
       this._dragging = false;
       this._paintValue = null;
@@ -214,6 +217,7 @@
       const inFreeze = freezeActive != null ? freezeActive : (now < this._freezeUntil);
       const hasLocal = Array.isArray(this._progLocal) && this._progLocal.length === 168;
       if (!hasLocal) return true;
+      if (this._editingPresetIdx !== -1) return false;
       if (this._dirtyProg || this._dirtyPresets) return false;
       if (inFreeze) return false;
       return true;
@@ -337,6 +341,7 @@
       }
       this._dirtyProg = false;
       this._dirtyPresets = false;
+      this._editingPresetIdx = -1;
       this._freezeUntil = 0;
       this._pendingEcho = { prog: null, ptemp: null };
       this._lastSent = { prog: null, ptemp: null };
@@ -355,6 +360,7 @@
       }
       this._dirtyProg = false;
       this._dirtyPresets = false;
+      this._editingPresetIdx = -1;
       this._freezeUntil = 0;
       this._pendingEcho = { prog: null, ptemp: null };
       this._render();
@@ -385,6 +391,7 @@
         });
         this._ptempLocal = payload.slice();
         this._dirtyPresets = false;
+        this._editingPresetIdx = -1;
         this._lastSent.ptemp = payload.slice();
         this._pendingEcho.ptemp = payload.slice();
         this._freezeUntil = nowMs() + this._freezeWindowMs;
@@ -444,6 +451,9 @@
       const [cold, night, day] = this._ptempLocal ?? [null, null, null];
 
       if (!this._hasRendered || forceFull) {
+        if (forceFull) {
+          this._editingPresetIdx = -1;
+        }
         const copyOptions = DAY_NAMES.map((d, i) => `<option value="${i}">${d}</option>`).join("");
         const gridShell = this._renderGridShell();
 
@@ -579,15 +589,27 @@
           this._dirtyPresets = true;
           this._updateStatusIndicators();
         });
+        this._els.presetInputs.cold?.addEventListener("focus", () => { this._editingPresetIdx = 0; });
+        this._els.presetInputs.cold?.addEventListener("blur", () => {
+          if (this._editingPresetIdx === 0) this._editingPresetIdx = -1;
+        });
         this._els.presetInputs.night?.addEventListener("input", () => {
           this._ptempLocal[1] = this._parseInputNum("tw_p_night");
           this._dirtyPresets = true;
           this._updateStatusIndicators();
         });
+        this._els.presetInputs.night?.addEventListener("focus", () => { this._editingPresetIdx = 1; });
+        this._els.presetInputs.night?.addEventListener("blur", () => {
+          if (this._editingPresetIdx === 1) this._editingPresetIdx = -1;
+        });
         this._els.presetInputs.day?.addEventListener("input", () => {
           this._ptempLocal[2] = this._parseInputNum("tw_p_day");
           this._dirtyPresets = true;
           this._updateStatusIndicators();
+        });
+        this._els.presetInputs.day?.addEventListener("focus", () => { this._editingPresetIdx = 2; });
+        this._els.presetInputs.day?.addEventListener("blur", () => {
+          if (this._editingPresetIdx === 2) this._editingPresetIdx = -1;
         });
 
         root.getElementById("savePresetsBtn")?.addEventListener("click", () => this._savePresets());
@@ -625,16 +647,14 @@
 
       const presetInputs = this._els.presetInputs;
       if (presetInputs) {
-        const activeEl = this.shadowRoot.activeElement;
         const presetValues = [cold, night, day];
         [presetInputs.cold, presetInputs.night, presetInputs.day].forEach((inputEl, idx) => {
           if (!inputEl) return;
           if (inputEl.step !== stepAttr) inputEl.step = stepAttr;
           const target = presetValues[idx];
-          if (!(this._dirtyPresets && activeEl === inputEl)) {
-            const valueStr = (target === null || target === undefined) ? "" : String(target);
-            if (inputEl.value !== valueStr) inputEl.value = valueStr;
-          }
+          if (this._editingPresetIdx === idx) return;
+          const valueStr = (target === null || target === undefined) ? "" : String(target);
+          if (inputEl.value !== valueStr) inputEl.value = valueStr;
         });
       }
 
