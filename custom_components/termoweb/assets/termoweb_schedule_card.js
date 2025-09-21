@@ -66,6 +66,7 @@
       // Freeze window: ignore hass updates while editing / just after save
       this._freezeUntil = 0; // epoch ms; 0 means not frozen
       this._freezeWindowMs = 15000; // 15s after save
+      this._pendingEcho = { prog: null, ptemp: null };
 
       // Last-sent payloads to detect echo
       this._lastSent = { prog: null, ptemp: null };
@@ -78,11 +79,14 @@
 
       // Available TermoWeb heater entities
       this._entities = [];
+      this._entityOptionsKey = "";
 
       // Track copy selectors
       this._copyFrom = 0;
       this._copyTo = "All";
       this._entity = null; // currently selected entity
+
+      this._hasRendered = false;
 
     }
 
@@ -99,6 +103,8 @@
       this._hass = hass;
       if (!this._config) return;
 
+      const prevEntity = this._entity;
+
       // Collect available TermoWeb heater entities
       this._entities = Object.entries(hass.states)
         .filter(([eid, st]) => {
@@ -111,6 +117,9 @@
           name: st.attributes?.friendly_name || st.attributes?.name || eid,
         }));
 
+      const prevEntityOptionsKey = this._entityOptionsKey;
+      this._entityOptionsKey = JSON.stringify(this._entities.map((e) => `${e.id}|${e.name}`));
+
       if (!this._entity && this._entities.length > 0) {
         this._entity = this._entities[0].id;
         if (this._config) this._config.entity = this._entity;
@@ -119,42 +128,88 @@
       const st = this._entity ? hass.states[this._entity] : undefined;
       this._stateObj = st || null;
 
-      const canHydrateNow = this._canHydrateFromState();
       const attrs = st?.attributes || {};
+      const now = nowMs();
 
-      if (canHydrateNow) {
-        // Prog
-        if (Array.isArray(attrs.prog) && attrs.prog.length === 168) {
-          // If we were waiting for echo and it matches last sent, unfreeze.
-          if (this._lastSent.prog && deepEqArray(attrs.prog, this._lastSent.prog)) {
-            this._freezeUntil = 0;
-          }
-          this._progLocal = attrs.prog.slice();
-        }
-        // Presets
-        if (Array.isArray(attrs.ptemp) && attrs.ptemp.length === 3) {
-          if (this._lastSent.ptemp && deepEqArray(attrs.ptemp, this._lastSent.ptemp)) {
-            this._freezeUntil = 0;
-          }
-          this._ptempLocal = attrs.ptemp.slice();
+      let waitingForEcho = false;
+      if (this._pendingEcho.prog) {
+        if (Array.isArray(attrs.prog) && attrs.prog.length === 168 && deepEqArray(attrs.prog, this._pendingEcho.prog)) {
+          this._pendingEcho.prog = null;
+        } else {
+          waitingForEcho = true;
         }
       }
-      // Re-render regardless (for header / unit changes)
-      this._render();
+      if (this._pendingEcho.ptemp) {
+        if (Array.isArray(attrs.ptemp) && attrs.ptemp.length === 3 && deepEqArray(attrs.ptemp, this._pendingEcho.ptemp)) {
+          this._pendingEcho.ptemp = null;
+        } else {
+          waitingForEcho = true;
+        }
+      }
+
+      if (!waitingForEcho) {
+        this._freezeUntil = 0;
+      }
+
+      const freezeActive = waitingForEcho || (now < this._freezeUntil);
+      const canHydrateNow = this._canHydrateFromState({ freezeActive });
+
+      let hydrated = false;
+      if (canHydrateNow) {
+        if (Array.isArray(attrs.prog) && attrs.prog.length === 168) {
+          if (!Array.isArray(this._progLocal) || !deepEqArray(this._progLocal, attrs.prog)) {
+            this._progLocal = attrs.prog.slice();
+            hydrated = true;
+          }
+        }
+        if (Array.isArray(attrs.ptemp) && attrs.ptemp.length === 3) {
+          if (!Array.isArray(this._ptempLocal) || !deepEqArray(this._ptempLocal, attrs.ptemp)) {
+            this._ptempLocal = attrs.ptemp.slice();
+            hydrated = true;
+          }
+        }
+      }
+
+      const entityChanged = prevEntity !== this._entity;
+      const entityOptionsChanged = prevEntityOptionsKey !== this._entityOptionsKey;
+      if (!this._hasRendered || entityChanged || entityOptionsChanged || hydrated) {
+        this._render();
+      } else {
+        this._updateStatusIndicators();
+      }
     }
 
-    _canHydrateFromState() {
+    _canHydrateFromState({ freezeActive } = {}) {
       // Only hydrate when:
       // - No local copy yet (first load)
       // - Not currently dirty
-      // - Not within freeze window
+      // - Not within freeze window / awaiting echo
       const now = nowMs();
-      const inFreeze = now < this._freezeUntil;
+      const inFreeze = freezeActive != null ? freezeActive : (now < this._freezeUntil);
       const hasLocal = Array.isArray(this._progLocal) && this._progLocal.length === 168;
       if (!hasLocal) return true;
       if (this._dirtyProg || this._dirtyPresets) return false;
       if (inFreeze) return false;
       return true;
+    }
+
+    _isFrozen() {
+      if (this._pendingEcho.prog || this._pendingEcho.ptemp) return true;
+      return nowMs() < this._freezeUntil;
+    }
+
+    _updateStatusIndicators() {
+      if (!this._hasRendered) return;
+      const root = this.shadowRoot;
+      if (!root) return;
+
+      const dirty = this._dirtyProg || this._dirtyPresets;
+      const dirtyEl = root.getElementById("tw_dirtyBadge");
+      if (dirtyEl) dirtyEl.style.display = dirty ? "" : "none";
+
+      const waiting = this._isFrozen();
+      const waitEl = root.getElementById("tw_freezeBadge");
+      if (waitEl) waitEl.style.display = waiting ? "" : "none";
     }
 
     getCardSize() { return 16; }
@@ -198,6 +253,7 @@
       this._progLocal[i] = this._selectedMode;
       this._dirtyProg = true;
       this._renderGridOnly();
+      this._updateStatusIndicators();
     }
     _onMouseDown(day, hour) {
       if (!this._progLocal) return;
@@ -209,6 +265,7 @@
       this._dirtyProg = true;
       window.addEventListener("mouseup", this._boundMouseUp, { once: true });
       this._renderGridOnly();
+      this._updateStatusIndicators();
     }
     _onMouseOver(day, hour) {
       if (!this._dragging || this._paintValue == null || !this._progLocal) return;
@@ -217,6 +274,7 @@
         this._progLocal[i] = this._paintValue;
         this._dirtyProg = true;
         this._colorCell(day, hour, this._paintValue);
+        this._updateStatusIndicators();
       }
     }
     _onMouseUp() { this._dragging = false; this._paintValue = null; }
@@ -234,13 +292,14 @@
       this._dirtyProg = false;
       this._dirtyPresets = false;
       this._freezeUntil = 0;
+      this._pendingEcho = { prog: null, ptemp: null };
       this._lastSent = { prog: null, ptemp: null };
       this._render();
     }
 
     _refreshFromState() {
       // Manual refresh, ignoring freeze; useful if user wants to sync now
-      const st = self._hass?.states?.[this._entity];
+      const st = this._hass?.states?.[this._entity];
       const attrs = st?.attributes || {};
       if (Array.isArray(attrs.prog) && attrs.prog.length === 168) {
         this._progLocal = attrs.prog.slice();
@@ -251,6 +310,7 @@
       this._dirtyProg = false;
       this._dirtyPresets = false;
       this._freezeUntil = 0;
+      this._pendingEcho = { prog: null, ptemp: null };
       this._render();
     }
 
@@ -280,8 +340,10 @@
         this._ptempLocal = payload.slice();
         this._dirtyPresets = false;
         this._lastSent.ptemp = payload.slice();
+        this._pendingEcho.ptemp = payload.slice();
         this._freezeUntil = nowMs() + this._freezeWindowMs;
         this._toast("Preset temperatures sent (waiting for device to update)");
+        this._updateStatusIndicators();
       } catch (e) {
         this._toast("Failed to save presets");
         console.error("TermoWeb card: set_preset_temperatures error:", e);
@@ -311,8 +373,10 @@
         });
         this._dirtyProg = false;
         this._lastSent.prog = body.slice();
+        this._pendingEcho.prog = body.slice();
         this._freezeUntil = nowMs() + this._freezeWindowMs;
         this._toast("Schedule sent (waiting for device to update)");
+        this._updateStatusIndicators();
       } catch (e) {
         this._toast("Failed to save schedule");
         console.error("TermoWeb card: set_schedule error:", e);
@@ -333,10 +397,9 @@
       const stepAttr = units === "F" ? "1" : "0.5";
       const [cold, night, day] = this._ptempLocal ?? [null, null, null];
 
-      const dirtyBadge = (this._dirtyProg || this._dirtyPresets) ?
-        `<span class="dirty">● unsaved</span>` : ``;
-
-      const frozen = nowMs() < this._freezeUntil;
+      const dirtyStyle = (this._dirtyProg || this._dirtyPresets) ? "" : "display:none;";
+      const frozen = this._isFrozen();
+      const frozenStyle = frozen ? "" : "display:none;";
 
       const entityOptions = (this._entities || [])
         .map((e) => `<option value="${e.id}" ${e.id === this._entity ? "selected" : ""}>${e.name}</option>`)
@@ -395,8 +458,8 @@
             <div>${title}</div>
             <div class="sub">
               <select id="entitySelect">${entityOptions}</select>
-              ${dirtyBadge}
-              ${frozen ? `<span class="chip">waiting for device update…</span>` : ``}
+              <span id="tw_dirtyBadge" class="dirty" style="${dirtyStyle}">● unsaved</span>
+              <span id="tw_freezeBadge" class="chip" style="${frozenStyle}">waiting for device update…</span>
               <button id="refreshBtn" title="Refresh from current state">Refresh</button>
             </div>
           </div>
@@ -458,14 +521,17 @@
       root.getElementById("tw_p_cold")?.addEventListener("input", () => {
         this._ptempLocal[0] = this._parseInputNum("tw_p_cold");
         this._dirtyPresets = true;
+        this._updateStatusIndicators();
       });
       root.getElementById("tw_p_night")?.addEventListener("input", () => {
         this._ptempLocal[1] = this._parseInputNum("tw_p_night");
         this._dirtyPresets = true;
+        this._updateStatusIndicators();
       });
       root.getElementById("tw_p_day")?.addEventListener("input", () => {
         this._ptempLocal[2] = this._parseInputNum("tw_p_day");
         this._dirtyPresets = true;
+        this._updateStatusIndicators();
       });
 
       // Bind preset save
@@ -492,10 +558,13 @@
         this._copyDay(this._copyFrom, this._copyTo);
         this._dirtyProg = true;
         this._renderGridOnly();
+        this._updateStatusIndicators();
       });
 
       // Paint cells
       this._renderGridOnly();
+      this._hasRendered = true;
+      this._updateStatusIndicators();
     }
 
     _renderGridShell() {
