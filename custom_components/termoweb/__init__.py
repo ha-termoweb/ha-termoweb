@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterable
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 import time
 from typing import Any
@@ -33,6 +33,8 @@ from .const import (
 from .coordinator import TermoWebCoordinator
 from .utils import extract_heater_addrs
 from .ws_client_legacy import TermoWebWSLegacyClient
+
+UTC = timezone.utc
 
 _LOGGER = logging.getLogger(__name__)
 
