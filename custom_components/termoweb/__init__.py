@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterable
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 # Import of recorder statistics helpers is deferred until runtime in
 # _store_statistics to avoid ImportError on Home Assistant versions
