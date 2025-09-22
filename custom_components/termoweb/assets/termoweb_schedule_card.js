@@ -215,8 +215,10 @@
       // - Not within freeze window / awaiting echo
       const now = nowMs();
       const inFreeze = freezeActive != null ? freezeActive : (now < this._freezeUntil);
-      const hasLocal = Array.isArray(this._progLocal) && this._progLocal.length === 168;
-      if (!hasLocal) return true;
+      const hasProgLocal = Array.isArray(this._progLocal) && this._progLocal.length === 168;
+      const hasPresetLocal = Array.isArray(this._ptempLocal) && this._ptempLocal.length === 3;
+      const hasAnyLocal = hasProgLocal || hasPresetLocal;
+      if (!hasAnyLocal) return true;
       if (this._editingPresetIdx !== -1) return false;
       if (this._dirtyProg || this._dirtyPresets) return false;
       if (inFreeze) return false;
