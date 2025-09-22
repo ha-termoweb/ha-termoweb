@@ -176,6 +176,8 @@ class FakeWSClient:
 
 
 class FakeCoordinator:
+    instances: list["FakeCoordinator"] = []
+
     def __init__(
         self,
         hass: StubHass,
@@ -195,6 +197,7 @@ class FakeCoordinator:
         self.data: dict[str, Any] = {dev_id: dev}
         self.listeners: list[Callable[[], None]] = []
         self.refresh_calls = 0
+        type(self).instances.append(self)
 
     async def async_config_entry_first_refresh(self) -> None:
         self.refresh_calls += 1
@@ -240,11 +243,25 @@ def termoweb_init(monkeypatch: pytest.MonkeyPatch) -> Any:
         if name.startswith("custom_components.termoweb"):
             sys.modules.pop(name)
 
+    FakeCoordinator.instances.clear()
     module = importlib.import_module("custom_components.termoweb.__init__")
     module = importlib.reload(module)
     monkeypatch.setattr(module, "TermoWebCoordinator", FakeCoordinator)
     monkeypatch.setattr(module, "TermoWebWSLegacyClient", FakeWSClient)
     monkeypatch.setattr(module, "extract_heater_addrs", _extract_addrs)
+    module._test_helpers = SimpleNamespace(
+        fake_coordinator=FakeCoordinator,
+        get_record=lambda hass, entry: hass.data[module.DOMAIN][entry.entry_id],
+        get_ws_tasks=lambda hass, entry: hass.data[module.DOMAIN][entry.entry_id][
+            "ws_tasks"
+        ],
+        get_ws_state=lambda hass, entry: hass.data[module.DOMAIN][entry.entry_id][
+            "ws_state"
+        ],
+        get_recalc=lambda hass, entry: hass.data[module.DOMAIN][entry.entry_id][
+            "recalc_poll"
+        ],
+    )
     return module
 
 
@@ -506,6 +523,278 @@ def test_import_energy_history_service_invocation(
     asyncio.run(_run())
 
 
+def test_recalc_poll_interval_transitions(
+    termoweb_init: Any, stub_hass: StubHass, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class PollClient(BaseFakeClient):
+        async def list_devices(self) -> list[dict[str, Any]]:
+            return [{"dev_id": "dev-1"}]
+
+    monkeypatch.setattr(termoweb_init, "TermoWebClient", PollClient)
+    entry = ConfigEntry("poll", data={"username": "user", "password": "pw"})
+    stub_hass.config_entries.add(entry)
+
+    async def _run() -> None:
+        assert await termoweb_init.async_setup_entry(stub_hass, entry)
+        await _drain_tasks(stub_hass)
+
+        record = termoweb_init._test_helpers.get_record(stub_hass, entry)
+        coordinator: FakeCoordinator = record["coordinator"]
+
+        if record["ws_tasks"]:
+            await asyncio.gather(
+                *record["ws_tasks"].values(), return_exceptions=True
+            )
+        record["ws_tasks"].clear()
+        record["ws_state"].clear()
+
+        base_interval = record["base_poll_interval"]
+
+        # (a) No running tasks with stretched=True restores base interval
+        record["stretched"] = True
+        coordinator.update_interval = timedelta(seconds=999)
+        record["recalc_poll"]()
+        assert record["stretched"] is False
+        assert coordinator.update_interval == timedelta(seconds=base_interval)
+
+        # (b) All healthy tasks stretch polling interval
+        healthy_event = asyncio.Event()
+        healthy_task = asyncio.create_task(healthy_event.wait())
+        record["ws_tasks"]["dev-healthy"] = healthy_task
+        record["ws_state"]["dev-healthy"] = {"status": "healthy"}
+        record["stretched"] = False
+        coordinator.update_interval = timedelta(seconds=base_interval)
+        record["recalc_poll"]()
+        assert record["stretched"] is True
+        assert coordinator.update_interval == timedelta(
+            seconds=termoweb_init.STRETCHED_POLL_INTERVAL
+        )
+        healthy_event.set()
+        await healthy_task
+
+        # (c) Unhealthy status reverts stretched polling
+        record["ws_tasks"].clear()
+        record["ws_state"].clear()
+        unhealthy_event = asyncio.Event()
+        unhealthy_task = asyncio.create_task(unhealthy_event.wait())
+        record["ws_tasks"]["dev-bad"] = unhealthy_task
+        record["ws_state"]["dev-bad"] = {"status": "degraded"}
+        record["stretched"] = True
+        coordinator.update_interval = timedelta(
+            seconds=termoweb_init.STRETCHED_POLL_INTERVAL
+        )
+        record["recalc_poll"]()
+        assert record["stretched"] is False
+        assert coordinator.update_interval == timedelta(seconds=base_interval)
+        unhealthy_event.set()
+        await unhealthy_task
+
+    asyncio.run(_run())
+
+
+def test_ws_status_dispatcher_filters_entry(
+    termoweb_init: Any, stub_hass: StubHass, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class DispatchClient(BaseFakeClient):
+        async def list_devices(self) -> list[dict[str, Any]]:
+            return [{"dev_id": "dev-1"}]
+
+    monkeypatch.setattr(termoweb_init, "TermoWebClient", DispatchClient)
+    entry1 = ConfigEntry("dispatch1", data={"username": "user", "password": "pw"})
+    entry2 = ConfigEntry("dispatch2", data={"username": "user", "password": "pw"})
+    stub_hass.config_entries.add(entry1)
+    stub_hass.config_entries.add(entry2)
+
+    async def _run() -> None:
+        assert await termoweb_init.async_setup_entry(stub_hass, entry1)
+        await _drain_tasks(stub_hass)
+        assert await termoweb_init.async_setup_entry(stub_hass, entry2)
+        await _drain_tasks(stub_hass)
+
+        record1 = termoweb_init._test_helpers.get_record(stub_hass, entry1)
+        coordinator1: FakeCoordinator = record1["coordinator"]
+        base_interval = record1["base_poll_interval"]
+
+        callbacks = {
+            signal: callback for signal, callback in stub_hass.dispatcher_connections
+        }
+        cb1 = callbacks[termoweb_init.signal_ws_status(entry1.entry_id)]
+        cb2 = callbacks[termoweb_init.signal_ws_status(entry2.entry_id)]
+
+        if record1["ws_tasks"]:
+            await asyncio.gather(
+                *record1["ws_tasks"].values(), return_exceptions=True
+            )
+        record1["ws_tasks"].clear()
+        record1["ws_state"].clear()
+
+        # Matching payload triggers recalc for entry1
+        healthy_event = asyncio.Event()
+        healthy_task = asyncio.create_task(healthy_event.wait())
+        record1["ws_tasks"]["dev-1"] = healthy_task
+        record1["ws_state"]["dev-1"] = {"status": "healthy"}
+        record1["stretched"] = False
+        coordinator1.update_interval = timedelta(seconds=base_interval)
+        cb1({"entry_id": entry1.entry_id})
+        assert record1["stretched"] is True
+        assert coordinator1.update_interval == timedelta(
+            seconds=termoweb_init.STRETCHED_POLL_INTERVAL
+        )
+        healthy_event.set()
+        await healthy_task
+
+        # Mismatching payload (other entry callback) does not affect entry1
+        record1["ws_tasks"].clear()
+        record1["ws_state"].clear()
+        other_event = asyncio.Event()
+        other_task = asyncio.create_task(other_event.wait())
+        record1["ws_tasks"]["dev-1"] = other_task
+        record1["ws_state"]["dev-1"] = {"status": "healthy"}
+        record1["stretched"] = False
+        coordinator1.update_interval = timedelta(seconds=base_interval)
+        cb2({"entry_id": entry1.entry_id})
+        assert record1["stretched"] is False
+        assert coordinator1.update_interval == timedelta(seconds=base_interval)
+        other_event.set()
+        await other_task
+
+    asyncio.run(_run())
+
+
+def test_coordinator_listener_starts_new_ws(
+    termoweb_init: Any, stub_hass: StubHass, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    start_events: list[asyncio.Event] = []
+
+    class SlowWSClient(FakeWSClient):
+        def start(self) -> asyncio.Task[Any]:
+            event = asyncio.Event()
+            start_events.append(event)
+            task = asyncio.create_task(event.wait())
+            self.start_calls.append(task)
+            return task
+
+    class ListenerClient(BaseFakeClient):
+        async def list_devices(self) -> list[dict[str, Any]]:
+            return [{"dev_id": "dev-1"}]
+
+    monkeypatch.setattr(termoweb_init, "TermoWebClient", ListenerClient)
+    monkeypatch.setattr(termoweb_init, "TermoWebWSLegacyClient", SlowWSClient)
+    entry = ConfigEntry("listener", data={"username": "user", "password": "pw"})
+    stub_hass.config_entries.add(entry)
+
+    async def _run() -> None:
+        assert await termoweb_init.async_setup_entry(stub_hass, entry)
+        await _drain_tasks(stub_hass)
+
+        record = termoweb_init._test_helpers.get_record(stub_hass, entry)
+        coordinator: FakeCoordinator = record["coordinator"]
+
+        existing_task = record["ws_tasks"].get("dev-1")
+        assert isinstance(existing_task, asyncio.Task)
+        assert not existing_task.done()
+
+        stub_hass.tasks.clear()
+        coordinator.data = dict(coordinator.data)
+        coordinator.data["dev-2"] = {"dev_id": "dev-2"}
+        assert coordinator.listeners
+        listener = coordinator.listeners[0]
+
+        listener()
+        assert len(stub_hass.tasks) == 1
+        await _drain_tasks(stub_hass)
+        assert set(record["ws_tasks"]) == {"dev-1", "dev-2"}
+        assert record["ws_tasks"]["dev-1"] is existing_task
+        assert isinstance(record["ws_tasks"]["dev-2"], asyncio.Task)
+        assert not record["ws_tasks"]["dev-2"].done()
+
+        listener()
+        assert not stub_hass.tasks
+
+        for event in start_events:
+            event.set()
+        await asyncio.gather(
+            *record["ws_tasks"].values(), return_exceptions=True
+        )
+
+    asyncio.run(_run())
+
+
+def test_import_energy_history_service_error_logging(
+    termoweb_init: Any, stub_hass: StubHass, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry = StubEntityRegistry()
+    monkeypatch.setattr(
+        termoweb_init.er, "async_get", lambda hass: registry, raising=False
+    )
+    monkeypatch.setattr(
+        entity_registry_mod, "async_get", lambda hass: registry, raising=False
+    )
+
+    class ServiceClient(BaseFakeClient):
+        async def list_devices(self) -> list[dict[str, Any]]:
+            return [{"dev_id": "dev-1"}]
+
+    async def failing_import(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("boom")
+
+    log_calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    def capture_exception(msg: str, *args: Any, **kwargs: Any) -> None:
+        log_calls.append((msg, args, kwargs))
+
+    monkeypatch.setattr(termoweb_init, "TermoWebClient", ServiceClient)
+    monkeypatch.setattr(
+        termoweb_init, "_async_import_energy_history", failing_import
+    )
+    monkeypatch.setattr(termoweb_init._LOGGER, "exception", capture_exception)
+
+    entry1 = ConfigEntry("svc1", data={"username": "user", "password": "pw"})
+    entry2 = ConfigEntry("svc2", data={"username": "user", "password": "pw"})
+    stub_hass.config_entries.add(entry1)
+    stub_hass.config_entries.add(entry2)
+
+    async def _run() -> None:
+        assert await termoweb_init.async_setup_entry(stub_hass, entry1)
+        await _drain_tasks(stub_hass)
+        service = stub_hass.services.get(
+            termoweb_init.DOMAIN, "import_energy_history"
+        )
+        assert service is not None
+
+        assert stub_hass.services.has_service(
+            termoweb_init.DOMAIN, "import_energy_history"
+        )
+        assert await termoweb_init.async_setup_entry(stub_hass, entry2)
+        await _drain_tasks(stub_hass)
+        assert (
+            stub_hass.services.get(termoweb_init.DOMAIN, "import_energy_history")
+            is service
+        )
+
+        registry.add(
+            "sensor.svc1_energy",
+            unique_id=f"{termoweb_init.DOMAIN}:dev-1:htr:A:energy",
+            platform=termoweb_init.DOMAIN,
+            config_entry_id=entry1.entry_id,
+        )
+        registry.add(
+            "sensor.svc2_energy",
+            unique_id=f"{termoweb_init.DOMAIN}:dev-1:htr:B:energy",
+            platform=termoweb_init.DOMAIN,
+            config_entry_id=entry2.entry_id,
+        )
+
+        call = SimpleNamespace(
+            data={"entity_id": ["sensor.svc1_energy", "sensor.svc2_energy"]}
+        )
+        await service(call)
+        assert len(log_calls) == 2
+        assert all("import_energy_history task failed" in msg for msg, *_ in log_calls)
+
+    asyncio.run(_run())
+
+
 def test_async_unload_entry_cleans_up(
     termoweb_init: Any, stub_hass: StubHass
 ) -> None:
@@ -572,3 +861,19 @@ def test_async_update_entry_options_recalculates_poll(
 
     asyncio.run(termoweb_init.async_update_entry_options(stub_hass, entry))
     assert recalc_calls == [True]
+
+
+def test_async_unload_entry_missing_returns_true(
+    termoweb_init: Any, stub_hass: StubHass
+) -> None:
+    entry = ConfigEntry("missing", data={})
+    stub_hass.config_entries.add(entry)
+    assert asyncio.run(termoweb_init.async_unload_entry(stub_hass, entry)) is True
+
+
+def test_async_migrate_entry_returns_true(
+    termoweb_init: Any, stub_hass: StubHass
+) -> None:
+    entry = ConfigEntry("migrate", data={})
+    stub_hass.config_entries.add(entry)
+    assert asyncio.run(termoweb_init.async_migrate_entry(stub_hass, entry)) is True
