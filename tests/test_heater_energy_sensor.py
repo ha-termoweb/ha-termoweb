@@ -91,8 +91,16 @@ _dispatchers: dict[str, list] = {}
 
 
 def async_dispatcher_connect(_hass, signal: str, callback) -> None:  # pragma: no cover - minimal
-    _dispatchers.setdefault(signal, []).append(callback)
-    return lambda: None
+    callbacks = _dispatchers.setdefault(signal, [])
+    callbacks.append(callback)
+
+    def _remove() -> None:
+        try:
+            callbacks.remove(callback)
+        except ValueError:  # pragma: no cover - safety
+            pass
+
+    return _remove
 
 
 def dispatcher_send(signal: str, payload: dict) -> None:
@@ -201,10 +209,13 @@ sys.modules[f"{package}.sensor"] = sensor_module
 spec2.loader.exec_module(sensor_module)
 
 TermoWebHeaterEnergyCoordinator = coord_module.TermoWebHeaterEnergyCoordinator
+TermoWebHeaterTemp = sensor_module.TermoWebHeaterTemp
 TermoWebHeaterEnergyTotal = sensor_module.TermoWebHeaterEnergyTotal
 TermoWebHeaterPower = sensor_module.TermoWebHeaterPower
 TermoWebTotalEnergy = sensor_module.TermoWebTotalEnergy
-signal_ws_data = __import__(f"{package}.const", fromlist=["signal_ws_data"]).signal_ws_data
+const_module = __import__(f"{package}.const", fromlist=["signal_ws_data", "DOMAIN"])
+signal_ws_data = const_module.signal_ws_data
+DOMAIN = const_module.DOMAIN
 
 
 def test_coordinator_and_sensors() -> None:
@@ -258,6 +269,76 @@ def test_coordinator_and_sensors() -> None:
         assert energy_sensor.native_value >= first_value
         assert energy_sensor.native_value == pytest.approx(0.002)
         assert power_sensor.native_value == pytest.approx(123.0)
+
+    asyncio.run(_run())
+
+
+def test_heater_temp_sensor() -> None:
+    async def _run() -> None:
+        hass = HomeAssistant()
+        coordinator = types.SimpleNamespace(
+            hass=hass,
+            data={
+                "dev1": {
+                    "nodes": {"nodes": [{"type": "htr", "addr": "A"}]},
+                    "htr": {
+                        "settings": {
+                            "A": {
+                                "mtemp": "21.5",
+                                "units": "C",
+                            }
+                        }
+                    },
+                }
+            },
+        )
+
+        sensor = TermoWebHeaterTemp(
+            coordinator,
+            "entry",
+            "dev1",
+            "A",
+            "Living Room Temperature",
+            "temp1",
+            "Living Room",
+        )
+        await sensor.async_added_to_hass()
+
+        info = sensor.device_info
+        assert info["identifiers"] == {(DOMAIN, "dev1", "A")}
+        assert info["name"] == "Living Room"
+        assert info["manufacturer"] == "TermoWeb"
+        assert info["model"] == "Heater"
+        assert info["via_device"] == (DOMAIN, "dev1")
+
+        assert sensor.available is True
+        assert sensor.native_value == pytest.approx(21.5)
+        assert sensor.extra_state_attributes == {
+            "dev_id": "dev1",
+            "addr": "A",
+            "units": "C",
+        }
+
+        signal = signal_ws_data("entry")
+        sensor.schedule_update_ha_state = MagicMock()
+
+        dispatcher_send(signal, {"dev_id": "other", "addr": "A"})
+        dispatcher_send(signal, {"dev_id": "dev1", "addr": "B"})
+        sensor.schedule_update_ha_state.assert_not_called()
+
+        dispatcher_send(signal, {"dev_id": "dev1", "addr": "A"})
+        sensor.schedule_update_ha_state.assert_called_once()
+
+        sensor.schedule_update_ha_state.reset_mock()
+        original_unsub = sensor._unsub_ws
+        sensor._unsub_ws = MagicMock(side_effect=original_unsub)
+        assert hasattr(sensor, "_on_remove")
+        sensor._on_remove()
+        sensor._unsub_ws.assert_called_once()
+        assert sensor._on_ws_data not in _dispatchers.get(signal, [])
+
+        dispatcher_send(signal, {"dev_id": "dev1", "addr": "A"})
+        sensor.schedule_update_ha_state.assert_not_called()
 
     asyncio.run(_run())
 
