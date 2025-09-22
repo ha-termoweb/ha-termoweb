@@ -89,11 +89,18 @@ class StubServices:
 class StubConfigEntriesManager:
     def __init__(self) -> None:
         self.forwarded: list[tuple[ConfigEntry, tuple[str, ...]]] = []
+        self.unloaded: list[tuple[ConfigEntry, tuple[str, ...]]] = []
 
     async def async_forward_entry_setups(
         self, entry: ConfigEntry, platforms: list[str] | tuple[str, ...]
     ) -> None:
         self.forwarded.append((entry, tuple(platforms)))
+
+    async def async_unload_platforms(
+        self, entry: ConfigEntry, platforms: list[str] | tuple[str, ...]
+    ) -> bool:
+        self.unloaded.append((entry, tuple(platforms)))
+        return True
 
     def async_update_entry(
         self, entry: ConfigEntry, *, options: dict[str, Any] | None = None
@@ -285,3 +292,74 @@ def test_async_setup_entry_happy_path(
     assert stub_hass.services.has_service(
         termoweb_init.DOMAIN, "import_energy_history"
     )
+
+
+def test_async_unload_entry_cleans_up(
+    termoweb_init: Any, stub_hass: StubHass
+) -> None:
+    entry = ConfigEntry("unload", data={})
+
+    class DummyWSClient:
+        def __init__(self) -> None:
+            self.stop_calls = 0
+
+        async def stop(self) -> None:
+            self.stop_calls += 1
+
+    async def _run_unload() -> tuple[bool, list[bool], list[bool], int, bool]:
+        cancel_events: list[bool] = []
+        unsubscribed: list[bool] = []
+        recalc_calls: list[bool] = []
+
+        async def _ws_runner() -> None:
+            waiter = asyncio.Event()
+            try:
+                await waiter.wait()
+            except asyncio.CancelledError:
+                cancel_events.append(True)
+                raise
+
+        ws_task = asyncio.create_task(_ws_runner())
+        client = DummyWSClient()
+        record = {
+            "ws_tasks": {"dev-1": ws_task},
+            "ws_clients": {"dev-1": client},
+            "unsub_ws_status": lambda: unsubscribed.append(True),
+            "recalc_poll": lambda: recalc_calls.append(True),
+        }
+        stub_hass.data.setdefault(termoweb_init.DOMAIN, {})[entry.entry_id] = record
+
+        await asyncio.sleep(0)
+        result = await termoweb_init.async_unload_entry(stub_hass, entry)
+        return result, cancel_events, unsubscribed, client.stop_calls, ws_task.cancelled()
+
+    result, cancel_events, unsubscribed, stop_calls, task_cancelled = asyncio.run(
+        _run_unload()
+    )
+
+    assert result is True
+    assert cancel_events == [True]
+    assert task_cancelled is True
+    assert stop_calls == 1
+    assert unsubscribed == [True]
+    assert stub_hass.config_entries.unloaded == [
+        (entry, tuple(termoweb_init.PLATFORMS))
+    ]
+    assert entry.entry_id not in stub_hass.data.get(termoweb_init.DOMAIN, {})
+
+
+def test_async_update_entry_options_recalculates_poll(
+    termoweb_init: Any, stub_hass: StubHass
+) -> None:
+    entry = ConfigEntry("options", data={})
+    recalc_calls: list[bool] = []
+    stub_hass.data.setdefault(termoweb_init.DOMAIN, {})[entry.entry_id] = {
+        "ws_tasks": {},
+        "ws_clients": {},
+        "unsub_ws_status": lambda: None,
+        "recalc_poll": lambda: recalc_calls.append(True),
+    }
+
+    asyncio.run(termoweb_init.async_update_entry_options(stub_hass, entry))
+
+    assert recalc_calls == [True]
