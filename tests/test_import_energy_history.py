@@ -175,6 +175,14 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False)
     sys.modules["homeassistant.util"] = ha_util
     sys.modules["homeassistant.util.dt"] = dt
 
+    aiohttp_mod = sys.modules.setdefault("aiohttp", types.ModuleType("aiohttp"))
+
+    if not hasattr(aiohttp_mod, "ClientError"):
+        class ClientError(Exception):  # pragma: no cover - minimal stub
+            pass
+
+        aiohttp_mod.ClientError = ClientError
+
     sys.modules["voluptuous"] = types.ModuleType("voluptuous")
 
     loader = types.ModuleType("homeassistant.loader")
@@ -689,5 +697,88 @@ def test_refresh_fallback_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
         await asyncio.sleep(0)
         assert task.cancelled()
         assert heater._refresh_fallback is None
+
+    asyncio.run(_run())
+
+
+def test_async_unload_entry_cleans_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        (
+            mod,
+            const,
+            _import_stats,
+            _update_meta,
+            _last_stats,
+            ConfigEntry,
+            HomeAssistant,
+            _ent_reg,
+        ) = await _load_module(monkeypatch)
+
+        hass = HomeAssistant()
+        hass.data = {const.DOMAIN: {}}
+
+        entry = ConfigEntry("entry-1")
+
+        task_cancelled = False
+        task_finalized = False
+        client_stopped = False
+        unsub_called = False
+        recalc_state = {"value": False}
+
+        async def ws_job() -> None:
+            nonlocal task_cancelled, task_finalized
+            try:
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                task_cancelled = True
+                raise
+            finally:
+                task_finalized = True
+
+        task = asyncio.create_task(ws_job())
+        await asyncio.sleep(0)
+
+        class DummyClient:
+            async def stop(self) -> None:
+                nonlocal client_stopped
+                client_stopped = True
+
+        def unsub() -> None:
+            nonlocal unsub_called
+            unsub_called = True
+
+        hass.data[const.DOMAIN][entry.entry_id] = {
+            "config_entry": entry,
+            "ws_tasks": {"dev": task},
+            "ws_clients": {"dev": DummyClient()},
+            "unsub_ws_status": unsub,
+            "recalc_poll": (
+                lambda state=recalc_state: state.__setitem__(
+                    "value", not state["value"]
+                )
+            ),
+        }
+
+        recalc_poll = hass.data[const.DOMAIN][entry.entry_id]["recalc_poll"]
+
+        unload_platforms = AsyncMock(return_value=True)
+        hass.config_entries = types.SimpleNamespace(
+            async_unload_platforms=unload_platforms,
+        )
+
+        result = await mod.async_unload_entry(hass, entry)
+
+        assert result is True
+        assert task.cancelled()
+        assert task_finalized
+        assert task_cancelled
+        assert client_stopped
+        assert unsub_called
+        unload_platforms.assert_awaited_once_with(entry, mod.PLATFORMS)
+        assert entry.entry_id not in hass.data[const.DOMAIN]
+
+        hass.data[const.DOMAIN][entry.entry_id] = {"recalc_poll": recalc_poll}
+        await mod.async_update_entry_options(hass, entry)
+        assert recalc_state["value"] is True
 
     asyncio.run(_run())
