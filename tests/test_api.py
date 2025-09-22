@@ -6,7 +6,7 @@ import importlib.util
 from pathlib import Path
 import sys
 import types
-from typing import Any
+from typing import Any, Callable
 
 import pytest
 
@@ -68,11 +68,15 @@ class MockResponse:
         json_data: Any,
         *,
         headers: dict[str, str] | None = None,
-        text_data: str = "",
+        text_data: str | Callable[[], str] | None = "",
+        text_exc: Exception | None = None,
+        json_exc: Exception | None = None,
     ) -> None:
         self.status = status
         self._json = json_data
         self._text = text_data
+        self._text_exc = text_exc
+        self._json_exc = json_exc
         self.headers = headers or {}
         self.request_info = None
         self.history = ()
@@ -86,12 +90,19 @@ class MockResponse:
         return None
 
     async def text(self) -> str:
-        return self._text
+        if self._text_exc is not None:
+            raise self._text_exc
+        value = self._text() if callable(self._text) else self._text
+        if value is None:
+            return ""
+        return value
 
     async def json(
         self, content_type: str | None = None
     ) -> Any:  # pragma: no cover - simple pass-through
-        return self._json
+        if self._json_exc is not None:
+            raise self._json_exc
+        return self._json() if callable(self._json) else self._json
 
 
 class LatchedResponse:
@@ -180,6 +191,88 @@ def test_token_refresh(monkeypatch) -> None:
         assert token2 == "t2"
         assert len(session.post_calls) == 2
 
+    asyncio.run(_run())
+
+
+def test_ensure_token_401_raises_auth_error() -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_post(
+            MockResponse(
+                401,
+                {},
+                headers={"Content-Type": "application/json"},
+            )
+        )
+
+        client = TermoWebClient(session, "user", "pass")
+
+        with pytest.raises(api.TermoWebAuthError):
+            await client._ensure_token()
+
+    asyncio.run(_run())
+
+
+def test_ensure_token_429_raises_rate_limit_error() -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_post(
+            MockResponse(
+                429,
+                {},
+                headers={"Content-Type": "application/json"},
+                text_data='{"error":"rate"}',
+            )
+        )
+
+        client = TermoWebClient(session, "user", "pass")
+
+        with pytest.raises(api.TermoWebRateLimitError):
+            await client._ensure_token()
+
+    asyncio.run(_run())
+
+
+def test_ensure_token_missing_access_token() -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_post(
+            MockResponse(
+                200,
+                {"unexpected": True},
+                headers={"Content-Type": "application/json"},
+            )
+        )
+
+        client = TermoWebClient(session, "user", "pass")
+
+        with pytest.raises(api.TermoWebAuthError):
+            await client._ensure_token()
+
+    asyncio.run(_run())
+
+
+def test_ensure_token_non_numeric_expires_in(monkeypatch) -> None:
+    fake_time = 1000.0
+
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_post(
+            MockResponse(
+                200,
+                {"access_token": "tok", "expires_in": "soon"},
+                headers={"Content-Type": "application/json"},
+            )
+        )
+
+        client = TermoWebClient(session, "user", "pass")
+
+        token = await client._ensure_token()
+        assert token == "tok"
+        assert client._token_obtained_at == fake_time
+        assert client._token_expiry == fake_time + 3600
+
+    monkeypatch.setattr(api.time, "time", lambda: fake_time)
     asyncio.run(_run())
 
 
@@ -395,6 +488,100 @@ def test_request_timeout_propagates() -> None:
     asyncio.run(_run())
 
 
+def test_request_preview_logs_json_fallback(caplog) -> None:
+    results: list[str] = []
+
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(
+                200,
+                {"ok": True},
+                headers={"Content-Type": "application/json"},
+                text_data='{"ok":true}',
+                json_exc=ValueError("boom"),
+            )
+        )
+
+        client = TermoWebClient(session, "user", "pass")
+        result = await client._request("GET", "/api/preview", headers={})
+        results.append(result)
+
+    caplog.clear()
+    api.API_LOG_PREVIEW = True
+    try:
+        with caplog.at_level("DEBUG"):
+            asyncio.run(_run())
+    finally:
+        api.API_LOG_PREVIEW = False
+
+    assert results == ['{"ok":true}']
+    preview_logs = [rec.message for rec in caplog.records if "body[0:200]" in rec.message]
+    assert preview_logs
+    assert '"ok"' in preview_logs[0]
+
+
+def test_request_cancelled_error_propagates() -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        def raise_cancelled() -> None:
+            raise asyncio.CancelledError()
+
+        session.queue_request(raise_cancelled)
+
+        client = TermoWebClient(session, "user", "pass")
+
+        with pytest.raises(asyncio.CancelledError):
+            await client._request("GET", "/api/cancel", headers={})
+
+    asyncio.run(_run())
+
+
+def test_request_final_auth_error_after_retries(monkeypatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_post(
+            MockResponse(
+                200,
+                {"access_token": "initial", "expires_in": 3600},
+                headers={"Content-Type": "application/json"},
+            ),
+            MockResponse(
+                200,
+                {"access_token": "refresh1", "expires_in": 3600},
+                headers={"Content-Type": "application/json"},
+            ),
+            MockResponse(
+                200,
+                {"access_token": "refresh2", "expires_in": 3600},
+                headers={"Content-Type": "application/json"},
+            ),
+        )
+        session.queue_request(
+            LatchedResponse(
+                MockResponse(
+                    401,
+                    {"error": "invalid_token"},
+                    headers={"Content-Type": "application/json"},
+                    text_data='{"error":"invalid_token"}',
+                )
+            )
+        )
+
+        client = TermoWebClient(session, "user", "pass")
+        headers = await client._authed_headers()
+        monkeypatch.setattr(api, "range", lambda _n: (0, 0), raising=False)
+
+        with pytest.raises(api.TermoWebAuthError) as err:
+            await client._request("GET", "/api/fail", headers=headers)
+
+        assert str(err.value) == "Unauthorized"
+        assert len(session.request_calls) == 2
+        assert len(session.post_calls) == 3
+
+    asyncio.run(_run())
+
+
 def test_set_htr_settings_invalid_units() -> None:
     async def _run() -> None:
         session = FakeSession()
@@ -511,6 +698,66 @@ def test_get_htr_samples_decreasing_counters() -> None:
     asyncio.run(_run())
 
 
+def test_get_htr_samples_malformed_items(monkeypatch, caplog) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        client = TermoWebClient(session, "user", "pass")
+
+        async def fake_headers() -> dict[str, str]:
+            return {}
+
+        async def fake_request(
+            method: str, path: str, **kwargs: Any
+        ) -> dict[str, Any]:
+            return {
+                "samples": [
+                    123,
+                    {"t": "bad"},
+                    {"t": 5, "counter": None},
+                ]
+            }
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "_request", fake_request)
+
+        with caplog.at_level("DEBUG"):
+            samples = await client.get_htr_samples("dev", "A", 0, 10)
+
+        assert samples == []
+
+    caplog.clear()
+    asyncio.run(_run())
+    messages = [rec.message for rec in caplog.records]
+    assert any("Unexpected htr sample item" in msg for msg in messages)
+    assert any("Unexpected htr sample shape" in msg for msg in messages)
+
+
+def test_get_htr_samples_unexpected_payload(monkeypatch, caplog) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        client = TermoWebClient(session, "user", "pass")
+
+        async def fake_headers() -> dict[str, str]:
+            return {}
+
+        async def fake_request(method: str, path: str, **kwargs: Any) -> Any:
+            return "garbled"
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "_request", fake_request)
+
+        with caplog.at_level("DEBUG"):
+            samples = await client.get_htr_samples("dev", "A", 0, 10)
+
+        assert samples == []
+
+    caplog.clear()
+    asyncio.run(_run())
+    assert any(
+        "Unexpected htr samples payload" in rec.message for rec in caplog.records
+    )
+
+
 def test_request_recovers_after_token_refresh() -> None:
     async def _run() -> None:
         session = FakeSession()
@@ -550,6 +797,56 @@ def test_request_recovers_after_token_refresh() -> None:
         assert refreshed_headers["Authorization"] == "Bearer new"
 
     asyncio.run(_run())
+
+
+def test_list_devices_unexpected_dict_payload(monkeypatch, caplog) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        client = TermoWebClient(session, "user", "pass")
+
+        async def fake_headers() -> dict[str, str]:
+            return {}
+
+        async def fake_request(
+            method: str, path: str, **kwargs: Any
+        ) -> dict[str, Any]:
+            return {"weird": []}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "_request", fake_request)
+
+        with caplog.at_level("DEBUG"):
+            devices = await client.list_devices()
+
+        assert devices == []
+
+    caplog.clear()
+    asyncio.run(_run())
+    assert any("Unexpected /devs shape" in rec.message for rec in caplog.records)
+
+
+def test_list_devices_unexpected_string_payload(monkeypatch, caplog) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        client = TermoWebClient(session, "user", "pass")
+
+        async def fake_headers() -> dict[str, str]:
+            return {}
+
+        async def fake_request(method: str, path: str, **kwargs: Any) -> str:
+            return "oops"
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "_request", fake_request)
+
+        with caplog.at_level("DEBUG"):
+            devices = await client.list_devices()
+
+        assert devices == []
+
+    caplog.clear()
+    asyncio.run(_run())
+    assert any("Unexpected /devs shape" in rec.message for rec in caplog.records)
 
 
 def test_set_htr_settings_translates_heat(monkeypatch) -> None:
