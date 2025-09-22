@@ -10,7 +10,7 @@ from collections.abc import Coroutine
 from pathlib import Path
 import sys
 import types
-from typing import Any, Callable, Deque
+from typing import Any, Callable, Deque, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -344,7 +344,9 @@ def test_async_setup_entry_creates_entities() -> None:
                 {"type": "other", "addr": "X"},
             ]
         }
-        coordinator_data = {dev_id: {"nodes": nodes, "htr": {"settings": {}}}}
+        coordinator_data = {
+            dev_id: {"nodes": nodes, "htr": {"settings": {}}, "version": "3.1.4"}
+        }
         coordinator = FakeCoordinator(hass, coordinator_data)
 
         hass.data = {
@@ -355,6 +357,7 @@ def test_async_setup_entry_creates_entities() -> None:
                     "client": AsyncMock(),
                     "nodes": nodes,
                     "htr_addrs": addrs,
+                    "version": "3.1.4",
                 }
             }
         }
@@ -378,6 +381,40 @@ def test_async_setup_entry_creates_entities() -> None:
 
         registered = [name for name, _, _ in platform.registered]
         assert registered == ["set_schedule", "set_preset_temperatures"]
+
+        for entity in added:
+            info = entity.device_info
+            assert info["identifiers"] == {(DOMAIN, dev_id, entity._addr)}
+            assert info["manufacturer"] == "TermoWeb"
+            assert info["model"] == "Heater"
+            assert info["via_device"] == (DOMAIN, dev_id)
+
+        schedule_name, _, schedule_handler = platform.registered[0]
+        preset_name, _, preset_handler = platform.registered[1]
+        assert schedule_name == "set_schedule"
+        assert preset_name == "set_preset_temperatures"
+
+        schedule_prog = [0] * 168
+        first = added[0]
+        first.async_set_schedule = AsyncMock()
+        await schedule_handler(first, ServiceCall({"prog": schedule_prog}))
+        first.async_set_schedule.assert_awaited_once_with(schedule_prog)
+
+        first.async_set_preset_temperatures = AsyncMock()
+        await preset_handler(first, ServiceCall({"ptemp": [18.0, 19.0, 20.0]}))
+        first.async_set_preset_temperatures.assert_awaited_once_with(
+            ptemp=[18.0, 19.0, 20.0]
+        )
+
+        second = added[1]
+        second.async_set_preset_temperatures = AsyncMock()
+        await preset_handler(
+            second,
+            ServiceCall({"cold": 15.0, "night": 18.0, "day": 20.0}),
+        )
+        second.async_set_preset_temperatures.assert_awaited_once_with(
+            cold=15.0, night=18.0, day=20.0
+        )
 
     asyncio.run(_run())
 
@@ -407,6 +444,7 @@ def test_heater_properties_and_ws_update() -> None:
             dev_id: {
                 "nodes": {"nodes": []},
                 "htr": {"settings": {addr: settings}},
+                "version": "2.0.0",
             }
         }
         coordinator = FakeCoordinator(hass, coordinator_data)
@@ -416,6 +454,7 @@ def test_heater_properties_and_ws_update() -> None:
                     "client": AsyncMock(),
                     "coordinator": coordinator,
                     "dev_id": dev_id,
+                    "version": "2.0.0",
                 }
             }
         }
@@ -427,17 +466,27 @@ def test_heater_properties_and_ws_update() -> None:
 
         await heater.async_added_to_hass()
 
+        info = heater.device_info
+        assert info["identifiers"] == {(DOMAIN, dev_id, addr)}
+        assert info["manufacturer"] == "TermoWeb"
+        assert info["model"] == "Heater"
+        assert info["via_device"] == (DOMAIN, dev_id)
+
         assert heater.should_poll is False
         assert heater.available is True
         assert heater.hvac_mode == HVACMode.HEAT
         assert heater.hvac_action == HVACAction.HEATING
         assert heater.current_temperature == pytest.approx(19.5)
         assert heater.target_temperature == pytest.approx(21.0)
+        assert heater.min_temp == 5.0
+        assert heater.max_temp == 30.0
         assert heater.icon == "mdi:radiator"
 
         attrs = heater.extra_state_attributes
         assert attrs["dev_id"] == dev_id
         assert attrs["addr"] == addr
+        assert attrs["units"] == "C"
+        assert attrs["max_power"] == 1200
         assert attrs["ptemp"] == ["15.0", "18.0", "21.0"]
         assert attrs["prog"] == prog
         assert attrs["program_slot"] == "day"
@@ -525,6 +574,7 @@ def test_heater_write_paths_and_errors(
             dev_id: {
                 "nodes": {"nodes": []},
                 "htr": {"settings": {addr: settings}},
+                "version": "5.0.0",
             }
         }
 
@@ -536,6 +586,7 @@ def test_heater_write_paths_and_errors(
                     "client": client,
                     "coordinator": coordinator,
                     "dev_id": dev_id,
+                    "version": "5.0.0",
                 }
             }
         }
@@ -544,6 +595,7 @@ def test_heater_write_paths_and_errors(
         await heater.async_added_to_hass()
 
         fallback_waiters: Deque[asyncio.Future[None]] = deque()
+        real_sleep = asyncio.sleep
 
         async def fake_sleep(delay: float) -> None:
             if delay == climate_module._WRITE_DEBOUNCE:
@@ -554,6 +606,7 @@ def test_heater_write_paths_and_errors(
                 fallback_waiters.append(fut)
                 await fut
                 return None
+            await real_sleep(delay)
             return None
 
         real_create_task = asyncio.create_task
@@ -570,8 +623,17 @@ def test_heater_write_paths_and_errors(
             for _ in range(10):
                 if fallback_waiters:
                     return fallback_waiters.popleft()
-                await asyncio.get_running_loop().run_in_executor(None, lambda: None)
+                await real_sleep(0)
             raise AssertionError("fallback waiter not created")
+
+        async def _complete_fallback_once() -> None:
+            waiter = await _pop_waiter()
+            assert heater._refresh_fallback is not None
+            assert coordinator.async_request_refresh.await_count == 0
+            waiter.set_result(None)
+            await heater._refresh_fallback
+            assert coordinator.async_request_refresh.await_count == 1
+            coordinator.async_request_refresh.reset_mock()
 
         monkeypatch.setattr(asyncio, "sleep", fake_sleep)
         monkeypatch.setattr(asyncio, "create_task", track_create_task)
@@ -589,23 +651,27 @@ def test_heater_write_paths_and_errors(
         assert settings_after["prog"] == list(base_prog)
 
         assert heater._refresh_fallback is not None
-        waiter = await _pop_waiter()
-        assert coordinator.async_request_refresh.await_count == 0
-        waiter.set_result(None)
-        await heater._refresh_fallback
-        assert coordinator.async_request_refresh.await_count == 1
+        await _complete_fallback_once()
 
         client.set_htr_settings.reset_mock()
-        coordinator.async_request_refresh.reset_mock()
 
-        # -------------------- async_set_schedule (invalid) --------------------
+        # -------------------- async_set_schedule (invalid length/value) -----
         caplog.clear()
         await heater.async_set_schedule([0, 1])
         assert client.set_htr_settings.await_count == 0
         assert "Invalid prog length" in caplog.text
         assert not fallback_waiters
 
-        # -------------------- async_set_preset_temperatures (valid) --------------------
+        caplog.clear()
+        client.set_htr_settings.reset_mock()
+        bad_prog = list(base_prog)
+        bad_prog[5] = 7
+        await heater.async_set_schedule(bad_prog)
+        assert client.set_htr_settings.await_count == 0
+        assert "Invalid prog for dev" in caplog.text
+        assert not fallback_waiters
+
+        # -------------------- async_set_preset_temperatures (valid forms) ---
         caplog.clear()
         preset_payload = [18.5, 19.5, 20.5]
         await heater.async_set_preset_temperatures(ptemp=preset_payload)
@@ -613,93 +679,95 @@ def test_heater_write_paths_and_errors(
         assert call.args == (dev_id, addr)
         assert call.kwargs["ptemp"] == preset_payload
         assert call.kwargs["units"] == "C"
-
-        settings_after = coordinator.data[dev_id]["htr"]["settings"][addr]
         assert settings_after["ptemp"] == ["18.5", "19.5", "20.5"]
-
-        waiter = await _pop_waiter()
-        assert coordinator.async_request_refresh.await_count == 0
-        waiter.set_result(None)
-        await heater._refresh_fallback
-        assert coordinator.async_request_refresh.await_count == 1
-
+        await _complete_fallback_once()
         client.set_htr_settings.reset_mock()
-        coordinator.async_request_refresh.reset_mock()
 
-        # -------------------- async_set_preset_temperatures (invalid) --------------------
+        caplog.clear()
+        await heater.async_set_preset_temperatures(cold=16.5, night=17.5, day=18.5)
+        call = client.set_htr_settings.await_args
+        assert call.kwargs["ptemp"] == [16.5, 17.5, 18.5]
+        assert settings_after["ptemp"] == ["16.5", "17.5", "18.5"]
+        await _complete_fallback_once()
+        client.set_htr_settings.reset_mock()
+
+        # -------------------- async_set_preset_temperatures (invalid) -------
         caplog.clear()
         await heater.async_set_preset_temperatures(ptemp=[18.0, 19.0])
         assert client.set_htr_settings.await_count == 0
         assert "Invalid ptemp length" in caplog.text
         assert not fallback_waiters
 
-        # -------------------- async_set_temperature --------------------
         caplog.clear()
         client.set_htr_settings.reset_mock()
-        await heater.async_set_temperature(**{ATTR_TEMPERATURE: 23.7})
+        await heater.async_set_preset_temperatures(ptemp=["bad", "bad", "bad"])
+        assert client.set_htr_settings.await_count == 0
+        assert "Invalid ptemp values" in caplog.text
+        assert not fallback_waiters
+
+        # -------------------- async_set_temperature (valid + clamps) -------
+        client.set_htr_settings.reset_mock()
+        await heater.async_set_temperature(**{ATTR_TEMPERATURE: 35.6})
         assert heater._write_task is not None
         await heater._write_task
         call = client.set_htr_settings.await_args
         assert call.args == (dev_id, addr)
         assert call.kwargs["mode"] == "manual"
-        assert call.kwargs["stemp"] == pytest.approx(23.7)
+        assert call.kwargs["stemp"] == pytest.approx(30.0)
         assert call.kwargs["units"] == "C"
-
-        waiter = await _pop_waiter()
-        waiter.set_result(None)
-        await heater._refresh_fallback
-        assert coordinator.async_request_refresh.await_count == 1
-
+        await _complete_fallback_once()
         client.set_htr_settings.reset_mock()
-        coordinator.async_request_refresh.reset_mock()
 
-        # -------------------- async_set_hvac_mode (AUTO) --------------------
+        await heater.async_set_temperature(**{ATTR_TEMPERATURE: 2.0})
+        assert heater._write_task is not None
+        await heater._write_task
+        call = client.set_htr_settings.await_args
+        assert call.kwargs["stemp"] == pytest.approx(5.0)
+        await _complete_fallback_once()
+        client.set_htr_settings.reset_mock()
+
+        caplog.clear()
+        await heater.async_set_temperature(**{ATTR_TEMPERATURE: "bad"})
+        assert client.set_htr_settings.await_count == 0
+        assert (heater._write_task is None) or heater._write_task.done()
+        assert "Invalid temperature payload" in caplog.text
+        assert not fallback_waiters
+
+        # -------------------- async_set_hvac_mode --------------------------
+        client.set_htr_settings.reset_mock()
         await heater.async_set_hvac_mode(HVACMode.AUTO)
         assert heater._write_task is not None
         await heater._write_task
         call = client.set_htr_settings.await_args
         assert call.kwargs["mode"] == "auto"
         assert call.kwargs["stemp"] is None
-
-        waiter = await _pop_waiter()
-        waiter.set_result(None)
-        await heater._refresh_fallback
-        assert coordinator.async_request_refresh.await_count == 1
-
+        await _complete_fallback_once()
         client.set_htr_settings.reset_mock()
-        coordinator.async_request_refresh.reset_mock()
 
-        # -------------------- async_set_hvac_mode (OFF) --------------------
         await heater.async_set_hvac_mode(HVACMode.OFF)
         assert heater._write_task is not None
         await heater._write_task
         call = client.set_htr_settings.await_args
         assert call.kwargs["mode"] == "off"
-
-        waiter = await _pop_waiter()
-        waiter.set_result(None)
-        await heater._refresh_fallback
-        assert coordinator.async_request_refresh.await_count == 1
-
+        await _complete_fallback_once()
         client.set_htr_settings.reset_mock()
-        coordinator.async_request_refresh.reset_mock()
 
-        # -------------------- async_set_hvac_mode (HEAT) --------------------
         await heater.async_set_hvac_mode(HVACMode.HEAT)
         assert heater._write_task is not None
         await heater._write_task
         call = client.set_htr_settings.await_args
         assert call.kwargs["mode"] == "manual"
         assert call.kwargs["stemp"] == pytest.approx(21.0)
+        await _complete_fallback_once()
+        client.set_htr_settings.reset_mock()
 
-        waiter = await _pop_waiter()
-        waiter.set_result(None)
-        await heater._refresh_fallback
-        assert coordinator.async_request_refresh.await_count == 1
+        caplog.clear()
+        await heater.async_set_hvac_mode(cast(HVACMode, "eco"))
+        assert client.set_htr_settings.await_count == 0
+        assert "Unsupported hvac_mode" in caplog.text
+        assert not fallback_waiters
 
-        coordinator.async_request_refresh.reset_mock()
-
-        # -------------------- _schedule_refresh_fallback behaviour --------------------
+        # -------------------- _schedule_refresh_fallback behaviour --------
         heater._schedule_refresh_fallback()
         task_a = heater._refresh_fallback
         waiter_a = await _pop_waiter()
