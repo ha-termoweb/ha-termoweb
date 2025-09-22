@@ -198,6 +198,99 @@ def test_request_ignore_status_returns_none() -> None:
 
     asyncio.run(_run())
 
+
+def test_request_two_401_responses() -> None:
+    async def _run() -> None:
+        session = MagicMock()
+        session.request.side_effect = [
+            MockResponse(
+                401,
+                {},
+                headers={"Content-Type": "application/json"},
+            ),
+            MockResponse(
+                401,
+                {},
+                headers={"Content-Type": "application/json"},
+            ),
+        ]
+        session.post.return_value = MockResponse(
+            200,
+            {"access_token": "fresh", "expires_in": 3600},
+            headers={"Content-Type": "application/json"},
+        )
+
+        client = TermoWebClient(session, "user", "pass")
+
+        with pytest.raises(api.TermoWebAuthError):
+            await client._request("GET", "/path", headers={})
+
+        assert session.post.call_count == 1
+        assert session.request.call_count == 2
+
+    asyncio.run(_run())
+
+
+def test_request_rate_limit() -> None:
+    async def _run() -> None:
+        session = MagicMock()
+        session.request.return_value = MockResponse(
+            429,
+            {},
+            headers={"Content-Type": "application/json"},
+        )
+
+        client = TermoWebClient(session, "user", "pass")
+
+        with pytest.raises(api.TermoWebRateLimitError):
+            await client._request("GET", "/path", headers={})
+
+        assert session.request.call_count == 1
+
+    asyncio.run(_run())
+
+
+def test_set_htr_settings_invalid_units() -> None:
+    async def _run() -> None:
+        client = TermoWebClient(MagicMock(), "user", "pass")
+
+        with pytest.raises(ValueError, match="Invalid units"):
+            await client.set_htr_settings("dev", "A", units="kelvin")
+
+    asyncio.run(_run())
+
+
+def test_set_htr_settings_bad_stemp() -> None:
+    async def _run() -> None:
+        client = TermoWebClient(MagicMock(), "user", "pass")
+
+        with pytest.raises(ValueError, match="Invalid stemp value"):
+            await client.set_htr_settings("dev", "A", stemp="not-a-number")
+
+    asyncio.run(_run())
+
+
+def test_set_htr_settings_short_prog() -> None:
+    async def _run() -> None:
+        client = TermoWebClient(MagicMock(), "user", "pass")
+
+        with pytest.raises(ValueError, match="prog must be a list of 168"):
+            await client.set_htr_settings("dev", "A", prog=[0, 1, 2])
+
+    asyncio.run(_run())
+
+
+def test_set_htr_settings_bad_ptemp() -> None:
+    async def _run() -> None:
+        client = TermoWebClient(MagicMock(), "user", "pass")
+
+        with pytest.raises(ValueError, match="ptemp contains non-numeric value"):
+            await client.set_htr_settings(
+                "dev", "A", ptemp=["19.5", "oops", "21.0"]
+            )
+
+    asyncio.run(_run())
+
 def test_request_retries_on_401() -> None:
     async def _run() -> None:
         session = MagicMock()
