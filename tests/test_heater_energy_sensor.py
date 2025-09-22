@@ -255,20 +255,41 @@ def test_coordinator_and_sensors() -> None:
         assert energy_sensor.native_value == pytest.approx(0.0015)
         assert power_sensor.native_value == pytest.approx(2000.0, rel=1e-3)
 
+        signal = signal_ws_data("entry")
         first_value: float = energy_sensor.native_value  # type: ignore[assignment]
+
+        coord.data["1"]["htr"]["energy"]["A"] = "bad"
+        coord.data["1"]["htr"]["power"]["A"] = "oops"
+        assert energy_sensor.native_value is None
+        assert power_sensor.native_value is None
 
         energy_sensor.schedule_update_ha_state = MagicMock()
         power_sensor.schedule_update_ha_state = MagicMock()
 
         coord.data["1"]["htr"]["energy"]["A"] = 2.0
         coord.data["1"]["htr"]["power"]["A"] = 123.0
-        dispatcher_send(signal_ws_data("entry"), {"dev_id": "1", "addr": "A"})
+        dispatcher_send(signal, {"dev_id": "1", "addr": "A"})
 
         energy_sensor.schedule_update_ha_state.assert_called_once()
         power_sensor.schedule_update_ha_state.assert_called_once()
         assert energy_sensor.native_value >= first_value
         assert energy_sensor.native_value == pytest.approx(0.002)
         assert power_sensor.native_value == pytest.approx(123.0)
+
+        energy_sensor.schedule_update_ha_state.reset_mock()
+        original_unsub_energy = energy_sensor._unsub_ws
+        energy_sensor._unsub_ws = MagicMock(side_effect=original_unsub_energy)
+        energy_sensor._on_remove()
+        energy_sensor._unsub_ws.assert_called_once()
+        assert energy_sensor._on_ws_data not in _dispatchers.get(signal, [])
+        dispatcher_send(signal, {"dev_id": "1", "addr": "A"})
+        energy_sensor.schedule_update_ha_state.assert_not_called()
+
+        power_sensor.schedule_update_ha_state.reset_mock()
+        original_unsub_power = power_sensor._unsub_ws
+        power_sensor._unsub_ws = MagicMock(side_effect=original_unsub_power)
+        power_sensor._on_remove()
+        power_sensor._unsub_ws.assert_called_once()
 
     asyncio.run(_run())
 
@@ -318,6 +339,12 @@ def test_heater_temp_sensor() -> None:
             "addr": "A",
             "units": "C",
         }
+
+        original_nodes = coordinator.data["dev1"]["nodes"]
+        coordinator.data["dev1"]["nodes"] = None
+        assert sensor.available is False
+        coordinator.data["dev1"]["nodes"] = original_nodes
+        assert sensor.available is True
 
         signal = signal_ws_data("entry")
         sensor.schedule_update_ha_state = MagicMock()
@@ -370,14 +397,25 @@ def test_total_energy_sensor() -> None:
 
         first_value: float = total_sensor.native_value  # type: ignore[assignment]
 
+        signal = signal_ws_data("entry")
         total_sensor.schedule_update_ha_state = MagicMock()
 
         coord.data["1"]["htr"]["energy"]["A"] = 1.5
         coord.data["1"]["htr"]["energy"]["B"] = 2.5
-        dispatcher_send(signal_ws_data("entry"), {"dev_id": "1", "addr": "A"})
+        coord.data["1"]["htr"]["energy"]["C"] = "bad"
+        dispatcher_send(signal, {"dev_id": "1", "addr": "A"})
 
         total_sensor.schedule_update_ha_state.assert_called_once()
         assert total_sensor.native_value >= first_value
         assert total_sensor.native_value == pytest.approx(0.004)
+
+        total_sensor.schedule_update_ha_state.reset_mock()
+        original_unsub = total_sensor._unsub_ws
+        total_sensor._unsub_ws = MagicMock(side_effect=original_unsub)
+        total_sensor._on_remove()
+        total_sensor._unsub_ws.assert_called_once()
+        assert total_sensor._on_ws_data not in _dispatchers.get(signal, [])
+        dispatcher_send(signal, {"dev_id": "1", "addr": "B"})
+        total_sensor.schedule_update_ha_state.assert_not_called()
 
     asyncio.run(_run())
