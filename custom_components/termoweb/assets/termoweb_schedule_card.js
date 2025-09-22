@@ -73,6 +73,12 @@
 
       // Track which preset input is actively being edited (focus index: 0=cold,1=night,2=day)
       this._editingPresetIdx = -1;
+      this._presetSelection = null;
+      this._pendingPresetFocusRestore = false;
+      this._presetFocusRelease = false;
+      this._restoreFocusRaf = null;
+      this._boundWindowPointerDown = (ev) => this._handleWindowPointerDown(ev);
+      this._pointerDownAttached = false;
 
       // painting
       this._dragging = false;
@@ -109,6 +115,22 @@
       };
       this._gridCells = null;
 
+    }
+
+    connectedCallback() {
+      if (super.connectedCallback) super.connectedCallback();
+      if (!this._pointerDownAttached) {
+        window.addEventListener("pointerdown", this._boundWindowPointerDown, true);
+        this._pointerDownAttached = true;
+      }
+    }
+
+    disconnectedCallback() {
+      if (this._pointerDownAttached) {
+        window.removeEventListener("pointerdown", this._boundWindowPointerDown, true);
+        this._pointerDownAttached = false;
+      }
+      if (super.disconnectedCallback) super.disconnectedCallback();
     }
 
     setConfig(config) {
@@ -205,6 +227,7 @@
         this._render({ forceFull: !this._hasRendered || entityChanged });
       } else {
         this._updateStatusIndicators();
+        this._restorePresetFocusIfNeeded();
       }
     }
 
@@ -344,6 +367,9 @@
       this._dirtyProg = false;
       this._dirtyPresets = false;
       this._editingPresetIdx = -1;
+      this._pendingPresetFocusRestore = false;
+      this._presetFocusRelease = false;
+      this._presetSelection = null;
       this._freezeUntil = 0;
       this._pendingEcho = { prog: null, ptemp: null };
       this._lastSent = { prog: null, ptemp: null };
@@ -363,6 +389,9 @@
       this._dirtyProg = false;
       this._dirtyPresets = false;
       this._editingPresetIdx = -1;
+      this._pendingPresetFocusRestore = false;
+      this._presetFocusRelease = false;
+      this._presetSelection = null;
       this._freezeUntil = 0;
       this._pendingEcho = { prog: null, ptemp: null };
       this._render();
@@ -394,6 +423,9 @@
         this._ptempLocal = payload.slice();
         this._dirtyPresets = false;
         this._editingPresetIdx = -1;
+        this._pendingPresetFocusRestore = false;
+        this._presetFocusRelease = false;
+        this._presetSelection = null;
         this._lastSent.ptemp = payload.slice();
         this._pendingEcho.ptemp = payload.slice();
         this._freezeUntil = nowMs() + this._freezeWindowMs;
@@ -586,33 +618,9 @@
           }
         });
 
-        this._els.presetInputs.cold?.addEventListener("input", () => {
-          this._ptempLocal[0] = this._parseInputNum("tw_p_cold");
-          this._dirtyPresets = true;
-          this._updateStatusIndicators();
-        });
-        this._els.presetInputs.cold?.addEventListener("focus", () => { this._editingPresetIdx = 0; });
-        this._els.presetInputs.cold?.addEventListener("blur", () => {
-          if (this._editingPresetIdx === 0) this._editingPresetIdx = -1;
-        });
-        this._els.presetInputs.night?.addEventListener("input", () => {
-          this._ptempLocal[1] = this._parseInputNum("tw_p_night");
-          this._dirtyPresets = true;
-          this._updateStatusIndicators();
-        });
-        this._els.presetInputs.night?.addEventListener("focus", () => { this._editingPresetIdx = 1; });
-        this._els.presetInputs.night?.addEventListener("blur", () => {
-          if (this._editingPresetIdx === 1) this._editingPresetIdx = -1;
-        });
-        this._els.presetInputs.day?.addEventListener("input", () => {
-          this._ptempLocal[2] = this._parseInputNum("tw_p_day");
-          this._dirtyPresets = true;
-          this._updateStatusIndicators();
-        });
-        this._els.presetInputs.day?.addEventListener("focus", () => { this._editingPresetIdx = 2; });
-        this._els.presetInputs.day?.addEventListener("blur", () => {
-          if (this._editingPresetIdx === 2) this._editingPresetIdx = -1;
-        });
+        this._bindPresetInput(this._els.presetInputs.cold, 0);
+        this._bindPresetInput(this._els.presetInputs.night, 1);
+        this._bindPresetInput(this._els.presetInputs.day, 2);
 
         root.getElementById("savePresetsBtn")?.addEventListener("click", () => this._savePresets());
 
@@ -668,6 +676,7 @@
       this._updateModeButtons();
       this._renderGridOnly();
       this._updateStatusIndicators();
+      this._restorePresetFocusIfNeeded();
     }
 
     _renderGridShell() {
@@ -710,6 +719,160 @@
       const root = this.shadowRoot;
       const el = root && root.querySelector(`.cell[data-d="${day}"][data-h="${hour}"]`);
       if (el) el.style.background = COLORS[v in COLORS ? v : 0];
+    }
+
+    _presetInputsArray() {
+      const inputs = this._els?.presetInputs;
+      if (!inputs) return [];
+      return [inputs.cold, inputs.night, inputs.day];
+    }
+
+    _presetInputByIndex(idx) {
+      const arr = this._presetInputsArray();
+      return Number.isInteger(idx) && idx >= 0 && idx < arr.length ? arr[idx] : null;
+    }
+
+    _bindPresetInput(inputEl, idx) {
+      if (!inputEl || inputEl._twPresetBound) return;
+      inputEl._twPresetBound = true;
+
+      const updateLocal = () => {
+        const raw = inputEl.value;
+        const n = Number(raw);
+        this._ptempLocal[idx] = Number.isFinite(n) ? n : null;
+      };
+
+      const captureSelection = () => {
+        this._capturePresetSelection(idx);
+      };
+
+      inputEl.addEventListener("input", () => {
+        updateLocal();
+        this._dirtyPresets = true;
+        this._pendingPresetFocusRestore = false;
+        captureSelection();
+        this._updateStatusIndicators();
+      });
+
+      inputEl.addEventListener("focus", () => {
+        this._handlePresetFocus(idx);
+        captureSelection();
+      });
+
+      inputEl.addEventListener("blur", () => {
+        captureSelection();
+        this._handlePresetBlur(idx);
+      });
+
+      inputEl.addEventListener("click", captureSelection);
+      inputEl.addEventListener("keyup", captureSelection);
+      inputEl.addEventListener("keydown", (ev) => {
+        if (ev.key === "Tab") {
+          this._presetFocusRelease = true;
+        }
+      });
+    }
+
+    _capturePresetSelection(idx) {
+      if (this._editingPresetIdx !== idx) return;
+      const inputEl = this._presetInputByIndex(idx);
+      if (!inputEl) return;
+      let start = null;
+      let end = null;
+      let dir = "none";
+      try {
+        start = inputEl.selectionStart;
+        end = inputEl.selectionEnd;
+        dir = inputEl.selectionDirection || "none";
+      } catch (e) {
+        // selection metadata unavailable
+      }
+      if (start == null || end == null) {
+        const len = inputEl.value != null ? String(inputEl.value).length : 0;
+        start = len;
+        end = len;
+      }
+      this._presetSelection = { start, end, dir };
+    }
+
+    _handlePresetFocus(idx) {
+      this._editingPresetIdx = idx;
+      this._presetFocusRelease = false;
+      this._pendingPresetFocusRestore = false;
+    }
+
+    _handlePresetBlur(idx) {
+      if (this._presetFocusRelease) {
+        if (this._editingPresetIdx === idx) {
+          this._editingPresetIdx = -1;
+        }
+        this._presetFocusRelease = false;
+        this._pendingPresetFocusRestore = false;
+        return;
+      }
+      if (this._editingPresetIdx === idx) {
+        this._pendingPresetFocusRestore = true;
+        this._schedulePresetFocusRestore();
+      }
+    }
+
+    _schedulePresetFocusRestore() {
+      if (!this._pendingPresetFocusRestore) return;
+      if (this._restoreFocusRaf != null) return;
+      const raf = window?.requestAnimationFrame || ((cb) => setTimeout(cb, 16));
+      this._restoreFocusRaf = raf(() => {
+        this._restoreFocusRaf = null;
+        this._restorePresetFocusIfNeeded();
+      });
+    }
+
+    _restorePresetFocusIfNeeded() {
+      const idx = this._editingPresetIdx;
+      if (!Number.isInteger(idx) || idx < 0) {
+        this._pendingPresetFocusRestore = false;
+        return;
+      }
+      if (this._presetFocusRelease) return;
+      const inputEl = this._presetInputByIndex(idx);
+      if (!inputEl) {
+        this._pendingPresetFocusRestore = false;
+        return;
+      }
+      const active = this.shadowRoot?.activeElement;
+      if (active === inputEl) {
+        this._pendingPresetFocusRestore = false;
+        return;
+      }
+      if (!this._pendingPresetFocusRestore && active && active !== inputEl) {
+        return;
+      }
+      this._pendingPresetFocusRestore = false;
+      try {
+        inputEl.focus({ preventScroll: true });
+      } catch (e) {
+        try { inputEl.focus(); } catch (_) { /* ignore */ }
+      }
+      const sel = this._presetSelection;
+      if (sel && sel.start != null && sel.end != null && inputEl.setSelectionRange) {
+        try {
+          inputEl.setSelectionRange(sel.start, sel.end, sel.dir || "none");
+        } catch (e) {
+          // ignore browsers that disallow selection updates
+        }
+        this._presetSelection = { start: sel.start, end: sel.end, dir: sel.dir || "none" };
+      }
+    }
+
+    _handleWindowPointerDown(ev) {
+      if (!Number.isInteger(this._editingPresetIdx) || this._editingPresetIdx < 0) return;
+      const current = this._presetInputByIndex(this._editingPresetIdx);
+      if (!current) return;
+      const path = typeof ev.composedPath === "function" ? ev.composedPath() : [];
+      if (path.includes(current)) {
+        this._presetFocusRelease = false;
+      } else {
+        this._presetFocusRelease = true;
+      }
     }
 
     static getConfigElement() { return null; }
