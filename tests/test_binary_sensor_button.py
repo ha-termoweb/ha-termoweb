@@ -282,6 +282,8 @@ def test_binary_sensor_setup_and_dispatch() -> None:
         }
 
         entity.schedule_update_ha_state = MagicMock()
+        dispatcher_send(signal_ws_status(entry.entry_id), {"dev_id": "other"})
+        entity.schedule_update_ha_state.assert_not_called()
         dispatcher_send(signal_ws_status(entry.entry_id), {"dev_id": dev_id})
         entity.schedule_update_ha_state.assert_called_once_with()
 
@@ -291,14 +293,42 @@ def test_binary_sensor_setup_and_dispatch() -> None:
 def test_refresh_button_device_info_and_press() -> None:
     async def _run() -> None:
         hass = HomeAssistant()
+        entry = types.SimpleNamespace(entry_id="entry-button")
         dev_id = "device-123"
         coordinator = types.SimpleNamespace(
             hass=hass,
             async_request_refresh=AsyncMock(),
         )
 
-        button = TermoWebRefreshButton(coordinator, dev_id)
-        button.hass = hass
+        hass.data = {DOMAIN: {entry.entry_id: {"coordinator": coordinator, "dev_id": dev_id}}}
+
+        added: list = []
+        seen_ids: set[str] = set()
+        call_sizes: list[int] = []
+
+        def _add_entities(entities):
+            call_sizes.append(len(entities))
+            for entity in entities:
+                uid = getattr(entity, "unique_id", None)
+                if uid is None:
+                    uid = getattr(entity, "_attr_unique_id", None)
+                if uid in seen_ids:
+                    continue
+                seen_ids.add(str(uid))
+                entity.hass = hass
+                added.append(entity)
+
+        await button_module.async_setup_entry(hass, entry, _add_entities)
+        assert call_sizes == [1]
+        assert len(added) == 1
+
+        button = added[0]
+        assert isinstance(button, TermoWebRefreshButton)
+
+        await button_module.async_setup_entry(hass, entry, _add_entities)
+        assert call_sizes == [1, 1]
+        assert len(added) == 1
+        assert len(seen_ids) == 1
 
         info = button.device_info
         assert info["identifiers"] == {(DOMAIN, dev_id)}
