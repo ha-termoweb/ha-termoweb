@@ -213,9 +213,17 @@ TermoWebHeaterTemp = sensor_module.TermoWebHeaterTemp
 TermoWebHeaterEnergyTotal = sensor_module.TermoWebHeaterEnergyTotal
 TermoWebHeaterPower = sensor_module.TermoWebHeaterPower
 TermoWebTotalEnergy = sensor_module.TermoWebTotalEnergy
-const_module = __import__(f"{package}.const", fromlist=["signal_ws_data", "DOMAIN"])
+const_module = __import__(
+    f"{package}.const", fromlist=["signal_ws_data", "DOMAIN", "signal_poll_refresh"]
+)
 signal_ws_data = const_module.signal_ws_data
 DOMAIN = const_module.DOMAIN
+
+if hasattr(const_module, "signal_poll_refresh"):
+    signal_poll_refresh = const_module.signal_poll_refresh
+else:
+    def signal_poll_refresh(entry_id: str) -> str:
+        return f"{signal_ws_data(entry_id)}:poll"
 
 
 def test_coordinator_and_sensors() -> None:
@@ -307,6 +315,7 @@ def test_heater_temp_sensor() -> None:
                             "A": {
                                 "mtemp": "21.5",
                                 "units": "C",
+                                "timestamp": 1_700_000_000,
                             }
                         }
                     },
@@ -323,7 +332,18 @@ def test_heater_temp_sensor() -> None:
             "temp1",
             "Living Room",
         )
+
+        original_async_on_remove = sensor.async_on_remove
+        sensor.async_on_remove = MagicMock(side_effect=original_async_on_remove)
+
         await sensor.async_added_to_hass()
+
+        ws_signal = signal_ws_data("entry")
+        poll_signal = signal_poll_refresh("entry")
+
+        assert sensor._unsub_ws is not None
+        assert sensor._on_ws_data in _dispatchers[ws_signal]
+        sensor.async_on_remove.assert_called_once()
 
         info = sensor.device_info
         assert info["identifiers"] == {(DOMAIN, "dev1", "A")}
@@ -332,6 +352,7 @@ def test_heater_temp_sensor() -> None:
         assert info["model"] == "Heater"
         assert info["via_device"] == (DOMAIN, "dev1")
 
+        assert sensor.native_unit_of_measurement == UnitOfTemperature.CELSIUS
         assert sensor.available is True
         assert sensor.native_value == pytest.approx(21.5)
         assert sensor.extra_state_attributes == {
@@ -346,25 +367,47 @@ def test_heater_temp_sensor() -> None:
         coordinator.data["dev1"]["nodes"] = original_nodes
         assert sensor.available is True
 
-        signal = signal_ws_data("entry")
+        original_device = coordinator.data["dev1"]
+        coordinator.data["dev1"] = {}
+        assert sensor.available is False
+        coordinator.data["dev1"] = original_device
+        assert sensor.available is True
+
+        settings = coordinator.data["dev1"]["htr"]["settings"]["A"]
+        settings["mtemp"] = "bad"
+        assert sensor.native_value is None
+
+        settings["mtemp"] = "22.75"
+        assert sensor.native_value == pytest.approx(22.75)
+
         sensor.schedule_update_ha_state = MagicMock()
 
-        dispatcher_send(signal, {"dev_id": "other", "addr": "A"})
-        dispatcher_send(signal, {"dev_id": "dev1", "addr": "B"})
+        dispatcher_send(ws_signal, {"dev_id": "other", "addr": "A"})
+        dispatcher_send(ws_signal, {"dev_id": "dev1", "addr": "B"})
+        dispatcher_send(poll_signal, {"dev_id": "dev1", "addr": "A"})
         sensor.schedule_update_ha_state.assert_not_called()
 
-        dispatcher_send(signal, {"dev_id": "dev1", "addr": "A"})
+        new_value = "23.5"
+        settings["mtemp"] = new_value
+        dispatcher_send(ws_signal, {"dev_id": "dev1", "addr": "A"})
+        sensor.schedule_update_ha_state.assert_called_once()
+        assert sensor.native_value == pytest.approx(float(new_value))
+
+        sensor.schedule_update_ha_state.reset_mock()
+        dispatcher_send(ws_signal, {"dev_id": "dev1"})
         sensor.schedule_update_ha_state.assert_called_once()
 
         sensor.schedule_update_ha_state.reset_mock()
         original_unsub = sensor._unsub_ws
+        assert original_unsub is not None
         sensor._unsub_ws = MagicMock(side_effect=original_unsub)
         assert hasattr(sensor, "_on_remove")
         sensor._on_remove()
         sensor._unsub_ws.assert_called_once()
-        assert sensor._on_ws_data not in _dispatchers.get(signal, [])
+        assert sensor._on_ws_data not in _dispatchers.get(ws_signal, [])
 
-        dispatcher_send(signal, {"dev_id": "dev1", "addr": "A"})
+        dispatcher_send(ws_signal, {"dev_id": "dev1", "addr": "A"})
+        dispatcher_send(poll_signal, {"dev_id": "dev1", "addr": "A"})
         sensor.schedule_update_ha_state.assert_not_called()
 
     asyncio.run(_run())
