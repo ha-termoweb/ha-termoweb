@@ -66,9 +66,19 @@
       // Freeze window: ignore hass updates while editing / just after save
       this._freezeUntil = 0; // epoch ms; 0 means not frozen
       this._freezeWindowMs = 15000; // 15s after save
+      this._pendingEcho = { prog: null, ptemp: null };
 
       // Last-sent payloads to detect echo
       this._lastSent = { prog: null, ptemp: null };
+
+      // Track which preset input is actively being edited (focus index: 0=cold,1=night,2=day)
+      this._editingPresetIdx = -1;
+      this._presetSelection = null;
+      this._pendingPresetFocusRestore = false;
+      this._presetFocusRelease = false;
+      this._restoreFocusRaf = null;
+      this._boundWindowPointerDown = (ev) => this._handleWindowPointerDown(ev);
+      this._pointerDownAttached = false;
 
       // painting
       this._dragging = false;
@@ -78,12 +88,49 @@
 
       // Available TermoWeb heater entities
       this._entities = [];
+      this._entityOptionsKey = "";
 
       // Track copy selectors
       this._copyFrom = 0;
       this._copyTo = "All";
       this._entity = null; // currently selected entity
 
+      this._hasRendered = false;
+
+      this._els = {
+        title: null,
+        entitySelect: null,
+        dirtyBadge: null,
+        freezeBadge: null,
+        unitsLabel: null,
+        presetInputs: { cold: null, night: null, day: null },
+        modeButtons: { cold: null, night: null, day: null },
+        refreshBtn: null,
+        copyFromSel: null,
+        copyToSel: null,
+        copyBtn: null,
+        revertBtn: null,
+        saveBtn: null,
+        progWarn: null,
+      };
+      this._gridCells = null;
+
+    }
+
+    connectedCallback() {
+      if (super.connectedCallback) super.connectedCallback();
+      if (!this._pointerDownAttached) {
+        window.addEventListener("pointerdown", this._boundWindowPointerDown, true);
+        this._pointerDownAttached = true;
+      }
+    }
+
+    disconnectedCallback() {
+      if (this._pointerDownAttached) {
+        window.removeEventListener("pointerdown", this._boundWindowPointerDown, true);
+        this._pointerDownAttached = false;
+      }
+      if (super.disconnectedCallback) super.disconnectedCallback();
     }
 
     setConfig(config) {
@@ -99,8 +146,10 @@
       this._hass = hass;
       if (!this._config) return;
 
+      const prevEntity = this._entity;
+
       // Collect available TermoWeb heater entities
-      this._entities = Object.entries(hass.states)
+      const entities = Object.entries(hass.states)
         .filter(([eid, st]) => {
           if (!eid.startsWith("climate.")) return false;
           const a = st?.attributes || {};
@@ -109,7 +158,18 @@
         .map(([eid, st]) => ({
           id: eid,
           name: st.attributes?.friendly_name || st.attributes?.name || eid,
-        }));
+        }))
+        .sort((a, b) => {
+          const nameCmp = (a.name || "").localeCompare(b.name || "");
+          if (nameCmp !== 0) return nameCmp;
+          return a.id.localeCompare(b.id);
+        });
+
+      this._entities = entities;
+
+      const prevEntityOptionsKey = this._entityOptionsKey;
+      const nextEntityOptionsKey = JSON.stringify(entities.map((e) => `${e.id}|${e.name}`));
+      this._entityOptionsKey = nextEntityOptionsKey;
 
       if (!this._entity && this._entities.length > 0) {
         this._entity = this._entities[0].id;
@@ -119,42 +179,112 @@
       const st = this._entity ? hass.states[this._entity] : undefined;
       this._stateObj = st || null;
 
-      const canHydrateNow = this._canHydrateFromState();
       const attrs = st?.attributes || {};
+      const now = nowMs();
 
-      if (canHydrateNow) {
-        // Prog
-        if (Array.isArray(attrs.prog) && attrs.prog.length === 168) {
-          // If we were waiting for echo and it matches last sent, unfreeze.
-          if (this._lastSent.prog && deepEqArray(attrs.prog, this._lastSent.prog)) {
-            this._freezeUntil = 0;
-          }
-          this._progLocal = attrs.prog.slice();
-        }
-        // Presets
-        if (Array.isArray(attrs.ptemp) && attrs.ptemp.length === 3) {
-          if (this._lastSent.ptemp && deepEqArray(attrs.ptemp, this._lastSent.ptemp)) {
-            this._freezeUntil = 0;
-          }
-          this._ptempLocal = attrs.ptemp.slice();
+      let waitingForEcho = false;
+      if (this._pendingEcho.prog) {
+        if (Array.isArray(attrs.prog) && attrs.prog.length === 168 && deepEqArray(attrs.prog, this._pendingEcho.prog)) {
+          this._pendingEcho.prog = null;
+        } else {
+          waitingForEcho = true;
         }
       }
-      // Re-render regardless (for header / unit changes)
-      this._render();
+      if (this._pendingEcho.ptemp) {
+        if (Array.isArray(attrs.ptemp) && attrs.ptemp.length === 3 && deepEqArray(attrs.ptemp, this._pendingEcho.ptemp)) {
+          this._pendingEcho.ptemp = null;
+        } else {
+          waitingForEcho = true;
+        }
+      }
+
+      if (!waitingForEcho) {
+        this._freezeUntil = 0;
+      }
+
+      const freezeActive = waitingForEcho || (now < this._freezeUntil);
+      const canHydrateNow = this._canHydrateFromState({ freezeActive });
+
+      let hydrated = false;
+      if (canHydrateNow) {
+        if (Array.isArray(attrs.prog) && attrs.prog.length === 168) {
+          if (!Array.isArray(this._progLocal) || !deepEqArray(this._progLocal, attrs.prog)) {
+            this._progLocal = attrs.prog.slice();
+            hydrated = true;
+          }
+        }
+        if (Array.isArray(attrs.ptemp) && attrs.ptemp.length === 3) {
+          if (!Array.isArray(this._ptempLocal) || !deepEqArray(this._ptempLocal, attrs.ptemp)) {
+            this._ptempLocal = attrs.ptemp.slice();
+            hydrated = true;
+          }
+        }
+      }
+
+      const entityChanged = prevEntity !== this._entity;
+      const entityOptionsChanged = prevEntityOptionsKey !== nextEntityOptionsKey;
+      if (!this._hasRendered || entityChanged || entityOptionsChanged || hydrated) {
+        this._render({ forceFull: !this._hasRendered || entityChanged });
+      } else {
+        this._updateStatusIndicators();
+        this._restorePresetFocusIfNeeded();
+      }
     }
 
-    _canHydrateFromState() {
+    _canHydrateFromState({ freezeActive } = {}) {
       // Only hydrate when:
       // - No local copy yet (first load)
       // - Not currently dirty
-      // - Not within freeze window
+      // - Not within freeze window / awaiting echo
       const now = nowMs();
-      const inFreeze = now < this._freezeUntil;
-      const hasLocal = Array.isArray(this._progLocal) && this._progLocal.length === 168;
-      if (!hasLocal) return true;
+      const inFreeze = freezeActive != null ? freezeActive : (now < this._freezeUntil);
+      const hasProgLocal = Array.isArray(this._progLocal) && this._progLocal.length === 168;
+      const hasPresetLocal = Array.isArray(this._ptempLocal) && this._ptempLocal.length === 3;
+      const hasAnyLocal = hasProgLocal || hasPresetLocal;
+      if (!hasAnyLocal) return true;
+      if (this._editingPresetIdx !== -1) return false;
       if (this._dirtyProg || this._dirtyPresets) return false;
       if (inFreeze) return false;
       return true;
+    }
+
+    _isFrozen() {
+      if (this._pendingEcho.prog || this._pendingEcho.ptemp) return true;
+      return nowMs() < this._freezeUntil;
+    }
+
+    _updateStatusIndicators() {
+      if (!this._hasRendered) return;
+      const dirty = this._dirtyProg || this._dirtyPresets;
+      const dirtyEl = this._els.dirtyBadge;
+      if (dirtyEl) dirtyEl.hidden = !dirty;
+
+      const waiting = this._isFrozen();
+      const waitEl = this._els.freezeBadge;
+      if (waitEl) waitEl.hidden = !waiting;
+    }
+
+    _syncEntityOptions() {
+      const select = this._els.entitySelect;
+      if (!select) return;
+      const optionsKey = this._entityOptionsKey || "";
+      if (select._twOptionsKey !== optionsKey) {
+        select.innerHTML = (this._entities || [])
+          .map((e) => `<option value="${e.id}">${e.name}</option>`)
+          .join("");
+        select._twOptionsKey = optionsKey;
+      }
+      if (this._entity && select.value !== this._entity) {
+        select.value = this._entity;
+      }
+    }
+
+    _updateModeButtons() {
+      const buttons = this._els.modeButtons;
+      if (!buttons) return;
+      if (buttons.cold) buttons.cold.classList.toggle("active", this._selectedMode === 0);
+      if (buttons.night) buttons.night.classList.toggle("active", this._selectedMode === 1);
+      if (buttons.day) buttons.day.classList.toggle("active", this._selectedMode === 2);
     }
 
     getCardSize() { return 16; }
@@ -198,6 +328,7 @@
       this._progLocal[i] = this._selectedMode;
       this._dirtyProg = true;
       this._renderGridOnly();
+      this._updateStatusIndicators();
     }
     _onMouseDown(day, hour) {
       if (!this._progLocal) return;
@@ -209,6 +340,7 @@
       this._dirtyProg = true;
       window.addEventListener("mouseup", this._boundMouseUp, { once: true });
       this._renderGridOnly();
+      this._updateStatusIndicators();
     }
     _onMouseOver(day, hour) {
       if (!this._dragging || this._paintValue == null || !this._progLocal) return;
@@ -217,6 +349,7 @@
         this._progLocal[i] = this._paintValue;
         this._dirtyProg = true;
         this._colorCell(day, hour, this._paintValue);
+        this._updateStatusIndicators();
       }
     }
     _onMouseUp() { this._dragging = false; this._paintValue = null; }
@@ -233,14 +366,19 @@
       }
       this._dirtyProg = false;
       this._dirtyPresets = false;
+      this._editingPresetIdx = -1;
+      this._pendingPresetFocusRestore = false;
+      this._presetFocusRelease = false;
+      this._presetSelection = null;
       this._freezeUntil = 0;
+      this._pendingEcho = { prog: null, ptemp: null };
       this._lastSent = { prog: null, ptemp: null };
       this._render();
     }
 
     _refreshFromState() {
       // Manual refresh, ignoring freeze; useful if user wants to sync now
-      const st = self._hass?.states?.[this._entity];
+      const st = this._hass?.states?.[this._entity];
       const attrs = st?.attributes || {};
       if (Array.isArray(attrs.prog) && attrs.prog.length === 168) {
         this._progLocal = attrs.prog.slice();
@@ -250,7 +388,12 @@
       }
       this._dirtyProg = false;
       this._dirtyPresets = false;
+      this._editingPresetIdx = -1;
+      this._pendingPresetFocusRestore = false;
+      this._presetFocusRelease = false;
+      this._presetSelection = null;
       this._freezeUntil = 0;
+      this._pendingEcho = { prog: null, ptemp: null };
       this._render();
     }
 
@@ -279,9 +422,15 @@
         });
         this._ptempLocal = payload.slice();
         this._dirtyPresets = false;
+        this._editingPresetIdx = -1;
+        this._pendingPresetFocusRestore = false;
+        this._presetFocusRelease = false;
+        this._presetSelection = null;
         this._lastSent.ptemp = payload.slice();
+        this._pendingEcho.ptemp = payload.slice();
         this._freezeUntil = nowMs() + this._freezeWindowMs;
         this._toast("Preset temperatures sent (waiting for device to update)");
+        this._updateStatusIndicators();
       } catch (e) {
         this._toast("Failed to save presets");
         console.error("TermoWeb card: set_preset_temperatures error:", e);
@@ -311,8 +460,10 @@
         });
         this._dirtyProg = false;
         this._lastSent.prog = body.slice();
+        this._pendingEcho.prog = body.slice();
         this._freezeUntil = nowMs() + this._freezeWindowMs;
         this._toast("Schedule sent (waiting for device to update)");
+        this._updateStatusIndicators();
       } catch (e) {
         this._toast("Failed to save schedule");
         console.error("TermoWeb card: set_schedule error:", e);
@@ -320,7 +471,7 @@
     }
 
     // ---------- render ----------
-    _render() {
+    _render({ forceFull = false } = {}) {
       const root = this.shadowRoot;
       if (!root) return;
 
@@ -333,169 +484,199 @@
       const stepAttr = units === "F" ? "1" : "0.5";
       const [cold, night, day] = this._ptempLocal ?? [null, null, null];
 
-      const dirtyBadge = (this._dirtyProg || this._dirtyPresets) ?
-        `<span class="dirty">● unsaved</span>` : ``;
-
-      const frozen = nowMs() < this._freezeUntil;
-
-      const entityOptions = (this._entities || [])
-        .map((e) => `<option value="${e.id}" ${e.id === this._entity ? "selected" : ""}>${e.name}</option>`)
-        .join("\n");
-
-      const copyFromOptions = DAY_NAMES
-        .map((d, i) => `<option value="${i}" ${i === this._copyFrom ? "selected" : ""}>${d}</option>`)
-        .join("\n");
-      const copyToDayOptions = DAY_NAMES
-        .map((d, i) => `<option value="${i}" ${(typeof this._copyTo === "number" && i === this._copyTo) ? "selected" : ""}>${d}</option>`)
-        .join("\n");
-      const copyAllSelected = this._copyTo === "All" ? "selected" : "";
-
-      root.innerHTML = `
-        <style>
-          :host { display:block; }
-          .card { padding: 12px; color: ${COLORS.text}; }
-          .header { display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-weight:600; }
-          .sub { color: ${COLORS.subtext}; font-size: 12px; display:flex; align-items:center; gap:8px; }
-          .dirty { color: var(--warning-color, #ffa000); font-size: 11px; }
-          .grid { display: grid; grid-template-columns: 56px repeat(7, 1fr); gap: 6px; margin-top: 8px; }
-          .hour { color: ${COLORS.label}; font-size: 12px; text-align: right; padding: 4px 6px; }
-          .dayhdr { color: ${COLORS.label}; font-size: 12px; text-align: center; padding: 4px 0 8px 0; }
-          .cell { background: ${COLORS.cellBg}; border: 1px solid ${COLORS.border}; height: 20px; border-radius: 6px; cursor: pointer; transition: filter .06s; }
-          .cell:hover { filter: brightness(1.08); }
-          .legend { display:flex;gap:12px;align-items:center;flex-wrap:wrap;color:${COLORS.label}; font-size: 12px; }
-          .legend .swatch { display:inline-block;width:14px;height:14px;border-radius:4px;border:1px solid ${COLORS.border};vertical-align:-2px;margin-right:6px; }
-          .row { display:flex; gap:10px; align-items:center; margin-top:10px; flex-wrap: wrap; color:${COLORS.label}; }
-          .modeToggle { display:flex; gap:8px; margin-top:10px; }
-          .modeToggle button { flex:1; padding:8px 0; border-radius:8px; border:2px solid ${COLORS.border}; color:${COLORS.text}; cursor:pointer; font-weight:600; opacity:0.6; }
-          .modeToggle button.active { opacity:1; border-color:${COLORS.text}; }
-          input[type="number"] {
-            width: 72px;
-            border-radius: 8px;
-            border: 1px solid ${COLORS.border};
-            background: var(--secondary-background-color, #2b2b2b);
-            color: ${COLORS.text};
-            padding: 5px 8px;
-          }
-          select {
-            border-radius: 6px;
-            border: 1px solid ${COLORS.border};
-            background: var(--secondary-background-color, #2b2b2b);
-            color: ${COLORS.text};
-            padding: 3px 4px;
-          }
-          .footer { display:flex;justify-content:flex-end;gap:8px;margin-top:10px; flex-wrap: wrap; }
-          button { background: var(--secondary-background-color, #2b2b2b); color: ${COLORS.text}; border: 1px solid ${COLORS.border}; border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
-          button:hover { filter: brightness(1.1); }
-          .warn { color: var(--error-color, #ef5350); }
-          .chip { padding:2px 6px; border:1px solid ${COLORS.border}; border-radius: 10px; font-size:11px; }
-        </style>
-
-        <ha-card class="card">
-          <div class="header">
-            <div>${title}</div>
-            <div class="sub">
-              <select id="entitySelect">${entityOptions}</select>
-              ${dirtyBadge}
-              ${frozen ? `<span class="chip">waiting for device update…</span>` : ``}
-              <button id="refreshBtn" title="Refresh from current state">Refresh</button>
-            </div>
-          </div>
-
-          <!-- Legend -->
-          <div class="legend">
-            <span><span class="swatch" style="background:${COLORS[0]}"></span>Cold</span>
-            <span><span class="swatch" style="background:${COLORS[2]}"></span>Day</span>
-            <span><span class="swatch" style="background:${COLORS[1]}"></span>Night</span>
-            <span>Units: ${units}</span>
-          </div>
-
-          <!-- Preset editors -->
-          <div class="row">
-            <label>Cold <input id="tw_p_cold" type="number" step="${stepAttr}" value="${cold ?? ""}"></label>
-            <label>Night <input id="tw_p_night" type="number" step="${stepAttr}" value="${night ?? ""}"></label>
-            <label>Day <input id="tw_p_day" type="number" step="${stepAttr}" value="${day ?? ""}"></label>
-            <button id="savePresetsBtn">Save Presets</button>
-          </div>
-
-          <div class="modeToggle">
-            <button id="modeCold" class="${this._selectedMode === 0 ? 'active' : ''}" style="background:${COLORS[0]}">Cold</button>
-            <button id="modeNight" class="${this._selectedMode === 1 ? 'active' : ''}" style="background:${COLORS[1]}">Night</button>
-            <button id="modeDay" class="${this._selectedMode === 2 ? 'active' : ''}" style="background:${COLORS[2]}">Day</button>
-          </div>
-
-          ${!hasProg ? `<div class="warn" style="margin-top:8px;">This entity has no valid 'prog' (expected 168 ints).</div>` : ""}
-
-          ${this._renderGridShell()}
-
-          <div class="row">
-            <label>Copy From <select id="copyFromSel">${copyFromOptions}</select></label>
-            <label>Copy To <select id="copyToSel"><option value="All" ${copyAllSelected}>All</option>${copyToDayOptions}</select></label>
-            <button id="copyBtn">Copy</button>
-          </div>
-
-          <div class="footer">
-            <button id="revertBtn">Revert</button>
-            <button id="saveBtn">Save</button>
-          </div>
-        </ha-card>
-      `;
-
-      // Bind Refresh
-      root.getElementById("refreshBtn")?.addEventListener("click", () => this._refreshFromState());
-
-      // Bind entity selector
-      root.getElementById("entitySelect")?.addEventListener("change", (ev) => {
-        const newEntity = ev.target.value;
-        if (newEntity && newEntity !== this._entity) {
-          this._entity = newEntity;
-          this._config.entity = newEntity;
-          this._stateObj = this._hass?.states?.[newEntity] || null;
-          this._revert();
+      if (!this._hasRendered || forceFull) {
+        if (forceFull) {
+          this._editingPresetIdx = -1;
         }
-      });
+        const copyOptions = DAY_NAMES.map((d, i) => `<option value="${i}">${d}</option>`).join("");
+        const gridShell = this._renderGridShell();
 
-      // Bind preset inputs to update local state and set dirty flag
-      root.getElementById("tw_p_cold")?.addEventListener("input", () => {
-        this._ptempLocal[0] = this._parseInputNum("tw_p_cold");
-        this._dirtyPresets = true;
-      });
-      root.getElementById("tw_p_night")?.addEventListener("input", () => {
-        this._ptempLocal[1] = this._parseInputNum("tw_p_night");
-        this._dirtyPresets = true;
-      });
-      root.getElementById("tw_p_day")?.addEventListener("input", () => {
-        this._ptempLocal[2] = this._parseInputNum("tw_p_day");
-        this._dirtyPresets = true;
-      });
+        root.innerHTML = `
+          <style>
+            :host { display:block; }
+            .card { padding: 12px; color: ${COLORS.text}; }
+            .header { display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-weight:600; }
+            .sub { color: ${COLORS.subtext}; font-size: 12px; display:flex; align-items:center; gap:8px; }
+            .dirty { color: var(--warning-color, #ffa000); font-size: 11px; }
+            .grid { display: grid; grid-template-columns: 56px repeat(7, 1fr); gap: 6px; margin-top: 8px; }
+            .hour { color: ${COLORS.label}; font-size: 12px; text-align: right; padding: 4px 6px; }
+            .dayhdr { color: ${COLORS.label}; font-size: 12px; text-align: center; padding: 4px 0 8px 0; }
+            .cell { background: ${COLORS.cellBg}; border: 1px solid ${COLORS.border}; height: 20px; border-radius: 6px; cursor: pointer; transition: filter .06s; }
+            .cell:hover { filter: brightness(1.08); }
+            .legend { display:flex;gap:12px;align-items:center;flex-wrap:wrap;color:${COLORS.label}; font-size: 12px; }
+            .legend .swatch { display:inline-block;width:14px;height:14px;border-radius:4px;border:1px solid ${COLORS.border};vertical-align:-2px;margin-right:6px; }
+            .row { display:flex; gap:10px; align-items:center; margin-top:10px; flex-wrap: wrap; color:${COLORS.label}; }
+            .modeToggle { display:flex; gap:8px; margin-top:10px; }
+            .modeToggle button { flex:1; padding:8px 0; border-radius:8px; border:2px solid ${COLORS.border}; color:${COLORS.text}; cursor:pointer; font-weight:600; opacity:0.6; }
+            .modeToggle button.active { opacity:1; border-color:${COLORS.text}; }
+            input[type="number"] {
+              width: 72px;
+              border-radius: 8px;
+              border: 1px solid ${COLORS.border};
+              background: var(--secondary-background-color, #2b2b2b);
+              color: ${COLORS.text};
+              padding: 5px 8px;
+            }
+            select {
+              border-radius: 6px;
+              border: 1px solid ${COLORS.border};
+              background: var(--secondary-background-color, #2b2b2b);
+              color: ${COLORS.text};
+              padding: 3px 4px;
+            }
+            .footer { display:flex;justify-content:flex-end;gap:8px;margin-top:10px; flex-wrap: wrap; }
+            button { background: var(--secondary-background-color, #2b2b2b); color: ${COLORS.text}; border: 1px solid ${COLORS.border}; border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+            button:hover { filter: brightness(1.1); }
+            .warn { color: var(--error-color, #ef5350); }
+            .chip { padding:2px 6px; border:1px solid ${COLORS.border}; border-radius: 10px; font-size:11px; }
+          </style>
 
-      // Bind preset save
-      root.getElementById("savePresetsBtn")?.addEventListener("click", () => this._savePresets());
+          <ha-card class="card">
+            <div class="header">
+              <div id="tw_title"></div>
+              <div class="sub">
+                <select id="entitySelect"></select>
+                <span id="tw_dirtyBadge" class="dirty" hidden>● unsaved</span>
+                <span id="tw_freezeBadge" class="chip" hidden>waiting for device update…</span>
+                <button id="refreshBtn" title="Refresh from current state">Refresh</button>
+              </div>
+            </div>
 
-      // Bind mode buttons
-      root.getElementById("modeCold")?.addEventListener("click", () => { this._selectedMode = 0; this._render(); });
-      root.getElementById("modeNight")?.addEventListener("click", () => { this._selectedMode = 1; this._render(); });
-      root.getElementById("modeDay")?.addEventListener("click", () => { this._selectedMode = 2; this._render(); });
+            <div class="legend">
+              <span><span class="swatch" style="background:${COLORS[0]}"></span>Cold</span>
+              <span><span class="swatch" style="background:${COLORS[2]}"></span>Day</span>
+              <span><span class="swatch" style="background:${COLORS[1]}"></span>Night</span>
+              <span id="tw_units"></span>
+            </div>
 
-      // Bind schedule buttons
-      root.getElementById("revertBtn")?.addEventListener("click", () => this._revert());
-      root.getElementById("saveBtn")?.addEventListener("click", () => this._saveSchedule());
+            <div class="row">
+              <label>Cold <input id="tw_p_cold" type="number"></label>
+              <label>Night <input id="tw_p_night" type="number"></label>
+              <label>Day <input id="tw_p_day" type="number"></label>
+              <button id="savePresetsBtn">Save Presets</button>
+            </div>
 
-      root.getElementById("copyFromSel")?.addEventListener("change", (ev) => {
-        this._copyFrom = Number(ev.target.value);
-      });
-      root.getElementById("copyToSel")?.addEventListener("change", (ev) => {
-        const v = ev.target.value;
-        this._copyTo = v === "All" ? "All" : Number(v);
-      });
+            <div class="modeToggle">
+              <button id="modeCold" style="background:${COLORS[0]}">Cold</button>
+              <button id="modeNight" style="background:${COLORS[1]}">Night</button>
+              <button id="modeDay" style="background:${COLORS[2]}">Day</button>
+            </div>
 
-      root.getElementById("copyBtn")?.addEventListener("click", () => {
-        this._copyDay(this._copyFrom, this._copyTo);
-        this._dirtyProg = true;
-        this._renderGridOnly();
-      });
+            <div id="tw_prog_warn" class="warn" style="margin-top:8px;" hidden>This entity has no valid 'prog' (expected 168 ints).</div>
 
-      // Paint cells
+            ${gridShell}
+
+            <div class="row">
+              <label>Copy From <select id="copyFromSel">${copyOptions}</select></label>
+              <label>Copy To <select id="copyToSel"><option value="All">All</option>${copyOptions}</select></label>
+              <button id="copyBtn">Copy</button>
+            </div>
+
+            <div class="footer">
+              <button id="revertBtn">Revert</button>
+              <button id="saveBtn">Save</button>
+            </div>
+          </ha-card>
+        `;
+
+        this._els = {
+          title: root.getElementById("tw_title"),
+          entitySelect: root.getElementById("entitySelect"),
+          dirtyBadge: root.getElementById("tw_dirtyBadge"),
+          freezeBadge: root.getElementById("tw_freezeBadge"),
+          unitsLabel: root.getElementById("tw_units"),
+          presetInputs: {
+            cold: root.getElementById("tw_p_cold"),
+            night: root.getElementById("tw_p_night"),
+            day: root.getElementById("tw_p_day"),
+          },
+          modeButtons: {
+            cold: root.getElementById("modeCold"),
+            night: root.getElementById("modeNight"),
+            day: root.getElementById("modeDay"),
+          },
+          refreshBtn: root.getElementById("refreshBtn"),
+          copyFromSel: root.getElementById("copyFromSel"),
+          copyToSel: root.getElementById("copyToSel"),
+          copyBtn: root.getElementById("copyBtn"),
+          revertBtn: root.getElementById("revertBtn"),
+          saveBtn: root.getElementById("saveBtn"),
+          progWarn: root.getElementById("tw_prog_warn"),
+        };
+
+        this._gridCells = Array.from(root.querySelectorAll(".cell"));
+
+        this._els.refreshBtn?.addEventListener("click", () => this._refreshFromState());
+
+        this._els.entitySelect?.addEventListener("change", (ev) => {
+          const newEntity = ev.target.value;
+          if (newEntity && newEntity !== this._entity) {
+            this._entity = newEntity;
+            this._config.entity = newEntity;
+            this._stateObj = this._hass?.states?.[newEntity] || null;
+            this._revert();
+          }
+        });
+
+        this._bindPresetInput(this._els.presetInputs.cold, 0);
+        this._bindPresetInput(this._els.presetInputs.night, 1);
+        this._bindPresetInput(this._els.presetInputs.day, 2);
+
+        root.getElementById("savePresetsBtn")?.addEventListener("click", () => this._savePresets());
+
+        this._els.modeButtons.cold?.addEventListener("click", () => { this._selectedMode = 0; this._render(); });
+        this._els.modeButtons.night?.addEventListener("click", () => { this._selectedMode = 1; this._render(); });
+        this._els.modeButtons.day?.addEventListener("click", () => { this._selectedMode = 2; this._render(); });
+
+        this._els.revertBtn?.addEventListener("click", () => this._revert());
+        this._els.saveBtn?.addEventListener("click", () => this._saveSchedule());
+
+        this._els.copyFromSel?.addEventListener("change", (ev) => {
+          this._copyFrom = Number(ev.target.value);
+        });
+        this._els.copyToSel?.addEventListener("change", (ev) => {
+          const v = ev.target.value;
+          this._copyTo = v === "All" ? "All" : Number(v);
+        });
+
+        this._els.copyBtn?.addEventListener("click", () => {
+          this._copyDay(this._copyFrom, this._copyTo);
+          this._dirtyProg = true;
+          this._renderGridOnly();
+          this._updateStatusIndicators();
+        });
+
+        this._hasRendered = true;
+      }
+
+      if (this._els.title) this._els.title.textContent = title;
+
+      this._syncEntityOptions();
+
+      if (this._els.unitsLabel) this._els.unitsLabel.textContent = `Units: ${units}`;
+
+      const presetInputs = this._els.presetInputs;
+      if (presetInputs) {
+        const presetValues = [cold, night, day];
+        [presetInputs.cold, presetInputs.night, presetInputs.day].forEach((inputEl, idx) => {
+          if (!inputEl) return;
+          if (inputEl.step !== stepAttr) inputEl.step = stepAttr;
+          const target = presetValues[idx];
+          if (this._editingPresetIdx === idx) return;
+          const valueStr = (target === null || target === undefined) ? "" : String(target);
+          if (inputEl.value !== valueStr) inputEl.value = valueStr;
+        });
+      }
+
+      if (this._els.copyFromSel) this._els.copyFromSel.value = String(this._copyFrom);
+      if (this._els.copyToSel) this._els.copyToSel.value = this._copyTo === "All" ? "All" : String(this._copyTo);
+
+      if (this._els.progWarn) this._els.progWarn.hidden = hasProg;
+
+      this._updateModeButtons();
       this._renderGridOnly();
+      this._updateStatusIndicators();
+      this._restorePresetFocusIfNeeded();
     }
 
     _renderGridShell() {
@@ -515,12 +696,9 @@
     }
 
     _renderGridOnly() {
-      const root = this.shadowRoot;
-      if (!root) return;
-      const cells = root.querySelectorAll(".cell");
-      if (!cells || !this._progLocal || this._progLocal.length !== 168) return;
+      if (!Array.isArray(this._gridCells) || !this._progLocal || this._progLocal.length !== 168) return;
 
-      cells.forEach((cell) => {
+      this._gridCells.forEach((cell) => {
         const d = Number(cell.getAttribute("data-d"));
         const h = Number(cell.getAttribute("data-h"));
         const idx = this._idx(d, h);
@@ -541,6 +719,160 @@
       const root = this.shadowRoot;
       const el = root && root.querySelector(`.cell[data-d="${day}"][data-h="${hour}"]`);
       if (el) el.style.background = COLORS[v in COLORS ? v : 0];
+    }
+
+    _presetInputsArray() {
+      const inputs = this._els?.presetInputs;
+      if (!inputs) return [];
+      return [inputs.cold, inputs.night, inputs.day];
+    }
+
+    _presetInputByIndex(idx) {
+      const arr = this._presetInputsArray();
+      return Number.isInteger(idx) && idx >= 0 && idx < arr.length ? arr[idx] : null;
+    }
+
+    _bindPresetInput(inputEl, idx) {
+      if (!inputEl || inputEl._twPresetBound) return;
+      inputEl._twPresetBound = true;
+
+      const updateLocal = () => {
+        const raw = inputEl.value;
+        const n = Number(raw);
+        this._ptempLocal[idx] = Number.isFinite(n) ? n : null;
+      };
+
+      const captureSelection = () => {
+        this._capturePresetSelection(idx);
+      };
+
+      inputEl.addEventListener("input", () => {
+        updateLocal();
+        this._dirtyPresets = true;
+        this._pendingPresetFocusRestore = false;
+        captureSelection();
+        this._updateStatusIndicators();
+      });
+
+      inputEl.addEventListener("focus", () => {
+        this._handlePresetFocus(idx);
+        captureSelection();
+      });
+
+      inputEl.addEventListener("blur", () => {
+        captureSelection();
+        this._handlePresetBlur(idx);
+      });
+
+      inputEl.addEventListener("click", captureSelection);
+      inputEl.addEventListener("keyup", captureSelection);
+      inputEl.addEventListener("keydown", (ev) => {
+        if (ev.key === "Tab") {
+          this._presetFocusRelease = true;
+        }
+      });
+    }
+
+    _capturePresetSelection(idx) {
+      if (this._editingPresetIdx !== idx) return;
+      const inputEl = this._presetInputByIndex(idx);
+      if (!inputEl) return;
+      let start = null;
+      let end = null;
+      let dir = "none";
+      try {
+        start = inputEl.selectionStart;
+        end = inputEl.selectionEnd;
+        dir = inputEl.selectionDirection || "none";
+      } catch (e) {
+        // selection metadata unavailable
+      }
+      if (start == null || end == null) {
+        const len = inputEl.value != null ? String(inputEl.value).length : 0;
+        start = len;
+        end = len;
+      }
+      this._presetSelection = { start, end, dir };
+    }
+
+    _handlePresetFocus(idx) {
+      this._editingPresetIdx = idx;
+      this._presetFocusRelease = false;
+      this._pendingPresetFocusRestore = false;
+    }
+
+    _handlePresetBlur(idx) {
+      if (this._presetFocusRelease) {
+        if (this._editingPresetIdx === idx) {
+          this._editingPresetIdx = -1;
+        }
+        this._presetFocusRelease = false;
+        this._pendingPresetFocusRestore = false;
+        return;
+      }
+      if (this._editingPresetIdx === idx) {
+        this._pendingPresetFocusRestore = true;
+        this._schedulePresetFocusRestore();
+      }
+    }
+
+    _schedulePresetFocusRestore() {
+      if (!this._pendingPresetFocusRestore) return;
+      if (this._restoreFocusRaf != null) return;
+      const raf = window?.requestAnimationFrame || ((cb) => setTimeout(cb, 16));
+      this._restoreFocusRaf = raf(() => {
+        this._restoreFocusRaf = null;
+        this._restorePresetFocusIfNeeded();
+      });
+    }
+
+    _restorePresetFocusIfNeeded() {
+      const idx = this._editingPresetIdx;
+      if (!Number.isInteger(idx) || idx < 0) {
+        this._pendingPresetFocusRestore = false;
+        return;
+      }
+      if (this._presetFocusRelease) return;
+      const inputEl = this._presetInputByIndex(idx);
+      if (!inputEl) {
+        this._pendingPresetFocusRestore = false;
+        return;
+      }
+      const active = this.shadowRoot?.activeElement;
+      if (active === inputEl) {
+        this._pendingPresetFocusRestore = false;
+        return;
+      }
+      if (!this._pendingPresetFocusRestore && active && active !== inputEl) {
+        return;
+      }
+      this._pendingPresetFocusRestore = false;
+      try {
+        inputEl.focus({ preventScroll: true });
+      } catch (e) {
+        try { inputEl.focus(); } catch (_) { /* ignore */ }
+      }
+      const sel = this._presetSelection;
+      if (sel && sel.start != null && sel.end != null && inputEl.setSelectionRange) {
+        try {
+          inputEl.setSelectionRange(sel.start, sel.end, sel.dir || "none");
+        } catch (e) {
+          // ignore browsers that disallow selection updates
+        }
+        this._presetSelection = { start: sel.start, end: sel.end, dir: sel.dir || "none" };
+      }
+    }
+
+    _handleWindowPointerDown(ev) {
+      if (!Number.isInteger(this._editingPresetIdx) || this._editingPresetIdx < 0) return;
+      const current = this._presetInputByIndex(this._editingPresetIdx);
+      if (!current) return;
+      const path = typeof ev.composedPath === "function" ? ev.composedPath() : [];
+      if (path.includes(current)) {
+        this._presetFocusRelease = false;
+      } else {
+        this._presetFocusRelease = true;
+      }
     }
 
     static getConfigElement() { return null; }
