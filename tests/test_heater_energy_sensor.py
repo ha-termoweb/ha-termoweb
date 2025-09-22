@@ -5,7 +5,7 @@ import importlib.util
 from pathlib import Path
 import sys
 import types
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -213,6 +213,7 @@ TermoWebHeaterTemp = sensor_module.TermoWebHeaterTemp
 TermoWebHeaterEnergyTotal = sensor_module.TermoWebHeaterEnergyTotal
 TermoWebHeaterPower = sensor_module.TermoWebHeaterPower
 TermoWebTotalEnergy = sensor_module.TermoWebTotalEnergy
+async_setup_sensor_entry = sensor_module.async_setup_entry
 const_module = __import__(
     f"{package}.const", fromlist=["signal_ws_data", "DOMAIN", "signal_poll_refresh"]
 )
@@ -298,6 +299,111 @@ def test_coordinator_and_sensors() -> None:
         power_sensor._unsub_ws = MagicMock(side_effect=original_unsub_power)
         power_sensor._on_remove()
         power_sensor._unsub_ws.assert_called_once()
+
+    asyncio.run(_run())
+
+
+def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> None:
+    async def _run() -> None:
+        hass = HomeAssistant()
+        entry = types.SimpleNamespace(entry_id="entry-setup")
+        dev_id = "dev-1"
+        nodes_meta = {
+            "nodes": [
+                {"type": "HTR", "addr": "1", "name": "Living Room"},
+                {"type": "htr", "addr": "2", "name": "Bedroom"},
+            ]
+        }
+        coordinator = types.SimpleNamespace(
+            hass=hass,
+            data={
+                dev_id: {
+                    "nodes": nodes_meta,
+                    "htr": {
+                        "settings": {
+                            "1": {"mtemp": "21.0", "units": "C"},
+                            "2": {"mtemp": "19.5", "units": "C"},
+                        },
+                        "energy": {"1": 1.0, "2": 2.0},
+                        "power": {"1": 100.0, "2": 150.0},
+                    },
+                }
+            },
+        )
+        record: dict = {
+            "coordinator": coordinator,
+            "client": types.SimpleNamespace(),
+            "dev_id": dev_id,
+            "nodes": nodes_meta,
+            "htr_addrs": ["1", "2"],
+        }
+        hass.data = {DOMAIN: {entry.entry_id: record}}
+
+        add_calls: list[list] = []
+        added_entities: list = []
+
+        def _add_entities(entities):
+            add_calls.append(list(entities))
+            added_entities.extend(entities)
+
+        refresh_mock = AsyncMock()
+        logger_mock = MagicMock()
+
+        expected_names = [
+            "Living Room Temperature",
+            "Living Room Energy",
+            "Living Room Power",
+            "Bedroom Temperature",
+            "Bedroom Energy",
+            "Bedroom Power",
+            "Total Energy",
+        ]
+
+        with patch.object(
+            TermoWebHeaterEnergyCoordinator,
+            "async_config_entry_first_refresh",
+            new=refresh_mock,
+        ), patch.object(sensor_module, "_LOGGER", logger_mock):
+            await async_setup_sensor_entry(hass, entry, _add_entities)
+
+            assert "energy_coordinator" in record
+            energy_coord = record["energy_coordinator"]
+            assert isinstance(energy_coord, TermoWebHeaterEnergyCoordinator)
+            assert refresh_mock.await_count == 1
+
+            expected_count = len(record["htr_addrs"]) * 3 + 1
+            assert len(add_calls) == 1
+            assert len(add_calls[0]) == expected_count
+            assert len(added_entities) == expected_count
+
+            names = [
+                getattr(ent, "_attr_name", getattr(ent, "name", None))
+                for ent in add_calls[0]
+            ]
+            assert names == expected_names
+            logger_mock.debug.assert_called_once_with(
+                "Adding %d TermoWeb sensors", expected_count
+            )
+
+            logger_mock.debug.reset_mock()
+            refresh_mock.reset_mock()
+
+            await async_setup_sensor_entry(hass, entry, _add_entities)
+
+            assert record["energy_coordinator"] is energy_coord
+            assert refresh_mock.await_count == 0
+            assert len(add_calls) == 2
+            assert len(add_calls[1]) == expected_count
+            assert len(added_entities) == expected_count * 2
+
+            names_second = [
+                getattr(ent, "_attr_name", getattr(ent, "name", None))
+                for ent in add_calls[1]
+            ]
+            assert names_second == expected_names
+            logger_mock.debug.assert_called_once_with(
+                "Adding %d TermoWeb sensors", expected_count
+            )
 
     asyncio.run(_run())
 
