@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import importlib.util
 import sys
 import types
@@ -220,32 +221,99 @@ def _load_ws_client(
     return module
 
 
-def test_runner_retries_handshake_and_resets_backoff(
+def test_runner_handles_handshake_events_and_disconnect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def _run() -> None:
         module = _load_ws_client()
+        dispatcher = MagicMock()
+        monkeypatch.setattr(module, "async_dispatcher_send", dispatcher)
         aiohttp = sys.modules["aiohttp"]
 
-        session = aiohttp.ClientSession(
-            get_responses=[
-                {"status": 500, "body": "fail"},
-                {"status": 200, "body": "abc123:25:60:websocket"},
+        orig_sleep = asyncio.sleep
+
+        async def _text_frame(data: str) -> dict[str, Any]:
+            await orig_sleep(0)
+            return {"type": aiohttp.WSMsgType.TEXT, "data": data}
+
+        event_payload = {
+            "name": "data",
+            "args": [
+                [
+                    {
+                        "path": "/mgr/nodes",
+                        "body": {
+                            "nodes": [
+                                {"addr": "01", "type": "htr"},
+                                {"addr": "02", "type": "HTR"},
+                            ]
+                        },
+                    },
+                    {"path": "/htr/01/settings", "body": {"temp": 21}},
+                    {"path": "/htr/02/settings", "body": {"temp": 22}},
+                    {"path": "/htr/01/advanced_setup", "body": {"adv": True}},
+                    {
+                        "path": "/htr/02/samples",
+                        "body": [{"ts": 1, "val": 5}],
+                    },
+                    {"path": "/misc", "body": {"foo": "bar"}},
+                ]
+            ],
+        }
+        event_str = f"5::{module.WS_NAMESPACE}:{json.dumps(event_payload, separators=(',', ':'))}"
+
+        ws = aiohttp.testing.FakeWebSocket(
+            messages=[
+                _text_frame("2::"),
+                _text_frame(event_str),
+                _text_frame(f"5::{module.WS_NAMESPACE}:not-json"),
+                _text_frame("0::"),
             ]
         )
 
+        session = aiohttp.ClientSession(
+            get_responses=[
+                {"status": 401, "body": "unauthorized"},
+                {"status": 200, "body": "abc123:25:60:websocket"},
+            ],
+            ws_connect_results=[ws],
+        )
+
         loop = asyncio.get_event_loop()
-        hass = types.SimpleNamespace(loop=loop, data={module.DOMAIN: {"entry": {}}})
-        coordinator = types.SimpleNamespace()
+        hass = types.SimpleNamespace(
+            loop=loop,
+            data={module.DOMAIN: {"entry": {}}},
+        )
+
+        class DummyCoordinator:
+            def __init__(self) -> None:
+                self.data = {
+                    "dev": {
+                        "dev_id": "dev",
+                        "name": "Device dev",
+                        "raw": {},
+                        "connected": True,
+                        "nodes": None,
+                        "htr": {"addrs": [], "settings": {}},
+                    }
+                }
+
+            def _addrs(self) -> list[str]:
+                return ["01", "02"]
+
+        coordinator = DummyCoordinator()
+
         api = types.SimpleNamespace(
             _session=session,
             _authed_headers=AsyncMock(
                 side_effect=[
-                    {"Authorization": "Bearer old"},
-                    {"Authorization": "Bearer new"},
+                    {"Authorization": "Bearer expired"},
+                    {"Authorization": "Bearer refreshed"},
+                    {"Authorization": "Bearer refreshed"},
                 ]
             ),
             _ensure_token=AsyncMock(),
+            _access_token="expired",
         )
 
         client = module.TermoWebWSLegacyClient(
@@ -257,44 +325,121 @@ def test_runner_retries_handshake_and_resets_backoff(
             session=session,
         )
 
-        orig_update = client._update_status
-        statuses: list[str] = []
+        client._backoff_idx = 3
 
-        def capture_update(self, status: str) -> None:
-            statuses.append(status)
-            orig_update(status)
+        now = 1_000.0
 
-        client._update_status = types.MethodType(capture_update, client)
+        def fake_time() -> float:
+            nonlocal now
+            now += 1.0
+            return now
 
-        sleeps: list[tuple[float, int]] = []
+        monkeypatch.setattr(module.time, "time", fake_time)
 
-        async def fake_sleep(delay: float) -> None:
-            sleeps.append((delay, client._backoff_idx))
+        sleep_calls: list[float] = []
 
-        monkeypatch.setattr(module.asyncio, "sleep", fake_sleep)
-        monkeypatch.setattr(module.random, "uniform", lambda a, b: 1.0)
+        async def fast_sleep(delay: float) -> None:
+            sleep_calls.append(delay)
+            await orig_sleep(0)
 
-        connect_backoff: list[int] = []
+        monkeypatch.setattr(module.asyncio, "sleep", fast_sleep)
 
-        async def fake_connect(sid: str) -> None:
-            connect_backoff.append(client._backoff_idx)
+        orig_read_loop = module.TermoWebWSLegacyClient._read_loop
 
-        client._connect_ws = AsyncMock(side_effect=fake_connect)
-        client._join_namespace = AsyncMock(return_value=None)
-        client._send_snapshot_request = AsyncMock(return_value=None)
-        client._subscribe_htr_samples = AsyncMock(return_value=None)
-        client._heartbeat_loop = AsyncMock(return_value=None)
-        client._read_loop = AsyncMock(side_effect=asyncio.CancelledError())
+        async def read_wrapper(self: Any) -> None:
+            try:
+                await orig_read_loop(self)
+            except RuntimeError:
+                self._closing = True
+                raise
+
+        client._read_loop = types.MethodType(read_wrapper, client)
 
         await client._runner()
 
-        assert len(sleeps) == 1
-        assert sleeps[0] == (5.0, 1)
-        assert client._connect_ws.await_args == call("abc123")
-        assert api._authed_headers.await_count == 2
-        assert connect_backoff == [0]
+        assert api._ensure_token.await_count == 1
+        assert api._authed_headers.await_count == 3
+        assert len(session.get_calls) == 2
+        assert "token=expired" in session.get_calls[0]["url"]
+        assert "token=refreshed" in session.get_calls[1]["url"]
         assert client._backoff_idx == 0
-        assert statuses.count("disconnected") >= 1
+        assert api._access_token is None
+        assert client._hb_send_interval == pytest.approx(11.25)
+        assert sleep_calls and sleep_calls[0] == pytest.approx(11.25)
+        assert client._connected_since is not None
+
+        assert len(session.ws_connect_calls) == 1
+        ws_call = session.ws_connect_calls[0]
+        assert "token=refreshed" in ws_call["url"]
+        assert ws_call["kwargs"]["timeout"] == 15
+
+        assert ws.sent[0] == f"1::{module.WS_NAMESPACE}"
+        assert ws.sent[1] == '5::/api/v2/socket_io:{"name":"dev_data","args":[]}'
+        subscribe_msgs = [msg for msg in ws.sent if "\"subscribe\"" in msg]
+        assert sorted(subscribe_msgs) == sorted(
+            [
+                '5::/api/v2/socket_io:{"name":"subscribe","args":["/htr/01/samples"]}',
+                '5::/api/v2/socket_io:{"name":"subscribe","args":["/htr/02/samples"]}',
+            ]
+        )
+
+        assert client._stats.frames_total == 4
+        assert client._stats.events_total == 1
+
+        dev_state = coordinator.data["dev"]
+        assert dev_state["nodes"] == {
+            "nodes": [
+                {"addr": "01", "type": "htr"},
+                {"addr": "02", "type": "HTR"},
+            ]
+        }
+        assert dev_state["htr"]["addrs"] == ["01", "02"]
+        assert dev_state["htr"]["settings"]["01"] == {"temp": 21}
+        assert dev_state["htr"]["settings"]["02"] == {"temp": 22}
+        assert dev_state["htr"]["advanced"]["01"] == {"adv": True}
+        assert dev_state["raw"]["misc"] == {"foo": "bar"}
+
+        status_signal = module.signal_ws_status("entry")
+        data_signal = module.signal_ws_data("entry")
+        status_payloads = [
+            call.args[2]
+            for call in dispatcher.call_args_list
+            if call.args[1] == status_signal
+        ]
+        assert [p["status"] for p in status_payloads] == [
+            "starting",
+            "connected",
+            "disconnected",
+            "stopped",
+        ]
+        assert all(p["dev_id"] == "dev" for p in status_payloads)
+
+        data_payloads = [
+            call.args[2]
+            for call in dispatcher.call_args_list
+            if call.args[1] == data_signal
+        ]
+        assert len(data_payloads) == 4
+        ts = client._stats.last_event_ts
+        assert {
+            (p["kind"], p["addr"])
+            for p in data_payloads
+        } == {
+            ("nodes", None),
+            ("htr_settings", "01"),
+            ("htr_settings", "02"),
+            ("htr_samples", "02"),
+        }
+        for payload in data_payloads:
+            assert payload["dev_id"] == "dev"
+            assert payload["ts"] == ts
+
+        ws_state = hass.data[module.DOMAIN]["entry"]["ws_state"]["dev"]
+        assert ws_state["status"] == "stopped"
+        assert ws_state["frames_total"] == 4
+        assert ws_state["events_total"] == 1
+        assert ws_state["last_event_at"] == ts
+        assert ws_state["healthy_since"] is None
 
     asyncio.run(_run())
 
@@ -366,90 +511,6 @@ def test_connect_ws_uses_secure_endpoint() -> None:
         assert ws_call["url"] == expected_url
         assert ws_call["kwargs"]["heartbeat"] is None
         assert ws_call["kwargs"]["timeout"] == 15
-
-    asyncio.run(_run())
-
-
-def test_handshake_refreshes_token_after_401():
-    async def _run() -> None:
-        module = _load_ws_client()
-        Client = module.TermoWebWSLegacyClient
-        aiohttp = sys.modules["aiohttp"]
-        session = aiohttp.ClientSession(
-            get_responses=[
-                {"status": 401, "body": "unauthorized"},
-                {"status": 200, "body": "abc123:25:60:websocket"},
-            ]
-        )
-        hass = types.SimpleNamespace(loop=asyncio.get_event_loop())
-        coordinator = types.SimpleNamespace()
-        api = types.SimpleNamespace(
-            _session=session,
-            _authed_headers=AsyncMock(
-                side_effect=
-                [
-                    {"Authorization": "Bearer old"},
-                    {"Authorization": "Bearer new"},
-                ]
-            ),
-            _ensure_token=AsyncMock(),
-        )
-        client = Client(
-            hass,
-            entry_id="entry",
-            dev_id="dev",
-            api_client=api,
-            coordinator=coordinator,
-            session=session,
-        )
-        client._force_refresh_token = AsyncMock(return_value=None)
-        client._backoff_idx = 3
-
-        sid, hb = await client._handshake()
-
-        assert sid == "abc123"
-        assert hb == 25
-        assert client._force_refresh_token.await_count == 1
-        assert api._authed_headers.await_count == 2
-        assert len(session.get_calls) == 2
-        assert client._backoff_idx == 0
-
-    asyncio.run(_run())
-
-
-def test_read_loop_handles_frames_and_disconnect() -> None:
-    async def _run() -> None:
-        module = _load_ws_client()
-        Client = module.TermoWebWSLegacyClient
-        hass = types.SimpleNamespace(loop=asyncio.get_event_loop())
-        api = types.SimpleNamespace(_session=None)
-        coordinator = types.SimpleNamespace()
-        client = Client(hass, entry_id="e", dev_id="d", api_client=api, coordinator=coordinator)
-
-        aiohttp = sys.modules["aiohttp"]
-        ws = aiohttp.testing.FakeWebSocket(
-            messages=[
-                {"type": aiohttp.WSMsgType.TEXT, "data": "2::"},
-                {"type": aiohttp.WSMsgType.TEXT, "data": "5::/api/v2/socket_io"},
-                {
-                    "type": aiohttp.WSMsgType.TEXT,
-                    "data": f"5::{module.WS_NAMESPACE}:not-json",
-                },
-                {"type": aiohttp.WSMsgType.TEXT, "data": "0::"},
-            ]
-        )
-        client._ws = ws
-        mark = MagicMock()
-        handle = MagicMock()
-        client._mark_event = mark
-        client._handle_event = handle
-
-        with pytest.raises(RuntimeError, match="server disconnect"):
-            await client._read_loop()
-
-        mark.assert_any_call(paths=None)
-        assert handle.call_count == 0
-        assert client._stats.frames_total == 4
 
     asyncio.run(_run())
 
@@ -620,46 +681,76 @@ def test_mark_event_promotes_to_healthy(monkeypatch: pytest.MonkeyPatch) -> None
 def test_heartbeat_loop_sends_until_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         module = _load_ws_client()
-        Client = module.TermoWebWSLegacyClient
+        dispatcher = MagicMock()
+        monkeypatch.setattr(module, "async_dispatcher_send", dispatcher)
         loop = asyncio.get_event_loop()
         hass = types.SimpleNamespace(loop=loop, data={module.DOMAIN: {"entry": {}}})
         coordinator = types.SimpleNamespace()
         api = types.SimpleNamespace(_session=None)
-        client = Client(
+        client = module.TermoWebWSLegacyClient(
             hass,
             entry_id="entry",
             dev_id="dev",
             api_client=api,
             coordinator=coordinator,
         )
-        client._hb_send_interval = 1.0
+        client._hb_send_interval = 1.5
 
         send_calls: list[str] = []
         send_event = asyncio.Event()
 
         async def fake_send(data: str) -> None:
             send_calls.append(data)
-            if len(send_calls) >= 2:
+            if len(send_calls) >= 3:
                 send_event.set()
 
         client._send_text = AsyncMock(side_effect=fake_send)
 
-        orig_sleep = module.asyncio.sleep
+        orig_sleep = asyncio.sleep
         sleep_calls: list[float] = []
 
-        async def fake_sleep(delay: float) -> None:
+        async def fast_sleep(delay: float) -> None:
             sleep_calls.append(delay)
             await orig_sleep(0)
 
-        monkeypatch.setattr(module.asyncio, "sleep", fake_sleep)
+        monkeypatch.setattr(module.asyncio, "sleep", fast_sleep)
+
+        now = 2_000.0
+
+        def fake_time() -> float:
+            nonlocal now
+            now += 1.0
+            return now
+
+        monkeypatch.setattr(module.time, "time", fake_time)
+
+        client._update_status("connected")
+        status_signal = module.signal_ws_status("entry")
 
         task = asyncio.create_task(client._heartbeat_loop())
-        await asyncio.wait_for(send_event.wait(), timeout=0.1)
+        await asyncio.wait_for(send_event.wait(), timeout=0.2)
         task.cancel()
         await task
 
-        assert len(send_calls) >= 2
-        assert all(payload == "2::" for payload in send_calls[:2])
-        assert sleep_calls[:2] == [1.0, 1.0]
+        client._update_status("disconnected")
+
+        assert send_calls[:3] == ["2::", "2::", "2::"]
+        assert sleep_calls[:3] == [pytest.approx(1.5)] * 3
+
+        status_payloads = [
+            call.args[2]
+            for call in dispatcher.call_args_list
+            if call.args[1] == status_signal
+        ]
+        assert status_payloads[-2:] == [
+            {"dev_id": "dev", "status": "connected"},
+            {"dev_id": "dev", "status": "disconnected"},
+        ]
+
+        ws_state = hass.data[module.DOMAIN]["entry"].setdefault("ws_state", {})["dev"]
+        assert ws_state["status"] == "disconnected"
+        assert ws_state["frames_total"] == client._stats.frames_total
+        assert ws_state["events_total"] == client._stats.events_total
+        assert ws_state["last_event_at"] is None
 
     asyncio.run(_run())
