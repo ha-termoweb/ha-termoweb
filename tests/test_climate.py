@@ -539,6 +539,20 @@ def test_heater_properties_and_ws_update() -> None:
         assert "program_slot" not in attrs
         assert "program_setpoint" not in attrs
 
+        settings["ptemp"] = ["15.0", "18.0", "21.0"]
+        settings["prog"] = ["bad"] + [1] * 167
+        settings["mode"] = "eco"
+        settings["state"] = "heating"
+        attrs = heater.extra_state_attributes
+        assert "program_slot" not in attrs
+        assert "program_setpoint" not in attrs
+        assert heater.hvac_mode == HVACMode.HEAT
+        assert heater.icon == "mdi:radiator"
+
+        settings["state"] = None
+        assert heater.hvac_action is None
+        assert heater.icon == "mdi:radiator"
+
         settings["mtemp"] = "invalid"
         settings["stemp"] = ""
         assert heater.current_temperature is None
@@ -595,10 +609,18 @@ def test_heater_write_paths_and_errors(
         await heater.async_added_to_hass()
 
         fallback_waiters: Deque[asyncio.Future[None]] = deque()
+        write_waiters: Deque[asyncio.Future[None]] = deque()
+        write_block = False
         real_sleep = asyncio.sleep
 
         async def fake_sleep(delay: float) -> None:
             if delay == climate_module._WRITE_DEBOUNCE:
+                if write_block:
+                    loop = asyncio.get_running_loop()
+                    fut: asyncio.Future[None] = loop.create_future()
+                    write_waiters.append(fut)
+                    await fut
+                    return None
                 return None
             if delay == climate_module._WS_ECHO_FALLBACK_REFRESH:
                 loop = asyncio.get_running_loop()
@@ -626,6 +648,13 @@ def test_heater_write_paths_and_errors(
                 await real_sleep(0)
             raise AssertionError("fallback waiter not created")
 
+        async def _pop_write_waiter() -> asyncio.Future[None]:
+            for _ in range(10):
+                if write_waiters:
+                    return write_waiters.popleft()
+                await real_sleep(0)
+            raise AssertionError("write waiter not created")
+
         async def _complete_fallback_once() -> None:
             waiter = await _pop_waiter()
             assert heater._refresh_fallback is not None
@@ -635,10 +664,21 @@ def test_heater_write_paths_and_errors(
             assert coordinator.async_request_refresh.await_count == 1
             coordinator.async_request_refresh.reset_mock()
 
+        class RaisingMapping:
+            def __init__(self, real: dict[str, Any]) -> None:
+                self._real = real
+                self._calls = 0
+
+            def get(self, *args: Any, **kwargs: Any) -> Any:
+                self._calls += 1
+                if self._calls >= 2:
+                    raise RuntimeError("boom mapping")
+                return self._real.get(*args, **kwargs)
+
         monkeypatch.setattr(asyncio, "sleep", fake_sleep)
         monkeypatch.setattr(asyncio, "create_task", track_create_task)
 
-        caplog.set_level(logging.ERROR)
+        caplog.set_level(logging.DEBUG)
 
         # -------------------- async_set_schedule (valid) --------------------
         await heater.async_set_schedule(list(base_prog))
@@ -670,6 +710,38 @@ def test_heater_write_paths_and_errors(
         assert client.set_htr_settings.await_count == 0
         assert "Invalid prog for dev" in caplog.text
         assert not fallback_waiters
+
+        # -------------------- async_set_schedule (API error) ----------------
+        caplog.clear()
+        client.set_htr_settings.reset_mock()
+        client.set_htr_settings.side_effect = RuntimeError("boom schedule")
+        prev_prog = list(settings_after["prog"])
+        prev_fallback = heater._refresh_fallback
+        await heater.async_set_schedule(list(base_prog))
+        assert client.set_htr_settings.await_count == 1
+        assert settings_after["prog"] == prev_prog
+        assert heater._refresh_fallback is prev_fallback
+        assert not fallback_waiters
+        assert "Schedule write failed" in caplog.text
+        client.set_htr_settings.side_effect = None
+        client.set_htr_settings.reset_mock()
+
+        # -------------------- async_set_schedule (optimistic failure) -------
+        caplog.clear()
+        client.set_htr_settings.reset_mock()
+        old_data = coordinator.data
+        coordinator.data = RaisingMapping(old_data)
+        await heater.async_set_schedule(list(base_prog))
+        assert client.set_htr_settings.await_count == 1
+        assert settings_after["prog"] == prev_prog
+        assert "Optimistic prog update failed" in caplog.text
+        waiter = await _pop_waiter()
+        coordinator.data = old_data
+        waiter.set_result(None)
+        await heater._refresh_fallback
+        assert coordinator.async_request_refresh.await_count == 1
+        coordinator.async_request_refresh.reset_mock()
+        client.set_htr_settings.reset_mock()
 
         # -------------------- async_set_preset_temperatures (valid forms) ---
         caplog.clear()
@@ -704,6 +776,38 @@ def test_heater_write_paths_and_errors(
         assert client.set_htr_settings.await_count == 0
         assert "Invalid ptemp values" in caplog.text
         assert not fallback_waiters
+
+        # -------------------- async_set_preset_temperatures (API error) -----
+        caplog.clear()
+        client.set_htr_settings.reset_mock()
+        client.set_htr_settings.side_effect = RuntimeError("boom preset")
+        prev_ptemp = list(settings_after["ptemp"])
+        prev_fallback = heater._refresh_fallback
+        await heater.async_set_preset_temperatures(ptemp=[19.1, 20.1, 21.1])
+        assert client.set_htr_settings.await_count == 1
+        assert settings_after["ptemp"] == prev_ptemp
+        assert heater._refresh_fallback is prev_fallback
+        assert not fallback_waiters
+        assert "Preset write failed" in caplog.text
+        client.set_htr_settings.side_effect = None
+        client.set_htr_settings.reset_mock()
+
+        # -------------------- async_set_preset_temperatures (optimistic failure) -
+        caplog.clear()
+        client.set_htr_settings.reset_mock()
+        old_data = coordinator.data
+        coordinator.data = RaisingMapping(old_data)
+        await heater.async_set_preset_temperatures(ptemp=[19.2, 20.2, 21.2])
+        assert client.set_htr_settings.await_count == 1
+        assert settings_after["ptemp"] == prev_ptemp
+        assert "Optimistic ptemp update failed" in caplog.text
+        waiter = await _pop_waiter()
+        coordinator.data = old_data
+        waiter.set_result(None)
+        await heater._refresh_fallback
+        assert coordinator.async_request_refresh.await_count == 1
+        coordinator.async_request_refresh.reset_mock()
+        client.set_htr_settings.reset_mock()
 
         # -------------------- async_set_temperature (valid + clamps) -------
         client.set_htr_settings.reset_mock()
@@ -767,6 +871,41 @@ def test_heater_write_paths_and_errors(
         assert "Unsupported hvac_mode" in caplog.text
         assert not fallback_waiters
 
+        # -------------------- _ensure_write_task and debounce -------------
+        client.set_htr_settings.reset_mock()
+        write_block = True
+        pre_fallback = heater._refresh_fallback
+        heater._pending_mode = None
+        heater._pending_stemp = None
+        await heater._ensure_write_task()
+        first_task = heater._write_task
+        assert first_task is not None
+        await heater._ensure_write_task()
+        assert heater._write_task is first_task
+        write_waiter = await _pop_write_waiter()
+        write_block = False
+        write_waiter.set_result(None)
+        await first_task
+        assert client.set_htr_settings.await_count == 0
+        assert heater._refresh_fallback is pre_fallback
+        assert not write_waiters
+
+        # -------------------- _write_after_debounce error path -------------
+        caplog.clear()
+        client.set_htr_settings.reset_mock()
+        client.set_htr_settings.side_effect = RuntimeError("write boom")
+        heater._pending_mode = HVACMode.AUTO
+        heater._pending_stemp = None
+        heater._refresh_fallback = None
+        await heater._ensure_write_task()
+        assert heater._write_task is not None
+        await heater._write_task
+        assert "Write failed" in caplog.text
+        assert heater._refresh_fallback is None
+        assert not fallback_waiters
+        client.set_htr_settings.side_effect = None
+        client.set_htr_settings.reset_mock()
+
         # -------------------- _schedule_refresh_fallback behaviour --------
         heater._schedule_refresh_fallback()
         task_a = heater._refresh_fallback
@@ -786,6 +925,17 @@ def test_heater_write_paths_and_errors(
         waiter_b.set_result(None)
         await task_b
         assert coordinator.async_request_refresh.await_count == 1
+
+        caplog.clear()
+        coordinator.async_request_refresh.side_effect = RuntimeError("refresh boom")
+        heater._schedule_refresh_fallback()
+        waiter_err = await _pop_waiter()
+        waiter_err.set_result(None)
+        await heater._refresh_fallback
+        assert "Refresh fallback failed" in caplog.text
+        coordinator.async_request_refresh.side_effect = None
+        coordinator.async_request_refresh.reset_mock()
+        assert not fallback_waiters
 
         assert created_tasks, "Expected background tasks to be created"
 
