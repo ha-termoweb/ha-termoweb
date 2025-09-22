@@ -288,12 +288,12 @@ def test_runner_retries_handshake_and_resets_backoff(
 
         await client._runner()
 
-        assert len(sleeps) == 2
+        assert len(sleeps) == 1
         assert sleeps[0] == (5.0, 1)
         assert client._connect_ws.await_args == call("abc123")
         assert api._authed_headers.await_count == 2
         assert connect_backoff == [0]
-        assert client._backoff_idx == 1
+        assert client._backoff_idx == 0
         assert statuses.count("disconnected") >= 1
 
     asyncio.run(_run())

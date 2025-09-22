@@ -131,6 +131,7 @@ class TermoWebWSLegacyClient:
     async def _runner(self) -> None:
         self._update_status("starting")
         while not self._closing:
+            should_retry = True
             try:
                 sid, hb_timeout = await self._handshake()
                 self._hs_fail_count = 0
@@ -152,7 +153,7 @@ class TermoWebWSLegacyClient:
                 await self._read_loop()
 
             except asyncio.CancelledError:
-                break
+                should_retry = False
             except HandshakeError as e:
                 self._hs_fail_count += 1
                 if self._hs_fail_count == 1:
@@ -205,18 +206,18 @@ class TermoWebWSLegacyClient:
 
                 self._update_status("disconnected")
 
-                if self._closing:
-                    break
+            if self._closing or not should_retry:
+                break
 
-                # Backoff with jitter
-                delay = self._backoff_seq[
-                    min(self._backoff_idx, len(self._backoff_seq) - 1)
-                ]
-                self._backoff_idx = min(
-                    self._backoff_idx + 1, len(self._backoff_seq) - 1
-                )
-                jitter = random.uniform(0.8, 1.2)
-                await asyncio.sleep(delay * jitter)
+            # Backoff with jitter
+            delay = self._backoff_seq[
+                min(self._backoff_idx, len(self._backoff_seq) - 1)
+            ]
+            self._backoff_idx = min(
+                self._backoff_idx + 1, len(self._backoff_seq) - 1
+            )
+            jitter = random.uniform(0.8, 1.2)
+            await asyncio.sleep(delay * jitter)
 
         # End loop
         self._update_status("stopped")
