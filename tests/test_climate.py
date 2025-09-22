@@ -447,6 +447,54 @@ def test_heater_properties_and_ws_update() -> None:
         dispatcher_send(signal_ws_data(entry_id), {"dev_id": dev_id, "addr": addr})
         heater.schedule_update_ha_state.assert_called_once()
 
+        heater.schedule_update_ha_state.reset_mock()
+        heater._on_ws_data({"dev_id": "other", "addr": addr})
+        heater._on_ws_data({"dev_id": dev_id, "addr": "B2"})
+        heater.schedule_update_ha_state.assert_not_called()
+
+        heater._on_ws_data({"dev_id": dev_id})
+        heater.schedule_update_ha_state.assert_called_once()
+
+        heater.schedule_update_ha_state.reset_mock()
+        heater._on_ws_data({"dev_id": dev_id, "addr": addr})
+        heater.schedule_update_ha_state.assert_called_once()
+
+        original_now = ha_dt.NOW
+        try:
+            ha_dt.NOW = dt.datetime(2024, 1, 1, 1, 0, tzinfo=dt.timezone.utc)
+            attrs = heater.extra_state_attributes
+            assert attrs["program_slot"] == "night"
+            assert attrs["program_setpoint"] == pytest.approx(18.0)
+        finally:
+            ha_dt.NOW = original_now
+
+        coordinator.data[dev_id]["nodes"] = None
+        assert heater.available is False
+        coordinator.data[dev_id]["nodes"] = {"nodes": []}
+        assert heater.available is True
+
+        settings["mode"] = "auto"
+        settings["state"] = "idle"
+        assert heater.hvac_mode == HVACMode.AUTO
+        assert heater.hvac_action == HVACAction.IDLE
+        assert heater.icon == "mdi:radiator-disabled"
+
+        settings["mode"] = "off"
+        settings["state"] = "idle"
+        settings["prog"] = [1]
+        settings["ptemp"] = None
+        attrs = heater.extra_state_attributes
+        assert heater.hvac_mode == HVACMode.OFF
+        assert heater.hvac_action == HVACAction.OFF
+        assert heater.icon == "mdi:radiator-off"
+        assert "program_slot" not in attrs
+        assert "program_setpoint" not in attrs
+
+        settings["mtemp"] = "invalid"
+        settings["stemp"] = ""
+        assert heater.current_temperature is None
+        assert heater.target_temperature is None
+
     asyncio.run(_run())
 
 
