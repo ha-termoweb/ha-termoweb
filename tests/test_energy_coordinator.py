@@ -118,7 +118,10 @@ sys.modules["homeassistant.helpers.dispatcher"] = ha_dispatcher
 
 # Load coordinator module
 COORD_PATH = (
-    Path(__file__).resolve().parents[1] / "custom_components" / "termoweb" / "coordinator.py"
+    Path(__file__).resolve().parents[1]
+    / "custom_components"
+    / "termoweb"
+    / "coordinator.py"
 )
 sys.modules.setdefault("custom_components", types.ModuleType("custom_components"))
 termoweb_pkg = types.ModuleType(package)
@@ -133,10 +136,17 @@ spec.loader.exec_module(coord_module)
 
 TermoWebHeaterEnergyCoordinator = coord_module.TermoWebHeaterEnergyCoordinator
 TermoWebCoordinator = coord_module.TermoWebCoordinator
-signal_ws_data = __import__(f"{package}.const", fromlist=["signal_ws_data"]).signal_ws_data
+signal_ws_data = __import__(
+    f"{package}.const", fromlist=["signal_ws_data"]
+).signal_ws_data
 HTR_ENERGY_UPDATE_INTERVAL = __import__(
     f"{package}.const", fromlist=["HTR_ENERGY_UPDATE_INTERVAL"]
 ).HTR_ENERGY_UPDATE_INTERVAL
+
+
+@pytest.mark.parametrize("value", ["", "  ", "not-a-number"])
+def test_as_float_returns_none_for_invalid_strings(value: str) -> None:
+    assert coord_module._as_float(value) is None
 
 
 def test_power_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -202,45 +212,42 @@ def test_counter_reset(monkeypatch: pytest.MonkeyPatch) -> None:
     asyncio.run(_run())
 
 
-def test_energy_regression_resets_last(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_energy_regression_resets_last() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
         client.get_htr_samples = AsyncMock(
             side_effect=[
-                [{"t": 1000, "counter": "5.0"}],
-                [{"counter": "6.0"}],
-                [{"t": 950, "counter": "4.0"}],
+                [{"t": 1000, "counter": "1.0"}],
+                [{"t": 1600, "counter": "2.0"}],
+                [{"t": 1500, "counter": "1.5"}],
             ]
         )
 
         hass = HomeAssistant()
         coord = TermoWebHeaterEnergyCoordinator(
-            hass, client, "1", ["A"]  # type: ignore[arg-type]
+            hass,
+            client,
+            "1",
+            ["A"],  # type: ignore[arg-type]
         )
 
-        fake_time = 1000.0
-
-        def _fake_time() -> float:
-            return fake_time
-
-        monkeypatch.setattr(coord_module.time, "time", _fake_time)
+        await coord.async_refresh()
+        assert coord.data["1"]["htr"]["energy"]["A"] == 1.0
+        assert "A" not in coord.data["1"]["htr"]["power"]
+        assert coord._last[("1", "A")] == (1000.0, 1.0)
 
         await coord.async_refresh()
-        assert coord._last[("1", "A")] == (1000.0, 5.0)
+        second_data = coord.data["1"]["htr"]
+        assert second_data["energy"]["A"] == 2.0
+        assert second_data["power"]["A"] == pytest.approx(6000.0, rel=1e-3)
+        assert coord._last[("1", "A")] == (1600.0, 2.0)
 
-        fake_time = 1600.0
-        await coord.async_refresh()
-        assert coord._last[("1", "A")] == (1000.0, 5.0)
-        assert "A" not in coord.data["1"]["htr"]["energy"]
-
-        fake_time = 1700.0
         await coord.async_refresh()
 
-        data = coord.data["1"]["htr"]
-        assert data["energy"]["A"] == 4.0
-        assert ("1", "A") in coord._last
-        assert coord._last[("1", "A")] == (950.0, 4.0)
-        assert "A" not in data["power"]
+        final_data = coord.data["1"]["htr"]
+        assert final_data["energy"]["A"] == 1.5
+        assert "A" not in final_data["power"]
+        assert coord._last[("1", "A")] == (1500.0, 1.5)
 
     asyncio.run(_run())
 
@@ -252,36 +259,147 @@ def test_update_interval_constant() -> None:
     assert coord.update_interval == HTR_ENERGY_UPDATE_INTERVAL
 
 
-def test_coordinator_rate_limit_backoff() -> None:
+def test_heater_energy_samples_empty_on_api_error() -> None:
     async def _run() -> None:
-        class FaultyDevice(dict):
-            def __init__(self) -> None:
-                super().__init__({"placeholder": True})
-
-            def get(self, key, default=None):
-                if key == "name":
-                    raise coord_module.TermoWebRateLimitError("429")
-                return super().get(key, default)
-
         client = types.SimpleNamespace()
-        client.get_htr_settings = AsyncMock(return_value={})
+        client.get_htr_samples = AsyncMock(side_effect=ClientError("fail"))
 
         hass = HomeAssistant()
-        device = FaultyDevice()
-        nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
-        coord = TermoWebCoordinator(
-            hass, client, 30, "1", device, nodes  # type: ignore[arg-type]
+        coord = TermoWebHeaterEnergyCoordinator(
+            hass,
+            client,
+            "1",
+            ["A"],  # type: ignore[arg-type]
         )
 
-        with pytest.raises(UpdateFailed, match="Rate limited; backing off to 60s"):
-            await coord.async_refresh()
-        assert coord._backoff == 60
-        assert coord.update_interval == timedelta(seconds=60)
+        await coord.async_refresh()
+        data = coord.data["1"]["htr"]
+        assert data["energy"] == {}
+        assert data["power"] == {}
+        assert coord._last == {}
 
-        with pytest.raises(UpdateFailed, match="Rate limited; backing off to 120s"):
+    asyncio.run(_run())
+
+
+def test_heater_energy_client_error_update_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_htr_samples = AsyncMock(return_value=[{"t": 1000, "counter": "1.0"}])
+
+        hass = HomeAssistant()
+        coord = TermoWebHeaterEnergyCoordinator(
+            hass,
+            client,
+            "1",
+            ["A"],  # type: ignore[arg-type]
+        )
+
+        def _raise_client_error(_value: Any) -> float:
+            raise ClientError("bad")
+
+        monkeypatch.setattr(coord_module, "_as_float", _raise_client_error)
+
+        with pytest.raises(UpdateFailed, match="API error: bad"):
             await coord.async_refresh()
-        assert coord._backoff == 120
-        assert coord.update_interval == timedelta(seconds=120)
+
+    asyncio.run(_run())
+
+
+def test_coordinator_rate_limit_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        async def _raise_rate_limit(*_args: Any, **_kwargs: Any) -> Any:
+            raise coord_module.TermoWebRateLimitError("429")
+
+        client = types.SimpleNamespace()
+        client.get_htr_settings = AsyncMock(side_effect=_raise_rate_limit)
+
+        hass = HomeAssistant()
+        nodes = {"nodes": [{"addr": "A", "type": "htr"}, {"addr": "B", "type": "htr"}]}
+        coord = TermoWebCoordinator(
+            hass,
+            client,
+            30,
+            "1",
+            {},
+            nodes,  # type: ignore[arg-type]
+        )
+
+        expected_backoffs = [60, 120, 240, 480, 960, 1920, 3600]
+        for backoff in expected_backoffs:
+            with pytest.raises(
+                UpdateFailed, match=f"Rate limited; backing off to {backoff}s"
+            ):
+                await coord.async_refresh()
+            assert coord._backoff == backoff
+            assert coord.update_interval == timedelta(seconds=backoff)
+            assert client.get_htr_settings.await_args_list[-1].args[1] == "A"
+
+        with pytest.raises(UpdateFailed, match="Rate limited; backing off to 3600s"):
+            await coord.async_refresh()
+        assert coord._backoff == 3600
+        assert coord.update_interval == timedelta(seconds=3600)
+        assert client.get_htr_settings.await_args_list[-1].args[1] == "A"
+
+    class RaisingLogger:
+        def debug(
+            self, *_args: Any, exc_info: Exception | None = None, **_kwargs: Any
+        ) -> None:
+            if exc_info is not None:
+                raise exc_info
+
+        def info(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def warning(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def error(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+    monkeypatch.setattr(coord_module, "_LOGGER", RaisingLogger())
+
+    asyncio.run(_run())
+
+
+def test_coordinator_client_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_htr_settings = AsyncMock(side_effect=ClientError("boom"))
+
+        hass = HomeAssistant()
+        nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
+        coord = TermoWebCoordinator(
+            hass,
+            client,
+            30,
+            "1",
+            {},
+            nodes,  # type: ignore[arg-type]
+        )
+
+        with pytest.raises(UpdateFailed, match="API error: boom"):
+            await coord.async_refresh()
+        assert client.get_htr_settings.await_args_list[-1].args[1] == "A"
+
+    class RaisingLogger:
+        def debug(
+            self, *_args: Any, exc_info: Exception | None = None, **_kwargs: Any
+        ) -> None:
+            if exc_info is not None:
+                raise exc_info
+
+        def info(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def warning(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def error(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+    monkeypatch.setattr(coord_module, "_LOGGER", RaisingLogger())
 
     asyncio.run(_run())
 
@@ -289,9 +407,7 @@ def test_coordinator_rate_limit_backoff() -> None:
 def test_ws_driven_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.get_htr_samples = AsyncMock(
-            return_value=[{"t": 1000, "counter": "1.0"}]
-        )
+        client.get_htr_samples = AsyncMock(return_value=[{"t": 1000, "counter": "1.0"}])
 
         hass = HomeAssistant()
         coord = TermoWebHeaterEnergyCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
@@ -299,13 +415,19 @@ def test_ws_driven_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
         await coord.async_refresh()
         assert coord.data["1"]["htr"]["energy"]["A"] == 1.0
 
-        client.get_htr_samples = AsyncMock(
-            return_value=[{"t": 2000, "counter": "2.0"}]
+        client.get_htr_samples = AsyncMock(return_value=[{"t": 2000, "counter": "2.0"}])
+
+        async_dispatcher_connect(
+            hass,
+            signal_ws_data("entry"),
+            lambda payload: asyncio.create_task(coord.async_request_refresh())
+            if payload.get("kind") == "htr_samples"
+            else None,
         )
 
-        async_dispatcher_connect(hass, signal_ws_data("entry"), lambda payload: asyncio.create_task(coord.async_request_refresh()) if payload.get("kind") == "htr_samples" else None)
-
-        dispatcher_send(signal_ws_data("entry"), {"dev_id": "1", "addr": "A", "kind": "htr_samples"})
+        dispatcher_send(
+            signal_ws_data("entry"), {"dev_id": "1", "addr": "A", "kind": "htr_samples"}
+        )
         await asyncio.sleep(0)
 
         assert coord.data["1"]["htr"]["energy"]["A"] == 2.0
@@ -321,7 +443,12 @@ def test_coordinator_timeout() -> None:
         hass = HomeAssistant()
         nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
         coord = TermoWebCoordinator(
-            hass, client, 30, "1", {}, nodes  # type: ignore[arg-type]
+            hass,
+            client,
+            30,
+            "1",
+            {},
+            nodes,  # type: ignore[arg-type]
         )
 
         with pytest.raises(UpdateFailed, match="API timeout"):
@@ -337,7 +464,10 @@ def test_heater_energy_timeout() -> None:
 
         hass = HomeAssistant()
         coord = TermoWebHeaterEnergyCoordinator(
-            hass, client, "1", ["A"]  # type: ignore[arg-type]
+            hass,
+            client,
+            "1",
+            ["A"],  # type: ignore[arg-type]
         )
 
         with pytest.raises(UpdateFailed, match="API timeout"):
