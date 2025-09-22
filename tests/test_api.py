@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 
 # Provide a minimal aiohttp stub for the module import
-aiohttp_stub = types.ModuleType("aiohttp")
+aiohttp_module = sys.modules.setdefault("aiohttp", types.ModuleType("aiohttp"))
 
 
 class ClientSession:  # pragma: no cover - simple placeholder
@@ -34,13 +34,12 @@ class ClientResponseError(Exception):  # pragma: no cover - simple placeholder
         self.history = history
 
 
-aiohttp_stub.ClientSession = ClientSession
-aiohttp_stub.ClientTimeout = ClientTimeout
-aiohttp_stub.ClientResponseError = ClientResponseError
-aiohttp_stub.ClientError = Exception
+aiohttp_module.ClientSession = ClientSession
+aiohttp_module.ClientTimeout = ClientTimeout
+aiohttp_module.ClientResponseError = ClientResponseError
+aiohttp_module.ClientError = Exception
 
-sys.modules.setdefault("aiohttp", aiohttp_stub)
-aiohttp = aiohttp_stub
+aiohttp = aiohttp_module
 
 API_PATH = (
     Path(__file__).resolve().parents[1] / "custom_components" / "termoweb" / "api.py"

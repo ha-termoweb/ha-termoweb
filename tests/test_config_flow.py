@@ -106,10 +106,10 @@ def _apply_validator(value: Any, validator: Any) -> Any:
     return value
 
 
-vol.Required = getattr(vol, "Required", Required)
-vol.All = getattr(vol, "All", All)
-vol.Range = getattr(vol, "Range", Range)
-vol.Schema = getattr(vol, "Schema", Schema)
+vol.Required = Required
+vol.All = All
+vol.Range = Range
+vol.Schema = Schema
 
 # --- Minimal Home Assistant stubs ----------------------------------------------
 
@@ -148,7 +148,7 @@ class FlowResult(dict):  # pragma: no cover - placeholder type alias
     pass
 
 
-data_entry_flow_mod.FlowResult = getattr(data_entry_flow_mod, "FlowResult", FlowResult)
+data_entry_flow_mod.FlowResult = FlowResult
 
 
 class ConfigEntry:  # pragma: no cover - simplified stand-in
@@ -259,22 +259,18 @@ class OptionsFlow:  # pragma: no cover - simplified OptionsFlow base
         return FlowResult({"type": "create_entry", "title": title, "data": data})
 
 
-config_entries_mod.ConfigEntry = getattr(config_entries_mod, "ConfigEntry", ConfigEntry)
-config_entries_mod.ConfigEntriesManager = getattr(
-    config_entries_mod, "ConfigEntriesManager", ConfigEntriesManager
-)
-config_entries_mod.ConfigFlow = getattr(config_entries_mod, "ConfigFlow", ConfigFlow)
-config_entries_mod.OptionsFlow = getattr(config_entries_mod, "OptionsFlow", OptionsFlow)
-core_mod.HomeAssistant = getattr(core_mod, "HomeAssistant", HomeAssistant)
+config_entries_mod.ConfigEntry = ConfigEntry
+config_entries_mod.ConfigEntriesManager = ConfigEntriesManager
+config_entries_mod.ConfigFlow = ConfigFlow
+config_entries_mod.OptionsFlow = OptionsFlow
+core_mod.HomeAssistant = HomeAssistant
 
 
 def async_get_clientsession(_hass: HomeAssistant) -> object:  # pragma: no cover - stub
     return object()
 
 
-aiohttp_client_mod.async_get_clientsession = getattr(
-    aiohttp_client_mod, "async_get_clientsession", async_get_clientsession
-)
+aiohttp_client_mod.async_get_clientsession = async_get_clientsession
 
 
 class _Integration:  # pragma: no cover - minimal integration info
@@ -286,9 +282,7 @@ async def async_get_integration(_hass: HomeAssistant, _domain: str) -> _Integrat
     return _Integration("0.0-test")
 
 
-loader_mod.async_get_integration = getattr(
-    loader_mod, "async_get_integration", async_get_integration
-)
+loader_mod.async_get_integration = async_get_integration
 
 # --- Import module under test ---------------------------------------------------
 
