@@ -27,8 +27,6 @@ These product lines are documented to work with the **TermoWeb** portal/app:
 
 > If a brand isn’t listed but the user signs in at **control.termoweb.net** (or **control2.termoweb.net**) with an app called **TermoWeb**, this integration should work.
 
-_Not supported:_ brands using different apps/backends (for example “Ducaheat/Ducasa”’s own “TermoWeb” app, which is a separate system).
-
 ---
 
 ## What you can do in Home Assistant
