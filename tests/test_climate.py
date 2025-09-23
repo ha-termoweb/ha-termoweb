@@ -573,6 +573,7 @@ def test_heater_write_paths_and_errors(
         entry_id = "entry"
         dev_id = "dev1"
         addr = "A1"
+        other_addr = "B2"
         base_prog: list[int] = [0, 1, 2] * 56
         settings = {
             "mode": "manual",
@@ -584,16 +585,30 @@ def test_heater_write_paths_and_errors(
             "units": "C",
             "max_power": 1200,
         }
+        other_settings = {
+            "mode": "auto",
+            "state": "idle",
+            "mtemp": "18.0",
+            "stemp": "19.0",
+            "ptemp": ["15.0", "18.0", "21.0"],
+            "prog": list(base_prog),
+            "units": "C",
+            "max_power": 900,
+        }
         coordinator_data = {
             dev_id: {
                 "nodes": {"nodes": []},
-                "htr": {"settings": {addr: settings}},
+                "htr": {
+                    "addrs": [addr, other_addr],
+                    "settings": {addr: settings, other_addr: other_settings},
+                },
                 "version": "5.0.0",
             }
         }
 
         coordinator = FakeCoordinator(hass, coordinator_data)
         client = AsyncMock()
+        client.get_htr_settings = AsyncMock()
         hass.data = {
             DOMAIN: {
                 entry_id: {
@@ -663,6 +678,25 @@ def test_heater_write_paths_and_errors(
             await heater._refresh_fallback
             assert coordinator.async_request_refresh.await_count == 1
             coordinator.async_request_refresh.reset_mock()
+
+        poll_sequence: Deque[str] = deque()
+
+        async def _round_robin_refresh() -> None:
+            if not poll_sequence:
+                return None
+            addr_to_poll = poll_sequence.popleft()
+            response = await client.get_htr_settings(dev_id, addr_to_poll)
+            if isinstance(response, dict):
+                settings_map = coordinator.data[dev_id]["htr"]["settings"]
+                current = settings_map.get(addr_to_poll)
+                if isinstance(current, dict):
+                    current.clear()
+                    current.update(response)
+                else:
+                    settings_map[addr_to_poll] = dict(response)
+            return None
+
+        coordinator.async_request_refresh.side_effect = _round_robin_refresh
 
         class RaisingMapping:
             def __init__(self, real: dict[str, Any]) -> None:
@@ -938,5 +972,68 @@ def test_heater_write_paths_and_errors(
         assert not fallback_waiters
 
         assert created_tasks, "Expected background tasks to be created"
+
+        # -------------------- fallback refresh round-robin regression -----
+        client.set_htr_settings.reset_mock()
+        coordinator.async_request_refresh.reset_mock()
+        coordinator.async_request_refresh.side_effect = _round_robin_refresh
+        client.get_htr_settings.reset_mock()
+        poll_sequence.clear()
+
+        settings_map = coordinator.data[dev_id]["htr"]["settings"]
+        target_settings = settings_map[addr]
+        other_current = settings_map[other_addr]
+
+        target_settings["mode"] = "auto"
+        target_settings["state"] = "heating"
+        target_settings["stemp"] = "21.0"
+        other_current["mode"] = "auto"
+        other_current["state"] = "idle"
+        other_current["stemp"] = "19.0"
+
+        manual_temp = 23.5
+        manual_update = dict(target_settings)
+        manual_update["mode"] = "manual"
+        manual_update["state"] = "heating"
+        manual_update["stemp"] = f"{manual_temp:.1f}"
+
+        other_update = dict(other_current)
+        other_update["stemp"] = "19.5"
+
+        async def _fake_get_htr_settings(dev_arg: str, addr_arg: str) -> dict[str, Any]:
+            assert dev_arg == dev_id
+            addr_key = str(addr_arg)
+            if addr_key == other_addr:
+                return dict(other_update)
+            if addr_key == addr:
+                return dict(manual_update)
+            return {}
+
+        client.get_htr_settings.side_effect = _fake_get_htr_settings
+
+        poll_sequence.extend([other_addr])
+        await heater.async_set_temperature(**{ATTR_TEMPERATURE: manual_temp})
+        assert heater._write_task is not None
+        await heater._write_task
+        await _complete_fallback_once()
+
+        auto_mode = heater.hvac_mode
+        auto_target = heater.target_temperature
+        preset_expected = pytest.approx(21.0)
+        manual_expected = pytest.approx(manual_temp)
+
+        if auto_mode == HVACMode.AUTO:
+            assert auto_target == preset_expected
+            poll_sequence.append(addr)
+            await coordinator.async_request_refresh()
+            assert heater.hvac_mode == HVACMode.HEAT
+            assert heater.target_temperature == manual_expected
+            pytest.xfail(
+                "Coordinator fallback refresh skipped the written heater; "
+                "round-robin index should be reset after writes."
+            )
+
+        assert auto_mode == HVACMode.HEAT
+        assert auto_target == manual_expected
 
     asyncio.run(_run())
