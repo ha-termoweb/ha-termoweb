@@ -682,7 +682,10 @@ def test_read_loop_bubbles_exception_on_close():
     async def _run() -> None:
         module = _load_ws_client()
         Client = module.TermoWebWSLegacyClient
-        hass = types.SimpleNamespace(loop=asyncio.get_event_loop())
+        hass = types.SimpleNamespace(
+            loop=asyncio.get_event_loop(),
+            data={module.DOMAIN: {}},
+        )
         api = types.SimpleNamespace(_session=None)
         coordinator = types.SimpleNamespace()
         client = Client(hass, entry_id="e", dev_id="d", api_client=api, coordinator=coordinator)
@@ -710,7 +713,10 @@ def test_read_loop_handles_error_frames_and_health(monkeypatch: pytest.MonkeyPat
     async def _run() -> None:
         module = _load_ws_client()
         Client = module.TermoWebWSLegacyClient
-        hass = types.SimpleNamespace(loop=asyncio.get_event_loop())
+        hass = types.SimpleNamespace(
+            loop=asyncio.get_event_loop(),
+            data={module.DOMAIN: {}},
+        )
         api = types.SimpleNamespace(_session=None)
         coordinator = types.SimpleNamespace()
         client = Client(hass, entry_id="e", dev_id="d", api_client=api, coordinator=coordinator)
@@ -1011,6 +1017,11 @@ def test_handle_event_updates_state_and_dispatch(monkeypatch: pytest.MonkeyPatch
         ]
     )
     assert module.async_dispatcher_send.call_count == 3
+
+    ws_state = hass.data[module.DOMAIN]["entry"]["ws_state"]["dev"]
+    assert ws_state["last_event_at"] == 1000.0
+    assert ws_state["events_total"] == 1
+    assert ws_state["frames_total"] == 0
     loop.close()
 
 

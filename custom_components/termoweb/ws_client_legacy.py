@@ -555,6 +555,16 @@ class TermoWebWSLegacyClient:
                         break
                 self._stats.last_paths = uniq
 
+        domain_bucket: dict[str, Any] = self.hass.data.setdefault(DOMAIN, {})
+        entry_bucket: dict[str, Any] = domain_bucket.setdefault(self.entry_id, {})
+        state_bucket: dict[str, dict[str, Any]] = entry_bucket.setdefault(
+            "ws_state", {}
+        )
+        state: dict[str, Any] = state_bucket.setdefault(self.dev_id, {})
+        state["last_event_at"] = now
+        state["frames_total"] = self._stats.frames_total
+        state["events_total"] = self._stats.events_total
+
         # Health heuristic: connected and alive for ≥ 300s => healthy
         if (
             self._connected_since
