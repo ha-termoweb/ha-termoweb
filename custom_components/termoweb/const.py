@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import timedelta
 from typing import Final
 
@@ -18,6 +19,48 @@ HTR_SAMPLES_PATH_FMT: Final = "/api/v2/devs/{dev_id}/htr/{addr}/samples"
 
 # Public client creds (from APK v2.5.1)
 BASIC_AUTH_B64: Final = "NTIxNzJkYzg0ZjYzZDZjNzU5MDAwMDA1OmJ4djRaM3hVU2U="
+
+# Brand handling
+CONF_BRAND: Final = "brand"
+BRAND_TERMOWEB: Final = "termoweb"
+BRAND_DUCAHEAT: Final = "ducaheat"
+DEFAULT_BRAND: Final = BRAND_TERMOWEB
+
+BRAND_LABELS: Final[Mapping[str, str]] = {
+    BRAND_TERMOWEB: "TermoWeb",
+    BRAND_DUCAHEAT: "Ducaheat",
+}
+
+BRAND_API_BASES: Final[Mapping[str, str]] = {
+    BRAND_TERMOWEB: API_BASE,
+    BRAND_DUCAHEAT: "https://api-tevolve.termoweb.net",
+}
+
+BRAND_BASIC_AUTH: Final[Mapping[str, str]] = {
+    BRAND_TERMOWEB: BASIC_AUTH_B64,
+    BRAND_DUCAHEAT: "NWM0OWRjZTk3NzUxMDM1MTUwNmM0MmRiOnRldm9sdmU=",
+}
+
+
+def get_brand_api_base(brand: str) -> str:
+    """Return API base URL for the selected brand."""
+
+    base = BRAND_API_BASES.get(brand)
+    if base:
+        return base.rstrip("/")
+    return API_BASE
+
+
+def get_brand_basic_auth(brand: str) -> str:
+    """Return Base64-encoded client credentials for the brand."""
+
+    return BRAND_BASIC_AUTH.get(brand, BASIC_AUTH_B64)
+
+
+def get_brand_label(brand: str) -> str:
+    """Return human-readable brand label."""
+
+    return BRAND_LABELS.get(brand, BRAND_LABELS[BRAND_TERMOWEB])
 
 # Polling
 DEFAULT_POLL_INTERVAL: Final = 120  # seconds

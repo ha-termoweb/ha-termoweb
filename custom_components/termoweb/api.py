@@ -49,15 +49,29 @@ class TermoWebClient:
     """Thin async client for the TermoWeb cloud (HA-safe)."""
 
     def __init__(
-        self, session: aiohttp.ClientSession, username: str, password: str
+        self,
+        session: aiohttp.ClientSession,
+        username: str,
+        password: str,
+        *,
+        api_base: str = API_BASE,
+        basic_auth_b64: str = BASIC_AUTH_B64,
     ) -> None:
         self._session = session
         self._username = username
         self._password = password
+        self._api_base = api_base.rstrip("/") if api_base else API_BASE
+        self._basic_auth_b64 = basic_auth_b64 or BASIC_AUTH_B64
         self._access_token: str | None = None
         self._token_obtained_at: float = 0.0
         self._token_expiry: float = 0.0
         self._lock = asyncio.Lock()
+
+    @property
+    def api_base(self) -> str:
+        """Expose API base for auxiliary clients (e.g. WS)."""
+
+        return self._api_base
 
     async def _request(
         self,
@@ -79,7 +93,7 @@ class TermoWebClient:
         headers.setdefault("Accept-Language", ACCEPT_LANGUAGE)
         timeout = kwargs.pop("timeout", aiohttp.ClientTimeout(total=25))
 
-        url = path if path.startswith("http") else API_BASE + path
+        url = path if path.startswith("http") else f"{self._api_base}{path}"
         _LOGGER.debug("HTTP %s %s", method, url)
 
         for attempt in range(2):
@@ -190,13 +204,13 @@ class TermoWebClient:
                 "grant_type": "password",
             }
             headers = {
-                "Authorization": f"Basic {BASIC_AUTH_B64}",
+                "Authorization": f"Basic {self._basic_auth_b64}",
                 "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
                 "Accept": "application/json",
                 "User-Agent": USER_AGENT,
                 "Accept-Language": ACCEPT_LANGUAGE,
             }
-            url = API_BASE + TOKEN_PATH
+            url = f"{self._api_base}{TOKEN_PATH}"
             _LOGGER.debug(
                 "Token POST %s for user domain=%s",
                 url,

@@ -64,6 +64,11 @@ class Range:  # pragma: no cover - minimal stub
         self.max = max
 
 
+class In:  # pragma: no cover - minimal stub
+    def __init__(self, container: Any) -> None:
+        self.container = container
+
+
 class Schema:  # pragma: no cover - minimal stub
     def __init__(self, schema: dict[Any, Any]) -> None:
         self.schema = schema
@@ -91,6 +96,15 @@ def _apply_validator(value: Any, validator: Any) -> Any:
         for item in validator.validators:
             value = _apply_validator(value, item)
         return value
+    if isinstance(validator, In):
+        container = validator.container
+        if isinstance(container, dict):
+            if value not in container:
+                raise ValueError(f"{value!r} not in {list(container)!r}")
+            return value
+        if value not in container:
+            raise ValueError(f"{value!r} not in {container!r}")
+        return value
     if isinstance(validator, Range):
         if validator.min is not None and value < validator.min:
             raise ValueError(f"{value} < {validator.min}")
@@ -109,6 +123,7 @@ def _apply_validator(value: Any, validator: Any) -> Any:
 vol.Required = Required
 vol.All = All
 vol.Range = Range
+vol.In = In
 vol.Schema = Schema
 
 # --- Minimal Home Assistant stubs ----------------------------------------------
@@ -348,6 +363,7 @@ def test_async_step_user_initial_form(monkeypatch: pytest.MonkeyPatch) -> None:
     schema = result["data_schema"]
     assert _schema_default(schema, "username") == ""
     assert _schema_default(schema, "poll_interval") == config_flow.DEFAULT_POLL_INTERVAL
+    assert _schema_default(schema, "brand") == config_flow.DEFAULT_BRAND
 
 
 def test_async_step_user_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -357,27 +373,35 @@ def test_async_step_user_success(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_version(_hass: HomeAssistant) -> str:
         return "9.9.9"
 
-    calls: list[tuple[str, str]] = []
+    calls: list[tuple[str, str, str]] = []
 
-    async def fake_validate(_hass: HomeAssistant, username: str, password: str) -> None:
-        calls.append((username, password))
+    async def fake_validate(
+        _hass: HomeAssistant, username: str, password: str, brand: str
+    ) -> None:
+        calls.append((username, password, brand))
 
     monkeypatch.setattr(config_flow, "_get_version", fake_version)
     monkeypatch.setattr(config_flow, "_validate_login", fake_validate)
 
     result = asyncio.run(
         flow.async_step_user(
-        {"username": "  new_user  ", "password": "pw", "poll_interval": 200}
-    )
+            {
+                "brand": config_flow.BRAND_DUCAHEAT,
+                "username": "  new_user  ",
+                "password": "pw",
+                "poll_interval": 200,
+            }
+        )
     )
 
-    assert calls == [("new_user", "pw")]
+    assert calls == [("new_user", "pw", config_flow.BRAND_DUCAHEAT)]
     assert result["type"] == "create_entry"
-    assert result["title"] == "TermoWeb (new_user)"
+    assert result["title"] == "Ducaheat (new_user)"
     assert result["data"] == {
         "username": "new_user",
         "password": "pw",
         "poll_interval": 200,
+        config_flow.CONF_BRAND: config_flow.BRAND_DUCAHEAT,
     }
 
 
@@ -399,13 +423,20 @@ def test_async_step_user_errors(
     async def fake_version(_hass: HomeAssistant) -> str:
         return "2.0.0"
 
-    async def fake_validate(_hass: HomeAssistant, username: str, password: str) -> None:
+    async def fake_validate(
+        _hass: HomeAssistant, username: str, password: str, brand: str
+    ) -> None:
         raise raised
 
     monkeypatch.setattr(config_flow, "_get_version", fake_version)
     monkeypatch.setattr(config_flow, "_validate_login", fake_validate)
 
-    user_input = {"username": "  trouble  ", "password": "pw", "poll_interval": 321}
+    user_input = {
+        "brand": config_flow.BRAND_DUCAHEAT,
+        "username": "  trouble  ",
+        "password": "pw",
+        "poll_interval": 321,
+    }
     result = asyncio.run(flow.async_step_user(user_input))
 
     assert result["type"] == "form"
@@ -415,6 +446,7 @@ def test_async_step_user_errors(
     schema = result["data_schema"]
     assert _schema_default(schema, "username") == "trouble"
     assert _schema_default(schema, "poll_interval") == 321
+    assert _schema_default(schema, "brand") == config_flow.BRAND_DUCAHEAT
 
 
 def test_async_step_reconfigure_initial_form(
@@ -423,7 +455,11 @@ def test_async_step_reconfigure_initial_form(
     hass = HomeAssistant()
     entry = ConfigEntry(
         "entry-id",
-        data={"username": "existing", "poll_interval": 150},
+        data={
+            "username": "existing",
+            "poll_interval": 150,
+            config_flow.CONF_BRAND: config_flow.BRAND_DUCAHEAT,
+        },
         options={"poll_interval": 180},
     )
     hass.config_entries.add_entry(entry)
@@ -446,6 +482,7 @@ def test_async_step_reconfigure_initial_form(
     schema = result["data_schema"]
     assert _schema_default(schema, "username") == "existing"
     assert _schema_default(schema, "poll_interval") == 180
+    assert _schema_default(schema, "brand") == config_flow.BRAND_DUCAHEAT
 
 
 def test_async_step_reconfigure_success(
@@ -459,6 +496,7 @@ def test_async_step_reconfigure_success(
             "password": "old-pass",
             "poll_interval": 90,
             "other": "keep",
+            config_flow.CONF_BRAND: config_flow.BRAND_TERMOWEB,
         },
         options={"poll_interval": 120, "extra": True},
     )
@@ -470,16 +508,24 @@ def test_async_step_reconfigure_success(
     async def fake_version(_hass: HomeAssistant) -> str:
         return "4.4.4"
 
-    async def fake_validate(_hass: HomeAssistant, username: str, password: str) -> None:
+    async def fake_validate(
+        _hass: HomeAssistant, username: str, password: str, brand: str
+    ) -> None:
         assert username == "updated"
         assert password == "new-pass"
+        assert brand == config_flow.BRAND_DUCAHEAT
 
     monkeypatch.setattr(config_flow, "_get_version", fake_version)
     monkeypatch.setattr(config_flow, "_validate_login", fake_validate)
 
     result = asyncio.run(
         flow.async_step_reconfigure(
-            {"username": "  updated  ", "password": "new-pass", "poll_interval": 300}
+            {
+                "brand": config_flow.BRAND_DUCAHEAT,
+                "username": "  updated  ",
+                "password": "new-pass",
+                "poll_interval": 300,
+            }
         )
     )
 
@@ -491,6 +537,7 @@ def test_async_step_reconfigure_success(
         "password": "new-pass",
         "poll_interval": 300,
         "other": "keep",
+        config_flow.CONF_BRAND: config_flow.BRAND_DUCAHEAT,
     }
     expected_options = {"poll_interval": 300, "extra": True}
 
@@ -516,7 +563,11 @@ def test_async_step_reconfigure_errors(
     hass = HomeAssistant()
     entry = ConfigEntry(
         "entry-id",
-        data={"username": "original", "poll_interval": 110},
+        data={
+            "username": "original",
+            "poll_interval": 110,
+            config_flow.CONF_BRAND: config_flow.BRAND_TERMOWEB,
+        },
         options={"poll_interval": 140},
     )
     hass.config_entries.add_entry(entry)
@@ -527,13 +578,20 @@ def test_async_step_reconfigure_errors(
     async def fake_version(_hass: HomeAssistant) -> str:
         return "5.5.5"
 
-    async def fake_validate(_hass: HomeAssistant, username: str, password: str) -> None:
+    async def fake_validate(
+        _hass: HomeAssistant, username: str, password: str, brand: str
+    ) -> None:
         raise raised
 
     monkeypatch.setattr(config_flow, "_get_version", fake_version)
     monkeypatch.setattr(config_flow, "_validate_login", fake_validate)
 
-    user_input = {"username": " candidate ", "password": "pw", "poll_interval": 210}
+    user_input = {
+        "brand": config_flow.BRAND_DUCAHEAT,
+        "username": " candidate ",
+        "password": "pw",
+        "poll_interval": 210,
+    }
     result = asyncio.run(flow.async_step_reconfigure(user_input))
 
     assert result["type"] == "form"
@@ -543,6 +601,7 @@ def test_async_step_reconfigure_errors(
     schema = result["data_schema"]
     assert _schema_default(schema, "username") == "candidate"
     assert _schema_default(schema, "poll_interval") == 210
+    assert _schema_default(schema, "brand") == config_flow.BRAND_DUCAHEAT
     assert hass.config_entries.updated_entries == []
 
 

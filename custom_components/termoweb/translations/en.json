@@ -2,9 +2,10 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect to Termoweb",
-        "description": "Version: {version}\n\nEnter your Termoweb account credentials",
+        "title": "Connect to Tevolve heaters",
+        "description": "Version: {version}\n\nChoose your heater brand and enter your account credentials",
         "data": {
+          "brand": "Brand",
           "username": "Email",
           "password": "Password",
           "poll_interval": "Polling interval (seconds)"
