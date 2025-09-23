@@ -24,10 +24,14 @@ from homeassistant.loader import async_get_integration
 
 from .api import TermoWebAuthError, TermoWebClient, TermoWebRateLimitError
 from .const import (
+    CONF_BRAND,
+    DEFAULT_BRAND,
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
     MIN_POLL_INTERVAL,
     STRETCHED_POLL_INTERVAL,
+    get_brand_api_base,
+    get_brand_basic_auth,
     signal_ws_status,
 )
 from .coordinator import TermoWebCoordinator
@@ -335,12 +339,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "poll_interval", entry.data.get("poll_interval", DEFAULT_POLL_INTERVAL)
         )
     )
+    brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
+    api_base = get_brand_api_base(brand)
+    basic_auth = get_brand_basic_auth(brand)
 
     # DRY version: read from manifest
     integration = await async_get_integration(hass, DOMAIN)
     version = integration.version or "unknown"
 
-    client = TermoWebClient(session, username, password)
+    client = TermoWebClient(
+        session,
+        username,
+        password,
+        api_base=api_base,
+        basic_auth_b64=basic_auth,
+    )
     try:
         devices = await client.list_devices()
     except TermoWebAuthError as err:
@@ -377,6 +390,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "ws_clients": {},  # dev_id -> TermoWebWSLegacyClient
         "ws_state": {},  # dev_id -> status attrs
         "version": version,
+        "brand": brand,
     }
 
     async def _start_ws(dev_id: str) -> None:

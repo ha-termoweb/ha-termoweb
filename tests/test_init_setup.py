@@ -207,10 +207,18 @@ class FakeCoordinator:
 
 
 class BaseFakeClient:
-    def __init__(self, session: Any, username: str, password: str) -> None:
+    def __init__(
+        self,
+        session: Any,
+        username: str,
+        password: str,
+        **kwargs: Any,
+    ) -> None:
         self.session = session
         self.username = username
         self.password = password
+        self.api_base = kwargs.get("api_base")
+        self.basic_auth_b64 = kwargs.get("basic_auth_b64")
         self.get_nodes_calls: list[str] = []
 
     async def list_devices(self) -> list[dict[str, Any]]:

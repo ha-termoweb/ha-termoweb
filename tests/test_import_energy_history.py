@@ -22,7 +22,8 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False)
     ha_core = types.ModuleType("homeassistant.core")
 
     class HomeAssistant:  # pragma: no cover - minimal stub
-        pass
+        def __init__(self) -> None:
+            self.data = {}
 
     def callback(func):  # pragma: no cover - minimal stub
         return func
@@ -240,10 +241,12 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False)
 
     api_stub = types.ModuleType(f"{package}.api")
     class TermoWebClient:  # pragma: no cover - placeholder
-        def __init__(self, session, username, password):
+        def __init__(self, session, username, password, **kwargs):
             self.session = session
             self.username = username
             self.password = password
+            self.api_base = kwargs.get("api_base")
+            self.basic_auth_b64 = kwargs.get("basic_auth_b64")
 
         async def list_devices(self):
             return [{"dev_id": "dev"}]

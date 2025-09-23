@@ -230,7 +230,8 @@ class TermoWebWSLegacyClient:
         """
         token = await self._get_token()
         t_ms = int(time.time() * 1000)
-        url = f"{API_BASE}/socket.io/1/?token={token}&dev_id={self.dev_id}&t={t_ms}"
+        base = self._api_base()
+        url = f"{base}/socket.io/1/?token={token}&dev_id={self.dev_id}&t={t_ms}"
 
         try:
             async with asyncio.timeout(15):
@@ -245,7 +246,11 @@ class TermoWebWSLegacyClient:
                         )
                         await self._force_refresh_token()
                         token = await self._get_token()
-                        url = f"{API_BASE}/socket.io/1/?token={token}&dev_id={self.dev_id}&t={int(time.time() * 1000)}"
+                        base = self._api_base()
+                        url = (
+                            f"{base}/socket.io/1/?token={token}&dev_id={self.dev_id}"
+                            f"&t={int(time.time() * 1000)}"
+                        )
                         async with self._session.get(
                             url, timeout=aiohttp.ClientTimeout(total=15)
                         ) as resp2:
@@ -267,7 +272,11 @@ class TermoWebWSLegacyClient:
 
     async def _connect_ws(self, sid: str) -> None:
         token = await self._get_token()
-        ws_url = f"{API_BASE.replace('https://', 'wss://')}/socket.io/1/websocket/{sid}?token={token}&dev_id={self.dev_id}"
+        base = self._api_base()
+        ws_base = base.replace("https://", "wss://", 1)
+        ws_url = (
+            f"{ws_base}/socket.io/1/websocket/{sid}?token={token}&dev_id={self.dev_id}"
+        )
         self._ws = await self._session.ws_connect(
             ws_url,
             heartbeat=None,  # we implement our own '2::' heartbeats
@@ -503,6 +512,12 @@ class TermoWebWSLegacyClient:
         except Exception:
             pass
         await self._client._ensure_token()
+
+    def _api_base(self) -> str:
+        base = getattr(self._client, "api_base", None)
+        if isinstance(base, str) and base:
+            return base.rstrip("/")
+        return API_BASE
 
     def _update_status(self, status: str) -> None:
         # Update shared state bucket (hass.data[...] managed by integration)

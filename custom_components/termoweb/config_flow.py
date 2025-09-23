@@ -13,7 +13,20 @@ from homeassistant.loader import async_get_integration
 import voluptuous as vol
 
 from .api import TermoWebAuthError, TermoWebClient, TermoWebRateLimitError
-from .const import DEFAULT_POLL_INTERVAL, DOMAIN, MAX_POLL_INTERVAL, MIN_POLL_INTERVAL
+from .const import (
+    BRAND_DUCAHEAT,
+    BRAND_LABELS,
+    BRAND_TERMOWEB,
+    CONF_BRAND,
+    DEFAULT_BRAND,
+    DEFAULT_POLL_INTERVAL,
+    DOMAIN,
+    MAX_POLL_INTERVAL,
+    MIN_POLL_INTERVAL,
+    get_brand_api_base,
+    get_brand_basic_auth,
+    get_brand_label,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,9 +48,17 @@ def _poll_schema(default_poll: int) -> vol.Schema:
     )
 
 
-def _login_schema(default_user: str = "", default_poll: int = DEFAULT_POLL_INTERVAL) -> vol.Schema:
+def _login_schema(
+    default_user: str = "",
+    default_poll: int = DEFAULT_POLL_INTERVAL,
+    default_brand: str = DEFAULT_BRAND,
+) -> vol.Schema:
     return vol.Schema(
         {
+            vol.Required(
+                CONF_BRAND,
+                default=default_brand if default_brand in BRAND_LABELS else DEFAULT_BRAND,
+            ): vol.In(BRAND_LABELS),
             vol.Required("username", default=default_user): str,
             vol.Required("password"): str,
             vol.Required(
@@ -48,9 +69,19 @@ def _login_schema(default_user: str = "", default_poll: int = DEFAULT_POLL_INTER
     )
 
 
-async def _validate_login(hass: HomeAssistant, username: str, password: str) -> None:
+async def _validate_login(
+    hass: HomeAssistant, username: str, password: str, brand: str
+) -> None:
     session = aiohttp_client.async_get_clientsession(hass)
-    client = TermoWebClient(session, username, password)
+    api_base = get_brand_api_base(brand)
+    basic_auth = get_brand_basic_auth(brand)
+    client = TermoWebClient(
+        session,
+        username,
+        password,
+        api_base=api_base,
+        basic_auth_b64=basic_auth,
+    )
     await client.list_devices()
 
 
@@ -64,16 +95,22 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         _LOGGER.info("TermoWeb config flow started (v%s)", ver)
 
         if user_input is None:
-            schema = _login_schema(default_user="", default_poll=DEFAULT_POLL_INTERVAL)
+            schema = _login_schema(
+                default_user="",
+                default_poll=DEFAULT_POLL_INTERVAL,
+                default_brand=DEFAULT_BRAND,
+            )
             return self.async_show_form(step_id="user", data_schema=schema, description_placeholders={"version": ver})
 
         username = (user_input.get("username") or "").strip()
         password = user_input.get("password") or ""
         poll_interval = int(user_input.get("poll_interval", DEFAULT_POLL_INTERVAL))
+        brand_in = user_input.get(CONF_BRAND) or DEFAULT_BRAND
+        brand = brand_in if brand_in in BRAND_LABELS else DEFAULT_BRAND
 
         errors: dict[str, str] = {}
         try:
-            await _validate_login(self.hass, username, password)
+            await _validate_login(self.hass, username, password, brand)
         except TermoWebAuthError:
             errors["base"] = "invalid_auth"
         except TermoWebRateLimitError:
@@ -85,14 +122,24 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors["base"] = "unknown"
 
         if errors:
-            schema = _login_schema(default_user=username, default_poll=poll_interval)
+            schema = _login_schema(
+                default_user=username,
+                default_poll=poll_interval,
+                default_brand=brand,
+            )
             return self.async_show_form(step_id="user", data_schema=schema, errors=errors, description_placeholders={"version": ver})
 
-        await self.async_set_unique_id(username)
+        unique_id = username if brand == BRAND_TERMOWEB else f"{brand}:{username}"
+        await self.async_set_unique_id(unique_id)
         self._abort_if_unique_id_configured()
 
-        data = {"username": username, "password": password, "poll_interval": poll_interval}
-        title = f"TermoWeb ({username})"
+        data = {
+            "username": username,
+            "password": password,
+            "poll_interval": poll_interval,
+            CONF_BRAND: brand,
+        }
+        title = f"{get_brand_label(brand)} ({username})"
         return self.async_create_entry(title=title, data=data)
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -106,10 +153,17 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         current_user = entry.data.get("username") or entry.data.get("email") or ""
         current_poll = int(entry.options.get("poll_interval", entry.data.get("poll_interval", DEFAULT_POLL_INTERVAL)))
+        current_brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
 
         if user_input is None:
             schema = vol.Schema(
                 {
+                    vol.Required(
+                        CONF_BRAND,
+                        default=current_brand
+                        if current_brand in BRAND_LABELS
+                        else DEFAULT_BRAND,
+                    ): vol.In(BRAND_LABELS),
                     vol.Required("username", default=current_user): str,
                     vol.Required("password"): str,
                     vol.Required(
@@ -123,10 +177,12 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         username = (user_input.get("username") or "").strip()
         password = user_input.get("password") or ""
         poll_interval = int(user_input.get("poll_interval", current_poll))
+        brand_in = user_input.get(CONF_BRAND, current_brand)
+        brand = brand_in if brand_in in BRAND_LABELS else DEFAULT_BRAND
 
         errors: dict[str, str] = {}
         try:
-            await _validate_login(self.hass, username, password)
+            await _validate_login(self.hass, username, password, brand)
         except TermoWebAuthError:
             errors["base"] = "invalid_auth"
         except TermoWebRateLimitError:
@@ -140,6 +196,10 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if errors:
             schema = vol.Schema(
                 {
+                    vol.Required(
+                        CONF_BRAND,
+                        default=brand if brand in BRAND_LABELS else DEFAULT_BRAND,
+                    ): vol.In(BRAND_LABELS),
                     vol.Required("username", default=username or current_user): str,
                     vol.Required("password"): str,
                     vol.Required(
@@ -151,7 +211,14 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_show_form(step_id="reconfigure", data_schema=schema, errors=errors, description_placeholders={"version": ver})
 
         new_data = dict(entry.data)
-        new_data.update({"username": username, "password": password, "poll_interval": poll_interval})
+        new_data.update(
+            {
+                "username": username,
+                "password": password,
+                "poll_interval": poll_interval,
+                CONF_BRAND: brand,
+            }
+        )
         new_options = dict(entry.options)
         new_options["poll_interval"] = poll_interval
 
