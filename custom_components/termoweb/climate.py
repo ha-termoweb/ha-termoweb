@@ -596,7 +596,7 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
         async def _fallback() -> None:
             await asyncio.sleep(_WS_ECHO_FALLBACK_REFRESH)
             try:
-                await self.coordinator.async_request_refresh()
+                await self.coordinator.async_refresh_heater(self._addr)
             except asyncio.CancelledError:
                 raise
             except Exception as e:

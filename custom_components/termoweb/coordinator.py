@@ -15,10 +15,6 @@ from .utils import extract_heater_addrs
 
 _LOGGER = logging.getLogger(__name__)
 
-# How many heater settings to fetch per device per cycle (keep gentle)
-HTR_SETTINGS_PER_CYCLE = 1
-
-
 def _as_float(value: Any) -> float | None:
     """Safely convert a value to float."""
     if isinstance(value, (int, float)):
@@ -57,7 +53,6 @@ class TermoWebCoordinator(
         self.client = client
         self._base_interval = max(base_interval, MIN_POLL_INTERVAL)
         self._backoff = 0  # seconds
-        self._rr_index: dict[str, int] = {}
         self._dev_id = dev_id
         self._device = device or {}
         self._nodes = nodes or {}
@@ -74,11 +69,7 @@ class TermoWebCoordinator(
             settings_map: dict[str, Any] = dict(prev_htr.get("settings") or {})
 
             if addrs:
-                start = self._rr_index.get(dev_id, 0) % len(addrs)
-                count = min(HTR_SETTINGS_PER_CYCLE, len(addrs))
-                for k in range(count):
-                    idx = (start + k) % len(addrs)
-                    addr = addrs[idx]
+                for addr in addrs:
                     try:
                         js = await self.client.get_htr_settings(dev_id, addr)
                         if isinstance(js, dict):
@@ -88,7 +79,6 @@ class TermoWebCoordinator(
                             "Error fetching settings for heater %s: %s", addr, err, exc_info=err
                         )
                         # keep previous settings on error
-                self._rr_index[dev_id] = (start + count) % len(addrs)
 
             dev_name = (self._device.get("name") or f"Device {dev_id}").strip()
 
@@ -123,6 +113,47 @@ class TermoWebCoordinator(
             raise UpdateFailed(f"Rate limited; backing off to {self._backoff}s") from err
         except (ClientError, TermoWebAuthError) as err:
             raise UpdateFailed(f"API error: {err}") from err
+
+    async def async_refresh_heater(self, addr: str) -> None:
+        """Fetch settings for a single heater and update cached data."""
+
+        dev_id = self._dev_id
+        data = self.data or {}
+        dev = data.get(dev_id)
+        if not isinstance(dev, dict):
+            _LOGGER.debug(
+                "Skipping targeted refresh for device %s heater %s: no cached data",
+                dev_id,
+                addr,
+            )
+            return
+
+        try:
+            settings = await self.client.get_htr_settings(dev_id, addr)
+        except (ClientError, TermoWebRateLimitError, TermoWebAuthError) as err:
+            _LOGGER.debug(
+                "Error fetching settings for heater %s: %s", addr, err, exc_info=err
+            )
+            return
+
+        if not isinstance(settings, dict):
+            _LOGGER.debug(
+                "Unexpected heater settings payload for device %s heater %s: %s",
+                dev_id,
+                addr,
+                type(settings).__name__,
+            )
+            return
+
+        new_data: dict[str, dict[str, Any]] = dict(data)
+        dev_copy: dict[str, Any] = dict(dev)
+        htr = dict(dev_copy.get("htr") or {})
+        settings_map = dict(htr.get("settings") or {})
+        settings_map[addr] = settings
+        htr["settings"] = settings_map
+        dev_copy["htr"] = htr
+        new_data[dev_id] = dev_copy
+        self.async_set_updated_data(new_data)
 
 
 class TermoWebHeaterEnergyCoordinator(

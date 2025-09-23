@@ -325,6 +325,7 @@ class FakeCoordinator:
         self.hass = hass
         self.data = data
         self.async_request_refresh: AsyncMock = AsyncMock()
+        self.async_refresh_heater: AsyncMock = AsyncMock()
 
     def async_add_listener(self, *_args: Any, **_kwargs: Any) -> None:
         return None
@@ -658,11 +659,11 @@ def test_heater_write_paths_and_errors(
         async def _complete_fallback_once() -> None:
             waiter = await _pop_waiter()
             assert heater._refresh_fallback is not None
-            assert coordinator.async_request_refresh.await_count == 0
+            assert coordinator.async_refresh_heater.await_count == 0
             waiter.set_result(None)
             await heater._refresh_fallback
-            assert coordinator.async_request_refresh.await_count == 1
-            coordinator.async_request_refresh.reset_mock()
+            assert coordinator.async_refresh_heater.await_count == 1
+            coordinator.async_refresh_heater.reset_mock()
 
         class RaisingMapping:
             def __init__(self, real: dict[str, Any]) -> None:
@@ -739,8 +740,8 @@ def test_heater_write_paths_and_errors(
         coordinator.data = old_data
         waiter.set_result(None)
         await heater._refresh_fallback
-        assert coordinator.async_request_refresh.await_count == 1
-        coordinator.async_request_refresh.reset_mock()
+        assert coordinator.async_refresh_heater.await_count == 1
+        coordinator.async_refresh_heater.reset_mock()
         client.set_htr_settings.reset_mock()
 
         # -------------------- async_set_preset_temperatures (valid forms) ---
@@ -805,8 +806,8 @@ def test_heater_write_paths_and_errors(
         coordinator.data = old_data
         waiter.set_result(None)
         await heater._refresh_fallback
-        assert coordinator.async_request_refresh.await_count == 1
-        coordinator.async_request_refresh.reset_mock()
+        assert coordinator.async_refresh_heater.await_count == 1
+        coordinator.async_refresh_heater.reset_mock()
         client.set_htr_settings.reset_mock()
 
         # -------------------- async_set_temperature (valid + clamps) -------
@@ -920,23 +921,159 @@ def test_heater_write_paths_and_errors(
         if not waiter_a.done():
             waiter_a.cancel()
 
-        assert coordinator.async_request_refresh.await_count == 0
+        assert coordinator.async_refresh_heater.await_count == 0
 
         waiter_b.set_result(None)
         await task_b
-        assert coordinator.async_request_refresh.await_count == 1
+        assert coordinator.async_refresh_heater.await_count == 1
 
         caplog.clear()
-        coordinator.async_request_refresh.side_effect = RuntimeError("refresh boom")
+        coordinator.async_refresh_heater.side_effect = RuntimeError("refresh boom")
         heater._schedule_refresh_fallback()
         waiter_err = await _pop_waiter()
         waiter_err.set_result(None)
         await heater._refresh_fallback
         assert "Refresh fallback failed" in caplog.text
-        coordinator.async_request_refresh.side_effect = None
-        coordinator.async_request_refresh.reset_mock()
+        coordinator.async_refresh_heater.side_effect = None
+        coordinator.async_refresh_heater.reset_mock()
         assert not fallback_waiters
 
         assert created_tasks, "Expected background tasks to be created"
+
+    asyncio.run(_run())
+
+
+def test_heater_fallback_targets_correct_heater(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        _reset_stubs()
+
+        hass = HomeAssistant()
+        entry_id = "entry"
+        dev_id = "dev1"
+        addr_a = "A1"
+        addr_b = "B2"
+
+        def _settings(stemp: str) -> dict[str, Any]:
+            return {
+                "mode": "manual",
+                "state": "heating",
+                "mtemp": "19.5",
+                "stemp": stemp,
+                "ptemp": ["15.0", "18.0", "21.0"],
+                "prog": [0, 1, 2] * 56,
+                "units": "C",
+                "max_power": 1200,
+            }
+
+        coordinator_data = {
+            dev_id: {
+                "nodes": {"nodes": []},
+                "htr": {
+                    "settings": {
+                        addr_a: _settings("21.0"),
+                        addr_b: _settings("18.0"),
+                    }
+                },
+                "version": "5.0.0",
+            }
+        }
+
+        coordinator = FakeCoordinator(hass, coordinator_data)
+        client = AsyncMock()
+        hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "client": client,
+                    "coordinator": coordinator,
+                    "dev_id": dev_id,
+                    "version": "5.0.0",
+                }
+            }
+        }
+
+        heater_a = TermoWebHeater(coordinator, entry_id, dev_id, addr_a, "Heater A")
+        heater_b = TermoWebHeater(coordinator, entry_id, dev_id, addr_b, "Heater B")
+
+        await heater_a.async_added_to_hass()
+        await heater_b.async_added_to_hass()
+
+        fallback_waiters: Deque[asyncio.Future[None]] = deque()
+        real_sleep = asyncio.sleep
+
+        async def fake_sleep(delay: float) -> None:
+            if delay == climate_module._WS_ECHO_FALLBACK_REFRESH:
+                loop = asyncio.get_running_loop()
+                fut: asyncio.Future[None] = loop.create_future()
+                fallback_waiters.append(fut)
+                await fut
+                return None
+            await real_sleep(delay)
+            return None
+
+        async def _pop_waiter() -> asyncio.Future[None]:
+            for _ in range(10):
+                if fallback_waiters:
+                    return fallback_waiters.popleft()
+                await real_sleep(0)
+            raise AssertionError("fallback waiter not created")
+
+        monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+        async def _targeted_refresh(addr: str) -> None:
+            new_data = dict(coordinator.data)
+            dev_payload = dict(new_data.get(dev_id, {}))
+            htr = dict(dev_payload.get("htr") or {})
+            settings_map = dict(htr.get("settings") or {})
+            current = dict(settings_map.get(addr, {}))
+            current["stemp"] = "23.0" if addr == addr_a else "17.0"
+            settings_map[addr] = current
+            htr["settings"] = settings_map
+            dev_payload["htr"] = htr
+            new_data[dev_id] = dev_payload
+            coordinator.data = new_data
+
+        coordinator.async_refresh_heater = AsyncMock(side_effect=_targeted_refresh)
+
+        heater_a._schedule_refresh_fallback()
+        waiter_a = await _pop_waiter()
+        assert heater_a._refresh_fallback is not None
+        waiter_a.set_result(None)
+        await heater_a._refresh_fallback
+        call_a = coordinator.async_refresh_heater.await_args
+        assert call_a.args == (addr_a,)
+        assert (
+            coordinator.data[dev_id]["htr"]["settings"][addr_a]["stemp"]
+            == "23.0"
+        )
+        assert (
+            coordinator.data[dev_id]["htr"]["settings"][addr_b]["stemp"]
+            == "18.0"
+        )
+        assert heater_a.target_temperature == pytest.approx(23.0)
+        assert heater_b.target_temperature == pytest.approx(18.0)
+        coordinator.async_refresh_heater.reset_mock()
+        assert not fallback_waiters
+
+        heater_b._schedule_refresh_fallback()
+        waiter_b = await _pop_waiter()
+        assert heater_b._refresh_fallback is not None
+        waiter_b.set_result(None)
+        await heater_b._refresh_fallback
+        assert coordinator.async_refresh_heater.await_count == 1
+        call_b = coordinator.async_refresh_heater.await_args
+        assert call_b.args == (addr_b,)
+        assert (
+            coordinator.data[dev_id]["htr"]["settings"][addr_b]["stemp"]
+            == "17.0"
+        )
+        assert (
+            coordinator.data[dev_id]["htr"]["settings"][addr_a]["stemp"]
+            == "23.0"
+        )
+        assert heater_b.target_temperature == pytest.approx(17.0)
+        assert heater_a.target_temperature == pytest.approx(23.0)
+        assert not fallback_waiters
 
     asyncio.run(_run())
