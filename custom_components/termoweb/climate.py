@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 from homeassistant.components.climate import (
@@ -205,6 +206,12 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
         addr = payload.get("addr")
         if addr is not None and str(addr) != self._addr:
             return
+        kind = payload.get("kind")
+        if kind == "htr_settings" and addr is not None:
+            if self._refresh_fallback:
+                if not self._refresh_fallback.done():
+                    self._refresh_fallback.cancel()
+                self._refresh_fallback = None
         # Thread-safe state push
         self.schedule_update_ha_state()
 
@@ -590,8 +597,33 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
         self._schedule_refresh_fallback()
 
     def _schedule_refresh_fallback(self) -> None:
-        if self._refresh_fallback and not self._refresh_fallback.done():
-            self._refresh_fallback.cancel()
+        if self._refresh_fallback:
+            if not self._refresh_fallback.done():
+                self._refresh_fallback.cancel()
+            self._refresh_fallback = None
+
+        ws_record = (
+            self.hass.data.get(DOMAIN, {}).get(self._entry_id, {}).get("ws_state")
+        )
+        if isinstance(ws_record, dict):
+            ws_state = ws_record.get(self._dev_id)
+            if isinstance(ws_state, dict):
+                status = str(ws_state.get("status") or "").lower()
+                last_event_at = ws_state.get("last_event_at")
+                if status in {"connected", "healthy"} and isinstance(
+                    last_event_at, (int, float)
+                ):
+                    now = time.time()
+                    age = now - float(last_event_at)
+                    if age < _WS_ECHO_FALLBACK_REFRESH:
+                        _LOGGER.debug(
+                            "Skipping refresh fallback dev=%s addr=%s ws_status=%s age=%.3f",
+                            self._dev_id,
+                            self._addr,
+                            status,
+                            age,
+                        )
+                        return
 
         async def _fallback() -> None:
             await asyncio.sleep(_WS_ECHO_FALLBACK_REFRESH)

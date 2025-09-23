@@ -5,6 +5,7 @@ import datetime as dt
 import enum
 import importlib.util
 import logging
+import time
 from collections import deque
 from collections.abc import Coroutine
 from pathlib import Path
@@ -289,6 +290,7 @@ def _reset_stubs() -> None:
     sys.modules["homeassistant.util.dt"] = ha_dt
     sys.modules["voluptuous"] = vol
 
+
 # -------------------- Load the real climate module --------------------
 
 CLIMATE_PATH = (
@@ -508,6 +510,18 @@ def test_heater_properties_and_ws_update() -> None:
         heater._on_ws_data({"dev_id": dev_id, "addr": addr})
         heater.schedule_update_ha_state.assert_called_once()
 
+        async def _pending() -> None:
+            await asyncio.sleep(3600)
+
+        task = asyncio.create_task(_pending())
+        heater._refresh_fallback = task
+        heater._on_ws_data({"dev_id": dev_id, "addr": addr, "kind": "htr_settings"})
+        await asyncio.sleep(0)
+        assert task.cancelled()
+        assert heater._refresh_fallback is None
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
         original_now = ha_dt.NOW
         try:
             ha_dt.NOW = dt.datetime(2024, 1, 1, 1, 0, tzinfo=dt.timezone.utc)
@@ -601,6 +615,9 @@ def test_heater_write_paths_and_errors(
                     "coordinator": coordinator,
                     "dev_id": dev_id,
                     "version": "5.0.0",
+                    "ws_state": {
+                        dev_id: {"status": "disconnected", "last_event_at": None}
+                    },
                 }
             }
         }
@@ -936,6 +953,32 @@ def test_heater_write_paths_and_errors(
         coordinator.async_request_refresh.side_effect = None
         coordinator.async_request_refresh.reset_mock()
         assert not fallback_waiters
+
+        # -------------------- WS healthy suppresses fallback --------------
+        hass.data[DOMAIN][entry_id]["ws_state"][dev_id] = {
+            "status": "healthy",
+            "last_event_at": time.time(),
+        }
+        client.set_htr_settings.reset_mock()
+        await heater.async_set_temperature(**{ATTR_TEMPERATURE: 22.5})
+        assert heater._write_task is not None
+        await heater._write_task
+        assert client.set_htr_settings.await_count == 1
+        assert heater._refresh_fallback is None
+        assert not fallback_waiters
+        client.set_htr_settings.reset_mock()
+
+        # -------------------- WS down restores fallback -------------------
+        hass.data[DOMAIN][entry_id]["ws_state"][dev_id] = {
+            "status": "disconnected",
+            "last_event_at": None,
+        }
+        await heater.async_set_temperature(**{ATTR_TEMPERATURE: 23.5})
+        assert heater._write_task is not None
+        await heater._write_task
+        assert heater._refresh_fallback is not None
+        await _complete_fallback_once()
+        client.set_htr_settings.reset_mock()
 
         assert created_tasks, "Expected background tasks to be created"
 
