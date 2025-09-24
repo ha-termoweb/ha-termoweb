@@ -800,6 +800,44 @@ def test_import_energy_history_service_error_logging(
         assert len(log_calls) == 2
 
 
+def test_import_energy_history_service_logs_global_task_errors(
+    termoweb_init: Any, stub_hass: StubHass, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class ServiceClient(BaseFakeClient):
+        async def list_devices(self) -> list[dict[str, Any]]:
+            return [{"dev_id": "dev-1"}]
+
+    async def failing_import(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("task boom")
+
+    log_calls: list[str] = []
+
+    def capture_exception(msg: str, *args: Any, **kwargs: Any) -> None:
+        log_calls.append(msg % args if args else msg)
+
+    monkeypatch.setattr(termoweb_init, "TermoWebClient", ServiceClient)
+    monkeypatch.setattr(termoweb_init, "_async_import_energy_history", failing_import)
+    monkeypatch.setattr(termoweb_init._LOGGER, "exception", capture_exception)
+
+    entry = ConfigEntry("svc-global", data={"username": "user", "password": "pw"})
+    stub_hass.config_entries.add(entry)
+
+    async def _run() -> None:
+        assert await termoweb_init.async_setup_entry(stub_hass, entry)
+        await _drain_tasks(stub_hass)
+
+        service = stub_hass.services.get(
+            termoweb_init.DOMAIN, "import_energy_history"
+        )
+        assert service is not None
+
+        await service(SimpleNamespace(data={}))
+
+    asyncio.run(_run())
+
+    assert any("task failed" in msg for msg in log_calls)
+
+
 def test_start_ws_skips_when_task_running(
     termoweb_init: Any, stub_hass: StubHass, monkeypatch: pytest.MonkeyPatch
 ) -> None:

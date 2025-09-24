@@ -1163,3 +1163,124 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
         assert coordinator.async_request_refresh.await_count == 1
 
     asyncio.run(_run())
+
+
+def test_heater_cancelled_paths_propagate(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _run() -> None:
+        _reset_stubs()
+        from homeassistant.components.climate import HVACMode
+
+        hass = HomeAssistant()
+        entry_id = "entry"
+        dev_id = "dev"
+        addr = "A"
+        base_prog: list[int] = [0, 1, 2] * 56
+        settings = {
+            "mode": "manual",
+            "state": "heating",
+            "mtemp": "19.0",
+            "stemp": "21.0",
+            "ptemp": ["18.0", "19.0", "20.0"],
+            "prog": list(base_prog),
+            "units": "C",
+        }
+        coordinator = FakeCoordinator(
+            hass,
+            {dev_id: {"nodes": {"nodes": []}, "htr": {"settings": {addr: settings}}}},
+        )
+        client = AsyncMock()
+        client.set_htr_settings = AsyncMock()
+
+        hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "client": client,
+                    "coordinator": coordinator,
+                    "dev_id": dev_id,
+                    "ws_state": {},
+                    "version": "1",
+                }
+            }
+        }
+
+        heater = TermoWebHeater(coordinator, entry_id, dev_id, addr, "Heater")
+        await heater.async_added_to_hass()
+
+        orig_float = climate_module.float_or_none
+
+        def raising_float(_value: Any) -> float | None:
+            raise asyncio.CancelledError()
+
+        monkeypatch.setattr(climate_module, "float_or_none", raising_float)
+        with pytest.raises(asyncio.CancelledError):
+            _ = heater.extra_state_attributes
+        monkeypatch.setattr(climate_module, "float_or_none", orig_float)
+
+        class CancelInt(int):
+            def __int__(self) -> int:
+                raise asyncio.CancelledError()
+
+        prog_cancel = list(base_prog)
+        prog_cancel[0] = CancelInt(0)
+        with pytest.raises(asyncio.CancelledError):
+            await heater.async_set_schedule(prog_cancel)
+
+        caplog.clear()
+        with caplog.at_level(logging.ERROR):
+            await heater.async_set_preset_temperatures()
+        assert "Preset temperatures require" in caplog.text
+
+        class CancelSettings(dict):
+            def get(self, *_args: Any, **_kwargs: Any) -> Any:
+                raise asyncio.CancelledError()
+
+        original_settings = coordinator.data[dev_id]["htr"]["settings"]
+        coordinator.data[dev_id]["htr"]["settings"] = CancelSettings(original_settings)
+        with pytest.raises(asyncio.CancelledError):
+            await heater.async_set_preset_temperatures(ptemp=[18.0, 19.0, 20.0])
+        coordinator.data[dev_id]["htr"]["settings"] = original_settings
+
+        client.set_htr_settings.side_effect = asyncio.CancelledError()
+        heater._pending_mode = HVACMode.AUTO
+        heater._pending_stemp = 21.0
+        with pytest.raises(asyncio.CancelledError):
+            await heater._write_after_debounce()
+
+        client.set_htr_settings.side_effect = None
+
+        class CancelFloat:
+            def __float__(self) -> float:
+                raise asyncio.CancelledError()
+
+        heater._pending_mode = HVACMode.HEAT
+        heater._pending_stemp = CancelFloat()
+        with pytest.raises(asyncio.CancelledError):
+            await heater._write_after_debounce()
+
+        class CancelMapping(dict):
+            def get(self, *_args: Any, **_kwargs: Any) -> Any:
+                raise asyncio.CancelledError()
+
+        original_data = coordinator.data
+        coordinator.data = CancelMapping(original_data)
+        heater._pending_mode = HVACMode.AUTO
+        heater._pending_stemp = 20.0
+        with pytest.raises(asyncio.CancelledError):
+            await heater._write_after_debounce()
+        coordinator.data = original_data
+
+        async def fast_sleep(_delay: float) -> None:
+            return None
+
+        monkeypatch.setattr(climate_module.asyncio, "sleep", fast_sleep)
+        coordinator.async_request_refresh = AsyncMock(
+            side_effect=asyncio.CancelledError()
+        )
+        heater._schedule_refresh_fallback()
+        assert heater._refresh_fallback is not None
+        with pytest.raises(asyncio.CancelledError):
+            await heater._refresh_fallback
+
+    asyncio.run(_run())

@@ -620,6 +620,34 @@ def test_ensure_token_concurrent_calls_share_refresh() -> None:
     asyncio.run(_run())
 
 
+def test_ensure_token_returns_cached_after_lock_entry() -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        client = TermoWebClient(session, "user", "pw")
+        client._access_token = None
+        client._token_expiry = 0.0
+
+        class FakeLock:
+            def __init__(self, owner: TermoWebClient) -> None:
+                self._owner = owner
+
+            async def __aenter__(self) -> "FakeLock":
+                self._owner._access_token = "cached"
+                self._owner._token_expiry = time.time() + 100
+                return self
+
+            async def __aexit__(self, *_exc: Any) -> bool:
+                return False
+
+        client._lock = FakeLock(client)  # type: ignore[assignment]
+
+        token = await client._ensure_token()
+        assert token == "cached"
+        assert session.post_calls == []
+
+    asyncio.run(_run())
+
+
 def test_token_request_error_raises_client_response_error() -> None:
     async def _run() -> None:
         session = FakeSession()

@@ -678,6 +678,55 @@ def test_runner_handles_handshake_events_and_disconnect(
     asyncio.run(_run())
 
 
+def test_runner_cleans_up_close_errors() -> None:
+    async def _run() -> None:
+        module = _load_ws_client()
+        loop = asyncio.get_event_loop()
+        hass = types.SimpleNamespace(
+            loop=loop,
+            data={module.DOMAIN: {"entry": {"ws_state": {}}}},
+        )
+        coordinator = types.SimpleNamespace(data={})
+        session = module.aiohttp.testing.FakeClientSession()
+        client = module.TermoWebWSLegacyClient(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=types.SimpleNamespace(_session=session),
+            coordinator=coordinator,
+            session=session,
+        )
+
+        class FakeTask:
+            def __init__(self) -> None:
+                self.cancelled = False
+
+            def cancel(self) -> None:
+                self.cancelled = True
+
+        fake_task = FakeTask()
+        client._hb_task = fake_task  # type: ignore[assignment]
+
+        class FailingWS:
+            async def close(self) -> None:
+                raise RuntimeError("close boom")
+
+        client._ws = FailingWS()
+
+        async def failing_handshake() -> tuple[str, int]:
+            client._closing = True
+            raise RuntimeError("boom")
+
+        client._handshake = failing_handshake  # type: ignore[assignment]
+
+        await client._runner()
+
+        assert fake_task.cancelled is True
+        assert client._ws is None
+
+    asyncio.run(_run())
+
+
 def test_read_loop_bubbles_exception_on_close():
     async def _run() -> None:
         module = _load_ws_client()
@@ -928,6 +977,42 @@ def test_handshake_wraps_client_error() -> None:
         assert isinstance(err.__cause__, aiohttp.ClientError)
         assert api._authed_headers.await_count == 1
         assert api._ensure_token.await_count == 0
+
+    asyncio.run(_run())
+
+
+def test_handshake_status_error_raises_handshake_error() -> None:
+    async def _run() -> None:
+        module = _load_ws_client()
+        aiohttp = sys.modules["aiohttp"]
+        session = aiohttp.ClientSession(get_responses=[{"status": 403, "body": "denied"}])
+
+        hass = types.SimpleNamespace(loop=asyncio.get_event_loop())
+        coordinator = types.SimpleNamespace()
+        api = types.SimpleNamespace(
+            _session=session,
+            _authed_headers=AsyncMock(return_value={"Authorization": "Bearer cached"}),
+            _ensure_token=AsyncMock(),
+        )
+
+        client = module.TermoWebWSLegacyClient(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=api,
+            coordinator=coordinator,
+            session=session,
+        )
+
+        with pytest.raises(module.HandshakeError) as ctx:
+            await client._handshake()
+
+        err = ctx.value
+        assert err.status == 403
+        assert err.body_snippet == "denied"
+        assert "token=cached" in err.url
+        assert api._ensure_token.await_count == 0
+        assert api._authed_headers.await_count == 1
 
     asyncio.run(_run())
 
@@ -1363,6 +1448,33 @@ def test_handle_event_seeds_device_state() -> None:
     assert dev_state["htr"]["settings"]["A"]["mode"] == "auto"
 
 
+def test_handle_event_invalid_inputs_are_ignored() -> None:
+    module = _load_ws_client()
+    loop = asyncio.new_event_loop()
+    hass = types.SimpleNamespace(
+        loop=loop,
+        data={module.DOMAIN: {"entry": {"ws_state": {}}}},
+    )
+    coordinator = types.SimpleNamespace(data={})
+    session = module.aiohttp.testing.FakeClientSession()
+    api = types.SimpleNamespace(_session=session)
+    client = module.TermoWebWSLegacyClient(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        api_client=api,
+        coordinator=coordinator,
+        session=session,
+    )
+
+    client._handle_event("not-a-dict")
+    client._handle_event({"name": "other", "args": []})
+    client._handle_event({"name": "data", "args": "bad"})
+    client._handle_event({"name": "data", "args": ["bad"]})
+    client._handle_event({"name": "data", "args": [["not-dict"]]})
+    client._handle_event({"name": "data", "args": [[{"path": None, "body": {}}]]})
+
+
 def test_parse_handshake_body_defaults() -> None:
     module = _load_ws_client()
     session = module.aiohttp.testing.FakeClientSession()
@@ -1384,6 +1496,29 @@ def test_parse_handshake_body_defaults() -> None:
     sid, hb = client._parse_handshake_body("sid:not-a-number")
     assert sid == "sid"
     assert hb == 60
+
+
+def test_parse_handshake_body_invalid() -> None:
+    module = _load_ws_client()
+    session = module.aiohttp.testing.FakeClientSession()
+    loop = types.SimpleNamespace(create_task=lambda *_args, **_kwargs: None)
+    hass = types.SimpleNamespace(
+        loop=loop,
+        data={module.DOMAIN: {"entry": {"ws_state": {}}}},
+    )
+    coordinator = types.SimpleNamespace()
+    api = types.SimpleNamespace(_session=session)
+    client = module.TermoWebWSLegacyClient(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        api_client=api,
+        coordinator=coordinator,
+        session=session,
+    )
+
+    with pytest.raises(RuntimeError):
+        client._parse_handshake_body("invalid")
 
 
 def test_send_text_no_ws() -> None:
@@ -1451,6 +1586,22 @@ def test_api_base_fallback_to_default() -> None:
     )
     client._client = types.SimpleNamespace(api_base="")  # type: ignore[assignment]
     assert client._api_base() == module.API_BASE
+
+
+def test_api_base_strips_trailing_slash() -> None:
+    module = _load_ws_client()
+    loop = types.SimpleNamespace(create_task=lambda *_args, **_kwargs: None)
+    hass = types.SimpleNamespace(loop=loop, data={})
+    coordinator = types.SimpleNamespace()
+    client = module.TermoWebWSLegacyClient(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        api_client=types.SimpleNamespace(_session=None),
+        coordinator=coordinator,
+    )
+    client._client = types.SimpleNamespace(api_base="https://api.example.com/path/")  # type: ignore[assignment]
+    assert client._api_base() == "https://api.example.com/path"
 
 
 def test_mark_event_unique_paths() -> None:
