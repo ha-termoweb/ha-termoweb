@@ -246,30 +246,153 @@ async def _async_import_energy_history(
             _LOGGER.debug("%s: no energy sensor found", addr)
             continue
 
-        # Determine existing cumulative sum before the earliest sample
-        earliest_ts = int(all_samples_sorted[0].get("t", 0))
-        earliest_start_dt = datetime.fromtimestamp(earliest_ts, UTC).replace(
+        first_ts = int(all_samples_sorted[0].get("t", 0))
+        last_ts = int(all_samples_sorted[-1].get("t", 0))
+        import_start_dt = datetime.fromtimestamp(first_ts, UTC).replace(
             minute=0, second=0, microsecond=0
         )
+        import_end_dt = datetime.fromtimestamp(last_ts, UTC).replace(
+            minute=0, second=0, microsecond=0
+        )
+
         sum_offset = 0.0
+        previous_kwh: float | None = None
+        last_before: dict[str, Any] | None = None
+
+        period_stats: dict[str, list[dict[str, Any]]] | None = None
         try:
             from homeassistant.components.recorder.statistics import (
-                async_get_last_statistics,
+                async_get_statistics_during_period,
             )
+        except (ImportError, AttributeError):  # pragma: no cover - defensive
+            async_get_statistics_during_period = None
 
-            existing = await async_get_last_statistics(
-                hass, 1, [entity_id], start_time=earliest_start_dt
+        if async_get_statistics_during_period:
+            lookback_days = max(2, max_days + 1)
+            lookback_start = import_start_dt - timedelta(days=lookback_days)
+            try:
+                period_stats = await async_get_statistics_during_period(
+                    hass,
+                    lookback_start,
+                    import_end_dt + timedelta(hours=1),
+                    [entity_id],
+                    period="hour",
+                )
+            except asyncio.CancelledError:  # pragma: no cover - allow cancellation
+                raise
+            except Exception as err:  # pragma: no cover - defensive
+                _LOGGER.debug(
+                    "%s: error fetching statistics window %s-%s: %s",
+                    addr,
+                    lookback_start,
+                    import_end_dt,
+                    err,
+                )
+            else:
+                window_values = period_stats.get(entity_id) if period_stats else []
+                if window_values:
+                    before_values = [
+                        val
+                        for val in window_values
+                        if isinstance(val.get("start"), datetime)
+                        and val["start"] < import_start_dt
+                    ]
+                    if before_values:
+                        last_before = before_values[-1]
+
+        if last_before is None:
+            try:
+                from homeassistant.components.recorder.statistics import (
+                    async_get_last_statistics,
+                )
+
+                existing = await async_get_last_statistics(hass, 1, [entity_id])
+                if existing and (vals := existing.get(entity_id)):
+                    candidate = vals[0]
+                    start_dt = candidate.get("start")
+                    if isinstance(start_dt, datetime) and start_dt < import_start_dt:
+                        last_before = candidate
+            except asyncio.CancelledError:  # pragma: no cover - allow cancellation
+                raise
+            except Exception as err:  # pragma: no cover - defensive
+                _LOGGER.debug(
+                    "%s: error fetching last statistics for offset: %s", addr, err
+                )
+
+        if last_before:
+            try:
+                sum_offset = float(last_before.get("sum") or 0.0)
+            except (TypeError, ValueError):  # pragma: no cover - defensive
+                _LOGGER.debug(
+                    "%s: invalid sum offset in existing statistics: %s",
+                    addr,
+                    last_before,
+                )
+                sum_offset = 0.0
+            prev_state = last_before.get("state")
+            if prev_state is not None:
+                try:
+                    previous_kwh = float(prev_state)
+                except (TypeError, ValueError):  # pragma: no cover - defensive
+                    _LOGGER.debug(
+                        "%s: invalid previous state in statistics: %s", addr, prev_state
+                    )
+                    previous_kwh = None
+
+        overlap_exists = False
+        if period_stats is not None:
+            overlap_exists = any(
+                isinstance(val.get("start"), datetime)
+                and import_start_dt <= val["start"] <= import_end_dt
+                for val in period_stats.get(entity_id, [])
             )
-            if existing and (vals := existing.get(entity_id)):
-                sum_offset = float(vals[0].get("sum") or 0.0)
-        except asyncio.CancelledError:  # pragma: no cover - allow cancellation
-            raise
-        except Exception as err:  # pragma: no cover - defensive
-            _LOGGER.debug("%s: error fetching last statistics: %s", addr, err)
+        else:
+            try:
+                from homeassistant.components.recorder.statistics import (
+                    async_get_last_statistics,
+                )
+
+                overlap_stats = await async_get_last_statistics(
+                    hass, 1, [entity_id], start_time=import_start_dt
+                )
+                overlap_exists = bool(
+                    overlap_stats and overlap_stats.get(entity_id)
+                )
+            except asyncio.CancelledError:  # pragma: no cover - allow cancellation
+                raise
+            except Exception as err:  # pragma: no cover - defensive
+                _LOGGER.debug(
+                    "%s: error checking for overlapping statistics: %s", addr, err
+                )
+
+        if overlap_exists:
+            try:
+                from homeassistant.components.recorder.statistics import (
+                    async_delete_statistics,
+                )
+
+                delete_args: dict[str, Any] = {
+                    "start_time": import_start_dt,
+                    "end_time": import_end_dt + timedelta(hours=1),
+                }
+                try:
+                    await async_delete_statistics(hass, [entity_id], **delete_args)
+                    _LOGGER.debug("%s: cleared overlapping statistics for %s", addr, entity_id)
+                except TypeError:
+                    await async_delete_statistics(hass, [entity_id])
+                    _LOGGER.debug("%s: cleared statistics for %s", addr, entity_id)
+            except asyncio.CancelledError:  # pragma: no cover - allow cancellation
+                raise
+            except ImportError:  # pragma: no cover - defensive
+                _LOGGER.debug(
+                    "%s: async_delete_statistics not available to clear overlap",
+                    addr,
+                )
+            except Exception as err:  # pragma: no cover - defensive
+                _LOGGER.debug("%s: failed to clear overlapping statistics: %s", addr, err)
 
         stats: list[dict[str, Any]] = []
-        sum_kwh: float = 0.0
-        previous_kwh: float | None = None
+        running_sum: float = sum_offset
         for sample in all_samples_sorted:
             t = sample.get("t")
             counter = sample.get("counter")
@@ -291,10 +414,8 @@ async def _async_import_energy_history(
             if delta <= 0:
                 previous_kwh = kwh
                 continue
-            sum_kwh += delta
-            stats.append(
-                {"start": start_dt, "state": None, "sum": sum_kwh + sum_offset}
-            )
+            running_sum += delta
+            stats.append({"start": start_dt, "state": kwh, "sum": running_sum})
             previous_kwh = kwh
 
         if not stats:
