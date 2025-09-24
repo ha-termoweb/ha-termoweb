@@ -593,6 +593,48 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
             )
             return
 
+        # Optimistic local update so HA state reflects the write immediately
+        try:
+            d = (self.coordinator.data or {}).get(self._dev_id, {})
+            htr = d.get("htr") or {}
+            settings_map = htr.get("settings") or {}
+            cur = settings_map.get(self._addr)
+            if isinstance(cur, dict):
+                changed = False
+                mode_local = None
+                if mode is not None:
+                    mode_local = {
+                        HVACMode.OFF: "off",
+                        HVACMode.AUTO: "auto",
+                        HVACMode.HEAT: "manual",
+                    }.get(mode, str(mode).lower())
+                    if cur.get("mode") != mode_local:
+                        cur["mode"] = mode_local
+                        changed = True
+                if stemp is not None:
+                    stemp_local = f"{float(stemp):.1f}"
+                    if cur.get("stemp") != stemp_local:
+                        cur["stemp"] = stemp_local
+                        changed = True
+                if changed:
+                    self.async_write_ha_state()
+                    _LOGGER.debug(
+                        "Optimistic mode/stemp applied dev=%s addr=%s mode=%s stemp=%s",
+                        self._dev_id,
+                        self._addr,
+                        mode_local,
+                        stemp,
+                    )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            _LOGGER.debug(
+                "Optimistic mode/stemp update failed dev=%s addr=%s: %s",
+                self._dev_id,
+                self._addr,
+                e,
+            )
+
         # Expect WS echo; schedule refresh if it doesn't arrive soon.
         self._schedule_refresh_fallback()
 

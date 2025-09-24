@@ -836,6 +836,11 @@ def test_heater_write_paths_and_errors(
         assert call.kwargs["mode"] == "manual"
         assert call.kwargs["stemp"] == pytest.approx(30.0)
         assert call.kwargs["units"] == "C"
+        assert float(settings_after["stemp"]) == pytest.approx(30.0)
+        assert heater.hvac_mode == HVACMode.HEAT
+        target_temp = heater.target_temperature
+        assert target_temp is not None
+        assert target_temp == pytest.approx(30.0)
         await _complete_fallback_once()
         client.set_htr_settings.reset_mock()
 
@@ -844,6 +849,12 @@ def test_heater_write_paths_and_errors(
         await heater._write_task
         call = client.set_htr_settings.await_args
         assert call.kwargs["stemp"] == pytest.approx(5.0)
+        assert float(settings_after["stemp"]) == pytest.approx(5.0)
+        assert heater.hvac_mode == HVACMode.HEAT
+        target_temp = heater.target_temperature
+        assert target_temp is not None
+        assert target_temp == pytest.approx(5.0)
+        manual_setpoint = float(target_temp)
         await _complete_fallback_once()
         client.set_htr_settings.reset_mock()
 
@@ -862,6 +873,10 @@ def test_heater_write_paths_and_errors(
         call = client.set_htr_settings.await_args
         assert call.kwargs["mode"] == "auto"
         assert call.kwargs["stemp"] is None
+        assert settings_after["mode"] == "auto"
+        assert float(settings_after["stemp"]) == pytest.approx(manual_setpoint)
+        assert heater.hvac_mode == HVACMode.AUTO
+        assert heater.target_temperature == pytest.approx(manual_setpoint)
         await _complete_fallback_once()
         client.set_htr_settings.reset_mock()
 
@@ -870,6 +885,10 @@ def test_heater_write_paths_and_errors(
         await heater._write_task
         call = client.set_htr_settings.await_args
         assert call.kwargs["mode"] == "off"
+        assert settings_after["mode"] == "off"
+        assert float(settings_after["stemp"]) == pytest.approx(manual_setpoint)
+        assert heater.hvac_mode == HVACMode.OFF
+        assert heater.target_temperature == pytest.approx(manual_setpoint)
         await _complete_fallback_once()
         client.set_htr_settings.reset_mock()
 
@@ -878,7 +897,11 @@ def test_heater_write_paths_and_errors(
         await heater._write_task
         call = client.set_htr_settings.await_args
         assert call.kwargs["mode"] == "manual"
-        assert call.kwargs["stemp"] == pytest.approx(21.0)
+        assert call.kwargs["stemp"] == pytest.approx(manual_setpoint)
+        assert settings_after["mode"] == "manual"
+        assert float(settings_after["stemp"]) == pytest.approx(manual_setpoint)
+        assert heater.hvac_mode == HVACMode.HEAT
+        assert heater.target_temperature == pytest.approx(manual_setpoint)
         await _complete_fallback_once()
         client.set_htr_settings.reset_mock()
 
@@ -911,6 +934,10 @@ def test_heater_write_paths_and_errors(
         caplog.clear()
         client.set_htr_settings.reset_mock()
         client.set_htr_settings.side_effect = RuntimeError("write boom")
+        prev_mode = settings_after["mode"]
+        prev_stemp = settings_after["stemp"]
+        prev_target = heater.target_temperature
+        prev_hvac_mode = heater.hvac_mode
         heater._pending_mode = HVACMode.AUTO
         heater._pending_stemp = None
         heater._refresh_fallback = None
@@ -918,6 +945,29 @@ def test_heater_write_paths_and_errors(
         assert heater._write_task is not None
         await heater._write_task
         assert "Write failed" in caplog.text
+        assert settings_after["mode"] == prev_mode
+        assert settings_after["stemp"] == prev_stemp
+        assert heater.hvac_mode == prev_hvac_mode
+        assert heater.target_temperature == prev_target
+        assert heater._refresh_fallback is None
+        assert not fallback_waiters
+        client.set_htr_settings.side_effect = None
+        client.set_htr_settings.reset_mock()
+
+        caplog.clear()
+        client.set_htr_settings.side_effect = RuntimeError("temp boom")
+        prev_mode = settings_after["mode"]
+        prev_stemp = settings_after["stemp"]
+        prev_target = heater.target_temperature
+        prev_hvac_mode = heater.hvac_mode
+        await heater.async_set_temperature(**{ATTR_TEMPERATURE: 19.9})
+        assert heater._write_task is not None
+        await heater._write_task
+        assert client.set_htr_settings.await_count == 1
+        assert settings_after["mode"] == prev_mode
+        assert settings_after["stemp"] == prev_stemp
+        assert heater.hvac_mode == prev_hvac_mode
+        assert heater.target_temperature == prev_target
         assert heater._refresh_fallback is None
         assert not fallback_waiters
         client.set_htr_settings.side_effect = None
@@ -964,6 +1014,12 @@ def test_heater_write_paths_and_errors(
         assert heater._write_task is not None
         await heater._write_task
         assert client.set_htr_settings.await_count == 1
+        assert float(settings_after["stemp"]) == pytest.approx(22.5)
+        assert heater.hvac_mode == HVACMode.HEAT
+        target_temp = heater.target_temperature
+        assert target_temp is not None
+        assert target_temp == pytest.approx(22.5)
+        manual_setpoint = float(target_temp)
         assert heater._refresh_fallback is None
         assert not fallback_waiters
         client.set_htr_settings.reset_mock()
@@ -976,6 +1032,12 @@ def test_heater_write_paths_and_errors(
         await heater.async_set_temperature(**{ATTR_TEMPERATURE: 23.5})
         assert heater._write_task is not None
         await heater._write_task
+        assert float(settings_after["stemp"]) == pytest.approx(23.5)
+        assert heater.hvac_mode == HVACMode.HEAT
+        target_temp = heater.target_temperature
+        assert target_temp is not None
+        assert target_temp == pytest.approx(23.5)
+        manual_setpoint = float(target_temp)
         assert heater._refresh_fallback is not None
         await _complete_fallback_once()
         client.set_htr_settings.reset_mock()
