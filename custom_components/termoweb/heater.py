@@ -74,6 +74,7 @@ class TermoWebHeaterBase(CoordinatorEntity):
         *,
         device_name: str | None = None,
     ) -> None:
+        """Initialise a heater entity tied to a TermoWeb device."""
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._dev_id = dev_id
@@ -84,6 +85,7 @@ class TermoWebHeaterBase(CoordinatorEntity):
         self._unsub_ws = None
 
     async def async_added_to_hass(self) -> None:
+        """Subscribe to websocket updates once the entity is added to hass."""
         await super().async_added_to_hass()
         if self.hass is None:
             return
@@ -95,6 +97,7 @@ class TermoWebHeaterBase(CoordinatorEntity):
         self.async_on_remove(self._remove_ws_listener)
 
     async def async_will_remove_from_hass(self) -> None:
+        """Tidy up websocket listeners before the entity is removed."""
         self._remove_ws_listener()
         await super().async_will_remove_from_hass()
 
@@ -134,10 +137,12 @@ class TermoWebHeaterBase(CoordinatorEntity):
 
     @property
     def should_poll(self) -> bool:
+        """Home Assistant should not poll heater entities."""
         return False
 
     @property
     def available(self) -> bool:
+        """Return whether the backing device exposes heater data."""
         return self._device_available(self._device_record())
 
     def _device_available(self, device_entry: dict[str, Any] | None) -> bool:
@@ -152,7 +157,7 @@ class TermoWebHeaterBase(CoordinatorEntity):
         if callable(getter):
             record = getter(self._dev_id)
         elif isinstance(data, dict):
-            record = data.get(self._dev_id)
+            record = dict.get(data, self._dev_id)
         else:
             return None
 
@@ -166,6 +171,7 @@ class TermoWebHeaterBase(CoordinatorEntity):
         return heaters if isinstance(heaters, dict) else {}
 
     def heater_settings(self) -> dict[str, Any] | None:
+        """Return the cached settings for this heater, if available."""
         settings_map = self._heater_section().get("settings")
         if not isinstance(settings_map, dict):
             return None
@@ -183,6 +189,7 @@ class TermoWebHeaterBase(CoordinatorEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
+        """Expose Home Assistant device metadata for the heater."""
         return DeviceInfo(
             identifiers={(DOMAIN, self._dev_id, self._addr)},
             name=self._device_name,

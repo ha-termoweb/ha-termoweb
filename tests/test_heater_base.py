@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-import pytest
+from conftest import _install_stubs
+
+_install_stubs()
 
 from custom_components.termoweb import heater as heater_module
 from homeassistant.core import HomeAssistant
@@ -53,12 +55,19 @@ def test_device_available_requires_nodes_section() -> None:
     assert heater._device_available({"nodes": []})
 
 
-def test_device_record_fallback_dict(monkeypatch: pytest.MonkeyPatch) -> None:
+class _FakeDict(dict):
+    """Dictionary that exposes a non-callable ``get`` attribute."""
+
+    get = "not-callable"
+
+
+def test_device_record_fallback_dict() -> None:
     hass = HomeAssistant()
-    coordinator = SimpleNamespace(hass=hass, data={"dev": {"nodes": "ok"}})
+    coordinator = SimpleNamespace(
+        hass=hass, data=_FakeDict({"dev": {"nodes": "ok"}})
+    )
     heater = _make_heater(coordinator)
 
-    monkeypatch.setitem(heater_module.__dict__, "callable", lambda _obj: False)
     assert heater._device_record() == {"nodes": "ok"}
 
 
