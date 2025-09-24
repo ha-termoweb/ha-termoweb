@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import importlib.util
 from pathlib import Path
 import sys
@@ -568,3 +569,80 @@ def test_total_energy_sensor() -> None:
         total_sensor.schedule_update_ha_state.assert_not_called()
 
     asyncio.run(_run())
+
+
+def test_energy_and_power_sensor_properties() -> None:
+    hass = HomeAssistant()
+    base_data = {
+        "dev": {
+            "nodes": {"nodes": []},
+            "htr": {
+                "energy": {"A": 1500},
+                "power": {"A": 250},
+            },
+        }
+    }
+    coordinator = types.SimpleNamespace(hass=hass, data=copy.deepcopy(base_data))
+
+    energy_sensor = TermoWebHeaterEnergyTotal(
+        coordinator,
+        "entry",
+        "dev",
+        "A",
+        "Energy",
+        "uid_energy",
+        "Node",
+    )
+    power_sensor = TermoWebHeaterPower(
+        coordinator,
+        "entry",
+        "dev",
+        "A",
+        "Power",
+        "uid_power",
+        "Node",
+    )
+
+    energy_info = energy_sensor.device_info
+    assert energy_info["identifiers"] == {(DOMAIN, "dev", "A")}
+    assert energy_sensor.available is True
+    assert energy_sensor.native_value == pytest.approx(1.5)
+    assert energy_sensor.extra_state_attributes == {"dev_id": "dev", "addr": "A"}
+
+    energy_sensor._on_ws_data({"dev_id": "other"})
+    energy_sensor._on_ws_data({"dev_id": "dev", "addr": "B"})
+
+    coordinator.data = {"dev": {"htr": {"energy": {"A": None}}}}
+    assert energy_sensor.native_value is None
+    coordinator.data = {"dev": None}
+    assert energy_sensor.available is False
+    coordinator.data = copy.deepcopy(base_data)
+
+    power_info = power_sensor.device_info
+    assert power_info["identifiers"] == {(DOMAIN, "dev", "A")}
+    assert power_sensor.available is True
+    assert power_sensor.native_value == pytest.approx(250.0)
+    assert power_sensor.extra_state_attributes == {"dev_id": "dev", "addr": "A"}
+
+    power_sensor._on_ws_data({"dev_id": "other"})
+    power_sensor._on_ws_data({"dev_id": "dev", "addr": "B"})
+
+    coordinator.data = {"dev": {"htr": {"power": {"A": None}}}}
+    assert power_sensor.native_value is None
+    coordinator.data = {"dev": None}
+    assert power_sensor.available is False
+    coordinator.data = copy.deepcopy(base_data)
+
+    total_sensor = TermoWebTotalEnergy(coordinator, "entry", "dev", "Total", "tot")
+    total_info = total_sensor.device_info
+    assert total_info == {"identifiers": {(DOMAIN, "dev")}}
+    assert total_sensor.available is True
+    assert total_sensor.native_value == pytest.approx(1.5)
+    assert total_sensor.extra_state_attributes == {"dev_id": "dev"}
+
+    total_sensor._on_ws_data({"dev_id": "other"})
+
+    coordinator.data = {"dev": {"htr": {"energy": {}}}}
+    assert total_sensor.native_value is None
+    coordinator.data = {"dev": None}
+    assert total_sensor.available is False

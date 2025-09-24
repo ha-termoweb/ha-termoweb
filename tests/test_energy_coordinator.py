@@ -149,6 +149,10 @@ def test_as_float_returns_none_for_invalid_strings(value: str) -> None:
     assert coord_module._as_float(value) is None
 
 
+def test_as_float_returns_none_for_unhandled_types() -> None:
+    assert coord_module._as_float(object()) is None
+
+
 def test_power_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
@@ -178,6 +182,33 @@ def test_power_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
         assert coord.data["1"]["htr"]["energy"]["A"] == 1.5
         power = coord.data["1"]["htr"]["power"]["A"]
         assert power == pytest.approx(2000.0, rel=1e-3)
+
+    asyncio.run(_run())
+
+
+def test_coordinator_success_resets_backoff() -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_htr_settings = AsyncMock(return_value={"mode": "auto"})
+
+        hass = HomeAssistant()
+        nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
+        coord = TermoWebCoordinator(
+            hass,
+            client,
+            30,
+            "dev",
+            {"name": "Device"},
+            nodes,  # type: ignore[arg-type]
+        )
+        coord._backoff = 120
+        coord.update_interval = timedelta(seconds=999)
+
+        await coord.async_refresh()
+
+        assert coord.data["dev"]["htr"]["settings"]["A"] == {"mode": "auto"}
+        assert coord._backoff == 0
+        assert coord.update_interval == timedelta(seconds=coord._base_interval)
 
     asyncio.run(_run())
 
@@ -248,6 +279,29 @@ def test_energy_regression_resets_last() -> None:
         assert final_data["energy"]["A"] == 1.5
         assert "A" not in final_data["power"]
         assert coord._last[("1", "A")] == (1500.0, 1.5)
+
+    asyncio.run(_run())
+
+
+def test_energy_samples_missing_fields() -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_htr_samples = AsyncMock(
+            return_value=[{"t": 1000, "counter": None}]
+        )
+
+        hass = HomeAssistant()
+        coord = TermoWebHeaterEnergyCoordinator(
+            hass,
+            client,
+            "dev",
+            ["A"],  # type: ignore[arg-type]
+        )
+
+        await coord.async_refresh()
+        data = coord.data["dev"]["htr"]
+        assert data["energy"] == {}
+        assert data["power"] == {}
 
     asyncio.run(_run())
 

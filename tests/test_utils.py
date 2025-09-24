@@ -74,3 +74,9 @@ def test_float_or_none(value, expected) -> None:
 @pytest.mark.parametrize("value", ["nan", "inf"])
 def test_float_or_none_non_finite_strings(value) -> None:
     assert float_or_none(value) is None
+
+
+def test_get_brand_api_base_fallback() -> None:
+    from custom_components.termoweb import const
+
+    assert const.get_brand_api_base("unknown-brand") == const.API_BASE
