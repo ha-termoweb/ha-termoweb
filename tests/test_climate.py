@@ -422,6 +422,70 @@ def test_async_setup_entry_creates_entities() -> None:
     asyncio.run(_run())
 
 
+def test_refresh_fallback_skips_when_hass_inactive(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _run() -> None:
+        _reset_stubs()
+
+        hass = HomeAssistant()
+        hass.is_stopping = True
+        hass.is_running = True
+        entry_id = "entry"
+        dev_id = "dev"
+        addr = "A"
+        coordinator = FakeCoordinator(
+            hass,
+            {dev_id: {"nodes": {"nodes": []}, "htr": {"settings": {addr: {}}}}},
+        )
+
+        hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "client": AsyncMock(),
+                    "coordinator": coordinator,
+                    "dev_id": dev_id,
+                    "version": "1",
+                    "ws_state": {},
+                }
+            }
+        }
+
+        heater = TermoWebHeater(coordinator, entry_id, dev_id, addr, "Heater")
+        await heater.async_added_to_hass()
+
+        async def fast_sleep(_delay: float) -> None:
+            return None
+
+        monkeypatch.setattr(climate_module.asyncio, "sleep", fast_sleep)
+
+        caplog.clear()
+        with caplog.at_level(logging.DEBUG):
+            heater._schedule_refresh_fallback()
+            task = heater._refresh_fallback
+            assert task is not None
+            await task
+        coordinator.async_refresh_heater.assert_not_awaited()
+        assert heater._refresh_fallback is None
+        assert "hass stopping" in caplog.text
+
+        hass.is_stopping = False
+        hass.is_running = False
+        coordinator.async_refresh_heater.reset_mock()
+
+        caplog.clear()
+        with caplog.at_level(logging.DEBUG):
+            heater._schedule_refresh_fallback()
+            task = heater._refresh_fallback
+            assert task is not None
+            await task
+        coordinator.async_refresh_heater.assert_not_awaited()
+        assert heater._refresh_fallback is None
+        assert "hass not running" in caplog.text
+
+    asyncio.run(_run())
+
+
 def test_heater_additional_cancelled_edges(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
