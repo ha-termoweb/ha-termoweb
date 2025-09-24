@@ -836,6 +836,7 @@ def test_heater_write_paths_and_errors(
         assert call.kwargs["mode"] == "manual"
         assert call.kwargs["stemp"] == pytest.approx(30.0)
         assert call.kwargs["units"] == "C"
+        assert settings_after["stemp"] == "30.0"
         await _complete_fallback_once()
         client.set_htr_settings.reset_mock()
 
@@ -844,6 +845,7 @@ def test_heater_write_paths_and_errors(
         await heater._write_task
         call = client.set_htr_settings.await_args
         assert call.kwargs["stemp"] == pytest.approx(5.0)
+        assert settings_after["stemp"] == "5.0"
         await _complete_fallback_once()
         client.set_htr_settings.reset_mock()
 
@@ -862,6 +864,8 @@ def test_heater_write_paths_and_errors(
         call = client.set_htr_settings.await_args
         assert call.kwargs["mode"] == "auto"
         assert call.kwargs["stemp"] is None
+        assert settings_after["mode"] == "auto"
+        assert settings_after["stemp"] == "5.0"
         await _complete_fallback_once()
         client.set_htr_settings.reset_mock()
 
@@ -870,6 +874,8 @@ def test_heater_write_paths_and_errors(
         await heater._write_task
         call = client.set_htr_settings.await_args
         assert call.kwargs["mode"] == "off"
+        assert settings_after["mode"] == "off"
+        assert settings_after["stemp"] == "5.0"
         await _complete_fallback_once()
         client.set_htr_settings.reset_mock()
 
@@ -878,7 +884,9 @@ def test_heater_write_paths_and_errors(
         await heater._write_task
         call = client.set_htr_settings.await_args
         assert call.kwargs["mode"] == "manual"
-        assert call.kwargs["stemp"] == pytest.approx(21.0)
+        assert call.kwargs["stemp"] == pytest.approx(5.0)
+        assert settings_after["mode"] == "manual"
+        assert settings_after["stemp"] == "5.0"
         await _complete_fallback_once()
         client.set_htr_settings.reset_mock()
 
