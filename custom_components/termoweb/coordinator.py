@@ -1,3 +1,5 @@
+"""Coordinator helpers for the TermoWeb integration."""
+
 from __future__ import annotations
 
 from datetime import timedelta
@@ -48,6 +50,7 @@ class TermoWebCoordinator(
         device: dict[str, Any],
         nodes: dict[str, Any],
     ) -> None:
+        """Initialize the TermoWeb device coordinator."""
         super().__init__(
             hass,
             logger=_LOGGER,
@@ -64,6 +67,96 @@ class TermoWebCoordinator(
 
     def _addrs(self) -> list[str]:
         return extract_heater_addrs(self._nodes)
+
+    async def async_refresh_heater(self, addr: str) -> None:
+        """Refresh settings for a specific heater and push the update to listeners."""
+
+        dev_id = self._dev_id
+        success = False
+        _LOGGER.info(
+            "Refreshing heater settings for device %s heater %s",
+            dev_id,
+            addr,
+        )
+        try:
+            if not addr:
+                _LOGGER.error(
+                    "Cannot refresh heater settings without an address for device %s",
+                    dev_id,
+                )
+                return
+
+            payload = await self.client.get_htr_settings(dev_id, addr)
+
+            if not isinstance(payload, dict):
+                _LOGGER.debug(
+                    "Ignoring unexpected heater settings payload for device %s heater %s: %s",
+                    dev_id,
+                    addr,
+                    payload,
+                )
+                return
+
+            current = self.data or {}
+            new_data: dict[str, dict[str, Any]] = dict(current)
+            dev_data = dict(new_data.get(dev_id) or {})
+
+            if not dev_data:
+                dev_name = (self._device.get("name") or f"Device {dev_id}").strip()
+                dev_data = {
+                    "dev_id": dev_id,
+                    "name": dev_name,
+                    "raw": self._device,
+                    "connected": True,
+                    "nodes": self._nodes,
+                }
+            else:
+                dev_data.setdefault("dev_id", dev_id)
+                if "name" not in dev_data:
+                    dev_data["name"] = (
+                        self._device.get("name") or f"Device {dev_id}"
+                    ).strip()
+                dev_data.setdefault("raw", self._device)
+                dev_data.setdefault("nodes", self._nodes)
+                dev_data.setdefault("connected", True)
+
+            htr_data = dict(dev_data.get("htr") or {})
+            existing_addrs = htr_data.get("addrs")
+            if isinstance(existing_addrs, list):
+                htr_data["addrs"] = list(existing_addrs)
+            else:
+                htr_data["addrs"] = list(self._addrs())
+
+            settings = dict(htr_data.get("settings") or {})
+            settings[addr] = payload
+            htr_data["settings"] = settings
+            dev_data["htr"] = htr_data
+            new_data[dev_id] = dev_data
+            self.async_set_updated_data(new_data)
+            success = True
+
+        except TimeoutError as err:
+            _LOGGER.error(
+                "Timeout refreshing heater settings for device %s heater %s",
+                dev_id,
+                addr,
+                exc_info=err,
+            )
+        except (ClientError, TermoWebRateLimitError, TermoWebAuthError) as err:
+            _LOGGER.error(
+                "Failed to refresh heater settings for device %s heater %s: %s",
+                dev_id,
+                addr,
+                err,
+                exc_info=err,
+            )
+        finally:
+            _LOGGER.info(
+                "Finished heater settings refresh for device %s heater %s (success=%s)",
+                dev_id,
+                addr,
+                success,
+            )
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         dev_id = self._dev_id
@@ -83,9 +176,16 @@ class TermoWebCoordinator(
                         js = await self.client.get_htr_settings(dev_id, addr)
                         if isinstance(js, dict):
                             settings_map[addr] = js
-                    except (ClientError, TermoWebRateLimitError, TermoWebAuthError) as err:
+                    except (
+                        ClientError,
+                        TermoWebRateLimitError,
+                        TermoWebAuthError,
+                    ) as err:
                         _LOGGER.debug(
-                            "Error fetching settings for heater %s: %s", addr, err, exc_info=err
+                            "Error fetching settings for heater %s: %s",
+                            addr,
+                            err,
+                            exc_info=err,
                         )
                         # keep previous settings on error
                 self._rr_index[dev_id] = (start + count) % len(addrs)
@@ -106,12 +206,6 @@ class TermoWebCoordinator(
                 }
             }
 
-            if self._backoff:
-                self._backoff = 0
-                self.update_interval = timedelta(seconds=self._base_interval)
-
-            return result
-
         except TimeoutError as err:
             raise UpdateFailed("API timeout") from err
         except TermoWebRateLimitError as err:
@@ -120,9 +214,17 @@ class TermoWebCoordinator(
                 3600,
             )
             self.update_interval = timedelta(seconds=self._backoff)
-            raise UpdateFailed(f"Rate limited; backing off to {self._backoff}s") from err
+            raise UpdateFailed(
+                f"Rate limited; backing off to {self._backoff}s"
+            ) from err
         except (ClientError, TermoWebAuthError) as err:
             raise UpdateFailed(f"API error: {err}") from err
+        else:
+            if self._backoff:
+                self._backoff = 0
+                self.update_interval = timedelta(seconds=self._base_interval)
+
+            return result
 
 
 class TermoWebHeaterEnergyCoordinator(
@@ -137,6 +239,7 @@ class TermoWebHeaterEnergyCoordinator(
         dev_id: str,
         addrs: list[str],
     ) -> None:
+        """Initialize the heater energy coordinator."""
         super().__init__(
             hass,
             logger=_LOGGER,
@@ -159,7 +262,9 @@ class TermoWebHeaterEnergyCoordinator(
                 now = time.time()
                 start = now - 3600  # fetch recent samples
                 try:
-                    samples = await self.client.get_htr_samples(dev_id, addr, start, now)
+                    samples = await self.client.get_htr_samples(
+                        dev_id, addr, start, now
+                    )
                 except (ClientError, TermoWebRateLimitError, TermoWebAuthError):
                     samples = []
 
@@ -208,9 +313,9 @@ class TermoWebHeaterEnergyCoordinator(
                 }
             }
 
-            return result
-
         except TimeoutError as err:
             raise UpdateFailed("API timeout") from err
         except (ClientError, TermoWebRateLimitError, TermoWebAuthError) as err:
             raise UpdateFailed(f"API error: {err}") from err
+        else:
+            return result
