@@ -144,15 +144,6 @@ HTR_ENERGY_UPDATE_INTERVAL = __import__(
 ).HTR_ENERGY_UPDATE_INTERVAL
 
 
-@pytest.mark.parametrize("value", ["", "  ", "not-a-number"])
-def test_as_float_returns_none_for_invalid_strings(value: str) -> None:
-    assert coord_module._as_float(value) is None
-
-
-def test_as_float_returns_none_for_unhandled_types() -> None:
-    assert coord_module._as_float(object()) is None
-
-
 def test_power_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
@@ -499,6 +490,29 @@ def test_energy_samples_missing_fields() -> None:
     asyncio.run(_run())
 
 
+def test_energy_samples_invalid_strings() -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_htr_samples = AsyncMock(
+            return_value=[{"t": " ", "counter": "garbage"}]
+        )
+
+        hass = HomeAssistant()
+        coord = TermoWebHeaterEnergyCoordinator(
+            hass,
+            client,
+            "dev",
+            ["A"],  # type: ignore[arg-type]
+        )
+
+        await coord.async_refresh()
+        data = coord.data["dev"]["htr"]
+        assert data["energy"] == {}
+        assert data["power"] == {}
+
+    asyncio.run(_run())
+
+
 def test_update_interval_constant() -> None:
     hass = HomeAssistant()
     client = types.SimpleNamespace()
@@ -546,7 +560,7 @@ def test_heater_energy_client_error_update_failed(
         def _raise_client_error(_value: Any) -> float:
             raise ClientError("bad")
 
-        monkeypatch.setattr(coord_module, "_as_float", _raise_client_error)
+        monkeypatch.setattr(coord_module, "float_or_none", _raise_client_error)
 
         with pytest.raises(UpdateFailed, match="API error: bad"):
             await coord.async_refresh()

@@ -13,29 +13,12 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import TermoWebAuthError, TermoWebClient, TermoWebRateLimitError
 from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
-from .utils import extract_heater_addrs
+from .utils import extract_heater_addrs, float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 
 # How many heater settings to fetch per device per cycle (keep gentle)
 HTR_SETTINGS_PER_CYCLE = 1
-
-
-def _as_float(value: Any) -> float | None:
-    """Safely convert a value to float."""
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        value = value.strip()
-        if not value:
-            return None
-        try:
-            return float(value)
-        except ValueError:
-            return None
-    return None
-
-
 class TermoWebCoordinator(
     DataUpdateCoordinator[dict[str, dict[str, Any]]]
 ):  # dev_id -> per-device data
@@ -275,8 +258,8 @@ class TermoWebHeaterEnergyCoordinator(
                     continue
 
                 last = samples[-1]
-                counter = _as_float(last.get("counter"))
-                t = _as_float(last.get("t"))
+                counter = float_or_none(last.get("counter"))
+                t = float_or_none(last.get("t"))
                 if counter is None or t is None:
                     _LOGGER.debug(
                         "Latest sample missing 't' or 'counter' for device %s heater %s",
