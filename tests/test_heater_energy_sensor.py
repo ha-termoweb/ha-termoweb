@@ -243,9 +243,9 @@ def test_coordinator_and_sensors() -> None:
         await coord.async_refresh()
         await coord.async_refresh()
 
-        assert coord.data["1"]["htr"]["energy"]["A"] == 1.5
+        assert coord.data["1"]["htr"]["energy"]["A"] == pytest.approx(0.0015)
         power = coord.data["1"]["htr"]["power"]["A"]
-        assert power == pytest.approx(2000.0, rel=1e-3)
+        assert power == pytest.approx(2.0, rel=1e-3)
 
         energy_sensor = TermoWebHeaterEnergyTotal(
             coord, "entry", "1", "A", "Energy", "e1", "Heater"
@@ -262,7 +262,7 @@ def test_coordinator_and_sensors() -> None:
         assert energy_sensor.native_unit_of_measurement == "kWh"
 
         assert energy_sensor.native_value == pytest.approx(0.0015)
-        assert power_sensor.native_value == pytest.approx(2000.0, rel=1e-3)
+        assert power_sensor.native_value == pytest.approx(2.0, rel=1e-3)
 
         signal = signal_ws_data("entry")
         first_value: float = energy_sensor.native_value  # type: ignore[assignment]
@@ -275,7 +275,7 @@ def test_coordinator_and_sensors() -> None:
         energy_sensor.schedule_update_ha_state = MagicMock()
         power_sensor.schedule_update_ha_state = MagicMock()
 
-        coord.data["1"]["htr"]["energy"]["A"] = 2.0
+        coord.data["1"]["htr"]["energy"]["A"] = 0.002
         coord.data["1"]["htr"]["power"]["A"] = 123.0
         dispatcher_send(signal, {"dev_id": "1", "addr": "A"})
 
@@ -549,8 +549,8 @@ def test_total_energy_sensor() -> None:
         signal = signal_ws_data("entry")
         total_sensor.schedule_update_ha_state = MagicMock()
 
-        coord.data["1"]["htr"]["energy"]["A"] = 1.5
-        coord.data["1"]["htr"]["energy"]["B"] = 2.5
+        coord.data["1"]["htr"]["energy"]["A"] = 0.0015
+        coord.data["1"]["htr"]["energy"]["B"] = 0.0025
         coord.data["1"]["htr"]["energy"]["C"] = "bad"
         dispatcher_send(signal, {"dev_id": "1", "addr": "A"})
 

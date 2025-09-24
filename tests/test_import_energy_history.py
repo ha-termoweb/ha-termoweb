@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
-from datetime import datetime
+from datetime import datetime, timezone
 import importlib
 import importlib.util
 import itertools
@@ -10,12 +10,15 @@ import logging
 from pathlib import Path
 import sys
 import types
+from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 
-async def _load_module(monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False):
+async def _load_module(
+    monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False, load_coordinator: bool = False
+):
     package = "custom_components.termoweb"
 
     # Stub Home Assistant modules
@@ -159,6 +162,25 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False)
     sys.modules.setdefault("homeassistant.components", types.ModuleType("homeassistant.components"))
     sys.modules["homeassistant.components.climate"] = climate
 
+    sensor_comp = types.ModuleType("homeassistant.components.sensor")
+
+    class SensorEntity:  # pragma: no cover - minimal stub
+        pass
+
+    class SensorDeviceClass:  # pragma: no cover - minimal stub
+        ENERGY = "energy"
+        POWER = "power"
+        TEMPERATURE = "temperature"
+
+    class SensorStateClass:  # pragma: no cover - minimal stub
+        TOTAL_INCREASING = "total_increasing"
+        MEASUREMENT = "measurement"
+
+    sensor_comp.SensorEntity = SensorEntity
+    sensor_comp.SensorDeviceClass = SensorDeviceClass
+    sensor_comp.SensorStateClass = SensorStateClass
+    sys.modules["homeassistant.components.sensor"] = sensor_comp
+
     helpers_entity = types.ModuleType("homeassistant.helpers.entity")
 
     class DeviceInfo(dict):  # pragma: no cover - minimal stub
@@ -184,7 +206,37 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False)
         async def async_will_remove_from_hass(self) -> None:
             return
 
+    class DataUpdateCoordinator:  # pragma: no cover - minimal stub
+        def __init__(
+            self,
+            hass,
+            *,
+            logger: Any | None = None,
+            name: str | None = None,
+            update_interval: Any | None = None,
+        ) -> None:
+            self.hass = hass
+            self.logger = logger
+            self.name = name
+            self.update_interval = update_interval
+            self.data: Any = None
+
+        async def async_config_entry_first_refresh(self) -> None:
+            return
+
+        def async_add_listener(self, _listener) -> None:
+            return
+
+        @classmethod
+        def __class_getitem__(cls, _item):  # pragma: no cover - typing support
+            return cls
+
+    class UpdateFailed(Exception):  # pragma: no cover - minimal stub
+        pass
+
     helpers_update_coordinator.CoordinatorEntity = CoordinatorEntity
+    helpers_update_coordinator.DataUpdateCoordinator = DataUpdateCoordinator
+    helpers_update_coordinator.UpdateFailed = UpdateFailed
     sys.modules["homeassistant.helpers.update_coordinator"] = (
         helpers_update_coordinator
     )
@@ -221,6 +273,10 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False)
 
     last_stats = AsyncMock(return_value={})
     stats.async_get_last_statistics = last_stats
+    get_period = AsyncMock(return_value={})
+    stats.async_get_statistics_during_period = get_period
+    delete_stats = AsyncMock()
+    stats.async_delete_statistics = delete_stats
 
     if legacy:
         add_stats = Mock()
@@ -265,19 +321,34 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False)
     api_stub.TermoWebRateLimitError = TermoWebRateLimitError
     sys.modules[f"{package}.api"] = api_stub
 
-    coord_stub = types.ModuleType(f"{package}.coordinator")
-    class TermoWebCoordinator:  # pragma: no cover - placeholder
-        def __init__(self, hass, client, base_interval, dev_id, dev, nodes):
-            self.data = {}
+    if load_coordinator:
+        coord_path = (
+            Path(__file__).resolve().parents[1]
+            / "custom_components"
+            / "termoweb"
+            / "coordinator.py"
+        )
+        spec_coord = importlib.util.spec_from_file_location(
+            f"{package}.coordinator", coord_path
+        )
+        coord_module = importlib.util.module_from_spec(spec_coord)
+        sys.modules[f"{package}.coordinator"] = coord_module
+        spec_coord.loader.exec_module(coord_module)
+    else:
+        coord_stub = types.ModuleType(f"{package}.coordinator")
 
-        async def async_config_entry_first_refresh(self):
-            return
+        class TermoWebCoordinator:  # pragma: no cover - placeholder
+            def __init__(self, hass, client, base_interval, dev_id, dev, nodes):
+                self.data = {}
 
-        def async_add_listener(self, cb):
-            return
+            async def async_config_entry_first_refresh(self):
+                return
 
-    coord_stub.TermoWebCoordinator = TermoWebCoordinator
-    sys.modules[f"{package}.coordinator"] = coord_stub
+            def async_add_listener(self, cb):
+                return
+
+        coord_stub.TermoWebCoordinator = TermoWebCoordinator
+        sys.modules[f"{package}.coordinator"] = coord_stub
 
     ws_stub = types.ModuleType(f"{package}.ws_client_legacy")
     class TermoWebWSLegacyClient:  # pragma: no cover - placeholder
@@ -312,6 +383,8 @@ async def _load_module(monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False)
         import_stats,
         update_meta,
         last_stats,
+        get_period,
+        delete_stats,
         ConfigEntry,
         HomeAssistant,
         ent_reg,
@@ -328,6 +401,8 @@ def test_store_statistics_prefers_internal_import(
             import_stats,
             _update_meta,
             _last_stats,
+            _get_period,
+            _delete_stats,
             _ConfigEntry,
             HomeAssistant,
             _ent_reg,
@@ -357,6 +432,8 @@ def test_store_statistics_external_fallback(monkeypatch: pytest.MonkeyPatch) -> 
             import_stats,
             _update_meta,
             _last_stats,
+            _get_period,
+            _delete_stats,
             _ConfigEntry,
             HomeAssistant,
             _ent_reg,
@@ -402,6 +479,8 @@ def test_async_import_energy_history_missing_record(
             _import_stats,
             _update_meta,
             _last_stats,
+            _get_period,
+            _delete_stats,
             ConfigEntry,
             HomeAssistant,
             _ent_reg,
@@ -443,6 +522,8 @@ def test_async_import_energy_history_already_imported(
             _import_stats,
             _update_meta,
             _last_stats,
+            _get_period,
+            _delete_stats,
             ConfigEntry,
             HomeAssistant,
             _ent_reg,
@@ -496,6 +577,8 @@ def test_async_import_energy_history_waits_between_queries(
             _import_stats,
             _update_meta,
             _last_stats,
+            _get_period,
+            _delete_stats,
             ConfigEntry,
             HomeAssistant,
             _ent_reg,
@@ -555,14 +638,12 @@ def test_async_import_energy_history_waits_between_queries(
         monkeypatch.setattr(mod, "asyncio", AsyncioProxy())
 
         fake_now = 3 * 86_400
-        monkeypatch.setattr(
-            mod,
-            "datetime",
-            types.SimpleNamespace(
-                now=lambda tz=None: datetime.fromtimestamp(fake_now, tz),
-                fromtimestamp=datetime.fromtimestamp,
-            ),
-        )
+        class FakeDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return super().fromtimestamp(fake_now, tz)
+
+        monkeypatch.setattr(mod, "datetime", FakeDateTime)
 
         await mod._async_import_energy_history(hass, entry)
 
@@ -583,6 +664,8 @@ def test_async_import_energy_history_skips_invalid_samples(
             _import_stats,
             _update_meta,
             _last_stats,
+            _get_period,
+            _delete_stats,
             ConfigEntry,
             HomeAssistant,
             ent_reg,
@@ -647,14 +730,12 @@ def test_async_import_energy_history_skips_invalid_samples(
             types.SimpleNamespace(monotonic=lambda: 100.0, time=lambda: 5 * 86_400),
         )
         fake_now = 5 * 86_400
-        monkeypatch.setattr(
-            mod,
-            "datetime",
-            types.SimpleNamespace(
-                now=lambda tz=None: datetime.fromtimestamp(fake_now, tz),
-                fromtimestamp=datetime.fromtimestamp,
-            ),
-        )
+        class FakeDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return super().fromtimestamp(fake_now, tz)
+
+        monkeypatch.setattr(mod, "datetime", FakeDateTime)
 
         await mod._async_import_energy_history(hass, entry)
 
@@ -668,9 +749,11 @@ def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
         (
             mod,
             const,
-            import_stats,
-            update_meta,
+            _import_stats,
+            _update_meta,
             last_stats,
+            get_period,
+            delete_stats,
             ConfigEntry,
             HomeAssistant,
             ent_reg,
@@ -711,14 +794,12 @@ def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
                 time=lambda: fake_now, monotonic=lambda: next(monotonic_counter)
             ),
         )
-        monkeypatch.setattr(
-            mod,
-            "datetime",
-            types.SimpleNamespace(
-                now=lambda tz=None: datetime.fromtimestamp(fake_now, tz),
-                fromtimestamp=datetime.fromtimestamp,
-            ),
-        )
+        class FakeDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return super().fromtimestamp(fake_now, tz)
+
+        monkeypatch.setattr(mod, "datetime", FakeDateTime)
 
         captured: dict = {}
         monkeypatch.setattr(
@@ -735,10 +816,19 @@ def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
         assert first_call == ("dev", "A", 259_199, 345_599)
         assert second_call == ("dev", "A", 172_799, 259_199)
 
+        get_period.assert_awaited_once()
+        delete_stats.assert_not_awaited()
         last_stats.assert_called_once()
         assert captured["meta"]["statistic_id"] == "sensor.dev_A_energy"
         stats_list = captured["stats"]
-        assert [s["sum"] for s in stats_list] == [pytest.approx(0.001), pytest.approx(0.002)]
+        assert [s["sum"] for s in stats_list] == [
+            pytest.approx(0.001),
+            pytest.approx(0.002),
+        ]
+        assert [s["state"] for s in stats_list] == [
+            pytest.approx(0.002),
+            pytest.approx(0.003),
+        ]
         assert entry.options[mod.OPTION_ENERGY_HISTORY_IMPORTED] is True
         assert entry.options[mod.OPTION_ENERGY_HISTORY_PROGRESS] == {"A": 172_799}
         assert entry.options["max_history_retrieved"] == 2
@@ -756,6 +846,8 @@ def test_import_energy_history_with_existing_stats(
             import_stats,
             update_meta,
             last_stats,
+            get_period,
+            delete_stats,
             ConfigEntry,
             HomeAssistant,
             ent_reg,
@@ -787,8 +879,6 @@ def test_import_energy_history_with_existing_stats(
         uid = f"{const.DOMAIN}:dev:htr:A:energy"
         ent_reg.add("sensor.dev_A_energy", "sensor", const.DOMAIN, uid, "A energy")
 
-        last_stats.return_value = {"sensor.dev_A_energy": [{"sum": 1.0}]}
-
         fake_now = 4 * 86_400
         monotonic_counter = itertools.count(start=1, step=2)
         monkeypatch.setattr(
@@ -798,14 +888,19 @@ def test_import_energy_history_with_existing_stats(
                 time=lambda: fake_now, monotonic=lambda: next(monotonic_counter)
             ),
         )
-        monkeypatch.setattr(
-            mod,
-            "datetime",
-            types.SimpleNamespace(
-                now=lambda tz=None: datetime.fromtimestamp(fake_now, tz),
-                fromtimestamp=datetime.fromtimestamp,
-            ),
-        )
+        class FakeDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return super().fromtimestamp(fake_now, tz)
+
+        monkeypatch.setattr(mod, "datetime", FakeDateTime)
+
+        start_prev = FakeDateTime.fromtimestamp(86_400, timezone.utc)
+        get_period.return_value = {
+            "sensor.dev_A_energy": [
+                {"start": start_prev, "sum": 1.0, "state": 0.0},
+            ]
+        }
 
         captured: dict = {}
         monkeypatch.setattr(
@@ -816,12 +911,118 @@ def test_import_energy_history_with_existing_stats(
 
         await mod._async_import_energy_history(hass, entry)
 
-        last_stats.assert_called_once()
+        get_period.assert_awaited_once()
+        delete_stats.assert_not_awaited()
+        last_stats.assert_not_called()
         stats_list = captured["stats"]
         assert [s["sum"] for s in stats_list] == [
             pytest.approx(1.001),
             pytest.approx(1.002),
+            pytest.approx(1.003),
         ]
+        assert [s["state"] for s in stats_list] == [
+            pytest.approx(0.001),
+            pytest.approx(0.002),
+            pytest.approx(0.003),
+        ]
+
+    asyncio.run(_run())
+
+
+def test_import_energy_history_clears_overlap(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        (
+            mod,
+            const,
+            import_stats,
+            update_meta,
+            last_stats,
+            get_period,
+            delete_stats,
+            ConfigEntry,
+            HomeAssistant,
+            ent_reg,
+        ) = await _load_module(monkeypatch)
+
+        hass = HomeAssistant()
+        hass.data = {const.DOMAIN: {}}
+        hass.config_entries = types.SimpleNamespace(
+            async_update_entry=lambda entry, *, options: entry.options.update(options)
+        )
+
+        entry = ConfigEntry("1", options={"max_history_retrieved": 2})
+        client = types.SimpleNamespace()
+        client.get_htr_samples = AsyncMock(
+            side_effect=[
+                [
+                    {"t": 345_600, "counter": "3.0"},
+                    {"t": 259_200, "counter": "2.0"},
+                ],
+                [{"t": 172_800, "counter": "1.0"}],
+            ]
+        )
+        hass.data[const.DOMAIN][entry.entry_id] = {
+            "client": client,
+            "dev_id": "dev",
+            "htr_addrs": ["A"],
+            "config_entry": entry,
+        }
+        uid = f"{const.DOMAIN}:dev:htr:A:energy"
+        ent_reg.add("sensor.dev_A_energy", "sensor", const.DOMAIN, uid, "A energy")
+
+        fake_now = 4 * 86_400
+        monkeypatch.setattr(
+            mod,
+            "time",
+            types.SimpleNamespace(time=lambda: fake_now, monotonic=lambda: fake_now),
+        )
+        class FakeDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return super().fromtimestamp(fake_now, tz)
+
+        monkeypatch.setattr(mod, "datetime", FakeDateTime)
+
+        before_start = FakeDateTime.fromtimestamp(86_400, timezone.utc)
+        overlap_start = FakeDateTime.fromtimestamp(259_200, timezone.utc)
+        get_period.return_value = {
+            "sensor.dev_A_energy": [
+                {"start": before_start, "sum": 0.5, "state": 0.0},
+                {"start": overlap_start, "sum": 0.6, "state": 0.002},
+            ]
+        }
+
+        captured: dict = {}
+        monkeypatch.setattr(
+            mod,
+            "_store_statistics",
+            lambda _h, m, s: captured.update(meta=m, stats=s),
+        )
+
+        await mod._async_import_energy_history(hass, entry)
+
+        get_period.assert_awaited_once()
+        last_stats.assert_not_called()
+        delete_stats.assert_awaited_once()
+        del_args, del_kwargs = delete_stats.await_args
+        assert del_args[0] is hass
+        assert del_args[1] == ["sensor.dev_A_energy"]
+        assert "start_time" in del_kwargs and "end_time" in del_kwargs
+        assert del_kwargs["start_time"] <= overlap_start <= del_kwargs["end_time"]
+
+        stats_list = captured["stats"]
+        assert [s["sum"] for s in stats_list] == [
+            pytest.approx(0.501),
+            pytest.approx(0.502),
+            pytest.approx(0.503),
+        ]
+        assert [s["state"] for s in stats_list] == [
+            pytest.approx(0.001),
+            pytest.approx(0.002),
+            pytest.approx(0.003),
+        ]
+        starts = [s["start"] for s in stats_list]
+        assert len(starts) == len(set(starts))
 
     asyncio.run(_run())
 
@@ -834,6 +1035,8 @@ def test_import_energy_history_legacy(monkeypatch: pytest.MonkeyPatch) -> None:
             add_stats,
             _,
             last_stats,
+            get_period,
+            delete_stats,
             ConfigEntry,
             HomeAssistant,
             ent_reg,
@@ -881,12 +1084,15 @@ def test_import_energy_history_legacy(monkeypatch: pytest.MonkeyPatch) -> None:
 
         await mod._async_import_energy_history(hass, entry)
 
+        get_period.assert_awaited_once()
+        delete_stats.assert_not_awaited()
         last_stats.assert_called_once()
         meta = captured["meta"]
         stats = captured["stats"]
         assert meta["statistic_id"] == "sensor.dev_A_energy"
         assert meta["source"] == "recorder"
         assert stats[0]["sum"] == pytest.approx(0.001)
+        assert stats[0]["state"] == pytest.approx(0.002)
 
     asyncio.run(_run())
 
@@ -899,6 +1105,8 @@ def test_import_energy_history_reset_and_subset(monkeypatch: pytest.MonkeyPatch)
             import_stats,
             update_meta,
             last_stats,
+            get_period,
+            delete_stats,
             ConfigEntry,
             HomeAssistant,
             ent_reg,
@@ -942,14 +1150,12 @@ def test_import_energy_history_reset_and_subset(monkeypatch: pytest.MonkeyPatch)
                 time=lambda: fake_now, monotonic=lambda: next(monotonic_counter)
             ),
         )
-        monkeypatch.setattr(
-            mod,
-            "datetime",
-            types.SimpleNamespace(
-                now=lambda tz=None: datetime.fromtimestamp(fake_now, tz),
-                fromtimestamp=datetime.fromtimestamp,
-            ),
-        )
+        class FakeDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return super().fromtimestamp(fake_now, tz)
+
+        monkeypatch.setattr(mod, "datetime", FakeDateTime)
 
         await mod._async_import_energy_history(hass, entry, ["A"], reset_progress=True)
 
@@ -970,6 +1176,8 @@ def test_import_energy_history_reset_all_progress(monkeypatch: pytest.MonkeyPatc
             _import_stats,
             _update_meta,
             last_stats,
+            get_period,
+            delete_stats,
             ConfigEntry,
             HomeAssistant,
             ent_reg,
@@ -1047,14 +1255,12 @@ def test_import_energy_history_reset_all_progress(monkeypatch: pytest.MonkeyPatc
                 time=lambda: fake_now, monotonic=lambda: next(monotonic_counter)
             ),
         )
-        monkeypatch.setattr(
-            mod,
-            "datetime",
-            types.SimpleNamespace(
-                now=lambda tz=None: datetime.fromtimestamp(fake_now, tz),
-                fromtimestamp=datetime.fromtimestamp,
-            ),
-        )
+        class FakeDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return super().fromtimestamp(fake_now, tz)
+
+        monkeypatch.setattr(mod, "datetime", FakeDateTime)
 
         await mod._async_import_energy_history(
             hass,
@@ -1091,6 +1297,86 @@ def test_import_energy_history_reset_all_progress(monkeypatch: pytest.MonkeyPatc
     asyncio.run(_run())
 
 
+def test_energy_polling_matches_import(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        (
+            _mod,
+            _const,
+            _import_stats,
+            _update_meta,
+            _last_stats,
+            _get_period,
+            _delete_stats,
+            _ConfigEntry,
+            HomeAssistant,
+            _ent_reg,
+        ) = await _load_module(monkeypatch, load_coordinator=True)
+
+        coord_mod = importlib.import_module("custom_components.termoweb.coordinator")
+        sensor_mod = importlib.import_module("custom_components.termoweb.sensor")
+
+        hass = HomeAssistant()
+        client = types.SimpleNamespace(
+            get_htr_samples=AsyncMock(
+                side_effect=[
+                    [{"t": 9_940, "counter": "1000"}],
+                    [{"t": 13_540, "counter": "1300"}],
+                ]
+            )
+        )
+
+        coordinator = coord_mod.TermoWebHeaterEnergyCoordinator(
+            hass,
+            client,
+            "dev",
+            ["A"],
+        )
+
+        times = iter([10_000.0, 13_600.0])
+        monkeypatch.setattr(
+            coord_mod,
+            "time",
+            types.SimpleNamespace(
+                time=lambda: next(times, 13_600.0),
+                monotonic=lambda: 0.0,
+            ),
+        )
+
+        data1 = await coordinator._async_update_data()
+        assert data1["dev"]["htr"]["energy"]["A"] == pytest.approx(1.0)
+        assert data1["dev"]["htr"]["power"] == {}
+
+        data2 = await coordinator._async_update_data()
+        assert data2["dev"]["htr"]["energy"]["A"] == pytest.approx(1.3)
+        assert data2["dev"]["htr"]["power"]["A"] == pytest.approx(300.0)
+
+        coordinator.data = data2
+
+        energy_entity = sensor_mod.TermoWebHeaterEnergyTotal(
+            coordinator,
+            "entry",
+            "dev",
+            "A",
+            "Heater A",
+            "uid",
+            "Device A",
+        )
+        total_entity = sensor_mod.TermoWebTotalEnergy(
+            coordinator,
+            "entry",
+            "dev",
+            "Total",
+            "total_uid",
+        )
+
+        assert energy_entity.native_value == pytest.approx(1.3)
+        assert total_entity.native_value == pytest.approx(1.3)
+
+        await asyncio.sleep(0)
+
+    asyncio.run(_run())
+
+
 def test_setup_defers_import_until_started(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         (
@@ -1099,6 +1385,8 @@ def test_setup_defers_import_until_started(monkeypatch: pytest.MonkeyPatch) -> N
             import_stats,
             update_meta,
             last_stats,
+            get_period,
+            delete_stats,
             ConfigEntry,
             HomeAssistant,
             _,
@@ -1174,6 +1462,8 @@ def test_service_dispatches_import_tasks(monkeypatch: pytest.MonkeyPatch) -> Non
             _import_stats,
             _update_meta,
             _last_stats,
+            _get_period,
+            _delete_stats,
             ConfigEntry,
             HomeAssistant,
             ent_reg,
@@ -1295,6 +1585,8 @@ def test_refresh_fallback_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
             _import_stats,
             _update_meta,
             _last_stats,
+            _get_period,
+            _delete_stats,
             ConfigEntry,
             HomeAssistant,
             _ent_reg,
@@ -1324,6 +1616,8 @@ def test_async_unload_entry_cleans_up(monkeypatch: pytest.MonkeyPatch) -> None:
             _import_stats,
             _update_meta,
             _last_stats,
+            _get_period,
+            _delete_stats,
             ConfigEntry,
             HomeAssistant,
             _ent_reg,
