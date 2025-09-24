@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -18,7 +19,66 @@ from .const import DOMAIN, signal_ws_data
 from .coordinator import TermoWebHeaterEnergyCoordinator
 from .utils import float_or_none
 
+_WH_TO_KWH = 1 / 1000.0
+
 _LOGGER = logging.getLogger(__name__)
+
+
+def _looks_like_integer_string(value: str) -> bool:
+    """Return True if the string looks like an integer number."""
+
+    stripped = value.strip()
+    if not stripped:
+        return False
+    if stripped[0] in "+-":
+        stripped = stripped[1:]
+    return stripped.isdigit()
+
+
+def _normalise_energy_value(coordinator: Any, raw: Any) -> float | None:
+    """Try to coerce a raw energy reading into kWh."""
+
+    if isinstance(raw, bool):
+        return None
+
+    try:
+        numeric = float(raw)
+    except (TypeError, ValueError):
+        return None
+
+    if not math.isfinite(numeric):
+        return None
+
+    scale_attr = getattr(coordinator, "_termoweb_energy_scale", None)
+    scale: float | None = None
+    if isinstance(scale_attr, (int, float)):
+        if math.isfinite(scale_attr) and scale_attr > 0:
+            scale = float(scale_attr)
+    elif isinstance(scale_attr, str):
+        lowered = scale_attr.strip().lower()
+        if lowered in {"kwh", "kilowatthour", "kilowatt-hour"}:
+            scale = 1.0
+        elif lowered in {"wh", "watt-hour", "watthour"}:
+            scale = _WH_TO_KWH
+        else:
+            try:
+                parsed = float(lowered)
+            except ValueError:
+                parsed = None
+            if parsed and math.isfinite(parsed) and parsed > 0:
+                scale = parsed
+
+    if scale is None:
+        if isinstance(coordinator, TermoWebHeaterEnergyCoordinator):
+            scale = 1.0
+        elif isinstance(raw, int):
+            scale = _WH_TO_KWH
+        elif isinstance(raw, str) and _looks_like_integer_string(raw):
+            scale = _WH_TO_KWH
+        else:
+            scale = 1.0
+
+    return numeric * scale
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -249,10 +309,7 @@ class TermoWebHeaterEnergyTotal(CoordinatorEntity, SensorEntity):
         val = energy.get(self._addr)
         if val is None:
             return None
-        try:
-            return float(val)
-        except (TypeError, ValueError):
-            return None
+        return _normalise_energy_value(self.coordinator, val)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -384,11 +441,11 @@ class TermoWebTotalEnergy(CoordinatorEntity, SensorEntity):
         total = 0.0
         found = False
         for val in energy.values():
-            try:
-                total += float(val)
-                found = True
-            except (TypeError, ValueError):
+            normalised = _normalise_energy_value(self.coordinator, val)
+            if normalised is None:
                 continue
+            total += normalised
+            found = True
         if not found:
             return None
         return total

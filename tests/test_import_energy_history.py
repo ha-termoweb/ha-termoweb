@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import importlib
 import importlib.util
 import itertools
@@ -1093,6 +1093,113 @@ def test_import_energy_history_legacy(monkeypatch: pytest.MonkeyPatch) -> None:
         assert meta["source"] == "recorder"
         assert stats[0]["sum"] == pytest.approx(0.001)
         assert stats[0]["state"] == pytest.approx(0.002)
+
+    asyncio.run(_run())
+
+
+def test_import_history_uses_last_stats_and_clears_overlap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        (
+            mod,
+            const,
+            import_stats,
+            update_meta,
+            _last_stats,
+            _get_period,
+            _delete_stats,
+            ConfigEntry,
+            HomeAssistant,
+            ent_reg,
+        ) = await _load_module(monkeypatch)
+
+        hass = HomeAssistant()
+        hass.data = {const.DOMAIN: {}}
+        hass.config_entries = types.SimpleNamespace(
+            async_update_entry=lambda entry, *, options: entry.options.update(options)
+        )
+
+        entry = ConfigEntry(
+            "import", options={mod.OPTION_MAX_HISTORY_RETRIEVED: 1}
+        )
+
+        client = types.SimpleNamespace()
+        sample_list = [
+            {"t": 345_600, "counter": "1000"},
+            {"t": 349_200, "counter": "1250"},
+            {"t": 352_800, "counter": "1500"},
+        ]
+        client.get_htr_samples = AsyncMock(return_value=sample_list)
+
+        hass.data[const.DOMAIN][entry.entry_id] = {
+            "client": client,
+            "dev_id": "dev",
+            "htr_addrs": ["A"],
+            "config_entry": entry,
+        }
+
+        uid = f"{const.DOMAIN}:dev:htr:A:energy"
+        ent_reg.add("sensor.dev_A_energy", "sensor", const.DOMAIN, uid, "A energy")
+
+        fake_now = 5 * 86_400
+
+        class FakeDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return super().fromtimestamp(fake_now, tz)
+
+        monkeypatch.setattr(mod, "datetime", FakeDateTime)
+        monkeypatch.setattr(
+            mod,
+            "time",
+            types.SimpleNamespace(time=lambda: fake_now, monotonic=lambda: 10.0),
+        )
+
+        stats_module = sys.modules["homeassistant.components.recorder.statistics"]
+        stats_module.async_get_statistics_during_period = None
+
+        import_start_dt = datetime.fromtimestamp(
+            sample_list[0]["t"], timezone.utc
+        ).replace(minute=0, second=0, microsecond=0)
+        before_start = import_start_dt - timedelta(hours=1)
+
+        first_last = {
+            "sensor.dev_A_energy": [
+                {"start": before_start, "state": "1.5", "sum": "3.0"}
+            ]
+        }
+        second_last = {"sensor.dev_A_energy": [{"start": import_start_dt}]}
+
+        stats_module.async_get_last_statistics = AsyncMock(
+            side_effect=[first_last, second_last]
+        )
+
+        stats_module.async_delete_statistics = AsyncMock(
+            side_effect=[TypeError(), None]
+        )
+
+        captured: dict[str, Any] = {}
+
+        def capture_stats(_hass, metadata, stats):
+            captured.update(meta=metadata, stats=stats)
+
+        monkeypatch.setattr(mod, "_store_statistics", capture_stats)
+
+        await mod._async_import_energy_history(hass, entry)
+
+        assert stats_module.async_get_last_statistics.await_count == 2
+        assert stats_module.async_delete_statistics.await_count == 2
+        first_call, second_call = stats_module.async_delete_statistics.await_args_list
+        assert first_call.kwargs["start_time"] == import_start_dt
+        assert "end_time" in first_call.kwargs
+        assert second_call.args == (hass, ["sensor.dev_A_energy"])
+
+        meta = captured["meta"]
+        stats = captured["stats"]
+        assert meta["statistic_id"] == "sensor.dev_A_energy"
+        assert stats
+        assert stats[0]["sum"] >= 0.0
 
     asyncio.run(_run())
 
