@@ -367,22 +367,6 @@ def test_get_version_returns_unknown_when_missing(
     result = asyncio.run(config_flow._get_version(hass))
 
     assert result == "unknown"
-
-
-def test_poll_schema_enforces_minimum() -> None:
-    below_min = config_flow.MIN_POLL_INTERVAL - 5
-    schema = config_flow._poll_schema(below_min)
-    default = _schema_default(schema, "poll_interval")
-    assert default == config_flow.MIN_POLL_INTERVAL
-
-    with pytest.raises(ValueError):
-        schema({"poll_interval": config_flow.MIN_POLL_INTERVAL - 1})
-
-    assert schema({"poll_interval": config_flow.MIN_POLL_INTERVAL + 10})[
-        "poll_interval"
-    ] == config_flow.MIN_POLL_INTERVAL + 10
-
-
 def test_validate_login_uses_brand_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

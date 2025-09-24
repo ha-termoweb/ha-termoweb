@@ -37,17 +37,6 @@ async def _get_version(hass: HomeAssistant) -> str:
     return integ.version or "unknown"
 
 
-def _poll_schema(default_poll: int) -> vol.Schema:
-    return vol.Schema(
-        {
-            vol.Required(
-                "poll_interval",
-                default=max(MIN_POLL_INTERVAL, int(default_poll)),
-            ): vol.All(int, vol.Range(min=MIN_POLL_INTERVAL, max=MAX_POLL_INTERVAL)),
-        }
-    )
-
-
 def _login_schema(
     default_user: str = "",
     default_poll: int = DEFAULT_POLL_INTERVAL,
