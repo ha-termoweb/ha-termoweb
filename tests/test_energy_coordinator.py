@@ -313,6 +313,48 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
     asyncio.run(_run())
 
 
+def test_refresh_heater_populates_missing_metadata() -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_htr_settings = AsyncMock(return_value={"mode": "heat"})
+
+        hass = HomeAssistant()
+        nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
+        coord = TermoWebCoordinator(
+            hass,
+            client,
+            45,
+            "dev",
+            {"name": " Device "},
+            nodes,  # type: ignore[arg-type]
+        )
+
+        updates: list[dict[str, dict[str, Any]]] = []
+
+        def _set_updated_data(self, data: dict[str, dict[str, Any]]) -> None:
+            updates.append(data)
+            self.data = data
+
+        coord.async_set_updated_data = types.MethodType(  # type: ignore[attr-defined]
+            _set_updated_data,
+            coord,
+        )
+
+        coord.data = {"dev": {"htr": {"settings": {}}, "connected": False}}
+
+        await coord.async_refresh_heater("A")
+
+        assert updates, "Expected async_set_updated_data to be called"
+        result = updates[-1]["dev"]
+        assert result["name"] == "Device"
+        assert result["raw"] == {"name": " Device "}
+        assert result["nodes"] == nodes
+        assert result["connected"] is False
+        assert result["htr"]["settings"]["A"] == {"mode": "heat"}
+
+    asyncio.run(_run())
+
+
 def test_refresh_heater_handles_errors(caplog: pytest.LogCaptureFixture) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
