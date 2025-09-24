@@ -2,64 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import copy
-import importlib.util
-from pathlib import Path
-import sys
 import logging
 import time
-import types
 from typing import Any, Callable
 
+import aiohttp
 import pytest
 
-# Provide a minimal aiohttp stub for the module import
-aiohttp_module = sys.modules.setdefault("aiohttp", types.ModuleType("aiohttp"))
+import custom_components.termoweb.api as api
 
-
-class ClientSession:  # pragma: no cover - simple placeholder
-    pass
-
-
-class ClientTimeout:  # pragma: no cover - simple placeholder
-    def __init__(self, total: int | None = None) -> None:
-        self.total = total
-
-
-class ClientResponseError(Exception):  # pragma: no cover - simple placeholder
-    def __init__(
-        self, request_info, history, *, status=None, message=None, headers=None
-    ) -> None:
-        super().__init__(message)
-        self.status = status
-        self.headers = headers
-        self.request_info = request_info
-        self.history = history
-
-
-aiohttp_module.ClientSession = ClientSession
-aiohttp_module.ClientTimeout = ClientTimeout
-aiohttp_module.ClientResponseError = ClientResponseError
-aiohttp_module.ClientError = Exception
-
-aiohttp = aiohttp_module
-
-API_PATH = (
-    Path(__file__).resolve().parents[1] / "custom_components" / "termoweb" / "api.py"
-)
-
-package_name = "custom_components.termoweb"
-module_name = f"{package_name}.api"
-
-sys.modules.setdefault("custom_components", types.ModuleType("custom_components"))
-termoweb_pkg = types.ModuleType(package_name)
-termoweb_pkg.__path__ = [str(API_PATH.parent)]
-sys.modules[package_name] = termoweb_pkg
-
-spec = importlib.util.spec_from_file_location(module_name, API_PATH)
-api = importlib.util.module_from_spec(spec)
-assert spec.loader is not None
-sys.modules[module_name] = api
-spec.loader.exec_module(api)
 TermoWebClient = api.TermoWebClient
 
 

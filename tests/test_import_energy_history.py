@@ -4,10 +4,8 @@ import asyncio
 import copy
 from datetime import datetime, timezone, timedelta
 import importlib
-import importlib.util
 import itertools
 import logging
-from pathlib import Path
 import sys
 import types
 from typing import Any
@@ -15,68 +13,42 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from conftest import _install_stubs
+
+_install_stubs()
+
 
 async def _load_module(
     monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False, load_coordinator: bool = False
 ):
-    package = "custom_components.termoweb"
+    _install_stubs()
 
-    # Stub Home Assistant modules
-    ha_core = types.ModuleType("homeassistant.core")
+    stats_module = types.ModuleType("homeassistant.components.recorder.statistics")
+    last_stats = AsyncMock(return_value={})
+    get_period = AsyncMock(return_value={})
+    delete_stats = AsyncMock()
+    stats_module.async_get_last_statistics = last_stats
+    stats_module.async_get_statistics_during_period = get_period
+    stats_module.async_delete_statistics = delete_stats
 
-    class HomeAssistant:  # pragma: no cover - minimal stub
-        def __init__(self) -> None:
-            self.data = {}
+    if legacy:
+        import_stats = Mock()
+        update_meta = None
+        stats_module.async_add_external_statistics = import_stats
+    else:
+        import_stats = Mock()
+        update_meta = Mock()
+        stats_module.async_import_statistics = import_stats
+        stats_module.async_update_statistics_metadata = update_meta
+        stats_module.async_add_external_statistics = Mock()
 
-    def callback(func):  # pragma: no cover - minimal stub
-        return func
+    sys.modules.setdefault(
+        "homeassistant.components.recorder",
+        types.ModuleType("homeassistant.components.recorder"),
+    )
+    sys.modules["homeassistant.components.recorder.statistics"] = stats_module
 
-    class ServiceCall:  # pragma: no cover - minimal stub
-        def __init__(self, data=None):
-            self.data = data or {}
-
-    ha_core.HomeAssistant = HomeAssistant
-    ha_core.callback = callback
-    ha_core.ServiceCall = ServiceCall
-    sys.modules["homeassistant"] = types.ModuleType("homeassistant")
-    sys.modules["homeassistant.core"] = ha_core
-
-    ha_cfg = types.ModuleType("homeassistant.config_entries")
-    class ConfigEntry:  # pragma: no cover - minimal stub
-        def __init__(self, entry_id, data=None, options=None):
-            self.entry_id = entry_id
-            self.data = data or {}
-            self.options = options or {}
-    ha_cfg.ConfigEntry = ConfigEntry
-    sys.modules["homeassistant.config_entries"] = ha_cfg
-
-    ha_const = types.ModuleType("homeassistant.const")
-    ha_const.EVENT_HOMEASSISTANT_STARTED = "homeassistant_started"
-
-    class UnitOfTemperature:  # pragma: no cover - minimal stub
-        CELSIUS = "°C"
-
-    ha_const.UnitOfTemperature = UnitOfTemperature
-    ha_const.ATTR_TEMPERATURE = "temperature"
-    sys.modules["homeassistant.const"] = ha_const
-
-    ha_exc = types.ModuleType("homeassistant.exceptions")
-    class ConfigEntryAuthFailed(Exception):
-        pass
-
-    class ConfigEntryNotReady(Exception):
-        pass
-
-    ha_exc.ConfigEntryAuthFailed = ConfigEntryAuthFailed
-    ha_exc.ConfigEntryNotReady = ConfigEntryNotReady
-    sys.modules["homeassistant.exceptions"] = ha_exc
-
-    helpers = types.ModuleType("homeassistant.helpers")
-    aiohttp_client = types.ModuleType("homeassistant.helpers.aiohttp_client")
-    aiohttp_client.async_get_clientsession = lambda hass: None
-    dispatcher = types.ModuleType("homeassistant.helpers.dispatcher")
-    dispatcher.async_dispatcher_connect = lambda hass, sig, cb: (lambda: None)
-    entity_registry = types.ModuleType("homeassistant.helpers.entity_registry")
+    entity_registry_module = importlib.import_module("homeassistant.helpers.entity_registry")
 
     class EntityEntry:
         def __init__(
@@ -126,256 +98,70 @@ async def _load_module(
             return self._by_entity.get(entity_id)
 
     ent_reg = EntityRegistry()
+    entity_registry_module.EntityEntry = EntityEntry
+    entity_registry_module.EntityRegistry = EntityRegistry
+    entity_registry_module.async_get = lambda hass: ent_reg
+    entity_registry_module.async_get_registry = entity_registry_module.async_get
 
-    entity_registry.async_get = lambda hass: ent_reg
-    helpers.aiohttp_client = aiohttp_client
-    helpers.entity_registry = entity_registry
-    sys.modules["homeassistant.helpers"] = helpers
-    sys.modules["homeassistant.helpers.aiohttp_client"] = aiohttp_client
-    sys.modules["homeassistant.helpers.dispatcher"] = dispatcher
-    sys.modules["homeassistant.helpers.entity_registry"] = entity_registry
+    helpers_module = importlib.import_module("homeassistant.helpers")
+    helpers_module.entity_registry = entity_registry_module
 
-    climate = types.ModuleType("homeassistant.components.climate")
+    api_module = importlib.import_module("custom_components.termoweb.api")
 
-    class ClimateEntity:  # pragma: no cover - minimal stub
-        async def async_will_remove_from_hass(self) -> None:
-            return
+    class _FakeTermoWebClient:
+        def __init__(self, session, username, password, **kwargs: Any) -> None:
+            self._session = session
+            self._username = username
+            self._password = password
+            self._api_base = kwargs.get("api_base")
+            self._basic_auth_b64 = kwargs.get("basic_auth_b64")
 
-    class HVACMode:  # pragma: no cover - minimal stub
-        HEAT = "heat"
-        OFF = "off"
-        AUTO = "auto"
+        async def list_devices(self) -> list[dict[str, Any]]:
+            return [{"dev_id": "dev", "name": "Device"}]
 
-    class HVACAction:  # pragma: no cover - minimal stub
-        HEATING = "heating"
-        IDLE = "idle"
-        OFF = "off"
-
-    class ClimateEntityFeature:  # pragma: no cover - minimal stub
-        TARGET_TEMPERATURE = 1
-        PRESET_MODE = 2
-
-    climate.ClimateEntity = ClimateEntity
-    climate.HVACMode = HVACMode
-    climate.HVACAction = HVACAction
-    climate.ClimateEntityFeature = ClimateEntityFeature
-    sys.modules.setdefault("homeassistant.components", types.ModuleType("homeassistant.components"))
-    sys.modules["homeassistant.components.climate"] = climate
-
-    sensor_comp = types.ModuleType("homeassistant.components.sensor")
-
-    class SensorEntity:  # pragma: no cover - minimal stub
-        pass
-
-    class SensorDeviceClass:  # pragma: no cover - minimal stub
-        ENERGY = "energy"
-        POWER = "power"
-        TEMPERATURE = "temperature"
-
-    class SensorStateClass:  # pragma: no cover - minimal stub
-        TOTAL_INCREASING = "total_increasing"
-        MEASUREMENT = "measurement"
-
-    sensor_comp.SensorEntity = SensorEntity
-    sensor_comp.SensorDeviceClass = SensorDeviceClass
-    sensor_comp.SensorStateClass = SensorStateClass
-    sys.modules["homeassistant.components.sensor"] = sensor_comp
-
-    helpers_entity = types.ModuleType("homeassistant.helpers.entity")
-
-    class DeviceInfo(dict):  # pragma: no cover - minimal stub
-        pass
-
-    helpers_entity.DeviceInfo = DeviceInfo
-    sys.modules["homeassistant.helpers.entity"] = helpers_entity
-
-    entity_platform = types.ModuleType("homeassistant.helpers.entity_platform")
-    entity_platform.async_get_current_platform = lambda: types.SimpleNamespace(
-        async_register_entity_service=lambda *args, **kwargs: None
-    )
-    sys.modules["homeassistant.helpers.entity_platform"] = entity_platform
-
-    helpers_update_coordinator = types.ModuleType(
-        "homeassistant.helpers.update_coordinator"
-    )
-
-    class CoordinatorEntity:  # pragma: no cover - minimal stub
-        def __init__(self, coordinator):
-            self.coordinator = coordinator
-
-        async def async_will_remove_from_hass(self) -> None:
-            return
-
-    class DataUpdateCoordinator:  # pragma: no cover - minimal stub
-        def __init__(
-            self,
-            hass,
-            *,
-            logger: Any | None = None,
-            name: str | None = None,
-            update_interval: Any | None = None,
-        ) -> None:
-            self.hass = hass
-            self.logger = logger
-            self.name = name
-            self.update_interval = update_interval
-            self.data: Any = None
-
-        async def async_config_entry_first_refresh(self) -> None:
-            return
-
-        def async_add_listener(self, _listener) -> None:
-            return
-
-        @classmethod
-        def __class_getitem__(cls, _item):  # pragma: no cover - typing support
-            return cls
-
-    class UpdateFailed(Exception):  # pragma: no cover - minimal stub
-        pass
-
-    helpers_update_coordinator.CoordinatorEntity = CoordinatorEntity
-    helpers_update_coordinator.DataUpdateCoordinator = DataUpdateCoordinator
-    helpers_update_coordinator.UpdateFailed = UpdateFailed
-    sys.modules["homeassistant.helpers.update_coordinator"] = (
-        helpers_update_coordinator
-    )
-
-    ha_util = types.ModuleType("homeassistant.util")
-    dt = types.ModuleType("homeassistant.util.dt")
-    dt.now = lambda: datetime.utcnow()
-    ha_util.dt = dt
-    sys.modules["homeassistant.util"] = ha_util
-    sys.modules["homeassistant.util.dt"] = dt
-
-    aiohttp_mod = sys.modules.setdefault("aiohttp", types.ModuleType("aiohttp"))
-
-    if not hasattr(aiohttp_mod, "ClientError"):
-        class ClientError(Exception):  # pragma: no cover - minimal stub
-            pass
-
-        aiohttp_mod.ClientError = ClientError
-
-    sys.modules["voluptuous"] = types.ModuleType("voluptuous")
-
-    loader = types.ModuleType("homeassistant.loader")
-    async def async_get_integration(hass, domain):
-        return types.SimpleNamespace(version="1.0")
-    loader.async_get_integration = async_get_integration
-    sys.modules["homeassistant.loader"] = loader
-
-    # Recorder statistics stub
-    recorder = types.ModuleType("homeassistant.components.recorder")
-    stats = types.ModuleType("homeassistant.components.recorder.statistics")
-    sys.modules.setdefault("homeassistant.components", types.ModuleType("homeassistant.components"))
-    sys.modules["homeassistant.components.recorder"] = recorder
-    sys.modules["homeassistant.components.recorder.statistics"] = stats
-
-    last_stats = AsyncMock(return_value={})
-    stats.async_get_last_statistics = last_stats
-    get_period = AsyncMock(return_value={})
-    stats.async_get_statistics_during_period = get_period
-    delete_stats = AsyncMock()
-    stats.async_delete_statistics = delete_stats
-
-    if legacy:
-        add_stats = Mock()
-        stats.async_add_external_statistics = add_stats
-        import_stats = add_stats
-        update_meta = None
-    else:
-        import_stats = Mock()
-        update_meta = Mock()
-        stats.async_import_statistics = import_stats
-        stats.async_update_statistics_metadata = update_meta
-
-    # Stub package modules
-    sys.modules.setdefault("custom_components", types.ModuleType("custom_components"))
-    termoweb_pkg = types.ModuleType(package)
-    termoweb_pkg.__path__ = [str(Path(__file__).resolve().parents[1] / "custom_components" / "termoweb")]
-    sys.modules[package] = termoweb_pkg
-
-    api_stub = types.ModuleType(f"{package}.api")
-    class TermoWebClient:  # pragma: no cover - placeholder
-        def __init__(self, session, username, password, **kwargs):
-            self.session = session
-            self.username = username
-            self.password = password
-            self.api_base = kwargs.get("api_base")
-            self.basic_auth_b64 = kwargs.get("basic_auth_b64")
-
-        async def list_devices(self):
-            return [{"dev_id": "dev"}]
-
-        async def get_nodes(self, dev_id):
+        async def get_nodes(self, dev_id: str) -> dict[str, Any]:
             return {"nodes": [{"type": "htr", "addr": "A"}]}
 
-    api_stub.TermoWebClient = TermoWebClient
-    class TermoWebAuthError(Exception):  # pragma: no cover - placeholder
-        pass
+        async def get_htr_settings(self, dev_id: str, addr: str) -> dict[str, Any]:
+            return {}
 
-    class TermoWebRateLimitError(Exception):  # pragma: no cover - placeholder
-        pass
+        async def get_htr_samples(
+            self, dev_id: str, addr: str, start: int | None = None, stop: int | None = None
+        ) -> list[dict[str, Any]]:
+            return []
 
-    api_stub.TermoWebAuthError = TermoWebAuthError
-    api_stub.TermoWebRateLimitError = TermoWebRateLimitError
-    sys.modules[f"{package}.api"] = api_stub
+    monkeypatch.setattr(api_module, "TermoWebClient", _FakeTermoWebClient)
 
-    if load_coordinator:
-        coord_path = (
-            Path(__file__).resolve().parents[1]
-            / "custom_components"
-            / "termoweb"
-            / "coordinator.py"
-        )
-        spec_coord = importlib.util.spec_from_file_location(
-            f"{package}.coordinator", coord_path
-        )
-        coord_module = importlib.util.module_from_spec(spec_coord)
-        sys.modules[f"{package}.coordinator"] = coord_module
-        spec_coord.loader.exec_module(coord_module)
-    else:
-        coord_stub = types.ModuleType(f"{package}.coordinator")
+    ws_module = importlib.import_module("custom_components.termoweb.ws_client_legacy")
 
-        class TermoWebCoordinator:  # pragma: no cover - placeholder
-            def __init__(self, hass, client, base_interval, dev_id, dev, nodes):
-                self.data = {}
+    class _FakeWSClient:
+        def __init__(self, hass: Any, dev_id: str, *args: Any, **kwargs: Any) -> None:
+            self.hass = hass
+            self.dev_id = dev_id
 
-            async def async_config_entry_first_refresh(self):
-                return
-
-            def async_add_listener(self, cb):
-                return
-
-        coord_stub.TermoWebCoordinator = TermoWebCoordinator
-        sys.modules[f"{package}.coordinator"] = coord_stub
-
-    ws_stub = types.ModuleType(f"{package}.ws_client_legacy")
-    class TermoWebWSLegacyClient:  # pragma: no cover - placeholder
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def start(self):
+        def start(self) -> asyncio.Task:
             return asyncio.create_task(asyncio.sleep(0))
 
-        async def stop(self):
-            return
+        async def stop(self) -> None:
+            return None
 
-    ws_stub.TermoWebWSLegacyClient = TermoWebWSLegacyClient
-    sys.modules[f"{package}.ws_client_legacy"] = ws_stub
+    monkeypatch.setattr(ws_module, "TermoWebWSLegacyClient", _FakeWSClient)
 
-    # Load const and __init__ modules
-    const_path = Path(__file__).resolve().parents[1] / "custom_components" / "termoweb" / "const.py"
-    spec_const = importlib.util.spec_from_file_location(f"{package}.const", const_path)
-    const_module = importlib.util.module_from_spec(spec_const)
-    sys.modules[f"{package}.const"] = const_module
-    spec_const.loader.exec_module(const_module)
+    if load_coordinator:
+        importlib.reload(importlib.import_module("custom_components.termoweb.coordinator"))
+        importlib.reload(importlib.import_module("custom_components.termoweb.sensor"))
+    else:
+        importlib.reload(importlib.import_module("custom_components.termoweb.coordinator"))
 
-    init_path = Path(__file__).resolve().parents[1] / "custom_components" / "termoweb" / "__init__.py"
-    spec = importlib.util.spec_from_file_location(f"{package}.__init__", init_path)
-    init_module = importlib.util.module_from_spec(spec)
-    sys.modules[f"{package}.__init__"] = init_module
-    spec.loader.exec_module(init_module)
+    const_module = importlib.reload(
+        importlib.import_module("custom_components.termoweb.const")
+    )
+    init_module = importlib.reload(
+        importlib.import_module("custom_components.termoweb.__init__")
+    )
+
+    ConfigEntry = importlib.import_module("homeassistant.config_entries").ConfigEntry
+    HomeAssistant = importlib.import_module("homeassistant.core").HomeAssistant
 
     return (
         init_module,

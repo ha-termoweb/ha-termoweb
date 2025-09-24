@@ -2,228 +2,42 @@ from __future__ import annotations
 
 import asyncio
 import copy
-import importlib.util
-from pathlib import Path
-import sys
 import types
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# Minimal aiohttp stub
-aiohttp_stub = types.ModuleType("aiohttp")
+from conftest import _install_stubs
 
+_install_stubs()
 
-class ClientError(Exception):  # pragma: no cover - placeholder
-    pass
+from aiohttp import ClientError
+from custom_components.termoweb import coordinator as coordinator_module
+from custom_components.termoweb import sensor as sensor_module
+from custom_components.termoweb import const as const_module
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
+from homeassistant.const import UnitOfTemperature
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import dispatcher as dispatcher_module
+from homeassistant.helpers.dispatcher import dispatcher_send
 
-
-aiohttp_stub.ClientError = ClientError
-sys.modules["aiohttp"] = aiohttp_stub
-
-# Stub Home Assistant modules
-ha_core = types.ModuleType("homeassistant.core")
-
-
-class HomeAssistant:  # pragma: no cover - placeholder
-    pass
-
-
-def callback(fn):  # pragma: no cover - passthrough
-    return fn
-
-ha_core.HomeAssistant = HomeAssistant
-ha_core.callback = callback
-sys.modules["homeassistant"] = types.ModuleType("homeassistant")
-sys.modules["homeassistant.core"] = ha_core
-
-ha_helpers = types.ModuleType("homeassistant.helpers")
-uc = types.ModuleType("homeassistant.helpers.update_coordinator")
-
-
-class UpdateFailed(Exception):  # pragma: no cover - placeholder
-    pass
-
-
-class DataUpdateCoordinator:  # pragma: no cover - minimal stub
-    def __init__(self, hass, *, logger=None, name=None, update_interval=None) -> None:
-        self.hass = hass
-        self.logger = logger
-        self.name = name
-        self.update_interval = update_interval
-        self.data: dict | None = None
-
-    async def async_refresh(self) -> None:
-        self.data = await self._async_update_data()
-
-    async def async_config_entry_first_refresh(self) -> None:
-        await self.async_refresh()
-
-    def async_add_listener(self, *_args) -> None:
-        return None
-
-    @classmethod
-    def __class_getitem__(cls, _item) -> type:
-        return cls
-
-
-class CoordinatorEntity:  # pragma: no cover - minimal stub
-    def __init__(self, coordinator) -> None:
-        self.coordinator = coordinator
-        self.hass = coordinator.hass
-
-    async def async_added_to_hass(self) -> None:
-        return None
-
-    def schedule_update_ha_state(self) -> None:
-        return None
-
-
-uc.UpdateFailed = UpdateFailed
-uc.DataUpdateCoordinator = DataUpdateCoordinator
-uc.CoordinatorEntity = CoordinatorEntity
-ha_helpers.update_coordinator = uc
-sys.modules["homeassistant.helpers"] = ha_helpers
-sys.modules["homeassistant.helpers.update_coordinator"] = uc
-
-# Dispatcher stub
-ha_dispatcher = types.ModuleType("homeassistant.helpers.dispatcher")
-_dispatchers: dict[str, list] = {}
-
-
-def async_dispatcher_connect(_hass, signal: str, callback) -> None:  # pragma: no cover - minimal
-    callbacks = _dispatchers.setdefault(signal, [])
-    callbacks.append(callback)
-
-    def _remove() -> None:
-        try:
-            callbacks.remove(callback)
-        except ValueError:  # pragma: no cover - safety
-            pass
-
-    return _remove
-
-
-def dispatcher_send(signal: str, payload: dict) -> None:
-    for cb in list(_dispatchers.get(signal, [])):
-        cb(payload)
-
-
-ha_dispatcher.async_dispatcher_connect = async_dispatcher_connect
-sys.modules["homeassistant.helpers.dispatcher"] = ha_dispatcher
-
-# Other HA stubs
-ha_const = types.ModuleType("homeassistant.const")
-
-
-class UnitOfTemperature:  # pragma: no cover - placeholder
-    CELSIUS = "C"
-
-ha_const.UnitOfTemperature = UnitOfTemperature
-sys.modules["homeassistant.const"] = ha_const
-
-ha_sensor = types.ModuleType("homeassistant.components.sensor")
-
-
-class SensorEntity:  # pragma: no cover - minimal entity
-    def __init__(self) -> None:
-        self.hass = None
-
-    async def async_added_to_hass(self) -> None:
-        return None
-
-    def schedule_update_ha_state(self) -> None:
-        return None
-
-    def async_on_remove(self, func) -> None:  # pragma: no cover - store callback
-        self._on_remove = func
-
-    @property
-    def device_class(self) -> str | None:
-        return getattr(self, "_attr_device_class", None)
-
-    @property
-    def state_class(self) -> str | None:
-        return getattr(self, "_attr_state_class", None)
-
-    @property
-    def native_unit_of_measurement(self) -> str | None:
-        return getattr(self, "_attr_native_unit_of_measurement", None)
-
-
-class SensorDeviceClass:  # pragma: no cover - simple container
-    ENERGY = "energy"
-    POWER = "power"
-    TEMPERATURE = "temp"
-
-
-class SensorStateClass:  # pragma: no cover - simple container
-    MEASUREMENT = "measurement"
-    TOTAL_INCREASING = "total_increasing"
-
-
-ha_sensor.SensorEntity = SensorEntity
-ha_sensor.SensorDeviceClass = SensorDeviceClass
-ha_sensor.SensorStateClass = SensorStateClass
-sys.modules["homeassistant.components.sensor"] = ha_sensor
-
-ha_entity = types.ModuleType("homeassistant.helpers.entity")
-
-
-class DeviceInfo(dict):  # pragma: no cover - simple mapping
-    pass
-
-
-ha_entity.DeviceInfo = DeviceInfo
-sys.modules["homeassistant.helpers.entity"] = ha_entity
-
-# Load coordinator and sensor modules
-COORD_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "custom_components"
-    / "termoweb"
-    / "coordinator.py"
+TermoWebHeaterEnergyCoordinator = (
+    coordinator_module.TermoWebHeaterEnergyCoordinator
 )
-SENSOR_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "custom_components"
-    / "termoweb"
-    / "sensor.py"
-)
-package = "custom_components.termoweb"
-
-sys.modules.setdefault("custom_components", types.ModuleType("custom_components"))
-termoweb_pkg = types.ModuleType(package)
-termoweb_pkg.__path__ = [str(COORD_PATH.parent)]
-sys.modules[package] = termoweb_pkg
-
-spec = importlib.util.spec_from_file_location(f"{package}.coordinator", COORD_PATH)
-coord_module = importlib.util.module_from_spec(spec)
-assert spec.loader is not None
-sys.modules[f"{package}.coordinator"] = coord_module
-spec.loader.exec_module(coord_module)
-
-spec2 = importlib.util.spec_from_file_location(f"{package}.sensor", SENSOR_PATH)
-sensor_module = importlib.util.module_from_spec(spec2)
-assert spec2.loader is not None
-sys.modules[f"{package}.sensor"] = sensor_module
-spec2.loader.exec_module(sensor_module)
-
-TermoWebHeaterEnergyCoordinator = coord_module.TermoWebHeaterEnergyCoordinator
 TermoWebHeaterTemp = sensor_module.TermoWebHeaterTemp
 TermoWebHeaterEnergyTotal = sensor_module.TermoWebHeaterEnergyTotal
 TermoWebHeaterPower = sensor_module.TermoWebHeaterPower
 TermoWebTotalEnergy = sensor_module.TermoWebTotalEnergy
 async_setup_sensor_entry = sensor_module.async_setup_entry
-const_module = __import__(
-    f"{package}.const", fromlist=["signal_ws_data", "DOMAIN", "signal_poll_refresh"]
-)
 signal_ws_data = const_module.signal_ws_data
 DOMAIN = const_module.DOMAIN
+
+dispatch_map = dispatcher_module._dispatch_map
 
 if hasattr(const_module, "signal_poll_refresh"):
     signal_poll_refresh = const_module.signal_poll_refresh
 else:
+
     def signal_poll_refresh(entry_id: str) -> str:
         return f"{signal_ws_data(entry_id)}:poll"
 
@@ -289,16 +103,16 @@ def test_coordinator_and_sensors() -> None:
         energy_sensor.schedule_update_ha_state.reset_mock()
         original_unsub_energy = energy_sensor._unsub_ws
         energy_sensor._unsub_ws = MagicMock(side_effect=original_unsub_energy)
-        energy_sensor._on_remove()
+        await energy_sensor.async_will_remove_from_hass()
         energy_sensor._unsub_ws.assert_called_once()
-        assert energy_sensor._on_ws_data not in _dispatchers.get(signal, [])
+        assert energy_sensor._on_ws_data not in dispatch_map.get(signal, [])
         dispatcher_send(signal, {"dev_id": "1", "addr": "A"})
         energy_sensor.schedule_update_ha_state.assert_not_called()
 
         power_sensor.schedule_update_ha_state.reset_mock()
         original_unsub_power = power_sensor._unsub_ws
         power_sensor._unsub_ws = MagicMock(side_effect=original_unsub_power)
-        power_sensor._on_remove()
+        await power_sensor.async_will_remove_from_hass()
         power_sensor._unsub_ws.assert_called_once()
 
     asyncio.run(_run())
@@ -449,7 +263,7 @@ def test_heater_temp_sensor() -> None:
         poll_signal = signal_poll_refresh("entry")
 
         assert sensor._unsub_ws is not None
-        assert sensor._on_ws_data in _dispatchers[ws_signal]
+        assert sensor._on_ws_data in dispatch_map[ws_signal]
         sensor.async_on_remove.assert_called_once()
 
         info = sensor.device_info
@@ -508,10 +322,9 @@ def test_heater_temp_sensor() -> None:
         original_unsub = sensor._unsub_ws
         assert original_unsub is not None
         sensor._unsub_ws = MagicMock(side_effect=original_unsub)
-        assert hasattr(sensor, "_on_remove")
-        sensor._on_remove()
+        await sensor.async_will_remove_from_hass()
         sensor._unsub_ws.assert_called_once()
-        assert sensor._on_ws_data not in _dispatchers.get(ws_signal, [])
+        assert sensor._on_ws_data not in dispatch_map.get(ws_signal, [])
 
         dispatcher_send(ws_signal, {"dev_id": "dev1", "addr": "A"})
         dispatcher_send(poll_signal, {"dev_id": "dev1", "addr": "A"})
@@ -562,9 +375,9 @@ def test_total_energy_sensor() -> None:
         total_sensor.schedule_update_ha_state.reset_mock()
         original_unsub = total_sensor._unsub_ws
         total_sensor._unsub_ws = MagicMock(side_effect=original_unsub)
-        total_sensor._on_remove()
+        await total_sensor.async_will_remove_from_hass()
         total_sensor._unsub_ws.assert_called_once()
-        assert total_sensor._on_ws_data not in _dispatchers.get(signal, [])
+        assert total_sensor._on_ws_data not in dispatch_map.get(signal, [])
         dispatcher_send(signal, {"dev_id": "1", "addr": "B"})
         total_sensor.schedule_update_ha_state.assert_not_called()
 

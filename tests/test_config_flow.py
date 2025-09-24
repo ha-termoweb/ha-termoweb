@@ -2,334 +2,20 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
-import importlib.util
-from pathlib import Path
-import sys
-import types
 from typing import Any
 
 import pytest
+import voluptuous as vol
+from conftest import _install_stubs
 
-# --- Minimal third-party stubs -------------------------------------------------
+_install_stubs()
 
-aiohttp_stub = sys.modules.setdefault("aiohttp", types.ModuleType("aiohttp"))
-
-
-class ClientSession:  # pragma: no cover - placeholder
-    pass
-
-
-class ClientTimeout:  # pragma: no cover - placeholder
-    def __init__(self, total: int | None = None) -> None:
-        self.total = total
-
-
-class ClientResponseError(Exception):  # pragma: no cover - placeholder
-    pass
-
-
-class ClientError(Exception):  # pragma: no cover - placeholder
-    pass
-
-
-aiohttp_stub.ClientSession = getattr(aiohttp_stub, "ClientSession", ClientSession)
-aiohttp_stub.ClientTimeout = getattr(aiohttp_stub, "ClientTimeout", ClientTimeout)
-aiohttp_stub.ClientResponseError = getattr(
-    aiohttp_stub, "ClientResponseError", ClientResponseError
-)
-aiohttp_stub.ClientError = ClientError
-
-
-vol = sys.modules.setdefault("voluptuous", types.ModuleType("voluptuous"))
-
-
-class Required:  # pragma: no cover - minimal stub
-    def __init__(self, schema: Any, *, default: Any | None = None) -> None:
-        self.schema = schema
-        self.default = default
-
-    def __repr__(self) -> str:  # pragma: no cover - debugging helper
-        return f"Required({self.schema!r})"
-
-
-class All:  # pragma: no cover - minimal stub
-    def __init__(self, *validators: Any) -> None:
-        self.validators = validators
-
-
-class Range:  # pragma: no cover - minimal stub
-    def __init__(self, *, min: int | None = None, max: int | None = None) -> None:
-        self.min = min
-        self.max = max
-
-
-class In:  # pragma: no cover - minimal stub
-    def __init__(self, container: Any) -> None:
-        self.container = container
-
-
-class Schema:  # pragma: no cover - minimal stub
-    def __init__(self, schema: dict[Any, Any]) -> None:
-        self.schema = schema
-
-    def __call__(self, data: dict[str, Any]) -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        for key, validator in self.schema.items():
-            if isinstance(key, Required):
-                name = key.schema
-                if name in data:
-                    value = data[name]
-                elif key.default is not None:
-                    value = key.default
-                else:
-                    raise KeyError(name)
-            else:
-                name = key
-                value = data[name]
-            result[name] = _apply_validator(value, validator)
-        return result
-
-
-def _apply_validator(value: Any, validator: Any) -> Any:
-    if isinstance(validator, All):
-        for item in validator.validators:
-            value = _apply_validator(value, item)
-        return value
-    if isinstance(validator, In):
-        container = validator.container
-        if isinstance(container, dict):
-            if value not in container:
-                raise ValueError(f"{value!r} not in {list(container)!r}")
-            return value
-        if value not in container:
-            raise ValueError(f"{value!r} not in {container!r}")
-        return value
-    if isinstance(validator, Range):
-        if validator.min is not None and value < validator.min:
-            raise ValueError(f"{value} < {validator.min}")
-        if validator.max is not None and value > validator.max:
-            raise ValueError(f"{value} > {validator.max}")
-        return value
-    if validator is int:
-        return int(value)
-    if validator is str:
-        return str(value)
-    if callable(validator):
-        return validator(value)
-    return value
-
-
-vol.Required = Required
-vol.All = All
-vol.Range = Range
-vol.In = In
-vol.Schema = Schema
-
-# --- Minimal Home Assistant stubs ----------------------------------------------
-
-homeassistant_pkg = sys.modules.setdefault(
-    "homeassistant", types.ModuleType("homeassistant")
-)
-config_entries_mod = sys.modules.setdefault(
-    "homeassistant.config_entries", types.ModuleType("homeassistant.config_entries")
-)
-core_mod = sys.modules.setdefault(
-    "homeassistant.core", types.ModuleType("homeassistant.core")
-)
-helpers_mod = sys.modules.setdefault(
-    "homeassistant.helpers", types.ModuleType("homeassistant.helpers")
-)
-aiohttp_client_mod = sys.modules.setdefault(
-    "homeassistant.helpers.aiohttp_client",
-    types.ModuleType("homeassistant.helpers.aiohttp_client"),
-)
-loader_mod = sys.modules.setdefault(
-    "homeassistant.loader", types.ModuleType("homeassistant.loader")
-)
-data_entry_flow_mod = sys.modules.setdefault(
-    "homeassistant.data_entry_flow", types.ModuleType("homeassistant.data_entry_flow")
-)
-
-homeassistant_pkg.config_entries = config_entries_mod
-homeassistant_pkg.core = core_mod
-homeassistant_pkg.helpers = helpers_mod
-homeassistant_pkg.loader = loader_mod
-homeassistant_pkg.data_entry_flow = data_entry_flow_mod
-helpers_mod.aiohttp_client = aiohttp_client_mod
-
-
-class FlowResult(dict):  # pragma: no cover - placeholder type alias
-    pass
-
-
-data_entry_flow_mod.FlowResult = FlowResult
-
-
-class ConfigEntry:  # pragma: no cover - simplified stand-in
-    def __init__(
-        self,
-        entry_id: str,
-        data: dict[str, Any] | None = None,
-        options: dict[str, Any] | None = None,
-    ) -> None:
-        self.entry_id = entry_id
-        self.data = dict(data or {})
-        self.options = dict(options or {})
-        self.unique_id: str | None = None
-        self.title = ""
-
-
-class ConfigEntriesManager:  # pragma: no cover - minimal registry
-    def __init__(self) -> None:
-        self._entries: dict[str, ConfigEntry] = {}
-        self.updated_entries: list[tuple[ConfigEntry, dict[str, Any] | None, dict[str, Any] | None]] = []
-
-    def add_entry(self, entry: ConfigEntry) -> None:
-        self._entries[entry.entry_id] = entry
-
-    def async_get_entry(self, entry_id: str) -> ConfigEntry | None:
-        return self._entries.get(entry_id)
-
-    def async_update_entry(
-        self,
-        entry: ConfigEntry,
-        *,
-        data: dict[str, Any] | None = None,
-        options: dict[str, Any] | None = None,
-    ) -> None:
-        if data is not None:
-            entry.data = data
-        if options is not None:
-            entry.options = options
-        self.updated_entries.append((entry, data, options))
-
-
-class HomeAssistant:  # pragma: no cover - minimal hass
-    def __init__(self) -> None:
-        self.config_entries = ConfigEntriesManager()
-
-
-class ConfigFlow:  # pragma: no cover - simplified ConfigFlow base
-    def __init_subclass__(cls, *, domain: str | None = None, **kwargs: Any) -> None:
-        super().__init_subclass__(**kwargs)
-        cls.DOMAIN = domain
-
-    def __init__(self) -> None:
-        self.hass: HomeAssistant | None = None
-        self.context: dict[str, Any] = {}
-        self._unique_id: str | None = None
-
-    async def async_set_unique_id(self, unique_id: str) -> None:
-        self._unique_id = unique_id
-
-    def _abort_if_unique_id_configured(self) -> None:
-        return None
-
-    def async_show_form(
-        self,
-        *,
-        step_id: str,
-        data_schema: Any,
-        errors: dict[str, str] | None = None,
-        description_placeholders: dict[str, Any] | None = None,
-    ) -> FlowResult:
-        return FlowResult(
-            {
-                "type": "form",
-                "step_id": step_id,
-                "data_schema": data_schema,
-                "errors": errors or {},
-                "description_placeholders": description_placeholders or {},
-            }
-        )
-
-    def async_create_entry(self, *, title: str, data: dict[str, Any]) -> FlowResult:
-        return FlowResult({"type": "create_entry", "title": title, "data": data})
-
-    def async_abort(self, *, reason: str) -> FlowResult:
-        return FlowResult({"type": "abort", "reason": reason})
-
-
-class OptionsFlow:  # pragma: no cover - simplified OptionsFlow base
-    def async_show_form(
-        self,
-        *,
-        step_id: str,
-        data_schema: Any,
-        errors: dict[str, str] | None = None,
-        description_placeholders: dict[str, Any] | None = None,
-    ) -> FlowResult:
-        return FlowResult(
-            {
-                "type": "form",
-                "step_id": step_id,
-                "data_schema": data_schema,
-                "errors": errors or {},
-                "description_placeholders": description_placeholders or {},
-            }
-        )
-
-    def async_create_entry(self, *, title: str, data: dict[str, Any]) -> FlowResult:
-        return FlowResult({"type": "create_entry", "title": title, "data": data})
-
-
-config_entries_mod.ConfigEntry = ConfigEntry
-config_entries_mod.ConfigEntriesManager = ConfigEntriesManager
-config_entries_mod.ConfigFlow = ConfigFlow
-config_entries_mod.OptionsFlow = OptionsFlow
-core_mod.HomeAssistant = HomeAssistant
-
-
-def async_get_clientsession(_hass: HomeAssistant) -> object:  # pragma: no cover - stub
-    return object()
-
-
-aiohttp_client_mod.async_get_clientsession = async_get_clientsession
-
-
-class _Integration:  # pragma: no cover - minimal integration info
-    def __init__(self, version: str) -> None:
-        self.version = version
-
-
-async def async_get_integration(_hass: HomeAssistant, _domain: str) -> _Integration:
-    return _Integration("0.0-test")
-
-
-loader_mod.async_get_integration = async_get_integration
-
-# --- Import module under test ---------------------------------------------------
-
-custom_components_pkg = sys.modules.setdefault(
-    "custom_components", types.ModuleType("custom_components")
-)
-custom_components_pkg.__path__ = [str(Path(__file__).resolve().parents[1] / "custom_components")]
-
-CONFIG_FLOW_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "custom_components"
-    / "termoweb"
-    / "config_flow.py"
-)
-package_name = "custom_components.termoweb"
-module_name = f"{package_name}.config_flow"
-
-termoweb_pkg = types.ModuleType(package_name)
-termoweb_pkg.__path__ = [str(CONFIG_FLOW_PATH.parent)]
-sys.modules[package_name] = termoweb_pkg
-setattr(custom_components_pkg, "termoweb", termoweb_pkg)
-
-spec = importlib.util.spec_from_file_location(module_name, CONFIG_FLOW_PATH)
-config_flow = importlib.util.module_from_spec(spec)
-assert spec.loader is not None
-sys.modules[module_name] = config_flow
-spec.loader.exec_module(config_flow)
+import custom_components.termoweb.config_flow as config_flow
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 
-def _schema_default(schema: Schema, field: str) -> Any:
+def _schema_default(schema: vol.Schema, field: str) -> Any:
     for key in getattr(schema, "schema", {}):
         name = getattr(key, "schema", key)
         if name == field:
@@ -349,7 +35,7 @@ def test_get_version_reads_integration_version() -> None:
 
     result = asyncio.run(config_flow._get_version(hass))
 
-    assert result == "0.0-test"
+    assert result == "test-version"
 
 
 def test_get_version_returns_unknown_when_missing(
@@ -357,8 +43,12 @@ def test_get_version_returns_unknown_when_missing(
 ) -> None:
     hass = HomeAssistant()
 
-    async def fake_get_integration(_hass: HomeAssistant, _domain: str) -> _Integration:
-        return _Integration(version="")
+    class DummyIntegration:
+        def __init__(self, version: str) -> None:
+            self.version = version
+
+    async def fake_get_integration(_hass: HomeAssistant, _domain: str) -> DummyIntegration:
+        return DummyIntegration("")
 
     monkeypatch.setattr(
         config_flow, "async_get_integration", fake_get_integration
@@ -367,6 +57,8 @@ def test_get_version_returns_unknown_when_missing(
     result = asyncio.run(config_flow._get_version(hass))
 
     assert result == "unknown"
+
+
 def test_validate_login_uses_brand_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -397,7 +89,7 @@ def test_validate_login_uses_brand_settings(
     )
 
     assert calls
-    session_obj, username, password, api_base, basic_auth = calls[0]
+    _session, username, password, api_base, basic_auth = calls[0]
     assert username == "user@example.com"
     assert password == "pw"
     assert api_base == config_flow.get_brand_api_base(config_flow.BRAND_DUCAHEAT)
@@ -477,16 +169,16 @@ def test_async_step_user_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize(
-    ("raised", "expected"),
+    ("raised_factory", "expected"),
     [
-        (config_flow.TermoWebAuthError(), "invalid_auth"),
-        (config_flow.TermoWebRateLimitError(), "rate_limited"),
-        (aiohttp_stub.ClientError(), "cannot_connect"),
-        (RuntimeError("boom"), "unknown"),
+        (lambda: config_flow.TermoWebAuthError(), "invalid_auth"),
+        (lambda: config_flow.TermoWebRateLimitError(), "rate_limited"),
+        (lambda: config_flow.ClientError(), "cannot_connect"),
+        (lambda: RuntimeError("boom"), "unknown"),
     ],
 )
 def test_async_step_user_errors(
-    monkeypatch: pytest.MonkeyPatch, raised: Exception, expected: str
+    monkeypatch: pytest.MonkeyPatch, raised_factory: Any, expected: str
 ) -> None:
     hass = HomeAssistant()
     flow = _create_flow(hass)
@@ -497,7 +189,7 @@ def test_async_step_user_errors(
     async def fake_validate(
         _hass: HomeAssistant, username: str, password: str, brand: str
     ) -> None:
-        raise raised
+        raise raised_factory()
 
     monkeypatch.setattr(config_flow, "_get_version", fake_version)
     monkeypatch.setattr(config_flow, "_validate_login", fake_validate)
@@ -620,16 +312,16 @@ def test_async_step_reconfigure_success(
 
 
 @pytest.mark.parametrize(
-    ("raised", "expected"),
+    ("raised_factory", "expected"),
     [
-        (config_flow.TermoWebAuthError(), "invalid_auth"),
-        (config_flow.TermoWebRateLimitError(), "rate_limited"),
-        (aiohttp_stub.ClientError(), "cannot_connect"),
-        (RuntimeError("fail"), "unknown"),
+        (lambda: config_flow.TermoWebAuthError(), "invalid_auth"),
+        (lambda: config_flow.TermoWebRateLimitError(), "rate_limited"),
+        (lambda: config_flow.ClientError(), "cannot_connect"),
+        (lambda: RuntimeError("fail"), "unknown"),
     ],
 )
 def test_async_step_reconfigure_errors(
-    monkeypatch: pytest.MonkeyPatch, raised: Exception, expected: str
+    monkeypatch: pytest.MonkeyPatch, raised_factory: Any, expected: str
 ) -> None:
     hass = HomeAssistant()
     entry = ConfigEntry(
@@ -652,7 +344,7 @@ def test_async_step_reconfigure_errors(
     async def fake_validate(
         _hass: HomeAssistant, username: str, password: str, brand: str
     ) -> None:
-        raise raised
+        raise raised_factory()
 
     monkeypatch.setattr(config_flow, "_get_version", fake_version)
     monkeypatch.setattr(config_flow, "_validate_login", fake_validate)

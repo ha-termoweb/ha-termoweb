@@ -7,149 +7,25 @@ import logging
 import sys
 from datetime import timedelta
 from types import SimpleNamespace
-from typing import Any, Callable, Coroutine
+from typing import Any, Callable
 
 import pytest
 from unittest.mock import AsyncMock
 
-from homeassistant import const as const_mod
-from homeassistant import helpers as helpers_mod
-from homeassistant import loader as loader_mod
+from conftest import _install_stubs
+
+_install_stubs()
+
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from homeassistant.helpers import aiohttp_client as aiohttp_client_mod
-from homeassistant.helpers import dispatcher as dispatcher_mod
 from homeassistant.helpers import entity_registry as entity_registry_mod
-
-helpers_mod.aiohttp_client = aiohttp_client_mod
-helpers_mod.entity_registry = entity_registry_mod
-helpers_mod.dispatcher = dispatcher_mod
-const_mod.EVENT_HOMEASSISTANT_STARTED = getattr(
-    const_mod, "EVENT_HOMEASSISTANT_STARTED", "homeassistant_started"
-)
-
-
-class _StubClientSession:  # pragma: no cover - placeholder session
-    pass
-
-
-_STUB_SESSION = _StubClientSession()
-
-
-def async_get_clientsession(hass: Any) -> _StubClientSession:  # pragma: no cover - stub
-    if hasattr(hass, "client_session_calls"):
-        hass.client_session_calls += 1
-    return _STUB_SESSION
-
-
-aiohttp_client_mod.async_get_clientsession = async_get_clientsession
-
-
-def async_dispatcher_connect(
-    hass: Any, signal: str, callback: Callable[[dict[str, Any]], None]
-) -> Callable[[], None]:  # pragma: no cover - stub
-    if hasattr(hass, "dispatcher_connections"):
-        hass.dispatcher_connections.append((signal, callback))
-    return lambda: None
-
-
-dispatcher_mod.async_dispatcher_connect = async_dispatcher_connect
-
-
-class _StubIntegration:  # pragma: no cover - minimal stub
-    def __init__(self, domain: str) -> None:
-        self.domain = domain
-        self.version = "test-version"
-
-
-async def async_get_integration(
-    hass: Any, domain: str
-) -> _StubIntegration:  # pragma: no cover
-    if hasattr(hass, "integration_requests"):
-        hass.integration_requests.append(domain)
-    return _StubIntegration(domain)
-
-
-loader_mod.async_get_integration = async_get_integration
-
-
-class StubServices:
-    def __init__(self) -> None:
-        self._services: dict[tuple[str, str], Any] = {}
-
-    def has_service(self, domain: str, service: str) -> bool:
-        return (domain, service) in self._services
-
-    def async_register(self, domain: str, service: str, handler: Any) -> None:
-        self._services[(domain, service)] = handler
-
-    def get(self, domain: str, service: str) -> Any:
-        return self._services[(domain, service)]
-
-
-class StubBus:
-    def __init__(self) -> None:
-        self.listeners: list[tuple[str, Callable[[Any], Any]]] = []
-
-    def async_listen_once(self, event: str, callback: Callable[[Any], Any]) -> None:
-        self.listeners.append((event, callback))
-
-
-class StubConfigEntriesManager:
-    def __init__(self) -> None:
-        self.forwarded: list[tuple[ConfigEntry, tuple[str, ...]]] = []
-        self.unloaded: list[tuple[ConfigEntry, tuple[str, ...]]] = []
-        self._entries: dict[str, ConfigEntry] = {}
-        self.updated: list[tuple[ConfigEntry, dict[str, Any] | None]] = []
-
-    def add(self, entry: ConfigEntry) -> None:
-        self._entries[entry.entry_id] = entry
-
-    async def async_forward_entry_setups(
-        self, entry: ConfigEntry, platforms: list[str] | tuple[str, ...]
-    ) -> None:
-        self.forwarded.append((entry, tuple(platforms)))
-
-    async def async_unload_platforms(
-        self, entry: ConfigEntry, platforms: list[str] | tuple[str, ...]
-    ) -> bool:
-        self.unloaded.append((entry, tuple(platforms)))
-        return True
-
-    def async_update_entry(
-        self, entry: ConfigEntry, *, options: dict[str, Any] | None = None
-    ) -> None:
-        if options is not None:
-            entry.options = dict(options)
-        self.updated.append((entry, options))
-        self._entries[entry.entry_id] = entry
-
-    def async_get_entry(self, entry_id: str) -> ConfigEntry | None:
-        return self._entries.get(entry_id)
-
-
-class StubHass:
-    def __init__(self) -> None:
-        self.data: dict[str, Any] = {}
-        self.services = StubServices()
-        self.config_entries = StubConfigEntriesManager()
-        self.dispatcher_connections: list[tuple[str, Callable[[dict[str, Any]], None]]] = []
-        self.tasks: list[asyncio.Task[Any]] = []
-        self.integration_requests: list[str] = []
-        self.client_session_calls = 0
-        self.is_running = True
-        self.bus = StubBus()
-
-    def async_create_task(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]:
-        task = asyncio.create_task(coro)
-        self.tasks.append(task)
-        return task
 
 
 class FakeWSClient:
     def __init__(
         self,
-        hass: StubHass,
+        hass: HomeAssistant,
         *,
         entry_id: str,
         dev_id: str,
@@ -181,7 +57,7 @@ class FakeCoordinator:
 
     def __init__(
         self,
-        hass: StubHass,
+        hass: HomeAssistant,
         client: Any,
         base_interval: int,
         dev_id: str,
@@ -240,7 +116,7 @@ def _extract_addrs(nodes: dict[str, Any]) -> list[str]:
     return addrs
 
 
-async def _drain_tasks(hass: StubHass) -> None:
+async def _drain_tasks(hass: HomeAssistant) -> None:
     if hass.tasks:
         await asyncio.gather(*hass.tasks, return_exceptions=True)
         hass.tasks.clear()
@@ -275,8 +151,8 @@ def termoweb_init(monkeypatch: pytest.MonkeyPatch) -> Any:
 
 
 @pytest.fixture
-def stub_hass() -> StubHass:
-    hass = StubHass()
+def stub_hass() -> HomeAssistant:
+    hass = HomeAssistant()
     hass.data = {}
     return hass
 
@@ -322,7 +198,7 @@ class StubEntityRegistry:
 
 
 def test_async_setup_entry_happy_path(
-    termoweb_init: Any, stub_hass: StubHass, monkeypatch: pytest.MonkeyPatch
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class HappyClient(BaseFakeClient):
         async def list_devices(self) -> list[dict[str, Any]]:
@@ -362,7 +238,7 @@ def test_async_setup_entry_happy_path(
 
 
 def test_async_setup_entry_auth_error(
-    termoweb_init: Any, stub_hass: StubHass, monkeypatch: pytest.MonkeyPatch
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class AuthClient(BaseFakeClient):
         async def list_devices(self) -> list[dict[str, Any]]:
@@ -386,7 +262,7 @@ def test_async_setup_entry_auth_error(
 )
 def test_async_setup_entry_transient_errors(
     termoweb_init: Any,
-    stub_hass: StubHass,
+    stub_hass: HomeAssistant,
     monkeypatch: pytest.MonkeyPatch,
     error_case: str,
 ) -> None:
@@ -408,7 +284,7 @@ def test_async_setup_entry_transient_errors(
 
 
 def test_async_setup_entry_no_devices(
-    termoweb_init: Any, stub_hass: StubHass, monkeypatch: pytest.MonkeyPatch
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class EmptyClient(BaseFakeClient):
         async def list_devices(self) -> list[dict[str, Any]]:
@@ -426,7 +302,7 @@ def test_async_setup_entry_no_devices(
 
 
 def test_async_setup_entry_defers_until_started(
-    termoweb_init: Any, stub_hass: StubHass, monkeypatch: pytest.MonkeyPatch
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class HappyClient(BaseFakeClient):
         async def list_devices(self) -> list[dict[str, Any]]:
@@ -458,7 +334,7 @@ def test_async_setup_entry_defers_until_started(
 
 
 def test_import_energy_history_service_invocation(
-    termoweb_init: Any, stub_hass: StubHass, monkeypatch: pytest.MonkeyPatch
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     registry = StubEntityRegistry()
     monkeypatch.setattr(
@@ -533,7 +409,7 @@ def test_import_energy_history_service_invocation(
 
 
 def test_recalc_poll_interval_transitions(
-    termoweb_init: Any, stub_hass: StubHass, monkeypatch: pytest.MonkeyPatch
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class PollClient(BaseFakeClient):
         async def list_devices(self) -> list[dict[str, Any]]:
@@ -602,7 +478,7 @@ def test_recalc_poll_interval_transitions(
 
 
 def test_ws_status_dispatcher_filters_entry(
-    termoweb_init: Any, stub_hass: StubHass, monkeypatch: pytest.MonkeyPatch
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class DispatchClient(BaseFakeClient):
         async def list_devices(self) -> list[dict[str, Any]]:
@@ -671,7 +547,7 @@ def test_ws_status_dispatcher_filters_entry(
 
 
 def test_coordinator_listener_starts_new_ws(
-    termoweb_init: Any, stub_hass: StubHass, monkeypatch: pytest.MonkeyPatch
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     start_events: list[asyncio.Event] = []
 
@@ -730,7 +606,7 @@ def test_coordinator_listener_starts_new_ws(
 
 
 def test_import_energy_history_service_error_logging(
-    termoweb_init: Any, stub_hass: StubHass, monkeypatch: pytest.MonkeyPatch
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     registry = StubEntityRegistry()
     monkeypatch.setattr(
@@ -802,7 +678,7 @@ def test_import_energy_history_service_error_logging(
 
 
 def test_import_energy_history_service_logs_global_task_errors(
-    termoweb_init: Any, stub_hass: StubHass, monkeypatch: pytest.MonkeyPatch
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class ServiceClient(BaseFakeClient):
         async def list_devices(self) -> list[dict[str, Any]]:
@@ -841,7 +717,7 @@ def test_import_energy_history_service_logs_global_task_errors(
 
 def test_import_energy_history_service_logs_entry_task_exception(
     termoweb_init: Any,
-    stub_hass: StubHass,
+    stub_hass: HomeAssistant,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -877,7 +753,7 @@ def test_import_energy_history_service_logs_entry_task_exception(
 
 
 def test_start_ws_skips_when_task_running(
-    termoweb_init: Any, stub_hass: StubHass, monkeypatch: pytest.MonkeyPatch
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class HappyClient(BaseFakeClient):
         async def list_devices(self) -> list[dict[str, Any]]:
@@ -923,7 +799,7 @@ def test_start_ws_skips_when_task_running(
 
 
 def test_import_energy_history_service_handles_string_ids_and_cancelled(
-    termoweb_init: Any, stub_hass: StubHass, monkeypatch: pytest.MonkeyPatch
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     registry = StubEntityRegistry()
     monkeypatch.setattr(
@@ -979,7 +855,7 @@ def test_import_energy_history_service_handles_string_ids_and_cancelled(
 
 
 def test_async_unload_entry_handles_task_and_client_errors(
-    termoweb_init: Any, stub_hass: StubHass, monkeypatch: pytest.MonkeyPatch
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class HappyClient(BaseFakeClient):
         async def list_devices(self) -> list[dict[str, Any]]:
@@ -1027,7 +903,7 @@ def test_async_unload_entry_handles_task_and_client_errors(
 
 
 def test_async_unload_entry_cleans_up(
-    termoweb_init: Any, stub_hass: StubHass
+    termoweb_init: Any, stub_hass: HomeAssistant
 ) -> None:
     entry = ConfigEntry("unload", data={})
     stub_hass.config_entries.add(entry)
@@ -1079,7 +955,7 @@ def test_async_unload_entry_cleans_up(
 
 
 def test_async_update_entry_options_recalculates_poll(
-    termoweb_init: Any, stub_hass: StubHass
+    termoweb_init: Any, stub_hass: HomeAssistant
 ) -> None:
     entry = ConfigEntry("options", data={})
     stub_hass.config_entries.add(entry)
@@ -1095,7 +971,7 @@ def test_async_update_entry_options_recalculates_poll(
 
 
 def test_async_unload_entry_missing_returns_true(
-    termoweb_init: Any, stub_hass: StubHass
+    termoweb_init: Any, stub_hass: HomeAssistant
 ) -> None:
     entry = ConfigEntry("missing", data={})
     stub_hass.config_entries.add(entry)
@@ -1103,7 +979,7 @@ def test_async_unload_entry_missing_returns_true(
 
 
 def test_async_migrate_entry_returns_true(
-    termoweb_init: Any, stub_hass: StubHass
+    termoweb_init: Any, stub_hass: HomeAssistant
 ) -> None:
     entry = ConfigEntry("migrate", data={})
     stub_hass.config_entries.add(entry)

@@ -2,322 +2,40 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
-import enum
-import importlib.util
 import logging
 import time
 from collections import deque
 from collections.abc import Coroutine
-from pathlib import Path
-import sys
 import types
-from typing import Any, Callable, Deque, cast
+from typing import Any, Deque, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-# -------------------- Minimal Home Assistant stubs --------------------
-
-ha_core = types.ModuleType("homeassistant.core")
-
-
-class HomeAssistant:  # pragma: no cover - lightweight container
-    def __init__(self) -> None:
-        self.data: dict[str, Any] = {}
-
-
-def callback(func: Callable[..., Any]) -> Callable[..., Any]:  # pragma: no cover
-    return func
-
-
-class ServiceCall:  # pragma: no cover - simple data holder
-    def __init__(self, data: dict[str, Any] | None = None) -> None:
-        self.data = data or {}
-
-
-ha_core.HomeAssistant = HomeAssistant
-ha_core.callback = callback
-ha_core.ServiceCall = ServiceCall
-sys.modules["homeassistant"] = types.ModuleType("homeassistant")
-ha_root = sys.modules["homeassistant"]
-sys.modules["homeassistant.core"] = ha_core
-
-ha_components = types.ModuleType("homeassistant.components")
-sys.modules["homeassistant.components"] = ha_components
-
-ha_climate = types.ModuleType("homeassistant.components.climate")
-
-
-class ClimateEntity:  # pragma: no cover - minimal implementation
-    def __init__(self) -> None:
-        self.hass: HomeAssistant | None = None
-
-    async def async_added_to_hass(self) -> None:
-        return None
-
-    async def async_will_remove_from_hass(self) -> None:
-        return None
-
-    def schedule_update_ha_state(self) -> None:
-        return None
-
-    def async_write_ha_state(self) -> None:
-        return None
-
-    def async_on_remove(self, func: Callable[[], Any]) -> None:
-        self._on_remove = func
-
-
-class ClimateEntityFeature:  # pragma: no cover - placeholder container
-    TARGET_TEMPERATURE = 1
-
-
-class HVACMode(str, enum.Enum):  # pragma: no cover - simple enum
-    OFF = "off"
-    HEAT = "heat"
-    AUTO = "auto"
-
-
-class HVACAction(str, enum.Enum):  # pragma: no cover - simple enum
-    OFF = "off"
-    IDLE = "idle"
-    HEATING = "heating"
-
-
-ha_climate.ClimateEntity = ClimateEntity
-ha_climate.ClimateEntityFeature = ClimateEntityFeature
-ha_climate.HVACMode = HVACMode
-ha_climate.HVACAction = HVACAction
-ha_components.climate = ha_climate
-sys.modules["homeassistant.components.climate"] = ha_climate
-
-ha_const = types.ModuleType("homeassistant.const")
-ha_const.ATTR_TEMPERATURE = "temperature"
-
-
-class UnitOfTemperature:  # pragma: no cover - minimal
-    CELSIUS = "C"
-
-
-ha_const.UnitOfTemperature = UnitOfTemperature
-sys.modules["homeassistant.const"] = ha_const
-
-ha_entity = types.ModuleType("homeassistant.helpers.entity")
-
-
-class DeviceInfo(dict):  # pragma: no cover - mapping subclass
-    pass
-
-
-ha_entity.DeviceInfo = DeviceInfo
-sys.modules["homeassistant.helpers.entity"] = ha_entity
-
-ha_helpers = types.ModuleType("homeassistant.helpers")
-sys.modules["homeassistant.helpers"] = ha_helpers
-
-ha_entity_platform = types.ModuleType("homeassistant.helpers.entity_platform")
-
-
-class EntityPlatform:  # pragma: no cover - captures registrations
-    def __init__(self) -> None:
-        self.registered: list[tuple[str, Any, Callable[..., Any]]] = []
-
-    def async_register_entity_service(
-        self, name: str, schema: Any, func: Callable[..., Any]
-    ) -> None:
-        self.registered.append((name, schema, func))
-
-
-_current_platform = EntityPlatform()
-
-
-def async_get_current_platform() -> EntityPlatform:  # pragma: no cover
-    return _current_platform
-
-
-def _set_current_platform(platform: EntityPlatform) -> None:  # pragma: no cover
-    global _current_platform
-    _current_platform = platform
-
-
-ha_entity_platform.EntityPlatform = EntityPlatform
-ha_entity_platform.async_get_current_platform = async_get_current_platform
-ha_entity_platform._set_current_platform = _set_current_platform
-sys.modules["homeassistant.helpers.entity_platform"] = ha_entity_platform
-
-ha_update_coordinator = types.ModuleType("homeassistant.helpers.update_coordinator")
-
-
-class CoordinatorEntity:  # pragma: no cover - lightweight base
-    def __init__(self, coordinator) -> None:
-        self.coordinator = coordinator
-        self.hass = getattr(coordinator, "hass", None)
-        self._on_remove: Callable[[], Any] | None = None
-
-    async def async_added_to_hass(self) -> None:
-        return None
-
-    async def async_will_remove_from_hass(self) -> None:
-        if self._on_remove:
-            self._on_remove()
-
-    def schedule_update_ha_state(self) -> None:
-        return None
-
-    def async_write_ha_state(self) -> None:
-        return None
-
-    def async_on_remove(self, func: Callable[[], Any]) -> None:
-        self._on_remove = func
-
-
-ha_update_coordinator.CoordinatorEntity = CoordinatorEntity
-sys.modules["homeassistant.helpers.update_coordinator"] = ha_update_coordinator
-ha_helpers.update_coordinator = ha_update_coordinator
-
-ha_dispatcher = types.ModuleType("homeassistant.helpers.dispatcher")
-_dispatch_map: dict[str, list[Callable[[dict[str, Any]], None]]] = {}
-
-
-def async_dispatcher_connect(
-    _hass: HomeAssistant, signal: str, func: Callable[[dict[str, Any]], None]
-) -> Callable[[], None]:  # pragma: no cover
-    _dispatch_map.setdefault(signal, []).append(func)
-
-    def _unsub() -> None:
-        callbacks = _dispatch_map.get(signal, [])
-        if func in callbacks:
-            callbacks.remove(func)
-
-    return _unsub
-
-
-def dispatcher_send(signal: str, payload: dict[str, Any]) -> None:  # pragma: no cover
-    for func in list(_dispatch_map.get(signal, [])):
-        func(payload)
-
-
-ha_dispatcher.async_dispatcher_connect = async_dispatcher_connect
-ha_dispatcher.dispatcher_send = dispatcher_send
-sys.modules["homeassistant.helpers.dispatcher"] = ha_dispatcher
-
-ha_dt = types.ModuleType("homeassistant.util.dt")
-ha_dt.NOW = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
-
-
-def now() -> dt.datetime:  # pragma: no cover - deterministic clock
-    return ha_dt.NOW
-
-
-ha_dt.now = now
-ha_util = types.ModuleType("homeassistant.util")
-ha_util.dt = ha_dt
-sys.modules["homeassistant.util"] = ha_util
-sys.modules["homeassistant.util.dt"] = ha_dt
-
-vol = types.ModuleType("voluptuous")
-
-
-def _identity(value: Any) -> Any:
-    return value
-
-
-def Required(_key: Any) -> Callable[[Any], Any]:  # pragma: no cover
-    def _req(value: Any) -> Any:
-        return value
-
-    return _req
-
-
-def Optional(_key: Any) -> Callable[[Any], Any]:  # pragma: no cover
-    def _opt(value: Any) -> Any:
-        return value
-
-    return _opt
-
-
-def In(container: list[Any]) -> Callable[[Any], Any]:  # pragma: no cover
-    def _validator(value: Any) -> Any:
-        if value not in container:
-            raise ValueError("value not allowed")
-        return value
-
-    return _validator
-
-
-def Coerce(type_: Callable[[Any], Any]) -> Callable[[Any], Any]:  # pragma: no cover
-    def _validator(value: Any) -> Any:
-        return type_(value)
-
-    return _validator
-
-
-def Length(*_args: Any, **_kwargs: Any) -> Callable[[Any], Any]:  # pragma: no cover
-    return _identity
-
-
-def All(*validators: Callable[[Any], Any]) -> Callable[[Any], Any]:  # pragma: no cover
-    def _validator(value: Any) -> Any:
-        result = value
-        for validator in validators:
-            result = validator(result)
-        return result
-
-    return _validator
-
-
-vol.Required = Required
-vol.Optional = Optional
-vol.In = In
-vol.Coerce = Coerce
-vol.Length = Length
-vol.All = All
-sys.modules["voluptuous"] = vol
-
-
-def _reset_stubs() -> None:
-    sys.modules["homeassistant"] = ha_root
-    sys.modules["homeassistant.core"] = ha_core
-    sys.modules["homeassistant.components"] = ha_components
-    sys.modules["homeassistant.components.climate"] = ha_climate
-    sys.modules["homeassistant.const"] = ha_const
-    sys.modules["homeassistant.helpers"] = ha_helpers
-    sys.modules["homeassistant.helpers.entity"] = ha_entity
-    sys.modules["homeassistant.helpers.entity_platform"] = ha_entity_platform
-    sys.modules["homeassistant.helpers.update_coordinator"] = ha_update_coordinator
-    sys.modules["homeassistant.helpers.dispatcher"] = ha_dispatcher
-    sys.modules["homeassistant.util"] = ha_util
-    sys.modules["homeassistant.util.dt"] = ha_dt
-    sys.modules["voluptuous"] = vol
-
-
-# -------------------- Load the real climate module --------------------
-
-CLIMATE_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "custom_components"
-    / "termoweb"
-    / "climate.py"
-)
-package = "custom_components.termoweb"
-
-sys.modules.setdefault("custom_components", types.ModuleType("custom_components"))
-termoweb_pkg = types.ModuleType(package)
-termoweb_pkg.__path__ = [str(CLIMATE_PATH.parent)]
-sys.modules[package] = termoweb_pkg
-
-spec = importlib.util.spec_from_file_location(f"{package}.climate", CLIMATE_PATH)
-climate_module = importlib.util.module_from_spec(spec)
-assert spec.loader is not None
-sys.modules[f"{package}.climate"] = climate_module
-spec.loader.exec_module(climate_module)
+from conftest import _install_stubs
+
+_install_stubs()
+
+from custom_components.termoweb import climate as climate_module
+from custom_components.termoweb.const import DOMAIN, signal_ws_data
+from homeassistant.components.climate import HVACAction, HVACMode
+from homeassistant.const import ATTR_TEMPERATURE
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.helpers import entity_platform as entity_platform_module
+from homeassistant.helpers.entity_platform import EntityPlatform
+from homeassistant.helpers import dispatcher as dispatcher_module
+from homeassistant.util import dt as dt_util
 
 TermoWebHeater = climate_module.TermoWebHeater
 async_setup_entry = climate_module.async_setup_entry
 
-const_module = importlib.import_module(f"{package}.const")
-signal_ws_data = const_module.signal_ws_data
-DOMAIN = const_module.DOMAIN
+
+def _reset_environment() -> None:
+    _install_stubs()
+    entity_platform_module._set_current_platform(EntityPlatform())
+    dispatcher_module._dispatch_map = {}
+    dt_util.NOW = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
+
 
 # -------------------- Helpers for tests --------------------
 
@@ -335,7 +53,7 @@ class FakeCoordinator:
 
 def test_async_setup_entry_creates_entities() -> None:
     async def _run() -> None:
-        _reset_stubs()
+        _reset_environment()
         hass = HomeAssistant()
         entry_id = "entry"
         dev_id = "dev1"
@@ -371,7 +89,7 @@ def test_async_setup_entry_creates_entities() -> None:
             added.extend(entities)
 
         platform = EntityPlatform()
-        ha_entity_platform._set_current_platform(platform)
+        entity_platform_module._set_current_platform(platform)
 
         entry = types.SimpleNamespace(entry_id=entry_id)
         await async_setup_entry(hass, entry, _async_add_entities)
@@ -426,7 +144,7 @@ def test_refresh_fallback_skips_when_hass_inactive(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def _run() -> None:
-        _reset_stubs()
+        _reset_environment()
 
         hass = HomeAssistant()
         hass.is_stopping = True
@@ -490,9 +208,7 @@ def test_heater_additional_cancelled_edges(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def _run() -> None:
-        _reset_stubs()
-        from homeassistant.components.climate import HVACMode
-
+        _reset_environment()
         hass = HomeAssistant()
         entry_id = "entry"
         dev_id = "dev"
@@ -600,10 +316,7 @@ def test_heater_additional_cancelled_edges(
 
 def test_heater_properties_and_ws_update() -> None:
     async def _run() -> None:
-        _reset_stubs()
-        from homeassistant.helpers.dispatcher import dispatcher_send
-        from homeassistant.components.climate import HVACAction, HVACMode
-
+        _reset_environment()
         hass = HomeAssistant()
         entry_id = "entry"
         dev_id = "dev1"
@@ -638,7 +351,7 @@ def test_heater_properties_and_ws_update() -> None:
             }
         }
 
-        ha_dt.NOW = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
+        dt_util.NOW = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
 
         heater = TermoWebHeater(coordinator, entry_id, dev_id, addr, "Living")
         assert heater.hass is hass
@@ -671,8 +384,9 @@ def test_heater_properties_and_ws_update() -> None:
         assert attrs["program_slot"] == "day"
         assert attrs["program_setpoint"] == pytest.approx(21.0)
 
+        assert heater._unsub_ws is not None
         heater.schedule_update_ha_state = MagicMock()
-        dispatcher_send(signal_ws_data(entry_id), {"dev_id": dev_id, "addr": addr})
+        heater._on_ws_data({"dev_id": dev_id, "addr": addr})
         heater.schedule_update_ha_state.assert_called_once()
 
         heater.schedule_update_ha_state.reset_mock()
@@ -699,14 +413,14 @@ def test_heater_properties_and_ws_update() -> None:
         with pytest.raises(asyncio.CancelledError):
             await task
 
-        original_now = ha_dt.NOW
+        original_now = dt_util.NOW
         try:
-            ha_dt.NOW = dt.datetime(2024, 1, 1, 1, 0, tzinfo=dt.timezone.utc)
+            dt_util.NOW = dt.datetime(2024, 1, 1, 1, 0, tzinfo=dt.timezone.utc)
             attrs = heater.extra_state_attributes
             assert attrs["program_slot"] == "night"
             assert attrs["program_setpoint"] == pytest.approx(18.0)
         finally:
-            ha_dt.NOW = original_now
+            dt_util.NOW = original_now
 
         coordinator.data[dev_id]["nodes"] = None
         assert heater.available is False
@@ -756,10 +470,8 @@ def test_heater_write_paths_and_errors(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     async def _run() -> None:
-        _reset_stubs()
+        _reset_environment()
         from homeassistant.const import ATTR_TEMPERATURE
-        from homeassistant.components.climate import HVACMode
-
         hass = HomeAssistant()
         entry_id = "entry"
         dev_id = "dev1"
@@ -1182,9 +894,7 @@ def test_heater_write_paths_and_errors(
 
 def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
-        _reset_stubs()
-        from homeassistant.components.climate import HVACMode
-
+        _reset_environment()
         hass = HomeAssistant()
         entry_id = "entry"
         dev_id = "dev"
@@ -1359,7 +1069,7 @@ def test_heater_cancelled_paths_propagate(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def _run() -> None:
-        _reset_stubs()
+        _reset_environment()
         from homeassistant.components.climate import HVACMode
 
         hass = HomeAssistant()
