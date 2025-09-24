@@ -646,3 +646,67 @@ def test_energy_and_power_sensor_properties() -> None:
     assert total_sensor.native_value is None
     coordinator.data = {"dev": None}
     assert total_sensor.available is False
+
+
+def test_energy_sensor_respects_scale_metadata() -> None:
+    hass = HomeAssistant()
+    base = {
+        "dev": {
+            "nodes": {},
+            "htr": {
+                "energy": {"A": "1500", "B": "500"},
+                "power": {},
+            },
+        }
+    }
+    coordinator = types.SimpleNamespace(hass=hass, data=copy.deepcopy(base))
+
+    energy_sensor = TermoWebHeaterEnergyTotal(
+        coordinator,
+        "entry",
+        "dev",
+        "A",
+        "Energy",
+        "uid",
+        "Node",
+    )
+    total_sensor = TermoWebTotalEnergy(coordinator, "entry", "dev", "Total", "tot")
+
+    assert energy_sensor.native_value == pytest.approx(1.5)
+    assert total_sensor.native_value == pytest.approx(2.0)
+
+    coordinator.data["dev"]["htr"]["energy"]["B"] = 0
+
+    coordinator.data["dev"]["htr"]["energy"]["A"] = True
+    assert energy_sensor.native_value is None
+
+    coordinator.data["dev"]["htr"]["energy"]["A"] = "nan"
+    assert energy_sensor.native_value is None
+
+    coordinator._termoweb_energy_scale = "Wh"
+    coordinator.data["dev"]["htr"]["energy"]["A"] = 2000
+    assert energy_sensor.native_value == pytest.approx(2.0)
+
+    coordinator._termoweb_energy_scale = "kWh"
+    coordinator.data["dev"]["htr"]["energy"]["A"] = "2.5"
+    assert energy_sensor.native_value == pytest.approx(2.5)
+
+    coordinator._termoweb_energy_scale = "0.5"
+    coordinator.data["dev"]["htr"]["energy"]["A"] = 4
+    assert energy_sensor.native_value == pytest.approx(2.0)
+
+    coordinator._termoweb_energy_scale = 2.0
+    coordinator.data["dev"]["htr"]["energy"]["A"] = 1.5
+    assert energy_sensor.native_value == pytest.approx(3.0)
+
+    coordinator._termoweb_energy_scale = "invalid"
+    coordinator.data["dev"]["htr"]["energy"]["A"] = "2.0"
+    assert energy_sensor.native_value == pytest.approx(2.0)
+
+
+def test_looks_like_integer_string_handles_signs_and_whitespace() -> None:
+    helper = sensor_module._looks_like_integer_string
+
+    assert helper("+123") is True
+    assert helper(" -42 ") is True
+    assert helper("   ") is False
