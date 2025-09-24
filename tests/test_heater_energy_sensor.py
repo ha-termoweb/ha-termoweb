@@ -103,17 +103,19 @@ def test_coordinator_and_sensors() -> None:
         energy_sensor.schedule_update_ha_state.reset_mock()
         original_unsub_energy = energy_sensor._unsub_ws
         energy_sensor._unsub_ws = MagicMock(side_effect=original_unsub_energy)
+        mock_energy_unsub = energy_sensor._unsub_ws
         await energy_sensor.async_will_remove_from_hass()
-        energy_sensor._unsub_ws.assert_called_once()
-        assert energy_sensor._on_ws_data not in dispatch_map.get(signal, [])
+        mock_energy_unsub.assert_called_once()
+        assert energy_sensor._handle_ws_message not in dispatch_map.get(signal, [])
         dispatcher_send(signal, {"dev_id": "1", "addr": "A"})
         energy_sensor.schedule_update_ha_state.assert_not_called()
 
         power_sensor.schedule_update_ha_state.reset_mock()
         original_unsub_power = power_sensor._unsub_ws
         power_sensor._unsub_ws = MagicMock(side_effect=original_unsub_power)
+        mock_power_unsub = power_sensor._unsub_ws
         await power_sensor.async_will_remove_from_hass()
-        power_sensor._unsub_ws.assert_called_once()
+        mock_power_unsub.assert_called_once()
 
     asyncio.run(_run())
 
@@ -263,7 +265,7 @@ def test_heater_temp_sensor() -> None:
         poll_signal = signal_poll_refresh("entry")
 
         assert sensor._unsub_ws is not None
-        assert sensor._on_ws_data in dispatch_map[ws_signal]
+        assert sensor._handle_ws_message in dispatch_map[ws_signal]
         sensor.async_on_remove.assert_called_once()
 
         info = sensor.device_info
@@ -322,9 +324,10 @@ def test_heater_temp_sensor() -> None:
         original_unsub = sensor._unsub_ws
         assert original_unsub is not None
         sensor._unsub_ws = MagicMock(side_effect=original_unsub)
+        mock_unsub = sensor._unsub_ws
         await sensor.async_will_remove_from_hass()
-        sensor._unsub_ws.assert_called_once()
-        assert sensor._on_ws_data not in dispatch_map.get(ws_signal, [])
+        mock_unsub.assert_called_once()
+        assert sensor._handle_ws_message not in dispatch_map.get(ws_signal, [])
 
         dispatcher_send(ws_signal, {"dev_id": "dev1", "addr": "A"})
         dispatcher_send(poll_signal, {"dev_id": "dev1", "addr": "A"})
@@ -375,8 +378,9 @@ def test_total_energy_sensor() -> None:
         total_sensor.schedule_update_ha_state.reset_mock()
         original_unsub = total_sensor._unsub_ws
         total_sensor._unsub_ws = MagicMock(side_effect=original_unsub)
+        mock_total_unsub = total_sensor._unsub_ws
         await total_sensor.async_will_remove_from_hass()
-        total_sensor._unsub_ws.assert_called_once()
+        mock_total_unsub.assert_called_once()
         assert total_sensor._on_ws_data not in dispatch_map.get(signal, [])
         dispatcher_send(signal, {"dev_id": "1", "addr": "B"})
         total_sensor.schedule_update_ha_state.assert_not_called()
@@ -422,8 +426,8 @@ def test_energy_and_power_sensor_properties() -> None:
     assert energy_sensor.native_value == pytest.approx(1.5)
     assert energy_sensor.extra_state_attributes == {"dev_id": "dev", "addr": "A"}
 
-    energy_sensor._on_ws_data({"dev_id": "other"})
-    energy_sensor._on_ws_data({"dev_id": "dev", "addr": "B"})
+    energy_sensor._handle_ws_message({"dev_id": "other"})
+    energy_sensor._handle_ws_message({"dev_id": "dev", "addr": "B"})
 
     coordinator.data = {"dev": {"htr": {"energy": {"A": None}}}}
     assert energy_sensor.native_value is None
@@ -437,8 +441,8 @@ def test_energy_and_power_sensor_properties() -> None:
     assert power_sensor.native_value == pytest.approx(250.0)
     assert power_sensor.extra_state_attributes == {"dev_id": "dev", "addr": "A"}
 
-    power_sensor._on_ws_data({"dev_id": "other"})
-    power_sensor._on_ws_data({"dev_id": "dev", "addr": "B"})
+    power_sensor._handle_ws_message({"dev_id": "other"})
+    power_sensor._handle_ws_message({"dev_id": "dev", "addr": "B"})
 
     coordinator.data = {"dev": {"htr": {"power": {"A": None}}}}
     assert power_sensor.native_value is None

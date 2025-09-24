@@ -386,19 +386,19 @@ def test_heater_properties_and_ws_update() -> None:
 
         assert heater._unsub_ws is not None
         heater.schedule_update_ha_state = MagicMock()
-        heater._on_ws_data({"dev_id": dev_id, "addr": addr})
+        heater._handle_ws_message({"dev_id": dev_id, "addr": addr})
         heater.schedule_update_ha_state.assert_called_once()
 
         heater.schedule_update_ha_state.reset_mock()
-        heater._on_ws_data({"dev_id": "other", "addr": addr})
-        heater._on_ws_data({"dev_id": dev_id, "addr": "B2"})
+        heater._handle_ws_message({"dev_id": "other", "addr": addr})
+        heater._handle_ws_message({"dev_id": dev_id, "addr": "B2"})
         heater.schedule_update_ha_state.assert_not_called()
 
-        heater._on_ws_data({"dev_id": dev_id})
+        heater._handle_ws_message({"dev_id": dev_id})
         heater.schedule_update_ha_state.assert_called_once()
 
         heater.schedule_update_ha_state.reset_mock()
-        heater._on_ws_data({"dev_id": dev_id, "addr": addr})
+        heater._handle_ws_message({"dev_id": dev_id, "addr": addr})
         heater.schedule_update_ha_state.assert_called_once()
 
         async def _pending() -> None:
@@ -406,7 +406,9 @@ def test_heater_properties_and_ws_update() -> None:
 
         task = asyncio.create_task(_pending())
         heater._refresh_fallback = task
-        heater._on_ws_data({"dev_id": dev_id, "addr": addr, "kind": "htr_settings"})
+        heater._handle_ws_message(
+            {"dev_id": dev_id, "addr": addr, "kind": "htr_settings"}
+        )
         await asyncio.sleep(0)
         assert task.cancelled()
         assert heater._refresh_fallback is None

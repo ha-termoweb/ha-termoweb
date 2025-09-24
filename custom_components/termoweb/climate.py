@@ -14,13 +14,11 @@ from homeassistant.components.climate import (
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import ServiceCall, callback
 from homeassistant.helpers import entity_platform
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
-from .const import DOMAIN, signal_ws_data
+from .const import DOMAIN
+from .heater import TermoWebHeaterBase, build_heater_name_map
 from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
@@ -39,14 +37,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     nodes = data["nodes"]
     addrs: list[str] = data["htr_addrs"]
 
-    name_map: dict[str, str] = {}
-    node_list = nodes.get("nodes") if isinstance(nodes, dict) else None
-    if isinstance(node_list, list):
-        for node in node_list:
-            if isinstance(node, dict) and (node.get("type") or "").lower() == "htr":
-                addr = str(node.get("addr"))
-                name = (node.get("name") or f"Heater {addr}").strip()
-                name_map[addr] = name
+    name_map = build_heater_name_map(nodes, lambda addr: f"Heater {addr}")
 
     new_entities = [
         TermoWebHeater(
@@ -118,7 +109,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     )
 
 
-class TermoWebHeater(CoordinatorEntity, ClimateEntity):
+class TermoWebHeater(TermoWebHeaterBase, ClimateEntity):
     """HA climate entity representing a single TermoWeb heater."""
 
     _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
@@ -128,13 +119,7 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
     def __init__(
         self, coordinator, entry_id: str, dev_id: str, addr: str, name: str
     ) -> None:
-        super().__init__(coordinator)
-        self._entry_id = entry_id
-        self._dev_id = dev_id
-        self._addr = addr
-        self._attr_name = name
-        self._attr_unique_id = f"{DOMAIN}:{dev_id}:htr:{addr}"
-        self._unsub_ws = None
+        super().__init__(coordinator, entry_id, dev_id, addr, name)
 
         self._refresh_fallback: asyncio.Task | None = None
 
@@ -143,43 +128,11 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
         self._pending_stemp: float | None = None
         self._write_task: asyncio.Task | None = None
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        self._unsub_ws = async_dispatcher_connect(
-            self.hass, signal_ws_data(self._entry_id), self._on_ws_data
-        )
-        self.async_on_remove(lambda: self._unsub_ws() if self._unsub_ws else None)
-
     async def async_will_remove_from_hass(self) -> None:
         if self._refresh_fallback:
             self._refresh_fallback.cancel()
             self._refresh_fallback = None
         await super().async_will_remove_from_hass()
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._dev_id, self._addr)},
-            name=self._attr_name,
-            manufacturer="TermoWeb",
-            model="Heater",
-            via_device=(DOMAIN, self._dev_id),
-        )
-
-    # -------------------- Helpers --------------------
-    def _client(self):
-        return self.hass.data[DOMAIN][self._entry_id]["client"]
-
-    def _settings(self) -> dict[str, Any] | None:
-        d = (self.coordinator.data or {}).get(self._dev_id, {})
-        htr = d.get("htr") or {}
-        settings = (htr.get("settings") or {}).get(self._addr)
-        return settings if isinstance(settings, dict) else None
-
-    def _units(self) -> str:
-        s = self._settings() or {}
-        u = (s.get("units") or "C").upper()
-        return "C" if u not in ("C", "F") else u
 
     @staticmethod
     def _slot_label(v: int) -> str | None:
@@ -200,34 +153,18 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
 
     # -------------------- WS updates --------------------
     @callback
-    def _on_ws_data(self, payload: dict) -> None:
-        if payload.get("dev_id") != self._dev_id:
-            return
-        addr = payload.get("addr")
-        if addr is not None and str(addr) != self._addr:
-            return
+    def _handle_ws_event(self, payload: dict) -> None:
         kind = payload.get("kind")
-        if kind == "htr_settings" and addr is not None:
-            if self._refresh_fallback:
-                if not self._refresh_fallback.done():
-                    self._refresh_fallback.cancel()
-                self._refresh_fallback = None
-        # Thread-safe state push
-        self.schedule_update_ha_state()
-
-    # -------------------- Read properties --------------------
-    @property
-    def should_poll(self) -> bool:
-        return False
-
-    @property
-    def available(self) -> bool:
-        d = (self.coordinator.data or {}).get(self._dev_id, {})
-        return d.get("nodes") is not None
+        addr = payload.get("addr")
+        if kind == "htr_settings" and addr is not None and self._refresh_fallback:
+            if not self._refresh_fallback.done():
+                self._refresh_fallback.cancel()
+            self._refresh_fallback = None
+        super()._handle_ws_event(payload)
 
     @property
     def hvac_mode(self) -> HVACMode:
-        s = self._settings() or {}
+        s = self.heater_settings() or {}
         mode = (s.get("mode") or "").lower()
         if mode == "off":
             return HVACMode.OFF
@@ -239,7 +176,7 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
 
     @property
     def hvac_action(self) -> HVACAction | None:
-        s = self._settings() or {}
+        s = self.heater_settings() or {}
         state = (s.get("state") or "").lower()
         if not state:
             return None
@@ -249,12 +186,12 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
 
     @property
     def current_temperature(self) -> float | None:
-        s = self._settings() or {}
+        s = self.heater_settings() or {}
         return float_or_none(s.get("mtemp"))
 
     @property
     def target_temperature(self) -> float | None:
-        s = self._settings() or {}
+        s = self.heater_settings() or {}
         return float_or_none(s.get("stemp"))
 
     @property
@@ -280,7 +217,7 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        s = self._settings() or {}
+        s = self.heater_settings() or {}
         attrs: dict[str, Any] = {
             "dev_id": self._dev_id,
             "addr": self._addr,
