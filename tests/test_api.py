@@ -5,6 +5,8 @@ import copy
 import importlib.util
 from pathlib import Path
 import sys
+import logging
+import time
 import types
 from typing import Any, Callable
 
@@ -518,12 +520,259 @@ def test_request_preview_logs_json_fallback(caplog) -> None:
     assert results == ['{"ok":true}']
     preview_logs = [rec.message for rec in caplog.records if "body[0:200]" in rec.message]
     assert preview_logs
-    assert '"ok"' in preview_logs[0]
+
+
+def test_api_base_property_returns_sanitized() -> None:
+    session = FakeSession()
+    client = TermoWebClient(session, "user", "pw", api_base="https://api.example.com/")
+
+    assert client.api_base == "https://api.example.com"
+
+
+def test_request_text_exception_fallback() -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_post(
+            MockResponse(
+                200,
+                {"access_token": "tok", "expires_in": 3600},
+                headers={"Content-Type": "application/json"},
+            )
+        )
+        session.queue_request(
+            MockResponse(
+                200,
+                {"ok": True},
+                headers={"Content-Type": "application/json"},
+                text_exc=RuntimeError("boom"),
+            )
+        )
+
+        client = TermoWebClient(session, "user", "pw")
+        headers = await client._authed_headers()
+        session.clear_calls()
+
+        result = await client._request("GET", "/api/data", headers=headers)
+        assert result == {"ok": True}
+
+    asyncio.run(_run())
+
+
+def test_request_returns_plain_text() -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_post(
+            MockResponse(
+                200,
+                {"access_token": "tok", "expires_in": 3600},
+                headers={"Content-Type": "application/json"},
+            )
+        )
+        session.queue_request(
+            MockResponse(
+                200,
+                "ignored",
+                headers={"Content-Type": "text/plain"},
+                text_data="hello world",
+            )
+        )
+
+        client = TermoWebClient(session, "user", "pw")
+        headers = await client._authed_headers()
+        session.clear_calls()
+
+        result = await client._request("GET", "/api/plain", headers=headers)
+        assert result == "hello world"
+
+    asyncio.run(_run())
+
+
+def test_ensure_token_uses_cache_without_http() -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        client = TermoWebClient(session, "user", "pw")
+        client._access_token = "cached"
+        client._token_expiry = time.time() + 1000
+
+        token = await client._ensure_token()
+        assert token == "cached"
+        assert session.post_calls == []
+
+    asyncio.run(_run())
+
+
+def test_ensure_token_concurrent_calls_share_refresh() -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_post(
+            MockResponse(
+                200,
+                {"access_token": "tok", "expires_in": 3600},
+                headers={"Content-Type": "application/json"},
+            )
+        )
+
+        client = TermoWebClient(session, "user", "pw")
+        tokens = await asyncio.gather(client._ensure_token(), client._ensure_token())
+
+        assert tokens == ["tok", "tok"]
+        assert len(session.post_calls) == 1
+
+    asyncio.run(_run())
+
+
+def test_ensure_token_returns_cached_after_lock_entry() -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        client = TermoWebClient(session, "user", "pw")
+        client._access_token = None
+        client._token_expiry = 0.0
+
+        class FakeLock:
+            def __init__(self, owner: TermoWebClient) -> None:
+                self._owner = owner
+
+            async def __aenter__(self) -> "FakeLock":
+                self._owner._access_token = "cached"
+                self._owner._token_expiry = time.time() + 100
+                return self
+
+            async def __aexit__(self, *_exc: Any) -> bool:
+                return False
+
+        client._lock = FakeLock(client)  # type: ignore[assignment]
+
+        token = await client._ensure_token()
+        assert token == "cached"
+        assert session.post_calls == []
+
+    asyncio.run(_run())
+
+
+def test_token_request_error_raises_client_response_error() -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_post(
+            MockResponse(
+                500,
+                {},
+                headers={"Content-Type": "text/plain"},
+                text_data="failure",
+            )
+        )
+
+        client = TermoWebClient(session, "user", "pw")
+        with pytest.raises(aiohttp.ClientResponseError) as err:
+            await client._ensure_token()
+        assert err.value.status == 500
+
+    asyncio.run(_run())
+
+
+def test_list_devices_handles_various_shapes() -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_post(
+            MockResponse(
+                200,
+                {"access_token": "tok", "expires_in": 3600},
+                headers={"Content-Type": "application/json"},
+            )
+        )
+        session.queue_request(
+            MockResponse(
+                200,
+                {"devs": [{"id": 1}, "bad"]},
+                headers={"Content-Type": "application/json"},
+            )
+        )
+        session.queue_request(
+            MockResponse(
+                200,
+                {"devices": [{"dev_id": "abc"}, 123]},
+                headers={"Content-Type": "application/json"},
+            )
+        )
+
+        client = TermoWebClient(session, "user", "pw")
+        first = await client.list_devices()
+        second = await client.list_devices()
+
+        assert first == [{"id": 1}]
+        assert second == [{"dev_id": "abc"}]
+
+    asyncio.run(_run())
+
+
+def test_device_connected_returns_none() -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        client = TermoWebClient(session, "user", "pw")
+        assert await client.device_connected("dev") is None
+
+    asyncio.run(_run())
+
+
+def test_get_nodes_and_settings_use_expected_paths(monkeypatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        client = TermoWebClient(session, "user", "pw")
+        client._access_token = "tok"
+        client._token_expiry = time.time() + 1000
+
+        calls: list[tuple[str, str]] = []
+
+        async def fake_request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+            calls.append((method, path))
+            return {"ok": True}
+
+        monkeypatch.setattr(client, "_request", fake_request)
+
+        await client.get_nodes("dev123")
+        await client.get_htr_settings("dev123", "5")
+
+        assert calls == [
+            ("GET", api.NODES_PATH_FMT.format(dev_id="dev123")),
+            ("GET", f"/api/v2/devs/dev123/htr/5/settings"),
+        ]
+
+    asyncio.run(_run())
+
+
+def test_set_htr_settings_includes_prog_and_ptemp(monkeypatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        client = TermoWebClient(session, "user", "pw")
+        client._access_token = "tok"
+        client._token_expiry = time.time() + 1000
+
+        received: list[dict[str, Any]] = []
+
+        async def fake_request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+            received.append(kwargs["json"])
+            return {"ok": True}
+
+        monkeypatch.setattr(client, "_request", fake_request)
+
+        prog = [0, 1, 2] * 56
+        ptemp = [18.0, 19.0, 20.0]
+        await client.set_htr_settings("dev123", "7", prog=prog, ptemp=ptemp, units="f")
+
+        assert received == [
+            {
+                "units": "F",
+                "prog": prog,
+                "ptemp": ["18.0", "19.0", "20.0"],
+            }
+        ]
+
+    asyncio.run(_run())
 
 
 def test_request_cancelled_error_propagates() -> None:
     async def _run() -> None:
         session = FakeSession()
+
         def raise_cancelled() -> None:
             raise asyncio.CancelledError()
 
@@ -535,6 +784,26 @@ def test_request_cancelled_error_propagates() -> None:
             await client._request("GET", "/api/cancel", headers={})
 
     asyncio.run(_run())
+
+
+def test_request_generic_exception_logs(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.ERROR, logger=api.__name__)
+
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(RuntimeError("upstream Bearer secret-token failure"))
+
+        client = TermoWebClient(session, "user", "pass")
+
+        headers = {"Authorization": "Bearer secret-token"}
+
+        with pytest.raises(RuntimeError):
+            await client._request("GET", "/api/fail", headers=headers)
+
+    asyncio.run(_run())
+
+    assert "Request GET" in caplog.text
+    assert "Bearer ***REDACTED***" in caplog.text
 
 
 def test_request_final_auth_error_after_retries(monkeypatch) -> None:

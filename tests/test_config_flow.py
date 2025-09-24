@@ -344,6 +344,93 @@ def _create_flow(hass: HomeAssistant) -> config_flow.TermoWebConfigFlow:
     return flow
 
 
+def test_get_version_reads_integration_version() -> None:
+    hass = HomeAssistant()
+
+    result = asyncio.run(config_flow._get_version(hass))
+
+    assert result == "0.0-test"
+
+
+def test_get_version_returns_unknown_when_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hass = HomeAssistant()
+
+    async def fake_get_integration(_hass: HomeAssistant, _domain: str) -> _Integration:
+        return _Integration(version="")
+
+    monkeypatch.setattr(
+        config_flow, "async_get_integration", fake_get_integration
+    )
+
+    result = asyncio.run(config_flow._get_version(hass))
+
+    assert result == "unknown"
+
+
+def test_poll_schema_enforces_minimum() -> None:
+    below_min = config_flow.MIN_POLL_INTERVAL - 5
+    schema = config_flow._poll_schema(below_min)
+    default = _schema_default(schema, "poll_interval")
+    assert default == config_flow.MIN_POLL_INTERVAL
+
+    with pytest.raises(ValueError):
+        schema({"poll_interval": config_flow.MIN_POLL_INTERVAL - 1})
+
+    assert schema({"poll_interval": config_flow.MIN_POLL_INTERVAL + 10})[
+        "poll_interval"
+    ] == config_flow.MIN_POLL_INTERVAL + 10
+
+
+def test_validate_login_uses_brand_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hass = HomeAssistant()
+    calls: list[tuple[Any, str, str, str, str]] = []
+
+    class DummyClient:
+        def __init__(
+            self,
+            session: object,
+            username: str,
+            password: str,
+            *,
+            api_base: str,
+            basic_auth_b64: str,
+        ) -> None:
+            calls.append((session, username, password, api_base, basic_auth_b64))
+
+        async def list_devices(self) -> None:
+            calls.append(("listed",))
+
+    monkeypatch.setattr(config_flow, "TermoWebClient", DummyClient)
+
+    asyncio.run(
+        config_flow._validate_login(
+            hass, "user@example.com", "pw", config_flow.BRAND_DUCAHEAT
+        )
+    )
+
+    assert calls
+    session_obj, username, password, api_base, basic_auth = calls[0]
+    assert username == "user@example.com"
+    assert password == "pw"
+    assert api_base == config_flow.get_brand_api_base(config_flow.BRAND_DUCAHEAT)
+    assert basic_auth == config_flow.get_brand_basic_auth(config_flow.BRAND_DUCAHEAT)
+    assert calls[-1] == ("listed",)
+
+
+def test_async_step_reconfigure_missing_entry_aborts() -> None:
+    hass = HomeAssistant()
+    flow = _create_flow(hass)
+    flow.context["entry_id"] = "missing"
+
+    result = asyncio.run(flow.async_step_reconfigure())
+
+    assert result == {"type": "abort", "reason": "no_config_entry"}
+
+
 def test_async_step_user_initial_form(monkeypatch: pytest.MonkeyPatch) -> None:
     hass = HomeAssistant()
     flow = _create_flow(hass)
