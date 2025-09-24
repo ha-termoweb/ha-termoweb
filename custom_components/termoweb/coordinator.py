@@ -180,21 +180,23 @@ class TermoWebHeaterEnergyCoordinator(
                     )
                     continue
 
-                energy_map[addr] = counter
+                kwh = counter / 1000.0
+                energy_map[addr] = kwh
 
                 prev = self._last.get((dev_id, addr))
                 if prev:
-                    prev_t, prev_counter = prev
-                    if counter < prev_counter or t <= prev_t:
-                        self._last[(dev_id, addr)] = (t, counter)
+                    prev_t, prev_kwh = prev
+                    if kwh < prev_kwh or t <= prev_t:
+                        self._last[(dev_id, addr)] = (t, kwh)
                         continue
                     dt_hours = (t - prev_t) / 3600
                     if dt_hours > 0:
-                        power = (counter - prev_counter) / dt_hours * 1000
+                        delta_kwh = kwh - prev_kwh
+                        power = delta_kwh / dt_hours * 1000
                         power_map[addr] = power
-                    self._last[(dev_id, addr)] = (t, counter)
+                    self._last[(dev_id, addr)] = (t, kwh)
                 else:
-                    self._last[(dev_id, addr)] = (t, counter)
+                    self._last[(dev_id, addr)] = (t, kwh)
 
             result: dict[str, dict[str, Any]] = {
                 dev_id: {
