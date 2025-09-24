@@ -1,7 +1,21 @@
 # TermoWeb Cloud API — REST & WebSocket (capture‑verified, 2025‑08‑13)
 
-**Base host**: `https://control.termoweb.net`  
-**Auth**: Bearer token obtained via **POST `/client/token`** (basic client credentials + password grant).  
+**Tevolve app family**: TermoWeb, Ducaheat, and (future) Tevolve white-label the same API shape but talk to separate backend deployments with isolated user databases.
+
+**Backends & OAuth clients**
+
+| App (brand) | Base host | Client ID | Client secret | Notes |
+| --- | --- | --- | --- | --- |
+| TermoWeb | `https://control.termoweb.net` | `52172dc84f63d6c759000005` | `bxv4Z3xUSe` | Legacy/primary deployment. |
+| Ducaheat | `https://api-tevolve.termoweb.net` | `5c49dce977510351506c42db` | `tevolve` | Uses identical endpoints with brand-specific assets. |
+| Tevolve | _TODO_ | _TODO_ | _TODO_ | Placeholder for the third Android app. |
+
+For both implemented apps, Basic client credentials are sent as `Authorization: Basic <base64(client_id:client_secret)>`:
+
+- TermoWeb: `NTIxNzJkYzg0ZjYzZDZjNzU5MDAwMDA1OmJ4djRaM3hVU2U=`
+- Ducaheat: `NWM0OWRjZTk3NzUxMDM1MTUwNmM0MmRiOnRldm9sdmU=`
+
+**Auth**: Bearer token obtained via **POST `/client/token`** (basic client credentials + password grant).
 **Content type**: JSON for all REST endpoints (request/response).
 
 > This document reflects endpoints and behaviours seen in live traffic from the official Android app on 2025‑08‑13. The vendor’s app traffic is treated as authoritative.
