@@ -17,6 +17,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_data
 from .coordinator import TermoWebHeaterEnergyCoordinator
+from .heater import TermoWebHeaterBase, build_heater_name_map
 from .utils import float_or_none
 
 _WH_TO_KWH = 1 / 1000.0
@@ -99,14 +100,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
         data["energy_coordinator"] = energy_coordinator
         await energy_coordinator.async_config_entry_first_refresh()
 
-    name_map: dict[str, str] = {}
-    node_list = nodes.get("nodes") if isinstance(nodes, dict) else None
-    if isinstance(node_list, list):
-        for node in node_list:
-            if isinstance(node, dict) and (node.get("type") or "").lower() == "htr":
-                addr = str(node.get("addr"))
-                base = (node.get("name") or f"Node {addr}").strip() or f"Node {addr}"
-                name_map[addr] = base
+    name_map = build_heater_name_map(
+        nodes, lambda addr: f"Node {addr}"
+    )
 
     new_entities: list[SensorEntity] = []
     for addr in addrs:
@@ -165,7 +161,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         async_add_entities(new_entities)
 
 
-class TermoWebHeaterTemp(CoordinatorEntity, SensorEntity):
+class TermoWebHeaterTemp(TermoWebHeaterBase, SensorEntity):
     """Temperature sensor for a single heater node (read-only mtemp)."""
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
@@ -182,62 +178,24 @@ class TermoWebHeaterTemp(CoordinatorEntity, SensorEntity):
         unique_id: str,
         device_name: str,
     ) -> None:
-        super().__init__(coordinator)
-        self._entry_id = entry_id
-        self._dev_id = dev_id
-        self._addr = addr
-        self._attr_name = name
-        self._attr_unique_id = unique_id
-        self._device_name = device_name
-        self._unsub_ws = None
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        self._unsub_ws = async_dispatcher_connect(
-            self.hass, signal_ws_data(self._entry_id), self._on_ws_data
+        super().__init__(
+            coordinator,
+            entry_id,
+            dev_id,
+            addr,
+            name,
+            unique_id,
+            device_name=device_name,
         )
-        self.async_on_remove(lambda: self._unsub_ws() if self._unsub_ws else None)
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._dev_id, self._addr)},
-            name=self._device_name,
-            manufacturer="TermoWeb",
-            model="Heater",
-            via_device=(DOMAIN, self._dev_id),
-        )
-
-    def _settings(self) -> dict[str, Any] | None:
-        d = (self.coordinator.data or {}).get(self._dev_id, {})
-        htr = d.get("htr") or {}
-        settings = (htr.get("settings") or {}).get(self._addr)
-        return settings if isinstance(settings, dict) else None
-
-
-    @callback
-    def _on_ws_data(self, payload: dict) -> None:
-        if payload.get("dev_id") != self._dev_id:
-            return
-        addr = payload.get("addr")
-        if addr is not None and str(addr) != self._addr:
-            return
-        # Thread-safe state update
-        self.schedule_update_ha_state()
-
-    @property
-    def available(self) -> bool:
-        d = (self.coordinator.data or {}).get(self._dev_id, {})
-        return d.get("nodes") is not None
 
     @property
     def native_value(self) -> float | None:
-        s = self._settings() or {}
+        s = self.heater_settings() or {}
         return float_or_none(s.get("mtemp"))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        s = self._settings() or {}
+        s = self.heater_settings() or {}
         return {
             "dev_id": self._dev_id,
             "addr": self._addr,
@@ -245,7 +203,7 @@ class TermoWebHeaterTemp(CoordinatorEntity, SensorEntity):
         }
 
 
-class TermoWebHeaterEnergyTotal(CoordinatorEntity, SensorEntity):
+class TermoWebHeaterEnergyTotal(TermoWebHeaterBase, SensorEntity):
     """Total energy consumption sensor for a heater."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
@@ -262,45 +220,18 @@ class TermoWebHeaterEnergyTotal(CoordinatorEntity, SensorEntity):
         unique_id: str,
         device_name: str,
     ) -> None:
-        super().__init__(coordinator)
-        self._entry_id = entry_id
-        self._dev_id = dev_id
-        self._addr = addr
-        self._attr_name = name
-        self._attr_unique_id = unique_id
-        self._device_name = device_name
-        self._unsub_ws = None
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        self._unsub_ws = async_dispatcher_connect(
-            self.hass, signal_ws_data(self._entry_id), self._on_ws_data
-        )
-        self.async_on_remove(lambda: self._unsub_ws() if self._unsub_ws else None)
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._dev_id, self._addr)},
-            name=self._device_name,
-            manufacturer="TermoWeb",
-            model="Heater",
-            via_device=(DOMAIN, self._dev_id),
+        super().__init__(
+            coordinator,
+            entry_id,
+            dev_id,
+            addr,
+            name,
+            unique_id,
+            device_name=device_name,
         )
 
-    @callback
-    def _on_ws_data(self, payload: dict) -> None:
-        if payload.get("dev_id") != self._dev_id:
-            return
-        addr = payload.get("addr")
-        if addr is not None and str(addr) != self._addr:
-            return
-        self.schedule_update_ha_state()
-
-    @property
-    def available(self) -> bool:
-        d = (self.coordinator.data or {}).get(self._dev_id)
-        return d is not None
+    def _device_available(self, device_entry: dict[str, Any] | None) -> bool:
+        return device_entry is not None
 
     @property
     def native_value(self) -> float | None:
@@ -316,7 +247,7 @@ class TermoWebHeaterEnergyTotal(CoordinatorEntity, SensorEntity):
         return {"dev_id": self._dev_id, "addr": self._addr}
 
 
-class TermoWebHeaterPower(CoordinatorEntity, SensorEntity):
+class TermoWebHeaterPower(TermoWebHeaterBase, SensorEntity):
     """Power sensor for a heater."""
 
     _attr_device_class = SensorDeviceClass.POWER
@@ -333,45 +264,18 @@ class TermoWebHeaterPower(CoordinatorEntity, SensorEntity):
         unique_id: str,
         device_name: str,
     ) -> None:
-        super().__init__(coordinator)
-        self._entry_id = entry_id
-        self._dev_id = dev_id
-        self._addr = addr
-        self._attr_name = name
-        self._attr_unique_id = unique_id
-        self._device_name = device_name
-        self._unsub_ws = None
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        self._unsub_ws = async_dispatcher_connect(
-            self.hass, signal_ws_data(self._entry_id), self._on_ws_data
-        )
-        self.async_on_remove(lambda: self._unsub_ws() if self._unsub_ws else None)
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._dev_id, self._addr)},
-            name=self._device_name,
-            manufacturer="TermoWeb",
-            model="Heater",
-            via_device=(DOMAIN, self._dev_id),
+        super().__init__(
+            coordinator,
+            entry_id,
+            dev_id,
+            addr,
+            name,
+            unique_id,
+            device_name=device_name,
         )
 
-    @callback
-    def _on_ws_data(self, payload: dict) -> None:
-        if payload.get("dev_id") != self._dev_id:
-            return
-        addr = payload.get("addr")
-        if addr is not None and str(addr) != self._addr:
-            return
-        self.schedule_update_ha_state()
-
-    @property
-    def available(self) -> bool:
-        d = (self.coordinator.data or {}).get(self._dev_id)
-        return d is not None
+    def _device_available(self, device_entry: dict[str, Any] | None) -> bool:
+        return device_entry is not None
 
     @property
     def native_value(self) -> float | None:
