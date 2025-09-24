@@ -668,9 +668,26 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
                         return
 
         async def _fallback() -> None:
+            task = asyncio.current_task()
             await asyncio.sleep(_WS_ECHO_FALLBACK_REFRESH)
             try:
-                await self.coordinator.async_request_refresh()
+                hass = self.hass
+                is_stopping = getattr(hass, "is_stopping", False)
+                is_running = getattr(hass, "is_running", True)
+                if is_stopping or not is_running:
+                    reason = "stopping" if is_stopping else "not running"
+                    _LOGGER.debug(
+                        "Skipping refresh fallback dev=%s addr=%s: hass %s",
+                        self._dev_id,
+                        self._addr,
+                        reason,
+                    )
+                    return
+
+                await self.coordinator.async_refresh_heater(self._addr)
+                if task and self._refresh_fallback is task:
+                    self._refresh_fallback = None
+                    return
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -680,6 +697,9 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
                     self._addr,
                     str(e),
                 )
+            finally:
+                if task and self._refresh_fallback is task:
+                    self._refresh_fallback = None
 
         self._refresh_fallback = asyncio.create_task(
             _fallback(), name=f"termoweb-fallback-{self._dev_id}-{self._addr}"

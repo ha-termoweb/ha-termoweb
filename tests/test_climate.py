@@ -327,6 +327,7 @@ class FakeCoordinator:
         self.hass = hass
         self.data = data
         self.async_request_refresh: AsyncMock = AsyncMock()
+        self.async_refresh_heater: AsyncMock = AsyncMock()
 
     def async_add_listener(self, *_args: Any, **_kwargs: Any) -> None:
         return None
@@ -521,7 +522,7 @@ def test_heater_additional_cancelled_edges(
         with pytest.raises(SentinelCancelled):
             await heater._write_after_debounce()
 
-        coordinator.async_request_refresh = AsyncMock(
+        coordinator.async_refresh_heater = AsyncMock(
             side_effect=SentinelCancelled()
         )
         heater._refresh_fallback = None
@@ -786,12 +787,14 @@ def test_heater_write_paths_and_errors(
 
         async def _complete_fallback_once() -> None:
             waiter = await _pop_waiter()
-            assert heater._refresh_fallback is not None
-            assert coordinator.async_request_refresh.await_count == 0
+            task = heater._refresh_fallback
+            assert task is not None
+            assert coordinator.async_refresh_heater.await_count == 0
             waiter.set_result(None)
-            await heater._refresh_fallback
-            assert coordinator.async_request_refresh.await_count == 1
-            coordinator.async_request_refresh.reset_mock()
+            await task
+            coordinator.async_refresh_heater.assert_awaited_once_with(addr)
+            coordinator.async_refresh_heater.reset_mock()
+            assert heater._refresh_fallback is None
 
         class RaisingMapping:
             def __init__(self, real: dict[str, Any]) -> None:
@@ -865,11 +868,14 @@ def test_heater_write_paths_and_errors(
         assert settings_after["prog"] == prev_prog
         assert "Optimistic prog update failed" in caplog.text
         waiter = await _pop_waiter()
+        task = heater._refresh_fallback
+        assert task is not None
         coordinator.data = old_data
         waiter.set_result(None)
-        await heater._refresh_fallback
-        assert coordinator.async_request_refresh.await_count == 1
-        coordinator.async_request_refresh.reset_mock()
+        await task
+        coordinator.async_refresh_heater.assert_awaited_once_with(addr)
+        coordinator.async_refresh_heater.reset_mock()
+        assert heater._refresh_fallback is None
         client.set_htr_settings.reset_mock()
 
         # -------------------- async_set_preset_temperatures (valid forms) ---
@@ -931,11 +937,14 @@ def test_heater_write_paths_and_errors(
         assert settings_after["ptemp"] == prev_ptemp
         assert "Optimistic ptemp update failed" in caplog.text
         waiter = await _pop_waiter()
+        task = heater._refresh_fallback
+        assert task is not None
         coordinator.data = old_data
         waiter.set_result(None)
-        await heater._refresh_fallback
-        assert coordinator.async_request_refresh.await_count == 1
-        coordinator.async_request_refresh.reset_mock()
+        await task
+        coordinator.async_refresh_heater.assert_awaited_once_with(addr)
+        coordinator.async_refresh_heater.reset_mock()
+        assert heater._refresh_fallback is None
         client.set_htr_settings.reset_mock()
 
         # -------------------- async_set_temperature (valid + clamps) -------
@@ -1057,21 +1066,24 @@ def test_heater_write_paths_and_errors(
         if not waiter_a.done():
             waiter_a.cancel()
 
-        assert coordinator.async_request_refresh.await_count == 0
+        assert coordinator.async_refresh_heater.await_count == 0
 
         waiter_b.set_result(None)
         await task_b
-        assert coordinator.async_request_refresh.await_count == 1
+        coordinator.async_refresh_heater.assert_awaited_once_with(addr)
+        coordinator.async_refresh_heater.reset_mock()
 
         caplog.clear()
-        coordinator.async_request_refresh.side_effect = RuntimeError("refresh boom")
+        coordinator.async_refresh_heater.side_effect = RuntimeError("refresh boom")
         heater._schedule_refresh_fallback()
         waiter_err = await _pop_waiter()
+        task_err = heater._refresh_fallback
+        assert task_err is not None
         waiter_err.set_result(None)
-        await heater._refresh_fallback
+        await task_err
         assert "Refresh fallback failed" in caplog.text
-        coordinator.async_request_refresh.side_effect = None
-        coordinator.async_request_refresh.reset_mock()
+        coordinator.async_refresh_heater.side_effect = None
+        coordinator.async_refresh_heater.reset_mock()
         assert not fallback_waiters
 
         # -------------------- WS healthy suppresses fallback --------------
@@ -1268,11 +1280,13 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
         async def failing_refresh() -> None:
             raise ValueError("fallback cancel")
 
-        coordinator.async_request_refresh = AsyncMock(side_effect=failing_refresh)
+        coordinator.async_refresh_heater = AsyncMock(side_effect=failing_refresh)
         heater._schedule_refresh_fallback()
-        assert heater._refresh_fallback is not None
-        await heater._refresh_fallback
-        assert coordinator.async_request_refresh.await_count == 1
+        task = heater._refresh_fallback
+        assert task is not None
+        await task
+        coordinator.async_refresh_heater.assert_awaited_once_with(addr)
+        assert heater._refresh_fallback is None
 
     asyncio.run(_run())
 
@@ -1387,12 +1401,14 @@ def test_heater_cancelled_paths_propagate(
             return None
 
         monkeypatch.setattr(climate_module.asyncio, "sleep", fast_sleep)
-        coordinator.async_request_refresh = AsyncMock(
+        coordinator.async_refresh_heater = AsyncMock(
             side_effect=asyncio.CancelledError()
         )
         heater._schedule_refresh_fallback()
-        assert heater._refresh_fallback is not None
+        task = heater._refresh_fallback
+        assert task is not None
         with pytest.raises(asyncio.CancelledError):
-            await heater._refresh_fallback
+            await task
+        assert heater._refresh_fallback is None
 
     asyncio.run(_run())
