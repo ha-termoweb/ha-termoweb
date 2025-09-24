@@ -1159,7 +1159,7 @@ def test_import_history_uses_last_stats_and_clears_overlap(
         stats_module = sys.modules["homeassistant.components.recorder.statistics"]
         stats_module.async_get_statistics_during_period = None
 
-        import_start_dt = datetime.fromtimestamp(
+        import_start_dt = mod.datetime.fromtimestamp(
             sample_list[0]["t"], timezone.utc
         ).replace(minute=0, second=0, microsecond=0)
         before_start = import_start_dt - timedelta(hours=1)

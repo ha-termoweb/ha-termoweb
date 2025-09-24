@@ -702,3 +702,11 @@ def test_energy_sensor_respects_scale_metadata() -> None:
     coordinator._termoweb_energy_scale = "invalid"
     coordinator.data["dev"]["htr"]["energy"]["A"] = "2.0"
     assert energy_sensor.native_value == pytest.approx(2.0)
+
+
+def test_looks_like_integer_string_handles_signs_and_whitespace() -> None:
+    helper = sensor_module._looks_like_integer_string
+
+    assert helper("+123") is True
+    assert helper(" -42 ") is True
+    assert helper("   ") is False
