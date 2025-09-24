@@ -1604,6 +1604,155 @@ def test_api_base_strips_trailing_slash() -> None:
     assert client._api_base() == "https://api.example.com/path"
 
 
+def test_runner_cleanup_handles_ws_close_errors() -> None:
+    async def _run() -> None:
+        module = _load_ws_client()
+        session = module.aiohttp.testing.FakeClientSession()
+        loop = asyncio.get_event_loop()
+        hass = types.SimpleNamespace(
+            loop=loop,
+            data={module.DOMAIN: {"entry": {"ws_state": {}}}},
+        )
+        coordinator = types.SimpleNamespace()
+        api = types.SimpleNamespace(
+            _session=session,
+            _authed_headers=AsyncMock(
+                return_value={"Authorization": "Bearer cached"}
+            ),
+            _ensure_token=AsyncMock(),
+        )
+
+        client = module.TermoWebWSLegacyClient(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=api,
+            coordinator=coordinator,
+            session=session,
+        )
+
+        class BoomWS:
+            def __init__(self) -> None:
+                self.close_calls = 0
+
+            async def close(self) -> None:
+                self.close_calls += 1
+                raise RuntimeError("close fail")
+
+            def exception(self) -> BaseException | None:
+                return None
+
+        boom_ws = BoomWS()
+
+        async def fake_connect(_sid: str) -> None:
+            client._ws = boom_ws
+
+        client._connect_ws = fake_connect  # type: ignore[assignment]
+        client._join_namespace = AsyncMock()
+        client._send_snapshot_request = AsyncMock()
+        client._subscribe_htr_samples = AsyncMock()
+        client._heartbeat_loop = AsyncMock()
+
+        async def fake_read_loop() -> None:
+            client._closing = True
+            raise RuntimeError("read fail")
+
+        client._read_loop = fake_read_loop  # type: ignore[assignment]
+        client._handshake = AsyncMock(return_value=("sid", 15))
+
+        await client._runner()
+
+        assert boom_ws.close_calls == 1
+
+    asyncio.run(_run())
+
+
+def test_handshake_status_error_raises_handshake_error() -> None:
+    async def _run() -> None:
+        module = _load_ws_client(get_responses=[{"status": 503, "body": "oops"}])
+        session = module.aiohttp.testing.FakeClientSession()
+        loop = asyncio.get_event_loop()
+        hass = types.SimpleNamespace(
+            loop=loop,
+            data={module.DOMAIN: {"entry": {"ws_state": {}}}},
+        )
+        coordinator = types.SimpleNamespace()
+        api = types.SimpleNamespace(
+            _session=session,
+            _authed_headers=AsyncMock(
+                return_value={"Authorization": "Bearer cached"}
+            ),
+            _ensure_token=AsyncMock(),
+        )
+        client = module.TermoWebWSLegacyClient(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=api,
+            coordinator=coordinator,
+            session=session,
+        )
+
+        with pytest.raises(module.HandshakeError) as err:
+            await client._handshake()
+
+        assert err.value.status == 503
+
+    asyncio.run(_run())
+
+
+def test_handle_event_basic_validation() -> None:
+    module = _load_ws_client()
+    session = module.aiohttp.testing.FakeClientSession()
+    loop = types.SimpleNamespace(create_task=lambda *_args, **_kwargs: None)
+    coordinator = types.SimpleNamespace(data={}, _addrs=lambda: [])
+    hass = types.SimpleNamespace(
+        loop=loop,
+        data={module.DOMAIN: {"entry": {"ws_state": {}}}},
+    )
+    api = types.SimpleNamespace(_session=session)
+    client = module.TermoWebWSLegacyClient(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        api_client=api,
+        coordinator=coordinator,
+        session=session,
+    )
+
+    client._handle_event(None)
+    client._handle_event({"name": "noop", "args": []})
+    client._handle_event({"name": "data", "args": "bad"})
+    client._handle_event({"name": "data", "args": ["bad"]})
+    client._handle_event({"name": "data", "args": [[123]]})
+    client._handle_event({"name": "data", "args": [[{"path": None, "body": {}}]]})
+
+    assert coordinator.data == {}
+
+
+def test_parse_handshake_body_requires_two_parts() -> None:
+    module = _load_ws_client()
+    session = module.aiohttp.testing.FakeClientSession()
+    loop = types.SimpleNamespace(create_task=lambda *_args, **_kwargs: None)
+    hass = types.SimpleNamespace(
+        loop=loop,
+        data={module.DOMAIN: {"entry": {"ws_state": {}}}},
+    )
+    coordinator = types.SimpleNamespace()
+    api = types.SimpleNamespace(_session=session)
+    client = module.TermoWebWSLegacyClient(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        api_client=api,
+        coordinator=coordinator,
+        session=session,
+    )
+
+    with pytest.raises(RuntimeError):
+        client._parse_handshake_body("single")
+
+
 def test_mark_event_unique_paths() -> None:
     module = _load_ws_client()
     loop = types.SimpleNamespace(create_task=lambda *_args, **_kwargs: None)

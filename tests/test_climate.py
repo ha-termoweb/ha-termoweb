@@ -421,6 +421,118 @@ def test_async_setup_entry_creates_entities() -> None:
     asyncio.run(_run())
 
 
+def test_heater_additional_cancelled_edges(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _run() -> None:
+        _reset_stubs()
+        from homeassistant.components.climate import HVACMode
+
+        hass = HomeAssistant()
+        entry_id = "entry"
+        dev_id = "dev"
+        addr = "A"
+        base_prog: list[int] = [0, 1, 2] * 56
+        settings = {
+            "mode": "manual",
+            "state": "heating",
+            "mtemp": "19.0",
+            "stemp": "21.0",
+            "ptemp": ["18.0", "19.0", "20.0"],
+            "prog": list(base_prog),
+            "units": "C",
+        }
+        coordinator = FakeCoordinator(
+            hass,
+            {dev_id: {"nodes": {"nodes": []}, "htr": {"settings": {addr: settings}}}},
+        )
+        client = AsyncMock()
+        client.set_htr_settings = AsyncMock()
+
+        hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "client": client,
+                    "coordinator": coordinator,
+                    "dev_id": dev_id,
+                    "ws_state": {},
+                    "version": "1",
+                }
+            }
+        }
+
+        heater = TermoWebHeater(coordinator, entry_id, dev_id, addr, "Heater")
+        await heater.async_added_to_hass()
+
+        class SentinelCancelled(Exception):
+            pass
+
+        monkeypatch.setattr(climate_module.asyncio, "CancelledError", SentinelCancelled)
+
+        async def fast_sleep(_delay: float) -> None:
+            return None
+
+        monkeypatch.setattr(climate_module.asyncio, "sleep", fast_sleep)
+
+        orig_float = climate_module.float_or_none
+
+        def raising_float(_value: Any) -> float | None:
+            raise SentinelCancelled()
+
+        climate_module.float_or_none = raising_float
+        with pytest.raises(SentinelCancelled):
+            _ = heater.extra_state_attributes
+        climate_module.float_or_none = orig_float
+
+        prog = list(base_prog)
+        orig_write = heater.async_write_ha_state
+
+        def raising_write() -> None:
+            raise SentinelCancelled()
+
+        heater.async_write_ha_state = raising_write
+        with pytest.raises(SentinelCancelled):
+            await heater.async_set_schedule(prog)
+        heater.async_write_ha_state = orig_write
+
+        caplog.clear()
+        with caplog.at_level(logging.ERROR):
+            await heater.async_set_preset_temperatures()
+        assert "Preset temperatures require" in caplog.text
+
+        heater.async_write_ha_state = raising_write
+        with pytest.raises(SentinelCancelled):
+            await heater.async_set_preset_temperatures(ptemp=[18.0, 19.0, 20.0])
+        heater.async_write_ha_state = orig_write
+
+        client.set_htr_settings.side_effect = SentinelCancelled()
+        heater._pending_mode = HVACMode.AUTO
+        heater._pending_stemp = 20.5
+        with pytest.raises(SentinelCancelled):
+            await heater._write_after_debounce()
+        client.set_htr_settings.side_effect = None
+
+        class BadFloat:
+            def __float__(self) -> float:
+                raise SentinelCancelled()
+
+        heater._pending_mode = HVACMode.HEAT
+        heater._pending_stemp = BadFloat()
+        with pytest.raises(SentinelCancelled):
+            await heater._write_after_debounce()
+
+        coordinator.async_request_refresh = AsyncMock(
+            side_effect=SentinelCancelled()
+        )
+        heater._refresh_fallback = None
+        heater._schedule_refresh_fallback()
+        assert heater._refresh_fallback is not None
+        with pytest.raises(SentinelCancelled):
+            await heater._refresh_fallback
+
+    asyncio.run(_run())
+
+
 def test_heater_properties_and_ws_update() -> None:
     async def _run() -> None:
         _reset_stubs()

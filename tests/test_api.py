@@ -5,6 +5,7 @@ import copy
 import importlib.util
 from pathlib import Path
 import sys
+import logging
 import time
 import types
 from typing import Any, Callable
@@ -771,6 +772,7 @@ def test_set_htr_settings_includes_prog_and_ptemp(monkeypatch) -> None:
 def test_request_cancelled_error_propagates() -> None:
     async def _run() -> None:
         session = FakeSession()
+
         def raise_cancelled() -> None:
             raise asyncio.CancelledError()
 
@@ -782,6 +784,26 @@ def test_request_cancelled_error_propagates() -> None:
             await client._request("GET", "/api/cancel", headers={})
 
     asyncio.run(_run())
+
+
+def test_request_generic_exception_logs(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.ERROR, logger=api.__name__)
+
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(RuntimeError("upstream Bearer secret-token failure"))
+
+        client = TermoWebClient(session, "user", "pass")
+
+        headers = {"Authorization": "Bearer secret-token"}
+
+        with pytest.raises(RuntimeError):
+            await client._request("GET", "/api/fail", headers=headers)
+
+    asyncio.run(_run())
+
+    assert "Request GET" in caplog.text
+    assert "Bearer ***REDACTED***" in caplog.text
 
 
 def test_request_final_auth_error_after_retries(monkeypatch) -> None:
