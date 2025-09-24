@@ -1,147 +1,30 @@
 from __future__ import annotations
 
 import asyncio
-import importlib.util
 from datetime import timedelta
-from pathlib import Path
-import sys
-import time as _time
 import types
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 
-# Minimal aiohttp stub
-aiohttp_stub = types.ModuleType("aiohttp")
+from conftest import _install_stubs
 
+_install_stubs()
 
-class ClientError(Exception):  # pragma: no cover - placeholder
-    pass
-
-
-aiohttp_stub.ClientError = ClientError
-sys.modules["aiohttp"] = aiohttp_stub
-
-# Stub minimal Home Assistant modules
-ha_core = types.ModuleType("homeassistant.core")
-
-
-class HomeAssistant:  # pragma: no cover - placeholder
-    pass
-
-
-ha_core.HomeAssistant = HomeAssistant
-sys.modules["homeassistant"] = types.ModuleType("homeassistant")
-sys.modules["homeassistant.core"] = ha_core
-
-ha_helpers = types.ModuleType("homeassistant.helpers")
-uc = types.ModuleType("homeassistant.helpers.update_coordinator")
-
-
-class UpdateFailed(Exception):  # pragma: no cover - placeholder
-    pass
-
-
-class DataUpdateCoordinator:  # pragma: no cover - minimal stub
-    def __init__(self, hass, *, logger=None, name=None, update_interval=None) -> None:
-        self.hass = hass
-        self.logger = logger
-        self.name = name
-        self.update_interval = update_interval
-        self.data: dict[str, dict[str, Any]] | None = None
-
-    async def async_refresh(self) -> None:
-        self.data = await self._async_update_data()
-
-    async def async_config_entry_first_refresh(self) -> None:
-        await self.async_refresh()
-
-    async def async_request_refresh(self) -> None:
-        await self.async_refresh()
-
-    def async_add_listener(self, *_args) -> None:
-        return None
-
-    @classmethod
-    def __class_getitem__(cls, _item) -> type:
-        return cls
-
-
-uc.UpdateFailed = UpdateFailed
-uc.DataUpdateCoordinator = DataUpdateCoordinator
-ha_helpers.update_coordinator = uc
-sys.modules["homeassistant.helpers"] = ha_helpers
-sys.modules["homeassistant.helpers.update_coordinator"] = uc
-
-# Stub API module
-package = "custom_components.termoweb"
-api_stub = types.ModuleType(f"{package}.api")
-
-
-class TermoWebClient:  # pragma: no cover - placeholder
-    pass
-
-
-class TermoWebAuthError(Exception):  # pragma: no cover - placeholder
-    pass
-
-
-class TermoWebRateLimitError(Exception):  # pragma: no cover - placeholder
-    pass
-
-
-api_stub.TermoWebClient = TermoWebClient
-api_stub.TermoWebAuthError = TermoWebAuthError
-api_stub.TermoWebRateLimitError = TermoWebRateLimitError
-api_stub.time = _time
-sys.modules[f"{package}.api"] = api_stub
-
-# Dispatcher stub
-ha_dispatcher = types.ModuleType("homeassistant.helpers.dispatcher")
-_dispatchers: dict[str, list] = {}
-
-
-def async_dispatcher_connect(_hass, signal: str, callback):  # pragma: no cover
-    _dispatchers.setdefault(signal, []).append(callback)
-    return lambda: None
-
-
-def dispatcher_send(signal: str, payload: dict) -> None:
-    for cb in list(_dispatchers.get(signal, [])):
-        cb(payload)
-
-
-ha_dispatcher.async_dispatcher_connect = async_dispatcher_connect
-ha_dispatcher.dispatcher_send = dispatcher_send
-sys.modules["homeassistant.helpers.dispatcher"] = ha_dispatcher
-
-# Load coordinator module
-COORD_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "custom_components"
-    / "termoweb"
-    / "coordinator.py"
+from aiohttp import ClientError
+from custom_components.termoweb import coordinator as coord_module
+from custom_components.termoweb.api import TermoWebAuthError, TermoWebRateLimitError
+from custom_components.termoweb.const import (
+    HTR_ENERGY_UPDATE_INTERVAL,
+    signal_ws_data,
 )
-sys.modules.setdefault("custom_components", types.ModuleType("custom_components"))
-termoweb_pkg = types.ModuleType(package)
-termoweb_pkg.__path__ = [str(COORD_PATH.parent)]
-sys.modules[package] = termoweb_pkg
-
-spec = importlib.util.spec_from_file_location(f"{package}.coordinator", COORD_PATH)
-coord_module = importlib.util.module_from_spec(spec)
-assert spec.loader is not None
-sys.modules[f"{package}.coordinator"] = coord_module
-spec.loader.exec_module(coord_module)
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.dispatcher import async_dispatcher_connect, dispatcher_send
+from homeassistant.helpers.update_coordinator import UpdateFailed
 
 TermoWebHeaterEnergyCoordinator = coord_module.TermoWebHeaterEnergyCoordinator
 TermoWebCoordinator = coord_module.TermoWebCoordinator
-signal_ws_data = __import__(
-    f"{package}.const", fromlist=["signal_ws_data"]
-).signal_ws_data
-HTR_ENERGY_UPDATE_INTERVAL = __import__(
-    f"{package}.const", fromlist=["HTR_ENERGY_UPDATE_INTERVAL"]
-).HTR_ENERGY_UPDATE_INTERVAL
 
 
 def test_power_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -353,7 +236,7 @@ def test_refresh_heater_handles_errors(caplog: pytest.LogCaptureFixture) -> None
             side_effect=[
                 "not-a-dict",
                 TimeoutError("slow"),
-                coord_module.TermoWebAuthError("denied"),
+                TermoWebAuthError("denied"),
             ]
         )
 
@@ -571,7 +454,7 @@ def test_heater_energy_client_error_update_failed(
 def test_coordinator_rate_limit_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         async def _raise_rate_limit(*_args: Any, **_kwargs: Any) -> Any:
-            raise coord_module.TermoWebRateLimitError("429")
+            raise TermoWebRateLimitError("429")
 
         client = types.SimpleNamespace()
         client.get_htr_settings = AsyncMock(side_effect=_raise_rate_limit)

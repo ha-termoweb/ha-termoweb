@@ -2,22 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import json
-import importlib.util
 import logging
-import sys
 import types
-from pathlib import Path
 from typing import Any, Iterable
 from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
-WS_CLIENT_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "custom_components"
-    / "termoweb"
-    / "ws_client_legacy.py"
-)
+from conftest import _install_stubs
+
+_install_stubs()
+
+import custom_components.termoweb.ws_client_legacy as ws_client_legacy
 
 
 def _load_ws_client(
@@ -25,200 +21,13 @@ def _load_ws_client(
     get_responses: Iterable[Any] | None = None,
     ws_connect_results: Iterable[Any] | None = None,
 ):
-    package = "custom_components.termoweb"
-    sys.modules.setdefault("custom_components", types.ModuleType("custom_components"))
-    termoweb_pkg = types.ModuleType(package)
-    termoweb_pkg.__path__ = [str(WS_CLIENT_PATH.parent)]
-    sys.modules[package] = termoweb_pkg
-
-    sys.modules.pop(f"{package}.ws_client_legacy", None)
-
-    ha = types.ModuleType("homeassistant")
-    ha_core = types.ModuleType("homeassistant.core")
-    ha_core.HomeAssistant = object  # type: ignore[attr-defined]
-    ha_helpers = types.ModuleType("homeassistant.helpers")
-    ha_dispatcher = types.ModuleType("homeassistant.helpers.dispatcher")
-
-    def _send(*args, **kwargs):
-        return None
-
-    ha_dispatcher.async_dispatcher_send = _send
-    sys.modules["homeassistant"] = ha
-    sys.modules["homeassistant.core"] = ha_core
-    sys.modules["homeassistant.helpers"] = ha_helpers
-    sys.modules["homeassistant.helpers.dispatcher"] = ha_dispatcher
-
-    aiohttp_stub = types.ModuleType("aiohttp")
-
-    class WSMsgType:
-        TEXT = 1
-        BINARY = 2
-        CLOSED = 3
-        CLOSE = 4
-        ERROR = 5
-
-    aiohttp_stub.WSMsgType = WSMsgType
-
-    class FakeClientTimeout:
-        def __init__(self, **kwargs: Any) -> None:
-            self.kwargs = kwargs
-
-    aiohttp_stub.ClientTimeout = FakeClientTimeout
-
-    class ClientError(Exception):
-        pass
-
-    aiohttp_stub.ClientError = ClientError
-    aiohttp_stub.WSCloseCode = types.SimpleNamespace(GOING_AWAY=1001)
-
-    default_get_script = list(get_responses or [])
-    default_ws_script = list(ws_connect_results or [])
-
-    class FakeHTTPResponse:
-        def __init__(
-            self,
-            status: int,
-            body: Any,
-            *,
-            headers: dict[str, Any] | None = None,
-        ) -> None:
-            self.status = status
-            self._body = body
-            self.headers = headers or {}
-
-        async def text(self) -> str:
-            body = self._body
-            if asyncio.iscoroutine(body):
-                body = await body
-            if callable(body):
-                body = body()
-            if isinstance(body, bytes):
-                return body.decode("utf-8", "ignore")
-            return str(body or "")
-
-    class FakeGetContext:
-        def __init__(self, response: FakeHTTPResponse) -> None:
-            self._response = response
-
-        async def __aenter__(self) -> FakeHTTPResponse:
-            return self._response
-
-        async def __aexit__(self, exc_type, exc, tb) -> bool:
-            return False
-
-    def _coerce_response(entry: Any) -> FakeHTTPResponse:
-        if isinstance(entry, FakeHTTPResponse):
-            return entry
-        if isinstance(entry, tuple):
-            status = int(entry[0])
-            body = entry[1] if len(entry) > 1 else ""
-            headers = entry[2] if len(entry) > 2 else None
-            return FakeHTTPResponse(status, body, headers=headers)
-        if isinstance(entry, dict):
-            return FakeHTTPResponse(
-                int(entry.get("status", 200)),
-                entry.get("body", ""),
-                headers=entry.get("headers"),
-            )
-        return FakeHTTPResponse(200, entry)
-
-    class FakeWebSocket:
-        def __init__(self, messages: Iterable[Any] | None = None) -> None:
-            self._messages = list(messages or [])
-            self.sent: list[str] = []
-            self.close_code: int | None = None
-            self._exception: BaseException | None = None
-
-        def queue_message(self, message: Any) -> None:
-            self._messages.append(message)
-
-        async def receive(self) -> Any:
-            if not self._messages:
-                return types.SimpleNamespace(
-                    type=aiohttp_stub.WSMsgType.CLOSED, data=None, extra=None
-                )
-            msg = self._messages.pop(0)
-            if callable(msg):
-                msg = msg()
-            if asyncio.iscoroutine(msg):
-                msg = await msg
-            if isinstance(msg, dict):
-                return types.SimpleNamespace(
-                    type=msg.get("type", aiohttp_stub.WSMsgType.TEXT),
-                    data=msg.get("data"),
-                    extra=msg.get("extra"),
-                )
-            return msg
-
-        async def send_str(self, data: str) -> None:
-            self.sent.append(data)
-
-        async def close(self, code: int | None = None, message: bytes | None = None) -> None:
-            self.close_code = code
-
-        def exception(self) -> BaseException | None:
-            return self._exception
-
-        def set_exception(self, exc: BaseException | None) -> None:
-            self._exception = exc
-
-    class FakeClientSession:
-        def __init__(
-            self,
-            *,
-            get_responses: Iterable[Any] | None = None,
-            ws_connect_results: Iterable[Any] | None = None,
-        ) -> None:
-            self._get_script = list(get_responses or default_get_script)
-            self._ws_script = list(ws_connect_results or default_ws_script)
-            self.get_calls: list[dict[str, Any]] = []
-            self.ws_connect_calls: list[dict[str, Any]] = []
-
-        def queue_get(self, response: Any) -> None:
-            self._get_script.append(response)
-
-        def queue_ws(self, result: Any) -> None:
-            self._ws_script.append(result)
-
-        def get(self, url: str, *, timeout: Any | None = None) -> FakeGetContext:
-            if not self._get_script:
-                raise AssertionError("No scripted GET response available")
-            entry = self._get_script.pop(0)
-            if callable(entry):
-                entry = entry(url=url, timeout=timeout)
-            response = _coerce_response(entry)
-            self.get_calls.append({"url": url, "timeout": timeout})
-            return FakeGetContext(response)
-
-        async def ws_connect(self, url: str, **kwargs: Any) -> Any:
-            if not self._ws_script:
-                raise AssertionError("No scripted ws_connect result available")
-            entry = self._ws_script.pop(0)
-            if callable(entry):
-                entry = entry(url=url, **kwargs)
-            if asyncio.iscoroutine(entry):
-                entry = await entry
-            if isinstance(entry, dict) and "messages" in entry:
-                entry = FakeWebSocket(entry["messages"])
-            self.ws_connect_calls.append({"url": url, "kwargs": kwargs})
-            return entry
-
-    aiohttp_stub.ClientSession = FakeClientSession
-    aiohttp_stub.ClientWebSocketResponse = FakeWebSocket
-    aiohttp_stub.testing = types.SimpleNamespace(
-        FakeClientSession=FakeClientSession,
-        FakeWebSocket=FakeWebSocket,
-        FakeHTTPResponse=FakeHTTPResponse,
-    )
-    sys.modules["aiohttp"] = aiohttp_stub
-
-    spec = importlib.util.spec_from_file_location(
-        f"{package}.ws_client_legacy", WS_CLIENT_PATH
-    )
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[f"{package}.ws_client_legacy"] = module
-    spec.loader.exec_module(module)
+    _install_stubs()
+    module = ws_client_legacy
+    testing = module.aiohttp.testing
+    defaults = getattr(testing, "_defaults", None)
+    if defaults is not None:
+        defaults.get_responses = list(get_responses or [])
+        defaults.ws_connect_results = list(ws_connect_results or [])
     return module
 
 
@@ -462,7 +271,7 @@ def test_runner_handles_handshake_events_and_disconnect(
         module = _load_ws_client()
         dispatcher = MagicMock()
         monkeypatch.setattr(module, "async_dispatcher_send", dispatcher)
-        aiohttp = sys.modules["aiohttp"]
+        aiohttp = module.aiohttp
 
         orig_sleep = asyncio.sleep
 
@@ -739,7 +548,7 @@ def test_read_loop_bubbles_exception_on_close():
         coordinator = types.SimpleNamespace()
         client = Client(hass, entry_id="e", dev_id="d", api_client=api, coordinator=coordinator)
 
-        aiohttp = sys.modules["aiohttp"]
+        aiohttp = module.aiohttp
 
         class DummyWS:
             def __init__(self):
@@ -770,7 +579,7 @@ def test_read_loop_handles_error_frames_and_health(monkeypatch: pytest.MonkeyPat
         coordinator = types.SimpleNamespace()
         client = Client(hass, entry_id="e", dev_id="d", api_client=api, coordinator=coordinator)
 
-        aiohttp = sys.modules["aiohttp"]
+        aiohttp = module.aiohttp
         namespace = module.WS_NAMESPACE
 
         messages = [
@@ -848,7 +657,7 @@ def test_read_loop_handles_error_frames_and_health(monkeypatch: pytest.MonkeyPat
 def test_connect_ws_uses_secure_endpoint() -> None:
     async def _run() -> None:
         module = _load_ws_client()
-        aiohttp = sys.modules["aiohttp"]
+        aiohttp = module.aiohttp
         ws_obj = types.SimpleNamespace()
         session = aiohttp.ClientSession(ws_connect_results=[ws_obj])
 
@@ -891,7 +700,7 @@ def test_connect_ws_uses_secure_endpoint() -> None:
 def test_handshake_refresh_failure_raises_handshake_error() -> None:
     async def _run() -> None:
         module = _load_ws_client()
-        aiohttp = sys.modules["aiohttp"]
+        aiohttp = module.aiohttp
         session = aiohttp.ClientSession(
             get_responses=[
                 {"status": 401, "body": "unauthorized"},
@@ -941,7 +750,7 @@ def test_handshake_refresh_failure_raises_handshake_error() -> None:
 def test_handshake_wraps_client_error() -> None:
     async def _run() -> None:
         module = _load_ws_client()
-        aiohttp = sys.modules["aiohttp"]
+        aiohttp = module.aiohttp
 
         def raise_client_error(*, url: str, timeout: Any | None = None) -> None:
             raise aiohttp.ClientError("boom")
@@ -984,7 +793,7 @@ def test_handshake_wraps_client_error() -> None:
 def test_handshake_status_error_raises_handshake_error() -> None:
     async def _run() -> None:
         module = _load_ws_client()
-        aiohttp = sys.modules["aiohttp"]
+        aiohttp = module.aiohttp
         session = aiohttp.ClientSession(get_responses=[{"status": 403, "body": "denied"}])
 
         hass = types.SimpleNamespace(loop=asyncio.get_event_loop())
