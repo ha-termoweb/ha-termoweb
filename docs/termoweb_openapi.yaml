@@ -2,10 +2,19 @@ openapi: 3.0.3
 info:
   title: "TermoWeb Cloud (capture\u2011verified)"
   version: '2025-08-13'
-  description: "REST endpoints observed from the official Android app on 2025\u2011\
-    08\u201113. Socket.IO is documented at a high level."
+  description: |
+    REST endpoints observed from the official Android app on 2025‑08‑13.
+    Tevolve ships three Android apps (TermoWeb, Ducaheat, Tevolve) that share this API surface but use separate OAuth clients and base URLs.
+    Implemented backends:
+      • TermoWeb → https://control.termoweb.net (client_id 52172dc84f63d6c759000005, secret bxv4Z3xUSe)
+      • Ducaheat → https://api-tevolve.termoweb.net (client_id 5c49dce977510351506c42db, secret tevolve)
+    TODO: Document the Tevolve-branded backend once captured.
 servers:
 - url: https://control.termoweb.net
+  description: TermoWeb production backend (client_id 52172dc84f63d6c759000005)
+- url: https://api-tevolve.termoweb.net
+  description: Ducaheat backend (client_id 5c49dce977510351506c42db)
+# TODO: Add Tevolve backend server entry once implementation is captured.
 components:
   securitySchemes:
     basicAuth:
