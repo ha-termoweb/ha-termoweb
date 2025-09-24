@@ -30,6 +30,12 @@ _WRITE_DEBOUNCE = 0.2
 # If WS echo doesn't arrive quickly after a successful write, force a refresh
 _WS_ECHO_FALLBACK_REFRESH = 2.0
 
+_HVAC_MODE_TO_API: dict[HVACMode, str] = {
+    HVACMode.OFF: "off",
+    HVACMode.AUTO: "auto",
+    HVACMode.HEAT: "manual",
+}
+
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Discover heater nodes and create climate entities."""
@@ -555,13 +561,15 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
             return
 
         client = self._client()
-        mode_api = None
+        mode_api: str | None = None
         if mode is not None:
-            mode_api = {
-                HVACMode.OFF: "off",
-                HVACMode.AUTO: "auto",
-                HVACMode.HEAT: "manual",
-            }.get(mode, str(mode))
+            mode_api = _HVAC_MODE_TO_API.get(mode)
+            if mode_api is None:
+                raw = getattr(mode, "value", None)
+                if isinstance(raw, str) and raw:
+                    mode_api = raw
+                else:
+                    mode_api = str(mode)
         try:
             _LOGGER.info(
                 "POST htr settings dev=%s addr=%s mode=%s stemp=%s",
@@ -601,13 +609,8 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
             cur = settings_map.get(self._addr)
             if isinstance(cur, dict):
                 changed = False
-                mode_local = None
-                if mode is not None:
-                    mode_local = {
-                        HVACMode.OFF: "off",
-                        HVACMode.AUTO: "auto",
-                        HVACMode.HEAT: "manual",
-                    }.get(mode, str(mode).lower())
+                if mode_api is not None:
+                    mode_local = str(mode_api).lower()
                     if cur.get("mode") != mode_local:
                         cur["mode"] = mode_local
                         changed = True
@@ -622,7 +625,7 @@ class TermoWebHeater(CoordinatorEntity, ClimateEntity):
                         "Optimistic mode/stemp applied dev=%s addr=%s mode=%s stemp=%s",
                         self._dev_id,
                         self._addr,
-                        mode_local,
+                        mode_api,
                         stemp,
                     )
         except asyncio.CancelledError:
