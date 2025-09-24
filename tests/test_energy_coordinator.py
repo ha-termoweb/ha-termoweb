@@ -174,14 +174,14 @@ def test_power_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(coord_module.time, "time", _fake_time)
 
         await coord.async_refresh()
-        assert coord.data["1"]["htr"]["energy"]["A"] == 1.0
+        assert coord.data["1"]["htr"]["energy"]["A"] == pytest.approx(0.001)
         assert "A" not in coord.data["1"]["htr"]["power"]
 
         fake_time = 1900.0
         await coord.async_refresh()
-        assert coord.data["1"]["htr"]["energy"]["A"] == 1.5
+        assert coord.data["1"]["htr"]["energy"]["A"] == pytest.approx(0.0015)
         power = coord.data["1"]["htr"]["power"]["A"]
-        assert power == pytest.approx(2000.0, rel=1e-3)
+        assert power == pytest.approx(2.0, rel=1e-3)
 
     asyncio.run(_run())
 
@@ -237,7 +237,7 @@ def test_counter_reset(monkeypatch: pytest.MonkeyPatch) -> None:
         fake_time = 1900.0
         await coord.async_refresh()
 
-        assert coord.data["1"]["htr"]["energy"]["A"] == 1.0
+        assert coord.data["1"]["htr"]["energy"]["A"] == pytest.approx(0.001)
         assert "A" not in coord.data["1"]["htr"]["power"]
 
     asyncio.run(_run())
@@ -263,22 +263,22 @@ def test_energy_regression_resets_last() -> None:
         )
 
         await coord.async_refresh()
-        assert coord.data["1"]["htr"]["energy"]["A"] == 1.0
+        assert coord.data["1"]["htr"]["energy"]["A"] == pytest.approx(0.001)
         assert "A" not in coord.data["1"]["htr"]["power"]
-        assert coord._last[("1", "A")] == (1000.0, 1.0)
+        assert coord._last[("1", "A")] == (1000.0, pytest.approx(0.001))
 
         await coord.async_refresh()
         second_data = coord.data["1"]["htr"]
-        assert second_data["energy"]["A"] == 2.0
-        assert second_data["power"]["A"] == pytest.approx(6000.0, rel=1e-3)
-        assert coord._last[("1", "A")] == (1600.0, 2.0)
+        assert second_data["energy"]["A"] == pytest.approx(0.002)
+        assert second_data["power"]["A"] == pytest.approx(6.0, rel=1e-3)
+        assert coord._last[("1", "A")] == (1600.0, pytest.approx(0.002))
 
         await coord.async_refresh()
 
         final_data = coord.data["1"]["htr"]
-        assert final_data["energy"]["A"] == 1.5
+        assert final_data["energy"]["A"] == pytest.approx(0.0015)
         assert "A" not in final_data["power"]
-        assert coord._last[("1", "A")] == (1500.0, 1.5)
+        assert coord._last[("1", "A")] == (1500.0, pytest.approx(0.0015))
 
     asyncio.run(_run())
 
@@ -467,7 +467,7 @@ def test_ws_driven_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
         coord = TermoWebHeaterEnergyCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
 
         await coord.async_refresh()
-        assert coord.data["1"]["htr"]["energy"]["A"] == 1.0
+        assert coord.data["1"]["htr"]["energy"]["A"] == pytest.approx(0.001)
 
         client.get_htr_samples = AsyncMock(return_value=[{"t": 2000, "counter": "2.0"}])
 
@@ -484,7 +484,7 @@ def test_ws_driven_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
         )
         await asyncio.sleep(0)
 
-        assert coord.data["1"]["htr"]["energy"]["A"] == 2.0
+        assert coord.data["1"]["htr"]["energy"]["A"] == pytest.approx(0.002)
 
     asyncio.run(_run())
 
