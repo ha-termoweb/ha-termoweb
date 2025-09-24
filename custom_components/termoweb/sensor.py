@@ -250,7 +250,7 @@ class TermoWebHeaterEnergyTotal(CoordinatorEntity, SensorEntity):
         if val is None:
             return None
         try:
-            return float(val) / 1000
+            return float(val)
         except (TypeError, ValueError):
             return None
 
@@ -391,7 +391,7 @@ class TermoWebTotalEnergy(CoordinatorEntity, SensorEntity):
                 continue
         if not found:
             return None
-        return total / 1000
+        return total
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
