@@ -86,6 +86,7 @@ def test_ducaheat_ws_client_flow(monkeypatch: pytest.MonkeyPatch) -> None:
 
         await client.stop()
         await asyncio.sleep(0)
+        await asyncio.sleep(0)
 
         status_signal = ws_v2.signal_ws_status("entry")
         data_signal = ws_v2.signal_ws_data("entry")
@@ -124,6 +125,64 @@ def test_ducaheat_ws_client_flow(monkeypatch: pytest.MonkeyPatch) -> None:
 
         assert client._nodes["htr"]["status"]["02"]["temp"] == 21
         assert client._healthy_since is not None
+        assert client._status == "stopped"
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_ws_client_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
+    dispatcher_calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_dispatcher(hass, signal: str, payload: dict[str, object]) -> None:
+        dispatcher_calls.append((signal, payload))
+
+    monkeypatch.setattr(ws_v2, "async_dispatcher_send", fake_dispatcher)
+
+    async def _run() -> None:
+        loop = asyncio.get_running_loop()
+        hass = types.SimpleNamespace(loop=loop, data={})
+
+        class FakeClient:
+            async def _authed_headers(self) -> dict[str, str]:
+                return {"Authorization": "Bearer token"}
+
+        client = ws_v2.DucaheatWSClient(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=FakeClient(),
+            coordinator=types.SimpleNamespace(),
+        )
+
+        # Stop before the runner starts to exercise the early stop path.
+        await client.stop()
+
+        # Starting twice should reuse the same task and not spawn another runner.
+        task = client.start()
+        assert client.start() is task
+        await asyncio.sleep(0)
+
+        # Invalid payloads should be ignored without raising.
+        client._on_frame(json.dumps({"event": "dev_handshake", "data": None}))
+        client._on_frame(json.dumps({"event": "dev_data", "data": {}}))
+        client._on_frame(
+            json.dumps({"event": "dev_data", "data": {"nodes": ["bad"]}})
+        )
+        await asyncio.sleep(0)
+
+        # Cancel the task so stop() hits the CancelledError branch.
+        task.cancel()
+        await asyncio.sleep(0)
+        await client.stop()
+
+        status_signal = ws_v2.signal_ws_status("entry")
+        status_updates = [
+            payload["status"]
+            for signal, payload in dispatcher_calls
+            if signal == status_signal
+        ]
+        assert status_updates.count("connecting") == 1
+        assert client.hass.data[ws_v2.DOMAIN]["entry"]["ws_state"]["dev"]["status"] == "stopped"
         assert client._status == "stopped"
 
     asyncio.run(_run())
