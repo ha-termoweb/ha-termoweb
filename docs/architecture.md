@@ -20,18 +20,12 @@ flowchart LR
     User[[Home Assistant UI]]
 
     subgraph HA[Home Assistant · TermoWeb Integration]
-        CF[Config Flow
-(validate account)]
-        Setup[Config Entry Setup
-(async_setup_entry)]
-        Client[TermoWebClient
-(REST helper)]
-        Coord[TermoWebCoordinator
-(polling cache)]
-        Entities[Platforms & Entities
-(climate / sensor / binary_sensor / button)]
-        WS[TermoWebWSLegacyClient
-(Socket.IO listener)]
+        CF["Config Flow\n(validate account)"]
+        Setup["Config Entry Setup\n(async_setup_entry)"]
+        Client["TermoWebClient\n(REST helper)"]
+        Coord["TermoWebCoordinator\n(polling cache)"]
+        Entities["Platforms & Entities\n(climate / sensor / binary_sensor / button)"]
+        WS["TermoWebWSLegacyClient\n(Socket.IO listener)"]
         Service[import_energy_history Service]
         Recorder[HA Recorder / Statistics]
     end
