@@ -1,16 +1,18 @@
 openapi: 3.0.3
 info:
   title: Ducaheat Cloud API (Tevolve v2) — Unofficial
-  version: "0.1.0"
+  version: "0.2.0"
   description: |
     Unofficial OpenAPI description for the Ducaheat (Ducasa) mobile app backend.
-    This reflects endpoints discovered in the v1.40.1 APK decompile and
-    verified patterns that differ from the consolidated TermoWeb API.
+    This includes endpoints observed in captures and user reports. It generalizes
+    node access to support multiple node types: heaters (htr), accumulators (acm),
+    and power meters (pmo).
 
     Key differences vs TermoWeb:
-      - No consolidated `/settings` resource for heaters.
-      - Writes are segmented: `/status`, `/mode`, `/prog`, `/prog_temps`, `/setup`, `/lock`, `/select`.
-      - Socket path differs: `/api/v2/socket_io?token=...`.
+      - No consolidated `/settings` resource for nodes; writes are segmented
+        into `/status`, `/mode`, `/prog`, `/prog_temps`, `/setup`, `/lock`, `/select`.
+      - WebSocket namespace and path differ (`/api/v2/socket_io`). Socket.IO v0.9.
+      - Node paths use `{type}` (htr|acm|pmo|...) instead of a fixed `htr` segment.
 
     Base host: https://api-tevolve.termoweb.net
 servers:
@@ -19,7 +21,8 @@ servers:
 tags:
   - name: Auth
   - name: Devices
-  - name: Heaters
+  - name: Nodes
+  - name: Programs
   - name: Samples
 security:
   - bearerAuth: []
@@ -36,156 +39,153 @@ components:
       type: object
       required: [access_token, token_type, expires_in]
       properties:
-        access_token:
-          type: string
-        token_type:
-          type: string
-          example: Bearer
-        expires_in:
-          type: integer
-          example: 3600
-        refresh_token:
-          type: string
-          nullable: true
-    HeaterNode:
+        access_token: { type: string }
+        token_type: { type: string, example: Bearer }
+        expires_in: { type: integer, example: 3600 }
+        refresh_token: { type: string, nullable: true }
+    Device:
       type: object
-      description: Consolidated state returned by GET /devs/{dev_id}/htr/{addr}
+      properties:
+        dev_id: { type: string }
+        name: { type: string }
+        product_id: { type: string }
+        fw_version: { type: string }
+        serial_id: { type: string }
+    NodesResponse:
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              addr: { type: integer }
+              type: { type: string, description: "htr | acm | pmo | ..." }
+              installed: { type: boolean }
+              lost: { type: boolean }
+              uid: { type: string }
+              level: { type: integer }
+              parent: { type: integer }
+              setup:
+                type: object
+                additionalProperties: true
+            additionalProperties: true
+    ConsolidatedNode:
+      type: object
+      description: Consolidated state returned by GET /devs/{dev_id}/{type}/{addr}
       additionalProperties: true
       properties:
-        dev_id:
-          type: string
-        node_type:
-          type: string
-          example: htr
-        addr:
-          type: integer
         status:
           type: object
           additionalProperties: true
           properties:
-            mode:
-              type: string
-              description: Current mode (as reported by device)
-              example: manual
-            stemp:
-              type: string
-              description: Current set temperature as a string with one decimal
-              example: "22.0"
-            units:
-              type: string
-              enum: [C, F]
-              example: C
-            boost_active:
-              type: boolean
+            sync_status: { type: string }
+            mode: { type: string }
+            stemp: { type: string, description: "Setpoint (string with one decimal)" }
+            mtemp: { type: string, description: "Ambient temperature as string" }
+            units: { type: string, enum: [C, F] }
+            heating: { type: boolean }
+            ventilation: { type: boolean }
+            charging: { type: boolean }
+            current_charge_per: { type: integer }
+            target_charge_per: { type: integer }
+            boost: { type: boolean }
+            boost_end_day: { type: integer }
+            boost_end_min: { type: integer }
+            locked: { type: integer }
+            window_open: { type: boolean }
+            error_code: { type: integer }
         setup:
           type: object
           additionalProperties: true
           properties:
-            extra_options:
+            sync_status: { type: string }
+            operational_mode: { type: integer }
+            control_mode: { type: integer }
+            units: { type: string, enum: [C, F] }
+            offset: { type: string }
+            priority: { type: string }
+            away_offset: { type: string }
+            window_mode_enabled: { type: boolean }
+            true_radiant_enabled: { type: boolean }
+            resistor_mode: { type: integer }
+            prog_resolution: { type: integer }
+            frost_protect: { type: boolean }
+            charging_conf:
+              type: object
+              properties:
+                slot_1: { type: object, properties: { start: {type: integer}, end: {type: integer} } }
+                slot_2: { type: object, properties: { start: {type: integer}, end: {type: integer} } }
+                active_days:
+                  type: array
+                  items: { type: integer }
+            min_stemp: { type: string }
+            max_stemp: { type: string }
+            factory_options:
               type: object
               additionalProperties: true
-              properties:
-                boost_time:
-                  type: integer
-                  description: Default boost/runback time (minutes)
-                  example: 60
-                boost_temp:
-                  type: string
-                  description: Temperature applied during boost, if distinct from `stemp`
-                  example: "22.0"
         prog:
           type: object
-          description: Weekly program structure (exact shape model-dependent; see markdown)
+          description: Weekly program structure (shape varies by model; treat opaquely)
           additionalProperties: true
         prog_temps:
           type: object
-          description: Named temperatures for program modes
           properties:
-            comfort:
-              type: string
-              example: "21.0"
-            eco:
-              type: string
-              example: "18.0"
-            antifrost:
-              type: string
-              example: "7.0"
-    HeaterStatusWrite:
+            comfort: { type: string }
+            eco: { type: string }
+            antifrost: { type: string }
+    StatusWrite:
       type: object
-      description: Write status for a heater
+      description: Write status for a node (htr|acm). pmo has its own endpoints.
       properties:
-        mode:
-          type: string
-          description: Target mode (exact enum is model-dependent; examples below)
-          example: manual
-        stemp:
-          type: string
-          description: Target set temperature (string with one decimal)
-          example: "22.0"
-        units:
-          type: string
-          enum: [C, F]
-          example: C
-        boost:
-          type: boolean
-          description: Start/stop an immediate Boost (runback) session
+        mode: { type: string, description: "Device mode (model-dependent)" }
+        stemp: { type: string, description: "Setpoint (string with one decimal)" }
+        units: { type: string, enum: [C, F] }
+        boost: { type: boolean, description: "Start/stop Boost (runback)" }
       additionalProperties: false
-    HeaterModeWrite:
+    ModeWrite:
       type: object
       properties:
-        mode:
-          type: string
-          example: manual
+        mode: { type: string }
       additionalProperties: false
-    HeaterProgWrite:
+    ProgWrite:
       type: object
-      description: Weekly program payload. Exact structure varies; app sends a structured object per day/slot.
       additionalProperties: true
-    HeaterProgTempsWrite:
+    ProgTempsWrite:
       type: object
       properties:
-        comfort:
-          type: string
-          example: "21.0"
-        eco:
-          type: string
-          example: "18.0"
-        antifrost:
-          type: string
-          example: "7.0"
+        comfort: { type: string }
+        eco: { type: string }
+        antifrost: { type: string }
       additionalProperties: false
-    HeaterSetupWrite:
+    SetupWrite:
       type: object
       properties:
         extra_options:
           type: object
           properties:
-            boost_time:
-              type: integer
-              minimum: 1
-              example: 60
-            boost_temp:
-              type: string
-              example: "22.0"
+            boost_time: { type: integer, minimum: 1 }
+            boost_temp: { type: string }
           additionalProperties: true
       additionalProperties: true
-    HeaterLockWrite:
+    LockWrite:
       type: object
       properties:
-        lock:
-          type: boolean
-          description: Enable/disable local controls (child lock)
+        lock: { type: boolean }
       additionalProperties: false
-    HeaterSelectWrite:
+    SelectWrite:
       type: object
       properties:
-        select:
-          type: boolean
-          description: Select this node for subsequent operations
+        select: { type: boolean }
       additionalProperties: false
     EmptyResponse:
       type: object
       description: Empty JSON object on success
+    PowerLimit:
+      type: object
+      properties:
+        power_limit: { type: string }
 paths:
   /client/token:
     post:
@@ -194,8 +194,7 @@ paths:
       description: >
         Use HTTP Basic with the app client (`5c49dce977510351506c42db:tevolve`).
         POST form fields: `grant_type=password&username=<email>&password=<password>`.
-      security:
-        - basicAuth: []
+      security: [ { basicAuth: [] } ]
       requestBody:
         required: true
         content:
@@ -204,13 +203,9 @@ paths:
               type: object
               required: [grant_type, username, password]
               properties:
-                grant_type:
-                  type: string
-                  example: password
-                username:
-                  type: string
-                password:
-                  type: string
+                grant_type: { type: string, example: password }
+                username: { type: string }
+                password: { type: string }
       responses:
         "200":
           description: Access token
@@ -218,271 +213,240 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TokenResponse'
-  /api/v2/devs/{dev_id}/htr/{addr}:
+  /api/v2/devs/:
     get:
-      tags: [Heaters]
-      summary: Read heater node (consolidated state)
+      tags: [Devices]
+      summary: List hubs (gateways) for the account
+      security: [ { bearerAuth: [] } ]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  devs:
+                    type: array
+                    items: { $ref: '#/components/schemas/Device' }
+                  invited_to:
+                    type: array
+                    items: { type: object }
+  /api/v2/devs/{dev_id}/mgr/nodes:
+    get:
+      tags: [Devices]
+      summary: List nodes attached to a hub (htr, acm, pmo, …)
+      security: [ { bearerAuth: [] } ]
       parameters:
         - name: dev_id
           in: path
           required: true
           schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodesResponse'
+  /api/v2/devs/{dev_id}/{type}/{addr}:
+    get:
+      tags: [Nodes]
+      summary: Read node (consolidated state) for heaters or accumulators
+      description: >
+        `{type}` is typically `htr` (heater) or `acm` (accumulator).
+        Returns a consolidated document with `status`, `setup`, `prog`, `prog_temps` (device dependent).
+      security: [ { bearerAuth: [] } ]
+      parameters:
+        - name: dev_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: type
+          in: path
+          required: true
+          schema: { type: string, enum: [htr, acm, pmo] }
         - name: addr
           in: path
           required: true
           schema: { type: integer }
       responses:
         "200":
-          description: Heater node state
+          description: OK
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HeaterNode'
-  /api/v2/devs/{dev_id}/htr/{addr}/status:
+                $ref: '#/components/schemas/ConsolidatedNode'
+  /api/v2/devs/{dev_id}/{type}/{addr}/status:
     post:
-      tags: [Heaters]
-      summary: Set mode/setpoint/units and optionally trigger Boost
+      tags: [Nodes]
+      summary: Set mode/setpoint/units and optionally trigger Boost (htr/acm)
+      security: [ { bearerAuth: [] } ]
       parameters:
-        - name: dev_id
-          in: path
-          required: true
-          schema: { type: string }
-        - name: addr
-          in: path
-          required: true
-          schema: { type: integer }
+        - { name: dev_id, in: path, required: true, schema: { type: string } }
+        - { name: type, in: path, required: true, schema: { type: string, enum: [htr, acm] } }
+        - { name: addr, in: path, required: true, schema: { type: integer } }
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/HeaterStatusWrite'
+            schema: { $ref: '#/components/schemas/StatusWrite' }
             examples:
               manual_22C:
-                value:
-                  mode: manual
-                  stemp: "22.0"
-                  units: C
+                value: { mode: manual, stemp: "22.0", units: C }
               boost_now:
-                value:
-                  boost: true
+                value: { boost: true }
       responses:
         "201":
           description: Accepted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EmptyResponse'
-  /api/v2/devs/{dev_id}/htr/{addr}/mode:
+          content: { application/json: { schema: { $ref: '#/components/schemas/EmptyResponse' } } }
+  /api/v2/devs/{dev_id}/{type}/{addr}/mode:
     post:
-      tags: [Heaters]
-      summary: Set mode only
+      tags: [Nodes]
+      summary: Set mode only (htr/acm)
+      security: [ { bearerAuth: [] } ]
       parameters:
-        - name: dev_id
-          in: path
-          required: true
-          schema: { type: string }
-        - name: addr
-          in: path
-          required: true
-          schema: { type: integer }
+        - { name: dev_id, in: path, required: true, schema: { type: string } }
+        - { name: type, in: path, required: true, schema: { type: string, enum: [htr, acm] } }
+        - { name: addr, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ModeWrite' } } }
+      responses:
+        "201":
+          description: Accepted
+          content: { application/json: { schema: { $ref: '#/components/schemas/EmptyResponse' } } }
+  /api/v2/devs/{dev_id}/{type}/{addr}/prog:
+    post:
+      tags: [Programs]
+      summary: Set weekly program (htr/acm)
+      description: Send the full weekly program object as read from GET, modified.
+      security: [ { bearerAuth: [] } ]
+      parameters:
+        - { name: dev_id, in: path, required: true, schema: { type: string } }
+        - { name: type, in: path, required: true, schema: { type: string, enum: [htr, acm] } }
+        - { name: addr, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ProgWrite' } } }
+      responses:
+        "201":
+          description: Accepted
+          content: { application/json: { schema: { $ref: '#/components/schemas/EmptyResponse' } } }
+  /api/v2/devs/{dev_id}/{type}/{addr}/prog_temps:
+    post:
+      tags: [Programs]
+      summary: Set program temperatures (comfort/eco/antifrost) (htr/acm)
+      security: [ { bearerAuth: [] } ]
+      parameters:
+        - { name: dev_id, in: path, required: true, schema: { type: string } }
+        - { name: type, in: path, required: true, schema: { type: string, enum: [htr, acm] } }
+        - { name: addr, in: path, required: true, schema: { type: integer } }
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/HeaterModeWrite'
+            schema: { $ref: '#/components/schemas/ProgTempsWrite' }
+            example: { comfort: "21.0", eco: "18.0", antifrost: "7.0" }
       responses:
         "201":
           description: Accepted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EmptyResponse'
-  /api/v2/devs/{dev_id}/htr/{addr}/prog:
+          content: { application/json: { schema: { $ref: '#/components/schemas/EmptyResponse' } } }
+  /api/v2/devs/{dev_id}/{type}/{addr}/setup:
     post:
-      tags: [Heaters]
-      summary: Set weekly program
-      description: >
-        Sends the full weekly program. Exact payload structure is device/model-specific
-        as produced by the Ducaheat app.
+      tags: [Nodes]
+      summary: Set advanced/extra options (includes default Boost params) (htr/acm)
+      security: [ { bearerAuth: [] } ]
       parameters:
-        - name: dev_id
-          in: path
-          required: true
-          schema: { type: string }
-        - name: addr
-          in: path
-          required: true
-          schema: { type: integer }
+        - { name: dev_id, in: path, required: true, schema: { type: string } }
+        - { name: type, in: path, required: true, schema: { type: string, enum: [htr, acm] } }
+        - { name: addr, in: path, required: true, schema: { type: integer } }
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/HeaterProgWrite'
+            schema: { $ref: '#/components/schemas/SetupWrite' }
+            example: { extra_options: { boost_time: 60, boost_temp: "22.0" } }
       responses:
         "201":
           description: Accepted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EmptyResponse'
-  /api/v2/devs/{dev_id}/htr/{addr}/prog_temps:
+          content: { application/json: { schema: { $ref: '#/components/schemas/EmptyResponse' } } }
+  /api/v2/devs/{dev_id}/{type}/{addr}/lock:
     post:
-      tags: [Heaters]
-      summary: Set program temperatures (comfort/eco/antifrost)
+      tags: [Nodes]
+      summary: Toggle child lock / local control lock (htr/acm)
+      security: [ { bearerAuth: [] } ]
       parameters:
-        - name: dev_id
-          in: path
-          required: true
-          schema: { type: string }
-        - name: addr
-          in: path
-          required: true
-          schema: { type: integer }
+        - { name: dev_id, in: path, required: true, schema: { type: string } }
+        - { name: type, in: path, required: true, schema: { type: string, enum: [htr, acm] } }
+        - { name: addr, in: path, required: true, schema: { type: integer } }
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/HeaterProgTempsWrite'
-            example:
-              comfort: "21.0"
-              eco: "18.0"
-              antifrost: "7.0"
-      responses:
-        "201":
-          description: Accepted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EmptyResponse'
-  /api/v2/devs/{dev_id}/htr/{addr}/setup:
-    post:
-      tags: [Heaters]
-      summary: Set advanced/extra options (incl. default Boost time/temp)
-      parameters:
-        - name: dev_id
-          in: path
-          required: true
-          schema: { type: string }
-        - name: addr
-          in: path
-          required: true
-          schema: { type: integer }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/HeaterSetupWrite'
-            example:
-              extra_options:
-                boost_time: 60
-                boost_temp: "22.0"
-      responses:
-        "201":
-          description: Accepted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EmptyResponse'
-  /api/v2/devs/{dev_id}/htr/{addr}/lock:
-    post:
-      tags: [Heaters]
-      summary: Toggle child lock / local control lock
-      parameters:
-        - name: dev_id
-          in: path
-          required: true
-          schema: { type: string }
-        - name: addr
-          in: path
-          required: true
-          schema: { type: integer }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/HeaterLockWrite'
+            schema: { $ref: '#/components/schemas/LockWrite' }
             examples:
-              enable:
-                value: { lock: true }
-              disable:
-                value: { lock: false }
+              enable: { value: { lock: true } }
+              disable: { value: { lock: false } }
       responses:
         "201":
           description: Accepted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EmptyResponse'
-  /api/v2/devs/{dev_id}/htr/{addr}/select:
+          content: { application/json: { schema: { $ref: '#/components/schemas/EmptyResponse' } } }
+  /api/v2/devs/{dev_id}/{type}/{addr}/select:
     post:
-      tags: [Heaters]
-      summary: Select/deselect this node for subsequent writes
-      description: Some operations may require the node to be selected by the current user.
+      tags: [Nodes]
+      summary: Select/deselect this node for subsequent writes (htr/acm)
+      security: [ { bearerAuth: [] } ]
       parameters:
-        - name: dev_id
-          in: path
-          required: true
-          schema: { type: string }
-        - name: addr
-          in: path
-          required: true
-          schema: { type: integer }
+        - { name: dev_id, in: path, required: true, schema: { type: string } }
+        - { name: type, in: path, required: true, schema: { type: string, enum: [htr, acm] } }
+        - { name: addr, in: path, required: true, schema: { type: integer } }
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/HeaterSelectWrite'
+            schema: { $ref: '#/components/schemas/SelectWrite' }
             examples:
-              select:
-                value: { select: true }
-              deselect:
-                value: { select: false }
+              select: { value: { select: true } }
+              deselect: { value: { select: false } }
       responses:
         "201":
           description: Accepted
+          content: { application/json: { schema: { $ref: '#/components/schemas/EmptyResponse' } } }
+  /api/v2/devs/{dev_id}/pmo/{addr}:
+    get:
+      tags: [Nodes]
+      summary: Read power meter (pmo) node (power limit and/or telemetry root)
+      security: [ { bearerAuth: [] } ]
+      parameters:
+        - { name: dev_id, in: path, required: true, schema: { type: string } }
+        - { name: addr, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: OK
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/EmptyResponse'
-  /api/v2/devs/{dev_id}/htr/{addr}/samples:
+              schema: { $ref: '#/components/schemas/PowerLimit' }
+  /api/v2/devs/{dev_id}/{type}/{addr}/samples:
     get:
       tags: [Samples]
-      summary: Read samples (telemetry/history)
+      summary: Read samples (telemetry/history) for a node
+      security: [ { bearerAuth: [] } ]
       parameters:
-        - name: dev_id
-          in: path
-          required: true
-          schema: { type: string }
-        - name: addr
-          in: path
-          required: true
-          schema: { type: integer }
+        - { name: dev_id, in: path, required: true, schema: { type: string } }
+        - { name: type, in: path, required: true, schema: { type: string, enum: [htr, acm, pmo] } }
+        - { name: addr, in: path, required: true, schema: { type: integer } }
         - name: start
           in: query
           required: true
-          schema:
-            type: integer
-            format: int64
-            description: Epoch milliseconds (inclusive)
-          example: 1704067200000
+          schema: { type: integer, format: int64, description: "Epoch ms (inclusive)" }
         - name: end
           in: query
           required: true
-          schema:
-            type: integer
-            format: int64
-            description: Epoch milliseconds (exclusive)
-          example: 1704153600000
+          schema: { type: integer, format: int64, description: "Epoch ms (exclusive)" }
       responses:
         "200":
-          description: Samples payload
+          description: Samples payload (shape device-dependent)
           content:
             application/json:
               schema:

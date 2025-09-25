@@ -1,164 +1,81 @@
-# Ducaheat (Ducasa) Cloud API — Tevolve v2 (Unofficial)
+# Ducaheat (Ducasa) Cloud API — Tevolve v2 (Unofficial, accumulators supported)
 
-This document summarizes the Ducaheat backend as implemented by the mobile app (v1.40.1). It diverges from the consolidated **TermoWeb** contract: Ducaheat uses **segmented endpoints** per function and a **different Socket.IO path**.
+This document folds in the latest user-provided captures for **accumulators (type `acm`)** and **power meter (type `pmo`)**, and aligns the path patterns with TermoWeb while preserving Ducaheat’s segmented writes.
 
-**Base host:** `https://api-tevolve.termoweb.net`  
-**Frontend:** `https://ducaheat.termoweb.net`  
-**Auth client (Basic):** `5c49dce977510351506c42db:tevolve` → Base64 `NWM0OWRjZTk3NzUxMDM1MTUwNmM0MmRiOnRldm9sdmU=`
+Base host: `https://api-tevolve.termoweb.net`
+Auth client (Basic): `5c49dce977510351506c42db:tevolve` (Base64: `NWM0OWRjZTk3NzUxMDM1MTUwNmM0MmRiOnRldm9sdmU=`)
+Socket namespace: `/api/v2/socket_io` (Socket.IO 0.9 semantics)
 
----
+## 1) Discover devices and nodes
 
-## Auth
+- GET `/api/v2/devs/` → find your `dev_id` (hub). Example (obfuscated):
+{ "devs": [ { "dev_id": "1234", "name": "HUB-A", "product_id":"1234", "fw_version":"1.36.0", "serial_id":"1.2.3.4" } ], "invited_to": [] }
 
-**POST** `/client/token`  (HTTP Basic + form)
+- GET `/api/v2/devs/{dev_id}/mgr/nodes` → list nodes (rooms/devices). Example (obfuscated):
+{
+  "nodes": [
+    { "name":"Bedroom",  "addr":2, "type":"acm", "installed":true, "lost":false, "uid":"ABCD1..." },
+    { "name":"Entrance", "addr":3, "type":"acm", "installed":true, "lost":false, "uid":"ABCD2..." },
+    { "name":"Dining",   "addr":4, "type":"acm", "installed":true, "lost":false, "uid":"ABCD3..." },
+    { "name":"Meter",    "addr":5, "type":"pmo", "installed":true, "lost": true, "uid":"ABCD4..." }
+  ]
+}
 
-Form fields:
-```
-grant_type=password&username=<email>&password=<password>
-```
+## 2) Generalized node path
 
-Response:
-```json
-{ "access_token":"…", "token_type":"Bearer", "expires_in":3600, "refresh_token":"…" }
-```
+Use `{type}` in paths:
 
-Use the `access_token` as `Authorization: Bearer …` for all API calls.
+- READ consolidated node (heater or accumulator):
+  - GET `/api/v2/devs/{dev_id}/{type}/{addr}` with `type ∈ {htr, acm}`
+- Power meter root:
+  - GET `/api/v2/devs/{dev_id}/pmo/{addr}` → `{ "power_limit": "6900" }`
 
----
+Historical samples (shape varies by model):
+- GET `/api/v2/devs/{dev_id}/{type}/{addr}/samples?start=<ms>&end=<ms>`
 
-## Heater node model (read)
+## 3) Example `acm` (accumulator) response (obfuscated)
 
-**GET** `/api/v2/devs/{dev_id}/htr/{addr}`
+Includes `status` (heating / ventilation / charging, current_charge_per, target_charge_per, boost, temperatures as strings), `setup` (charging_conf with slot_1/slot_2 and active_days), and a weekly `prog` keyed by `"0"`…"6" with 48 half-hour slots in many firmwares. Preserve the shape you read before writing back.
 
-Returns a consolidated object with nested sections such as `status`, `setup`, `prog`, `prog_temps`. Keys are model‑dependent; the app treats unknown keys leniently.
+## 4) Power meter (`pmo`) minimal read
 
----
+- GET `/api/v2/devs/{dev_id}/pmo/{addr}` → `{ "power_limit": "6900" }`
+- Samples (if implemented for pmo): `/api/v2/devs/{dev_id}/pmo/{addr}/samples?start=<ms>&end=<ms>`
 
-## Writes are segmented
+## 5) Writes (segmented) for `htr` and `acm`
 
-Unlike TermoWeb’s `/settings` write, Ducaheat splits writes across multiple endpoints:
+- POST `/api/v2/devs/{dev_id}/{type}/{addr}/status`
+  - `{ "mode": "manual", "stemp": "22.0", "units": "C" }`
+  - `{ "boost": true }`
+- POST `/api/v2/devs/{dev_id}/{type}/{addr}/mode` → `{ "mode": "off" }`
+- POST `/api/v2/devs/{dev_id}/{type}/{addr}/prog` → weekly schedule object
+- POST `/api/v2/devs/{dev_id}/{type}/{addr}/prog_temps` → `{ "comfort":"21.0","eco":"18.0","antifrost":"7.0" }`
+- POST `/api/v2/devs/{dev_id}/{type}/{addr}/setup` → `{ "extra_options": { "boost_time": 60, "boost_temp": "22.0" } }`
+- POST `/api/v2/devs/{dev_id}/{type}/{addr}/lock` → `{ "lock": true }`
+- POST `/api/v2/devs/{dev_id}/{type}/{addr}/select` → `{ "select": true }`
 
-### 1) Status (mode / setpoint / units / boost)
+## 6) WebSocket
 
-**POST** `/api/v2/devs/{dev_id}/htr/{addr}/status`
+- Connect to `/api/v2/socket_io?token=<Bearer>` (Socket.IO 0.9). Typical events: `dev_handshake`, `dev_data`, `update`.
+- Push paths observed: `/mgr/nodes`, `/{type}/{addr}/status`, `/{type}/{addr}/setup`, `/{type}/{addr}/prog`.
 
-Body examples:
-```json
-{ "mode": "manual", "stemp": "22.0", "units": "C" }
-```
-```json
-{ "boost": true }
-```
 
-Returns `201 {}`.
+## 7) cURL sanity flow
 
-> Temperatures are strings with one decimal (e.g., `"22.0"`). `units` is `"C"` or `"F"`.
+1. Token:
+   `curl -u '5c49dce977510351506c42db:tevolve' -d 'grant_type=password&username=EMAIL&password=PASS' https://api-tevolve.termoweb.net/client/token`
 
-### 2) Mode only
+2. List devices:
+   `curl -H "Authorization: Bearer $TOK" https://api-tevolve.termoweb.net/api/v2/devs/`
 
-**POST** `/api/v2/devs/{dev_id}/htr/{addr}/mode`  
-Body:
-```json
-{ "mode": "manual" }
-```
+3. Nodes:
+   `curl -H "Authorization: Bearer $TOK" https://api-tevolve.termoweb.net/api/v2/devs/$DEV/mgr/nodes`
 
-### 3) Weekly program
+4. Read an accumulator:
+   `curl -H "Authorization: Bearer $TOK" https://api-tevolve.termoweb.net/api/v2/devs/$DEV/acm/2`
 
-**POST** `/api/v2/devs/{dev_id}/htr/{addr}/prog`  
-Payload mirrors the app’s weekly schedule object (structure varies by model). Use the object echoed by the GET call as a template.
+5. Start Boost:
+   `curl -H "Authorization: Bearer $TOK" -H "Content-Type: application/json" -d '{"boost":true}' https://api-tevolve.termoweb.net/api/v2/devs/$DEV/acm/2/status`
 
-### 4) Program temperatures
-
-**POST** `/api/v2/devs/{dev_id}/htr/{addr}/prog_temps`
-```json
-{ "comfort": "21.0", "eco": "18.0", "antifrost": "7.0" }
-```
-
-### 5) Advanced setup / extra options
-
-**POST** `/api/v2/devs/{dev_id}/htr/{addr}/setup`
-```json
-{ "extra_options": { "boost_time": 60, "boost_temp": "22.0" } }
-```
-
-### 6) Lock (child lock)
-
-**POST** `/api/v2/devs/{dev_id}/htr/{addr}/lock`
-```json
-{ "lock": true }
-```
-
-### 7) Select (ownership hint for writes)
-
-**POST** `/api/v2/devs/{dev_id}/htr/{addr}/select`
-```json
-{ "select": true }
-```
-Some write operations may require `select: true` before they take effect; de‑select with `select: false` afterwards.
-
----
-
-## Samples (history / telemetry)
-
-**GET** `/api/v2/devs/{dev_id}/htr/{addr}/samples?start=<ms>&end=<ms>`
-
-`start` and `end` are **epoch milliseconds**. The response shape varies by device and firmware; treat as opaque JSON until stabilized by capture.
-
----
-
-## Boost / Runback behavior
-
-- Timed override that runs at a boost setpoint for a fixed duration, then reverts.  
-- Activation paths:
-  - Immediate: `POST …/status { "boost": true }`
-  - Defaults: set via `POST …/setup { "extra_options": { "boost_time": 60, "boost_temp": "22.0" } }`
-- Related read keys often present under `setup.extra_options` and/or `status`:
-  - `boost_time`, `boost_temp`, and `boost_active`.
-
----
-
-## WebSocket (Socket.IO)
-
-**Path:** `/api/v2/socket_io?token=<access_token>`
-
-The app listens for at least these events:
-- `dev_handshake` — initial device list / permissions
-- `dev_data` — node payloads (status/setup/prog updates)
-- `update` — incremental changes
-
-This differs from TermoWeb’s legacy `/socket.io/1/…` path. Use Socket.IO v0.9 semantics as the server reports.
-
----
-
-## Example cURL flow
-
-```bash
-# 1) Token
-TOK=$(curl -sS -u '5c49dce977510351506c42db:tevolve'   -d 'grant_type=password&username=EMAIL&password=PASS'   https://api-tevolve.termoweb.net/client/token | jq -r .access_token)
-
-# 2) Read heater 2
-curl -sS -H "Authorization: Bearer $TOK"   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/htr/2
-
-# 3) (Optional) Select before write
-curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"   -d '{"select": true}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/htr/2/select
-
-# 4) Set manual 22.0°C
-curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"   -d '{"mode":"manual","stemp":"22.0","units":"C"}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/htr/2/status
-
-# 5) Start Boost now
-curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"   -d '{"boost": true}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/htr/2/status
-
-# 6) Configure default Boost time
-curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"   -d '{"extra_options":{"boost_time":60,"boost_temp":"22.0"}}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/htr/2/setup
-
-# 7) De-select after write
-curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"   -d '{"select": false}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/htr/2/select
-```
-
----
-
-## Notes and caveats
-
-- Treat unknown keys as forward‑compatible; the app is tolerant of additional fields.
-- Program payload (`/prog`) structure varies by model/firmware. Capture the GET shape first and write it back unchanged after edits.
-- Some deployments may accept `/htr/{addr}/boost` as a synonym for boosting, but `/status` with `{ "boost": true }` is consistently present in the app bundle.
+6. Power meter:
+   `curl -H "Authorization: Bearer $TOK" https://api-tevolve.termoweb.net/api/v2/devs/$DEV/pmo/5`
