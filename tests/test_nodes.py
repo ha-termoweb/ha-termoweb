@@ -9,6 +9,7 @@ from custom_components.termoweb.nodes import (
     AccumulatorNode,
     DucaheatAccum,
     HeaterNode,
+    Node,
     PowerMonitorNode,
     ThermostatNode,
 )
@@ -58,3 +59,40 @@ def test_thermostat_stub() -> None:
 def test_node_requires_brand() -> None:
     with pytest.raises(ValueError):
         HeaterNode(name="Living", addr=1, brand="")
+
+
+def test_node_requires_type() -> None:
+    class BareNode(Node):
+        __slots__ = ()
+
+    with pytest.raises(ValueError):
+        BareNode(name="Bare", addr=1, brand=BRAND_TERMOWEB)
+
+
+def test_node_requires_addr() -> None:
+    with pytest.raises(ValueError):
+        HeaterNode(name="Living", addr="  ", brand=BRAND_TERMOWEB)
+
+
+def test_node_updates_entity_attr_name() -> None:
+    class EntityNode(HeaterNode):
+        __slots__ = ("_attr_name",)
+
+    node = EntityNode(name="First", addr=1, brand=BRAND_TERMOWEB)
+    node._attr_name = "Legacy"  # attribute provided by HA entity mixin
+
+    node.name = "Updated"
+
+    assert node._attr_name == "Updated"
+    assert node.name == "Updated"
+
+
+def test_node_as_dict() -> None:
+    node = HeaterNode(name="Kitchen", addr=5, brand=BRAND_TERMOWEB)
+
+    assert node.as_dict() == {
+        "name": "Kitchen",
+        "addr": "5",
+        "type": "htr",
+        "brand": BRAND_TERMOWEB,
+    }
