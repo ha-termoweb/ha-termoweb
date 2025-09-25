@@ -213,3 +213,58 @@ def test_ws_url_requires_token() -> None:
             await client.ws_url()
 
     asyncio.run(_run())
+
+
+def test_stop_handles_cancelled_task(monkeypatch: pytest.MonkeyPatch) -> None:
+    dispatcher_calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_dispatcher(hass, signal: str, payload: dict[str, object]) -> None:
+        dispatcher_calls.append((signal, payload))
+
+    monkeypatch.setattr(ws_v2, "async_dispatcher_send", fake_dispatcher)
+
+    async def _run() -> None:
+        loop = asyncio.get_running_loop()
+        hass = types.SimpleNamespace(loop=loop, data={})
+
+        class FakeClient:
+            async def _authed_headers(self) -> dict[str, str]:
+                return {"Authorization": "Bearer token"}
+
+        client = ws_v2.DucaheatWSClient(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=FakeClient(),
+            coordinator=types.SimpleNamespace(),
+        )
+
+        async def hanging_runner(self: ws_v2.DucaheatWSClient) -> None:
+            self._update_status("connecting")
+            try:
+                await asyncio.Future()
+            finally:
+                self._update_status("stopped")
+
+        client._runner = types.MethodType(hanging_runner, client)
+
+        task = client.start()
+        await asyncio.sleep(0)
+        assert not task.done()
+
+        task.cancel()
+        await asyncio.sleep(0)
+
+        await client.stop()
+        await asyncio.sleep(0)
+
+        assert client._task is None
+        status_signal = ws_v2.signal_ws_status("entry")
+        status_updates = [
+            payload["status"]
+            for signal, payload in dispatcher_calls
+            if signal == status_signal
+        ]
+        assert status_updates[-1] == "stopped"
+
+    asyncio.run(_run())
