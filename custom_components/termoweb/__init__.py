@@ -23,6 +23,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.loader import async_get_integration
 
 from .api import TermoWebAuthError, TermoWebClient, TermoWebRateLimitError
+from .backend import Backend, WsClientProto, create_backend
 from .const import (
     CONF_BRAND,
     DEFAULT_BRAND,
@@ -36,7 +37,9 @@ from .const import (
 )
 from .coordinator import TermoWebCoordinator
 from .utils import extract_heater_addrs
-from .ws_client_legacy import TermoWebWSLegacyClient
+
+# Re-export legacy WS client for backward compatibility (tests may patch it).
+from .ws_client_legacy import TermoWebWSLegacyClient  # noqa: F401
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -475,6 +478,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         api_base=api_base,
         basic_auth_b64=basic_auth,
     )
+    backend = create_backend(brand=brand, client=client)
     try:
         devices = await client.list_devices()
     except TermoWebAuthError as err:
@@ -499,7 +503,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = data = {
-        "client": client,
+        "backend": backend,
+        "client": backend.client,
         "coordinator": coordinator,
         "dev_id": dev_id,
         "nodes": nodes,
@@ -508,24 +513,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "base_poll_interval": max(base_interval, MIN_POLL_INTERVAL),
         "stretched": False,
         "ws_tasks": {},  # dev_id -> asyncio.Task
-        "ws_clients": {},  # dev_id -> TermoWebWSLegacyClient
+        "ws_clients": {},  # dev_id -> WS clients
         "ws_state": {},  # dev_id -> status attrs
         "version": version,
         "brand": brand,
     }
 
     async def _start_ws(dev_id: str) -> None:
+        backend: Backend = data["backend"]
         tasks: dict[str, asyncio.Task] = data["ws_tasks"]
-        clients: dict[str, TermoWebWSLegacyClient] = data["ws_clients"]
+        clients: dict[str, WsClientProto] = data["ws_clients"]
         if dev_id in tasks and not tasks[dev_id].done():
             return
         ws_client = clients.get(dev_id)
         if not ws_client:
-            ws_client = TermoWebWSLegacyClient(
+            ws_client = backend.create_ws_client(
                 hass,
                 entry_id=entry.entry_id,
                 dev_id=dev_id,
-                api_client=client,
                 coordinator=coordinator,
             )
             clients[dev_id] = ws_client

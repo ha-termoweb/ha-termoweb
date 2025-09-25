@@ -14,7 +14,7 @@ import voluptuous as vol
 
 from .api import TermoWebAuthError, TermoWebClient, TermoWebRateLimitError
 from .const import (
-    BRAND_DUCAHEAT,
+    BRAND_DUCAHEAT as CONST_BRAND_DUCAHEAT,
     BRAND_LABELS,
     BRAND_TERMOWEB,
     CONF_BRAND,
@@ -27,6 +27,8 @@ from .const import (
     get_brand_basic_auth,
     get_brand_label,
 )
+
+BRAND_DUCAHEAT = CONST_BRAND_DUCAHEAT
 
 _LOGGER = logging.getLogger(__name__)
 
