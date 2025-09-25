@@ -17,8 +17,9 @@ from homeassistant.helpers import entity_platform
 from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
-from .const import DOMAIN
+from .const import BRAND_TERMOWEB, DOMAIN
 from .heater import TermoWebHeaterBase, build_heater_name_map
+from .nodes import HeaterNode
 from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
@@ -39,6 +40,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     name_map = build_heater_name_map(nodes, lambda addr: f"Heater {addr}")
 
+    brand = data.get("brand", BRAND_TERMOWEB)
+
     new_entities = [
         TermoWebHeater(
             coordinator,
@@ -46,6 +49,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             dev_id,
             addr,
             name_map.get(addr, f"Heater {addr}"),
+            brand=brand,
         )
         for addr in addrs
     ]
@@ -109,7 +113,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     )
 
 
-class TermoWebHeater(TermoWebHeaterBase, ClimateEntity):
+class TermoWebHeater(HeaterNode, TermoWebHeaterBase, ClimateEntity):
     """HA climate entity representing a single TermoWeb heater."""
 
     _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
@@ -117,9 +121,17 @@ class TermoWebHeater(TermoWebHeaterBase, ClimateEntity):
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
 
     def __init__(
-        self, coordinator, entry_id: str, dev_id: str, addr: str, name: str
+        self,
+        coordinator,
+        entry_id: str,
+        dev_id: str,
+        addr: str,
+        name: str,
+        *,
+        brand: str | None = None,
     ) -> None:
-        super().__init__(coordinator, entry_id, dev_id, addr, name)
+        HeaterNode.__init__(self, name=name, addr=addr, brand=brand or BRAND_TERMOWEB)
+        TermoWebHeaterBase.__init__(self, coordinator, entry_id, dev_id, addr, self.name)
 
         self._refresh_fallback: asyncio.Task | None = None
 
