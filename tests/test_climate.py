@@ -17,7 +17,8 @@ from conftest import _install_stubs
 _install_stubs()
 
 from custom_components.termoweb import climate as climate_module
-from custom_components.termoweb.const import DOMAIN, signal_ws_data
+from custom_components.termoweb.const import BRAND_TERMOWEB, DOMAIN, signal_ws_data
+from custom_components.termoweb.nodes import HeaterNode
 from homeassistant.components.climate import HVACAction, HVACMode
 from homeassistant.const import ATTR_TEMPERATURE
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -51,6 +52,27 @@ class FakeCoordinator:
         return None
 
 
+def test_termoweb_heater_is_heater_node() -> None:
+    _reset_environment()
+    hass = HomeAssistant()
+    coordinator = FakeCoordinator(hass, {"dev": {"htr": {"settings": {}}, "nodes": {}}})
+
+    heater = TermoWebHeater(
+        coordinator,
+        "entry",
+        "dev",
+        "1",
+        " Living Room ",
+        brand=BRAND_TERMOWEB,
+    )
+
+    assert isinstance(heater, HeaterNode)
+    assert heater.type == "htr"
+    assert heater.addr == "1"
+    assert heater.brand == BRAND_TERMOWEB
+    assert heater.name == "Living Room"
+
+
 def test_async_setup_entry_creates_entities() -> None:
     async def _run() -> None:
         _reset_environment()
@@ -79,6 +101,7 @@ def test_async_setup_entry_creates_entities() -> None:
                     "nodes": nodes,
                     "htr_addrs": addrs,
                     "version": "3.1.4",
+                    "brand": BRAND_TERMOWEB,
                 }
             }
         }
