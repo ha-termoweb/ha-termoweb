@@ -21,5 +21,3 @@ jobs:
           cov-threshold-total: 95
           async-tests: true
           package-extras: dev,tests
-          github_token: ${{ secrets.github_token }}
-          working_branch: ${{ steps.extract_branch.outputs.branch }}
