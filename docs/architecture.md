@@ -37,10 +37,10 @@ flowchart LR
 
     subgraph Field[Home Gateway & Nodes]
         Gateway[TermoWeb Gateway]
-        Htr[[Heater Nodes (htr)]]
-        Acm[[Accumulator Nodes (acm)]]
-        Pmo[[Power Monitor Nodes (pmo)]]
-        Thm[[Thermostat Nodes (thm)]]
+        Htr["Heater Nodes (htr)"]
+        Acm["Accumulator Nodes (acm)"]
+        Pmo["Power Monitor Nodes (pmo)"]
+        Thm["Thermostat Nodes (thm)"]
     end
 
     User --> CF
