@@ -1,0 +1,490 @@
+openapi: 3.0.3
+info:
+  title: Ducaheat Cloud API (Tevolve v2) — Unofficial
+  version: "0.1.0"
+  description: |
+    Unofficial OpenAPI description for the Ducaheat (Ducasa) mobile app backend.
+    This reflects endpoints discovered in the v1.40.1 APK decompile and
+    verified patterns that differ from the consolidated TermoWeb API.
+
+    Key differences vs TermoWeb:
+      - No consolidated `/settings` resource for heaters.
+      - Writes are segmented: `/status`, `/mode`, `/prog`, `/prog_temps`, `/setup`, `/lock`, `/select`.
+      - Socket path differs: `/api/v2/socket_io?token=...`.
+
+    Base host: https://api-tevolve.termoweb.net
+servers:
+  - url: https://api-tevolve.termoweb.net
+    description: Production (Ducaheat)
+tags:
+  - name: Auth
+  - name: Devices
+  - name: Heaters
+  - name: Samples
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+    basicAuth:
+      type: http
+      scheme: basic
+  schemas:
+    TokenResponse:
+      type: object
+      required: [access_token, token_type, expires_in]
+      properties:
+        access_token:
+          type: string
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+          example: 3600
+        refresh_token:
+          type: string
+          nullable: true
+    HeaterNode:
+      type: object
+      description: Consolidated state returned by GET /devs/{dev_id}/htr/{addr}
+      additionalProperties: true
+      properties:
+        dev_id:
+          type: string
+        node_type:
+          type: string
+          example: htr
+        addr:
+          type: integer
+        status:
+          type: object
+          additionalProperties: true
+          properties:
+            mode:
+              type: string
+              description: Current mode (as reported by device)
+              example: manual
+            stemp:
+              type: string
+              description: Current set temperature as a string with one decimal
+              example: "22.0"
+            units:
+              type: string
+              enum: [C, F]
+              example: C
+            boost_active:
+              type: boolean
+        setup:
+          type: object
+          additionalProperties: true
+          properties:
+            extra_options:
+              type: object
+              additionalProperties: true
+              properties:
+                boost_time:
+                  type: integer
+                  description: Default boost/runback time (minutes)
+                  example: 60
+                boost_temp:
+                  type: string
+                  description: Temperature applied during boost, if distinct from `stemp`
+                  example: "22.0"
+        prog:
+          type: object
+          description: Weekly program structure (exact shape model-dependent; see markdown)
+          additionalProperties: true
+        prog_temps:
+          type: object
+          description: Named temperatures for program modes
+          properties:
+            comfort:
+              type: string
+              example: "21.0"
+            eco:
+              type: string
+              example: "18.0"
+            antifrost:
+              type: string
+              example: "7.0"
+    HeaterStatusWrite:
+      type: object
+      description: Write status for a heater
+      properties:
+        mode:
+          type: string
+          description: Target mode (exact enum is model-dependent; examples below)
+          example: manual
+        stemp:
+          type: string
+          description: Target set temperature (string with one decimal)
+          example: "22.0"
+        units:
+          type: string
+          enum: [C, F]
+          example: C
+        boost:
+          type: boolean
+          description: Start/stop an immediate Boost (runback) session
+      additionalProperties: false
+    HeaterModeWrite:
+      type: object
+      properties:
+        mode:
+          type: string
+          example: manual
+      additionalProperties: false
+    HeaterProgWrite:
+      type: object
+      description: Weekly program payload. Exact structure varies; app sends a structured object per day/slot.
+      additionalProperties: true
+    HeaterProgTempsWrite:
+      type: object
+      properties:
+        comfort:
+          type: string
+          example: "21.0"
+        eco:
+          type: string
+          example: "18.0"
+        antifrost:
+          type: string
+          example: "7.0"
+      additionalProperties: false
+    HeaterSetupWrite:
+      type: object
+      properties:
+        extra_options:
+          type: object
+          properties:
+            boost_time:
+              type: integer
+              minimum: 1
+              example: 60
+            boost_temp:
+              type: string
+              example: "22.0"
+          additionalProperties: true
+      additionalProperties: true
+    HeaterLockWrite:
+      type: object
+      properties:
+        lock:
+          type: boolean
+          description: Enable/disable local controls (child lock)
+      additionalProperties: false
+    HeaterSelectWrite:
+      type: object
+      properties:
+        select:
+          type: boolean
+          description: Select this node for subsequent operations
+      additionalProperties: false
+    EmptyResponse:
+      type: object
+      description: Empty JSON object on success
+paths:
+  /client/token:
+    post:
+      tags: [Auth]
+      summary: Obtain OAuth2 access token (password grant)
+      description: >
+        Use HTTP Basic with the app client (`5c49dce977510351506c42db:tevolve`).
+        POST form fields: `grant_type=password&username=<email>&password=<password>`.
+      security:
+        - basicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type, username, password]
+              properties:
+                grant_type:
+                  type: string
+                  example: password
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        "200":
+          description: Access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+  /api/v2/devs/{dev_id}/htr/{addr}:
+    get:
+      tags: [Heaters]
+      summary: Read heater node (consolidated state)
+      parameters:
+        - name: dev_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: addr
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Heater node state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HeaterNode'
+  /api/v2/devs/{dev_id}/htr/{addr}/status:
+    post:
+      tags: [Heaters]
+      summary: Set mode/setpoint/units and optionally trigger Boost
+      parameters:
+        - name: dev_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: addr
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeaterStatusWrite'
+            examples:
+              manual_22C:
+                value:
+                  mode: manual
+                  stemp: "22.0"
+                  units: C
+              boost_now:
+                value:
+                  boost: true
+      responses:
+        "201":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+  /api/v2/devs/{dev_id}/htr/{addr}/mode:
+    post:
+      tags: [Heaters]
+      summary: Set mode only
+      parameters:
+        - name: dev_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: addr
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeaterModeWrite'
+      responses:
+        "201":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+  /api/v2/devs/{dev_id}/htr/{addr}/prog:
+    post:
+      tags: [Heaters]
+      summary: Set weekly program
+      description: >
+        Sends the full weekly program. Exact payload structure is device/model-specific
+        as produced by the Ducaheat app.
+      parameters:
+        - name: dev_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: addr
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeaterProgWrite'
+      responses:
+        "201":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+  /api/v2/devs/{dev_id}/htr/{addr}/prog_temps:
+    post:
+      tags: [Heaters]
+      summary: Set program temperatures (comfort/eco/antifrost)
+      parameters:
+        - name: dev_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: addr
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeaterProgTempsWrite'
+            example:
+              comfort: "21.0"
+              eco: "18.0"
+              antifrost: "7.0"
+      responses:
+        "201":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+  /api/v2/devs/{dev_id}/htr/{addr}/setup:
+    post:
+      tags: [Heaters]
+      summary: Set advanced/extra options (incl. default Boost time/temp)
+      parameters:
+        - name: dev_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: addr
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeaterSetupWrite'
+            example:
+              extra_options:
+                boost_time: 60
+                boost_temp: "22.0"
+      responses:
+        "201":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+  /api/v2/devs/{dev_id}/htr/{addr}/lock:
+    post:
+      tags: [Heaters]
+      summary: Toggle child lock / local control lock
+      parameters:
+        - name: dev_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: addr
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeaterLockWrite'
+            examples:
+              enable:
+                value: { lock: true }
+              disable:
+                value: { lock: false }
+      responses:
+        "201":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+  /api/v2/devs/{dev_id}/htr/{addr}/select:
+    post:
+      tags: [Heaters]
+      summary: Select/deselect this node for subsequent writes
+      description: Some operations may require the node to be selected by the current user.
+      parameters:
+        - name: dev_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: addr
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeaterSelectWrite'
+            examples:
+              select:
+                value: { select: true }
+              deselect:
+                value: { select: false }
+      responses:
+        "201":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+  /api/v2/devs/{dev_id}/htr/{addr}/samples:
+    get:
+      tags: [Samples]
+      summary: Read samples (telemetry/history)
+      parameters:
+        - name: dev_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: addr
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: start
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+            description: Epoch milliseconds (inclusive)
+          example: 1704067200000
+        - name: end
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+            description: Epoch milliseconds (exclusive)
+          example: 1704153600000
+      responses:
+        "200":
+          description: Samples payload
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
