@@ -97,3 +97,67 @@ The flow shows how configuration and runtime components share the authenticated 
   - **TermoWebTotalEnergy** (`SensorEntity`) – aggregates heater energy metrics across the installation using the energy coordinator feed.【F:custom_components/termoweb/sensor.py†L281-L337】
 - **Websocket client**
   - **TermoWebWSLegacyClient** – socket.io client that streams push updates, maintains heartbeat loops, and dispatches payloads back into coordinator caches and dispatcher channels.【F:custom_components/termoweb/ws_client_legacy.py†L40-L195】
+
+### Class relationships diagram
+
+```mermaid
+classDiagram
+    %% Core Home Assistant base classes
+    class ConfigFlow
+    class OptionsFlow
+    class DataUpdateCoordinator
+    class CoordinatorEntity
+    class ClimateEntity
+    class SensorEntity
+    class BinarySensorEntity
+    class ButtonEntity
+
+    %% Integration classes
+    class TermoWebClient
+    class TermoWebWSLegacyClient
+    class TermoWebConfigFlow
+    class TermoWebOptionsFlow
+    class TermoWebCoordinator
+    class TermoWebHeaterEnergyCoordinator
+    class TermoWebHeaterBase
+    class TermoWebHeater
+    class TermoWebHeaterTemp
+    class TermoWebHeaterMeasurementSensor
+    class TermoWebHeaterEnergyTotal
+    class TermoWebHeaterPower
+    class TermoWebTotalEnergy
+    class TermoWebDeviceOnlineBinarySensor
+    class TermoWebRefreshButton
+
+    %% Inheritance
+    TermoWebConfigFlow --|> ConfigFlow
+    TermoWebOptionsFlow --|> OptionsFlow
+    TermoWebCoordinator --|> DataUpdateCoordinator
+    TermoWebHeaterEnergyCoordinator --|> DataUpdateCoordinator
+    TermoWebHeaterBase --|> CoordinatorEntity
+    TermoWebHeater --|> TermoWebHeaterBase
+    TermoWebHeater --|> ClimateEntity
+    TermoWebHeaterTemp --|> TermoWebHeaterBase
+    TermoWebHeaterTemp --|> SensorEntity
+    TermoWebHeaterMeasurementSensor --|> TermoWebHeaterBase
+    TermoWebHeaterMeasurementSensor --|> SensorEntity
+    TermoWebHeaterEnergyTotal --|> TermoWebHeaterMeasurementSensor
+    TermoWebHeaterPower --|> TermoWebHeaterMeasurementSensor
+    TermoWebTotalEnergy --|> CoordinatorEntity
+    TermoWebTotalEnergy --|> SensorEntity
+    TermoWebDeviceOnlineBinarySensor --|> CoordinatorEntity
+    TermoWebDeviceOnlineBinarySensor --|> BinarySensorEntity
+    TermoWebRefreshButton --|> CoordinatorEntity
+    TermoWebRefreshButton --|> ButtonEntity
+
+    %% Usage relationships
+    TermoWebConfigFlow --> TermoWebClient : validates
+    TermoWebOptionsFlow --> TermoWebCoordinator : adjusts interval
+    TermoWebCoordinator --> TermoWebClient : polls
+    TermoWebHeaterEnergyCoordinator --> TermoWebClient : fetches energy
+    TermoWebWSLegacyClient --> TermoWebCoordinator : pushes updates
+    TermoWebHeaterBase --> TermoWebCoordinator : consumes data
+    TermoWebHeaterMeasurementSensor --> TermoWebHeaterEnergyCoordinator : reads samples
+    TermoWebDeviceOnlineBinarySensor --> TermoWebCoordinator : monitors status
+    TermoWebRefreshButton --> TermoWebCoordinator : requests refresh
+```
