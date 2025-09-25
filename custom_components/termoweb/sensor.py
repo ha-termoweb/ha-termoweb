@@ -203,95 +203,79 @@ class TermoWebHeaterTemp(TermoWebHeaterBase, SensorEntity):
         }
 
 
-class TermoWebHeaterEnergyTotal(TermoWebHeaterBase, SensorEntity):
+class TermoWebHeaterMeasurementSensor(TermoWebHeaterBase, SensorEntity):
+    """Base helper for heater measurement sensors such as power and energy."""
+
+    _metric_key: str
+
+    def __init__(
+        self,
+        coordinator: TermoWebHeaterEnergyCoordinator,
+        entry_id: str,
+        dev_id: str,
+        addr: str,
+        name: str,
+        unique_id: str,
+        device_name: str,
+    ) -> None:
+        super().__init__(
+            coordinator,
+            entry_id,
+            dev_id,
+            addr,
+            name,
+            unique_id,
+            device_name=device_name,
+        )
+
+    def _device_available(self, device_entry: dict[str, Any] | None) -> bool:
+        return isinstance(device_entry, dict)
+
+    def _metric_section(self) -> dict[str, Any]:
+        heater_section = self._heater_section()
+        metric = heater_section.get(self._metric_key)
+        return metric if isinstance(metric, dict) else {}
+
+    def _raw_native_value(self) -> Any:
+        return self._metric_section().get(self._addr)
+
+    def _coerce_native_value(self, raw: Any) -> float | None:
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
+
+    @property
+    def native_value(self) -> float | None:
+        raw = self._raw_native_value()
+        if raw is None:
+            return None
+        return self._coerce_native_value(raw)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"dev_id": self._dev_id, "addr": self._addr}
+
+
+class TermoWebHeaterEnergyTotal(TermoWebHeaterMeasurementSensor):
     """Total energy consumption sensor for a heater."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_native_unit_of_measurement = "kWh"
+    _metric_key = "energy"
 
-    def __init__(
-        self,
-        coordinator: TermoWebHeaterEnergyCoordinator,
-        entry_id: str,
-        dev_id: str,
-        addr: str,
-        name: str,
-        unique_id: str,
-        device_name: str,
-    ) -> None:
-        super().__init__(
-            coordinator,
-            entry_id,
-            dev_id,
-            addr,
-            name,
-            unique_id,
-            device_name=device_name,
-        )
-
-    def _device_available(self, device_entry: dict[str, Any] | None) -> bool:
-        return device_entry is not None
-
-    @property
-    def native_value(self) -> float | None:
-        d = (self.coordinator.data or {}).get(self._dev_id, {})
-        energy = (d.get("htr") or {}).get("energy") or {}
-        val = energy.get(self._addr)
-        if val is None:
-            return None
-        return _normalise_energy_value(self.coordinator, val)
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        return {"dev_id": self._dev_id, "addr": self._addr}
+    def _coerce_native_value(self, raw: Any) -> float | None:  # type: ignore[override]
+        return _normalise_energy_value(self.coordinator, raw)
 
 
-class TermoWebHeaterPower(TermoWebHeaterBase, SensorEntity):
+class TermoWebHeaterPower(TermoWebHeaterMeasurementSensor):
     """Power sensor for a heater."""
 
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "W"
-
-    def __init__(
-        self,
-        coordinator: TermoWebHeaterEnergyCoordinator,
-        entry_id: str,
-        dev_id: str,
-        addr: str,
-        name: str,
-        unique_id: str,
-        device_name: str,
-    ) -> None:
-        super().__init__(
-            coordinator,
-            entry_id,
-            dev_id,
-            addr,
-            name,
-            unique_id,
-            device_name=device_name,
-        )
-
-    def _device_available(self, device_entry: dict[str, Any] | None) -> bool:
-        return device_entry is not None
-
-    @property
-    def native_value(self) -> float | None:
-        d = (self.coordinator.data or {}).get(self._dev_id, {})
-        power = (d.get("htr") or {}).get("power") or {}
-        val = power.get(self._addr)
-        if val is None:
-            return None
-        try:
-            return float(val)
-        except (TypeError, ValueError):
-            return None
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        return {"dev_id": self._dev_id, "addr": self._addr}
+    _metric_key = "power"
 
 
 class TermoWebTotalEnergy(CoordinatorEntity, SensorEntity):

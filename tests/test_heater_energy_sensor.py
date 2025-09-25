@@ -76,46 +76,54 @@ def test_coordinator_and_sensors() -> None:
         assert energy_sensor.state_class == SensorStateClass.TOTAL_INCREASING
         assert energy_sensor.native_unit_of_measurement == "kWh"
 
-        assert energy_sensor.native_value == pytest.approx(0.0015)
-        assert power_sensor.native_value == pytest.approx(2.0, rel=1e-3)
-
         signal = signal_ws_data("entry")
+        sensors = {
+            "energy": energy_sensor,
+            "power": power_sensor,
+        }
+        expected_initial = {
+            "energy": pytest.approx(0.0015),
+            "power": pytest.approx(2.0, rel=1e-3),
+        }
+        for metric, sensor in sensors.items():
+            assert sensor.native_value == expected_initial[metric]
+
         first_value: float = energy_sensor.native_value  # type: ignore[assignment]
 
-        coord.data["1"]["htr"]["energy"]["A"] = "bad"
-        coord.data["1"]["htr"]["power"]["A"] = "oops"
-        assert energy_sensor.native_value is None
-        assert power_sensor.native_value is None
+        for metric, bad_value in {"energy": "bad", "power": "oops"}.items():
+            coord.data["1"]["htr"][metric]["A"] = bad_value
 
-        energy_sensor.schedule_update_ha_state = MagicMock()
-        power_sensor.schedule_update_ha_state = MagicMock()
+        for sensor in sensors.values():
+            assert sensor.native_value is None
+            sensor.schedule_update_ha_state = MagicMock()
 
-        coord.data["1"]["htr"]["energy"]["A"] = 0.002
-        coord.data["1"]["htr"]["power"]["A"] = 123.0
+        for metric, new_value in {"energy": 0.002, "power": 123.0}.items():
+            coord.data["1"]["htr"][metric]["A"] = new_value
+
         dispatcher_send(signal, {"dev_id": "1", "addr": "A"})
 
-        energy_sensor.schedule_update_ha_state.assert_called_once()
-        power_sensor.schedule_update_ha_state.assert_called_once()
+        expected_updated = {
+            "energy": pytest.approx(0.002),
+            "power": pytest.approx(123.0),
+        }
+        for metric, sensor in sensors.items():
+            sensor.schedule_update_ha_state.assert_called_once()
+            assert sensor.native_value == expected_updated[metric]
+
         assert energy_sensor.native_value >= first_value
-        assert energy_sensor.native_value == pytest.approx(0.002)
-        assert power_sensor.native_value == pytest.approx(123.0)
 
-        energy_sensor.schedule_update_ha_state.reset_mock()
-        original_unsub_energy = energy_sensor._unsub_ws
-        energy_sensor._unsub_ws = MagicMock(side_effect=original_unsub_energy)
-        mock_energy_unsub = energy_sensor._unsub_ws
-        await energy_sensor.async_will_remove_from_hass()
-        mock_energy_unsub.assert_called_once()
-        assert energy_sensor._handle_ws_message not in dispatch_map.get(signal, [])
+        for sensor in sensors.values():
+            sensor.schedule_update_ha_state.reset_mock()
+            original_unsub = sensor._unsub_ws
+            sensor._unsub_ws = MagicMock(side_effect=original_unsub)
+            mock_unsub = sensor._unsub_ws
+            await sensor.async_will_remove_from_hass()
+            mock_unsub.assert_called_once()
+            assert sensor._handle_ws_message not in dispatch_map.get(signal, [])
+
         dispatcher_send(signal, {"dev_id": "1", "addr": "A"})
-        energy_sensor.schedule_update_ha_state.assert_not_called()
-
-        power_sensor.schedule_update_ha_state.reset_mock()
-        original_unsub_power = power_sensor._unsub_ws
-        power_sensor._unsub_ws = MagicMock(side_effect=original_unsub_power)
-        mock_power_unsub = power_sensor._unsub_ws
-        await power_sensor.async_will_remove_from_hass()
-        mock_power_unsub.assert_called_once()
+        for sensor in sensors.values():
+            sensor.schedule_update_ha_state.assert_not_called()
 
     asyncio.run(_run())
 
@@ -401,54 +409,49 @@ def test_energy_and_power_sensor_properties() -> None:
     }
     coordinator = types.SimpleNamespace(hass=hass, data=copy.deepcopy(base_data))
 
-    energy_sensor = TermoWebHeaterEnergyTotal(
-        coordinator,
-        "entry",
-        "dev",
-        "A",
-        "Energy",
-        "uid_energy",
-        "Node",
-    )
-    power_sensor = TermoWebHeaterPower(
-        coordinator,
-        "entry",
-        "dev",
-        "A",
-        "Power",
-        "uid_power",
-        "Node",
-    )
+    sensors = {
+        "energy": TermoWebHeaterEnergyTotal(
+            coordinator,
+            "entry",
+            "dev",
+            "A",
+            "Energy",
+            "uid_energy",
+            "Node",
+        ),
+        "power": TermoWebHeaterPower(
+            coordinator,
+            "entry",
+            "dev",
+            "A",
+            "Power",
+            "uid_power",
+            "Node",
+        ),
+    }
 
-    energy_info = energy_sensor.device_info
-    assert energy_info["identifiers"] == {(DOMAIN, "dev", "A")}
-    assert energy_sensor.available is True
-    assert energy_sensor.native_value == pytest.approx(1.5)
-    assert energy_sensor.extra_state_attributes == {"dev_id": "dev", "addr": "A"}
+    expected_values = {
+        "energy": pytest.approx(1.5),
+        "power": pytest.approx(250.0),
+    }
 
-    energy_sensor._handle_ws_message({"dev_id": "other"})
-    energy_sensor._handle_ws_message({"dev_id": "dev", "addr": "B"})
+    for metric, sensor in sensors.items():
+        info = sensor.device_info
+        assert info["identifiers"] == {(DOMAIN, "dev", "A")}
+        assert sensor.available is True
+        assert sensor.native_value == expected_values[metric]
+        assert sensor.extra_state_attributes == {"dev_id": "dev", "addr": "A"}
 
-    coordinator.data = {"dev": {"htr": {"energy": {"A": None}}}}
-    assert energy_sensor.native_value is None
-    coordinator.data = {"dev": None}
-    assert energy_sensor.available is False
-    coordinator.data = copy.deepcopy(base_data)
+        sensor._handle_ws_message({"dev_id": "other"})
+        sensor._handle_ws_message({"dev_id": "dev", "addr": "B"})
 
-    power_info = power_sensor.device_info
-    assert power_info["identifiers"] == {(DOMAIN, "dev", "A")}
-    assert power_sensor.available is True
-    assert power_sensor.native_value == pytest.approx(250.0)
-    assert power_sensor.extra_state_attributes == {"dev_id": "dev", "addr": "A"}
+        coordinator.data = {"dev": {"htr": {metric: {"A": None}}}}
+        assert sensor.native_value is None
 
-    power_sensor._handle_ws_message({"dev_id": "other"})
-    power_sensor._handle_ws_message({"dev_id": "dev", "addr": "B"})
+        coordinator.data = {"dev": None}
+        assert sensor.available is False
 
-    coordinator.data = {"dev": {"htr": {"power": {"A": None}}}}
-    assert power_sensor.native_value is None
-    coordinator.data = {"dev": None}
-    assert power_sensor.available is False
-    coordinator.data = copy.deepcopy(base_data)
+        coordinator.data = copy.deepcopy(base_data)
 
     total_sensor = TermoWebTotalEnergy(coordinator, "entry", "dev", "Total", "tot")
     total_info = total_sensor.device_info
