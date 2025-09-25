@@ -1,25 +1,2 @@
-name: pycoverage workflow
-
-on: [pull_request]
-
-jobs:
-  tests:
-    runs-on: ubuntu-latest
-    name: Unit tests
-    steps:
-      - uses: actions/checkout@v2
-        with:
-          ref: ${{ github.head_ref }} # be sure to add this ref on your checkout
-      - uses: actions/setup-python@v2
-        with:
-          python-version: '3.13.2' # Define your project python version
-      - id: run-tests
-        uses: JotaFan/pycoverage@v1.0.0
-        with:
-          cov-omit-list: tests/*
-          cov-threshold-single: 90
-          cov-threshold-total: 95
-          async-tests: true
-          package-extras: dev,tests
-          github_token: ${{ secrets.github_token }}
-          working_branch: ${{ steps.extract_branch.outputs.branch }}
+- name: Python Test Action
+  uses: rcmdnk/python-action@v3.0.3
