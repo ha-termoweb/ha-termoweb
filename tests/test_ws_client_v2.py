@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import types
 from typing import Any
 from unittest.mock import AsyncMock
@@ -487,6 +488,54 @@ def test_runner_cleans_up_after_runtime_error(monkeypatch: pytest.MonkeyPatch) -
     assert hb_tasks > 0
 
 
+def test_runner_breaks_when_closing(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = ws_client_v2
+
+    async def _run() -> list[str]:
+        hass = types.SimpleNamespace(
+            loop=types.SimpleNamespace(create_task=lambda coro, name=None: coro),
+            data={module.DOMAIN: {"entry": {"ws_state": {}}}},
+        )
+        api = types.SimpleNamespace(
+            _session=module.aiohttp.testing.FakeClientSession(),
+            api_base="https://api.example.com",
+            _authed_headers=AsyncMock(return_value={"Authorization": "Bearer tok"}),
+            _ensure_token=AsyncMock(),
+        )
+        coordinator = types.SimpleNamespace(data={})
+        client = module.TermoWebWSV2Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=api,
+            coordinator=coordinator,
+        )
+
+        error = module.HandshakeError(500, "http://example", "bad")
+        client._handshake = AsyncMock(side_effect=error)  # type: ignore[assignment]
+
+        statuses: list[str] = []
+
+        def update_status(status: str) -> None:
+            statuses.append(status)
+            if status == "disconnected":
+                client._closing = True
+
+        monkeypatch.setattr(client, "_update_status", update_status)
+        monkeypatch.setattr(
+            module.asyncio,
+            "sleep",
+            lambda *_: (_ for _ in ()).throw(AssertionError("sleep called")),
+        )
+
+        await client._runner()
+        return statuses
+
+    statuses = asyncio.run(_run())
+    assert statuses[:2] == ["starting", "disconnected"]
+    assert statuses[-1] == "stopped"
+
+
 def test_handshake_refreshes_token_after_401(monkeypatch: pytest.MonkeyPatch) -> None:
     module = ws_client_v2
     _configure_defaults(
@@ -537,6 +586,51 @@ def test_handshake_refreshes_token_after_401(monkeypatch: pytest.MonkeyPatch) ->
     assert ping_interval == 20.0
     assert ping_timeout == 40.0
     assert refresh_calls == 1
+
+
+def test_handshake_raises_when_refresh_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = ws_client_v2
+    _configure_defaults(
+        get_responses=[
+            {"status": 401, "body": "unauthorized"},
+            {"status": 503, "body": "down"},
+        ]
+    )
+
+    async def _run() -> tuple[int, str]:
+        hass = types.SimpleNamespace(
+            loop=asyncio.get_running_loop(),
+            data={module.DOMAIN: {"entry": {"ws_state": {}}}},
+        )
+        session = module.aiohttp.testing.FakeClientSession()
+        original_get = session.get
+
+        def patched_get(url: str, *, timeout=None, headers=None):
+            return original_get(url, timeout=timeout)
+
+        session.get = patched_get  # type: ignore[assignment]
+        api = types.SimpleNamespace(
+            _session=session,
+            api_base="https://api.example.com",
+            _authed_headers=AsyncMock(return_value={"Authorization": "Bearer tok"}),
+            _ensure_token=AsyncMock(),
+        )
+        coordinator = types.SimpleNamespace(data={})
+        client = module.TermoWebWSV2Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=api,
+            coordinator=coordinator,
+        )
+
+        with pytest.raises(module.HandshakeError) as err:
+            await client._handshake()
+        return err.value.status, err.value.body_snippet
+
+    status, body = asyncio.run(_run())
+    assert status == 503
+    assert body == "down"
 
 
 def test_handshake_raises_on_transport_error() -> None:
@@ -722,6 +816,43 @@ def test_read_loop_processes_frames(monkeypatch: pytest.MonkeyPatch) -> None:
     assert hb_interval == 5.0
 
 
+def test_heartbeat_loop_returns_on_cancel() -> None:
+    module = ws_client_v2
+
+    async def _run() -> int:
+        hass = types.SimpleNamespace(
+            loop=types.SimpleNamespace(create_task=lambda coro, name=None: coro),
+            data={module.DOMAIN: {"entry": {"ws_state": {}}}},
+        )
+        api = types.SimpleNamespace(
+            _session=module.aiohttp.testing.FakeClientSession(),
+            api_base="https://api.example.com",
+            _authed_headers=AsyncMock(return_value={"Authorization": "Bearer tok"}),
+            _ensure_token=AsyncMock(),
+        )
+        coordinator = types.SimpleNamespace(data={})
+        client = module.TermoWebWSV2Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=api,
+            coordinator=coordinator,
+        )
+        sender = AsyncMock()
+        client._send_text = sender  # type: ignore[assignment]
+        client._hb_send_interval = 10.0
+
+        task = asyncio.create_task(client._heartbeat_loop())
+        await asyncio.sleep(0)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        return sender.await_count
+
+    send_calls = asyncio.run(_run())
+    assert send_calls == 0
+
+
 def test_read_loop_errors_and_close(monkeypatch: pytest.MonkeyPatch) -> None:
     module = ws_client_v2
 
@@ -767,6 +898,88 @@ def test_read_loop_errors_and_close(monkeypatch: pytest.MonkeyPatch) -> None:
     message_close, message_error = asyncio.run(_run())
     assert "ws fail" in message_close
     assert "websocket error" in message_error
+
+
+def test_read_loop_handles_missing_ws_and_filtered_frames() -> None:
+    module = ws_client_v2
+
+    class Dummy:
+        def decode(self, *_: Any) -> Any:
+            return 123
+
+    async def _run() -> tuple[None | int, str]:
+        hass = types.SimpleNamespace(
+            loop=types.SimpleNamespace(create_task=lambda coro, name=None: coro),
+            data={module.DOMAIN: {"entry": {"ws_state": {}}}},
+        )
+        api = types.SimpleNamespace(
+            _session=module.aiohttp.testing.FakeClientSession(),
+            api_base="https://api.example.com",
+            _authed_headers=AsyncMock(return_value={"Authorization": "Bearer tok"}),
+            _ensure_token=AsyncMock(),
+        )
+        coordinator = types.SimpleNamespace(data={})
+        client = module.TermoWebWSV2Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=api,
+            coordinator=coordinator,
+        )
+
+        result_none = await client._read_loop()
+
+        ws = module.aiohttp.testing.FakeWebSocket(
+            [
+                {"type": 999},
+                {"type": module.aiohttp.WSMsgType.BINARY, "data": Dummy()},
+                {"type": module.aiohttp.WSMsgType.CLOSE, "extra": "bye"},
+            ]
+        )
+        client._ws = ws
+        with pytest.raises(RuntimeError) as exc:
+            await client._read_loop()
+        return result_none, str(exc.value)
+
+    result, message = asyncio.run(_run())
+    assert result is None
+    assert "websocket closed" in message
+
+
+def test_read_loop_raises_original_exception() -> None:
+    module = ws_client_v2
+
+    async def _run() -> str:
+        hass = types.SimpleNamespace(
+            loop=types.SimpleNamespace(create_task=lambda coro, name=None: coro),
+            data={module.DOMAIN: {"entry": {"ws_state": {}}}},
+        )
+        api = types.SimpleNamespace(
+            _session=module.aiohttp.testing.FakeClientSession(),
+            api_base="https://api.example.com",
+            _authed_headers=AsyncMock(return_value={"Authorization": "Bearer tok"}),
+            _ensure_token=AsyncMock(),
+        )
+        coordinator = types.SimpleNamespace(data={})
+        client = module.TermoWebWSV2Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=api,
+            coordinator=coordinator,
+        )
+
+        ws = module.aiohttp.testing.FakeWebSocket(
+            [{"type": module.aiohttp.WSMsgType.ERROR, "extra": None}]
+        )
+        ws.set_exception(ValueError("bad frame"))
+        client._ws = ws
+        with pytest.raises(ValueError) as exc:
+            await client._read_loop()
+        return str(exc.value)
+
+    message = asyncio.run(_run())
+    assert message == "bad frame"
 
 
 def test_handle_open_frame_updates_intervals() -> None:
@@ -825,6 +1038,30 @@ def test_parse_event_frame_validates_namespace() -> None:
     assert client._parse_event_frame("42[\"evt\",1,2]") == ("evt", [1, 2])
 
 
+def test_parse_event_frame_returns_none_for_empty_payload() -> None:
+    module = ws_client_v2
+    hass = types.SimpleNamespace(
+        loop=types.SimpleNamespace(create_task=lambda coro, name=None: coro),
+        data={module.DOMAIN: {"entry": {"ws_state": {}}}},
+    )
+    api = types.SimpleNamespace(
+        _session=module.aiohttp.testing.FakeClientSession(),
+        api_base="https://api.example.com",
+        _authed_headers=AsyncMock(return_value={"Authorization": "Bearer tok"}),
+        _ensure_token=AsyncMock(),
+    )
+    coordinator = types.SimpleNamespace(data={})
+    client = module.TermoWebWSV2Client(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        api_client=api,
+        coordinator=coordinator,
+    )
+
+    assert client._parse_event_frame("42") is None
+
+
 def test_extract_updates_handles_handshake_and_defaults() -> None:
     module = ws_client_v2
     hass = types.SimpleNamespace(
@@ -872,6 +1109,60 @@ def test_extract_updates_handles_handshake_and_defaults() -> None:
     assert generic[0][0] == "fallback"
 
 
+def test_handle_event_skips_empty_update_batches(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = ws_client_v2
+    hass = types.SimpleNamespace(
+        loop=types.SimpleNamespace(create_task=lambda coro, name=None: coro),
+        data={module.DOMAIN: {"entry": {"ws_state": {}}}},
+    )
+    api = types.SimpleNamespace(
+        _session=module.aiohttp.testing.FakeClientSession(),
+        api_base="https://api.example.com",
+        _authed_headers=AsyncMock(return_value={"Authorization": "Bearer tok"}),
+        _ensure_token=AsyncMock(),
+    )
+    coordinator = types.SimpleNamespace(data={})
+    client = module.TermoWebWSV2Client(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        api_client=api,
+        coordinator=coordinator,
+    )
+
+    def fake_extract(name: str, args: list[Any]) -> list[tuple[str, list[dict[str, Any]]]]:
+        return [
+            (client.dev_id, []),
+            (
+                client.dev_id,
+                [
+                    {
+                        "path": "/mgr/nodes",
+                        "body": {"nodes": [{"addr": "1", "type": "htr"}]},
+                    }
+                ],
+            ),
+        ]
+
+    monkeypatch.setattr(client, "_extract_updates", fake_extract)
+
+    def fake_apply(dev_id: str, updates: list[dict[str, Any]]):
+        assert updates
+        return ["/mgr/nodes"], False, [], []
+
+    monkeypatch.setattr(client, "_apply_updates", fake_apply)
+
+    sent: list[dict[str, Any]] = []
+
+    def fake_dispatch(hass_obj: Any, signal: str, payload: dict[str, Any]) -> None:
+        sent.append(payload)
+
+    monkeypatch.setattr(module, "async_dispatcher_send", fake_dispatch)
+
+    client._handle_event("dev_data", [])
+    assert sent == []
+
+
 def test_apply_updates_initializes_device_and_deduplicates() -> None:
     module = ws_client_v2
     hass = types.SimpleNamespace(
@@ -909,6 +1200,91 @@ def test_apply_updates_initializes_device_and_deduplicates() -> None:
     assert setting_addrs == ["1"]
     assert sample_addrs == ["1"]
     assert coordinator.data["dev"]["raw"]["misc_info"] == {"v": 1}
+
+
+def test_coerce_dev_id_and_updates_handle_invalid_inputs() -> None:
+    module = ws_client_v2
+    hass = types.SimpleNamespace(
+        loop=types.SimpleNamespace(create_task=lambda coro, name=None: coro),
+        data={module.DOMAIN: {"entry": {"ws_state": {}}}},
+    )
+    api = types.SimpleNamespace(
+        _session=module.aiohttp.testing.FakeClientSession(),
+        api_base="https://api.example.com",
+        _authed_headers=AsyncMock(return_value={"Authorization": "Bearer tok"}),
+        _ensure_token=AsyncMock(),
+    )
+    coordinator = types.SimpleNamespace(data={})
+    client = module.TermoWebWSV2Client(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        api_client=api,
+        coordinator=coordinator,
+    )
+
+    assert client._coerce_dev_id("bad") is None
+    assert client._coerce_updates("bad") == []
+
+    updates = client._coerce_updates(
+        {
+            "nodes": {"nodes": []},
+            "htr": {
+                "settings": {"1": {"mode": "eco"}},
+                "advanced": {"1": {"boost": 5}},
+            },
+        }
+    )
+    paths = sorted(entry["path"] for entry in updates)
+    assert paths == [
+        "/htr/1/advanced_setup",
+        "/htr/1/settings",
+        "/mgr/nodes",
+    ]
+
+
+def test_apply_updates_skips_invalid_entries() -> None:
+    module = ws_client_v2
+    hass = types.SimpleNamespace(
+        loop=types.SimpleNamespace(create_task=lambda coro, name=None: coro),
+        data={module.DOMAIN: {"entry": {"ws_state": {}}}},
+    )
+    api = types.SimpleNamespace(
+        _session=module.aiohttp.testing.FakeClientSession(),
+        api_base="https://api.example.com",
+        _authed_headers=AsyncMock(return_value={"Authorization": "Bearer tok"}),
+        _ensure_token=AsyncMock(),
+    )
+    coordinator = types.SimpleNamespace(
+        data={
+            "dev": {
+                "dev_id": "dev",
+                "htr": {"addrs": [], "settings": {}},
+                "raw": {},
+            }
+        }
+    )
+    client = module.TermoWebWSV2Client(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        api_client=api,
+        coordinator=coordinator,
+    )
+
+    paths, updated_nodes, settings, samples = client._apply_updates(
+        "dev",
+        [
+            None,
+            {"path": 123, "body": {}},
+            {"path": "/mgr/nodes", "body": {"nodes": []}},
+        ],
+    )
+
+    assert paths == ["/mgr/nodes"]
+    assert updated_nodes is True
+    assert settings == []
+    assert samples == []
 
 
 def test_parse_handshake_validates_payload() -> None:
