@@ -1,6 +1,6 @@
 # Ducaheat (Ducasa) Cloud API — Tevolve v2 (Unofficial)
 
-This document summarizes the Ducaheat backend as implemented by the mobile app (v1.40.1). It diverges from the consolidated **TermoWeb** contract: Ducaheat uses **segmented endpoints** per function and a **different Socket.IO path**.
+This document summarizes the Ducaheat backend as implemented by the mobile app (v1.40.1) and verified against captured WebSocket traffic. It diverges from the consolidated **TermoWeb** contract: Ducaheat uses **segmented endpoints** per function and a **different Socket.IO path**.
 
 **Base host:** `https://api-tevolve.termoweb.net`  
 **Frontend:** `https://ducaheat.termoweb.net`  
@@ -26,11 +26,49 @@ Use the `access_token` as `Authorization: Bearer …` for all API calls.
 
 ---
 
-## Heater node model (read)
+## Snapshot payload (`dev_data`)
 
-**GET** `/api/v2/devs/{dev_id}/htr/{addr}`
+The Socket.IO channel emits a `dev_data` event that delivers the complete gateway snapshot. The object mirrors what the mobile
+app fetches via REST:
 
-Returns a consolidated object with nested sections such as `status`, `setup`, `prog`, `prog_temps`. Keys are model‑dependent; the app treats unknown keys leniently.
+- `geoData` / `geo_data` — duplicated structures with coarse location metadata (country, administrative division, time zone,
+  optional coarse coordinates). Clients should not rely on either variant being preferred.
+- `away_status` — `{ "enabled": <bool>, "away": <bool>, "forced": <bool> }`.
+- `nodes` — array of node descriptions (see below).
+- `htr_system` — heater fleet level settings. Observed keys include `power_limit` and `setup.power_limit`,
+  `setup.refresh_period`, and `setup.extra_nrg_conf.enabled`.
+- `pmo_system` — power-management metadata with `main_circuit_pmos`, `max_power_config.profiles`, and
+  `max_power_config.slots` (each slot: `{ "m": <minute_offset>, "i": <profile_index> }`).
+- `discovery` — e.g., `{ "discovery": "off" }`.
+- `connected` — gateway connection boolean.
+
+Every node object includes `name`, `addr`, `type`, `installed`, `lost`, `uid`, `level`, and `parent`. Additional sections vary
+by node type and match the REST resources for that node.
+
+## Heater and accumulator node model (read)
+
+**GET** `/api/v2/devs/{dev_id}/{node_type}/{addr}`
+
+Applies to heater (`htr`) and accumulator (`acm`) nodes. The response is a consolidated object with nested sections such as
+`status`, `setup`, `prog`, `prog_temps`, and `version`. Keys are model‑dependent; the app treats unknown keys leniently.
+
+- `prog.sync_status` reflects synchronization with the cloud. `prog.prog` is an object keyed by weekday (`"0"` … `"6"`). Each
+  weekday value is an array of slot states. Recent captures show 49 integer entries per day, which map 30-minute resolution
+  slots to mode identifiers.
+- `setup` contains operational metadata. Observed keys include:
+  - `operational_mode` (integer)
+  - `control_mode` (integer)
+  - `units` (`"C"` / `"F"`)
+  - `offset`, `priority`, `away_offset`, `min_stemp`, `max_stemp` as strings (one decimal)
+  - `window_mode_enabled`, `true_radiant_enabled`, `frost_protect` (booleans)
+  - `resistor_mode`, `prog_resolution` (integers)
+  - `charging_conf.slot_1` / `slot_2` with `start`/`end` minute offsets and `active_days` array (seven booleans)
+  - `factory_options` describing hardware capabilities (`resistor_available`, `ventilation_available`, `ventilation_type`).
+- `status` contains real-time telemetry, all keyed as strings or booleans where appropriate. Observed keys: `mode`, `heating`,
+  `ventilation`, `charging`, `ice_temp`, `eco_temp`, `comf_temp`, `units`, `stemp`, `mtemp`, `pcb_temp`, `power`, `locked`,
+  `window_open`, `true_radiant`, `presence`, `current_charge_per`, `target_charge_per`, `boost`, `boost_end_day`,
+  `boost_end_min`, and `error_code`.
+- `version` enumerates firmware and hardware revisions (`hw_version`, `fw_version`, `pid`, `uid`).
 
 ---
 
@@ -40,7 +78,7 @@ Unlike TermoWeb’s `/settings` write, Ducaheat splits writes across multiple en
 
 ### 1) Status (mode / setpoint / units / boost)
 
-**POST** `/api/v2/devs/{dev_id}/htr/{addr}/status`
+**POST** `/api/v2/devs/{dev_id}/{node_type}/{addr}/status`
 
 Body examples:
 ```json
@@ -56,7 +94,7 @@ Returns `201 {}`.
 
 ### 2) Mode only
 
-**POST** `/api/v2/devs/{dev_id}/htr/{addr}/mode`  
+**POST** `/api/v2/devs/{dev_id}/{node_type}/{addr}/mode`
 Body:
 ```json
 { "mode": "manual" }
@@ -64,33 +102,33 @@ Body:
 
 ### 3) Weekly program
 
-**POST** `/api/v2/devs/{dev_id}/htr/{addr}/prog`  
+**POST** `/api/v2/devs/{dev_id}/{node_type}/{addr}/prog`
 Payload mirrors the app’s weekly schedule object (structure varies by model). Use the object echoed by the GET call as a template.
 
 ### 4) Program temperatures
 
-**POST** `/api/v2/devs/{dev_id}/htr/{addr}/prog_temps`
+**POST** `/api/v2/devs/{dev_id}/{node_type}/{addr}/prog_temps`
 ```json
 { "comfort": "21.0", "eco": "18.0", "antifrost": "7.0" }
 ```
 
 ### 5) Advanced setup / extra options
 
-**POST** `/api/v2/devs/{dev_id}/htr/{addr}/setup`
+**POST** `/api/v2/devs/{dev_id}/{node_type}/{addr}/setup`
 ```json
 { "extra_options": { "boost_time": 60, "boost_temp": "22.0" } }
 ```
 
 ### 6) Lock (child lock)
 
-**POST** `/api/v2/devs/{dev_id}/htr/{addr}/lock`
+**POST** `/api/v2/devs/{dev_id}/{node_type}/{addr}/lock`
 ```json
 { "lock": true }
 ```
 
 ### 7) Select (ownership hint for writes)
 
-**POST** `/api/v2/devs/{dev_id}/htr/{addr}/select`
+**POST** `/api/v2/devs/{dev_id}/{node_type}/{addr}/select`
 ```json
 { "select": true }
 ```
@@ -100,9 +138,22 @@ Some write operations may require `select: true` before they take effect; de‑s
 
 ## Samples (history / telemetry)
 
-**GET** `/api/v2/devs/{dev_id}/htr/{addr}/samples?start=<ms>&end=<ms>`
+**GET** `/api/v2/devs/{dev_id}/{node_type}/{addr}/samples?start=<ms>&end=<ms>`
 
 `start` and `end` are **epoch milliseconds**. The response shape varies by device and firmware; treat as opaque JSON until stabilized by capture.
+
+## Power monitor node model (read)
+
+**GET** `/api/v2/devs/{dev_id}/pmo/{addr}`
+
+`pmo` nodes report:
+
+- `power_limit` — wrapper around the configured limit (stringified value).
+- `setup` — `{ "power_limit": <int>, "reverse": <bool>, "circuit_type": <int> }`.
+- `version` — firmware and hardware identifiers (`hw_version`, `fw_version`, `pid`, `uid`).
+
+No Socket.IO `status` event has been seen for `pmo` nodes, but the node appears in `dev_data` with `lost: true` when
+connectivity drops.
 
 ---
 
@@ -119,14 +170,13 @@ Some write operations may require `select: true` before they take effect; de‑s
 
 ## WebSocket (Socket.IO)
 
-**Path:** `/api/v2/socket_io?token=<access_token>`
+**Path:** `/api/v2/socket_io?token=<access_token>` (handshake may be redirected to a session identifier URL fragment).
 
 The app listens for at least these events:
-- `dev_handshake` — initial device list / permissions
-- `dev_data` — node payloads (status/setup/prog updates)
-- `update` — incremental changes
-
-This differs from TermoWeb’s legacy `/socket.io/1/…` path. Use Socket.IO v0.9 semantics as the server reports.
+- `dev_handshake` — initial device list / permissions (not observed in this capture but present in prior reverse engineering).
+- `dev_data` — full gateway snapshot (see above).
+- `update` — incremental node changes. The payload contains `path` (e.g., `/acm/2/status`) and `body` matching the corresponding
+  REST resource. Clients should route updates by node type and address using the `path` components.
 
 ---
 
