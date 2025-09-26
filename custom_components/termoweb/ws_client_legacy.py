@@ -425,18 +425,24 @@ class WebSocket09Client:
                 # body is nodes payload
                 if isinstance(body, dict):
                     dev_map["nodes"] = body
-                    brand = getattr(self._coordinator, "brand", "")
+                    raw_brand = getattr(self._coordinator, "brand", "")
+                    if isinstance(raw_brand, str):
+                        brand = raw_brand.strip()
+                    else:
+                        brand = ""
+                    if not brand:
+                        brand = "unknown"
+
                     inventory: list[Any] = []
-                    if isinstance(brand, str) and brand:
-                        try:
-                            inventory = build_node_inventory(body, brand)
-                        except ValueError as err:  # pragma: no cover - defensive
-                            _LOGGER.debug(
-                                "WS %s: failed to build node inventory: %s",
-                                self.dev_id,
-                                err,
-                                exc_info=err,
-                            )
+                    try:
+                        inventory = build_node_inventory(body, brand)
+                    except ValueError as err:  # pragma: no cover - defensive
+                        _LOGGER.debug(
+                            "WS %s: failed to build node inventory: %s",
+                            self.dev_id,
+                            err,
+                            exc_info=err,
+                        )
                     addrs = addresses_by_type(inventory, HEATER_NODE_TYPES)
                     dev_map.setdefault("htr", {}).setdefault("settings", {})
                     dev_map["htr"]["addrs"] = addrs

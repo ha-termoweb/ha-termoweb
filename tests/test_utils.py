@@ -22,6 +22,15 @@ def test_addresses_by_type_filters_and_deduplicates() -> None:
 
     assert addresses_by_type(inventory, HEATER_NODE_TYPES) == ["A", "1"]
 
+def test_addresses_by_type_handles_missing_types() -> None:
+    inventory = build_node_inventory(
+        {"nodes": [{"type": "htr", "addr": "A"}]},
+        BRAND_TERMOWEB,
+    )
+
+    assert addresses_by_type(inventory, [None]) == []
+
+
 
 
 @pytest.mark.parametrize(

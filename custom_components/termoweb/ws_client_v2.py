@@ -170,18 +170,19 @@ class DucaheatWSClient:
         brand = ""
         if isinstance(record, dict):
             brand = str(record.get("brand") or "").strip()
+        if not brand:
+            brand = "unknown"
 
         inventory: list[Any] = []
-        if brand:
-            try:
-                inventory = build_node_inventory(nodes, brand)
-            except ValueError as err:  # pragma: no cover - defensive
-                _LOGGER.debug(
-                    "WS %s: failed to build node inventory: %s",
-                    self.dev_id,
-                    err,
-                    exc_info=err,
-                )
+        try:
+            inventory = build_node_inventory(nodes, brand)
+        except ValueError as err:  # pragma: no cover - defensive
+            _LOGGER.debug(
+                "WS %s: failed to build node inventory: %s",
+                self.dev_id,
+                err,
+                exc_info=err,
+            )
 
         if hasattr(self._coordinator, "update_nodes"):
             self._coordinator.update_nodes(nodes, inventory)

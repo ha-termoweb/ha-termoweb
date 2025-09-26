@@ -133,3 +133,21 @@ def test_build_node_inventory_prefers_ducaheat_accumulator() -> None:
     node = nodes[0]
     assert isinstance(node, DucaheatAccum)
     assert node.supports_boost() is True
+
+
+def test_build_node_inventory_handles_list_payload(caplog: pytest.LogCaptureFixture) -> None:
+    payload = [
+        {"type": "htr", "addr": "01", "name": "Heater"},
+        {"addr": "02", "name": "Missing type"},
+    ]
+
+    with caplog.at_level(logging.DEBUG):
+        nodes = build_node_inventory(payload, BRAND_TERMOWEB)
+
+    assert [node.addr for node in nodes] == ["01"]
+    assert any("Skipping node with missing type" in message for message in caplog.messages)
+
+
+def test_build_node_inventory_requires_brand() -> None:
+    with pytest.raises(ValueError):
+        build_node_inventory({"nodes": []}, " ")

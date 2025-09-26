@@ -51,7 +51,10 @@ class StateCoordinator(
         self._dev_id = dev_id
         self._device = device or {}
         self._nodes = nodes or {}
-        self._brand = (brand or "").strip()
+        brand_clean = (brand or "").strip()
+        if not brand_clean:
+            brand_clean = "unknown"
+        self._brand = brand_clean
         self._node_inventory: list[Node] = list(node_inventory or [])
 
     @property
@@ -61,8 +64,17 @@ class StateCoordinator(
         return self._brand
 
     def _addrs(self) -> list[str]:
-        if not self._node_inventory and self._nodes and self._brand:
-            self._node_inventory = build_node_inventory(self._nodes, self._brand)
+        if not self._node_inventory and self._nodes:
+            try:
+                self._node_inventory = build_node_inventory(self._nodes, self._brand)
+            except ValueError as err:  # pragma: no cover - defensive
+                _LOGGER.debug(
+                    "Failed to build node inventory for %s: %s",
+                    self._dev_id,
+                    err,
+                    exc_info=err,
+                )
+                self._node_inventory = []
         return addresses_by_type(self._node_inventory, HEATER_NODE_TYPES)
 
     def update_nodes(
@@ -75,10 +87,20 @@ class StateCoordinator(
         self._nodes = nodes or {}
         if node_inventory is not None:
             self._node_inventory = list(node_inventory)
-        elif self._brand:
-            self._node_inventory = build_node_inventory(self._nodes, self._brand)
         else:
             self._node_inventory = []
+            if self._nodes:
+                try:
+                    self._node_inventory = build_node_inventory(
+                        self._nodes, self._brand
+                    )
+                except ValueError as err:  # pragma: no cover - defensive
+                    _LOGGER.debug(
+                        "Failed to build node inventory for %s: %s",
+                        self._dev_id,
+                        err,
+                        exc_info=err,
+                    )
 
     async def async_refresh_heater(self, addr: str) -> None:
         """Refresh settings for a specific heater and push the update to listeners."""
@@ -184,22 +206,9 @@ class StateCoordinator(
                 for k in range(count):
                     idx = (start + k) % len(addrs)
                     addr = addrs[idx]
-                    try:
-                        js = await self.client.get_htr_settings(dev_id, addr)
-                        if isinstance(js, dict):
-                            settings_map[addr] = js
-                    except (
-                        ClientError,
-                        BackendRateLimitError,
-                        BackendAuthError,
-                    ) as err:
-                        _LOGGER.debug(
-                            "Error fetching settings for heater %s: %s",
-                            addr,
-                            err,
-                            exc_info=err,
-                        )
-                        # keep previous settings on error
+                    js = await self.client.get_htr_settings(dev_id, addr)
+                    if isinstance(js, dict):
+                        settings_map[addr] = js
                 self._rr_index[dev_id] = (start + count) % len(addrs)
 
             dev_name = (self._device.get("name") or f"Device {dev_id}").strip()
