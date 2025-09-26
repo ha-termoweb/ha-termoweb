@@ -1460,6 +1460,11 @@ def test_ducaheat_normalise_prog_temps_variations() -> None:
     )
     assert temps == ["", "18.5", "abc"]
 
+    weird = client._normalise_prog_temps(
+        {"antifrost": ["bad"], "eco": None, "comfort": 18}
+    )
+    assert weird == ["['bad']", "", "18.0"]
+
 
 def test_ducaheat_safe_temperature_handles_strings() -> None:
     client = DucaheatRESTClient(
@@ -1473,6 +1478,7 @@ def test_ducaheat_safe_temperature_handles_strings() -> None:
     assert client._safe_temperature(" 21.2 ") == "21.2"
     assert client._safe_temperature("   ") is None
     assert client._safe_temperature("abc") == "abc"
+    assert client._safe_temperature(["oops"]) is None
 
 
 def test_extract_samples_handles_list_payload() -> None:
