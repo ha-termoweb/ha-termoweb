@@ -23,9 +23,10 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.loader import async_get_integration
 
 from .api import BackendAuthError, RESTClient, BackendRateLimitError
-from .backend import Backend, WsClientProto, create_backend
+from .backend import Backend, DucaheatRESTClient, WsClientProto, create_backend
 from .const import (
     CONF_BRAND,
+    BRAND_DUCAHEAT,
     DEFAULT_BRAND,
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
@@ -471,7 +472,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     integration = await async_get_integration(hass, DOMAIN)
     version = integration.version or "unknown"
 
-    client = RESTClient(
+    client_cls = DucaheatRESTClient if brand == BRAND_DUCAHEAT else RESTClient
+    client = client_cls(
         session,
         username,
         password,

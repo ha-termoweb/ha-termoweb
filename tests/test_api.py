@@ -10,6 +10,7 @@ import aiohttp
 import pytest
 
 import custom_components.termoweb.api as api
+from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
 
 RESTClient = api.RESTClient
 
@@ -1090,6 +1091,163 @@ def test_set_htr_settings_translates_heat(monkeypatch) -> None:
 
         assert captured["json"]["mode"] == "manual"
         assert captured["json"]["stemp"] == "21.0"
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_get_htr_settings_normalises_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(
+                200,
+                {
+                    "status": {
+                        "mode": "Manual",
+                        "state": "heating",
+                        "stemp": "21.0",
+                        "temp": 20.5,
+                        "units": "c",
+                        "boost_active": True,
+                    },
+                    "setup": {"extra_options": {"boost_temp": "23.0", "boost_time": 45}},
+                    "prog": {
+                        "days": {
+                            "mon": {"slots": [0, 1, 2, 0] * 6},
+                            "tue": {"slots": [1] * 24},
+                            "wed": {"slots": [2] * 24},
+                            "thu": {"slots": [0] * 24},
+                            "fri": {"slots": [1, 2] * 12},
+                            "sat": {"slots": [2, 2, 1, 1] * 6},
+                            "sun": {"slots": [0, 0, 1, 2] * 6},
+                        }
+                    },
+                    "prog_temps": {
+                        "comfort": "21.0",
+                        "eco": "18.0",
+                        "antifrost": "7.0",
+                    },
+                    "addr": "A1",
+                },
+                headers={"Content-Type": "application/json"},
+            )
+        )
+
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        data = await client.get_htr_settings("dev", "A1")
+
+        assert data["mode"] == "manual"
+        assert data["state"] == "heating"
+        assert data["stemp"] == "21.0"
+        assert data["mtemp"] == "20.5"
+        assert data["units"] == "C"
+        assert data["boost_active"] is True
+        assert data["boost_time"] == 45
+        assert data["boost_temp"] == "23.0"
+        assert len(data["prog"]) == 168
+        assert data["ptemp"] == ["7.0", "18.0", "21.0"]
+        assert data["raw"]["status"]["mode"] == "Manual"
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_set_htr_settings_writes_segmented(monkeypatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(200, {}, headers={"Content-Type": "application/json"}),
+            MockResponse(200, {}, headers={"Content-Type": "application/json"}),
+            MockResponse(200, {}, headers={"Content-Type": "application/json"}),
+            MockResponse(200, {}, headers={"Content-Type": "application/json"}),
+            MockResponse(200, {}, headers={"Content-Type": "application/json"}),
+        )
+
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        prog_list = [0] * 24 + [1] * 24 + [2] * 24 + [0] * 24 + [1] * 24 + [2] * 24 + [0] * 24
+        ptemp_list = [5.0, 15.0, 21.0]
+
+        result = await client.set_htr_settings(
+            "dev",
+            "A1",
+            mode="manual",
+            stemp=21.2,
+            prog=prog_list,
+            ptemp=ptemp_list,
+            units="C",
+        )
+
+        assert set(result) == {"status", "prog", "prog_temps"}
+        urls = [call[1] for call in session.request_calls]
+        assert urls == [
+            "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/select",
+            "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/status",
+            "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/prog",
+            "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/prog_temps",
+            "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/select",
+        ]
+        status_json = session.request_calls[1][2]["json"]
+        assert status_json == {"mode": "manual", "stemp": "21.2", "units": "C"}
+        prog_json = session.request_calls[2][2]["json"]
+        assert prog_json["days"]["tue"]["slots"] == [1] * 24
+        ptemp_json = session.request_calls[3][2]["json"]
+        assert ptemp_json == {"antifrost": "5.0", "eco": "15.0", "comfort": "21.0"}
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_get_htr_samples_converts_ms(monkeypatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(
+                200,
+                {"samples": [{"t": 1_234_500, "counter": 7.5}]},
+                headers={"Content-Type": "application/json"},
+            )
+        )
+
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        samples = await client.get_htr_samples("dev", "A", 10, 20)
+        assert samples == [{"t": 1234, "counter": "7.5"}]
+
+        call = session.request_calls[0]
+        assert call[1] == "https://api.termoweb.fake/api/v2/devs/dev/htr/A/samples"
+        assert call[2]["params"] == {"start": 10_000, "end": 20_000}
 
     asyncio.run(_run())
 

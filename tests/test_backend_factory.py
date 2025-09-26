@@ -7,7 +7,9 @@ from typing import Any
 import pytest
 
 from custom_components.termoweb.backend import create_backend
+from custom_components.termoweb.backend.ducaheat import DucaheatBackend
 from custom_components.termoweb.backend.termoweb import TermoWebBackend
+from custom_components.termoweb.const import BRAND_DUCAHEAT
 from custom_components.termoweb.ws_client_legacy import WebSocket09Client
 
 
@@ -60,6 +62,14 @@ def test_create_backend_returns_termoweb_backend() -> None:
     backend = create_backend(brand="termoweb", client=client)
     assert isinstance(backend, TermoWebBackend)
     assert backend.brand == "termoweb"
+    assert backend.client is client
+
+
+def test_create_backend_returns_ducaheat_backend() -> None:
+    client = DummyHttpClient()
+    backend = create_backend(brand=BRAND_DUCAHEAT, client=client)
+    assert isinstance(backend, DucaheatBackend)
+    assert backend.brand == BRAND_DUCAHEAT
     assert backend.client is client
 
 
