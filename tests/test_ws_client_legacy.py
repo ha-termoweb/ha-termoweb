@@ -71,7 +71,7 @@ def test_handshake_error_attributes_and_start_reuses_task() -> None:
     coordinator = types.SimpleNamespace()
     api = types.SimpleNamespace(_session=None)
 
-    client = module.TermoWebWSLegacyClient(
+    client = module.WebSocket09Client(
         hass,
         entry_id="entry",
         dev_id="dev",
@@ -97,7 +97,7 @@ def test_stop_handles_exceptions_and_updates_status() -> None:
         )
         coordinator = types.SimpleNamespace()
         api = types.SimpleNamespace(_session=None)
-        client = module.TermoWebWSLegacyClient(
+        client = module.WebSocket09Client(
             hass,
             entry_id="entry",
             dev_id="dev",
@@ -171,7 +171,7 @@ def test_runner_backoff_after_handshake_errors(
             _ensure_token=AsyncMock(),
         )
 
-        client = module.TermoWebWSLegacyClient(
+        client = module.WebSocket09Client(
             hass,
             entry_id="entry",
             dev_id="dev",
@@ -359,7 +359,7 @@ def test_runner_handles_handshake_events_and_disconnect(
             _access_token="expired",
         )
 
-        client = module.TermoWebWSLegacyClient(
+        client = module.WebSocket09Client(
             hass,
             entry_id="entry",
             dev_id="dev",
@@ -387,7 +387,7 @@ def test_runner_handles_handshake_events_and_disconnect(
 
         monkeypatch.setattr(module.asyncio, "sleep", fast_sleep)
 
-        orig_read_loop = module.TermoWebWSLegacyClient._read_loop
+        orig_read_loop = module.WebSocket09Client._read_loop
 
         async def read_wrapper(self: Any) -> None:
             try:
@@ -497,7 +497,7 @@ def test_runner_cleans_up_close_errors() -> None:
         )
         coordinator = types.SimpleNamespace(data={})
         session = module.aiohttp.testing.FakeClientSession()
-        client = module.TermoWebWSLegacyClient(
+        client = module.WebSocket09Client(
             hass,
             entry_id="entry",
             dev_id="dev",
@@ -539,7 +539,7 @@ def test_runner_cleans_up_close_errors() -> None:
 def test_read_loop_bubbles_exception_on_close():
     async def _run() -> None:
         module = _load_ws_client()
-        Client = module.TermoWebWSLegacyClient
+        Client = module.WebSocket09Client
         hass = types.SimpleNamespace(
             loop=asyncio.get_event_loop(),
             data={module.DOMAIN: {}},
@@ -570,7 +570,7 @@ def test_read_loop_bubbles_exception_on_close():
 def test_read_loop_handles_error_frames_and_health(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         module = _load_ws_client()
-        Client = module.TermoWebWSLegacyClient
+        Client = module.WebSocket09Client
         hass = types.SimpleNamespace(
             loop=asyncio.get_event_loop(),
             data={module.DOMAIN: {}},
@@ -672,7 +672,7 @@ def test_connect_ws_uses_secure_endpoint() -> None:
             _ensure_token=AsyncMock(),
         )
 
-        client = module.TermoWebWSLegacyClient(
+        client = module.WebSocket09Client(
             hass,
             entry_id="entry",
             dev_id="dev-42",
@@ -722,7 +722,7 @@ def test_handshake_refresh_failure_raises_handshake_error() -> None:
             _access_token="stale",
         )
 
-        client = module.TermoWebWSLegacyClient(
+        client = module.WebSocket09Client(
             hass,
             entry_id="entry",
             dev_id="dev",
@@ -767,7 +767,7 @@ def test_handshake_wraps_client_error() -> None:
             _ensure_token=AsyncMock(),
         )
 
-        client = module.TermoWebWSLegacyClient(
+        client = module.WebSocket09Client(
             hass,
             entry_id="entry",
             dev_id="dev",
@@ -804,7 +804,7 @@ def test_handshake_status_error_raises_handshake_error() -> None:
             _ensure_token=AsyncMock(),
         )
 
-        client = module.TermoWebWSLegacyClient(
+        client = module.WebSocket09Client(
             hass,
             entry_id="entry",
             dev_id="dev",
@@ -847,7 +847,7 @@ def test_handle_event_updates_state_and_dispatch(monkeypatch: pytest.MonkeyPatch
         }
     )
     api = types.SimpleNamespace(_session=types.SimpleNamespace())
-    client = module.TermoWebWSLegacyClient(
+    client = module.WebSocket09Client(
         hass,
         entry_id="entry",
         dev_id="dev",
@@ -922,7 +922,7 @@ def test_handle_event_updates_state_and_dispatch(monkeypatch: pytest.MonkeyPatch
 def test_subscribe_htr_samples_sends_expected_payloads():
     async def _run() -> None:
         module = _load_ws_client()
-        Client = module.TermoWebWSLegacyClient
+        Client = module.WebSocket09Client
         hass = types.SimpleNamespace(loop=asyncio.get_event_loop())
         coordinator = types.SimpleNamespace(_addrs=lambda: ["01", "02"])
         api = types.SimpleNamespace(_session=None)
@@ -964,7 +964,7 @@ def test_mark_event_promotes_to_healthy(monkeypatch: pytest.MonkeyPatch) -> None
     )
     coordinator = types.SimpleNamespace()
     api = types.SimpleNamespace(_session=None)
-    client = module.TermoWebWSLegacyClient(
+    client = module.WebSocket09Client(
         hass,
         entry_id="entry",
         dev_id="dev",
@@ -1003,7 +1003,7 @@ def test_heartbeat_loop_sends_until_cancel(monkeypatch: pytest.MonkeyPatch) -> N
         hass = types.SimpleNamespace(loop=loop, data={module.DOMAIN: {"entry": {}}})
         coordinator = types.SimpleNamespace()
         api = types.SimpleNamespace(_session=None)
-        client = module.TermoWebWSLegacyClient(
+        client = module.WebSocket09Client(
             hass,
             entry_id="entry",
             dev_id="dev",
@@ -1081,7 +1081,7 @@ def test_is_running_property() -> None:
         )
         coordinator = types.SimpleNamespace()
         api = types.SimpleNamespace(_session=None)
-        client = module.TermoWebWSLegacyClient(
+        client = module.WebSocket09Client(
             hass,
             entry_id="entry",
             dev_id="dev",
@@ -1115,7 +1115,7 @@ def test_handshake_success_resets_backoff() -> None:
         api = types.SimpleNamespace(
             _session=session, _authed_headers=authed_headers
         )
-        client = module.TermoWebWSLegacyClient(
+        client = module.WebSocket09Client(
             hass,
             entry_id="entry",
             dev_id="dev",
@@ -1140,7 +1140,7 @@ def test_heartbeat_loop_handles_send_errors() -> None:
         )
         coordinator = types.SimpleNamespace()
         api = types.SimpleNamespace(_session=None)
-        client = module.TermoWebWSLegacyClient(
+        client = module.WebSocket09Client(
             hass,
             entry_id="entry",
             dev_id="dev",
@@ -1169,7 +1169,7 @@ def test_read_loop_returns_when_ws_missing() -> None:
         )
         coordinator = types.SimpleNamespace()
         api = types.SimpleNamespace(_session=None)
-        client = module.TermoWebWSLegacyClient(
+        client = module.WebSocket09Client(
             hass,
             entry_id="entry",
             dev_id="dev",
@@ -1192,7 +1192,7 @@ def test_read_loop_handles_close_and_error_messages() -> None:
         )
         coordinator = types.SimpleNamespace()
         api = types.SimpleNamespace(_session=session)
-        client = module.TermoWebWSLegacyClient(
+        client = module.WebSocket09Client(
             hass,
             entry_id="entry",
             dev_id="dev",
@@ -1230,7 +1230,7 @@ def test_handle_event_seeds_device_state() -> None:
     hass = types.SimpleNamespace(loop=loop, data={})
     coordinator = types.SimpleNamespace(data=None)
     api = types.SimpleNamespace(_session=None)
-    client = module.TermoWebWSLegacyClient(
+    client = module.WebSocket09Client(
         hass,
         entry_id="entry",
         dev_id="dev",
@@ -1267,7 +1267,7 @@ def test_handle_event_invalid_inputs_are_ignored() -> None:
     coordinator = types.SimpleNamespace(data={})
     session = module.aiohttp.testing.FakeClientSession()
     api = types.SimpleNamespace(_session=session)
-    client = module.TermoWebWSLegacyClient(
+    client = module.WebSocket09Client(
         hass,
         entry_id="entry",
         dev_id="dev",
@@ -1294,7 +1294,7 @@ def test_parse_handshake_body_defaults() -> None:
     )
     coordinator = types.SimpleNamespace()
     api = types.SimpleNamespace(_session=session)
-    client = module.TermoWebWSLegacyClient(
+    client = module.WebSocket09Client(
         hass,
         entry_id="entry",
         dev_id="dev",
@@ -1317,7 +1317,7 @@ def test_parse_handshake_body_invalid() -> None:
     )
     coordinator = types.SimpleNamespace()
     api = types.SimpleNamespace(_session=session)
-    client = module.TermoWebWSLegacyClient(
+    client = module.WebSocket09Client(
         hass,
         entry_id="entry",
         dev_id="dev",
@@ -1336,7 +1336,7 @@ def test_send_text_no_ws() -> None:
     hass = types.SimpleNamespace(loop=loop, data={})
     coordinator = types.SimpleNamespace()
     api = types.SimpleNamespace(_session=None)
-    client = module.TermoWebWSLegacyClient(
+    client = module.WebSocket09Client(
         hass,
         entry_id="entry",
         dev_id="dev",
@@ -1352,7 +1352,7 @@ def test_force_refresh_token_handles_missing_attribute() -> None:
         hass = types.SimpleNamespace(loop=asyncio.get_event_loop(), data={})
         coordinator = types.SimpleNamespace()
         session = module.aiohttp.testing.FakeClientSession()
-        client = module.TermoWebWSLegacyClient(
+        client = module.WebSocket09Client(
             hass,
             entry_id="entry",
             dev_id="dev",
@@ -1386,7 +1386,7 @@ def test_api_base_fallback_to_default() -> None:
     loop = types.SimpleNamespace(create_task=lambda *_args, **_kwargs: None)
     hass = types.SimpleNamespace(loop=loop, data={})
     coordinator = types.SimpleNamespace()
-    client = module.TermoWebWSLegacyClient(
+    client = module.WebSocket09Client(
         hass,
         entry_id="entry",
         dev_id="dev",
@@ -1402,7 +1402,7 @@ def test_api_base_strips_trailing_slash() -> None:
     loop = types.SimpleNamespace(create_task=lambda *_args, **_kwargs: None)
     hass = types.SimpleNamespace(loop=loop, data={})
     coordinator = types.SimpleNamespace()
-    client = module.TermoWebWSLegacyClient(
+    client = module.WebSocket09Client(
         hass,
         entry_id="entry",
         dev_id="dev",
@@ -1431,7 +1431,7 @@ def test_runner_cleanup_handles_ws_close_errors() -> None:
             _ensure_token=AsyncMock(),
         )
 
-        client = module.TermoWebWSLegacyClient(
+        client = module.WebSocket09Client(
             hass,
             entry_id="entry",
             dev_id="dev",
@@ -1493,7 +1493,7 @@ def test_handshake_status_error_raises_handshake_error() -> None:
             ),
             _ensure_token=AsyncMock(),
         )
-        client = module.TermoWebWSLegacyClient(
+        client = module.WebSocket09Client(
             hass,
             entry_id="entry",
             dev_id="dev",
@@ -1520,7 +1520,7 @@ def test_handle_event_basic_validation() -> None:
         data={module.DOMAIN: {"entry": {"ws_state": {}}}},
     )
     api = types.SimpleNamespace(_session=session)
-    client = module.TermoWebWSLegacyClient(
+    client = module.WebSocket09Client(
         hass,
         entry_id="entry",
         dev_id="dev",
@@ -1549,7 +1549,7 @@ def test_parse_handshake_body_requires_two_parts() -> None:
     )
     coordinator = types.SimpleNamespace()
     api = types.SimpleNamespace(_session=session)
-    client = module.TermoWebWSLegacyClient(
+    client = module.WebSocket09Client(
         hass,
         entry_id="entry",
         dev_id="dev",
@@ -1570,7 +1570,7 @@ def test_mark_event_unique_paths() -> None:
         data={module.DOMAIN: {"entry": {"ws_state": {}}}},
     )
     coordinator = types.SimpleNamespace()
-    client = module.TermoWebWSLegacyClient(
+    client = module.WebSocket09Client(
         hass,
         entry_id="entry",
         dev_id="dev",

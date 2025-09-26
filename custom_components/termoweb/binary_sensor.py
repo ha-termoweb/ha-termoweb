@@ -12,20 +12,20 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_status
-from .coordinator import TermoWebCoordinator
+from .coordinator import StateCoordinator
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up one connectivity binary sensor per TermoWeb hub (dev_id)."""
     data = hass.data[DOMAIN][entry.entry_id]
-    coord: TermoWebCoordinator = data["coordinator"]
+    coord: StateCoordinator = data["coordinator"]
     dev_id = data["dev_id"]
-    ent = TermoWebDeviceOnlineBinarySensor(coord, entry.entry_id, dev_id)
+    ent = GatewayOnlineBinarySensor(coord, entry.entry_id, dev_id)
     async_add_entities([ent])
 
 
-class TermoWebDeviceOnlineBinarySensor(
-    CoordinatorEntity[TermoWebCoordinator], BinarySensorEntity
+class GatewayOnlineBinarySensor(
+    CoordinatorEntity[StateCoordinator], BinarySensorEntity
 ):
     """Connectivity sensor for the TermoWeb hub (gateway)."""
 
@@ -33,7 +33,7 @@ class TermoWebDeviceOnlineBinarySensor(
     _attr_should_poll = False
 
     def __init__(
-        self, coordinator: TermoWebCoordinator, entry_id: str, dev_id: str
+        self, coordinator: StateCoordinator, entry_id: str, dev_id: str
     ) -> None:
         super().__init__(coordinator)
         self._entry_id = entry_id

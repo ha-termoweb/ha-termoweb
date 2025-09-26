@@ -11,7 +11,7 @@ from aiohttp import ClientError
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import TermoWebAuthError, TermoWebClient, TermoWebRateLimitError
+from .api import BackendAuthError, RESTClient, BackendRateLimitError
 from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
 from .utils import extract_heater_addrs, float_or_none
 
@@ -19,7 +19,7 @@ _LOGGER = logging.getLogger(__name__)
 
 # How many heater settings to fetch per device per cycle (keep gentle)
 HTR_SETTINGS_PER_CYCLE = 1
-class TermoWebCoordinator(
+class StateCoordinator(
     DataUpdateCoordinator[dict[str, dict[str, Any]]]
 ):  # dev_id -> per-device data
     """Polls TermoWeb and exposes a per-device dict used by platforms."""
@@ -27,7 +27,7 @@ class TermoWebCoordinator(
     def __init__(
         self,
         hass: HomeAssistant,
-        client: TermoWebClient,
+        client: RESTClient,
         base_interval: int,
         dev_id: str,
         device: dict[str, Any],
@@ -125,7 +125,7 @@ class TermoWebCoordinator(
                 addr,
                 exc_info=err,
             )
-        except (ClientError, TermoWebRateLimitError, TermoWebAuthError) as err:
+        except (ClientError, BackendRateLimitError, BackendAuthError) as err:
             _LOGGER.error(
                 "Failed to refresh heater settings for device %s heater %s: %s",
                 dev_id,
@@ -161,8 +161,8 @@ class TermoWebCoordinator(
                             settings_map[addr] = js
                     except (
                         ClientError,
-                        TermoWebRateLimitError,
-                        TermoWebAuthError,
+                        BackendRateLimitError,
+                        BackendAuthError,
                     ) as err:
                         _LOGGER.debug(
                             "Error fetching settings for heater %s: %s",
@@ -191,7 +191,7 @@ class TermoWebCoordinator(
 
         except TimeoutError as err:
             raise UpdateFailed("API timeout") from err
-        except TermoWebRateLimitError as err:
+        except BackendRateLimitError as err:
             self._backoff = min(
                 max(self._base_interval, (self._backoff or self._base_interval) * 2),
                 3600,
@@ -200,7 +200,7 @@ class TermoWebCoordinator(
             raise UpdateFailed(
                 f"Rate limited; backing off to {self._backoff}s"
             ) from err
-        except (ClientError, TermoWebAuthError) as err:
+        except (ClientError, BackendAuthError) as err:
             raise UpdateFailed(f"API error: {err}") from err
         else:
             if self._backoff:
@@ -210,7 +210,7 @@ class TermoWebCoordinator(
             return result
 
 
-class TermoWebHeaterEnergyCoordinator(
+class EnergyStateCoordinator(
     DataUpdateCoordinator[dict[str, dict[str, Any]]]
 ):  # dev_id -> per-device data
     """Polls heater energy counters and exposes energy and power per heater."""
@@ -218,7 +218,7 @@ class TermoWebHeaterEnergyCoordinator(
     def __init__(
         self,
         hass: HomeAssistant,
-        client: TermoWebClient,
+        client: RESTClient,
         dev_id: str,
         addrs: list[str],
     ) -> None:
@@ -248,7 +248,7 @@ class TermoWebHeaterEnergyCoordinator(
                     samples = await self.client.get_htr_samples(
                         dev_id, addr, start, now
                     )
-                except (ClientError, TermoWebRateLimitError, TermoWebAuthError):
+                except (ClientError, BackendRateLimitError, BackendAuthError):
                     samples = []
 
                 if not samples:
@@ -298,7 +298,7 @@ class TermoWebHeaterEnergyCoordinator(
 
         except TimeoutError as err:
             raise UpdateFailed("API timeout") from err
-        except (ClientError, TermoWebRateLimitError, TermoWebAuthError) as err:
+        except (ClientError, BackendRateLimitError, BackendAuthError) as err:
             raise UpdateFailed(f"API error: {err}") from err
         else:
             return result

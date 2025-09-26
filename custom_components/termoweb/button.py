@@ -12,10 +12,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
-    async_add_entities([TermoWebRefreshButton(coordinator, dev_id)])
+    async_add_entities([StateRefreshButton(coordinator, dev_id)])
 
 
-class TermoWebRefreshButton(CoordinatorEntity, ButtonEntity):
+class StateRefreshButton(CoordinatorEntity, ButtonEntity):
     """Button that requests an immediate coordinator refresh."""
 
     _attr_name = "Force refresh"

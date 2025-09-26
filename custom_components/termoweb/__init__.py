@@ -22,7 +22,7 @@ from homeassistant.helpers import aiohttp_client, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.loader import async_get_integration
 
-from .api import TermoWebAuthError, TermoWebClient, TermoWebRateLimitError
+from .api import BackendAuthError, RESTClient, BackendRateLimitError
 from .backend import Backend, WsClientProto, create_backend
 from .const import (
     CONF_BRAND,
@@ -35,11 +35,11 @@ from .const import (
     get_brand_basic_auth,
     signal_ws_status,
 )
-from .coordinator import TermoWebCoordinator
+from .coordinator import StateCoordinator
 from .utils import extract_heater_addrs
 
 # Re-export legacy WS client for backward compatibility (tests may patch it).
-from .ws_client_legacy import TermoWebWSLegacyClient  # noqa: F401
+from .ws_client_legacy import WebSocket09Client  # noqa: F401
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -129,7 +129,7 @@ async def _async_import_energy_history(
     if not rec:
         _LOGGER.debug("%s: no record found for energy import", entry.entry_id)
         return
-    client: TermoWebClient = rec["client"]
+    client: RESTClient = rec["client"]
     dev_id: str = rec["dev_id"]
     all_addrs: list[str] = rec.get("htr_addrs", [])
     target_addrs = (
@@ -471,7 +471,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     integration = await async_get_integration(hass, DOMAIN)
     version = integration.version or "unknown"
 
-    client = TermoWebClient(
+    client = RESTClient(
         session,
         username,
         password,
@@ -481,10 +481,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     backend = create_backend(brand=brand, client=client)
     try:
         devices = await client.list_devices()
-    except TermoWebAuthError as err:
+    except BackendAuthError as err:
         _LOGGER.info("list_devices auth error: %s", err)
         raise ConfigEntryAuthFailed from err
-    except (TimeoutError, ClientError, TermoWebRateLimitError) as err:
+    except (TimeoutError, ClientError, BackendRateLimitError) as err:
         _LOGGER.info("list_devices connection error: %s", err)
         raise ConfigEntryNotReady from err
 
@@ -499,7 +499,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     nodes = await client.get_nodes(dev_id)
     addrs = extract_heater_addrs(nodes)
 
-    coordinator = TermoWebCoordinator(hass, client, base_interval, dev_id, dev, nodes)
+    coordinator = StateCoordinator(hass, client, base_interval, dev_id, dev, nodes)
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = data = {

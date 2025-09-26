@@ -58,7 +58,7 @@ def build_heater_name_map(
     return name_map
 
 
-class TermoWebHeaterBase(CoordinatorEntity):
+class HeaterNodeBase(CoordinatorEntity):
     """Base entity implementing common TermoWeb heater behaviour."""
 
     _unsub_ws: dispatcher.DispatcherHandle | None

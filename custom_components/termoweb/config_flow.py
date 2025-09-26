@@ -12,7 +12,7 @@ from homeassistant.helpers import aiohttp_client
 from homeassistant.loader import async_get_integration
 import voluptuous as vol
 
-from .api import TermoWebAuthError, TermoWebClient, TermoWebRateLimitError
+from .api import BackendAuthError, RESTClient, BackendRateLimitError
 from .const import (
     BRAND_DUCAHEAT as CONST_BRAND_DUCAHEAT,
     BRAND_LABELS,
@@ -66,7 +66,7 @@ async def _validate_login(
     session = aiohttp_client.async_get_clientsession(hass)
     api_base = get_brand_api_base(brand)
     basic_auth = get_brand_basic_auth(brand)
-    client = TermoWebClient(
+    client = RESTClient(
         session,
         username,
         password,
@@ -102,9 +102,9 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         try:
             await _validate_login(self.hass, username, password, brand)
-        except TermoWebAuthError:
+        except BackendAuthError:
             errors["base"] = "invalid_auth"
-        except TermoWebRateLimitError:
+        except BackendRateLimitError:
             errors["base"] = "rate_limited"
         except ClientError:
             errors["base"] = "cannot_connect"
@@ -174,9 +174,9 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         try:
             await _validate_login(self.hass, username, password, brand)
-        except TermoWebAuthError:
+        except BackendAuthError:
             errors["base"] = "invalid_auth"
-        except TermoWebRateLimitError:
+        except BackendRateLimitError:
             errors["base"] = "rate_limited"
         except ClientError:
             errors["base"] = "cannot_connect"

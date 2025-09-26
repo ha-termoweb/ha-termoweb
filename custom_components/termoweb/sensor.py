@@ -16,8 +16,8 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_data
-from .coordinator import TermoWebHeaterEnergyCoordinator
-from .heater import TermoWebHeaterBase, build_heater_name_map
+from .coordinator import EnergyStateCoordinator
+from .heater import HeaterNodeBase, build_heater_name_map
 from .utils import float_or_none
 
 _WH_TO_KWH = 1 / 1000.0
@@ -70,7 +70,7 @@ def _normalise_energy_value(coordinator: Any, raw: Any) -> float | None:
                 scale = parsed
 
     if scale is None:
-        if isinstance(coordinator, TermoWebHeaterEnergyCoordinator):
+        if isinstance(coordinator, EnergyStateCoordinator):
             scale = 1.0
         elif isinstance(raw, int):
             scale = _WH_TO_KWH
@@ -90,11 +90,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
     nodes = data["nodes"]
     addrs: list[str] = data["htr_addrs"]
 
-    energy_coordinator: TermoWebHeaterEnergyCoordinator | None = data.get(
+    energy_coordinator: EnergyStateCoordinator | None = data.get(
         "energy_coordinator",
     )
     if energy_coordinator is None:
-        energy_coordinator = TermoWebHeaterEnergyCoordinator(
+        energy_coordinator = EnergyStateCoordinator(
             hass, data["client"], dev_id, addrs
         )
         data["energy_coordinator"] = energy_coordinator
@@ -109,7 +109,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         base_name = name_map.get(addr, f"Node {addr}")
         uid_temp = f"{DOMAIN}:{dev_id}:htr:{addr}:temp"
         new_entities.append(
-            TermoWebHeaterTemp(
+            HeaterTemperatureSensor(
                 coordinator,
                 entry.entry_id,
                 dev_id,
@@ -121,7 +121,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         )
         uid_energy = f"{DOMAIN}:{dev_id}:htr:{addr}:energy"
         new_entities.append(
-            TermoWebHeaterEnergyTotal(
+            HeaterEnergyTotalSensor(
                 energy_coordinator,
                 entry.entry_id,
                 dev_id,
@@ -133,7 +133,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         )
         uid_power = f"{DOMAIN}:{dev_id}:htr:{addr}:power"
         new_entities.append(
-            TermoWebHeaterPower(
+            HeaterPowerSensor(
                 energy_coordinator,
                 entry.entry_id,
                 dev_id,
@@ -146,7 +146,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     uid_total = f"{DOMAIN}:{dev_id}:energy_total"
     new_entities.append(
-        TermoWebTotalEnergy(
+        InstallationTotalEnergySensor(
 
             energy_coordinator,
             entry.entry_id,
@@ -161,7 +161,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         async_add_entities(new_entities)
 
 
-class TermoWebHeaterTemp(TermoWebHeaterBase, SensorEntity):
+class HeaterTemperatureSensor(HeaterNodeBase, SensorEntity):
     """Temperature sensor for a single heater node (read-only mtemp)."""
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
@@ -203,14 +203,14 @@ class TermoWebHeaterTemp(TermoWebHeaterBase, SensorEntity):
         }
 
 
-class TermoWebHeaterMeasurementSensor(TermoWebHeaterBase, SensorEntity):
+class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
     """Base helper for heater measurement sensors such as power and energy."""
 
     _metric_key: str
 
     def __init__(
         self,
-        coordinator: TermoWebHeaterEnergyCoordinator,
+        coordinator: EnergyStateCoordinator,
         entry_id: str,
         dev_id: str,
         addr: str,
@@ -257,7 +257,7 @@ class TermoWebHeaterMeasurementSensor(TermoWebHeaterBase, SensorEntity):
         return {"dev_id": self._dev_id, "addr": self._addr}
 
 
-class TermoWebHeaterEnergyTotal(TermoWebHeaterMeasurementSensor):
+class HeaterEnergyTotalSensor(HeaterEnergyBase):
     """Total energy consumption sensor for a heater."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
@@ -269,7 +269,7 @@ class TermoWebHeaterEnergyTotal(TermoWebHeaterMeasurementSensor):
         return _normalise_energy_value(self.coordinator, raw)
 
 
-class TermoWebHeaterPower(TermoWebHeaterMeasurementSensor):
+class HeaterPowerSensor(HeaterEnergyBase):
     """Power sensor for a heater."""
 
     _attr_device_class = SensorDeviceClass.POWER
@@ -278,7 +278,7 @@ class TermoWebHeaterPower(TermoWebHeaterMeasurementSensor):
     _metric_key = "power"
 
 
-class TermoWebTotalEnergy(CoordinatorEntity, SensorEntity):
+class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
     """Total energy consumption across all heaters."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
@@ -287,7 +287,7 @@ class TermoWebTotalEnergy(CoordinatorEntity, SensorEntity):
 
     def __init__(
         self,
-        coordinator: TermoWebHeaterEnergyCoordinator,
+        coordinator: EnergyStateCoordinator,
         entry_id: str,
         dev_id: str,
         name: str,

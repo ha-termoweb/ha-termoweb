@@ -27,7 +27,7 @@ from homeassistant.helpers.entity_platform import EntityPlatform
 from homeassistant.helpers import dispatcher as dispatcher_module
 from homeassistant.util import dt as dt_util
 
-TermoWebHeater = climate_module.TermoWebHeater
+HeaterClimateEntity = climate_module.HeaterClimateEntity
 async_setup_entry = climate_module.async_setup_entry
 
 
@@ -57,7 +57,7 @@ def test_termoweb_heater_is_heater_node() -> None:
     hass = HomeAssistant()
     coordinator = FakeCoordinator(hass, {"dev": {"htr": {"settings": {}}, "nodes": {}}})
 
-    heater = TermoWebHeater(
+    heater = HeaterClimateEntity(
         coordinator,
         "entry",
         "dev",
@@ -106,9 +106,9 @@ def test_async_setup_entry_creates_entities() -> None:
             }
         }
 
-        added: list[TermoWebHeater] = []
+        added: list[HeaterClimateEntity] = []
 
-        def _async_add_entities(entities: list[TermoWebHeater]) -> None:
+        def _async_add_entities(entities: list[HeaterClimateEntity]) -> None:
             added.extend(entities)
 
         platform = EntityPlatform()
@@ -118,7 +118,7 @@ def test_async_setup_entry_creates_entities() -> None:
         await async_setup_entry(hass, entry, _async_add_entities)
 
         assert len(added) == 2
-        assert all(isinstance(entity, TermoWebHeater) for entity in added)
+        assert all(isinstance(entity, HeaterClimateEntity) for entity in added)
         names = {entity._addr: entity._attr_name for entity in added}
         assert names["A1"] == "Living Room"
         assert names["B2"] == "Heater B2"
@@ -192,7 +192,7 @@ def test_refresh_fallback_skips_when_hass_inactive(
             }
         }
 
-        heater = TermoWebHeater(coordinator, entry_id, dev_id, addr, "Heater")
+        heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
         await heater.async_added_to_hass()
 
         async def fast_sleep(_delay: float) -> None:
@@ -265,7 +265,7 @@ def test_heater_additional_cancelled_edges(
             }
         }
 
-        heater = TermoWebHeater(coordinator, entry_id, dev_id, addr, "Heater")
+        heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
         await heater.async_added_to_hass()
 
         class SentinelCancelled(Exception):
@@ -376,7 +376,7 @@ def test_heater_properties_and_ws_update() -> None:
 
         dt_util.NOW = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
 
-        heater = TermoWebHeater(coordinator, entry_id, dev_id, addr, "Living")
+        heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Living")
         assert heater.hass is hass
 
         await heater.async_added_to_hass()
@@ -536,7 +536,7 @@ def test_heater_write_paths_and_errors(
             }
         }
 
-        heater = TermoWebHeater(coordinator, entry_id, dev_id, addr, "Heater")
+        heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
         await heater.async_added_to_hass()
 
         fallback_waiters: Deque[asyncio.Future[None]] = deque()
@@ -953,7 +953,7 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
             }
         }
 
-        heater = TermoWebHeater(coordinator, entry_id, dev_id, addr, "Heater")
+        heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
         await heater.async_added_to_hass()
         orig_cancelled = climate_module.asyncio.CancelledError
 
@@ -1130,7 +1130,7 @@ def test_heater_cancelled_paths_propagate(
             }
         }
 
-        heater = TermoWebHeater(coordinator, entry_id, dev_id, addr, "Heater")
+        heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
         await heater.async_added_to_hass()
 
         orig_float = climate_module.float_or_none

@@ -12,7 +12,7 @@ import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
-from .api import TermoWebClient
+from .api import RESTClient
 from .const import API_BASE, DOMAIN, WS_NAMESPACE, signal_ws_data, signal_ws_status
 from .utils import extract_heater_addrs
 
@@ -37,7 +37,7 @@ class WSStats:
     last_paths: list[str] | None = None
 
 
-class TermoWebWSLegacyClient:
+class WebSocket09Client:
     """Minimal read-only Socket.IO 0.9 client for TermoWeb cloud.
 
     Behavior:
@@ -57,8 +57,8 @@ class TermoWebWSLegacyClient:
         *,
         entry_id: str,
         dev_id: str,
-        api_client: TermoWebClient,
-        coordinator,  # TermoWebCoordinator; typed as Any to avoid import cycle
+        api_client: RESTClient,
+        coordinator,  # StateCoordinator; typed as Any to avoid import cycle
         session: aiohttp.ClientSession | None = None,
         handshake_fail_threshold: int = 5,
     ) -> None:

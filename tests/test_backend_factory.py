@@ -8,7 +8,7 @@ import pytest
 
 from custom_components.termoweb.backend import create_backend
 from custom_components.termoweb.backend.termoweb import TermoWebBackend
-from custom_components.termoweb.ws_client_legacy import TermoWebWSLegacyClient
+from custom_components.termoweb.ws_client_legacy import WebSocket09Client
 
 
 class DummyHttpClient:
@@ -79,7 +79,7 @@ def test_termoweb_backend_creates_ws_client() -> None:
     finally:
         loop.close()
 
-    assert isinstance(ws_client, TermoWebWSLegacyClient)
+    assert isinstance(ws_client, WebSocket09Client)
     assert ws_client.dev_id == "device456"
     assert ws_client.entry_id == "entry123"
     assert ws_client._coordinator is coordinator
@@ -88,7 +88,7 @@ def test_termoweb_backend_creates_ws_client() -> None:
 def test_termoweb_backend_fallback_ws_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
     import custom_components.termoweb as init_module
 
-    monkeypatch.setattr(init_module, "TermoWebWSLegacyClient", None)
+    monkeypatch.setattr(init_module, "WebSocket09Client", None)
     client = DummyHttpClient()
     backend = TermoWebBackend(brand="termoweb", client=client)
     loop = asyncio.new_event_loop()
@@ -103,4 +103,4 @@ def test_termoweb_backend_fallback_ws_resolution(monkeypatch: pytest.MonkeyPatch
     finally:
         loop.close()
 
-    assert isinstance(ws_client, TermoWebWSLegacyClient)
+    assert isinstance(ws_client, WebSocket09Client)

@@ -21,13 +21,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import dispatcher as dispatcher_module
 from homeassistant.helpers.dispatcher import dispatcher_send
 
-TermoWebHeaterEnergyCoordinator = (
-    coordinator_module.TermoWebHeaterEnergyCoordinator
+EnergyStateCoordinator = (
+    coordinator_module.EnergyStateCoordinator
 )
-TermoWebHeaterTemp = sensor_module.TermoWebHeaterTemp
-TermoWebHeaterEnergyTotal = sensor_module.TermoWebHeaterEnergyTotal
-TermoWebHeaterPower = sensor_module.TermoWebHeaterPower
-TermoWebTotalEnergy = sensor_module.TermoWebTotalEnergy
+HeaterTemperatureSensor = sensor_module.HeaterTemperatureSensor
+HeaterEnergyTotalSensor = sensor_module.HeaterEnergyTotalSensor
+HeaterPowerSensor = sensor_module.HeaterPowerSensor
+InstallationTotalEnergySensor = sensor_module.InstallationTotalEnergySensor
 async_setup_sensor_entry = sensor_module.async_setup_entry
 signal_ws_data = const_module.signal_ws_data
 DOMAIN = const_module.DOMAIN
@@ -53,7 +53,7 @@ def test_coordinator_and_sensors() -> None:
         )
 
         hass = HomeAssistant()
-        coord = TermoWebHeaterEnergyCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
+        coord = EnergyStateCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
 
         await coord.async_refresh()
         await coord.async_refresh()
@@ -62,10 +62,10 @@ def test_coordinator_and_sensors() -> None:
         power = coord.data["1"]["htr"]["power"]["A"]
         assert power == pytest.approx(2.0, rel=1e-3)
 
-        energy_sensor = TermoWebHeaterEnergyTotal(
+        energy_sensor = HeaterEnergyTotalSensor(
             coord, "entry", "1", "A", "Energy", "e1", "Heater"
         )
-        power_sensor = TermoWebHeaterPower(
+        power_sensor = HeaterPowerSensor(
             coord, "entry", "1", "A", "Power", "p1", "Heater"
         )
         energy_sensor.hass = power_sensor.hass = hass
@@ -185,7 +185,7 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
         ]
 
         with patch.object(
-            TermoWebHeaterEnergyCoordinator,
+            EnergyStateCoordinator,
             "async_config_entry_first_refresh",
             new=refresh_mock,
         ), patch.object(sensor_module, "_LOGGER", logger_mock):
@@ -193,7 +193,7 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
 
             assert "energy_coordinator" in record
             energy_coord = record["energy_coordinator"]
-            assert isinstance(energy_coord, TermoWebHeaterEnergyCoordinator)
+            assert isinstance(energy_coord, EnergyStateCoordinator)
             assert refresh_mock.await_count == 1
 
             expected_count = len(record["htr_addrs"]) * 3 + 1
@@ -254,7 +254,7 @@ def test_heater_temp_sensor() -> None:
             },
         )
 
-        sensor = TermoWebHeaterTemp(
+        sensor = HeaterTemperatureSensor(
             coordinator,
             "entry",
             "dev1",
@@ -355,11 +355,11 @@ def test_total_energy_sensor() -> None:
         )
 
         hass = HomeAssistant()
-        coord = TermoWebHeaterEnergyCoordinator(hass, client, "1", ["A", "B"])  # type: ignore[arg-type]
+        coord = EnergyStateCoordinator(hass, client, "1", ["A", "B"])  # type: ignore[arg-type]
 
         await coord.async_refresh()
 
-        total_sensor = TermoWebTotalEnergy(coord, "entry", "1", "Total Energy", "tot")
+        total_sensor = InstallationTotalEnergySensor(coord, "entry", "1", "Total Energy", "tot")
         total_sensor.hass = hass
         await total_sensor.async_added_to_hass()
 
@@ -410,7 +410,7 @@ def test_energy_and_power_sensor_properties() -> None:
     coordinator = types.SimpleNamespace(hass=hass, data=copy.deepcopy(base_data))
 
     sensors = {
-        "energy": TermoWebHeaterEnergyTotal(
+        "energy": HeaterEnergyTotalSensor(
             coordinator,
             "entry",
             "dev",
@@ -419,7 +419,7 @@ def test_energy_and_power_sensor_properties() -> None:
             "uid_energy",
             "Node",
         ),
-        "power": TermoWebHeaterPower(
+        "power": HeaterPowerSensor(
             coordinator,
             "entry",
             "dev",
@@ -453,7 +453,7 @@ def test_energy_and_power_sensor_properties() -> None:
 
         coordinator.data = copy.deepcopy(base_data)
 
-    total_sensor = TermoWebTotalEnergy(coordinator, "entry", "dev", "Total", "tot")
+    total_sensor = InstallationTotalEnergySensor(coordinator, "entry", "dev", "Total", "tot")
     total_info = total_sensor.device_info
     assert total_info == {"identifiers": {(DOMAIN, "dev")}}
     assert total_sensor.available is True
@@ -481,7 +481,7 @@ def test_energy_sensor_respects_scale_metadata() -> None:
     }
     coordinator = types.SimpleNamespace(hass=hass, data=copy.deepcopy(base))
 
-    energy_sensor = TermoWebHeaterEnergyTotal(
+    energy_sensor = HeaterEnergyTotalSensor(
         coordinator,
         "entry",
         "dev",
@@ -490,7 +490,7 @@ def test_energy_sensor_respects_scale_metadata() -> None:
         "uid",
         "Node",
     )
-    total_sensor = TermoWebTotalEnergy(coordinator, "entry", "dev", "Total", "tot")
+    total_sensor = InstallationTotalEnergySensor(coordinator, "entry", "dev", "Total", "tot")
 
     assert energy_sensor.native_value == pytest.approx(1.5)
     assert total_sensor.native_value == pytest.approx(2.0)

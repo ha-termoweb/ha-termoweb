@@ -18,7 +18,7 @@ from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
 from .const import BRAND_TERMOWEB, DOMAIN
-from .heater import TermoWebHeaterBase, build_heater_name_map
+from .heater import HeaterNodeBase, build_heater_name_map
 from .nodes import HeaterNode
 from .utils import float_or_none
 
@@ -43,7 +43,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     brand = data.get("brand", BRAND_TERMOWEB)
 
     new_entities = [
-        TermoWebHeater(
+        HeaterClimateEntity(
             coordinator,
             entry.entry_id,
             dev_id,
@@ -61,7 +61,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     platform = entity_platform.async_get_current_platform()
 
     # Explicit callables ensure dispatch and let us add clear logs when invoked.
-    async def _svc_set_schedule(entity: TermoWebHeater, call: ServiceCall) -> None:
+    async def _svc_set_schedule(entity: HeaterClimateEntity, call: ServiceCall) -> None:
         prog = call.data.get("prog")
         _LOGGER.info(
             "entity-service termoweb.set_schedule -> %s prog_len=%s",
@@ -71,7 +71,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         await entity.async_set_schedule(prog)
 
     async def _svc_set_preset_temperatures(
-        entity: TermoWebHeater, call: ServiceCall
+        entity: HeaterClimateEntity, call: ServiceCall
     ) -> None:
         if "ptemp" in call.data:
             args = {"ptemp": call.data.get("ptemp")}
@@ -113,7 +113,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     )
 
 
-class TermoWebHeater(HeaterNode, TermoWebHeaterBase, ClimateEntity):
+class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
     """HA climate entity representing a single TermoWeb heater."""
 
     _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
@@ -131,7 +131,7 @@ class TermoWebHeater(HeaterNode, TermoWebHeaterBase, ClimateEntity):
         brand: str | None = None,
     ) -> None:
         HeaterNode.__init__(self, name=name, addr=addr, brand=brand or BRAND_TERMOWEB)
-        TermoWebHeaterBase.__init__(self, coordinator, entry_id, dev_id, addr, self.name)
+        HeaterNodeBase.__init__(self, coordinator, entry_id, dev_id, addr, self.name)
 
         self._refresh_fallback: asyncio.Task | None = None
 

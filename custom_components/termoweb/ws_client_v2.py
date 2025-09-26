@@ -12,7 +12,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
-from .api import TermoWebClient
+from .api import RESTClient
 from .const import API_BASE, DOMAIN, signal_ws_data, signal_ws_status
 
 _LOGGER = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ class DucaheatWSClient:
         hass: HomeAssistant,
         entry_id: str,
         dev_id: str,
-        api_client: TermoWebClient,
+        api_client: RESTClient,
         coordinator: Any,
     ) -> None:
         """Initialize the client."""

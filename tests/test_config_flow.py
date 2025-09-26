@@ -80,7 +80,7 @@ def test_validate_login_uses_brand_settings(
         async def list_devices(self) -> None:
             calls.append(("listed",))
 
-    monkeypatch.setattr(config_flow, "TermoWebClient", DummyClient)
+    monkeypatch.setattr(config_flow, "RESTClient", DummyClient)
 
     asyncio.run(
         config_flow._validate_login(
@@ -171,8 +171,8 @@ def test_async_step_user_success(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.parametrize(
     ("raised_factory", "expected"),
     [
-        (lambda: config_flow.TermoWebAuthError(), "invalid_auth"),
-        (lambda: config_flow.TermoWebRateLimitError(), "rate_limited"),
+        (lambda: config_flow.BackendAuthError(), "invalid_auth"),
+        (lambda: config_flow.BackendRateLimitError(), "rate_limited"),
         (lambda: config_flow.ClientError(), "cannot_connect"),
         (lambda: RuntimeError("boom"), "unknown"),
     ],
@@ -314,8 +314,8 @@ def test_async_step_reconfigure_success(
 @pytest.mark.parametrize(
     ("raised_factory", "expected"),
     [
-        (lambda: config_flow.TermoWebAuthError(), "invalid_auth"),
-        (lambda: config_flow.TermoWebRateLimitError(), "rate_limited"),
+        (lambda: config_flow.BackendAuthError(), "invalid_auth"),
+        (lambda: config_flow.BackendRateLimitError(), "rate_limited"),
         (lambda: config_flow.ClientError(), "cannot_connect"),
         (lambda: RuntimeError("fail"), "unknown"),
     ],

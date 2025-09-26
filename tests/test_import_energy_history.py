@@ -108,7 +108,7 @@ async def _load_module(
 
     api_module = importlib.import_module("custom_components.termoweb.api")
 
-    class _FakeTermoWebClient:
+    class _FakeRESTClient:
         def __init__(self, session, username, password, **kwargs: Any) -> None:
             self._session = session
             self._username = username
@@ -130,7 +130,7 @@ async def _load_module(
         ) -> list[dict[str, Any]]:
             return []
 
-    monkeypatch.setattr(api_module, "TermoWebClient", _FakeTermoWebClient)
+    monkeypatch.setattr(api_module, "RESTClient", _FakeRESTClient)
 
     ws_module = importlib.import_module("custom_components.termoweb.ws_client_legacy")
 
@@ -145,7 +145,7 @@ async def _load_module(
         async def stop(self) -> None:
             return None
 
-    monkeypatch.setattr(ws_module, "TermoWebWSLegacyClient", _FakeWSClient)
+    monkeypatch.setattr(ws_module, "WebSocket09Client", _FakeWSClient)
 
     if load_coordinator:
         importlib.reload(importlib.import_module("custom_components.termoweb.coordinator"))
@@ -1218,7 +1218,7 @@ def test_energy_polling_matches_import(monkeypatch: pytest.MonkeyPatch) -> None:
             )
         )
 
-        coordinator = coord_mod.TermoWebHeaterEnergyCoordinator(
+        coordinator = coord_mod.EnergyStateCoordinator(
             hass,
             client,
             "dev",
@@ -1245,7 +1245,7 @@ def test_energy_polling_matches_import(monkeypatch: pytest.MonkeyPatch) -> None:
 
         coordinator.data = data2
 
-        energy_entity = sensor_mod.TermoWebHeaterEnergyTotal(
+        energy_entity = sensor_mod.HeaterEnergyTotalSensor(
             coordinator,
             "entry",
             "dev",
@@ -1254,7 +1254,7 @@ def test_energy_polling_matches_import(monkeypatch: pytest.MonkeyPatch) -> None:
             "uid",
             "Device A",
         )
-        total_entity = sensor_mod.TermoWebTotalEnergy(
+        total_entity = sensor_mod.InstallationTotalEnergySensor(
             coordinator,
             "entry",
             "dev",
@@ -1487,7 +1487,7 @@ def test_refresh_fallback_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
 
         climate_mod = importlib.import_module("custom_components.termoweb.climate")
         coordinator = types.SimpleNamespace(async_request_refresh=AsyncMock())
-        heater = climate_mod.TermoWebHeater(coordinator, "1", "dev", "A", "Heater A")
+        heater = climate_mod.HeaterClimateEntity(coordinator, "1", "dev", "A", "Heater A")
         heater.hass = HomeAssistant()
         heater._schedule_refresh_fallback()
         task = heater._refresh_fallback

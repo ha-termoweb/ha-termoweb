@@ -10,12 +10,12 @@ _install_stubs()
 from custom_components.termoweb import heater as heater_module
 from homeassistant.core import HomeAssistant
 
-TermoWebHeaterBase = heater_module.TermoWebHeaterBase
+HeaterNodeBase = heater_module.HeaterNodeBase
 build_heater_name_map = heater_module.build_heater_name_map
 
 
-def _make_heater(coordinator: SimpleNamespace) -> TermoWebHeaterBase:
-    return TermoWebHeaterBase(coordinator, "entry", "dev", "A", "Heater A")
+def _make_heater(coordinator: SimpleNamespace) -> HeaterNodeBase:
+    return HeaterNodeBase(coordinator, "entry", "dev", "A", "Heater A")
 
 
 def test_build_heater_name_map_handles_invalid_entries() -> None:

@@ -12,11 +12,11 @@ import custom_components.termoweb.binary_sensor as binary_sensor_module
 import custom_components.termoweb.button as button_module
 from custom_components.termoweb.const import DOMAIN, signal_ws_status
 
-TermoWebDeviceOnlineBinarySensor = (
-    binary_sensor_module.TermoWebDeviceOnlineBinarySensor
+GatewayOnlineBinarySensor = (
+    binary_sensor_module.GatewayOnlineBinarySensor
 )
 async_setup_binary_sensor_entry = binary_sensor_module.async_setup_entry
-TermoWebRefreshButton = button_module.TermoWebRefreshButton
+StateRefreshButton = button_module.StateRefreshButton
 async_setup_button_entry = button_module.async_setup_entry
 
 
@@ -63,7 +63,7 @@ def test_binary_sensor_setup_and_dispatch() -> None:
 
         assert len(added) == 1
         entity = added[0]
-        assert isinstance(entity, TermoWebDeviceOnlineBinarySensor)
+        assert isinstance(entity, GatewayOnlineBinarySensor)
 
         entity.hass = hass
         await entity.async_added_to_hass()
@@ -130,7 +130,7 @@ def test_refresh_button_device_info_and_press() -> None:
         assert len(added) == 1
 
         button_entity = added[0]
-        assert isinstance(button_entity, TermoWebRefreshButton)
+        assert isinstance(button_entity, StateRefreshButton)
 
         await async_setup_button_entry(hass, entry, _add_entities)
         assert call_sizes == [1, 1]

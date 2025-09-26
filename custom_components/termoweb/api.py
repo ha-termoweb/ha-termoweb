@@ -25,11 +25,11 @@ _LOGGER = logging.getLogger(__name__)
 API_LOG_PREVIEW = False
 
 
-class TermoWebAuthError(Exception):
+class BackendAuthError(Exception):
     """Authentication with TermoWeb failed."""
 
 
-class TermoWebRateLimitError(Exception):
+class BackendRateLimitError(Exception):
     """Server rate-limited the client (HTTP 429)."""
 
 
@@ -45,7 +45,7 @@ def _redact_bearer(text: str | None) -> str:
     )
 
 
-class TermoWebClient:
+class RESTClient:
     """Thin async client for the TermoWeb cloud (HA-safe)."""
 
     def __init__(
@@ -142,9 +142,9 @@ class TermoWebClient:
                             token = await self._ensure_token()
                             headers["Authorization"] = f"Bearer {token}"
                             continue
-                        raise TermoWebAuthError("Unauthorized")
+                        raise BackendAuthError("Unauthorized")
                     if resp.status == 429:
-                        raise TermoWebRateLimitError("Rate limited")
+                        raise BackendRateLimitError("Rate limited")
                     if resp.status in ignore_statuses:
                         return None
                     if resp.status >= 400:
@@ -166,7 +166,7 @@ class TermoWebClient:
                             return body_text
                     return body_text
 
-            except (TermoWebAuthError, TermoWebRateLimitError):
+            except (BackendAuthError, BackendRateLimitError):
                 raise
             except aiohttp.ClientResponseError as e:
                 if e.status not in ignore_statuses:
@@ -187,7 +187,7 @@ class TermoWebClient:
                     _redact_bearer(str(e)),
                 )
                 raise
-        raise TermoWebAuthError("Unauthorized")
+        raise BackendAuthError("Unauthorized")
 
     async def _ensure_token(self) -> str:
         """Ensure a bearer token is present; fetch if missing."""
@@ -226,11 +226,11 @@ class TermoWebClient:
                 _LOGGER.debug("Token resp status=%s", resp.status)
 
                 if resp.status in (400, 401):
-                    raise TermoWebAuthError(
+                    raise BackendAuthError(
                         f"Invalid credentials or client auth failed (status {resp.status})"
                     )
                 if resp.status == 429:
-                    raise TermoWebRateLimitError("Rate limited on token endpoint")
+                    raise BackendRateLimitError("Rate limited on token endpoint")
                 if resp.status >= 400:
                     text = await resp.text()
                     raise aiohttp.ClientResponseError(
@@ -245,7 +245,7 @@ class TermoWebClient:
                 token = js.get("access_token")
                 if not token:
                     _LOGGER.error("No access_token in response JSON")
-                    raise TermoWebAuthError("No access_token in response")
+                    raise BackendAuthError("No access_token in response")
                 self._access_token = token
                 self._token_obtained_at = time.time()
                 expires_in = js.get("expires_in")

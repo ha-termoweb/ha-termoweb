@@ -12,10 +12,10 @@ class TermoWebBackend(Backend):
 
     def _resolve_ws_client_cls(self) -> type[Any]:
         module = import_module("custom_components.termoweb.__init__")
-        ws_cls = getattr(module, "TermoWebWSLegacyClient", None)
+        ws_cls = getattr(module, "WebSocket09Client", None)
         if ws_cls is None:
             legacy_module = import_module("custom_components.termoweb.ws_client_legacy")
-            ws_cls = legacy_module.TermoWebWSLegacyClient
+            ws_cls = legacy_module.WebSocket09Client
         return ws_cls
 
     def create_ws_client(

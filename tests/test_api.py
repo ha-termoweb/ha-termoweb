@@ -11,7 +11,7 @@ import pytest
 
 import custom_components.termoweb.api as api
 
-TermoWebClient = api.TermoWebClient
+RESTClient = api.RESTClient
 
 
 class MockResponse:
@@ -126,7 +126,7 @@ def test_token_refresh(monkeypatch) -> None:
             ),
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         import custom_components.termoweb.api as api_module
 
@@ -158,9 +158,9 @@ def test_ensure_token_401_raises_auth_error() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
-        with pytest.raises(api.TermoWebAuthError):
+        with pytest.raises(api.BackendAuthError):
             await client._ensure_token()
 
     asyncio.run(_run())
@@ -178,9 +178,9 @@ def test_ensure_token_429_raises_rate_limit_error() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
-        with pytest.raises(api.TermoWebRateLimitError):
+        with pytest.raises(api.BackendRateLimitError):
             await client._ensure_token()
 
     asyncio.run(_run())
@@ -197,9 +197,9 @@ def test_ensure_token_missing_access_token() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
-        with pytest.raises(api.TermoWebAuthError):
+        with pytest.raises(api.BackendAuthError):
             await client._ensure_token()
 
     asyncio.run(_run())
@@ -218,7 +218,7 @@ def test_ensure_token_non_numeric_expires_in(monkeypatch) -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         token = await client._ensure_token()
         assert token == "tok"
@@ -247,7 +247,7 @@ def test_get_htr_samples_success() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
         samples = await client.get_htr_samples("dev", "A", 0, 10)
 
         assert samples == [{"t": 1000, "counter": "1.5"}]
@@ -276,7 +276,7 @@ def test_get_htr_samples_404() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
         with pytest.raises(aiohttp.ClientResponseError) as err:
             await client.get_htr_samples("dev", "A", 0, 10)
         assert err.value.status == 404
@@ -301,7 +301,7 @@ def test_request_ignore_status_returns_none() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
         result = await client._request(
             "GET", "/missing", headers={}, ignore_statuses=(404,)
         )
@@ -336,11 +336,11 @@ def test_request_refreshes_once_then_raises() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
         headers = await client._authed_headers()
         session.clear_calls()
 
-        with pytest.raises(api.TermoWebAuthError):
+        with pytest.raises(api.BackendAuthError):
             await client._request("GET", "/api/test", headers=headers)
 
         assert len(session.request_calls) == 2
@@ -372,11 +372,11 @@ def test_request_rate_limit_error() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
         headers = await client._authed_headers()
         session.clear_calls()
 
-        with pytest.raises(api.TermoWebRateLimitError):
+        with pytest.raises(api.BackendRateLimitError):
             await client._request("GET", "/api/rate", headers=headers)
 
         assert len(session.request_calls) == 1
@@ -404,7 +404,7 @@ def test_request_5xx_surfaces_client_error() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
         headers = await client._authed_headers()
         session.clear_calls()
 
@@ -429,7 +429,7 @@ def test_request_timeout_propagates() -> None:
         )
         session.queue_request(asyncio.TimeoutError())
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
         headers = await client._authed_headers()
         session.clear_calls()
 
@@ -456,7 +456,7 @@ def test_request_preview_logs_json_fallback(caplog) -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
         result = await client._request("GET", "/api/preview", headers={})
         results.append(result)
 
@@ -475,7 +475,7 @@ def test_request_preview_logs_json_fallback(caplog) -> None:
 
 def test_api_base_property_returns_sanitized() -> None:
     session = FakeSession()
-    client = TermoWebClient(session, "user", "pw", api_base="https://api.example.com/")
+    client = RESTClient(session, "user", "pw", api_base="https://api.example.com/")
 
     assert client.api_base == "https://api.example.com"
 
@@ -499,7 +499,7 @@ def test_request_text_exception_fallback() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pw")
+        client = RESTClient(session, "user", "pw")
         headers = await client._authed_headers()
         session.clear_calls()
 
@@ -528,7 +528,7 @@ def test_request_returns_plain_text() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pw")
+        client = RESTClient(session, "user", "pw")
         headers = await client._authed_headers()
         session.clear_calls()
 
@@ -541,7 +541,7 @@ def test_request_returns_plain_text() -> None:
 def test_ensure_token_uses_cache_without_http() -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pw")
+        client = RESTClient(session, "user", "pw")
         client._access_token = "cached"
         client._token_expiry = time.time() + 1000
 
@@ -563,7 +563,7 @@ def test_ensure_token_concurrent_calls_share_refresh() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pw")
+        client = RESTClient(session, "user", "pw")
         tokens = await asyncio.gather(client._ensure_token(), client._ensure_token())
 
         assert tokens == ["tok", "tok"]
@@ -575,12 +575,12 @@ def test_ensure_token_concurrent_calls_share_refresh() -> None:
 def test_ensure_token_returns_cached_after_lock_entry() -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pw")
+        client = RESTClient(session, "user", "pw")
         client._access_token = None
         client._token_expiry = 0.0
 
         class FakeLock:
-            def __init__(self, owner: TermoWebClient) -> None:
+            def __init__(self, owner: RESTClient) -> None:
                 self._owner = owner
 
             async def __aenter__(self) -> "FakeLock":
@@ -612,7 +612,7 @@ def test_token_request_error_raises_client_response_error() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pw")
+        client = RESTClient(session, "user", "pw")
         with pytest.raises(aiohttp.ClientResponseError) as err:
             await client._ensure_token()
         assert err.value.status == 500
@@ -645,7 +645,7 @@ def test_list_devices_handles_various_shapes() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pw")
+        client = RESTClient(session, "user", "pw")
         first = await client.list_devices()
         second = await client.list_devices()
 
@@ -658,7 +658,7 @@ def test_list_devices_handles_various_shapes() -> None:
 def test_device_connected_returns_none() -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pw")
+        client = RESTClient(session, "user", "pw")
         assert await client.device_connected("dev") is None
 
     asyncio.run(_run())
@@ -667,7 +667,7 @@ def test_device_connected_returns_none() -> None:
 def test_get_nodes_and_settings_use_expected_paths(monkeypatch) -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pw")
+        client = RESTClient(session, "user", "pw")
         client._access_token = "tok"
         client._token_expiry = time.time() + 1000
 
@@ -693,7 +693,7 @@ def test_get_nodes_and_settings_use_expected_paths(monkeypatch) -> None:
 def test_set_htr_settings_includes_prog_and_ptemp(monkeypatch) -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pw")
+        client = RESTClient(session, "user", "pw")
         client._access_token = "tok"
         client._token_expiry = time.time() + 1000
 
@@ -729,7 +729,7 @@ def test_request_cancelled_error_propagates() -> None:
 
         session.queue_request(raise_cancelled)
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         with pytest.raises(asyncio.CancelledError):
             await client._request("GET", "/api/cancel", headers={})
@@ -744,7 +744,7 @@ def test_request_generic_exception_logs(caplog: pytest.LogCaptureFixture) -> Non
         session = FakeSession()
         session.queue_request(RuntimeError("upstream Bearer secret-token failure"))
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         headers = {"Authorization": "Bearer secret-token"}
 
@@ -788,11 +788,11 @@ def test_request_final_auth_error_after_retries(monkeypatch) -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
         headers = await client._authed_headers()
         monkeypatch.setattr(api, "range", lambda _n: (0, 0), raising=False)
 
-        with pytest.raises(api.TermoWebAuthError) as err:
+        with pytest.raises(api.BackendAuthError) as err:
             await client._request("GET", "/api/fail", headers=headers)
 
         assert str(err.value) == "Unauthorized"
@@ -805,7 +805,7 @@ def test_request_final_auth_error_after_retries(monkeypatch) -> None:
 def test_set_htr_settings_invalid_units() -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         with pytest.raises(ValueError, match="Invalid units"):
             await client.set_htr_settings("dev", "1", units="kelvin")
@@ -819,7 +819,7 @@ def test_set_htr_settings_invalid_units() -> None:
 def test_set_htr_settings_invalid_program() -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         with pytest.raises(ValueError, match="prog must be a list of 168"):
             await client.set_htr_settings("dev", "1", prog=[0, 1, 2])
@@ -839,7 +839,7 @@ def test_set_htr_settings_invalid_program() -> None:
 def test_set_htr_settings_invalid_temperatures() -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         with pytest.raises(ValueError, match="Invalid stemp value"):
             await client.set_htr_settings("dev", "1", stemp="warm")
@@ -876,7 +876,7 @@ def test_get_htr_samples_empty_payload() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
         samples = await client.get_htr_samples("dev", "A", 0, 10)
 
         assert samples == []
@@ -907,7 +907,7 @@ def test_get_htr_samples_decreasing_counters() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
         samples = await client.get_htr_samples("dev", "A", 0, 10)
 
         assert samples == [
@@ -921,7 +921,7 @@ def test_get_htr_samples_decreasing_counters() -> None:
 def test_get_htr_samples_malformed_items(monkeypatch, caplog) -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         async def fake_headers() -> dict[str, str]:
             return {}
@@ -955,7 +955,7 @@ def test_get_htr_samples_malformed_items(monkeypatch, caplog) -> None:
 def test_get_htr_samples_unexpected_payload(monkeypatch, caplog) -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         async def fake_headers() -> dict[str, str]:
             return {}
@@ -1007,7 +1007,7 @@ def test_request_recovers_after_token_refresh() -> None:
             ),
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
         devices = await client.list_devices()
 
         assert devices == [{"dev_id": "1"}]
@@ -1022,7 +1022,7 @@ def test_request_recovers_after_token_refresh() -> None:
 def test_list_devices_unexpected_dict_payload(monkeypatch, caplog) -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         async def fake_headers() -> dict[str, str]:
             return {}
@@ -1048,7 +1048,7 @@ def test_list_devices_unexpected_dict_payload(monkeypatch, caplog) -> None:
 def test_list_devices_unexpected_string_payload(monkeypatch, caplog) -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         async def fake_headers() -> dict[str, str]:
             return {}
@@ -1072,7 +1072,7 @@ def test_list_devices_unexpected_string_payload(monkeypatch, caplog) -> None:
 def test_set_htr_settings_translates_heat(monkeypatch) -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         async def fake_headers() -> dict[str, str]:
             return {}

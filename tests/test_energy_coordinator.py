@@ -14,7 +14,7 @@ _install_stubs()
 
 from aiohttp import ClientError
 from custom_components.termoweb import coordinator as coord_module
-from custom_components.termoweb.api import TermoWebAuthError, TermoWebRateLimitError
+from custom_components.termoweb.api import BackendAuthError, BackendRateLimitError
 from custom_components.termoweb.const import (
     HTR_ENERGY_UPDATE_INTERVAL,
     signal_ws_data,
@@ -23,8 +23,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_connect, dispatcher_send
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-TermoWebHeaterEnergyCoordinator = coord_module.TermoWebHeaterEnergyCoordinator
-TermoWebCoordinator = coord_module.TermoWebCoordinator
+EnergyStateCoordinator = coord_module.EnergyStateCoordinator
+StateCoordinator = coord_module.StateCoordinator
 
 
 def test_power_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -38,7 +38,7 @@ def test_power_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
         hass = HomeAssistant()
-        coord = TermoWebHeaterEnergyCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
+        coord = EnergyStateCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
 
         fake_time = 1000.0
 
@@ -67,7 +67,7 @@ def test_coordinator_success_resets_backoff() -> None:
 
         hass = HomeAssistant()
         nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
-        coord = TermoWebCoordinator(
+        coord = StateCoordinator(
             hass,
             client,
             30,
@@ -94,7 +94,7 @@ def test_refresh_heater_skips_invalid_inputs() -> None:
 
         hass = HomeAssistant()
         nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
-        coord = TermoWebCoordinator(
+        coord = StateCoordinator(
             hass,
             client,
             30,
@@ -141,7 +141,7 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
                 {"addr": "B", "type": "htr"},
             ]
         }
-        coord = TermoWebCoordinator(
+        coord = StateCoordinator(
             hass,
             client,
             15,
@@ -194,7 +194,7 @@ def test_refresh_heater_populates_missing_metadata() -> None:
 
         hass = HomeAssistant()
         nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
-        coord = TermoWebCoordinator(
+        coord = StateCoordinator(
             hass,
             client,
             45,
@@ -236,13 +236,13 @@ def test_refresh_heater_handles_errors(caplog: pytest.LogCaptureFixture) -> None
             side_effect=[
                 "not-a-dict",
                 TimeoutError("slow"),
-                TermoWebAuthError("denied"),
+                BackendAuthError("denied"),
             ]
         )
 
         hass = HomeAssistant()
         nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
-        coord = TermoWebCoordinator(
+        coord = StateCoordinator(
             hass,
             client,
             30,
@@ -291,7 +291,7 @@ def test_counter_reset(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
         hass = HomeAssistant()
-        coord = TermoWebHeaterEnergyCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
+        coord = EnergyStateCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
 
         fake_time = 1000.0
 
@@ -322,7 +322,7 @@ def test_energy_regression_resets_last() -> None:
         )
 
         hass = HomeAssistant()
-        coord = TermoWebHeaterEnergyCoordinator(
+        coord = EnergyStateCoordinator(
             hass,
             client,
             "1",
@@ -358,7 +358,7 @@ def test_energy_samples_missing_fields() -> None:
         )
 
         hass = HomeAssistant()
-        coord = TermoWebHeaterEnergyCoordinator(
+        coord = EnergyStateCoordinator(
             hass,
             client,
             "dev",
@@ -381,7 +381,7 @@ def test_energy_samples_invalid_strings() -> None:
         )
 
         hass = HomeAssistant()
-        coord = TermoWebHeaterEnergyCoordinator(
+        coord = EnergyStateCoordinator(
             hass,
             client,
             "dev",
@@ -399,7 +399,7 @@ def test_energy_samples_invalid_strings() -> None:
 def test_update_interval_constant() -> None:
     hass = HomeAssistant()
     client = types.SimpleNamespace()
-    coord = TermoWebHeaterEnergyCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
+    coord = EnergyStateCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
     assert coord.update_interval == HTR_ENERGY_UPDATE_INTERVAL
 
 
@@ -409,7 +409,7 @@ def test_heater_energy_samples_empty_on_api_error() -> None:
         client.get_htr_samples = AsyncMock(side_effect=ClientError("fail"))
 
         hass = HomeAssistant()
-        coord = TermoWebHeaterEnergyCoordinator(
+        coord = EnergyStateCoordinator(
             hass,
             client,
             "1",
@@ -433,7 +433,7 @@ def test_heater_energy_client_error_update_failed(
         client.get_htr_samples = AsyncMock(return_value=[{"t": 1000, "counter": "1.0"}])
 
         hass = HomeAssistant()
-        coord = TermoWebHeaterEnergyCoordinator(
+        coord = EnergyStateCoordinator(
             hass,
             client,
             "1",
@@ -454,14 +454,14 @@ def test_heater_energy_client_error_update_failed(
 def test_coordinator_rate_limit_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         async def _raise_rate_limit(*_args: Any, **_kwargs: Any) -> Any:
-            raise TermoWebRateLimitError("429")
+            raise BackendRateLimitError("429")
 
         client = types.SimpleNamespace()
         client.get_htr_settings = AsyncMock(side_effect=_raise_rate_limit)
 
         hass = HomeAssistant()
         nodes = {"nodes": [{"addr": "A", "type": "htr"}, {"addr": "B", "type": "htr"}]}
-        coord = TermoWebCoordinator(
+        coord = StateCoordinator(
             hass,
             client,
             30,
@@ -514,7 +514,7 @@ def test_coordinator_client_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
         hass = HomeAssistant()
         nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
-        coord = TermoWebCoordinator(
+        coord = StateCoordinator(
             hass,
             client,
             30,
@@ -554,7 +554,7 @@ def test_ws_driven_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
         client.get_htr_samples = AsyncMock(return_value=[{"t": 1000, "counter": "1.0"}])
 
         hass = HomeAssistant()
-        coord = TermoWebHeaterEnergyCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
+        coord = EnergyStateCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
 
         await coord.async_refresh()
         assert coord.data["1"]["htr"]["energy"]["A"] == pytest.approx(0.001)
@@ -586,7 +586,7 @@ def test_coordinator_timeout() -> None:
 
         hass = HomeAssistant()
         nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
-        coord = TermoWebCoordinator(
+        coord = StateCoordinator(
             hass,
             client,
             30,
@@ -607,7 +607,7 @@ def test_heater_energy_timeout() -> None:
         client.get_htr_samples = AsyncMock(side_effect=asyncio.TimeoutError)
 
         hass = HomeAssistant()
-        coord = TermoWebHeaterEnergyCoordinator(
+        coord = EnergyStateCoordinator(
             hass,
             client,
             "1",
