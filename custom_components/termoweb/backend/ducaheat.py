@@ -50,7 +50,6 @@ class DucaheatRESTClient(RESTClient):
             mode_norm = str(mode).lower()
             if mode_norm == "heat":
                 mode_norm = "manual"
-            status_payload["mode"] = mode_norm
             mode_payload = {"mode": mode_norm}
 
         if stemp is not None:
@@ -58,6 +57,8 @@ class DucaheatRESTClient(RESTClient):
                 status_payload["stemp"] = self._ensure_temperature(stemp)
             except ValueError as err:
                 raise ValueError(f"Invalid stemp value: {stemp}") from err
+            if mode_payload is not None:
+                status_payload["mode"] = mode_payload["mode"]
 
         if status_payload:
             unit_str = units.upper() if isinstance(units, str) else "C"

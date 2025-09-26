@@ -1219,6 +1219,123 @@ def test_ducaheat_set_htr_settings_writes_segmented(monkeypatch) -> None:
     asyncio.run(_run())
 
 
+def test_ducaheat_set_htr_settings_mode_only(monkeypatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(200, {"ok": True}, headers={"Content-Type": "application/json"})
+        )
+
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        result = await client.set_htr_settings("dev", "A1", mode="heat")
+        assert result == {"mode": {"ok": True}}
+
+        assert len(session.request_calls) == 1
+        call = session.request_calls[0]
+        assert call[1] == "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/mode"
+        assert call[2]["json"] == {"mode": "manual"}
+        assert call[2]["headers"]["Authorization"] == "Bearer token"
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_set_htr_settings_invalid_stemp(monkeypatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        with pytest.raises(ValueError) as exc:
+            await client.set_htr_settings("dev", "A1", stemp="bad")
+
+        assert "Invalid stemp value" in str(exc.value)
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_set_htr_settings_invalid_units(monkeypatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(200, {}, headers={"Content-Type": "application/json"})
+        )
+
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        with pytest.raises(ValueError) as exc:
+            await client.set_htr_settings("dev", "A1", stemp=21.0, units="K")
+
+        assert "Invalid units" in str(exc.value)
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_set_htr_settings_prog_only(monkeypatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(200, {}, headers={"Content-Type": "application/json"}),
+            MockResponse(200, {"saved": True}, headers={"Content-Type": "application/json"}),
+            MockResponse(200, {}, headers={"Content-Type": "application/json"}),
+        )
+
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        prog_list = [0] * 168
+
+        result = await client.set_htr_settings("dev", "A1", prog=prog_list)
+        assert result == {"prog": {"saved": True}}
+
+        urls = [call[1] for call in session.request_calls]
+        assert urls == [
+            "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/select",
+            "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/prog",
+            "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/select",
+        ]
+
+    asyncio.run(_run())
+
+
 def test_ducaheat_get_htr_samples_converts_ms(monkeypatch) -> None:
     async def _run() -> None:
         session = FakeSession()
@@ -1251,4 +1368,128 @@ def test_ducaheat_get_htr_samples_converts_ms(monkeypatch) -> None:
 
     asyncio.run(_run())
 
+
+def test_ducaheat_normalise_settings_non_dict() -> None:
+    client = DucaheatRESTClient(
+        FakeSession(),
+        "user",
+        "pass",
+        api_base="https://api.termoweb.fake",
+    )
+    assert client._normalise_settings(123) == {}
+
+
+def test_ducaheat_normalise_settings_fallbacks() -> None:
+    client = DucaheatRESTClient(
+        FakeSession(),
+        "user",
+        "pass",
+        api_base="https://api.termoweb.fake",
+    )
+    payload = {
+        "status": {
+            "set_temp": "20.5",
+            "ambient": 19,
+            "boost_temp": "  23.0 ",
+            "boost_time": 30,
+        },
+        "prog": None,
+        "prog_temps": {"cold": "5", "night": None, "day": " 18 "},
+        "name": "Heater",
+    }
+
+    result = client._normalise_settings(payload)
+    assert result["stemp"] == "20.5"
+    assert result["mtemp"] == "19.0"
+    assert result["boost_temp"] == "23.0"
+    assert result["boost_time"] == 30
+    assert result["ptemp"] == ["5.0", "", "18.0"]
+    assert result["name"] == "Heater"
+
+
+def test_ducaheat_normalise_prog_with_varied_inputs() -> None:
+    client = DucaheatRESTClient(
+        FakeSession(),
+        "user",
+        "pass",
+        api_base="https://api.termoweb.fake",
+    )
+    data = {
+        "mon": {"values": [0, 1, 2]},
+        "tue": [1] * 10,
+        "wed": {"slots": [2] * 30},
+        "fri": {"slots": [0] * 24},
+        "sat": {"values": [1] * 24},
+    }
+
+    result = client._normalise_prog(data)
+    assert result is not None
+    assert len(result) == 168
+    # Monday should extend with zeros to 24 slots
+    assert result[:3] == [0, 1, 2]
+
+
+def test_ducaheat_normalise_prog_invalid_inputs() -> None:
+    client = DucaheatRESTClient(
+        FakeSession(),
+        "user",
+        "pass",
+        api_base="https://api.termoweb.fake",
+    )
+
+    assert client._normalise_prog("bad") is None
+    assert client._normalise_prog({"foo": "bar"}) is None
+    assert client._normalise_prog([0] * 168 + ["x"]) is None
+
+    bad_day = {"days": {"mon": ["x"]}}
+    assert client._normalise_prog(bad_day) is None
+
+
+def test_ducaheat_normalise_prog_temps_variations() -> None:
+    client = DucaheatRESTClient(
+        FakeSession(),
+        "user",
+        "pass",
+        api_base="https://api.termoweb.fake",
+    )
+
+    assert client._normalise_prog_temps("bad") is None
+
+    temps = client._normalise_prog_temps(
+        {"antifrost": None, "eco": " 18.5 ", "comfort": "abc"}
+    )
+    assert temps == ["", "18.5", "abc"]
+
+
+def test_ducaheat_safe_temperature_handles_strings() -> None:
+    client = DucaheatRESTClient(
+        FakeSession(),
+        "user",
+        "pass",
+        api_base="https://api.termoweb.fake",
+    )
+
+    assert client._safe_temperature(None) is None
+    assert client._safe_temperature(" 21.2 ") == "21.2"
+    assert client._safe_temperature("   ") is None
+    assert client._safe_temperature("abc") == "abc"
+
+
+def test_extract_samples_handles_list_payload() -> None:
+    client = DucaheatRESTClient(
+        FakeSession(),
+        "user",
+        "pass",
+        api_base="https://api.termoweb.fake",
+    )
+
+    samples = client._extract_samples(
+        [
+            {"timestamp": 2000.0, "value": 5.5},
+            {"t": "bad"},
+            {"timestamp": 1000, "energy": 3},
+        ]
+    )
+
+    assert samples == [{"t": 2000, "counter": "5.5"}, {"t": 1000, "counter": "3"}]
 
