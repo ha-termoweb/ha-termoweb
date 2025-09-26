@@ -14,7 +14,8 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .api import RESTClient
 from .const import API_BASE, DOMAIN, WS_NAMESPACE, signal_ws_data, signal_ws_status
-from .utils import extract_heater_addrs
+from .nodes import build_node_inventory
+from .utils import HEATER_NODE_TYPES, addresses_by_type
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -424,9 +425,28 @@ class WebSocket09Client:
                 # body is nodes payload
                 if isinstance(body, dict):
                     dev_map["nodes"] = body
-                    addrs = extract_heater_addrs(body)
+                    brand = getattr(self._coordinator, "brand", "")
+                    inventory: list[Any] = []
+                    if isinstance(brand, str) and brand:
+                        try:
+                            inventory = build_node_inventory(body, brand)
+                        except ValueError as err:  # pragma: no cover - defensive
+                            _LOGGER.debug(
+                                "WS %s: failed to build node inventory: %s",
+                                self.dev_id,
+                                err,
+                                exc_info=err,
+                            )
+                    addrs = addresses_by_type(inventory, HEATER_NODE_TYPES)
                     dev_map.setdefault("htr", {}).setdefault("settings", {})
                     dev_map["htr"]["addrs"] = addrs
+                    if hasattr(self._coordinator, "update_nodes"):
+                        self._coordinator.update_nodes(body, inventory)
+                    record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
+                    if isinstance(record, dict):
+                        record["nodes"] = body
+                        record["node_inventory"] = inventory
+                        record["htr_addrs"] = addrs
                     updated_nodes = True
 
             elif "/htr/" in path and path.endswith("/settings"):

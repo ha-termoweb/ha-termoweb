@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+import logging
 from typing import Any
 
 from .const import BRAND_DUCAHEAT
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class Node:
@@ -154,3 +158,78 @@ class ThermostatNode(Node):
         """Return thermostat capabilities (stub)."""
 
         raise NotImplementedError
+
+
+NODE_CLASS_BY_TYPE: dict[str, type[Node]] = {
+    HeaterNode.NODE_TYPE: HeaterNode,
+    AccumulatorNode.NODE_TYPE: AccumulatorNode,
+    PowerMonitorNode.NODE_TYPE: PowerMonitorNode,
+    ThermostatNode.NODE_TYPE: ThermostatNode,
+}
+
+
+def _iter_node_payload(raw_nodes: Any) -> Iterable[dict[str, Any]]:
+    """Yield node dictionaries from a payload returned by the API."""
+
+    if isinstance(raw_nodes, dict):
+        node_list = raw_nodes.get("nodes")
+        if isinstance(node_list, list):
+            for entry in node_list:
+                if isinstance(entry, dict):
+                    yield entry
+        return
+
+    if isinstance(raw_nodes, list):
+        for entry in raw_nodes:
+            if isinstance(entry, dict):
+                yield entry
+
+
+def _resolve_node_class(node_type: str, brand: str) -> type[Node]:
+    """Return the most appropriate node class for ``node_type`` and ``brand``."""
+
+    if node_type == AccumulatorNode.NODE_TYPE and brand == BRAND_DUCAHEAT:
+        return DucaheatAccum
+    return NODE_CLASS_BY_TYPE.get(node_type, Node)
+
+
+def build_node_inventory(raw_nodes: Any, brand: str) -> list[Node]:
+    """Return a list of :class:`Node` instances for the provided payload.
+
+    ``raw_nodes`` is typically the JSON response from ``/mgr/nodes``.  Each
+    entry is validated and normalised – unknown node types are logged at DEBUG
+    level yet still represented using the base :class:`Node` class so that
+    callers can account for the presence of the device.
+    """
+
+    brand_str = str(brand or "").strip()
+    if not brand_str:
+        msg = "brand must be provided"
+        raise ValueError(msg)
+
+    inventory: list[Node] = []
+    for index, payload in enumerate(_iter_node_payload(raw_nodes)):
+        node_type = str(payload.get("type") or payload.get("node_type") or "").strip().lower()
+        if not node_type:
+            _LOGGER.debug("Skipping node with missing type at index %s: %s", index, payload)
+            continue
+
+        name = payload.get("name") or payload.get("title") or payload.get("label")
+        addr = payload.get("addr") or payload.get("address")
+
+        node_cls = _resolve_node_class(node_type, brand_str)
+        if node_cls is Node:
+            _LOGGER.debug("Unsupported node type '%s' encountered", node_type)
+
+        kwargs: dict[str, Any] = {"name": name, "addr": addr, "brand": brand_str}
+        if node_cls is Node:
+            kwargs["node_type"] = node_type
+        try:
+            node = node_cls(**kwargs)
+        except (TypeError, ValueError) as err:  # pragma: no cover - defensive
+            _LOGGER.debug("Failed to initialise node %s at index %s: %s", payload, index, err)
+            continue
+
+        inventory.append(node)
+
+    return inventory

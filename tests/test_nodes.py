@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from custom_components.termoweb.const import BRAND_DUCAHEAT, BRAND_TERMOWEB
@@ -12,6 +14,7 @@ from custom_components.termoweb.nodes import (
     Node,
     PowerMonitorNode,
     ThermostatNode,
+    build_node_inventory,
 )
 
 
@@ -96,3 +99,37 @@ def test_node_as_dict() -> None:
         "type": "htr",
         "brand": BRAND_TERMOWEB,
     }
+
+
+def test_build_node_inventory_handles_mixed_types(caplog: pytest.LogCaptureFixture) -> None:
+    payload = {
+        "nodes": [
+            {"type": "htr", "addr": 1, "name": "Heater"},
+            {"type": "ACM", "addr": "2", "name": "Accumulator"},
+            {"type": "pmo", "addr": "3"},
+            {"type": "foo", "addr": 4, "name": "Unknown"},
+        ]
+    }
+
+    with caplog.at_level(logging.DEBUG):
+        nodes = build_node_inventory(payload, BRAND_TERMOWEB)
+
+    assert [type(node) for node in nodes] == [
+        HeaterNode,
+        AccumulatorNode,
+        PowerMonitorNode,
+        Node,
+    ]
+    assert [node.addr for node in nodes] == ["1", "2", "3", "4"]
+    assert any("Unsupported node type" in message for message in caplog.messages)
+
+
+def test_build_node_inventory_prefers_ducaheat_accumulator() -> None:
+    payload = {"nodes": [{"type": "acm", "addr": 5, "name": "Storage"}]}
+
+    nodes = build_node_inventory(payload, BRAND_DUCAHEAT)
+
+    assert len(nodes) == 1
+    node = nodes[0]
+    assert isinstance(node, DucaheatAccum)
+    assert node.supports_boost() is True

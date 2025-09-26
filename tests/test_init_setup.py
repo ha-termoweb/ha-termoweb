@@ -63,6 +63,9 @@ class FakeCoordinator:
         dev_id: str,
         dev: dict[str, Any],
         nodes: dict[str, Any],
+        node_inventory: list[Any] | None = None,
+        *,
+        brand: str | None = None,
     ) -> None:
         self.hass = hass
         self.client = client
@@ -70,6 +73,8 @@ class FakeCoordinator:
         self.dev_id = dev_id
         self.dev = dev
         self.nodes = nodes
+        self.node_inventory = list(node_inventory or [])
+        self.brand = (brand or "").strip()
         self.update_interval = timedelta(seconds=base_interval)
         self.data: dict[str, Any] = {dev_id: dev}
         self.listeners: list[Callable[[], None]] = []
@@ -81,6 +86,15 @@ class FakeCoordinator:
 
     def async_add_listener(self, listener: Callable[[], None]) -> None:
         self.listeners.append(listener)
+
+    def update_nodes(
+        self,
+        nodes: dict[str, Any],
+        node_inventory: list[Any] | None = None,
+    ) -> None:
+        self.nodes = nodes
+        if node_inventory is not None:
+            self.node_inventory = list(node_inventory)
 
 
 class BaseFakeClient:
@@ -104,18 +118,6 @@ class BaseFakeClient:
     async def get_nodes(self, dev_id: str) -> dict[str, Any]:
         self.get_nodes_calls.append(dev_id)
         return {}
-
-
-def _extract_addrs(nodes: dict[str, Any]) -> list[str]:
-    addrs: list[str] = []
-    node_list = nodes.get("nodes") if isinstance(nodes, dict) else None
-    if isinstance(node_list, list):
-        for node in node_list:
-            if isinstance(node, dict) and "addr" in node:
-                addrs.append(str(node["addr"]))
-    return addrs
-
-
 async def _drain_tasks(hass: HomeAssistant) -> None:
     if hass.tasks:
         await asyncio.gather(*hass.tasks, return_exceptions=True)
@@ -133,7 +135,6 @@ def termoweb_init(monkeypatch: pytest.MonkeyPatch) -> Any:
     module = importlib.reload(module)
     monkeypatch.setattr(module, "StateCoordinator", FakeCoordinator)
     monkeypatch.setattr(module, "WebSocket09Client", FakeWSClient)
-    monkeypatch.setattr(module, "extract_heater_addrs", _extract_addrs)
     module._test_helpers = SimpleNamespace(
         fake_coordinator=FakeCoordinator,
         get_record=lambda hass, entry: hass.data[module.DOMAIN][entry.entry_id],
@@ -206,7 +207,12 @@ def test_async_setup_entry_happy_path(
 
         async def get_nodes(self, dev_id: str) -> dict[str, Any]:
             assert dev_id == "dev-1"
-            return {"nodes": [{"addr": "A"}, {"addr": "B"}]}
+            return {
+                "nodes": [
+                    {"addr": "A", "type": "htr"},
+                    {"addr": "B", "type": "acm"},
+                ]
+            }
 
     monkeypatch.setattr(termoweb_init, "RESTClient", HappyClient)
     import_mock = AsyncMock()
@@ -227,6 +233,8 @@ def test_async_setup_entry_happy_path(
     assert isinstance(record["coordinator"], FakeCoordinator)
     assert record["coordinator"].refresh_calls == 1
     assert record["htr_addrs"] == ["A", "B"]
+    assert [node.addr for node in record["node_inventory"]] == ["A", "B"]
+    assert [node.type for node in record["node_inventory"]] == ["htr", "acm"]
     assert stub_hass.client_session_calls == 1
     assert stub_hass.config_entries.forwarded == [
         (entry, tuple(termoweb_init.PLATFORMS))
@@ -309,7 +317,7 @@ def test_async_setup_entry_defers_until_started(
             return [{"dev_id": "dev-1"}]
 
         async def get_nodes(self, dev_id: str) -> dict[str, Any]:
-            return {"nodes": [{"addr": "A"}]}
+            return {"nodes": [{"addr": "A", "type": "htr"}]}
 
     monkeypatch.setattr(termoweb_init, "RESTClient", HappyClient)
     import_mock = AsyncMock()
@@ -349,7 +357,12 @@ def test_import_energy_history_service_invocation(
             return [{"dev_id": "dev-1"}]
 
         async def get_nodes(self, dev_id: str) -> dict[str, Any]:
-            return {"nodes": [{"addr": "A"}, {"addr": "B"}]}
+            return {
+                "nodes": [
+                    {"addr": "A", "type": "htr"},
+                    {"addr": "B", "type": "htr"},
+                ]
+            }
 
     monkeypatch.setattr(termoweb_init, "RESTClient", HappyClient)
     import_mock = AsyncMock()

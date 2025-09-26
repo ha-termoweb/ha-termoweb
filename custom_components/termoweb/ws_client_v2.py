@@ -14,6 +14,8 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .api import RESTClient
 from .const import API_BASE, DOMAIN, signal_ws_data, signal_ws_status
+from .nodes import build_node_inventory
+from .utils import HEATER_NODE_TYPES, addresses_by_type
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -164,6 +166,31 @@ class DucaheatWSClient:
         return None
 
     def _dispatch_nodes(self, nodes: dict[str, Any]) -> None:
+        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
+        brand = ""
+        if isinstance(record, dict):
+            brand = str(record.get("brand") or "").strip()
+
+        inventory: list[Any] = []
+        if brand:
+            try:
+                inventory = build_node_inventory(nodes, brand)
+            except ValueError as err:  # pragma: no cover - defensive
+                _LOGGER.debug(
+                    "WS %s: failed to build node inventory: %s",
+                    self.dev_id,
+                    err,
+                    exc_info=err,
+                )
+
+        if hasattr(self._coordinator, "update_nodes"):
+            self._coordinator.update_nodes(nodes, inventory)
+
+        if isinstance(record, dict):
+            record["nodes"] = nodes
+            record["node_inventory"] = inventory
+            record["htr_addrs"] = addresses_by_type(inventory, HEATER_NODE_TYPES)
+
         payload = {"dev_id": self.dev_id, "nodes": deepcopy(nodes)}
 
         def _send() -> None:

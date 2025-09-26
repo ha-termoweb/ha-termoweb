@@ -13,7 +13,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import BackendAuthError, RESTClient, BackendRateLimitError
 from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
-from .utils import extract_heater_addrs, float_or_none
+from .nodes import Node, build_node_inventory
+from .utils import HEATER_NODE_TYPES, addresses_by_type, float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,6 +33,9 @@ class StateCoordinator(
         dev_id: str,
         device: dict[str, Any],
         nodes: dict[str, Any],
+        node_inventory: list[Node] | None = None,
+        *,
+        brand: str | None = None,
     ) -> None:
         """Initialize the TermoWeb device coordinator."""
         super().__init__(
@@ -47,9 +51,34 @@ class StateCoordinator(
         self._dev_id = dev_id
         self._device = device or {}
         self._nodes = nodes or {}
+        self._brand = (brand or "").strip()
+        self._node_inventory: list[Node] = list(node_inventory or [])
+
+    @property
+    def brand(self) -> str:
+        """Return the configured brand for this coordinator."""
+
+        return self._brand
 
     def _addrs(self) -> list[str]:
-        return extract_heater_addrs(self._nodes)
+        if not self._node_inventory and self._nodes and self._brand:
+            self._node_inventory = build_node_inventory(self._nodes, self._brand)
+        return addresses_by_type(self._node_inventory, HEATER_NODE_TYPES)
+
+    def update_nodes(
+        self,
+        nodes: dict[str, Any],
+        node_inventory: list[Node] | None = None,
+    ) -> None:
+        """Update cached node payload and inventory."""
+
+        self._nodes = nodes or {}
+        if node_inventory is not None:
+            self._node_inventory = list(node_inventory)
+        elif self._brand:
+            self._node_inventory = build_node_inventory(self._nodes, self._brand)
+        else:
+            self._node_inventory = []
 
     async def async_refresh_heater(self, addr: str) -> None:
         """Refresh settings for a specific heater and push the update to listeners."""

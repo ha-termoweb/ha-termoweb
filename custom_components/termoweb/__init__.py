@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 import logging
@@ -37,7 +38,8 @@ from .const import (
     signal_ws_status,
 )
 from .coordinator import StateCoordinator
-from .utils import extract_heater_addrs
+from .nodes import build_node_inventory
+from .utils import HEATER_NODE_TYPES, addresses_by_type
 
 # Re-export legacy WS client for backward compatibility (tests may patch it).
 from .ws_client_legacy import WebSocket09Client  # noqa: F401
@@ -499,9 +501,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         dev.get("dev_id") or dev.get("id") or dev.get("serial_id") or ""
     ).strip()
     nodes = await client.get_nodes(dev_id)
-    addrs = extract_heater_addrs(nodes)
+    node_inventory = build_node_inventory(nodes, brand)
+    addrs = addresses_by_type(node_inventory, HEATER_NODE_TYPES)
 
-    coordinator = StateCoordinator(hass, client, base_interval, dev_id, dev, nodes)
+    if node_inventory:
+        type_counts = Counter(node.type for node in node_inventory)
+        summary = ", ".join(f"{node_type}:{count}" for node_type, count in sorted(type_counts.items()))
+    else:
+        summary = "none"
+    _LOGGER.info("%s: discovered node types: %s", dev_id, summary)
+
+    coordinator = StateCoordinator(
+        hass,
+        client,
+        base_interval,
+        dev_id,
+        dev,
+        nodes,
+        node_inventory,
+        brand=brand,
+    )
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = data = {
@@ -510,6 +529,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "coordinator": coordinator,
         "dev_id": dev_id,
         "nodes": nodes,
+        "node_inventory": node_inventory,
         "htr_addrs": addrs,
         "config_entry": entry,
         "base_poll_interval": max(base_interval, MIN_POLL_INTERVAL),

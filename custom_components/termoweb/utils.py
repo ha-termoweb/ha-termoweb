@@ -1,25 +1,39 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from typing import Any
 
+from .nodes import Node
 
-def extract_heater_addrs(nodes: dict[str, Any] | None) -> list[str]:
-    """Return heater addresses from a nodes payload.
+HEATER_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm"})
 
-    The function expects a mapping like the one returned by the
-    `/mgr/nodes` endpoint and extracts the `addr` of all entries
-    whose `type` is `htr` (case-insensitive).
-    """
-    addrs: dict[str, None] = {}
-    if isinstance(nodes, dict):
-        node_list = nodes.get("nodes")
-        if isinstance(node_list, list):
-            for n in node_list:
-                if isinstance(n, dict) and (n.get("type") or "").lower() == "htr":
-                    addr = str(n.get("addr"))
-                    addrs.setdefault(addr)
-    return list(addrs)
+
+def addresses_by_type(nodes: Iterable[Node], node_types: Iterable[str]) -> list[str]:
+    """Return unique addresses for nodes whose ``type`` matches ``node_types``."""
+
+    valid_types: set[str] = set()
+    for node_type in node_types:
+        if node_type is None:
+            continue
+        valid_types.add(str(node_type).strip().lower())
+    result: list[str] = []
+    seen: set[str] = set()
+
+    if not valid_types:
+        return result
+
+    for node in nodes:
+        node_type = str(getattr(node, "type", "")).strip().lower()
+        if node_type not in valid_types:
+            continue
+        addr = str(getattr(node, "addr", "")).strip()
+        if not addr or addr in seen:
+            continue
+        seen.add(addr)
+        result.append(addr)
+
+    return result
 
 
 def float_or_none(value: Any) -> float | None:
