@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+import logging
 import time
 from typing import Any, Callable
 
@@ -11,6 +12,7 @@ import pytest
 
 import custom_components.termoweb.api as api
 from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
+from custom_components.termoweb.nodes import AccumulatorNode
 
 RESTClient = api.RESTClient
 
@@ -691,6 +693,73 @@ def test_get_nodes_and_settings_use_expected_paths(monkeypatch) -> None:
     asyncio.run(_run())
 
 
+def test_get_node_settings_acm_logs(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(
+                200,
+                {"status": {"mode": "auto"}, "capabilities": {"boost": {"max": 60}}},
+                headers={"Content-Type": "application/json"},
+            )
+        )
+
+        client = RESTClient(session, "user", "pw")
+        client._access_token = "tok"
+        client._token_expiry = time.time() + 1000
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer tok"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        caplog.set_level(logging.DEBUG, logger=api.__name__)
+        node = AccumulatorNode(name="Store", addr="7")
+        data = await client.get_node_settings("dev", node)
+
+        assert data["status"]["mode"] == "auto"
+        assert any(
+            "GET settings node dev/7 (acm) payload" in record.getMessage()
+            for record in caplog.records
+        )
+
+    asyncio.run(_run())
+
+
+def test_get_node_samples_logs_for_unknown_type(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(
+                200,
+                {"unexpected": True},
+                headers={"Content-Type": "application/json"},
+            )
+        )
+
+        client = RESTClient(session, "user", "pw")
+        client._access_token = "tok"
+        client._token_expiry = time.time() + 1000
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer tok"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        caplog.set_level(logging.DEBUG, logger=api.__name__)
+        samples = await client.get_node_samples("dev", ("pmo", "4"), 0, 5)
+
+        assert samples == []
+        assert any(
+            "GET samples node dev/4 (pmo) payload" in record.getMessage()
+            for record in caplog.records
+        )
+
+    asyncio.run(_run())
+
+
 def test_set_htr_settings_includes_prog_and_ptemp(monkeypatch) -> None:
     async def _run() -> None:
         session = FakeSession()
@@ -1160,6 +1229,54 @@ def test_ducaheat_get_htr_settings_normalises_payload(
         assert len(data["prog"]) == 168
         assert data["ptemp"] == ["7.0", "18.0", "21.0"]
         assert data["raw"]["status"]["mode"] == "Manual"
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_get_node_settings_acm_merges_capabilities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(
+                200,
+                {
+                    "status": {
+                        "mode": "auto",
+                        "capabilities": {"boost": {"max": 90}},
+                    },
+                    "setup": {
+                        "capabilities": {
+                            "boost": {"min": 10},
+                            "charge": {"modes": ["eco"]},
+                        }
+                    },
+                    "capabilities": {"charge": {"levels": [1, 2, 3]}},
+                },
+                headers={"Content-Type": "application/json"},
+            )
+        )
+
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        data = await client.get_node_settings("dev", ("acm", "2"))
+
+        assert data["mode"] == "auto"
+        assert data["capabilities"] == {
+            "boost": {"max": 90, "min": 10},
+            "charge": {"modes": ["eco"], "levels": [1, 2, 3]},
+        }
 
     asyncio.run(_run())
 

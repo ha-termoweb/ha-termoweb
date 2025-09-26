@@ -12,13 +12,16 @@ class DummyClient:
     async def get_nodes(self, dev_id: str) -> dict[str, object]:
         return {"dev_id": dev_id}
 
-    async def get_htr_settings(self, dev_id: str, addr: str | int) -> dict[str, object]:
-        return {"dev_id": dev_id, "addr": addr}
+    async def get_node_settings(
+        self, dev_id: str, node: tuple[str, str | int]
+    ) -> dict[str, object]:
+        node_type, addr = node
+        return {"dev_id": dev_id, "addr": addr, "type": node_type}
 
-    async def set_htr_settings(
+    async def set_node_settings(
         self,
         dev_id: str,
-        addr: str | int,
+        node: tuple[str, str | int],
         *,
         mode: str | None = None,
         stemp: float | None = None,
@@ -28,10 +31,10 @@ class DummyClient:
     ) -> dict[str, object]:
         return {}
 
-    async def get_htr_samples(
+    async def get_node_samples(
         self,
         dev_id: str,
-        addr: str | int,
+        node: tuple[str, str | int],
         start: float,
         stop: float,
     ) -> list[dict[str, object]]:
@@ -58,3 +61,14 @@ def test_ducaheat_backend_creates_ws_client() -> None:
     assert isinstance(ws_client, DucaheatWSClient)
     assert ws_client.dev_id == "dev"
     assert ws_client.entry_id == "entry"
+
+
+def test_dummy_client_get_node_settings_accepts_acm() -> None:
+    client = DummyClient()
+
+    async def _run() -> dict[str, object]:
+        return await client.get_node_settings("dev", ("acm", "3"))
+
+    data = asyncio.run(_run())
+    assert data["type"] == "acm"
+    assert data["addr"] == "3"

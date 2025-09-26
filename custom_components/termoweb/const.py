@@ -15,7 +15,7 @@ CONNECTED_PATH_FMT: Final = (
     "/api/v2/devs/{dev_id}/connected"  # some fw return 404; we tolerate
 )
 NODES_PATH_FMT: Final = "/api/v2/devs/{dev_id}/mgr/nodes"
-HTR_SAMPLES_PATH_FMT: Final = "/api/v2/devs/{dev_id}/htr/{addr}/samples"
+NODE_SAMPLES_PATH_FMT: Final = "/api/v2/devs/{dev_id}/{node_type}/{addr}/samples"
 
 # Public client creds (from APK v2.5.1)
 BASIC_AUTH_B64: Final = "NTIxNzJkYzg0ZjYzZDZjNzU5MDAwMDA1OmJ4djRaM3hVU2U="

@@ -7,6 +7,7 @@ from typing import Any
 
 from ..api import RESTClient
 from ..const import BRAND_DUCAHEAT
+from ..nodes import Node
 from ..ws_client_v2 import DucaheatWSClient
 from .base import Backend, WsClientProto
 
@@ -14,22 +15,33 @@ _LOGGER = logging.getLogger(__name__)
 
 _DAY_ORDER = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
+NodeDescriptor = Node | tuple[str, str | int]
+
 
 class DucaheatRESTClient(RESTClient):
     """HTTP adapter that speaks the segmented Ducaheat API."""
 
-    async def get_htr_settings(self, dev_id: str, addr: str | int) -> dict[str, Any]:
-        """Fetch and normalise heater settings for the Ducaheat API."""
+    async def get_node_settings(
+        self, dev_id: str, node: NodeDescriptor
+    ) -> dict[str, Any]:
+        """Fetch and normalise node settings for the Ducaheat API."""
 
-        headers = await self._authed_headers()
-        path = f"/api/v2/devs/{dev_id}/htr/{addr}"
-        payload = await self._request("GET", path, headers=headers)
-        return self._normalise_settings(payload)
+        node_type, addr = self._resolve_node_descriptor(node)
+        if node_type == "htr":
+            headers = await self._authed_headers()
+            path = f"/api/v2/devs/{dev_id}/htr/{addr}"
+            payload = await self._request("GET", path, headers=headers)
+            return self._normalise_settings(payload, node_type=node_type)
 
-    async def set_htr_settings(
+        response = await super().get_node_settings(dev_id, (node_type, addr))
+        if node_type == "acm":
+            return self._normalise_settings(response, node_type=node_type)
+        return response
+
+    async def set_node_settings(
         self,
         dev_id: str,
-        addr: str | int,
+        node: NodeDescriptor,
         *,
         mode: str | None = None,
         stemp: float | None = None,
@@ -38,6 +50,18 @@ class DucaheatRESTClient(RESTClient):
         units: str = "C",
     ) -> dict[str, Any]:
         """Write heater settings using the segmented endpoints."""
+
+        node_type, addr = self._resolve_node_descriptor(node)
+        if node_type != "htr":
+            return await super().set_node_settings(
+                dev_id,
+                (node_type, addr),
+                mode=mode,
+                stemp=stemp,
+                prog=prog,
+                ptemp=ptemp,
+                units=units,
+            )
 
         headers = await self._authed_headers()
         base = f"/api/v2/devs/{dev_id}/htr/{addr}"
@@ -134,14 +158,18 @@ class DucaheatRESTClient(RESTClient):
                     )
         return responses
 
-    async def get_htr_samples(
+    async def get_node_samples(
         self,
         dev_id: str,
-        addr: str | int,
+        node: NodeDescriptor,
         start: float,
         stop: float,
     ) -> list[dict[str, str | int]]:
         """Return samples converting epoch seconds to milliseconds for the API."""
+
+        node_type, addr = self._resolve_node_descriptor(node)
+        if node_type != "htr":
+            return await super().get_node_samples(dev_id, (node_type, addr), start, stop)
 
         headers = await self._authed_headers()
         path = f"/api/v2/devs/{dev_id}/htr/{addr}/samples"
@@ -149,7 +177,9 @@ class DucaheatRESTClient(RESTClient):
         data = await self._request("GET", path, headers=headers, params=params)
         return self._extract_samples(data, timestamp_divisor=1000)
 
-    def _normalise_settings(self, payload: Any) -> dict[str, Any]:
+    def _normalise_settings(
+        self, payload: Any, *, node_type: str = "htr"
+    ) -> dict[str, Any]:
         if not isinstance(payload, dict):
             return {}
 
@@ -246,7 +276,40 @@ class DucaheatRESTClient(RESTClient):
                 flattened[key] = payload[key]
 
         flattened["raw"] = deepcopy(payload)
+
+        if node_type == "acm":
+            capabilities = self._normalise_acm_capabilities(payload)
+            if capabilities:
+                flattened["capabilities"] = capabilities
+
         return flattened
+
+    def _normalise_acm_capabilities(self, payload: Any) -> dict[str, Any]:
+        """Merge accumulator capability dictionaries into a single mapping."""
+
+        merged: dict[str, Any] = {}
+
+        def _merge(target: dict[str, Any], source: dict[str, Any]) -> None:
+            for key, value in source.items():
+                if (
+                    isinstance(value, dict)
+                    and isinstance(target.get(key), dict)
+                ):
+                    _merge(target[key], value)
+                else:
+                    target[key] = value
+
+        for container in (
+            payload,
+            payload.get("status") if isinstance(payload, dict) else None,
+            payload.get("setup") if isinstance(payload, dict) else None,
+        ):
+            if isinstance(container, dict):
+                candidate = container.get("capabilities")
+                if isinstance(candidate, dict):
+                    _merge(merged, candidate)
+
+        return merged
 
     def _normalise_prog(self, data: Any) -> list[int] | None:
         if isinstance(data, list):
