@@ -14,7 +14,7 @@ _LOGGER = logging.getLogger(__name__)
 class Node:
     """Base representation of a TermoWeb node."""
 
-    __slots__ = ("_node_name", "addr", "brand", "type")
+    __slots__ = ("_node_name", "addr", "type")
     NODE_TYPE = ""
 
     def __init__(
@@ -22,7 +22,6 @@ class Node:
         *,
         name: str | None,
         addr: str | int,
-        brand: str,
         node_type: str | None = None,
     ) -> None:
         """Initialise a node with normalised metadata."""
@@ -37,14 +36,8 @@ class Node:
             msg = "addr must be provided"
             raise ValueError(msg)
 
-        brand_str = str(brand or "").strip()
-        if not brand_str:
-            msg = "brand must be provided"
-            raise ValueError(msg)
-
         self.addr = addr_str
         self.type = resolved_type
-        self.brand = brand_str
         self._node_name = ""
         self.name = name if name is not None else ""
 
@@ -71,7 +64,6 @@ class Node:
             "name": self.name,
             "addr": self.addr,
             "type": self.type,
-            "brand": self.brand,
         }
 
 
@@ -81,10 +73,10 @@ class HeaterNode(Node):
     __slots__ = ()
     NODE_TYPE = "htr"
 
-    def __init__(self, *, name: str | None, addr: str | int, brand: str) -> None:
+    def __init__(self, *, name: str | None, addr: str | int) -> None:
         """Initialise a heater node."""
 
-        super().__init__(name=name, addr=addr, brand=brand)
+        super().__init__(name=name, addr=addr)
 
     def supports_boost(self) -> bool:
         """Return whether the node natively exposes boost/runback control."""
@@ -109,16 +101,10 @@ class DucaheatAccum(AccumulatorNode):
 
     __slots__ = ()
 
-    def __init__(
-        self,
-        *,
-        name: str | None,
-        addr: str | int,
-        brand: str = BRAND_DUCAHEAT,
-    ) -> None:
+    def __init__(self, *, name: str | None, addr: str | int) -> None:
         """Initialise a Ducaheat accumulator node."""
 
-        super().__init__(name=name, addr=addr, brand=brand)
+        super().__init__(name=name, addr=addr)
 
     def supports_boost(self) -> bool:
         """Return ``True`` to indicate boost is available."""
@@ -132,10 +118,10 @@ class PowerMonitorNode(Node):
     __slots__ = ()
     NODE_TYPE = "pmo"
 
-    def __init__(self, *, name: str | None, addr: str | int, brand: str) -> None:
+    def __init__(self, *, name: str | None, addr: str | int) -> None:
         """Initialise a power monitor node."""
 
-        super().__init__(name=name, addr=addr, brand=brand)
+        super().__init__(name=name, addr=addr)
 
     def power_level(self) -> float:
         """Return the reported power level (stub)."""
@@ -149,10 +135,10 @@ class ThermostatNode(Node):
     __slots__ = ()
     NODE_TYPE = "thm"
 
-    def __init__(self, *, name: str | None, addr: str | int, brand: str) -> None:
+    def __init__(self, *, name: str | None, addr: str | int) -> None:
         """Initialise a thermostat node."""
 
-        super().__init__(name=name, addr=addr, brand=brand)
+        super().__init__(name=name, addr=addr)
 
     def capabilities(self) -> dict[str, Any]:
         """Return thermostat capabilities (stub)."""
@@ -221,7 +207,7 @@ def build_node_inventory(raw_nodes: Any, brand: str) -> list[Node]:
         if node_cls is Node:
             _LOGGER.debug("Unsupported node type '%s' encountered", node_type)
 
-        kwargs: dict[str, Any] = {"name": name, "addr": addr, "brand": brand_str}
+        kwargs: dict[str, Any] = {"name": name, "addr": addr}
         if node_cls is Node:
             kwargs["node_type"] = node_type
         try:

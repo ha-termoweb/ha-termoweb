@@ -40,8 +40,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     name_map = build_heater_name_map(nodes, lambda addr: f"Heater {addr}")
 
-    brand = data.get("brand", BRAND_TERMOWEB)
-
     new_entities = [
         HeaterClimateEntity(
             coordinator,
@@ -49,7 +47,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
             dev_id,
             addr,
             name_map.get(addr, f"Heater {addr}"),
-            brand=brand,
         )
         for addr in addrs
     ]
@@ -127,10 +124,8 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         dev_id: str,
         addr: str,
         name: str,
-        *,
-        brand: str | None = None,
     ) -> None:
-        HeaterNode.__init__(self, name=name, addr=addr, brand=brand or BRAND_TERMOWEB)
+        HeaterNode.__init__(self, name=name, addr=addr)
         HeaterNodeBase.__init__(self, coordinator, entry_id, dev_id, addr, self.name)
 
         self._refresh_fallback: asyncio.Task | None = None

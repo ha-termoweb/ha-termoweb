@@ -63,13 +63,11 @@ def test_termoweb_heater_is_heater_node() -> None:
         "dev",
         "1",
         " Living Room ",
-        brand=BRAND_TERMOWEB,
     )
 
     assert isinstance(heater, HeaterNode)
     assert heater.type == "htr"
     assert heater.addr == "1"
-    assert heater.brand == BRAND_TERMOWEB
     assert heater.name == "Living Room"
 
 
