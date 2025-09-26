@@ -160,6 +160,51 @@ def test_async_setup_entry_creates_entities() -> None:
     asyncio.run(_run())
 
 
+def test_async_setup_entry_rebuilds_inventory_when_missing() -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry = types.SimpleNamespace(entry_id="entry-missing")
+        dev_id = "dev-missing"
+        nodes = {
+            "nodes": [
+                {"type": "htr", "addr": "11", "name": " First "},
+                {"type": "HTR", "addr": "22"},
+            ]
+        }
+
+        coordinator = FakeCoordinator(
+            hass,
+            {
+                dev_id: {
+                    "nodes": nodes,
+                    "htr": {"settings": {"11": {}, "22": {}}},
+                }
+            },
+        )
+
+        record: dict[str, Any] = {
+            "coordinator": coordinator,
+            "dev_id": dev_id,
+            "client": AsyncMock(),
+            "nodes": nodes,
+        }
+        hass.data = {DOMAIN: {entry.entry_id: record}}
+
+        added: list[HeaterClimateEntity] = []
+
+        def _async_add_entities(entities: list[HeaterClimateEntity]) -> None:
+            added.extend(entities)
+
+        await async_setup_entry(hass, entry, _async_add_entities)
+
+        assert len(added) == 2
+        stored_inventory = hass.data[DOMAIN][entry.entry_id]["node_inventory"]
+        assert [node.addr for node in stored_inventory] == ["11", "22"]
+
+    asyncio.run(_run())
+
+
 def test_refresh_fallback_skips_when_hass_inactive(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -451,6 +451,47 @@ def test_heater_energy_client_error_update_failed(
     asyncio.run(_run())
 
 
+def test_state_coordinator_update_nodes_rebuilds_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hass = HomeAssistant()
+    client = types.SimpleNamespace()
+    nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
+
+    built_nodes = [types.SimpleNamespace(addr="A")]
+    calls: list[dict[str, Any]] = []
+
+    def fake_build(payload: dict[str, Any]) -> list[Any]:
+        calls.append(payload)
+        return built_nodes
+
+    monkeypatch.setattr(coord_module, "build_node_inventory", fake_build)
+
+    coord = StateCoordinator(
+        hass,
+        client,
+        30,
+        "dev",
+        {"name": "Device"},
+        {},
+    )
+
+    coord.update_nodes(nodes)
+
+    assert calls == [nodes]
+    assert coord._node_inventory == built_nodes
+
+
+def test_energy_state_coordinator_update_addresses_filters_duplicates() -> None:
+    hass = HomeAssistant()
+    client = types.SimpleNamespace()
+    coord = EnergyStateCoordinator(hass, client, "dev", ["orig"])  # type: ignore[arg-type]
+
+    coord.update_addresses(["A", " ", "B", "A", "B ", ""])
+
+    assert coord._addrs == ["A", "B"]
+
+
 def test_coordinator_rate_limit_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         async def _raise_rate_limit(*_args: Any, **_kwargs: Any) -> Any:

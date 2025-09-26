@@ -304,6 +304,51 @@ def test_async_import_energy_history_missing_record(
     assert "no record found for energy import" in caplog.text
 
 
+def test_async_import_energy_history_rebuilds_missing_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        (
+            mod,
+            const,
+            _import_stats,
+            _update_meta,
+            _last_stats,
+            _get_period,
+            _delete_stats,
+            ConfigEntry,
+            HomeAssistant,
+            _ent_reg,
+        ) = await _load_module(monkeypatch)
+
+        hass = HomeAssistant()
+        hass.config_entries = types.SimpleNamespace(async_update_entry=Mock())
+
+        entry = ConfigEntry(
+            "1",
+            options={mod.OPTION_ENERGY_HISTORY_IMPORTED: True},
+        )
+
+        nodes_payload = {"nodes": [{"addr": "A", "type": "htr"}]}
+        client = types.SimpleNamespace()
+        hass.data = {
+            const.DOMAIN: {
+                entry.entry_id: {
+                    "client": client,
+                    "dev_id": "dev",
+                    "nodes": nodes_payload,
+                }
+            }
+        }
+
+        await mod._async_import_energy_history(hass, entry)
+
+        inventory = hass.data[const.DOMAIN][entry.entry_id]["node_inventory"]
+        assert [node.addr for node in inventory] == ["A"]
+
+    asyncio.run(_run())
+
+
 def test_async_import_energy_history_already_imported(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:

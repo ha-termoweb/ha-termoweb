@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import types
+from typing import Any, Iterable
 
 import pytest
 
@@ -19,11 +21,29 @@ def test_ducaheat_ws_client_flow(monkeypatch: pytest.MonkeyPatch) -> None:
 
     async def _run() -> None:
         loop = asyncio.get_running_loop()
+        node_updates: list[tuple[dict[str, Any], list[Any]]] = []
+        energy_updates: list[list[str]] = []
+
+        class RecordingCoordinator:
+            def update_nodes(self, nodes: dict[str, Any], inventory: list[Any]) -> None:
+                node_updates.append((copy.deepcopy(nodes), list(inventory)))
+
+        class FakeEnergyCoordinator:
+            def update_addresses(self, addrs: Iterable[str]) -> None:
+                energy_updates.append(list(addrs))
+
         hass = types.SimpleNamespace(
             loop=loop,
-            data={ws_v2.DOMAIN: {"entry": {"ws_state": {}}}},
+            data={
+                ws_v2.DOMAIN: {
+                    "entry": {
+                        "ws_state": {},
+                        "energy_coordinator": FakeEnergyCoordinator(),
+                    }
+                }
+            },
         )
-        coordinator = types.SimpleNamespace()
+        coordinator = RecordingCoordinator()
 
         class FakeClient:
             api_base = "https://api-tevolve.termoweb.net/"
@@ -118,6 +138,14 @@ def test_ducaheat_ws_client_flow(monkeypatch: pytest.MonkeyPatch) -> None:
         assert data_payloads[2]["nodes"]["raw"] == {
             "meta": {"foo": "bar", "extra": True},
         }
+        assert len(node_updates) == len(energy_updates) == 3
+        assert node_updates[0][0] == initial_update["nodes"]
+        assert node_updates[1][0] == dev_data_payload["nodes"]
+        assert node_updates[2][0]["htr"]["status"] == {
+            "01": {"temp": 20},
+            "02": {"temp": 21},
+        }
+        assert all(not update for update in energy_updates)
         assert data_payloads[2]["nodes"]["metrics"] == 3
         for payload in data_payloads:
             assert payload["dev_id"] == "dev"

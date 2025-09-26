@@ -830,22 +830,41 @@ def test_handle_event_updates_state_and_dispatch(monkeypatch: pytest.MonkeyPatch
     module = _load_ws_client()
     module.async_dispatcher_send = MagicMock()
     loop = asyncio.new_event_loop()
+    class RecordingCoordinator:
+        def __init__(self) -> None:
+            self.data = {
+                "dev": {
+                    "dev_id": "dev",
+                    "name": "Device dev",
+                    "raw": {"existing": True},
+                    "connected": True,
+                    "nodes": None,
+                    "htr": {"addrs": [], "settings": {}},
+                }
+            }
+
+        def update_nodes(self, nodes: dict[str, Any], inventory: list[Any]) -> None:
+            node_updates.append((nodes, inventory))
+
+    node_updates: list[tuple[dict[str, Any], list[Any]]] = []
+    energy_updates: list[list[str]] = []
+
+    class FakeEnergyCoordinator:
+        def update_addresses(self, addrs: Iterable[str]) -> None:
+            energy_updates.append(list(addrs))
+
     hass = types.SimpleNamespace(
         loop=loop,
-        data={module.DOMAIN: {"entry": {"ws_state": {}}}},
-    )
-    coordinator = types.SimpleNamespace(
         data={
-            "dev": {
-                "dev_id": "dev",
-                "name": "Device dev",
-                "raw": {"existing": True},
-                "connected": True,
-                "nodes": None,
-                "htr": {"addrs": [], "settings": {}},
+            module.DOMAIN: {
+                "entry": {
+                    "ws_state": {},
+                    "energy_coordinator": FakeEnergyCoordinator(),
+                }
             }
-        }
+        },
     )
+    coordinator = RecordingCoordinator()
     api = types.SimpleNamespace(_session=types.SimpleNamespace())
     client = module.WebSocket09Client(
         hass,
@@ -911,6 +930,16 @@ def test_handle_event_updates_state_and_dispatch(monkeypatch: pytest.MonkeyPatch
         ]
     )
     assert module.async_dispatcher_send.call_count == 3
+
+    assert len(node_updates) == 1
+    assert node_updates[0][0] == {
+        "nodes": [
+            {"addr": "01", "type": "htr"},
+            {"addr": "02", "type": "HTR"},
+        ]
+    }
+    assert [node.addr for node in node_updates[0][1]] == ["01", "02"]
+    assert energy_updates == [["01", "02"]]
 
     ws_state = hass.data[module.DOMAIN]["entry"]["ws_state"]["dev"]
     assert ws_state["last_event_at"] == 1000.0
