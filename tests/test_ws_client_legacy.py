@@ -826,10 +826,13 @@ def test_handshake_status_error_raises_handshake_error() -> None:
     asyncio.run(_run())
 
 
-def test_handle_event_updates_state_and_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_handle_event_updates_state_and_dispatch(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     module = _load_ws_client()
     module.async_dispatcher_send = MagicMock()
     loop = asyncio.new_event_loop()
+    caplog.set_level(logging.DEBUG, logger=module.__name__)
     class RecordingCoordinator:
         def __init__(self) -> None:
             self.data = {
@@ -839,7 +842,8 @@ def test_handle_event_updates_state_and_dispatch(monkeypatch: pytest.MonkeyPatch
                     "raw": {"existing": True},
                     "connected": True,
                     "nodes": None,
-                    "htr": {"addrs": [], "settings": {}},
+                    "nodes_by_type": {"htr": {"addrs": [], "settings": {}, "advanced": {}, "samples": {}}},
+                    "htr": {"addrs": [], "settings": {}, "advanced": {}, "samples": {}},
                 }
             }
 
@@ -847,11 +851,14 @@ def test_handle_event_updates_state_and_dispatch(monkeypatch: pytest.MonkeyPatch
             node_updates.append((nodes, inventory))
 
     node_updates: list[tuple[dict[str, Any], list[Any]]] = []
-    energy_updates: list[list[str]] = []
+    energy_updates: list[Any] = []
 
     class FakeEnergyCoordinator:
-        def update_addresses(self, addrs: Iterable[str]) -> None:
-            energy_updates.append(list(addrs))
+        def update_addresses(self, addrs: Iterable[str] | dict[str, Iterable[str]]) -> None:
+            if isinstance(addrs, dict):
+                energy_updates.append({k: list(v) for k, v in addrs.items()})
+            else:
+                energy_updates.append(list(addrs))
 
     hass = types.SimpleNamespace(
         loop=loop,
@@ -885,6 +892,7 @@ def test_handle_event_updates_state_and_dispatch(monkeypatch: pytest.MonkeyPatch
                         "nodes": [
                             {"addr": "01", "type": "htr"},
                             {"addr": "02", "type": "HTR"},
+                            {"addr": "03", "type": "acm"},
                         ]
                     },
                 },
@@ -894,6 +902,7 @@ def test_handle_event_updates_state_and_dispatch(monkeypatch: pytest.MonkeyPatch
                     "path": "/htr/02/samples",
                     "body": [{"ts": 1, "val": 2}],
                 },
+                {"path": "/acm/03/settings", "body": {"mode": "eco"}},
                 {"path": "/misc", "body": {"foo": "bar"}},
             ]
         ],
@@ -903,11 +912,17 @@ def test_handle_event_updates_state_and_dispatch(monkeypatch: pytest.MonkeyPatch
 
     dev_data = coordinator.data["dev"]
     assert dev_data["nodes"] == {
-        "nodes": [{"addr": "01", "type": "htr"}, {"addr": "02", "type": "HTR"}]
+        "nodes": [
+            {"addr": "01", "type": "htr"},
+            {"addr": "02", "type": "HTR"},
+            {"addr": "03", "type": "acm"},
+        ]
     }
     assert dev_data["htr"]["addrs"] == ["01", "02"]
     assert dev_data["htr"]["settings"]["01"] == {"temp": 21}
     assert dev_data["htr"]["advanced"]["01"] == {"adv": True}
+    assert dev_data["nodes_by_type"]["acm"]["addrs"] == ["03"]
+    assert dev_data["nodes_by_type"]["acm"]["settings"]["03"] == {"mode": "eco"}
     assert dev_data["raw"]["misc"] == {"foo": "bar"}
     assert client._stats.events_total == 1
     module.async_dispatcher_send.assert_has_calls(
@@ -915,36 +930,150 @@ def test_handle_event_updates_state_and_dispatch(monkeypatch: pytest.MonkeyPatch
             call(
                 hass,
                 module.signal_ws_data("entry"),
-                {"dev_id": "dev", "ts": 1000.0, "addr": None, "kind": "nodes"},
+                {
+                    "dev_id": "dev",
+                    "ts": 1000.0,
+                    "addr": None,
+                    "kind": "nodes",
+                    "node_type": None,
+                },
             ),
             call(
                 hass,
                 module.signal_ws_data("entry"),
-                {"dev_id": "dev", "ts": 1000.0, "addr": "01", "kind": "htr_settings"},
+                {
+                    "dev_id": "dev",
+                    "ts": 1000.0,
+                    "addr": "01",
+                    "kind": "htr_settings",
+                    "node_type": "htr",
+                },
             ),
             call(
                 hass,
                 module.signal_ws_data("entry"),
-                {"dev_id": "dev", "ts": 1000.0, "addr": "02", "kind": "htr_samples"},
+                {
+                    "dev_id": "dev",
+                    "ts": 1000.0,
+                    "addr": "02",
+                    "kind": "htr_samples",
+                    "node_type": "htr",
+                },
             ),
-        ]
+            call(
+                hass,
+                module.signal_ws_data("entry"),
+                {
+                    "dev_id": "dev",
+                    "ts": 1000.0,
+                    "addr": "03",
+                    "kind": "acm_settings",
+                    "node_type": "acm",
+                },
+            ),
+        ],
+        any_order=True,
     )
-    assert module.async_dispatcher_send.call_count == 3
+    assert module.async_dispatcher_send.call_count == 4
 
     assert len(node_updates) == 1
     assert node_updates[0][0] == {
         "nodes": [
             {"addr": "01", "type": "htr"},
             {"addr": "02", "type": "HTR"},
+            {"addr": "03", "type": "acm"},
         ]
     }
-    assert [node.addr for node in node_updates[0][1]] == ["01", "02"]
-    assert energy_updates == [["01", "02"]]
+    assert [node.addr for node in node_updates[0][1]] == ["01", "02", "03"]
+    assert energy_updates == [{"acm": ["03"], "htr": ["01", "02"]}]
+    assert "unknown node types" not in caplog.text
 
     ws_state = hass.data[module.DOMAIN]["entry"]["ws_state"]["dev"]
     assert ws_state["last_event_at"] == 1000.0
     assert ws_state["events_total"] == 1
     assert ws_state["frames_total"] == 0
+    loop.close()
+
+
+def test_handle_event_logs_unknown_types(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    module = _load_ws_client()
+    module.async_dispatcher_send = MagicMock()
+    caplog.set_level(logging.DEBUG, logger=module.__name__)
+
+    loop = asyncio.new_event_loop()
+
+    class RecordingCoordinator:
+        def __init__(self) -> None:
+            self.data = {
+                "dev": {
+                    "dev_id": "dev",
+                    "name": "Device dev",
+                    "raw": {},
+                    "connected": True,
+                    "nodes": None,
+                    "nodes_by_type": {},
+                    "htr": {"addrs": [], "settings": {}},
+                }
+            }
+
+        def update_nodes(self, nodes: dict[str, Any], inventory: list[Any]) -> None:
+            node_updates.append((nodes, inventory))
+
+    node_updates: list[tuple[dict[str, Any], list[Any]]] = []
+    energy_updates: list[Any] = []
+
+    class FakeEnergyCoordinator:
+        def update_addresses(self, addrs: Iterable[str] | dict[str, Iterable[str]]) -> None:
+            if isinstance(addrs, dict):
+                energy_updates.append({k: list(v) for k, v in addrs.items()})
+            else:
+                energy_updates.append(list(addrs))
+
+    hass = types.SimpleNamespace(
+        loop=loop,
+        data={
+            module.DOMAIN: {
+                "entry": {
+                    "ws_state": {},
+                    "energy_coordinator": FakeEnergyCoordinator(),
+                }
+            }
+        },
+    )
+    coordinator = RecordingCoordinator()
+    api = types.SimpleNamespace(_session=types.SimpleNamespace())
+    client = module.WebSocket09Client(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        api_client=api,
+        coordinator=coordinator,
+    )
+
+    event = {
+        "name": "data",
+        "args": [
+            [
+                {
+                    "path": "/mgr/nodes",
+                    "body": {
+                        "nodes": [
+                            {"addr": "01", "type": "htr"},
+                            {"addr": "09", "type": "gizmo"},
+                        ]
+                    },
+                }
+            ]
+        ],
+    }
+
+    client._handle_event(event)
+
+    assert any("unknown node types in inventory: gizmo" in rec.message for rec in caplog.records)
+    assert energy_updates == [{"gizmo": ["09"], "htr": ["01"]}]
+    assert node_updates
     loop.close()
 
 

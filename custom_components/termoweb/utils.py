@@ -36,6 +36,39 @@ def addresses_by_type(nodes: Iterable[Node], node_types: Iterable[str]) -> list[
     return result
 
 
+def addresses_by_node_type(
+    nodes: Iterable[Node],
+    *,
+    known_types: Iterable[str] | None = None,
+) -> tuple[dict[str, list[str]], set[str]]:
+    """Return mapping of node type to address list, tracking unknown types."""
+
+    known: set[str] | None = None
+    if known_types is not None:
+        known = {str(node_type).strip().lower() for node_type in known_types if node_type}
+
+    result: dict[str, list[str]] = {}
+    seen: dict[str, set[str]] = {}
+    unknown: set[str] = set()
+
+    for node in nodes:
+        node_type = str(getattr(node, "type", "")).strip().lower()
+        if not node_type:
+            continue
+        addr = str(getattr(node, "addr", "")).strip()
+        if not addr:
+            continue
+        type_seen = seen.setdefault(node_type, set())
+        if addr in type_seen:
+            continue
+        type_seen.add(addr)
+        result.setdefault(node_type, []).append(addr)
+        if known is not None and node_type not in known:
+            unknown.add(node_type)
+
+    return result, unknown
+
+
 def float_or_none(value: Any) -> float | None:
     """Return value as ``float`` if possible, else ``None``.
 

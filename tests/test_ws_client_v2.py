@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import logging
 import types
 from typing import Any, Iterable
 
@@ -11,7 +12,9 @@ import pytest
 import custom_components.termoweb.ws_client_v2 as ws_v2
 
 
-def test_ducaheat_ws_client_flow(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ducaheat_ws_client_flow(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     dispatcher_calls: list[tuple[str, dict[str, object]]] = []
 
     def fake_dispatcher(hass, signal: str, payload: dict[str, object]) -> None:
@@ -21,16 +24,20 @@ def test_ducaheat_ws_client_flow(monkeypatch: pytest.MonkeyPatch) -> None:
 
     async def _run() -> None:
         loop = asyncio.get_running_loop()
+        caplog.set_level(logging.DEBUG, logger=ws_v2.__name__)
         node_updates: list[tuple[dict[str, Any], list[Any]]] = []
-        energy_updates: list[list[str]] = []
+        energy_updates: list[Any] = []
 
         class RecordingCoordinator:
             def update_nodes(self, nodes: dict[str, Any], inventory: list[Any]) -> None:
                 node_updates.append((copy.deepcopy(nodes), list(inventory)))
 
         class FakeEnergyCoordinator:
-            def update_addresses(self, addrs: Iterable[str]) -> None:
-                energy_updates.append(list(addrs))
+            def update_addresses(self, addrs: Iterable[str] | dict[str, Iterable[str]]) -> None:
+                if isinstance(addrs, dict):
+                    energy_updates.append({k: list(v) for k, v in addrs.items()})
+                else:
+                    energy_updates.append(list(addrs))
 
         hass = types.SimpleNamespace(
             loop=loop,
@@ -75,13 +82,19 @@ def test_ducaheat_ws_client_flow(monkeypatch: pytest.MonkeyPatch) -> None:
         assert client._handshake is not None
         assert client._handshake["devs"][0]["id"] == "dev"
 
-        initial_update = {"nodes": {"htr": {"status": {"01": {"temp": 20}}}}}
+        initial_update = {
+            "nodes": {
+                "htr": {"status": {"01": {"temp": 20}}},
+                "acm": {"status": {"A1": {"mode": "eco"}}},
+            }
+        }
         client._on_frame(json.dumps({"event": "update", "data": initial_update}))
         await asyncio.sleep(0)
 
         dev_data_payload = {
             "nodes": {
                 "htr": {"status": {"01": {"temp": 20}}},
+                "acm": {"status": {"A1": {"mode": "eco"}}},
                 "raw": {"meta": {"foo": "bar"}},
             }
         }
@@ -91,6 +104,7 @@ def test_ducaheat_ws_client_flow(monkeypatch: pytest.MonkeyPatch) -> None:
         incremental_update = {
             "nodes": {
                 "htr": {"status": {"02": {"temp": 21}}},
+                "acm": {"status": {"A2": {"mode": "boost"}}},
                 "raw": {"meta": {"foo": "bar", "extra": True}},
                 "metrics": 3,
             }
@@ -130,10 +144,16 @@ def test_ducaheat_ws_client_flow(monkeypatch: pytest.MonkeyPatch) -> None:
         ]
         assert len(data_payloads) == 3
         assert data_payloads[0]["nodes"] == initial_update["nodes"]
+        assert data_payloads[0]["node_type"] is None
         assert data_payloads[1]["nodes"] == dev_data_payload["nodes"]
+        assert data_payloads[1]["nodes_by_type"]["acm"]["status"] == {"A1": {"mode": "eco"}}
         assert data_payloads[2]["nodes"]["htr"]["status"] == {
             "01": {"temp": 20},
             "02": {"temp": 21},
+        }
+        assert data_payloads[2]["nodes"]["acm"]["status"] == {
+            "A1": {"mode": "eco"},
+            "A2": {"mode": "boost"},
         }
         assert data_payloads[2]["nodes"]["raw"] == {
             "meta": {"foo": "bar", "extra": True},
@@ -145,15 +165,85 @@ def test_ducaheat_ws_client_flow(monkeypatch: pytest.MonkeyPatch) -> None:
             "01": {"temp": 20},
             "02": {"temp": 21},
         }
+        assert node_updates[2][0]["acm"]["status"] == {
+            "A1": {"mode": "eco"},
+            "A2": {"mode": "boost"},
+        }
         assert all(not update for update in energy_updates)
         assert data_payloads[2]["nodes"]["metrics"] == 3
         for payload in data_payloads:
             assert payload["dev_id"] == "dev"
-            assert payload["nodes"] is not client._nodes
+            assert payload["nodes"] is not client._nodes["nodes"]
 
-        assert client._nodes["htr"]["status"]["02"]["temp"] == 21
+        assert client._nodes["nodes_by_type"]["htr"]["status"]["02"]["temp"] == 21
+        assert client._nodes["nodes_by_type"]["acm"]["status"]["A2"]["mode"] == "boost"
         assert client._healthy_since is not None
         assert client._status == "stopped"
+        assert "unknown node types" not in caplog.text
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_ws_client_logs_unknown_types(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    dispatcher_calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_dispatcher(hass, signal: str, payload: dict[str, object]) -> None:
+        dispatcher_calls.append((signal, payload))
+
+    monkeypatch.setattr(ws_v2, "async_dispatcher_send", fake_dispatcher)
+
+    async def _run() -> None:
+        loop = asyncio.get_running_loop()
+        caplog.set_level(logging.DEBUG, logger=ws_v2.__name__)
+
+        node_updates: list[tuple[dict[str, Any], list[Any]]] = []
+        energy_updates: list[Any] = []
+
+        class RecordingCoordinator:
+            def update_nodes(self, nodes: dict[str, Any], inventory: list[Any]) -> None:
+                node_updates.append((copy.deepcopy(nodes), list(inventory)))
+
+        class FakeEnergyCoordinator:
+            def update_addresses(self, addrs: Iterable[str] | dict[str, Iterable[str]]) -> None:
+                if isinstance(addrs, dict):
+                    energy_updates.append({k: list(v) for k, v in addrs.items()})
+                else:
+                    energy_updates.append(list(addrs))
+
+        hass = types.SimpleNamespace(
+            loop=loop,
+            data={
+                ws_v2.DOMAIN: {
+                    "entry": {
+                        "ws_state": {},
+                        "energy_coordinator": FakeEnergyCoordinator(),
+                    }
+                }
+            },
+        )
+        coordinator = RecordingCoordinator()
+
+        class FakeClient:
+            async def _authed_headers(self) -> dict[str, str]:
+                return {"Authorization": "Bearer tok"}
+
+        client = ws_v2.DucaheatWSClient(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=FakeClient(),
+            coordinator=coordinator,
+        )
+
+        payload = {"nodes": {"nodes": [{"addr": "X", "type": "gizmo"}, {"addr": "01", "type": "htr"}]}}
+        client._handle_dev_data(payload)
+        await asyncio.sleep(0)
+
+        assert any("unknown node types in inventory: gizmo" in rec.message for rec in caplog.records)
+        assert energy_updates == [{"gizmo": ["X"], "htr": ["01"]}]
+        assert node_updates
 
     asyncio.run(_run())
 
