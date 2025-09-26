@@ -1081,8 +1081,45 @@ def test_subscribe_htr_samples_sends_expected_payloads():
     async def _run() -> None:
         module = _load_ws_client()
         Client = module.WebSocket09Client
-        hass = types.SimpleNamespace(loop=asyncio.get_event_loop())
-        coordinator = types.SimpleNamespace(_addrs=lambda: ["01", "02"])
+        energy_updates: list[Any] = []
+
+        class FakeEnergyCoordinator:
+            def update_addresses(self, addrs: Any) -> None:
+                if isinstance(addrs, dict):
+                    energy_updates.append({k: list(v) for k, v in addrs.items()})
+                else:
+                    energy_updates.append(list(addrs))
+
+        hass = types.SimpleNamespace(
+            loop=asyncio.get_event_loop(),
+            data={module.DOMAIN: {"entry": {"energy_coordinator": FakeEnergyCoordinator()}}},
+        )
+
+        class RecordingCoordinator:
+            def __init__(self) -> None:
+                htr_bucket: dict[str, Any] = {
+                    "addrs": ["01"],
+                    "settings": {},
+                    "advanced": {},
+                    "samples": {},
+                }
+                self.data = {
+                    "dev": {
+                        "nodes_by_type": {"htr": htr_bucket},
+                        "htr": htr_bucket,
+                    }
+                }
+                self._node_inventory = module.build_node_inventory(
+                    {
+                        "nodes": [
+                            {"addr": "01", "type": "htr"},
+                            {"addr": "02", "type": "htr"},
+                            {"addr": "A1", "type": "acm"},
+                        ]
+                    }
+                )
+
+        coordinator = RecordingCoordinator()
         api = types.SimpleNamespace(_session=None)
         client = Client(
             hass,
@@ -1107,7 +1144,13 @@ def test_subscribe_htr_samples_sends_expected_payloads():
         assert ws.sent == [
             '5::/api/v2/socket_io:{"name":"subscribe","args":["/htr/01/samples"]}',
             '5::/api/v2/socket_io:{"name":"subscribe","args":["/htr/02/samples"]}',
+            '5::/api/v2/socket_io:{"name":"subscribe","args":["/acm/A1/samples"]}',
         ]
+
+        dev_map = coordinator.data["dev"]
+        assert dev_map["nodes_by_type"]["acm"]["addrs"] == ["A1"]
+        assert dev_map["htr"] is dev_map["nodes_by_type"]["htr"]
+        assert energy_updates == [{"htr": ["01", "02"], "acm": ["A1"]}]
 
     asyncio.run(_run())
 
