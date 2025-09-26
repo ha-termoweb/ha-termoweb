@@ -19,7 +19,8 @@ servers:
 tags:
   - name: Auth
   - name: Devices
-  - name: Heaters
+  - name: ThermalNodes
+  - name: PowerMonitors
   - name: Samples
 security:
   - bearerAuth: []
@@ -47,9 +48,58 @@ components:
         refresh_token:
           type: string
           nullable: true
-    HeaterNode:
+    GeoData:
       type: object
-      description: Consolidated state returned by GET /devs/{dev_id}/htr/{addr}
+      description: Coarse location metadata reported by the gateway snapshot
+      properties:
+        country:
+          type: string
+        state:
+          type: string
+          nullable: true
+        city:
+          type: string
+          nullable: true
+        zip:
+          type: string
+          nullable: true
+        tz_code:
+          type: string
+        coarsePosition:
+          type: object
+          description: Approximate coordinates when available
+          properties:
+            longitude:
+              type: number
+              format: float
+            latitude:
+              type: number
+              format: float
+          additionalProperties: false
+      additionalProperties: false
+    AwayStatus:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        away:
+          type: boolean
+        forced:
+          type: boolean
+      additionalProperties: false
+    ChargingSlot:
+      type: object
+      properties:
+        start:
+          type: integer
+          description: Minute offset from start of day
+        end:
+          type: integer
+          description: Minute offset from start of day
+      additionalProperties: false
+    ThermalNode:
+      type: object
+      description: Consolidated state returned by GET /devs/{dev_id}/{node_type}/{addr} (heater or accumulator)
       additionalProperties: true
       properties:
         dev_id:
@@ -93,6 +143,57 @@ components:
                   type: string
                   description: Temperature applied during boost, if distinct from `stemp`
                   example: "22.0"
+            operational_mode:
+              type: integer
+            control_mode:
+              type: integer
+            units:
+              type: string
+              enum: [C, F]
+            offset:
+              type: string
+            priority:
+              type: string
+            away_offset:
+              type: string
+            window_mode_enabled:
+              type: boolean
+            true_radiant_enabled:
+              type: boolean
+            resistor_mode:
+              type: integer
+            prog_resolution:
+              type: integer
+            frost_protect:
+              type: boolean
+            charging_conf:
+              type: object
+              properties:
+                slot_1:
+                  $ref: '#/components/schemas/ChargingSlot'
+                slot_2:
+                  $ref: '#/components/schemas/ChargingSlot'
+                active_days:
+                  type: array
+                  description: Seven booleans indicating which days the charging slots apply
+                  minItems: 7
+                  maxItems: 7
+                  items:
+                    type: integer
+              additionalProperties: false
+            min_stemp:
+              type: string
+            max_stemp:
+              type: string
+            factory_options:
+              type: object
+              properties:
+                resistor_available:
+                  type: boolean
+                ventilation_available:
+                  type: boolean
+                ventilation_type:
+                  type: integer
         prog:
           type: object
           description: Weekly program structure (exact shape model-dependent; see markdown)
@@ -110,6 +211,18 @@ components:
             antifrost:
               type: string
               example: "7.0"
+        version:
+          type: object
+          properties:
+            hw_version:
+              type: string
+            fw_version:
+              type: string
+            uid:
+              type: string
+            pid:
+              type: string
+          additionalProperties: false
     HeaterStatusWrite:
       type: object
       description: Write status for a heater
@@ -183,6 +296,81 @@ components:
           type: boolean
           description: Select this node for subsequent operations
       additionalProperties: false
+    PowerMonitorNode:
+      type: object
+      description: Power monitor node state returned by GET /devs/{dev_id}/pmo/{addr}
+      properties:
+        name:
+          type: string
+        addr:
+          type: integer
+        type:
+          type: string
+          example: pmo
+        installed:
+          type: boolean
+        lost:
+          type: boolean
+        uid:
+          type: string
+        level:
+          type: integer
+        parent:
+          type: integer
+        power_limit:
+          type: object
+          properties:
+            power_limit:
+              type: string
+        setup:
+          type: object
+          properties:
+            power_limit:
+              type: integer
+            reverse:
+              type: boolean
+            circuit_type:
+              type: integer
+        version:
+          type: object
+          properties:
+            hw_version:
+              type: string
+            fw_version:
+              type: string
+            uid:
+              type: string
+            pid:
+              type: string
+      additionalProperties: true
+    GatewaySnapshot:
+      type: object
+      description: Payload emitted by the dev_data Socket.IO event
+      properties:
+        geoData:
+          $ref: '#/components/schemas/GeoData'
+        geo_data:
+          $ref: '#/components/schemas/GeoData'
+        away_status:
+          $ref: '#/components/schemas/AwayStatus'
+        nodes:
+          type: array
+          items:
+            type: object
+            description: Node objects (heater, accumulator, power monitor, etc.)
+            additionalProperties: true
+        htr_system:
+          type: object
+          additionalProperties: true
+        pmo_system:
+          type: object
+          additionalProperties: true
+        discovery:
+          type: object
+          additionalProperties: true
+        connected:
+          type: boolean
+      additionalProperties: true
     EmptyResponse:
       type: object
       description: Empty JSON object on success
@@ -218,35 +406,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TokenResponse'
-  /api/v2/devs/{dev_id}/htr/{addr}:
+  /api/v2/devs/{dev_id}/{node_type}/{addr}:
     get:
-      tags: [Heaters]
-      summary: Read heater node (consolidated state)
+      tags: [ThermalNodes]
+      summary: Read heater or accumulator node (consolidated state)
       parameters:
         - name: dev_id
           in: path
           required: true
           schema: { type: string }
+        - name: node_type
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [htr, acm]
         - name: addr
           in: path
           required: true
           schema: { type: integer }
       responses:
         "200":
-          description: Heater node state
+          description: Node state
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HeaterNode'
-  /api/v2/devs/{dev_id}/htr/{addr}/status:
+                $ref: '#/components/schemas/ThermalNode'
+  /api/v2/devs/{dev_id}/{node_type}/{addr}/status:
     post:
-      tags: [Heaters]
+      tags: [ThermalNodes]
       summary: Set mode/setpoint/units and optionally trigger Boost
       parameters:
         - name: dev_id
           in: path
           required: true
           schema: { type: string }
+        - name: node_type
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [htr, acm]
         - name: addr
           in: path
           required: true
@@ -273,15 +473,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
-  /api/v2/devs/{dev_id}/htr/{addr}/mode:
+  /api/v2/devs/{dev_id}/{node_type}/{addr}/mode:
     post:
-      tags: [Heaters]
+      tags: [ThermalNodes]
       summary: Set mode only
       parameters:
         - name: dev_id
           in: path
           required: true
           schema: { type: string }
+        - name: node_type
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [htr, acm]
         - name: addr
           in: path
           required: true
@@ -299,9 +505,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
-  /api/v2/devs/{dev_id}/htr/{addr}/prog:
+  /api/v2/devs/{dev_id}/{node_type}/{addr}/prog:
     post:
-      tags: [Heaters]
+      tags: [ThermalNodes]
       summary: Set weekly program
       description: >
         Sends the full weekly program. Exact payload structure is device/model-specific
@@ -311,6 +517,12 @@ paths:
           in: path
           required: true
           schema: { type: string }
+        - name: node_type
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [htr, acm]
         - name: addr
           in: path
           required: true
@@ -328,15 +540,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
-  /api/v2/devs/{dev_id}/htr/{addr}/prog_temps:
+  /api/v2/devs/{dev_id}/{node_type}/{addr}/prog_temps:
     post:
-      tags: [Heaters]
+      tags: [ThermalNodes]
       summary: Set program temperatures (comfort/eco/antifrost)
       parameters:
         - name: dev_id
           in: path
           required: true
           schema: { type: string }
+        - name: node_type
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [htr, acm]
         - name: addr
           in: path
           required: true
@@ -358,15 +576,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
-  /api/v2/devs/{dev_id}/htr/{addr}/setup:
+  /api/v2/devs/{dev_id}/{node_type}/{addr}/setup:
     post:
-      tags: [Heaters]
+      tags: [ThermalNodes]
       summary: Set advanced/extra options (incl. default Boost time/temp)
       parameters:
         - name: dev_id
           in: path
           required: true
           schema: { type: string }
+        - name: node_type
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [htr, acm]
         - name: addr
           in: path
           required: true
@@ -388,15 +612,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
-  /api/v2/devs/{dev_id}/htr/{addr}/lock:
+  /api/v2/devs/{dev_id}/{node_type}/{addr}/lock:
     post:
-      tags: [Heaters]
+      tags: [ThermalNodes]
       summary: Toggle child lock / local control lock
       parameters:
         - name: dev_id
           in: path
           required: true
           schema: { type: string }
+        - name: node_type
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [htr, acm]
         - name: addr
           in: path
           required: true
@@ -419,9 +649,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
-  /api/v2/devs/{dev_id}/htr/{addr}/select:
+  /api/v2/devs/{dev_id}/{node_type}/{addr}/select:
     post:
-      tags: [Heaters]
+      tags: [ThermalNodes]
       summary: Select/deselect this node for subsequent writes
       description: Some operations may require the node to be selected by the current user.
       parameters:
@@ -429,6 +659,12 @@ paths:
           in: path
           required: true
           schema: { type: string }
+        - name: node_type
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [htr, acm]
         - name: addr
           in: path
           required: true
@@ -451,7 +687,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
-  /api/v2/devs/{dev_id}/htr/{addr}/samples:
+  /api/v2/devs/{dev_id}/{node_type}/{addr}/samples:
     get:
       tags: [Samples]
       summary: Read samples (telemetry/history)
@@ -460,6 +696,12 @@ paths:
           in: path
           required: true
           schema: { type: string }
+        - name: node_type
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [htr, acm]
         - name: addr
           in: path
           required: true
@@ -488,3 +730,23 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+  /api/v2/devs/{dev_id}/pmo/{addr}:
+    get:
+      tags: [PowerMonitors]
+      summary: Read power monitor node
+      parameters:
+        - name: dev_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: addr
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Power monitor node state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PowerMonitorNode'
