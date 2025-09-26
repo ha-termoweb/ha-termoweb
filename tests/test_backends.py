@@ -1,5 +1,7 @@
 import types
 
+import pytest
+
 from conftest import _install_stubs
 
 _install_stubs()
@@ -47,3 +49,17 @@ def test_backend_factory_returns_expected_clients() -> None:
 
     default_backend_cls = backends.get_backend_for_brand("unknown")
     assert default_backend_cls is backends.TermowebBackend
+
+
+def test_base_backend_requires_create_override() -> None:
+    hass = types.SimpleNamespace(loop=None, data={})
+    backend = backends.BaseBackend(
+        hass,
+        entry_id="entry",
+        api_client=object(),
+        coordinator=object(),
+        ws_client_factory=lambda *args, **kwargs: None,
+    )
+
+    with pytest.raises(NotImplementedError):
+        backend.create_ws_client("dev")
