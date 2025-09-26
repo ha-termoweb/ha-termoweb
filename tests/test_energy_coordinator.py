@@ -14,6 +14,7 @@ _install_stubs()
 
 from aiohttp import ClientError
 from custom_components.termoweb import coordinator as coord_module
+from custom_components.termoweb import nodes as nodes_module
 from custom_components.termoweb.api import BackendAuthError, BackendRateLimitError
 from custom_components.termoweb.const import (
     HTR_ENERGY_UPDATE_INTERVAL,
@@ -480,6 +481,29 @@ def test_state_coordinator_update_nodes_rebuilds_inventory(
 
     assert calls == [nodes]
     assert coord._node_inventory == built_nodes
+
+
+def test_state_coordinator_update_nodes_uses_provided_inventory() -> None:
+    hass = HomeAssistant()
+    client = types.SimpleNamespace()
+    nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
+    provided_inventory = [nodes_module.Node(name="Heater", addr="A", node_type="htr")]
+
+    coord = StateCoordinator(
+        hass,
+        client,
+        30,
+        "dev",
+        {"name": "Device"},
+        {},
+    )
+
+    coord.update_nodes(nodes, provided_inventory)
+
+    assert coord._nodes == nodes
+    assert coord._node_inventory is not provided_inventory
+    assert coord._node_inventory == provided_inventory
+    assert coord._node_inventory[0] is provided_inventory[0]
 
 
 def test_energy_state_coordinator_update_addresses_filters_duplicates() -> None:
