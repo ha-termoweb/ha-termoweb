@@ -14,8 +14,8 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .api import RESTClient
 from .const import API_BASE, DOMAIN, WS_NAMESPACE, signal_ws_data, signal_ws_status
-from .nodes import build_node_inventory
-from .utils import HEATER_NODE_TYPES, addresses_by_type
+from .nodes import NODE_CLASS_BY_TYPE, build_node_inventory
+from .utils import addresses_by_node_type
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -391,6 +391,38 @@ class WebSocket09Client:
         updated_addrs: list[str] = []
         sample_addrs: list[str] = []
 
+        def _ensure_type_bucket(node_type: str) -> dict[str, Any]:
+            nodes_by_type: dict[str, Any] = dev_map.setdefault("nodes_by_type", {})
+            bucket = nodes_by_type.get(node_type)
+            if bucket is None:
+                bucket = {
+                    "addrs": [],
+                    "settings": {},
+                    "advanced": {},
+                    "samples": {},
+                }
+                nodes_by_type[node_type] = bucket
+            else:
+                bucket.setdefault("addrs", [])
+                bucket.setdefault("settings", {})
+                bucket.setdefault("advanced", {})
+                bucket.setdefault("samples", {})
+            if node_type == "htr":
+                dev_map["htr"] = bucket
+            return bucket
+
+        def _extract_type_addr(path: str) -> tuple[str | None, str | None]:
+            if not path:
+                return None, None
+            parts = [p for p in path.split("/") if p]
+            for idx in range(len(parts) - 2):
+                node_type = parts[idx]
+                addr = parts[idx + 1]
+                leaf = parts[idx + 2]
+                if leaf in {"settings", "samples", "advanced_setup"}:
+                    return node_type, addr
+            return None, None
+
         for item in batch:
             if not isinstance(item, dict):
                 continue
@@ -406,13 +438,20 @@ class WebSocket09Client:
             ) or {}
             if not dev_map:
                 # Seed minimal structure if coordinator has not put this dev yet
+                htr_bucket: dict[str, Any] = {
+                    "addrs": [],
+                    "settings": {},
+                    "advanced": {},
+                    "samples": {},
+                }
                 dev_map = {
                     "dev_id": self.dev_id,
                     "name": f"Device {self.dev_id}",
                     "raw": {},
                     "connected": True,
                     "nodes": None,
-                    "htr": {"addrs": [], "settings": {}},
+                    "nodes_by_type": {"htr": htr_bucket},
+                    "htr": htr_bucket,
                 }
                 # put into coordinator cache
                 cur = dict(self._coordinator.data or {})
@@ -436,9 +475,20 @@ class WebSocket09Client:
                             err,
                             exc_info=err,
                         )
-                    addrs = addresses_by_type(inventory, HEATER_NODE_TYPES)
-                    dev_map.setdefault("htr", {}).setdefault("settings", {})
-                    dev_map["htr"]["addrs"] = addrs
+                    type_to_addrs, unknown_types = addresses_by_node_type(
+                        inventory, known_types=NODE_CLASS_BY_TYPE
+                    )
+                    if unknown_types:
+                        _LOGGER.debug(
+                            "WS %s: unknown node types in inventory: %s",
+                            self.dev_id,
+                            ", ".join(sorted(unknown_types)),
+                        )
+                    for node_type, addrs in type_to_addrs.items():
+                        bucket = _ensure_type_bucket(node_type)
+                        bucket["addrs"] = list(addrs)
+                    if "htr" not in dev_map and "htr" in type_to_addrs:
+                        dev_map["htr"] = _ensure_type_bucket("htr")
                     if hasattr(self._coordinator, "update_nodes"):
                         self._coordinator.update_nodes(body, inventory)
                     record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
@@ -447,33 +497,48 @@ class WebSocket09Client:
                         record["node_inventory"] = inventory
                         energy_coordinator = record.get("energy_coordinator")
                         if hasattr(energy_coordinator, "update_addresses"):
-                            energy_coordinator.update_addresses(addrs)
+                            energy_coordinator.update_addresses(type_to_addrs)
                     updated_nodes = True
 
-            elif "/htr/" in path and path.endswith("/settings"):
-                # /api/v2/devs/{dev_id}/htr/{addr}/settings => push path uses '/htr/<addr>/settings'
-                addr = path.split("/htr/")[1].split("/")[0]
-                settings_map: dict[str, Any] = dev_map.setdefault("htr", {}).setdefault(
-                    "settings", {}
-                )
-                if isinstance(body, dict):
-                    settings_map[addr] = body
-                    updated_addrs.append(addr)
-
-            elif "/htr/" in path and path.endswith("/advanced_setup"):
-                # Store for diagnostics/future; entities ignore for now
-                addr = path.split("/htr/")[1].split("/")[0]
-                adv_map: dict[str, Any] = dev_map.setdefault("htr", {}).setdefault(
-                    "advanced", {}
-                )
-                if isinstance(body, dict):
-                    adv_map[addr] = body
-
-            elif "/htr/" in path and path.endswith("/samples"):
-                addr = path.split("/htr/")[1].split("/")[0]
-                sample_addrs.append(addr)
-
             else:
+                node_type, addr = _extract_type_addr(path)
+                if (
+                    node_type
+                    and addr
+                    and path.endswith("/settings")
+                    and node_type != "mgr"
+                ):
+                    bucket = _ensure_type_bucket(node_type)
+                    settings_map: dict[str, Any] = bucket.setdefault("settings", {})
+                    if isinstance(body, dict):
+                        settings_map[addr] = body
+                        updated_addrs.append((node_type, addr))
+                    continue
+
+                if (
+                    node_type
+                    and addr
+                    and path.endswith("/advanced_setup")
+                    and node_type != "mgr"
+                ):
+                    bucket = _ensure_type_bucket(node_type)
+                    adv_map: dict[str, Any] = bucket.setdefault("advanced", {})
+                    if isinstance(body, dict):
+                        adv_map[addr] = body
+                    continue
+
+                if (
+                    node_type
+                    and addr
+                    and path.endswith("/samples")
+                    and node_type != "mgr"
+                ):
+                    bucket = _ensure_type_bucket(node_type)
+                    samples_map: dict[str, Any] = bucket.setdefault("samples", {})
+                    samples_map[addr] = body
+                    sample_addrs.append((node_type, addr))
+                    continue
+
                 # Other top-level paths, store compactly under raw
                 raw = dev_map.setdefault("raw", {})
                 key = path.strip("/").replace("/", "_")
@@ -481,24 +546,38 @@ class WebSocket09Client:
 
         # Dispatch (one compact signal)
         self._mark_event(paths=paths)
-        payload_base = {"dev_id": self.dev_id, "ts": self._stats.last_event_ts}
+        payload_base = {
+            "dev_id": self.dev_id,
+            "ts": self._stats.last_event_ts,
+            "node_type": None,
+        }
         if updated_nodes:
             async_dispatcher_send(
                 self.hass,
                 signal_ws_data(self.entry_id),
                 {**payload_base, "addr": None, "kind": "nodes"},
             )
-        for addr in set(updated_addrs):
+        for node_type, addr in set(updated_addrs):
             async_dispatcher_send(
                 self.hass,
                 signal_ws_data(self.entry_id),
-                {**payload_base, "addr": addr, "kind": "htr_settings"},
+                {
+                    **payload_base,
+                    "addr": addr,
+                    "kind": f"{node_type}_settings",
+                    "node_type": node_type,
+                },
             )
-        for addr in set(sample_addrs):
+        for node_type, addr in set(sample_addrs):
             async_dispatcher_send(
                 self.hass,
                 signal_ws_data(self.entry_id),
-                {**payload_base, "addr": addr, "kind": "htr_samples"},
+                {
+                    **payload_base,
+                    "addr": addr,
+                    "kind": f"{node_type}_samples",
+                    "node_type": node_type,
+                },
             )
 
     # ----------------- Helpers -----------------

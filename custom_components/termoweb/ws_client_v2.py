@@ -14,8 +14,8 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .api import RESTClient
 from .const import API_BASE, DOMAIN, signal_ws_data, signal_ws_status
-from .nodes import build_node_inventory
-from .utils import HEATER_NODE_TYPES, addresses_by_type
+from .nodes import NODE_CLASS_BY_TYPE, build_node_inventory
+from .utils import addresses_by_node_type
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,6 +46,7 @@ class DucaheatWSClient:
         self._healthy_since: float | None = None
         self._handshake: dict[str, Any] | None = None
         self._nodes: dict[str, Any] = {}
+        self._nodes_raw: dict[str, Any] = {}
 
         domain_bucket = self.hass.data.setdefault(DOMAIN, {})
         entry_bucket = domain_bucket.setdefault(self.entry_id, {})
@@ -141,7 +142,8 @@ class DucaheatWSClient:
         if nodes is None:
             _LOGGER.debug("WS %s: dev_data without nodes", self.dev_id)
             return
-        self._nodes = deepcopy(nodes)
+        self._nodes_raw = deepcopy(nodes)
+        self._nodes = self._build_nodes_snapshot(self._nodes_raw)
         self._dispatch_nodes(self._nodes)
         self._mark_event()
 
@@ -150,10 +152,11 @@ class DucaheatWSClient:
         if nodes is None:
             _LOGGER.debug("WS %s: update without nodes", self.dev_id)
             return
-        if not self._nodes:
-            self._nodes = deepcopy(nodes)
+        if not self._nodes_raw:
+            self._nodes_raw = deepcopy(nodes)
         else:
-            self._merge_nodes(self._nodes, nodes)
+            self._merge_nodes(self._nodes_raw, nodes)
+        self._nodes = self._build_nodes_snapshot(self._nodes_raw)
         self._dispatch_nodes(self._nodes)
         self._mark_event()
 
@@ -165,12 +168,12 @@ class DucaheatWSClient:
             return nodes
         return None
 
-    def _dispatch_nodes(self, nodes: dict[str, Any]) -> None:
+    def _dispatch_nodes(self, snapshot: dict[str, Any]) -> None:
         record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
 
         inventory: list[Any] = []
         try:
-            inventory = build_node_inventory(nodes)
+            inventory = build_node_inventory(snapshot.get("nodes"))
         except Exception as err:  # pragma: no cover - defensive
             _LOGGER.debug(
                 "WS %s: failed to build node inventory: %s",
@@ -180,17 +183,30 @@ class DucaheatWSClient:
             )
 
         if hasattr(self._coordinator, "update_nodes"):
-            self._coordinator.update_nodes(nodes, inventory)
+            self._coordinator.update_nodes(snapshot.get("nodes"), inventory)
 
         if isinstance(record, dict):
-            record["nodes"] = nodes
+            record["nodes"] = snapshot.get("nodes")
             record["node_inventory"] = inventory
-            addrs = addresses_by_type(inventory, HEATER_NODE_TYPES)
+            addr_map, unknown_types = addresses_by_node_type(
+                inventory, known_types=NODE_CLASS_BY_TYPE
+            )
+            if unknown_types:
+                _LOGGER.debug(
+                    "WS %s: unknown node types in inventory: %s",
+                    self.dev_id,
+                    ", ".join(sorted(unknown_types)),
+                )
             energy_coordinator = record.get("energy_coordinator")
             if hasattr(energy_coordinator, "update_addresses"):
-                energy_coordinator.update_addresses(addrs)
+                energy_coordinator.update_addresses(addr_map)
 
-        payload = {"dev_id": self.dev_id, "nodes": deepcopy(nodes)}
+        payload = {
+            "dev_id": self.dev_id,
+            "node_type": None,
+            "nodes": deepcopy(snapshot.get("nodes")),
+            "nodes_by_type": deepcopy(snapshot.get("nodes_by_type", {})),
+        }
 
         def _send() -> None:
             async_dispatcher_send(
@@ -200,6 +216,23 @@ class DucaheatWSClient:
             )
 
         self.hass.loop.call_soon_threadsafe(_send)
+
+    @staticmethod
+    def _build_nodes_snapshot(nodes: dict[str, Any]) -> dict[str, Any]:
+        nodes_copy = deepcopy(nodes)
+        nodes_by_type: dict[str, Any] = {}
+        for node_type, payload in nodes_copy.items():
+            if isinstance(payload, dict):
+                nodes_by_type[node_type] = payload
+        snapshot: dict[str, Any] = {
+            "nodes": nodes_copy,
+            "nodes_by_type": nodes_by_type,
+        }
+        for node_type, payload in nodes_by_type.items():
+            snapshot[node_type] = payload
+        if "htr" in nodes_by_type:
+            snapshot.setdefault("htr", nodes_by_type["htr"])
+        return snapshot
 
     def _mark_event(self) -> None:
         now = time.time()

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 import logging
 import time
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from aiohttp import ClientError
 from homeassistant.core import HomeAssistant
@@ -258,17 +258,32 @@ class EnergyStateCoordinator(
         self._addrs = addrs
         self._last: dict[tuple[str, str], tuple[float, float]] = {}
 
-    def update_addresses(self, addrs: Iterable[str]) -> None:
+    def update_addresses(
+        self, addrs: Iterable[str] | Mapping[str, Iterable[str]]
+    ) -> None:
         """Replace the tracked heater addresses with ``addrs``."""
 
         cleaned: list[str] = []
         seen: set[str] = set()
-        for addr in addrs:
-            addr_str = str(addr).strip()
-            if not addr_str or addr_str in seen:
-                continue
-            seen.add(addr_str)
-            cleaned.append(addr_str)
+
+        if isinstance(addrs, Mapping):
+            iterables = []
+            for node_type, values in addrs.items():
+                node_type_str = str(node_type or "").strip().lower()
+                if node_type_str and node_type_str not in HEATER_NODE_TYPES:
+                    continue
+                iterables.append(values or [])
+        else:
+            iterables = [addrs]
+
+        for iterable in iterables:
+            for addr in iterable:
+                addr_str = str(addr).strip()
+                if not addr_str or addr_str in seen:
+                    continue
+                seen.add(addr_str)
+                cleaned.append(addr_str)
+
         self._addrs = cleaned
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:

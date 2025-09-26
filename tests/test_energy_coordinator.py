@@ -516,6 +516,16 @@ def test_energy_state_coordinator_update_addresses_filters_duplicates() -> None:
     assert coord._addrs == ["A", "B"]
 
 
+def test_energy_state_coordinator_update_addresses_accepts_map() -> None:
+    hass = HomeAssistant()
+    client = types.SimpleNamespace()
+    coord = EnergyStateCoordinator(hass, client, "dev", [])  # type: ignore[arg-type]
+
+    coord.update_addresses({"htr": ["A", "A"], "acm": ["B", ""], "foo": ["X"]})
+
+    assert coord._addrs == ["A", "B"]
+
+
 def test_coordinator_rate_limit_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         async def _raise_rate_limit(*_args: Any, **_kwargs: Any) -> Any:
