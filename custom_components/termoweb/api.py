@@ -299,6 +299,92 @@ class RESTClient:
         path = f"/api/v2/devs/{dev_id}/htr/{addr}/settings"
         return await self._request("GET", path, headers=headers)
 
+    def _ensure_temperature(self, value: Any) -> str:
+        """Normalise a numeric temperature to a string with one decimal."""
+
+        try:
+            return f"{float(value):.1f}"
+        except (TypeError, ValueError) as err:
+            raise ValueError(f"Invalid temperature value: {value!r}") from err
+
+    def _ensure_prog(self, prog: list[int]) -> list[int]:
+        """Validate and normalise a weekly program list."""
+
+        if not isinstance(prog, list) or len(prog) != 168:
+            raise ValueError("prog must be a list of 168 integers (0, 1, or 2)")
+        normalised: list[int] = []
+        for value in prog:
+            try:
+                ivalue = int(value)
+            except (TypeError, ValueError) as err:
+                raise ValueError(f"prog contains non-integer value: {value!r}") from err
+            if ivalue not in (0, 1, 2):
+                raise ValueError(f"prog values must be 0, 1, or 2; got {ivalue}")
+            normalised.append(ivalue)
+        return normalised
+
+    def _ensure_ptemp(self, ptemp: list[float]) -> list[str]:
+        """Validate preset temperatures and return formatted strings."""
+
+        if not isinstance(ptemp, list) or len(ptemp) != 3:
+            raise ValueError(
+                "ptemp must be a list of three numeric values [cold, night, day]"
+            )
+        formatted: list[str] = []
+        for value in ptemp:
+            try:
+                formatted.append(self._ensure_temperature(value))
+            except ValueError as err:
+                raise ValueError(f"ptemp contains non-numeric value: {value}") from err
+        return formatted
+
+    def _extract_samples(
+        self, data: Any, *, timestamp_divisor: float = 1.0
+    ) -> list[dict[str, str | int]]:
+        """Normalise heater samples payloads into {"t", "counter"} lists."""
+
+        items: list[Any] | None = None
+        if isinstance(data, dict) and isinstance(data.get("samples"), list):
+            items = data["samples"]
+        elif isinstance(data, list):
+            items = data
+
+        if items is None:
+            _LOGGER.debug(
+                "Unexpected htr samples payload (%s); returning empty list",
+                type(data).__name__,
+            )
+            return []
+
+        samples: list[dict[str, str | int]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                _LOGGER.debug("Unexpected htr sample item: %r", item)
+                continue
+            timestamp = item.get("t")
+            if timestamp is None:
+                timestamp = item.get("timestamp")
+            if not isinstance(timestamp, (int, float)):
+                _LOGGER.debug("Unexpected htr sample shape: %s", item)
+                _LOGGER.debug("Unexpected htr sample timestamp: %r", timestamp)
+                continue
+            counter = item.get("counter")
+            if counter is None:
+                counter = item.get("value")
+            if counter is None:
+                counter = item.get("energy")
+            if counter is None:
+                _LOGGER.debug("Unexpected htr sample shape: %s", item)
+                _LOGGER.debug("Unexpected htr sample counter: %r", item)
+                continue
+            samples.append(
+                {
+                    "t": int(float(timestamp) / timestamp_divisor),
+                    "counter": str(counter),
+                }
+            )
+        return samples
+
     async def set_htr_settings(
         self,
         dev_id: str,
@@ -350,38 +436,17 @@ class RESTClient:
         # Manual setpoint – format as string with one decimal
         if stemp is not None:
             try:
-                payload["stemp"] = f"{float(stemp):.1f}"
-            except Exception:
-                raise ValueError(f"Invalid stemp value: {stemp}")
+                payload["stemp"] = self._ensure_temperature(stemp)
+            except ValueError as err:
+                raise ValueError(f"Invalid stemp value: {stemp}") from err
 
         # Weekly program – validate length and values
         if prog is not None:
-            if not isinstance(prog, list) or len(prog) != 168:
-                raise ValueError("prog must be a list of 168 integers (0, 1, or 2)")
-            normalized: list[int] = []
-            for v in prog:
-                try:
-                    iv = int(v)
-                except Exception:
-                    raise ValueError(f"prog contains non-integer value: {v}")
-                if iv not in (0, 1, 2):
-                    raise ValueError(f"prog values must be 0, 1, or 2; got {iv}")
-                normalized.append(iv)
-            payload["prog"] = normalized
+            payload["prog"] = self._ensure_prog(prog)
 
         # Preset temperatures – validate length and convert to strings
         if ptemp is not None:
-            if not isinstance(ptemp, list) or len(ptemp) != 3:
-                raise ValueError(
-                    "ptemp must be a list of three numeric values [cold, night, day]"
-                )
-            formatted: list[str] = []
-            for v in ptemp:
-                try:
-                    formatted.append(f"{float(v):.1f}")
-                except Exception:
-                    raise ValueError(f"ptemp contains non-numeric value: {v}")
-            payload["ptemp"] = formatted
+            payload["ptemp"] = self._ensure_ptemp(ptemp)
 
         headers = await self._authed_headers()
         path = f"/api/v2/devs/{dev_id}/htr/{addr}/settings"
@@ -400,22 +465,4 @@ class RESTClient:
         params = {"start": int(start), "end": int(end)}
         data = await self._request("GET", path, headers=headers, params=params)
 
-        if isinstance(data, dict) and isinstance(data.get("samples"), list):
-            samples: list[dict[str, str | int]] = []
-            for item in data["samples"]:
-                if not isinstance(item, dict):
-                    _LOGGER.debug("Unexpected htr sample item: %r", item)
-                    continue
-                t = item.get("t")
-                counter = item.get("counter")
-                if isinstance(t, (int, float)) and counter is not None:
-                    samples.append({"t": int(t), "counter": str(counter)})
-                else:
-                    _LOGGER.debug("Unexpected htr sample shape: %s", item)
-            return samples
-
-        _LOGGER.debug(
-            "Unexpected htr samples payload (%s); returning empty list",
-            type(data).__name__,
-        )
-        return []
+        return self._extract_samples(data)

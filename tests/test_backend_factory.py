@@ -7,7 +7,10 @@ from typing import Any
 import pytest
 
 from custom_components.termoweb.backend import create_backend
+from custom_components.termoweb.backend import termoweb as termoweb_backend
+from custom_components.termoweb.backend.ducaheat import DucaheatBackend
 from custom_components.termoweb.backend.termoweb import TermoWebBackend
+from custom_components.termoweb.const import BRAND_DUCAHEAT
 from custom_components.termoweb.ws_client_legacy import WebSocket09Client
 
 
@@ -63,6 +66,14 @@ def test_create_backend_returns_termoweb_backend() -> None:
     assert backend.client is client
 
 
+def test_create_backend_returns_ducaheat_backend() -> None:
+    client = DummyHttpClient()
+    backend = create_backend(brand=BRAND_DUCAHEAT, client=client)
+    assert isinstance(backend, DucaheatBackend)
+    assert backend.brand == BRAND_DUCAHEAT
+    assert backend.client is client
+
+
 def test_termoweb_backend_creates_ws_client() -> None:
     client = DummyHttpClient()
     backend = TermoWebBackend(brand="termoweb", client=client)
@@ -104,3 +115,25 @@ def test_termoweb_backend_fallback_ws_resolution(monkeypatch: pytest.MonkeyPatch
         loop.close()
 
     assert isinstance(ws_client, WebSocket09Client)
+
+
+def test_termoweb_backend_resolve_ws_client_cls_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = TermoWebBackend(brand="termoweb", client=DummyHttpClient())
+    sentinel = object()
+
+    modules = {
+        "custom_components.termoweb.__init__": SimpleNamespace(WebSocket09Client=None),
+        "custom_components.termoweb.ws_client_legacy": SimpleNamespace(
+            WebSocket09Client=sentinel
+        ),
+    }
+
+    def fake_import(name: str) -> Any:
+        return modules[name]
+
+    monkeypatch.setattr(termoweb_backend, "import_module", fake_import)
+
+    resolved = backend._resolve_ws_client_cls()
+    assert resolved is sentinel
