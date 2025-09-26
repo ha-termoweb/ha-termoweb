@@ -35,6 +35,7 @@ class GatewayOnlineBinarySensor(
     def __init__(
         self, coordinator: StateCoordinator, entry_id: str, dev_id: str
     ) -> None:
+        """Initialise the connectivity binary sensor."""
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._dev_id = str(dev_id)
@@ -43,6 +44,7 @@ class GatewayOnlineBinarySensor(
         self._unsub_ws = None
 
     async def async_added_to_hass(self) -> None:
+        """Subscribe to websocket status updates when added to hass."""
         await super().async_added_to_hass()
         self._unsub_ws = async_dispatcher_connect(
             self.hass, signal_ws_status(self._entry_id), self._on_ws_status
@@ -50,16 +52,19 @@ class GatewayOnlineBinarySensor(
         self.async_on_remove(lambda: self._unsub_ws() if self._unsub_ws else None)
 
     def _ws_state(self) -> dict[str, Any]:
+        """Return the latest websocket status payload for this device."""
         rec = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {}) or {}
         return (rec.get("ws_state") or {}).get(self._dev_id, {})
 
     @property
     def is_on(self) -> bool:
+        """Return True when the integration reports the gateway is online."""
         data = (self.coordinator.data or {}).get(self._dev_id, {}) or {}
         return bool(data.get("connected"))
 
     @property
     def device_info(self) -> DeviceInfo:
+        """Return Home Assistant device metadata for the gateway."""
         data = (self.coordinator.data or {}).get(self._dev_id, {}) or {}
         version = (self.hass.data.get(DOMAIN, {}).get(self._entry_id, {}) or {}).get(
             "version"
@@ -76,6 +81,7 @@ class GatewayOnlineBinarySensor(
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional gateway diagnostics and websocket state."""
         data = (self.coordinator.data or {}).get(self._dev_id, {}) or {}
         ws = self._ws_state()
         return {
@@ -90,6 +96,7 @@ class GatewayOnlineBinarySensor(
 
     @callback
     def _on_ws_status(self, payload: dict) -> None:
+        """Handle websocket status broadcasts from the integration."""
         if payload.get("dev_id") != self._dev_id:
             return
         self.schedule_update_ha_state()

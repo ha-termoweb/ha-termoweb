@@ -11,6 +11,7 @@ class TermoWebBackend(Backend):
     """Backend for the TermoWeb brand."""
 
     def _resolve_ws_client_cls(self) -> type[Any]:
+        """Return the websocket client class compatible with this backend."""
         module = import_module("custom_components.termoweb.__init__")
         ws_cls = getattr(module, "WebSocket09Client", None)
         if ws_cls is None:

@@ -17,7 +17,7 @@ from homeassistant.helpers import entity_platform
 from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
-from .const import BRAND_TERMOWEB, DOMAIN
+from .const import DOMAIN
 from .heater import HeaterNodeBase, build_heater_name_map
 from .nodes import HeaterNode, build_node_inventory
 from .utils import HEATER_NODE_TYPES, addresses_by_type, float_or_none
@@ -63,6 +63,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     # Explicit callables ensure dispatch and let us add clear logs when invoked.
     async def _svc_set_schedule(entity: HeaterClimateEntity, call: ServiceCall) -> None:
+        """Handle the set_schedule entity service."""
         prog = call.data.get("prog")
         _LOGGER.info(
             "entity-service termoweb.set_schedule -> %s prog_len=%s",
@@ -74,6 +75,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     async def _svc_set_preset_temperatures(
         entity: HeaterClimateEntity, call: ServiceCall
     ) -> None:
+        """Handle the set_preset_temperatures entity service."""
         if "ptemp" in call.data:
             args = {"ptemp": call.data.get("ptemp")}
         else:
@@ -129,6 +131,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         addr: str,
         name: str,
     ) -> None:
+        """Initialise the climate entity for a TermoWeb heater."""
         HeaterNode.__init__(self, name=name, addr=addr)
         HeaterNodeBase.__init__(self, coordinator, entry_id, dev_id, addr, self.name)
 
@@ -140,6 +143,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         self._write_task: asyncio.Task | None = None
 
     async def async_will_remove_from_hass(self) -> None:
+        """Clean up pending tasks when the entity is removed."""
         if self._refresh_fallback:
             self._refresh_fallback.cancel()
             self._refresh_fallback = None
@@ -147,9 +151,11 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
     @staticmethod
     def _slot_label(v: int) -> str | None:
+        """Translate a program slot integer into a label."""
         return {0: "cold", 1: "night", 2: "day"}.get(v)
 
     def _current_prog_slot(self, s: dict[str, Any]) -> int | None:
+        """Return the active program slot index for the heater."""
         prog = s.get("prog")
         if not isinstance(prog, list) or len(prog) < 168:
             return None
@@ -165,6 +171,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
     # -------------------- WS updates --------------------
     @callback
     def _handle_ws_event(self, payload: dict) -> None:
+        """React to websocket updates for this heater."""
         kind = payload.get("kind")
         addr = payload.get("addr")
         if kind == "htr_settings" and addr is not None and self._refresh_fallback:
@@ -175,6 +182,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
     @property
     def hvac_mode(self) -> HVACMode:
+        """Return the HA HVAC mode derived from heater settings."""
         s = self.heater_settings() or {}
         mode = (s.get("mode") or "").lower()
         if mode == "off":
@@ -187,6 +195,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
     @property
     def hvac_action(self) -> HVACAction | None:
+        """Return the current HVAC action reported by the heater."""
         s = self.heater_settings() or {}
         state = (s.get("state") or "").lower()
         if not state:
@@ -197,27 +206,29 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
     @property
     def current_temperature(self) -> float | None:
+        """Return the measured ambient temperature."""
         s = self.heater_settings() or {}
         return float_or_none(s.get("mtemp"))
 
     @property
     def target_temperature(self) -> float | None:
+        """Return the target temperature set on the heater."""
         s = self.heater_settings() or {}
         return float_or_none(s.get("stemp"))
 
     @property
     def min_temp(self) -> float:
+        """Return the minimum supported setpoint."""
         return 5.0
 
     @property
     def max_temp(self) -> float:
+        """Return the maximum supported setpoint."""
         return 30.0
 
     @property
     def icon(self) -> str | None:
-        """Dynamic icon: radiator-off when off, radiator-disabled when idle,
-        radiator when heating
-        """
+        """Return an icon reflecting the heater state."""
         if self.hvac_mode == HVACMode.OFF:
             return "mdi:radiator-off"
         if self.hvac_action == HVACAction.HEATING:
@@ -228,6 +239,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional metadata about the heater."""
         s = self.heater_settings() or {}
         attrs: dict[str, Any] = {
             "dev_id": self._dev_id,
@@ -475,6 +487,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         _LOGGER.error("Unsupported hvac_mode=%s", hvac_mode)
 
     async def _ensure_write_task(self) -> None:
+        """Schedule a debounced write task if one is not running."""
         if self._write_task and not self._write_task.done():
             return
         self._write_task = asyncio.create_task(
@@ -483,6 +496,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         )
 
     async def _write_after_debounce(self) -> None:
+        """Batch pending mode/setpoint writes after the debounce interval."""
         await asyncio.sleep(_WRITE_DEBOUNCE)
         mode = self._pending_mode
         stemp = self._pending_stemp
@@ -587,6 +601,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         self._schedule_refresh_fallback()
 
     def _schedule_refresh_fallback(self) -> None:
+        """Schedule a refresh if the websocket echo does not arrive."""
         if self._refresh_fallback:
             if not self._refresh_fallback.done():
                 self._refresh_fallback.cancel()
@@ -616,6 +631,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                         return
 
         async def _fallback() -> None:
+            """Force a heater refresh after the fallback delay."""
             task = asyncio.current_task()
             await asyncio.sleep(_WS_ECHO_FALLBACK_REFRESH)
             try:

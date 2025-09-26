@@ -43,6 +43,11 @@ The end user of this integration is a non-technical person who has a home automa
 - New features must be documented.
 - Do not make changes to parts of the code that are unrelated to your current task.
 
+## Tooling Tips
+- Run `python scripts/generate_function_map.py` to produce `docs/function_map.txt`,
+  which lists every function with its docstring summary (tests are excluded). This
+  is a quick way to understand the available helpers within the integration.
+
 ## Pull Request Expectations
 - Keep every PR focused on a single feature or test with minimal code changes as needed.
 - Provide a brief summary of your changes and how they were tested.

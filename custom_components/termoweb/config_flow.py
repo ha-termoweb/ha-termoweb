@@ -12,7 +12,7 @@ from homeassistant.helpers import aiohttp_client
 from homeassistant.loader import async_get_integration
 import voluptuous as vol
 
-from .api import BackendAuthError, RESTClient, BackendRateLimitError
+from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .const import (
     BRAND_DUCAHEAT as CONST_BRAND_DUCAHEAT,
     BRAND_LABELS,
@@ -44,6 +44,7 @@ def _login_schema(
     default_poll: int = DEFAULT_POLL_INTERVAL,
     default_brand: str = DEFAULT_BRAND,
 ) -> vol.Schema:
+    """Build the login form schema with provided defaults."""
     return vol.Schema(
         {
             vol.Required(
@@ -63,6 +64,7 @@ def _login_schema(
 async def _validate_login(
     hass: HomeAssistant, username: str, password: str, brand: str
 ) -> None:
+    """Ensure the provided credentials authenticate successfully."""
     session = aiohttp_client.async_get_clientsession(hass)
     api_base = get_brand_api_base(brand)
     basic_auth = get_brand_basic_auth(brand)
@@ -82,6 +84,7 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Collect credentials and create the config entry."""
         ver = await _get_version(self.hass)
         _LOGGER.info("TermoWeb config flow started (v%s)", ver)
 
@@ -221,9 +224,11 @@ class TermoWebOptionsFlow(config_entries.OptionsFlow):
     """Options flow to tweak poll interval only."""
 
     def __init__(self, entry: ConfigEntry) -> None:
+        """Store the entry being configured."""
         self.entry = entry
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
+        """Show or process the poll-interval options form."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
@@ -246,4 +251,5 @@ class TermoWebOptionsFlow(config_entries.OptionsFlow):
 
 
 async def async_get_options_flow(config_entry: ConfigEntry):
+    """Return the options flow handler for this config entry."""
     return TermoWebOptionsFlow(config_entry)

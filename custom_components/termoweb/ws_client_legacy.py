@@ -24,6 +24,7 @@ HandshakeResult = tuple[str, int]  # (sid, heartbeat_timeout_s)
 
 class HandshakeError(RuntimeError):
     def __init__(self, status: int, url: str, body_snippet: str) -> None:
+        """Capture context for failed Socket.IO handshakes."""
         super().__init__(f"handshake failed (status={status})")
         self.status = status
         self.url = url
@@ -63,6 +64,7 @@ class WebSocket09Client:
         session: aiohttp.ClientSession | None = None,
         handshake_fail_threshold: int = 5,
     ) -> None:
+        """Initialise the legacy Socket.IO client wrapper."""
         self.hass = hass
         self.entry_id = entry_id
         self.dev_id = dev_id
@@ -89,6 +91,7 @@ class WebSocket09Client:
     # ----------------- Public control -----------------
 
     def start(self) -> asyncio.Task:
+        """Start the websocket client background task."""
         if self._task and not self._task.done():
             return self._task
         self._closing = False
@@ -125,11 +128,13 @@ class WebSocket09Client:
         self._update_status("stopped")
 
     def is_running(self) -> bool:
+        """Return True if the websocket client task is active."""
         return bool(self._task and not self._task.done())
 
     # ----------------- Core loop -----------------
 
     async def _runner(self) -> None:
+        """Manage reconnection loops and websocket lifecycle."""
         self._update_status("starting")
         while not self._closing:
             should_retry = True
@@ -268,10 +273,11 @@ class WebSocket09Client:
                     sid, hb = self._parse_handshake_body(body)
                     self._backoff_idx = 0  # success resets backoff
                     return sid, hb
-        except (asyncio.TimeoutError, aiohttp.ClientError) as error:
+        except (TimeoutError, aiohttp.ClientError) as error:
             raise HandshakeError(-1, url, str(error)) from error
 
     async def _connect_ws(self, sid: str) -> None:
+        """Establish the websocket connection using the handshake session id."""
         token = await self._get_token()
         base = self._api_base()
         ws_base = base.replace("https://", "wss://", 1)
@@ -289,9 +295,11 @@ class WebSocket09Client:
         )
 
     async def _join_namespace(self) -> None:
+        """Enter the API namespace required for TermoWeb events."""
         await self._send_text(f"1::{WS_NAMESPACE}")
 
     async def _send_snapshot_request(self) -> None:
+        """Request the initial device snapshot after connecting."""
         # 5::/api/v2/socket_io:{"name":"dev_data","args":[]}
         payload = {"name": "dev_data", "args": []}
         await self._send_text(
@@ -312,6 +320,7 @@ class WebSocket09Client:
     # ----------------- Loops -----------------
 
     async def _heartbeat_loop(self) -> None:
+        """Send periodic heartbeat frames to keep the connection alive."""
         try:
             while True:
                 await asyncio.sleep(self._hb_send_interval)
@@ -323,6 +332,7 @@ class WebSocket09Client:
             return
 
     async def _read_loop(self) -> None:
+        """Consume websocket frames and route events."""
         ws = self._ws
         if ws is None:
             return
@@ -392,6 +402,7 @@ class WebSocket09Client:
         sample_addrs: list[str] = []
 
         def _ensure_type_bucket(node_type: str) -> dict[str, Any]:
+            """Return the node bucket for ``node_type``, creating defaults."""
             nodes_by_type: dict[str, Any] = dev_map.setdefault("nodes_by_type", {})
             bucket = nodes_by_type.get(node_type)
             if bucket is None:
@@ -412,6 +423,7 @@ class WebSocket09Client:
             return bucket
 
         def _extract_type_addr(path: str) -> tuple[str | None, str | None]:
+            """Extract the node type and address from a websocket path."""
             if not path:
                 return None, None
             parts = [p for p in path.split("/") if p]
@@ -583,6 +595,7 @@ class WebSocket09Client:
     # ----------------- Helpers -----------------
 
     def _parse_handshake_body(self, body: str) -> HandshakeResult:
+        """Parse the Socket.IO handshake response into (sid, timeout)."""
         # "<sid>:<heartbeat>:<disconnect>:<transports>"
         parts = (body or "").strip().split(":")
         if len(parts) < 2:
@@ -595,16 +608,19 @@ class WebSocket09Client:
         return sid, hb
 
     async def _send_text(self, data: str) -> None:
+        """Send a raw Socket.IO text frame if the websocket is open."""
         if not self._ws:
             return
         await self._ws.send_str(data)
 
     async def _get_token(self) -> str:
+        """Reuse the REST client token for websocket authentication."""
         # Borrow token from API client without logging it
         headers = await self._client._authed_headers()
         return headers["Authorization"].split(" ", 1)[1]
 
     async def _force_refresh_token(self) -> None:
+        """Force the REST client to fetch a fresh access token."""
         # Clear cached token and fetch a new one
         try:
             # noinspection PyUnresolvedReferences
@@ -614,12 +630,14 @@ class WebSocket09Client:
         await self._client._ensure_token()
 
     def _api_base(self) -> str:
+        """Return the base REST API URL used for websocket routes."""
         base = getattr(self._client, "api_base", None)
         if isinstance(base, str) and base:
             return base.rstrip("/")
         return API_BASE
 
     def _update_status(self, status: str) -> None:
+        """Publish the websocket status to Home Assistant listeners."""
         # Update shared state bucket (hass.data[...] managed by integration)
         state_bucket = self.hass.data[DOMAIN][self.entry_id].setdefault("ws_state", {})
         s = state_bucket.setdefault(self.dev_id, {})
@@ -641,6 +659,7 @@ class WebSocket09Client:
         )
 
     def _mark_event(self, *, paths: list[str] | None) -> None:
+        """Record receipt of a websocket event batch for health tracking."""
         now = time.time()
         self._stats.last_event_ts = now
         if paths:

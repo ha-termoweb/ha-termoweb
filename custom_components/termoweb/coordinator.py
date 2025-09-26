@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from datetime import timedelta
 import logging
 import time
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from aiohttp import ClientError
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import BackendAuthError, RESTClient, BackendRateLimitError
+from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
 from .nodes import Node, build_node_inventory
 from .utils import HEATER_NODE_TYPES, addresses_by_type, float_or_none
@@ -52,6 +53,7 @@ class StateCoordinator(
         self._node_inventory: list[Node] = list(node_inventory or [])
 
     def _addrs(self) -> list[str]:
+        """Return cached heater addresses, rebuilding inventory if needed."""
         if not self._node_inventory and self._nodes:
             try:
                 self._node_inventory = build_node_inventory(self._nodes)
@@ -179,6 +181,7 @@ class StateCoordinator(
             )
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
+        """Fetch heater settings for a subset of addresses on each poll."""
         dev_id = self._dev_id
         addrs = self._addrs()
         try:
@@ -287,6 +290,7 @@ class EnergyStateCoordinator(
         self._addrs = cleaned
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
+        """Fetch recent heater energy samples and derive totals and power."""
         dev_id = self._dev_id
         addrs = self._addrs
         try:

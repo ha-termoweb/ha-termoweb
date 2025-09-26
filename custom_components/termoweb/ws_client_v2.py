@@ -131,6 +131,7 @@ class DucaheatWSClient:
             _LOGGER.debug("WS %s: unhandled event %s", self.dev_id, event)
 
     def _handle_handshake(self, data: Any) -> None:
+        """Process the initial handshake payload from the server."""
         if isinstance(data, dict):
             self._handshake = deepcopy(data)
             self._update_status("connected")
@@ -138,6 +139,7 @@ class DucaheatWSClient:
             _LOGGER.debug("WS %s: invalid handshake payload", self.dev_id)
 
     def _handle_dev_data(self, data: Any) -> None:
+        """Handle the first full snapshot of nodes from the websocket."""
         nodes = self._extract_nodes(data)
         if nodes is None:
             _LOGGER.debug("WS %s: dev_data without nodes", self.dev_id)
@@ -148,6 +150,7 @@ class DucaheatWSClient:
         self._mark_event()
 
     def _handle_update(self, data: Any) -> None:
+        """Merge incremental node updates from the websocket feed."""
         nodes = self._extract_nodes(data)
         if nodes is None:
             _LOGGER.debug("WS %s: update without nodes", self.dev_id)
@@ -161,6 +164,7 @@ class DucaheatWSClient:
         self._mark_event()
 
     def _extract_nodes(self, data: Any) -> dict[str, Any] | None:
+        """Extract the nodes dictionary from a websocket payload."""
         if not isinstance(data, dict):
             return None
         nodes = data.get("nodes")
@@ -169,6 +173,7 @@ class DucaheatWSClient:
         return None
 
     def _dispatch_nodes(self, snapshot: dict[str, Any]) -> None:
+        """Publish the node snapshot to the coordinator and listeners."""
         record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
 
         inventory: list[Any] = []
@@ -209,6 +214,7 @@ class DucaheatWSClient:
         }
 
         def _send() -> None:
+            """Fire the dispatcher signal with the latest node payload."""
             async_dispatcher_send(
                 self.hass,
                 signal_ws_data(self.entry_id),
@@ -219,6 +225,7 @@ class DucaheatWSClient:
 
     @staticmethod
     def _build_nodes_snapshot(nodes: dict[str, Any]) -> dict[str, Any]:
+        """Normalise the nodes payload for consumers."""
         nodes_copy = deepcopy(nodes)
         nodes_by_type: dict[str, Any] = {}
         for node_type, payload in nodes_copy.items():
@@ -235,6 +242,7 @@ class DucaheatWSClient:
         return snapshot
 
     def _mark_event(self) -> None:
+        """Record the timestamp of the most recent websocket event."""
         now = time.time()
         self._last_event_at = now
         if self._healthy_since is None:
@@ -243,6 +251,7 @@ class DucaheatWSClient:
 
     @staticmethod
     def _merge_nodes(target: dict[str, Any], source: dict[str, Any]) -> None:
+        """Deep-merge incremental node updates into the stored snapshot."""
         for key, value in source.items():
             if isinstance(value, dict):
                 existing = target.get(key)
@@ -254,6 +263,7 @@ class DucaheatWSClient:
                 target[key] = value
 
     def _update_status(self, status: str) -> None:
+        """Update bookkeeping for the websocket connection health."""
         if status == self._status and status != "healthy":
             return
         self._status = status
@@ -272,6 +282,7 @@ class DucaheatWSClient:
         status_payload = {"dev_id": self.dev_id, "status": status}
 
         def _send() -> None:
+            """Emit the websocket status update to Home Assistant."""
             async_dispatcher_send(
                 self.hass,
                 signal_ws_status(self.entry_id),

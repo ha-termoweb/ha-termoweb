@@ -193,6 +193,7 @@ async def _async_import_energy_history(
     async def _rate_limited_fetch(
         addr: str, start: int, stop: int
     ) -> list[dict[str, Any]]:
+        """Fetch heater samples while respecting the shared rate limit."""
         global _LAST_SAMPLES_QUERY
         async with _SAMPLES_QUERY_LOCK:
             now = time.monotonic()
@@ -546,6 +547,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     async def _start_ws(dev_id: str) -> None:
+        """Ensure a websocket client exists and is running for ``dev_id``."""
         backend: Backend = data["backend"]
         tasks: dict[str, asyncio.Task] = data["ws_tasks"]
         clients: dict[str, WsClientProto] = data["ws_clients"]
@@ -606,6 +608,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data["recalc_poll"] = _recalc_poll_interval
 
     def _on_ws_status(_payload: dict) -> None:
+        """Recalculate polling intervals when websocket status changes."""
         _recalc_poll_interval()
 
     unsub = async_dispatcher_connect(
@@ -622,6 +625,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Start for any devices discovered later
     def _on_coordinator_updated() -> None:
+        """Start websocket clients for newly discovered devices."""
         for dev_id in (coordinator.data or {}).keys():
             if dev_id not in data["ws_tasks"]:
                 hass.async_create_task(_start_ws(dev_id))
@@ -631,6 +635,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     async def _service_import_energy_history(call) -> None:
+        """Handle the import_energy_history service call."""
         _LOGGER.debug("service import_energy_history called")
         reset = bool(call.data.get("reset_progress", False))
         max_days = call.data.get("max_history_retrieval")
@@ -691,6 +696,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.debug("%s: scheduling initial energy import", entry.entry_id)
 
         async def _schedule_import(_event: Any | None = None) -> None:
+            """Kick off the initial energy history import task."""
             await _async_import_energy_history(hass, entry)
 
         if hass.is_running:

@@ -102,6 +102,7 @@ class HeaterNodeBase(CoordinatorEntity):
         await super().async_will_remove_from_hass()
 
     def _remove_ws_listener(self) -> None:
+        """Disconnect the websocket listener if it is registered."""
         if self._unsub_ws is None:
             return
         try:
@@ -117,11 +118,13 @@ class HeaterNodeBase(CoordinatorEntity):
 
     @callback
     def _handle_ws_message(self, payload: dict) -> None:
+        """Process websocket payloads addressed to this heater."""
         if not self._payload_matches_heater(payload):
             return
         self._handle_ws_event(payload)
 
     def _payload_matches_heater(self, payload: dict) -> bool:
+        """Return True when the websocket payload targets this heater."""
         if payload.get("dev_id") != self._dev_id:
             return False
         addr = payload.get("addr")
@@ -146,11 +149,13 @@ class HeaterNodeBase(CoordinatorEntity):
         return self._device_available(self._device_record())
 
     def _device_available(self, device_entry: dict[str, Any] | None) -> bool:
+        """Return True when the device entry contains node data."""
         if not isinstance(device_entry, dict):
             return False
         return device_entry.get("nodes") is not None
 
     def _device_record(self) -> dict[str, Any] | None:
+        """Return the coordinator cache entry for this device."""
         data = getattr(self.coordinator, "data", {}) or {}
         getter = getattr(data, "get", None)
 
@@ -164,6 +169,7 @@ class HeaterNodeBase(CoordinatorEntity):
         return record if isinstance(record, dict) else None
 
     def _heater_section(self) -> dict[str, Any]:
+        """Return the heater-specific portion of the coordinator data."""
         record = self._device_record()
         if record is None:
             return {}
@@ -179,10 +185,12 @@ class HeaterNodeBase(CoordinatorEntity):
         return settings if isinstance(settings, dict) else None
 
     def _client(self) -> Any:
+        """Return the REST client used for write operations."""
         hass_data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
         return hass_data.get("client")
 
     def _units(self) -> str:
+        """Return the configured temperature units for this heater."""
         settings = self.heater_settings() or {}
         units = (settings.get("units") or "C").upper()
         return "C" if units not in {"C", "F"} else units
