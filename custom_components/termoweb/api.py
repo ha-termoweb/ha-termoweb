@@ -13,11 +13,12 @@ from .const import (
     API_BASE,
     BASIC_AUTH_B64,
     DEVS_PATH,
-    HTR_SAMPLES_PATH_FMT,
     NODES_PATH_FMT,
+    NODE_SAMPLES_PATH_FMT,
     TOKEN_PATH,
     USER_AGENT,
 )
+from .nodes import Node
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,6 +32,9 @@ class BackendAuthError(Exception):
 
 class BackendRateLimitError(Exception):
     """Server rate-limited the client (HTTP 429)."""
+
+
+NodeDescriptor = Node | tuple[str, str | int]
 
 
 def _redact_bearer(text: str | None) -> str:
@@ -293,11 +297,21 @@ class RESTClient:
         path = NODES_PATH_FMT.format(dev_id=dev_id)
         return await self._request("GET", path, headers=headers)
 
-    async def get_htr_settings(self, dev_id: str, addr: str | int) -> Any:
-        """Return heater settings/state for a node: GET /htr/{addr}/settings."""
+    async def get_node_settings(self, dev_id: str, node: NodeDescriptor) -> Any:
+        """Return settings/state for a node."""
+
+        node_type, addr = self._resolve_node_descriptor(node)
         headers = await self._authed_headers()
-        path = f"/api/v2/devs/{dev_id}/htr/{addr}/settings"
-        return await self._request("GET", path, headers=headers)
+        path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}/settings"
+        data = await self._request("GET", path, headers=headers)
+        self._log_non_htr_payload(
+            node_type=node_type,
+            dev_id=dev_id,
+            addr=addr,
+            stage="GET settings",
+            payload=data,
+        )
+        return data
 
     def _ensure_temperature(self, value: Any) -> str:
         """Normalise a numeric temperature to a string with one decimal."""
@@ -385,10 +399,10 @@ class RESTClient:
             )
         return samples
 
-    async def set_htr_settings(
+    async def set_node_settings(
         self,
         dev_id: str,
-        addr: str | int,
+        node: NodeDescriptor,
         *,
         mode: str | None = None,  # "auto" | "manual" | "off"
         stemp: float | None = None,  # target setpoint (in current units)
@@ -417,6 +431,8 @@ class RESTClient:
         The payload will only include keys for the parameters passed by the caller, to avoid
         overwriting unrelated settings on the device.
         """
+
+        node_type, addr = self._resolve_node_descriptor(node)
 
         # Validate units
         unit_str: str = units.upper()
@@ -449,8 +465,75 @@ class RESTClient:
             payload["ptemp"] = self._ensure_ptemp(ptemp)
 
         headers = await self._authed_headers()
-        path = f"/api/v2/devs/{dev_id}/htr/{addr}/settings"
-        return await self._request("POST", path, headers=headers, json=payload)
+        path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}/settings"
+        self._log_non_htr_payload(
+            node_type=node_type,
+            dev_id=dev_id,
+            addr=addr,
+            stage="POST settings",  # request payload
+            payload=payload,
+        )
+        response = await self._request("POST", path, headers=headers, json=payload)
+        self._log_non_htr_payload(
+            node_type=node_type,
+            dev_id=dev_id,
+            addr=addr,
+            stage="POST settings response",
+            payload=response,
+        )
+        return response
+
+    async def get_node_samples(
+        self,
+        dev_id: str,
+        node: NodeDescriptor,
+        start: float,
+        end: float,
+    ) -> list[dict[str, str | int]]:
+        """Return heater samples as list of {"t", "counter"} dicts."""
+        node_type, addr = self._resolve_node_descriptor(node)
+        headers = await self._authed_headers()
+        path = NODE_SAMPLES_PATH_FMT.format(
+            dev_id=dev_id, node_type=node_type, addr=addr
+        )
+        params = {"start": int(start), "end": int(end)}
+        data = await self._request("GET", path, headers=headers, params=params)
+        self._log_non_htr_payload(
+            node_type=node_type,
+            dev_id=dev_id,
+            addr=addr,
+            stage="GET samples",
+            payload=data,
+        )
+        return self._extract_samples(data)
+
+    async def get_htr_settings(self, dev_id: str, addr: str | int) -> Any:
+        """Return heater settings/state for a node: GET /htr/{addr}/settings."""
+
+        return await self.get_node_settings(dev_id, ("htr", addr))
+
+    async def set_htr_settings(
+        self,
+        dev_id: str,
+        addr: str | int,
+        *,
+        mode: str | None = None,
+        stemp: float | None = None,
+        prog: list[int] | None = None,
+        ptemp: list[float] | None = None,
+        units: str = "C",
+    ) -> Any:
+        """Update heater settings for the specified node."""
+
+        return await self.set_node_settings(
+            dev_id,
+            ("htr", addr),
+            mode=mode,
+            stemp=stemp,
+            prog=prog,
+            ptemp=ptemp,
+            units=units,
+        )
 
     async def get_htr_samples(
         self,
@@ -459,10 +542,53 @@ class RESTClient:
         start: float,
         end: float,
     ) -> list[dict[str, str | int]]:
-        """Return heater samples as list of {"t", "counter"} dicts."""
-        headers = await self._authed_headers()
-        path = HTR_SAMPLES_PATH_FMT.format(dev_id=dev_id, addr=addr)
-        params = {"start": int(start), "end": int(end)}
-        data = await self._request("GET", path, headers=headers, params=params)
+        """Return historical heater samples for the specified node."""
 
-        return self._extract_samples(data)
+        return await self.get_node_samples(dev_id, ("htr", addr), start, end)
+    def _resolve_node_descriptor(self, node: NodeDescriptor) -> tuple[str, str]:
+        """Return ``(node_type, addr)`` for the provided descriptor."""
+
+        if isinstance(node, Node):
+            node_type = node.type
+            addr = node.addr
+        else:
+            if not isinstance(node, tuple) or len(node) != 2:
+                msg = f"Unsupported node descriptor: {node!r}"
+                raise ValueError(msg)
+            node_type, addr = node
+
+        node_type_str = str(node_type or "").strip().lower()
+        if not node_type_str:
+            msg = f"Invalid node type extracted from descriptor: {node!r}"
+            raise ValueError(msg)
+
+        addr_str = str(addr or "").strip()
+        if not addr_str:
+            msg = f"Invalid node address extracted from descriptor: {node!r}"
+            raise ValueError(msg)
+
+        return node_type_str, addr_str
+
+    def _log_non_htr_payload(
+        self,
+        *,
+        node_type: str,
+        dev_id: str,
+        addr: str,
+        stage: str,
+        payload: Any,
+    ) -> None:
+        """Log payloads for unsupported node types at DEBUG level."""
+
+        if node_type == "htr":
+            return
+
+        _LOGGER.debug(
+            "%s node %s/%s (%s) payload: %s",
+            stage,
+            dev_id,
+            addr,
+            node_type,
+            _redact_bearer(repr(payload)),
+        )
+

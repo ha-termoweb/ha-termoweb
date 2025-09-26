@@ -5,6 +5,10 @@ from abc import ABC, abstractmethod
 from asyncio import Task
 from typing import Any, Protocol
 
+from ..nodes import Node
+
+NodeDescriptor = Node | tuple[str, str | int]
+
 
 class HttpClientProto(Protocol):
     """Protocol for the HTTP client used by TermoWeb entities."""
@@ -14,6 +18,31 @@ class HttpClientProto(Protocol):
 
     async def get_nodes(self, dev_id: str) -> Any:
         """Return the node description for the given device."""
+
+    async def get_node_settings(self, dev_id: str, node: NodeDescriptor) -> Any:
+        """Return settings for the specified node."""
+
+    async def set_node_settings(
+        self,
+        dev_id: str,
+        node: NodeDescriptor,
+        *,
+        mode: str | None = None,
+        stemp: float | None = None,
+        prog: list[int] | None = None,
+        ptemp: list[float] | None = None,
+        units: str = "C",
+    ) -> Any:
+        """Update node settings for the specified node."""
+
+    async def get_node_samples(
+        self,
+        dev_id: str,
+        node: NodeDescriptor,
+        start: float,
+        stop: float,
+    ) -> list[dict[str, str | int]]:
+        """Return historical samples for the specified node."""
 
     async def get_htr_settings(self, dev_id: str, addr: str | int) -> Any:
         """Return heater settings for the specified node."""
