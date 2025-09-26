@@ -73,9 +73,7 @@ def _normalise_energy_value(coordinator: Any, raw: Any) -> float | None:
     if scale is None:
         if isinstance(coordinator, EnergyStateCoordinator):
             scale = 1.0
-        elif isinstance(raw, int):
-            scale = _WH_TO_KWH
-        elif isinstance(raw, str) and _looks_like_integer_string(raw):
+        elif isinstance(raw, int) or (isinstance(raw, str) and _looks_like_integer_string(raw)):
             scale = _WH_TO_KWH
         else:
             scale = 1.0
@@ -185,6 +183,7 @@ class HeaterTemperatureSensor(HeaterNodeBase, SensorEntity):
         unique_id: str,
         device_name: str,
     ) -> None:
+        """Initialise the heater temperature sensor entity."""
         super().__init__(
             coordinator,
             entry_id,
@@ -197,11 +196,13 @@ class HeaterTemperatureSensor(HeaterNodeBase, SensorEntity):
 
     @property
     def native_value(self) -> float | None:
+        """Return the latest temperature reported by the heater."""
         s = self.heater_settings() or {}
         return float_or_none(s.get("mtemp"))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        """Return metadata describing the heater temperature source."""
         s = self.heater_settings() or {}
         return {
             "dev_id": self._dev_id,
@@ -225,6 +226,7 @@ class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
         unique_id: str,
         device_name: str,
     ) -> None:
+        """Initialise a heater energy-derived sensor entity."""
         super().__init__(
             coordinator,
             entry_id,
@@ -236,17 +238,21 @@ class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
         )
 
     def _device_available(self, device_entry: dict[str, Any] | None) -> bool:
+        """Return True when the heater has a device entry."""
         return isinstance(device_entry, dict)
 
     def _metric_section(self) -> dict[str, Any]:
+        """Return the dictionary with the requested metric values."""
         heater_section = self._heater_section()
         metric = heater_section.get(self._metric_key)
         return metric if isinstance(metric, dict) else {}
 
     def _raw_native_value(self) -> Any:
+        """Return the raw metric value for this heater address."""
         return self._metric_section().get(self._addr)
 
     def _coerce_native_value(self, raw: Any) -> float | None:
+        """Convert the raw metric value into a float."""
         try:
             return float(raw)
         except (TypeError, ValueError):
@@ -254,6 +260,7 @@ class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
 
     @property
     def native_value(self) -> float | None:
+        """Return the processed metric value for Home Assistant."""
         raw = self._raw_native_value()
         if raw is None:
             return None
@@ -261,6 +268,7 @@ class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        """Return identifiers that locate the heater metric."""
         return {"dev_id": self._dev_id, "addr": self._addr}
 
 
@@ -273,6 +281,7 @@ class HeaterEnergyTotalSensor(HeaterEnergyBase):
     _metric_key = "energy"
 
     def _coerce_native_value(self, raw: Any) -> float | None:  # type: ignore[override]
+        """Normalise the raw energy metric into kWh."""
         return _normalise_energy_value(self.coordinator, raw)
 
 
@@ -300,6 +309,7 @@ class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
         name: str,
         unique_id: str,
     ) -> None:
+        """Initialise the installation-wide energy sensor."""
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._dev_id = dev_id
@@ -308,6 +318,7 @@ class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
         self._unsub_ws = None
 
     async def async_added_to_hass(self) -> None:
+        """Register websocket callbacks once the entity is added."""
         await super().async_added_to_hass()
         self._unsub_ws = async_dispatcher_connect(
             self.hass, signal_ws_data(self._entry_id), self._on_ws_data
@@ -316,21 +327,25 @@ class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
+        """Return the Home Assistant device metadata for the gateway."""
         return DeviceInfo(identifiers={(DOMAIN, self._dev_id)})
 
     @callback
     def _on_ws_data(self, payload: dict) -> None:
+        """Handle websocket payloads that may update the totals."""
         if payload.get("dev_id") != self._dev_id:
             return
         self.schedule_update_ha_state()
 
     @property
     def available(self) -> bool:
+        """Return True if the latest coordinator data contains totals."""
         d = (self.coordinator.data or {}).get(self._dev_id)
         return d is not None
 
     @property
     def native_value(self) -> float | None:
+        """Return the summed energy usage across all heaters."""
         d = (self.coordinator.data or {}).get(self._dev_id, {})
         energy = (d.get("htr") or {}).get("energy") or {}
         total = 0.0
@@ -347,6 +362,7 @@ class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        """Return identifiers describing the aggregated energy value."""
         return {"dev_id": self._dev_id}
 
 

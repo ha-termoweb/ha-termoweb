@@ -1,8 +1,8 @@
 """Ducaheat backend implementation and HTTP adapter."""
 from __future__ import annotations
 
-import logging
 from copy import deepcopy
+import logging
 from typing import Any
 
 from ..api import RESTClient
@@ -180,6 +180,7 @@ class DucaheatRESTClient(RESTClient):
     def _normalise_settings(
         self, payload: Any, *, node_type: str = "htr"
     ) -> dict[str, Any]:
+        """Flatten the vendor payload into HA-friendly heater settings."""
         if not isinstance(payload, dict):
             return {}
 
@@ -290,6 +291,7 @@ class DucaheatRESTClient(RESTClient):
         merged: dict[str, Any] = {}
 
         def _merge(target: dict[str, Any], source: dict[str, Any]) -> None:
+            """Recursively merge capability dictionaries."""
             for key, value in source.items():
                 if (
                     isinstance(value, dict)
@@ -312,6 +314,7 @@ class DucaheatRESTClient(RESTClient):
         return merged
 
     def _normalise_prog(self, data: Any) -> list[int] | None:
+        """Convert vendor programme payloads into a 168-slot list."""
         if isinstance(data, list):
             try:
                 return self._ensure_prog(data)
@@ -357,6 +360,7 @@ class DucaheatRESTClient(RESTClient):
         return values if len(values) == 168 else None
 
     def _normalise_prog_temps(self, data: Any) -> list[str] | None:
+        """Convert preset temperature payloads into stringified list."""
         if not isinstance(data, dict):
             return None
         antifrost = data.get("antifrost") or data.get("cold")
@@ -376,6 +380,7 @@ class DucaheatRESTClient(RESTClient):
         return formatted
 
     def _serialise_prog(self, prog: list[int]) -> dict[str, Any]:
+        """Serialise the 168-slot programme back to API structure."""
         normalised = self._ensure_prog(prog)
         days: dict[str, Any] = {}
         for idx, day in enumerate(_DAY_ORDER):
@@ -384,6 +389,7 @@ class DucaheatRESTClient(RESTClient):
         return {"days": days}
 
     def _serialise_prog_temps(self, ptemp: list[float]) -> dict[str, str]:
+        """Serialise preset temperatures into the API schema."""
         antifrost, eco, comfort = self._ensure_ptemp(ptemp)
         return {"antifrost": antifrost, "eco": eco, "comfort": comfort}
 

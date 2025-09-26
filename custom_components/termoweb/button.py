@@ -22,12 +22,14 @@ class StateRefreshButton(CoordinatorEntity, ButtonEntity):
     _attr_has_entity_name = True
 
     def __init__(self, coordinator, dev_id: str) -> None:
+        """Initialise the force-refresh button entity."""
         super().__init__(coordinator)
         self._dev_id = dev_id
         self._attr_unique_id = f"{DOMAIN}:{dev_id}:refresh"
 
     @property
     def device_info(self) -> DeviceInfo:
+        """Return the Home Assistant device metadata for this gateway."""
         return DeviceInfo(
             identifiers={(DOMAIN, self._dev_id)},
             name="TermoWeb Gateway",
@@ -37,4 +39,5 @@ class StateRefreshButton(CoordinatorEntity, ButtonEntity):
         )
 
     async def async_press(self) -> None:
+        """Request an immediate coordinator refresh when pressed."""
         await self.coordinator.async_request_refresh()

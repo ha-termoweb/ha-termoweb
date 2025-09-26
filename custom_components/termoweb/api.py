@@ -13,8 +13,8 @@ from .const import (
     API_BASE,
     BASIC_AUTH_B64,
     DEVS_PATH,
-    NODES_PATH_FMT,
     NODE_SAMPLES_PATH_FMT,
+    NODES_PATH_FMT,
     TOKEN_PATH,
     USER_AGENT,
 )
@@ -61,6 +61,7 @@ class RESTClient:
         api_base: str = API_BASE,
         basic_auth_b64: str = BASIC_AUTH_B64,
     ) -> None:
+        """Initialise the REST client with authentication context."""
         self._session = session
         self._username = username
         self._password = password
@@ -260,6 +261,7 @@ class RESTClient:
                 return token
 
     async def _authed_headers(self) -> dict[str, str]:
+        """Return HTTP headers including a valid bearer token."""
         token = await self._ensure_token()
         return {
             "Authorization": f"Bearer {token}",

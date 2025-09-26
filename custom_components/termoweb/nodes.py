@@ -50,6 +50,7 @@ class Node:
 
     @name.setter
     def name(self, value: str | None) -> None:
+        """Update the stored friendly name for the node."""
         cleaned = str(value or "").strip()
         self._node_name = cleaned
         if hasattr(self, "_attr_name"):
