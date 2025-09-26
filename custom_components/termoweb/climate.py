@@ -19,8 +19,8 @@ import voluptuous as vol
 
 from .const import BRAND_TERMOWEB, DOMAIN
 from .heater import HeaterNodeBase, build_heater_name_map
-from .nodes import HeaterNode
-from .utils import float_or_none
+from .nodes import HeaterNode, build_node_inventory
+from .utils import HEATER_NODE_TYPES, addresses_by_type, float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,7 +36,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
     nodes = data["nodes"]
-    addrs: list[str] = data["htr_addrs"]
+    inventory = list(data.get("node_inventory") or [])
+    if not inventory and nodes:
+        inventory = build_node_inventory(nodes)
+        data["node_inventory"] = inventory
+    addrs: list[str] = addresses_by_type(inventory, HEATER_NODE_TYPES)
 
     name_map = build_heater_name_map(nodes, lambda addr: f"Heater {addr}")
 

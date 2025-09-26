@@ -6,10 +6,8 @@ import logging
 
 import pytest
 
-from custom_components.termoweb.const import BRAND_DUCAHEAT, BRAND_TERMOWEB
 from custom_components.termoweb.nodes import (
     AccumulatorNode,
-    DucaheatAccum,
     HeaterNode,
     Node,
     PowerMonitorNode,
@@ -34,13 +32,6 @@ def test_accumulator_node_defaults() -> None:
     assert node.addr == "007"
     assert node.type == "acm"
     assert node.supports_boost() is False
-
-
-def test_ducaheat_accum_supports_boost() -> None:
-    node = DucaheatAccum(name="Tank", addr="4")
-
-    assert node.type == "acm"
-    assert node.supports_boost() is True
 
 
 def test_power_monitor_stub() -> None:
@@ -110,7 +101,7 @@ def test_build_node_inventory_handles_mixed_types(caplog: pytest.LogCaptureFixtu
     }
 
     with caplog.at_level(logging.DEBUG):
-        nodes = build_node_inventory(payload, BRAND_TERMOWEB)
+        nodes = build_node_inventory(payload)
 
     assert [type(node) for node in nodes] == [
         HeaterNode,
@@ -122,17 +113,6 @@ def test_build_node_inventory_handles_mixed_types(caplog: pytest.LogCaptureFixtu
     assert any("Unsupported node type" in message for message in caplog.messages)
 
 
-def test_build_node_inventory_prefers_ducaheat_accumulator() -> None:
-    payload = {"nodes": [{"type": "acm", "addr": 5, "name": "Storage"}]}
-
-    nodes = build_node_inventory(payload, BRAND_DUCAHEAT)
-
-    assert len(nodes) == 1
-    node = nodes[0]
-    assert isinstance(node, DucaheatAccum)
-    assert node.supports_boost() is True
-
-
 def test_build_node_inventory_handles_list_payload(caplog: pytest.LogCaptureFixture) -> None:
     payload = [
         {"type": "htr", "addr": "01", "name": "Heater"},
@@ -140,12 +120,11 @@ def test_build_node_inventory_handles_list_payload(caplog: pytest.LogCaptureFixt
     ]
 
     with caplog.at_level(logging.DEBUG):
-        nodes = build_node_inventory(payload, BRAND_TERMOWEB)
+        nodes = build_node_inventory(payload)
 
     assert [node.addr for node in nodes] == ["01"]
     assert any("Skipping node with missing type" in message for message in caplog.messages)
 
 
-def test_build_node_inventory_requires_brand() -> None:
-    with pytest.raises(ValueError):
-        build_node_inventory({"nodes": []}, " ")
+def test_build_node_inventory_tolerates_empty_payload() -> None:
+    assert build_node_inventory({"nodes": []}) == []

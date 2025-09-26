@@ -134,7 +134,13 @@ async def _async_import_energy_history(
         return
     client: RESTClient = rec["client"]
     dev_id: str = rec["dev_id"]
-    all_addrs: list[str] = rec.get("htr_addrs", [])
+    inventory: list[Any] = list(rec.get("node_inventory") or [])
+    if not inventory:
+        nodes_payload = rec.get("nodes")
+        if nodes_payload:
+            inventory = build_node_inventory(nodes_payload)
+            rec["node_inventory"] = inventory
+    all_addrs: list[str] = addresses_by_type(inventory, HEATER_NODE_TYPES)
     target_addrs = (
         all_addrs
         if addrs is None
@@ -501,7 +507,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         dev.get("dev_id") or dev.get("id") or dev.get("serial_id") or ""
     ).strip()
     nodes = await client.get_nodes(dev_id)
-    node_inventory = build_node_inventory(nodes, brand)
+    node_inventory = build_node_inventory(nodes)
     addrs = addresses_by_type(node_inventory, HEATER_NODE_TYPES)
 
     if node_inventory:
@@ -519,7 +525,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         dev,
         nodes,
         node_inventory,
-        brand=brand,
     )
 
     hass.data.setdefault(DOMAIN, {})
@@ -530,7 +535,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "dev_id": dev_id,
         "nodes": nodes,
         "node_inventory": node_inventory,
-        "htr_addrs": addrs,
         "config_entry": entry,
         "base_poll_interval": max(base_interval, MIN_POLL_INTERVAL),
         "stretched": False,

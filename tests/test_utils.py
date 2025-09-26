@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from custom_components.termoweb.const import BRAND_TERMOWEB
 from custom_components.termoweb.nodes import build_node_inventory
 from custom_components.termoweb.utils import HEATER_NODE_TYPES, addresses_by_type, float_or_none
 
@@ -16,16 +15,14 @@ def test_addresses_by_type_filters_and_deduplicates() -> None:
                 {"type": "acm", "addr": 1},
                 {"type": "HTR", "addr": "A"},
             ]
-        },
-        BRAND_TERMOWEB,
+        }
     )
 
     assert addresses_by_type(inventory, HEATER_NODE_TYPES) == ["A", "1"]
 
 def test_addresses_by_type_handles_missing_types() -> None:
     inventory = build_node_inventory(
-        {"nodes": [{"type": "htr", "addr": "A"}]},
-        BRAND_TERMOWEB,
+        {"nodes": [{"type": "htr", "addr": "A"}]}
     )
 
     assert addresses_by_type(inventory, [None]) == []

@@ -6,8 +6,6 @@ from collections.abc import Iterable
 import logging
 from typing import Any
 
-from .const import BRAND_DUCAHEAT
-
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -96,22 +94,6 @@ class AccumulatorNode(HeaterNode):
         return False
 
 
-class DucaheatAccum(AccumulatorNode):
-    """Accumulator node for the Ducaheat brand supporting boost."""
-
-    __slots__ = ()
-
-    def __init__(self, *, name: str | None, addr: str | int) -> None:
-        """Initialise a Ducaheat accumulator node."""
-
-        super().__init__(name=name, addr=addr)
-
-    def supports_boost(self) -> bool:
-        """Return ``True`` to indicate boost is available."""
-
-        return True
-
-
 class PowerMonitorNode(Node):
     """Power monitor node (type ``pmo``)."""
 
@@ -171,15 +153,13 @@ def _iter_node_payload(raw_nodes: Any) -> Iterable[dict[str, Any]]:
                 yield entry
 
 
-def _resolve_node_class(node_type: str, brand: str) -> type[Node]:
-    """Return the most appropriate node class for ``node_type`` and ``brand``."""
+def _resolve_node_class(node_type: str) -> type[Node]:
+    """Return the most appropriate node class for ``node_type``."""
 
-    if node_type == AccumulatorNode.NODE_TYPE and brand == BRAND_DUCAHEAT:
-        return DucaheatAccum
     return NODE_CLASS_BY_TYPE.get(node_type, Node)
 
 
-def build_node_inventory(raw_nodes: Any, brand: str) -> list[Node]:
+def build_node_inventory(raw_nodes: Any) -> list[Node]:
     """Return a list of :class:`Node` instances for the provided payload.
 
     ``raw_nodes`` is typically the JSON response from ``/mgr/nodes``.  Each
@@ -187,11 +167,6 @@ def build_node_inventory(raw_nodes: Any, brand: str) -> list[Node]:
     level yet still represented using the base :class:`Node` class so that
     callers can account for the presence of the device.
     """
-
-    brand_str = str(brand or "").strip()
-    if not brand_str:
-        msg = "brand must be provided"
-        raise ValueError(msg)
 
     inventory: list[Node] = []
     for index, payload in enumerate(_iter_node_payload(raw_nodes)):
@@ -203,7 +178,7 @@ def build_node_inventory(raw_nodes: Any, brand: str) -> list[Node]:
         name = payload.get("name") or payload.get("title") or payload.get("label")
         addr = payload.get("addr") or payload.get("address")
 
-        node_cls = _resolve_node_class(node_type, brand_str)
+        node_cls = _resolve_node_class(node_type)
         if node_cls is Node:
             _LOGGER.debug("Unsupported node type '%s' encountered", node_type)
 

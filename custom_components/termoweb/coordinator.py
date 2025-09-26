@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 import logging
 import time
-from typing import Any
+from typing import Any, Iterable
 
 from aiohttp import ClientError
 from homeassistant.core import HomeAssistant
@@ -34,8 +34,6 @@ class StateCoordinator(
         device: dict[str, Any],
         nodes: dict[str, Any],
         node_inventory: list[Node] | None = None,
-        *,
-        brand: str | None = None,
     ) -> None:
         """Initialize the TermoWeb device coordinator."""
         super().__init__(
@@ -51,22 +49,12 @@ class StateCoordinator(
         self._dev_id = dev_id
         self._device = device or {}
         self._nodes = nodes or {}
-        brand_clean = (brand or "").strip()
-        if not brand_clean:
-            brand_clean = "unknown"
-        self._brand = brand_clean
         self._node_inventory: list[Node] = list(node_inventory or [])
-
-    @property
-    def brand(self) -> str:
-        """Return the configured brand for this coordinator."""
-
-        return self._brand
 
     def _addrs(self) -> list[str]:
         if not self._node_inventory and self._nodes:
             try:
-                self._node_inventory = build_node_inventory(self._nodes, self._brand)
+                self._node_inventory = build_node_inventory(self._nodes)
             except ValueError as err:  # pragma: no cover - defensive
                 _LOGGER.debug(
                     "Failed to build node inventory for %s: %s",
@@ -91,9 +79,7 @@ class StateCoordinator(
             self._node_inventory = []
             if self._nodes:
                 try:
-                    self._node_inventory = build_node_inventory(
-                        self._nodes, self._brand
-                    )
+                    self._node_inventory = build_node_inventory(self._nodes)
                 except ValueError as err:  # pragma: no cover - defensive
                     _LOGGER.debug(
                         "Failed to build node inventory for %s: %s",
@@ -271,6 +257,19 @@ class EnergyStateCoordinator(
         self._dev_id = dev_id
         self._addrs = addrs
         self._last: dict[tuple[str, str], tuple[float, float]] = {}
+
+    def update_addresses(self, addrs: Iterable[str]) -> None:
+        """Replace the tracked heater addresses with ``addrs``."""
+
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for addr in addrs:
+            addr_str = str(addr).strip()
+            if not addr_str or addr_str in seen:
+                continue
+            seen.add(addr_str)
+            cleaned.append(addr_str)
+        self._addrs = cleaned
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         dev_id = self._dev_id

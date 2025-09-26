@@ -167,16 +167,11 @@ class DucaheatWSClient:
 
     def _dispatch_nodes(self, nodes: dict[str, Any]) -> None:
         record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-        brand = ""
-        if isinstance(record, dict):
-            brand = str(record.get("brand") or "").strip()
-        if not brand:
-            brand = "unknown"
 
         inventory: list[Any] = []
         try:
-            inventory = build_node_inventory(nodes, brand)
-        except ValueError as err:  # pragma: no cover - defensive
+            inventory = build_node_inventory(nodes)
+        except Exception as err:  # pragma: no cover - defensive
             _LOGGER.debug(
                 "WS %s: failed to build node inventory: %s",
                 self.dev_id,
@@ -190,7 +185,10 @@ class DucaheatWSClient:
         if isinstance(record, dict):
             record["nodes"] = nodes
             record["node_inventory"] = inventory
-            record["htr_addrs"] = addresses_by_type(inventory, HEATER_NODE_TYPES)
+            addrs = addresses_by_type(inventory, HEATER_NODE_TYPES)
+            energy_coordinator = record.get("energy_coordinator")
+            if hasattr(energy_coordinator, "update_addresses"):
+                energy_coordinator.update_addresses(addrs)
 
         payload = {"dev_id": self.dev_id, "nodes": deepcopy(nodes)}
 

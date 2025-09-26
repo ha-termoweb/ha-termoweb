@@ -64,8 +64,6 @@ class FakeCoordinator:
         dev: dict[str, Any],
         nodes: dict[str, Any],
         node_inventory: list[Any] | None = None,
-        *,
-        brand: str | None = None,
     ) -> None:
         self.hass = hass
         self.client = client
@@ -74,7 +72,6 @@ class FakeCoordinator:
         self.dev = dev
         self.nodes = nodes
         self.node_inventory = list(node_inventory or [])
-        self.brand = (brand or "").strip()
         self.update_interval = timedelta(seconds=base_interval)
         self.data: dict[str, Any] = {dev_id: dev}
         self.listeners: list[Callable[[], None]] = []
@@ -232,7 +229,9 @@ def test_async_setup_entry_happy_path(
     assert isinstance(record["client"], HappyClient)
     assert isinstance(record["coordinator"], FakeCoordinator)
     assert record["coordinator"].refresh_calls == 1
-    assert record["htr_addrs"] == ["A", "B"]
+    assert termoweb_init.addresses_by_type(
+        record["node_inventory"], termoweb_init.HEATER_NODE_TYPES
+    ) == ["A", "B"]
     assert [node.addr for node in record["node_inventory"]] == ["A", "B"]
     assert [node.type for node in record["node_inventory"]] == ["htr", "acm"]
     assert stub_hass.client_session_calls == 1

@@ -77,7 +77,6 @@ def test_async_setup_entry_creates_entities() -> None:
         hass = HomeAssistant()
         entry_id = "entry"
         dev_id = "dev1"
-        addrs = ["A1", "B2"]
         nodes = {
             "nodes": [
                 {"type": "htr", "addr": "A1", "name": " Living Room "},
@@ -97,7 +96,7 @@ def test_async_setup_entry_creates_entities() -> None:
                     "dev_id": dev_id,
                     "client": AsyncMock(),
                     "nodes": nodes,
-                    "htr_addrs": addrs,
+                    "node_inventory": climate_module.build_node_inventory(nodes),
                     "version": "3.1.4",
                     "brand": BRAND_TERMOWEB,
                 }
