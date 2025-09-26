@@ -63,13 +63,11 @@ def test_termoweb_heater_is_heater_node() -> None:
         "dev",
         "1",
         " Living Room ",
-        brand=BRAND_TERMOWEB,
     )
 
     assert isinstance(heater, HeaterNode)
     assert heater.type == "htr"
     assert heater.addr == "1"
-    assert heater.brand == BRAND_TERMOWEB
     assert heater.name == "Living Room"
 
 
@@ -79,7 +77,6 @@ def test_async_setup_entry_creates_entities() -> None:
         hass = HomeAssistant()
         entry_id = "entry"
         dev_id = "dev1"
-        addrs = ["A1", "B2"]
         nodes = {
             "nodes": [
                 {"type": "htr", "addr": "A1", "name": " Living Room "},
@@ -99,7 +96,7 @@ def test_async_setup_entry_creates_entities() -> None:
                     "dev_id": dev_id,
                     "client": AsyncMock(),
                     "nodes": nodes,
-                    "htr_addrs": addrs,
+                    "node_inventory": climate_module.build_node_inventory(nodes),
                     "version": "3.1.4",
                     "brand": BRAND_TERMOWEB,
                 }
@@ -159,6 +156,51 @@ def test_async_setup_entry_creates_entities() -> None:
         second.async_set_preset_temperatures.assert_awaited_once_with(
             cold=15.0, night=18.0, day=20.0
         )
+
+    asyncio.run(_run())
+
+
+def test_async_setup_entry_rebuilds_inventory_when_missing() -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry = types.SimpleNamespace(entry_id="entry-missing")
+        dev_id = "dev-missing"
+        nodes = {
+            "nodes": [
+                {"type": "htr", "addr": "11", "name": " First "},
+                {"type": "HTR", "addr": "22"},
+            ]
+        }
+
+        coordinator = FakeCoordinator(
+            hass,
+            {
+                dev_id: {
+                    "nodes": nodes,
+                    "htr": {"settings": {"11": {}, "22": {}}},
+                }
+            },
+        )
+
+        record: dict[str, Any] = {
+            "coordinator": coordinator,
+            "dev_id": dev_id,
+            "client": AsyncMock(),
+            "nodes": nodes,
+        }
+        hass.data = {DOMAIN: {entry.entry_id: record}}
+
+        added: list[HeaterClimateEntity] = []
+
+        def _async_add_entities(entities: list[HeaterClimateEntity]) -> None:
+            added.extend(entities)
+
+        await async_setup_entry(hass, entry, _async_add_entities)
+
+        assert len(added) == 2
+        stored_inventory = hass.data[DOMAIN][entry.entry_id]["node_inventory"]
+        assert [node.addr for node in stored_inventory] == ["11", "22"]
 
     asyncio.run(_run())
 

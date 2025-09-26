@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 import logging
 import time
-from typing import Any
+from typing import Any, Iterable
 
 from aiohttp import ClientError
 from homeassistant.core import HomeAssistant
@@ -13,7 +13,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import BackendAuthError, RESTClient, BackendRateLimitError
 from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
-from .utils import extract_heater_addrs, float_or_none
+from .nodes import Node, build_node_inventory
+from .utils import HEATER_NODE_TYPES, addresses_by_type, float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class StateCoordinator(
         dev_id: str,
         device: dict[str, Any],
         nodes: dict[str, Any],
+        node_inventory: list[Node] | None = None,
     ) -> None:
         """Initialize the TermoWeb device coordinator."""
         super().__init__(
@@ -47,9 +49,44 @@ class StateCoordinator(
         self._dev_id = dev_id
         self._device = device or {}
         self._nodes = nodes or {}
+        self._node_inventory: list[Node] = list(node_inventory or [])
 
     def _addrs(self) -> list[str]:
-        return extract_heater_addrs(self._nodes)
+        if not self._node_inventory and self._nodes:
+            try:
+                self._node_inventory = build_node_inventory(self._nodes)
+            except ValueError as err:  # pragma: no cover - defensive
+                _LOGGER.debug(
+                    "Failed to build node inventory for %s: %s",
+                    self._dev_id,
+                    err,
+                    exc_info=err,
+                )
+                self._node_inventory = []
+        return addresses_by_type(self._node_inventory, HEATER_NODE_TYPES)
+
+    def update_nodes(
+        self,
+        nodes: dict[str, Any],
+        node_inventory: list[Node] | None = None,
+    ) -> None:
+        """Update cached node payload and inventory."""
+
+        self._nodes = nodes or {}
+        if node_inventory is not None:
+            self._node_inventory = list(node_inventory)
+        else:
+            self._node_inventory = []
+            if self._nodes:
+                try:
+                    self._node_inventory = build_node_inventory(self._nodes)
+                except ValueError as err:  # pragma: no cover - defensive
+                    _LOGGER.debug(
+                        "Failed to build node inventory for %s: %s",
+                        self._dev_id,
+                        err,
+                        exc_info=err,
+                    )
 
     async def async_refresh_heater(self, addr: str) -> None:
         """Refresh settings for a specific heater and push the update to listeners."""
@@ -155,22 +192,9 @@ class StateCoordinator(
                 for k in range(count):
                     idx = (start + k) % len(addrs)
                     addr = addrs[idx]
-                    try:
-                        js = await self.client.get_htr_settings(dev_id, addr)
-                        if isinstance(js, dict):
-                            settings_map[addr] = js
-                    except (
-                        ClientError,
-                        BackendRateLimitError,
-                        BackendAuthError,
-                    ) as err:
-                        _LOGGER.debug(
-                            "Error fetching settings for heater %s: %s",
-                            addr,
-                            err,
-                            exc_info=err,
-                        )
-                        # keep previous settings on error
+                    js = await self.client.get_htr_settings(dev_id, addr)
+                    if isinstance(js, dict):
+                        settings_map[addr] = js
                 self._rr_index[dev_id] = (start + count) % len(addrs)
 
             dev_name = (self._device.get("name") or f"Device {dev_id}").strip()
@@ -233,6 +257,19 @@ class EnergyStateCoordinator(
         self._dev_id = dev_id
         self._addrs = addrs
         self._last: dict[tuple[str, str], tuple[float, float]] = {}
+
+    def update_addresses(self, addrs: Iterable[str]) -> None:
+        """Replace the tracked heater addresses with ``addrs``."""
+
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for addr in addrs:
+            addr_str = str(addr).strip()
+            if not addr_str or addr_str in seen:
+                continue
+            seen.add(addr_str)
+            cleaned.append(addr_str)
+        self._addrs = cleaned
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         dev_id = self._dev_id

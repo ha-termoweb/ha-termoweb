@@ -177,6 +177,12 @@ async def _load_module(
     )
 
 
+def _inventory_for(mod: Any, addrs: list[str]) -> list[Any]:
+    return mod.build_node_inventory(
+        {"nodes": [{"addr": addr, "type": "htr"} for addr in addrs]}
+    )
+
+
 def test_store_statistics_prefers_internal_import(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -298,6 +304,51 @@ def test_async_import_energy_history_missing_record(
     assert "no record found for energy import" in caplog.text
 
 
+def test_async_import_energy_history_rebuilds_missing_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        (
+            mod,
+            const,
+            _import_stats,
+            _update_meta,
+            _last_stats,
+            _get_period,
+            _delete_stats,
+            ConfigEntry,
+            HomeAssistant,
+            _ent_reg,
+        ) = await _load_module(monkeypatch)
+
+        hass = HomeAssistant()
+        hass.config_entries = types.SimpleNamespace(async_update_entry=Mock())
+
+        entry = ConfigEntry(
+            "1",
+            options={mod.OPTION_ENERGY_HISTORY_IMPORTED: True},
+        )
+
+        nodes_payload = {"nodes": [{"addr": "A", "type": "htr"}]}
+        client = types.SimpleNamespace()
+        hass.data = {
+            const.DOMAIN: {
+                entry.entry_id: {
+                    "client": client,
+                    "dev_id": "dev",
+                    "nodes": nodes_payload,
+                }
+            }
+        }
+
+        await mod._async_import_energy_history(hass, entry)
+
+        inventory = hass.data[const.DOMAIN][entry.entry_id]["node_inventory"]
+        assert [node.addr for node in inventory] == ["A"]
+
+    asyncio.run(_run())
+
+
 def test_async_import_energy_history_already_imported(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -334,7 +385,7 @@ def test_async_import_energy_history_already_imported(
                 entry.entry_id: {
                     "client": client,
                     "dev_id": "dev",
-                    "htr_addrs": ["A"],
+                    "node_inventory": _inventory_for(mod, ["A"]),
                     "config_entry": entry,
                 }
             }
@@ -387,7 +438,7 @@ def test_async_import_energy_history_waits_between_queries(
                 entry.entry_id: {
                     "client": client,
                     "dev_id": "dev",
-                    "htr_addrs": ["A"],
+                    "node_inventory": _inventory_for(mod, ["A"]),
                     "config_entry": entry,
                 }
             }
@@ -495,7 +546,7 @@ def test_async_import_energy_history_skips_invalid_samples(
                 entry.entry_id: {
                     "client": client,
                     "dev_id": "dev",
-                    "htr_addrs": ["A", "B", "C", "D"],
+                    "node_inventory": _inventory_for(mod, ["A", "B", "C", "D"]),
                     "config_entry": entry,
                 }
             }
@@ -565,7 +616,7 @@ def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
         hass.data[const.DOMAIN][entry.entry_id] = {
             "client": client,
             "dev_id": "dev",
-            "htr_addrs": ["A"],
+            "node_inventory": _inventory_for(mod, ["A"]),
             "config_entry": entry,
         }
         uid = f"{const.DOMAIN}:dev:htr:A:energy"
@@ -659,7 +710,7 @@ def test_import_energy_history_with_existing_stats(
         hass.data[const.DOMAIN][entry.entry_id] = {
             "client": client,
             "dev_id": "dev",
-            "htr_addrs": ["A"],
+            "node_inventory": _inventory_for(mod, ["A"]),
             "config_entry": entry,
         }
         uid = f"{const.DOMAIN}:dev:htr:A:energy"
@@ -750,7 +801,7 @@ def test_import_energy_history_clears_overlap(monkeypatch: pytest.MonkeyPatch) -
         hass.data[const.DOMAIN][entry.entry_id] = {
             "client": client,
             "dev_id": "dev",
-            "htr_addrs": ["A"],
+            "node_inventory": _inventory_for(mod, ["A"]),
             "config_entry": entry,
         }
         uid = f"{const.DOMAIN}:dev:htr:A:energy"
@@ -845,7 +896,7 @@ def test_import_energy_history_legacy(monkeypatch: pytest.MonkeyPatch) -> None:
         hass.data[const.DOMAIN][entry.entry_id] = {
             "client": client,
             "dev_id": "dev",
-            "htr_addrs": ["A"],
+            "node_inventory": _inventory_for(mod, ["A"]),
             "config_entry": entry,
         }
         uid = f"{const.DOMAIN}:dev:htr:A:energy"
@@ -921,7 +972,7 @@ def test_import_history_uses_last_stats_and_clears_overlap(
         hass.data[const.DOMAIN][entry.entry_id] = {
             "client": client,
             "dev_id": "dev",
-            "htr_addrs": ["A"],
+            "node_inventory": _inventory_for(mod, ["A"]),
             "config_entry": entry,
         }
 
@@ -1026,7 +1077,7 @@ def test_import_energy_history_reset_and_subset(monkeypatch: pytest.MonkeyPatch)
         hass.data[const.DOMAIN][entry.entry_id] = {
             "client": client,
             "dev_id": "dev",
-            "htr_addrs": ["A", "B"],
+            "node_inventory": _inventory_for(mod, ["A", "B"]),
             "config_entry": entry,
         }
         uidA = f"{const.DOMAIN}:dev:htr:A:energy"
@@ -1116,7 +1167,7 @@ def test_import_energy_history_reset_all_progress(monkeypatch: pytest.MonkeyPatc
         hass.data[const.DOMAIN][entry.entry_id] = {
             "client": client,
             "dev_id": "dev",
-            "htr_addrs": ["A", "B"],
+            "node_inventory": _inventory_for(mod, ["A", "B"]),
             "config_entry": entry,
         }
 
@@ -1324,7 +1375,7 @@ def test_setup_defers_import_until_started(monkeypatch: pytest.MonkeyPatch) -> N
         hass.data[const.DOMAIN][entry.entry_id] = {
             "client": object(),
             "dev_id": "dev",
-            "htr_addrs": ["A"],
+            "node_inventory": _inventory_for(mod, ["A"]),
             "config_entry": entry,
         }
 
@@ -1411,7 +1462,7 @@ def test_service_dispatches_import_tasks(monkeypatch: pytest.MonkeyPatch) -> Non
         assert await mod.async_setup_entry(hass, entry) is True
 
         rec = hass.data[const.DOMAIN][entry.entry_id]
-        rec["htr_addrs"] = ["A", "B"]
+        rec["node_inventory"] = _inventory_for(mod, ["A", "B"])
 
         uid_a = f"{const.DOMAIN}:dev:htr:A:energy"
         uid_b = f"{const.DOMAIN}:dev:htr:B:energy"

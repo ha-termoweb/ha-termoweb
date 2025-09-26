@@ -160,7 +160,7 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
             "client": types.SimpleNamespace(),
             "dev_id": dev_id,
             "nodes": nodes_meta,
-            "htr_addrs": ["1", "2"],
+            "node_inventory": sensor_module.build_node_inventory(nodes_meta),
         }
         hass.data = {DOMAIN: {entry.entry_id: record}}
 
@@ -196,7 +196,10 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
             assert isinstance(energy_coord, EnergyStateCoordinator)
             assert refresh_mock.await_count == 1
 
-            expected_count = len(record["htr_addrs"]) * 3 + 1
+            heater_addrs = sensor_module.addresses_by_type(
+                record["node_inventory"], sensor_module.HEATER_NODE_TYPES
+            )
+            expected_count = len(heater_addrs) * 3 + 1
             assert len(add_calls) == 1
             assert len(add_calls[0]) == expected_count
             assert len(added_entities) == expected_count
@@ -229,6 +232,61 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
             logger_mock.debug.assert_called_once_with(
                 "Adding %d TermoWeb sensors", expected_count
             )
+
+    asyncio.run(_run())
+
+
+def test_sensor_async_setup_entry_rebuilds_inventory_when_missing() -> None:
+    async def _run() -> None:
+        hass = HomeAssistant()
+        entry = types.SimpleNamespace(entry_id="entry-missing")
+        dev_id = "dev-missing"
+        nodes_meta = {
+            "nodes": [
+                {"type": "htr", "addr": "A1", "name": "Living"},
+                {"type": "HTR", "addr": "B2", "name": "Bedroom"},
+            ]
+        }
+
+        coordinator = types.SimpleNamespace(
+            hass=hass,
+            data={
+                dev_id: {
+                    "nodes": nodes_meta,
+                    "htr": {
+                        "settings": {"A1": {}, "B2": {}},
+                        "energy": {},
+                        "power": {},
+                    },
+                }
+            },
+        )
+
+        record: dict[str, Any] = {
+            "coordinator": coordinator,
+            "client": types.SimpleNamespace(),
+            "dev_id": dev_id,
+            "nodes": nodes_meta,
+        }
+        hass.data = {DOMAIN: {entry.entry_id: record}}
+
+        added: list = []
+
+        def _add_entities(entities: list) -> None:
+            added.extend(entities)
+
+        refresh_mock = AsyncMock()
+        with patch.object(
+            EnergyStateCoordinator,
+            "async_config_entry_first_refresh",
+            new=refresh_mock,
+        ):
+            await async_setup_sensor_entry(hass, entry, _add_entities)
+
+        assert refresh_mock.await_count == 1
+        assert len(added) == 7
+        stored_inventory = hass.data[DOMAIN][entry.entry_id]["node_inventory"]
+        assert [node.addr for node in stored_inventory] == ["A1", "B2"]
 
     asyncio.run(_run())
 

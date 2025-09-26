@@ -18,7 +18,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN, signal_ws_data
 from .coordinator import EnergyStateCoordinator
 from .heater import HeaterNodeBase, build_heater_name_map
-from .utils import float_or_none
+from .nodes import build_node_inventory
+from .utils import HEATER_NODE_TYPES, addresses_by_type, float_or_none
 
 _WH_TO_KWH = 1 / 1000.0
 
@@ -88,7 +89,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
     nodes = data["nodes"]
-    addrs: list[str] = data["htr_addrs"]
+    inventory = list(data.get("node_inventory") or [])
+    if not inventory and nodes:
+        inventory = build_node_inventory(nodes)
+        data["node_inventory"] = inventory
+    addrs: list[str] = addresses_by_type(inventory, HEATER_NODE_TYPES)
 
     energy_coordinator: EnergyStateCoordinator | None = data.get(
         "energy_coordinator",
@@ -99,6 +104,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
         )
         data["energy_coordinator"] = energy_coordinator
         await energy_coordinator.async_config_entry_first_refresh()
+    else:
+        energy_coordinator.update_addresses(addrs)
 
     name_map = build_heater_name_map(
         nodes, lambda addr: f"Node {addr}"
