@@ -1794,10 +1794,21 @@ def test_handle_event_logs_unknown_types(
     loop.close()
 
 
-def test_subscribe_htr_samples_sends_expected_payloads():
+def test_subscribe_htr_samples_sends_expected_payloads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_ws_client()
+    Client = module.WebSocket09Client
+    original = Client._ensure_type_bucket
+    call_record: list[str] = []
+
+    def wrapper(self: Any, dev_map: Any, nodes_by_type: Any, node_type: str) -> Any:
+        call_record.append(node_type)
+        return original(self, dev_map, nodes_by_type, node_type)
+
+    monkeypatch.setattr(Client, "_ensure_type_bucket", wrapper)
+
     async def _run() -> None:
-        module = _load_ws_client()
-        Client = module.WebSocket09Client
         energy_updates: list[Any] = []
 
         class FakeEnergyCoordinator:
@@ -1868,6 +1879,8 @@ def test_subscribe_htr_samples_sends_expected_payloads():
         assert dev_map["nodes_by_type"]["acm"]["addrs"] == ["A1"]
         assert dev_map["htr"] is dev_map["nodes_by_type"]["htr"]
         assert energy_updates == [{"htr": ["01", "02"], "acm": ["A1"]}]
+        assert "htr" in call_record
+        assert "acm" in call_record
 
     asyncio.run(_run())
 
@@ -2390,9 +2403,19 @@ def test_handle_event_invalid_inputs_are_ignored() -> None:
     client._handle_event({"name": "data", "args": [[{"path": None, "body": {}}]]})
 
 
-def test_handle_event_adds_missing_htr_bucket(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_handle_event_adds_missing_htr_bucket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     module = _load_ws_client()
     Client = module.WebSocket09Client
+    original = Client._ensure_type_bucket
+    call_record: list[str] = []
+
+    def wrapper(self: Any, dev_map: Any, nodes_by_type: Any, node_type: str) -> Any:
+        call_record.append(node_type)
+        return original(self, dev_map, nodes_by_type, node_type)
+
+    monkeypatch.setattr(Client, "_ensure_type_bucket", wrapper)
 
     loop = asyncio.new_event_loop()
     hass = types.SimpleNamespace(
@@ -2433,6 +2456,7 @@ def test_handle_event_adds_missing_htr_bucket(monkeypatch: pytest.MonkeyPatch) -
     client._handle_event(event)
     dev_state = coordinator.data["dev"]
     assert dev_state["htr"]["addrs"] == ["1"]
+    assert "htr" in call_record
 
     loop.close()
 
