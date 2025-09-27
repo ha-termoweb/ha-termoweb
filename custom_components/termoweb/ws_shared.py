@@ -119,7 +119,7 @@ class TermoWebWSShared:
     def _update_status(self, status: str) -> None:
         """Update shared websocket state and dispatch notifications."""
 
-        state_bucket = self.hass.data[DOMAIN][self.entry_id].setdefault("ws_state", {})
+        state_bucket = self._state_bucket()
         state = state_bucket.setdefault(self.dev_id, {})
         now = time.time()
         state["status"] = status
@@ -153,11 +153,7 @@ class TermoWebWSShared:
                         break
                 self._stats.last_paths = uniq
 
-        domain_bucket: dict[str, Any] = self.hass.data.setdefault(DOMAIN, {})
-        entry_bucket: dict[str, Any] = domain_bucket.setdefault(self.entry_id, {})
-        state_bucket: dict[str, dict[str, Any]] = entry_bucket.setdefault(
-            "ws_state", {}
-        )
+        state_bucket = self._state_bucket()
         state: dict[str, Any] = state_bucket.setdefault(self.dev_id, {})
         state["last_event_at"] = now
         state["frames_total"] = self._stats.frames_total
@@ -170,4 +166,11 @@ class TermoWebWSShared:
         ):
             self._healthy_since = now
             self._update_status("healthy")
+
+    def _state_bucket(self) -> dict[str, dict[str, Any]]:
+        """Return the websocket state bucket, creating it if necessary."""
+
+        domain_bucket: dict[str, Any] = self.hass.data.setdefault(DOMAIN, {})
+        entry_bucket: dict[str, Any] = domain_bucket.setdefault(self.entry_id, {})
+        return entry_bucket.setdefault("ws_state", {})
 
