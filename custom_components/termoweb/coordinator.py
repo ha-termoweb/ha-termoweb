@@ -15,7 +15,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
 from .nodes import Node, build_node_inventory
-from .utils import HEATER_NODE_TYPES, addresses_by_node_type, float_or_none
+from .utils import addresses_by_node_type, float_or_none, normalize_heater_addresses
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -482,38 +482,7 @@ class EnergyStateCoordinator(
     ) -> None:
         """Replace the tracked heater addresses with ``addrs``."""
 
-        cleaned_map: dict[str, list[str]] = {}
-        compat_aliases: dict[str, str] = {}
-
-        if isinstance(addrs, Mapping):
-            sources = addrs.items()
-        else:
-            sources = [("htr", addrs)]
-
-        for node_type, values in sources:
-            node_type_str = str(node_type or "").strip().lower()
-            if not node_type_str:
-                continue
-            alias_target: str | None = None
-            if node_type_str in {"heater", "heaters", "htr"}:
-                alias_target = "htr"
-            if alias_target is not None and node_type_str != alias_target:
-                compat_aliases[node_type_str] = alias_target
-                node_type_str = alias_target
-            if node_type_str not in HEATER_NODE_TYPES:
-                continue
-            bucket = cleaned_map.setdefault(node_type_str, [])
-            seen: set[str] = set(bucket)
-            for addr in values or []:
-                addr_str = str(addr).strip()
-                if not addr_str or addr_str in seen:
-                    continue
-                seen.add(addr_str)
-                bucket.append(addr_str)
-
-        cleaned_map.setdefault("htr", [])
-        compat_aliases["htr"] = "htr"
-
+        cleaned_map, compat_aliases = normalize_heater_addresses(addrs)
         self._addresses_by_type = cleaned_map
         self._compat_aliases = compat_aliases
         self._addr_lookup = {

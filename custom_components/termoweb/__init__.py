@@ -39,7 +39,12 @@ from .const import (
 )
 from .coordinator import StateCoordinator
 from .nodes import build_node_inventory
-from .utils import HEATER_NODE_TYPES, addresses_by_node_type, ensure_node_inventory
+from .utils import (
+    HEATER_NODE_TYPES,
+    addresses_by_node_type,
+    ensure_node_inventory,
+    normalize_heater_addresses,
+)
 
 # Re-export legacy WS client for backward compatibility (tests may patch it).
 from .ws_client import TermoWebSocketClient as WebSocket09Client  # noqa: F401
@@ -161,45 +166,12 @@ async def _async_import_energy_history(
 
     by_type, reverse_lookup = _heater_address_map(inventory)
 
-    def _normalise_addresses(value: Iterable[Any] | Any) -> list[str]:
-        """Return cleaned list of address strings."""
-
-        if isinstance(value, str) or not isinstance(value, Iterable):
-            candidates = [value]
-        else:
-            candidates = list(value)
-
-        result: list[str] = []
-        for candidate in candidates:
-            addr = str(candidate).strip()
-            if addr:
-                result.append(addr)
-        return result
-
     requested_map: dict[str, list[str]] | None
     if nodes is None:
         requested_map = None
-    elif isinstance(nodes, Mapping):
-        requested_map = {}
-        for node_type, raw_addrs in nodes.items():
-            node_type_str = str(node_type or "").strip().lower()
-            if not node_type_str:
-                continue
-            addr_list = _normalise_addresses(raw_addrs)
-            if addr_list:
-                requested_map[node_type_str] = addr_list
     else:
-        requested_map = {"htr": _normalise_addresses(nodes)}
-
-    def _dedupe(seq: Iterable[str]) -> list[str]:
-        seen: set[str] = set()
-        result: list[str] = []
-        for item in seq:
-            if item in seen:
-                continue
-            seen.add(item)
-            result.append(item)
-        return result
+        normalized_map, _ = normalize_heater_addresses(nodes)
+        requested_map = {k: list(v) for k, v in normalized_map.items() if v}
 
     selected_map: dict[str, list[str]] = {}
     if requested_map:
@@ -224,12 +196,9 @@ async def _async_import_energy_history(
     if not selected_map:
         selected_map = {node_type: list(addrs) for node_type, addrs in by_type.items()}
 
-    cleaned_map: dict[str, list[str]] = {}
-    for node_type, addrs in selected_map.items():
-        deduped = _dedupe(addrs)
-        if deduped:
-            cleaned_map[node_type] = deduped
-    selected_map = cleaned_map
+    if selected_map:
+        deduped_map, _ = normalize_heater_addresses(selected_map)
+        selected_map = {k: list(v) for k, v in deduped_map.items() if v}
 
     all_pairs: list[tuple[str, str]] = [
         (node_type, addr) for node_type, addrs in by_type.items() for addr in addrs
