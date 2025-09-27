@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from custom_components.termoweb.api import RESTClient
 from custom_components.termoweb.backend.ducaheat import DucaheatBackend, DucaheatRESTClient
-from custom_components.termoweb.ws_client import DucaheatWSClient
+from custom_components.termoweb.ws_client import DucaheatWSClient, TermoWebSocketClient
 
 
 class DummyClient:
@@ -59,9 +59,11 @@ def test_ducaheat_backend_creates_ws_client() -> None:
     finally:
         loop.close()
 
+    assert isinstance(ws_client, TermoWebSocketClient)
     assert isinstance(ws_client, DucaheatWSClient)
     assert ws_client.dev_id == "dev"
     assert ws_client.entry_id == "entry"
+    assert ws_client._protocol_hint == "engineio2"
 
 
 def test_dummy_client_get_node_settings_accepts_acm() -> None:

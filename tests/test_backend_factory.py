@@ -93,10 +93,12 @@ def test_termoweb_backend_creates_ws_client() -> None:
     finally:
         loop.close()
 
+    assert isinstance(ws_client, TermoWebSocketClient)
     assert isinstance(ws_client, WebSocket09Client)
     assert ws_client.dev_id == "device456"
     assert ws_client.entry_id == "entry123"
     assert ws_client._coordinator is coordinator
+    assert ws_client._protocol_hint == "socketio09"
 
 
 def test_termoweb_backend_fallback_ws_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -117,7 +119,9 @@ def test_termoweb_backend_fallback_ws_resolution(monkeypatch: pytest.MonkeyPatch
     finally:
         loop.close()
 
+    assert isinstance(ws_client, TermoWebSocketClient)
     assert isinstance(ws_client, WebSocket09Client)
+    assert ws_client._protocol_hint == "socketio09"
 
 
 def test_termoweb_backend_resolve_ws_client_cls_fallback(
@@ -135,3 +139,46 @@ def test_termoweb_backend_resolve_ws_client_cls_fallback(
 
     resolved = backend._resolve_ws_client_cls()
     assert resolved is TermoWebSocketClient
+
+
+def test_termoweb_backend_legacy_ws_class(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = TermoWebBackend(brand="termoweb", client=DummyHttpClient())
+
+    class LegacyWS:
+        def __init__(
+            self,
+            hass,
+            *,
+            entry_id: str,
+            dev_id: str,
+            api_client: Any,
+            coordinator: Any,
+            **kwargs: Any,
+        ) -> None:
+            self.hass = hass
+            self.entry_id = entry_id
+            self.dev_id = dev_id
+            self.api_client = api_client
+            self.coordinator = coordinator
+            self.kwargs = kwargs
+
+    modules = {
+        "custom_components.termoweb.__init__": SimpleNamespace(WebSocket09Client=LegacyWS)
+    }
+
+    monkeypatch.setattr(termoweb_backend, "import_module", modules.__getitem__)
+
+    loop = asyncio.new_event_loop()
+    try:
+        hass = SimpleNamespace(loop=loop)
+        ws_client = backend.create_ws_client(
+            hass,
+            entry_id="entry", 
+            dev_id="dev", 
+            coordinator=object(),
+        )
+    finally:
+        loop.close()
+
+    assert isinstance(ws_client, LegacyWS)
+    assert "protocol" not in ws_client.kwargs
