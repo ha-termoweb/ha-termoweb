@@ -55,33 +55,6 @@ def ensure_node_inventory(
     return []
 
 
-def addresses_by_type(nodes: Iterable[Node], node_types: Iterable[str]) -> list[str]:
-    """Return unique addresses for nodes whose ``type`` matches ``node_types``."""
-
-    valid_types: set[str] = set()
-    for node_type in node_types:
-        if node_type is None:
-            continue
-        valid_types.add(str(node_type).strip().lower())
-    result: list[str] = []
-    seen: set[str] = set()
-
-    if not valid_types:
-        return result
-
-    for node in nodes:
-        node_type = str(getattr(node, "type", "")).strip().lower()
-        if node_type not in valid_types:
-            continue
-        addr = str(getattr(node, "addr", "")).strip()
-        if not addr or addr in seen:
-            continue
-        seen.add(addr)
-        result.append(addr)
-
-    return result
-
-
 def addresses_by_node_type(
     nodes: Iterable[Node],
     *,
@@ -134,3 +107,53 @@ def float_or_none(value: Any) -> float | None:
         return num if math.isfinite(num) else None
     except Exception:
         return None
+
+
+def normalize_heater_addresses(
+    addrs: Iterable[Any] | Mapping[Any, Iterable[Any]] | None,
+) -> tuple[dict[str, list[str]], dict[str, str]]:
+    """Return canonical heater addresses and compatibility aliases."""
+
+    cleaned_map: dict[str, list[str]] = {}
+    compat_aliases: dict[str, str] = {}
+
+    if addrs is None:
+        sources: Iterable[tuple[Any, Iterable[Any] | Any]] = []
+    elif isinstance(addrs, Mapping):
+        sources = addrs.items()
+    else:
+        sources = [("htr", addrs)]
+
+    for raw_type, values in sources:
+        node_type = str(raw_type or "").strip().lower()
+        if not node_type:
+            continue
+
+        alias_target: str | None = None
+        if node_type in {"heater", "heaters", "htr"}:
+            alias_target = "htr"
+        if alias_target is not None and node_type != alias_target:
+            compat_aliases[node_type] = alias_target
+            node_type = alias_target
+
+        if node_type not in HEATER_NODE_TYPES:
+            continue
+
+        if isinstance(values, str) or not isinstance(values, Iterable):
+            candidates = [values]
+        else:
+            candidates = list(values)
+
+        bucket = cleaned_map.setdefault(node_type, [])
+        seen: set[str] = set(bucket)
+        for candidate in candidates:
+            addr = "" if candidate is None else str(candidate).strip()
+            if not addr or addr in seen:
+                continue
+            seen.add(addr)
+            bucket.append(addr)
+
+    cleaned_map.setdefault("htr", [])
+    compat_aliases["htr"] = "htr"
+
+    return cleaned_map, compat_aliases

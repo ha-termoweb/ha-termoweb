@@ -416,27 +416,39 @@ class TermoWebSocketClient:
                 for node_type, addrs in normalized_map.items():
                     if not addrs and node_type != "htr":
                         continue
-                    bucket = nodes_by_type.get(node_type)
-                    if bucket is None:
-                        bucket = {
-                            "addrs": [],
-                            "settings": {},
-                            "advanced": {},
-                            "samples": {},
-                        }
-                        nodes_by_type[node_type] = bucket
-                    else:
-                        bucket.setdefault("addrs", [])
-                        bucket.setdefault("settings", {})
-                        bucket.setdefault("advanced", {})
-                        bucket.setdefault("samples", {})
+                    bucket = self._ensure_type_bucket(
+                        dev_map, nodes_by_type, node_type
+                    )
                     if addrs:
                         bucket["addrs"] = list(addrs)
-                if "htr" in nodes_by_type:
-                    dev_map["htr"] = nodes_by_type["htr"]
                 updated = dict(coordinator_data)
                 updated[self.dev_id] = dev_map
                 self._coordinator.data = updated  # type: ignore[attr-defined]
+
+    def _ensure_type_bucket(
+        self,
+        dev_map: dict[str, Any],
+        nodes_by_type: dict[str, Any],
+        node_type: str,
+    ) -> dict[str, Any]:
+        """Return the node bucket for ``node_type`` with default sections."""
+        bucket = nodes_by_type.get(node_type)
+        if bucket is None:
+            bucket = {
+                "addrs": [],
+                "settings": {},
+                "advanced": {},
+                "samples": {},
+            }
+            nodes_by_type[node_type] = bucket
+        else:
+            bucket.setdefault("addrs", [])
+            bucket.setdefault("settings", {})
+            bucket.setdefault("advanced", {})
+            bucket.setdefault("samples", {})
+        if node_type == "htr":
+            dev_map["htr"] = bucket
+        return bucket
 
     async def _heartbeat_loop(self) -> None:
         """Send periodic heartbeat frames to keep the connection alive."""
@@ -507,27 +519,6 @@ class TermoWebSocketClient:
         updated_addrs: list[tuple[str, str]] = []
         sample_addrs: list[tuple[str, str]] = []
 
-        def _ensure_type_bucket(node_type: str) -> dict[str, Any]:
-            """Return the node bucket for ``node_type`` creating defaults."""
-            nodes_by_type: dict[str, Any] = dev_map.setdefault("nodes_by_type", {})
-            bucket = nodes_by_type.get(node_type)
-            if bucket is None:
-                bucket = {
-                    "addrs": [],
-                    "settings": {},
-                    "advanced": {},
-                    "samples": {},
-                }
-                nodes_by_type[node_type] = bucket
-            else:
-                bucket.setdefault("addrs", [])
-                bucket.setdefault("settings", {})
-                bucket.setdefault("advanced", {})
-                bucket.setdefault("samples", {})
-            if node_type == "htr":
-                dev_map["htr"] = bucket
-            return bucket
-
         def _extract_type_addr(path: str) -> tuple[str | None, str | None]:
             """Extract the node type and address from a websocket path."""
             if not path:
@@ -571,15 +562,25 @@ class TermoWebSocketClient:
                 cur = dict(self._coordinator.data or {})
                 cur[self.dev_id] = dev_map
                 self._coordinator.data = cur  # type: ignore[attr-defined]
+            nodes_by_type: dict[str, Any] = dev_map.setdefault("nodes_by_type", {})
             if path.endswith("/mgr/nodes"):
                 if isinstance(body, dict):
                     dev_map["nodes"] = body
                     type_to_addrs = self._dispatch_nodes(body)
                     for node_type, addrs in type_to_addrs.items():
-                        bucket = _ensure_type_bucket(node_type)
+                        bucket = self._ensure_type_bucket(
+                            dev_map, nodes_by_type, node_type
+                        )
                         bucket["addrs"] = list(addrs)
-                    if "htr" not in dev_map and "htr" in type_to_addrs:
-                        dev_map["htr"] = _ensure_type_bucket("htr")
+                    if hasattr(self._coordinator, "update_nodes"):
+                        self._coordinator.update_nodes(body, inventory)
+                    record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
+                    if isinstance(record, dict):
+                        record["nodes"] = body
+                        record["node_inventory"] = inventory
+                        energy_coordinator = record.get("energy_coordinator")
+                        if hasattr(energy_coordinator, "update_addresses"):
+                            energy_coordinator.update_addresses(type_to_addrs)
                     updated_nodes = True
             else:
                 node_type, addr = _extract_type_addr(path)
@@ -589,7 +590,9 @@ class TermoWebSocketClient:
                     and path.endswith("/settings")
                     and node_type != "mgr"
                 ):
-                    bucket = _ensure_type_bucket(node_type)
+                    bucket = self._ensure_type_bucket(
+                        dev_map, nodes_by_type, node_type
+                    )
                     settings_map: dict[str, Any] = bucket.setdefault("settings", {})
                     if isinstance(body, dict):
                         settings_map[addr] = body
@@ -601,7 +604,9 @@ class TermoWebSocketClient:
                     and path.endswith("/advanced_setup")
                     and node_type != "mgr"
                 ):
-                    bucket = _ensure_type_bucket(node_type)
+                    bucket = self._ensure_type_bucket(
+                        dev_map, nodes_by_type, node_type
+                    )
                     adv_map: dict[str, Any] = bucket.setdefault("advanced", {})
                     if isinstance(body, dict):
                         adv_map[addr] = body
@@ -612,7 +617,9 @@ class TermoWebSocketClient:
                     and path.endswith("/samples")
                     and node_type != "mgr"
                 ):
-                    bucket = _ensure_type_bucket(node_type)
+                    bucket = self._ensure_type_bucket(
+                        dev_map, nodes_by_type, node_type
+                    )
                     samples_map: dict[str, Any] = bucket.setdefault("samples", {})
                     samples_map[addr] = body
                     sample_addrs.append((node_type, addr))

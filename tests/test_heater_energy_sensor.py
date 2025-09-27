@@ -27,8 +27,6 @@ EnergyStateCoordinator = coordinator_module.EnergyStateCoordinator
 HeaterTemperatureSensor = sensor_module.HeaterTemperatureSensor
 HeaterEnergyTotalSensor = sensor_module.HeaterEnergyTotalSensor
 HeaterPowerSensor = sensor_module.HeaterPowerSensor
-AccumulatorEnergyTotalSensor = sensor_module.AccumulatorEnergyTotalSensor
-AccumulatorPowerSensor = sensor_module.AccumulatorPowerSensor
 InstallationTotalEnergySensor = sensor_module.InstallationTotalEnergySensor
 async_setup_sensor_entry = sensor_module.async_setup_entry
 signal_ws_data = const_module.signal_ws_data
@@ -94,7 +92,7 @@ def test_coordinator_and_sensors() -> None:
                 f"{DOMAIN}:1:htr:A:power",
                 "Heater",
             ),
-            ("acm", "energy"): AccumulatorEnergyTotalSensor(
+            ("acm", "energy"): HeaterEnergyTotalSensor(
                 coord,
                 "entry",
                 "1",
@@ -104,7 +102,7 @@ def test_coordinator_and_sensors() -> None:
                 "Accumulator",
                 node_type="acm",
             ),
-            ("acm", "power"): AccumulatorPowerSensor(
+            ("acm", "power"): HeaterPowerSensor(
                 coord,
                 "entry",
                 "1",

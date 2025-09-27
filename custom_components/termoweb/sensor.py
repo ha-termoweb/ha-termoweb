@@ -117,17 +117,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 continue
             base_name = resolve_name(node_type, addr_str)
             uid_prefix = f"{DOMAIN}:{dev_id}:{node_type}:{addr_str}"
-            temp_cls: type[HeaterTemperatureSensor]
-            energy_cls: type[HeaterEnergyTotalSensor]
-            power_cls: type[HeaterPowerSensor]
-            if node_type == "acm":
-                temp_cls = AccumulatorTemperatureSensor
-                energy_cls = AccumulatorEnergyTotalSensor
-                power_cls = AccumulatorPowerSensor
-            else:
-                temp_cls = HeaterTemperatureSensor
-                energy_cls = HeaterEnergyTotalSensor
-                power_cls = HeaterPowerSensor
+            temp_cls: type[HeaterTemperatureSensor] = HeaterTemperatureSensor
+            energy_cls: type[HeaterEnergyTotalSensor] = HeaterEnergyTotalSensor
+            power_cls: type[HeaterPowerSensor] = HeaterPowerSensor
 
             new_entities.append(
                 temp_cls(
@@ -326,20 +318,6 @@ class HeaterPowerSensor(HeaterEnergyBase):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "W"
     _metric_key = "power"
-
-
-class AccumulatorTemperatureSensor(HeaterTemperatureSensor):
-    """Temperature sensor for accumulator nodes."""
-
-
-class AccumulatorEnergyTotalSensor(HeaterEnergyTotalSensor):
-    """Total energy sensor for accumulator nodes."""
-
-
-class AccumulatorPowerSensor(HeaterPowerSensor):
-    """Power sensor for accumulator nodes."""
-
-
 class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
     """Total energy consumption across all heaters."""
 
