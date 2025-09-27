@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections import defaultdict
 from typing import Any, Callable
 
 from homeassistant.components.climate import (
@@ -19,8 +18,8 @@ from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
 from .const import DOMAIN
-from .heater import HeaterNodeBase, build_heater_name_map
-from .nodes import HeaterNode, Node, build_node_inventory
+from .heater import HeaterNodeBase, prepare_heater_platform_data
+from .nodes import HeaterNode
 from .utils import HEATER_NODE_TYPES, float_or_none
 
 _LOGGER = logging.getLogger(__name__)
@@ -36,37 +35,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
-    nodes = data["nodes"]
-    inventory = list(data.get("node_inventory") or [])
-    if not inventory and nodes:
-        inventory = build_node_inventory(nodes)
-        data["node_inventory"] = inventory
-    default_name_simple = lambda addr: f"Heater {addr}"  # noqa: E731
-
-    def default_name(addr: str, node_type: str | None = None) -> str:
-        if (node_type or "").lower() == "acm":
-            return f"Accumulator {addr}"
-        return default_name_simple(addr)
-
-    nodes_by_type: dict[str, list[Node]] = defaultdict(list)
-    for node in inventory:
-        node_type = str(getattr(node, "type", "")).strip().lower()
-        if not node_type:
-            continue
-        nodes_by_type[node_type].append(node)
-
-    name_map = build_heater_name_map(nodes, default_name_simple)
-    names_by_type: dict[str, dict[str, str]] = name_map.get("by_type", {})
-    legacy_names: dict[str, str] = name_map.get("htr", {})
-
-    def _resolve_name(node_type: str, addr_str: str) -> str:
-        per_type = names_by_type.get(node_type, {})
-        return (
-            per_type.get(addr_str)
-            or name_map.get((node_type, addr_str))
-            or legacy_names.get(addr_str)
-            or default_name(addr_str, node_type)
-        )
+    _, nodes_by_type, _, resolve_name = prepare_heater_platform_data(
+        data,
+        default_name_simple=lambda addr: f"Heater {addr}",
+    )
 
     new_entities: list[ClimateEntity] = []
     for node_type in HEATER_NODE_TYPES:
@@ -74,7 +46,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             addr_str = str(getattr(node, "addr", "")).strip()
             if not addr_str:
                 continue
-            resolved_name = _resolve_name(node_type, addr_str)
+            resolved_name = resolve_name(node_type, addr_str)
             unique_id = f"{DOMAIN}:{dev_id}:{node_type}:{addr_str}:climate"
             entity_cls: type[HeaterClimateEntity]
             if node_type == "acm":
@@ -96,7 +68,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     for skipped_type in ("pmo", "thm"):
         skipped_nodes = nodes_by_type.get(skipped_type, [])
         if skipped_nodes:
-            addrs = ", ".join(sorted(str(getattr(node, "addr", "")) for node in skipped_nodes))
+            addrs = ", ".join(
+                sorted(str(getattr(node, "addr", "")) for node in skipped_nodes)
+            )
             _LOGGER.debug(
                 "Skipping TermoWeb %s nodes for climate platform: %s",
                 skipped_type,
@@ -312,7 +286,9 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             raise
         except Exception as err:
             status = getattr(err, "status", None)
-            body = getattr(err, "body", None) or getattr(err, "message", None) or str(err)
+            body = (
+                getattr(err, "body", None) or getattr(err, "message", None) or str(err)
+            )
             _LOGGER.error(
                 "%s failed dev=%s type=%s addr=%s: status=%s body=%s",
                 log_context,

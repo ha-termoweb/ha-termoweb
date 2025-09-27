@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Callable, Iterable
 import logging
 from typing import Any
@@ -77,10 +78,89 @@ def build_heater_name_map(
     if by_type:
         result["by_type"] = {k: dict(v) for k, v in by_type.items()}
 
-    for key, value in by_node.items():
-        result[key] = value
+    result.update(by_node)
 
     return result
+
+
+def prepare_heater_platform_data(
+    entry_data: dict[str, Any],
+    *,
+    default_name_simple: Callable[[str], str],
+) -> tuple[
+    list[Node],
+    dict[str, list[Node]],
+    dict[str, list[str]],
+    Callable[[str, str], str],
+]:
+    """Return node metadata and name resolution helpers for a config entry."""
+
+    nodes = entry_data.get("nodes")
+    inventory = list(entry_data.get("node_inventory") or [])
+    if not inventory and nodes:
+        inventory = build_node_inventory(nodes)
+        entry_data["node_inventory"] = inventory
+
+    nodes_by_type: dict[str, list[Node]] = defaultdict(list)
+    explicit_names: set[tuple[str, str]] = set()
+    for node in inventory:
+        node_type = str(getattr(node, "type", "")).strip().lower()
+        if not node_type:
+            continue
+        nodes_by_type[node_type].append(node)
+        addr = str(getattr(node, "addr", "")).strip()
+        if addr and getattr(node, "name", "").strip():
+            explicit_names.add((node_type, addr))
+
+    addrs_by_type: dict[str, list[str]] = {}
+    for node_type in HEATER_NODE_TYPES:
+        addresses: list[str] = []
+        for node in nodes_by_type.get(node_type, []):
+            addr_str = str(getattr(node, "addr", "")).strip()
+            if addr_str:
+                addresses.append(addr_str)
+        addrs_by_type[node_type] = addresses
+
+    name_map = build_heater_name_map(nodes, default_name_simple)
+    names_by_type: dict[str, dict[str, str]] = name_map.get("by_type", {})
+    legacy_names: dict[str, str] = name_map.get("htr", {})
+
+    def _default_name(addr: str, node_type: str | None = None) -> str:
+        if (node_type or "").lower() == "acm":
+            return f"Accumulator {addr}"
+        return default_name_simple(addr)
+
+    def resolve_name(node_type: str, addr: str) -> str:
+        """Resolve the friendly name for ``addr`` of the given node type."""
+
+        node_type_norm = str(node_type or "").strip().lower()
+        addr_str = str(addr or "").strip()
+        default_simple = default_name_simple(addr_str)
+
+        def _candidate(value: Any) -> str | None:
+            if not isinstance(value, str) or not value:
+                return None
+            if (
+                node_type_norm == "acm"
+                and value == default_simple
+                and (node_type_norm, addr_str) not in explicit_names
+            ):
+                return None
+            return value
+
+        per_type = names_by_type.get(node_type_norm, {})
+        for candidate_value in (
+            per_type.get(addr_str),
+            name_map.get((node_type_norm, addr_str)),
+            legacy_names.get(addr_str),
+        ):
+            candidate = _candidate(candidate_value)
+            if candidate:
+                return candidate
+
+        return _default_name(addr_str, node_type_norm)
+
+    return inventory, dict(nodes_by_type), addrs_by_type, resolve_name
 
 
 class HeaterNodeBase(CoordinatorEntity):
@@ -256,4 +336,3 @@ class HeaterNodeBase(CoordinatorEntity):
             model=model,
             via_device=(DOMAIN, self._dev_id),
         )
-

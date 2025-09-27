@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import defaultdict
 import logging
 import math
 from typing import Any
@@ -18,8 +17,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_data
 from .coordinator import EnergyStateCoordinator
-from .heater import HeaterNodeBase, build_heater_name_map
-from .nodes import Node, build_node_inventory
+from .heater import HeaterNodeBase, prepare_heater_platform_data
 from .utils import HEATER_NODE_TYPES, float_or_none
 
 _WH_TO_KWH = 1 / 1000.0
@@ -74,7 +72,9 @@ def _normalise_energy_value(coordinator: Any, raw: Any) -> float | None:
     if scale is None:
         if isinstance(coordinator, EnergyStateCoordinator):
             scale = 1.0
-        elif isinstance(raw, int) or (isinstance(raw, str) and _looks_like_integer_string(raw)):
+        elif isinstance(raw, int) or (
+            isinstance(raw, str) and _looks_like_integer_string(raw)
+        ):
             scale = _WH_TO_KWH
         else:
             scale = 1.0
@@ -87,27 +87,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
-    nodes = data["nodes"]
-    inventory = list(data.get("node_inventory") or [])
-    if not inventory and nodes:
-        inventory = build_node_inventory(nodes)
-        data["node_inventory"] = inventory
-    nodes_by_type: dict[str, list[Node]] = defaultdict(list)
-    for node in inventory:
-        node_type = str(getattr(node, "type", "")).strip().lower()
-        if not node_type:
-            continue
-        nodes_by_type[node_type].append(node)
-
-    addrs_by_type: dict[str, list[str]] = {}
-    for node_type in HEATER_NODE_TYPES:
-        addrs: list[str] = []
-        for node in nodes_by_type.get(node_type, []):
-            addr_str = str(getattr(node, "addr", "")).strip()
-            if not addr_str:
-                continue
-            addrs.append(addr_str)
-        addrs_by_type[node_type] = addrs
+    inventory, nodes_by_type, addrs_by_type, resolve_name = (
+        prepare_heater_platform_data(
+            data,
+            default_name_simple=lambda addr: f"Node {addr}",
+        )
+    )
 
     energy_coordinator: EnergyStateCoordinator | None = data.get(
         "energy_coordinator",
@@ -120,27 +105,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
         await energy_coordinator.async_config_entry_first_refresh()
     else:
         energy_coordinator.update_addresses(addrs_by_type)
-
-    default_name_simple = lambda addr: f"Node {addr}"  # noqa: E731
-
-    def default_name(addr: str, node_type: str | None = None) -> str:
-        if (node_type or "").lower() == "acm":
-            return f"Accumulator {addr}"
-        return default_name_simple(addr)
-
-    name_map = build_heater_name_map(nodes, default_name_simple)
-
-    names_by_type: dict[str, dict[str, str]] = name_map.get("by_type", {})
-    legacy_names: dict[str, str] = name_map.get("htr", {})
-
-    def resolve_name(node_type: str, addr: str) -> str:
-        per_type = names_by_type.get(node_type, {})
-        return (
-            per_type.get(addr)
-            or name_map.get((node_type, addr))
-            or legacy_names.get(addr)
-            or default_name(addr, node_type)
-        )
 
     new_entities: list[SensorEntity] = []
     for node_type in HEATER_NODE_TYPES:
@@ -217,7 +181,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
     uid_total = f"{DOMAIN}:{dev_id}:energy_total"
     new_entities.append(
         InstallationTotalEnergySensor(
-
             energy_coordinator,
             entry.entry_id,
             dev_id,
@@ -463,5 +426,3 @@ class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return identifiers describing the aggregated energy value."""
         return {"dev_id": self._dev_id}
-
-

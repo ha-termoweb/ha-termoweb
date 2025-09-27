@@ -18,7 +18,7 @@ _install_stubs()
 
 from custom_components.termoweb import climate as climate_module
 from custom_components.termoweb.const import BRAND_TERMOWEB, DOMAIN, signal_ws_data
-from custom_components.termoweb.nodes import HeaterNode
+from custom_components.termoweb.nodes import HeaterNode, build_node_inventory
 from homeassistant.components.climate import HVACAction, HVACMode
 from homeassistant.const import ATTR_TEMPERATURE
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -128,7 +128,7 @@ def test_async_setup_entry_creates_entities() -> None:
                     "dev_id": dev_id,
                     "client": AsyncMock(),
                     "nodes": nodes,
-                    "node_inventory": climate_module.build_node_inventory(nodes),
+                    "node_inventory": build_node_inventory(nodes),
                     "version": "3.1.4",
                     "brand": BRAND_TERMOWEB,
                 }
@@ -215,7 +215,7 @@ def test_async_setup_entry_default_names_and_invalid_nodes() -> None:
                 {"type": "pmo", "addr": "P1"},
             ]
         }
-        inventory = climate_module.build_node_inventory(raw_nodes)
+        inventory = build_node_inventory(raw_nodes)
         inventory.append(types.SimpleNamespace(type="  ", addr="extra"))
         inventory.append(types.SimpleNamespace(type="htr", addr=" "))
 
@@ -309,7 +309,7 @@ def test_async_setup_entry_creates_accumulator_entity() -> None:
                     "dev_id": dev_id,
                     "client": client,
                     "nodes": nodes,
-                    "node_inventory": climate_module.build_node_inventory(nodes),
+                    "node_inventory": build_node_inventory(nodes),
                 }
             }
         }
@@ -587,9 +587,7 @@ def test_heater_additional_cancelled_edges(
         with pytest.raises(SentinelCancelled):
             await heater._write_after_debounce()
 
-        coordinator.async_refresh_heater = AsyncMock(
-            side_effect=SentinelCancelled()
-        )
+        coordinator.async_refresh_heater = AsyncMock(side_effect=SentinelCancelled())
         heater._refresh_fallback = None
         heater._schedule_refresh_fallback()
         assert heater._refresh_fallback is not None
@@ -764,6 +762,7 @@ def test_heater_write_paths_and_errors(
     async def _run() -> None:
         _reset_environment()
         from homeassistant.const import ATTR_TEMPERATURE
+
         hass = HomeAssistant()
         entry_id = "entry"
         dev_id = "dev1"
@@ -1189,6 +1188,7 @@ def test_heater_write_paths_and_errors(
 
     asyncio.run(_run())
 
+
 def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         _reset_environment()
@@ -1289,7 +1289,9 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
                 raise ValueError("cancel float")
 
         with pytest.raises(ValueError):
-            await heater.async_set_preset_temperatures(ptemp=[CancelFloat(), 19.0, 20.0])
+            await heater.async_set_preset_temperatures(
+                ptemp=[CancelFloat(), 19.0, 20.0]
+            )
 
         client.set_htr_settings.reset_mock()
         client.set_htr_settings.side_effect = ValueError("preset cancel")
