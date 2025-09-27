@@ -1,3 +1,5 @@
+"""Binary sensor entities for TermoWeb gateway connectivity."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -13,6 +15,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_status
 from .coordinator import StateCoordinator
+from .utils import build_gateway_device_info
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -65,19 +68,7 @@ class GatewayOnlineBinarySensor(
     @property
     def device_info(self) -> DeviceInfo:
         """Return Home Assistant device metadata for the gateway."""
-        data = (self.coordinator.data or {}).get(self._dev_id, {}) or {}
-        version = (self.hass.data.get(DOMAIN, {}).get(self._entry_id, {}) or {}).get(
-            "version"
-        )
-        model = (data.get("raw") or {}).get("model") or "Gateway/Controller"
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._dev_id)},
-            name="TermoWeb Gateway",
-            manufacturer="TermoWeb",
-            model=str(model),
-            sw_version=str(version) if version is not None else None,
-            configuration_url="https://control.termoweb.net",
-        )
+        return build_gateway_device_info(self.hass, self._entry_id, self._dev_id)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

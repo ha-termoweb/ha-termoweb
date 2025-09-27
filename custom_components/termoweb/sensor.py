@@ -1,3 +1,5 @@
+"""Sensor platform entities for TermoWeb heaters and gateways."""
+
 from __future__ import annotations
 
 import logging
@@ -18,7 +20,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN, signal_ws_data
 from .coordinator import EnergyStateCoordinator
 from .heater import HeaterNodeBase, prepare_heater_platform_data
-from .utils import HEATER_NODE_TYPES, float_or_none
+from .utils import HEATER_NODE_TYPES, build_gateway_device_info, float_or_none
 
 _WH_TO_KWH = 1 / 1000.0
 
@@ -352,7 +354,7 @@ class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
     @property
     def device_info(self) -> DeviceInfo:
         """Return the Home Assistant device metadata for the gateway."""
-        return DeviceInfo(identifiers={(DOMAIN, self._dev_id)})
+        return build_gateway_device_info(self.hass, self._entry_id, self._dev_id)
 
     @callback
     def _on_ws_data(self, payload: dict) -> None:
