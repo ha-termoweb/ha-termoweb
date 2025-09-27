@@ -376,6 +376,7 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
             "nodes": [
                 {"type": "HTR", "addr": "1", "name": "Living Room"},
                 {"type": "htr", "addr": "2", "name": "Bedroom"},
+                {"type": "ACM", "addr": "3", "name": "Accumulator"},
             ]
         }
         coordinator = types.SimpleNamespace(
@@ -390,6 +391,11 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
                         },
                         "energy": {"1": 1.0, "2": 2.0},
                         "power": {"1": 100.0, "2": 150.0},
+                    },
+                    "acm": {
+                        "settings": {"3": {"mtemp": "17.0", "units": "C"}},
+                        "energy": {"3": 3.0},
+                        "power": {"3": 200.0},
                     },
                 }
             },
@@ -420,6 +426,9 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
             "Bedroom Temperature",
             "Bedroom Energy",
             "Bedroom Power",
+            "Accumulator Temperature",
+            "Accumulator Energy",
+            "Accumulator Power",
             "Total Energy",
         ]
 
@@ -448,7 +457,19 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
                 getattr(ent, "_attr_name", getattr(ent, "name", None))
                 for ent in add_calls[0]
             ]
-            assert names == expected_names
+            assert sorted(names) == sorted(expected_names)
+            per_node = {}
+            for name in names:
+                if name == "Total Energy":
+                    continue
+                base, _, measurement = name.rpartition(" ")
+                per_node.setdefault(base, set()).add(measurement)
+
+            assert per_node == {
+                "Living Room": {"Temperature", "Energy", "Power"},
+                "Bedroom": {"Temperature", "Energy", "Power"},
+                "Accumulator": {"Temperature", "Energy", "Power"},
+            }
             logger_mock.debug.assert_called_once_with(
                 "Adding %d TermoWeb sensors", expected_count
             )
@@ -468,7 +489,19 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
                 getattr(ent, "_attr_name", getattr(ent, "name", None))
                 for ent in add_calls[1]
             ]
-            assert names_second == expected_names
+            assert sorted(names_second) == sorted(expected_names)
+            per_node_second = {}
+            for name in names_second:
+                if name == "Total Energy":
+                    continue
+                base, _, measurement = name.rpartition(" ")
+                per_node_second.setdefault(base, set()).add(measurement)
+
+            assert per_node_second == {
+                "Living Room": {"Temperature", "Energy", "Power"},
+                "Bedroom": {"Temperature", "Energy", "Power"},
+                "Accumulator": {"Temperature", "Energy", "Power"},
+            }
             logger_mock.debug.assert_called_once_with(
                 "Adding %d TermoWeb sensors", expected_count
             )
