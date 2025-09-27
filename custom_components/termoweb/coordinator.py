@@ -55,11 +55,18 @@ class StateCoordinator(
         self._addr_lookup: dict[str, str] = {}
         self._refresh_node_cache()
 
-    def _ensure_inventory(self) -> list[Node]:
-        """Return cached node inventory, rebuilding when necessary."""
-        if not self._node_inventory and self._nodes:
+    def _set_inventory_from_nodes(
+        self,
+        nodes: Mapping[str, Any] | None,
+        provided: Iterable[Node] | None = None,
+    ) -> list[Node]:
+        """Populate the cached inventory from ``provided`` or ``nodes``."""
+
+        if provided is not None:
+            inventory = list(provided)
+        elif nodes:
             try:
-                self._node_inventory = build_node_inventory(self._nodes)
+                inventory = build_node_inventory(nodes)
             except ValueError as err:  # pragma: no cover - defensive
                 _LOGGER.debug(
                     "Failed to build node inventory for %s: %s",
@@ -67,7 +74,17 @@ class StateCoordinator(
                     err,
                     exc_info=err,
                 )
-                self._node_inventory = []
+                inventory = []
+        else:
+            inventory = []
+
+        self._node_inventory = inventory
+        return inventory
+
+    def _ensure_inventory(self) -> list[Node]:
+        """Return cached node inventory, rebuilding when necessary."""
+        if not self._node_inventory:
+            self._set_inventory_from_nodes(self._nodes)
         self._refresh_node_cache()
         return self._node_inventory
 
@@ -139,20 +156,7 @@ class StateCoordinator(
         """Update cached node payload and inventory."""
 
         self._nodes = nodes or {}
-        if node_inventory is not None:
-            self._node_inventory = list(node_inventory)
-        else:
-            self._node_inventory = []
-            if self._nodes:
-                try:
-                    self._node_inventory = build_node_inventory(self._nodes)
-                except ValueError as err:  # pragma: no cover - defensive
-                    _LOGGER.debug(
-                        "Failed to build node inventory for %s: %s",
-                        self._dev_id,
-                        err,
-                        exc_info=err,
-                    )
+        self._set_inventory_from_nodes(self._nodes, provided=node_inventory)
         self._refresh_node_cache()
 
     async def async_refresh_heater(self, node: str | tuple[str, str]) -> None:
