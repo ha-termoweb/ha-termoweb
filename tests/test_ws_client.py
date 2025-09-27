@@ -1832,7 +1832,7 @@ def test_handle_event_logs_unknown_types(
     client._handle_event(event)
 
     assert any("unknown node types in inventory: gizmo" in rec.message for rec in caplog.records)
-    assert energy_updates == [{"gizmo": ["09"], "htr": ["01"]}]
+    assert energy_updates == [{"htr": ["01"]}]
     assert node_updates
     loop.close()
 
@@ -1854,6 +1854,7 @@ def test_subscribe_htr_samples_sends_expected_payloads(
     async def _run() -> None:
         energy_updates: list[Any] = []
         normalize_calls: list[Any] = []
+        helper_calls: list[tuple[Any, Any]] = []
 
         class FakeEnergyCoordinator:
             def update_addresses(self, addrs: Any) -> None:
@@ -1910,6 +1911,14 @@ def test_subscribe_htr_samples_sends_expected_payloads(
             coordinator=coordinator,
         )
 
+        original_helper = Client._apply_heater_addresses
+
+        def helper(self: Any, addr_map: Any, *, inventory: Any = None) -> Any:
+            helper_calls.append((addr_map, inventory))
+            return original_helper(self, addr_map, inventory=inventory)
+
+        monkeypatch.setattr(Client, "_apply_heater_addresses", helper)
+
         class DummyWS:
             def __init__(self) -> None:
                 self.sent: list[str] = []
@@ -1930,13 +1939,24 @@ def test_subscribe_htr_samples_sends_expected_payloads(
             '5::/api/v2/socket_io:{"name":"subscribe","args":["/acm/A1/samples"]}',
         ]
 
-        assert normalize_calls == [{"htr": ["01", "02"], "acm": ["A1"]}]
+        assert normalize_calls == [
+            {"htr": ["01", "02"], "acm": ["A1"]},
+            {"htr": ["01", "02"], "acm": ["A1"]},
+        ]
         dev_map = coordinator.data["dev"]
         assert dev_map["nodes_by_type"]["acm"]["addrs"] == ["A1"]
         assert dev_map["htr"] is dev_map["nodes_by_type"]["htr"]
         assert energy_updates == [{"htr": ["01", "02"], "acm": ["A1"]}]
         assert "htr" in call_record
         assert "acm" in call_record
+        assert helper_calls and helper_calls[0][0] == {"htr": ["01", "02"], "acm": ["A1"]}
+        inventory = helper_calls[0][1]
+        assert inventory is not None
+        assert sorted((getattr(node, "type", None), getattr(node, "addr", None)) for node in inventory) == [
+            ("acm", "A1"),
+            ("htr", "01"),
+            ("htr", "02"),
+        ]
 
     asyncio.run(_run())
 
@@ -2125,6 +2145,103 @@ def test_subscribe_htr_samples_handles_empty_non_htr(monkeypatch):
         ]
 
     asyncio.run(_run())
+
+
+def test_dispatch_nodes_uses_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_ws_client()
+    Client = module.WebSocket09Client
+
+    helper_calls: list[tuple[Any, Any]] = []
+
+    original_helper = Client._apply_heater_addresses
+
+    def helper(self: Any, addr_map: Any, *, inventory: Any = None) -> Any:
+        helper_calls.append((addr_map, inventory))
+        return original_helper(self, addr_map, inventory=inventory)
+
+    monkeypatch.setattr(Client, "_apply_heater_addresses", helper)
+
+    dispatcher_calls: list[tuple[str, dict[str, Any]]] = []
+
+    def fake_dispatcher(hass: Any, signal: str, payload: dict[str, Any]) -> None:
+        dispatcher_calls.append((signal, payload))
+
+    monkeypatch.setattr(module, "async_dispatcher_send", fake_dispatcher)
+    monkeypatch.setattr(ws_core, "async_dispatcher_send", fake_dispatcher)
+
+    class FakeEnergyCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[Any] = []
+
+        def update_addresses(self, addrs: Any) -> None:
+            self.calls.append(addrs)
+
+    energy = FakeEnergyCoordinator()
+
+    class DummyLoop:
+        def call_soon_threadsafe(self, callback: Any) -> None:
+            callback()
+
+    hass = types.SimpleNamespace(
+        loop=DummyLoop(),
+        data={module.DOMAIN: {"entry": {"ws_state": {}, "energy_coordinator": energy}}},
+    )
+
+    class RecordingCoordinator:
+        def __init__(self) -> None:
+            self.nodes_updates: list[Any] = []
+            self.data = {
+                "dev": {
+                    "nodes_by_type": {},
+                    "htr": {
+                        "addrs": [],
+                        "settings": {},
+                        "advanced": {},
+                        "samples": {},
+                    },
+                }
+            }
+
+        def update_nodes(self, nodes: dict[str, Any], inventory: list[Any]) -> None:
+            self.nodes_updates.append((nodes, inventory))
+
+    coordinator = RecordingCoordinator()
+    api = types.SimpleNamespace(_session=None)
+    client = Client(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        api_client=api,
+        coordinator=coordinator,
+    )
+
+    payload = {
+        "nodes": [
+            {"addr": "01", "type": "htr"},
+            {"addr": "02", "type": "htr"},
+            {"addr": "A1", "type": "acm"},
+        ]
+    }
+
+    result = client._dispatch_nodes(payload)
+
+    assert helper_calls
+    addr_map_arg = helper_calls[0][0]
+    assert {
+        key: sorted(value) for key, value in addr_map_arg.items()
+    } == {"acm": ["A1"], "htr": ["01", "02"]}
+    inventory = helper_calls[0][1]
+    assert inventory is not None
+    assert sorted(
+        (getattr(node, "type", None), getattr(node, "addr", None)) for node in inventory
+    ) == [("acm", "A1"), ("htr", "01"), ("htr", "02")]
+    assert energy.calls == [{"htr": ["01", "02"], "acm": ["A1"]}]
+    record = hass.data[module.DOMAIN]["entry"]
+    assert "node_inventory" in record and record["node_inventory"] is inventory
+    assert {
+        key: sorted(value) for key, value in result.items()
+    } == {"acm": ["A1"], "htr": ["01", "02"]}
+    assert dispatcher_calls
 
 
 def test_mark_event_promotes_to_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2989,7 +3106,7 @@ def test_engineio_ws_client_flow(
         assert node_updates[1][0] == dev_data_payload["nodes"]
         assert node_updates[2][0]["htr"]["status"]["02"]["temp"] == 21
         assert node_updates[2][0]["acm"]["status"]["A2"]["mode"] == "boost"
-        assert all(not update for update in energy_updates)
+        assert all(set(update.keys()) == {"htr"} and not update["htr"] for update in energy_updates)
         assert client._nodes["nodes_by_type"]["htr"]["status"]["02"]["temp"] == 21
         assert client._nodes["nodes_by_type"]["acm"]["status"]["A2"]["mode"] == "boost"
         assert client._healthy_since is not None
@@ -3074,7 +3191,7 @@ def test_engineio_logs_unknown_types(
             "unknown node types in inventory: gizmo" in rec.message
             for rec in caplog.records
         )
-        assert energy_updates == [{"gizmo": ["X"], "htr": ["01"]}]
+        assert energy_updates == [{"htr": ["01"]}]
         assert node_updates
 
     asyncio.run(_run())

@@ -1,6 +1,7 @@
 """Unified websocket client for TermoWeb backends."""
 
 import asyncio
+from collections.abc import Iterable, Mapping
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass
@@ -405,28 +406,7 @@ class TermoWebSocketClient:
                 await self._send_text(
                     f"5::{WS_NAMESPACE}:{json.dumps(payload, separators=(',', ':'))}"
                 )
-        if isinstance(record, dict):
-            if inventory:
-                record["node_inventory"] = inventory
-            energy_coordinator = record.get("energy_coordinator")
-            if hasattr(energy_coordinator, "update_addresses"):
-                energy_coordinator.update_addresses(normalized_map)
-        coordinator_data = getattr(self._coordinator, "data", None)
-        if isinstance(coordinator_data, dict):
-            dev_map = coordinator_data.get(self.dev_id)
-            if isinstance(dev_map, dict):
-                nodes_by_type: dict[str, Any] = dev_map.setdefault("nodes_by_type", {})
-                for node_type, addrs in normalized_map.items():
-                    if not addrs and node_type != "htr":
-                        continue
-                    bucket = self._ensure_type_bucket(
-                        dev_map, nodes_by_type, node_type
-                    )
-                    if addrs:
-                        bucket["addrs"] = list(addrs)
-                updated = dict(coordinator_data)
-                updated[self.dev_id] = dev_map
-                self._coordinator.data = updated  # type: ignore[attr-defined]
+        self._apply_heater_addresses(normalized_map, inventory=inventory or None)
 
     def _ensure_type_bucket(
         self,
@@ -506,7 +486,7 @@ class TermoWebSocketClient:
             if data.startswith("0::"):
                 raise RuntimeError("server disconnect")
 
-    def _handle_event(self, evt: dict[str, Any]) -> None:  # noqa: C901
+    def _handle_event(self, evt: dict[str, Any]) -> None:
         """Process a Socket.IO 0.9 event payload."""
         if not isinstance(evt, dict):
             return
@@ -569,21 +549,7 @@ class TermoWebSocketClient:
             if path.endswith("/mgr/nodes"):
                 if isinstance(body, dict):
                     dev_map["nodes"] = body
-                    type_to_addrs = self._dispatch_nodes(body)
-                    for node_type, addrs in type_to_addrs.items():
-                        bucket = self._ensure_type_bucket(
-                            dev_map, nodes_by_type, node_type
-                        )
-                        bucket["addrs"] = list(addrs)
-                    if hasattr(self._coordinator, "update_nodes"):
-                        self._coordinator.update_nodes(body, inventory)
-                    record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-                    if isinstance(record, dict):
-                        record["nodes"] = body
-                        record["node_inventory"] = inventory
-                        energy_coordinator = record.get("energy_coordinator")
-                        if hasattr(energy_coordinator, "update_addresses"):
-                            energy_coordinator.update_addresses(type_to_addrs)
+                    self._dispatch_nodes(body)
                     updated_nodes = True
             else:
                 node_type, addr = _extract_type_addr(path)
@@ -977,10 +943,8 @@ class TermoWebSocketClient:
 
         if isinstance(record, dict):
             record["nodes"] = raw_nodes
-            record["node_inventory"] = inventory
-            energy_coordinator = record.get("energy_coordinator")
-            if hasattr(energy_coordinator, "update_addresses"):
-                energy_coordinator.update_addresses(addr_map)
+
+        self._apply_heater_addresses(addr_map, inventory=inventory)
 
         payload_copy = {
             "dev_id": self.dev_id,
@@ -1006,6 +970,42 @@ class TermoWebSocketClient:
             _send()
 
         return {node_type: list(addrs) for node_type, addrs in addr_map.items()}
+
+    def _apply_heater_addresses(
+        self,
+        addr_map: Mapping[Any, Iterable[Any]] | Iterable[Any] | None,
+        *,
+        inventory: list[Any] | None = None,
+    ) -> dict[str, list[str]]:
+        """Update entry and coordinator state with heater address data."""
+
+        normalized_map, _compat_aliases = normalize_heater_addresses(addr_map)
+        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
+        if isinstance(record, dict):
+            if inventory is not None:
+                record["node_inventory"] = inventory
+            energy_coordinator = record.get("energy_coordinator")
+            if hasattr(energy_coordinator, "update_addresses"):
+                energy_coordinator.update_addresses(normalized_map)
+
+        coordinator_data = getattr(self._coordinator, "data", None)
+        if isinstance(coordinator_data, dict):
+            dev_map = coordinator_data.get(self.dev_id)
+            if isinstance(dev_map, dict):
+                nodes_by_type: dict[str, Any] = dev_map.setdefault("nodes_by_type", {})
+                for node_type, addrs in normalized_map.items():
+                    if not addrs and node_type != "htr":
+                        continue
+                    bucket = self._ensure_type_bucket(
+                        dev_map, nodes_by_type, node_type
+                    )
+                    if addrs:
+                        bucket["addrs"] = list(addrs)
+                updated = dict(coordinator_data)
+                updated[self.dev_id] = dev_map
+                self._coordinator.data = updated  # type: ignore[attr-defined]
+
+        return normalized_map
 
     @staticmethod
     def _build_nodes_snapshot(nodes: dict[str, Any]) -> dict[str, Any]:
