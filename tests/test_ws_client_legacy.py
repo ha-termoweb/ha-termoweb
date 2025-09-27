@@ -928,6 +928,61 @@ def test_handle_event_updates_state_and_dispatch(monkeypatch: pytest.MonkeyPatch
     loop.close()
 
 
+def test_legacy_handle_event_uses_shared_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_ws_client()
+    hass = types.SimpleNamespace(
+        loop=asyncio.new_event_loop(),
+        data={module.DOMAIN: {"entry": {"ws_state": {}}}},
+    )
+    coordinator = types.SimpleNamespace(data={})
+    api = types.SimpleNamespace(_session=types.SimpleNamespace())
+    client = module.TermoWebWSLegacyClient(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        api_client=api,
+        coordinator=coordinator,
+    )
+
+    captured: list[tuple[Any, str, list[dict[str, Any]]]] = []
+
+    def fake_apply(coord: Any, dev: str, updates: list[dict[str, Any]]):
+        captured.append((coord, dev, updates))
+        return ["/mgr/nodes"], True, ["01"], ["01"]
+
+    monkeypatch.setattr(module, "apply_updates", fake_apply)
+    monkeypatch.setattr(module.time, "time", lambda: 2000.0)
+
+    dispatcher = MagicMock()
+    _patch_dispatcher(module, monkeypatch, dispatcher)
+
+    client._handle_event(
+        {"name": "data", "args": [[{"path": "/mgr/nodes", "body": {}}]]}
+    )
+
+    assert captured == [(coordinator, "dev", [{"path": "/mgr/nodes", "body": {}}])]
+    dispatcher.assert_has_calls(
+        [
+            call(
+                hass,
+                module.signal_ws_data("entry"),
+                {"dev_id": "dev", "ts": 2000.0, "addr": None, "kind": "nodes"},
+            ),
+            call(
+                hass,
+                module.signal_ws_data("entry"),
+                {"dev_id": "dev", "ts": 2000.0, "addr": "01", "kind": "htr_settings"},
+            ),
+            call(
+                hass,
+                module.signal_ws_data("entry"),
+                {"dev_id": "dev", "ts": 2000.0, "addr": "01", "kind": "htr_samples"},
+            ),
+        ]
+    )
+    hass.loop.close()
+
+
 def test_subscribe_htr_samples_sends_expected_payloads():
     async def _run() -> None:
         module = _load_ws_client()

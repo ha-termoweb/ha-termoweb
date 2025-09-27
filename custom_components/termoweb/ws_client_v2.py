@@ -16,8 +16,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .const import DOMAIN, WS_NAMESPACE, signal_ws_data, signal_ws_status
-from .utils import extract_heater_addrs
-from .ws_shared import HandshakeError, TermoWebWSShared
+from .ws_shared import HandshakeError, TermoWebWSShared, apply_updates
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -422,71 +421,7 @@ class TermoWebWSV2Client(TermoWebWSShared):
     def _apply_updates(
         self, dev_id: str, updates: list[dict[str, Any]]
     ) -> tuple[list[str], bool, list[str], list[str]]:
-        paths: list[str] = []
-        updated_nodes = False
-        updated_addrs: list[str] = []
-        sample_addrs: list[str] = []
-
-        for item in updates:
-            if not isinstance(item, dict):
-                continue
-            path = item.get("path")
-            body = item.get("body")
-            if not isinstance(path, str):
-                continue
-            paths.append(path)
-
-            dev_map: dict[str, Any] = (self._coordinator.data or {}).get(dev_id) or {}
-            if not dev_map:
-                dev_map = {
-                    "dev_id": dev_id,
-                    "name": f"Device {dev_id}",
-                    "raw": {},
-                    "connected": True,
-                    "nodes": None,
-                    "htr": {"addrs": [], "settings": {}},
-                }
-                cur = dict(self._coordinator.data or {})
-                cur[dev_id] = dev_map
-                self._coordinator.data = cur  # type: ignore[attr-defined]
-
-            if path.endswith("/mgr/nodes"):
-                if isinstance(body, dict):
-                    dev_map["nodes"] = body
-                    addrs = extract_heater_addrs(body)
-                    dev_map.setdefault("htr", {}).setdefault("settings", {})
-                    dev_map["htr"]["addrs"] = addrs
-                    updated_nodes = True
-
-            elif "/htr/" in path and path.endswith("/settings"):
-                addr = path.split("/htr/")[1].split("/")[0]
-                settings_map: dict[str, Any] = dev_map.setdefault("htr", {}).setdefault(
-                    "settings", {}
-                )
-                if isinstance(body, dict):
-                    settings_map[addr] = body
-                    updated_addrs.append(addr)
-
-            elif "/htr/" in path and path.endswith("/advanced_setup"):
-                addr = path.split("/htr/")[1].split("/")[0]
-                adv_map: dict[str, Any] = dev_map.setdefault("htr", {}).setdefault(
-                    "advanced", {}
-                )
-                if isinstance(body, dict):
-                    adv_map[addr] = body
-
-            elif "/htr/" in path and path.endswith("/samples"):
-                addr = path.split("/htr/")[1].split("/")[0]
-                sample_addrs.append(addr)
-
-            else:
-                raw = dev_map.setdefault("raw", {})
-                key = path.strip("/").replace("/", "_")
-                raw[key] = body
-
-        return paths, updated_nodes, list(dict.fromkeys(updated_addrs)), list(
-            dict.fromkeys(sample_addrs)
-        )
+        return apply_updates(self._coordinator, dev_id, updates)
 
     # ----------------- Helpers -----------------
 

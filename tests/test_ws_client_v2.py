@@ -1192,7 +1192,8 @@ def test_apply_updates_initializes_device_and_deduplicates() -> None:
         coordinator=coordinator,
     )
 
-    paths, updated_nodes, setting_addrs, sample_addrs = client._apply_updates(
+    paths, updated_nodes, setting_addrs, sample_addrs = ws_shared.apply_updates(
+        coordinator,
         "dev",
         [
             {"path": "/mgr/nodes", "body": {"nodes": [{"addr": "1", "type": "htr"}]}},
@@ -1208,6 +1209,41 @@ def test_apply_updates_initializes_device_and_deduplicates() -> None:
     assert setting_addrs == ["1"]
     assert sample_addrs == ["1"]
     assert coordinator.data["dev"]["raw"]["misc_info"] == {"v": 1}
+
+
+def test_v2_client_apply_updates_uses_shared_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = ws_client_v2
+    hass = types.SimpleNamespace(
+        loop=types.SimpleNamespace(create_task=lambda coro, name=None: coro),
+        data={module.DOMAIN: {"entry": {"ws_state": {}}}},
+    )
+    api = types.SimpleNamespace(
+        _session=module.aiohttp.testing.FakeClientSession(),
+        api_base="https://api.example.com",
+        _authed_headers=AsyncMock(return_value={"Authorization": "Bearer tok"}),
+        _ensure_token=AsyncMock(),
+    )
+    coordinator = types.SimpleNamespace(data={})
+    client = module.TermoWebWSV2Client(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        api_client=api,
+        coordinator=coordinator,
+    )
+
+    captured: list[tuple[Any, str, list[dict[str, Any]]]] = []
+
+    def fake_apply(coord: Any, dev: str, updates: list[dict[str, Any]]):
+        captured.append((coord, dev, updates))
+        return ["/mgr/nodes"], True, ["1"], ["1"]
+
+    monkeypatch.setattr(module, "apply_updates", fake_apply)
+
+    result = client._apply_updates("dev", [{"path": "/mgr/nodes", "body": {}}])
+
+    assert result == (["/mgr/nodes"], True, ["1"], ["1"])
+    assert captured == [(coordinator, "dev", [{"path": "/mgr/nodes", "body": {}}])]
 
 
 def test_coerce_dev_id_and_updates_handle_invalid_inputs() -> None:
@@ -1280,7 +1316,8 @@ def test_apply_updates_skips_invalid_entries() -> None:
         coordinator=coordinator,
     )
 
-    paths, updated_nodes, settings, samples = client._apply_updates(
+    paths, updated_nodes, settings, samples = ws_shared.apply_updates(
+        coordinator,
         "dev",
         [
             None,
