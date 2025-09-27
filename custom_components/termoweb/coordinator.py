@@ -51,7 +51,9 @@ class StateCoordinator(
         self._device = device or {}
         self._nodes = nodes or {}
         self._node_inventory: list[Node] = list(node_inventory or [])
-        self._addr_map: dict[str, list[str]] | None = None
+        self._nodes_by_type: dict[str, list[str]] = {}
+        self._addr_lookup: dict[str, str] = {}
+        self._refresh_node_cache()
 
     def _ensure_inventory(self) -> list[Node]:
         """Return cached node inventory, rebuilding when necessary."""
@@ -66,30 +68,68 @@ class StateCoordinator(
                     exc_info=err,
                 )
                 self._node_inventory = []
+        self._refresh_node_cache()
         return self._node_inventory
 
-    def _addr_lookup(self) -> tuple[dict[str, list[str]], dict[str, str]]:
-        """Return mapping of node types to addresses and reverse lookup."""
+    def _refresh_node_cache(self) -> None:
+        """Rebuild cached mappings of node types to addresses."""
 
-        if self._addr_map is None:
-            inventory = self._ensure_inventory()
-            mapping: dict[str, list[str]] = {}
-            if inventory:
-                grouped, _unknown = addresses_by_node_type(
-                    inventory, known_types=HEATER_NODE_TYPES
-                )
-                for node_type, addrs in grouped.items():
-                    if node_type in HEATER_NODE_TYPES:
-                        mapping[node_type] = list(addrs)
-            self._addr_map = mapping
+        mapping: dict[str, list[str]] = {}
+        inventory = self._node_inventory
+        if inventory:
+            grouped, _unknown = addresses_by_node_type(inventory)
+            for node_type, addrs in grouped.items():
+                mapping[node_type] = list(addrs)
 
-        addr_map = self._addr_map
+        self._nodes_by_type = mapping
         reverse: dict[str, str] = {}
-        for node_type, addrs in addr_map.items():
+        for node_type, addrs in mapping.items():
             for addr in addrs:
-                reverse.setdefault(addr, node_type)
+                reverse[str(addr)] = node_type
+        self._addr_lookup = reverse
 
-        return addr_map, reverse
+    def _register_node_address(self, node_type: str, addr: str) -> None:
+        """Add ``addr`` to the cached map for ``node_type`` if missing."""
+
+        if not node_type or not addr:
+            return
+        node_type = node_type.strip().lower()
+        addr = addr.strip()
+        if not node_type or not addr:
+            return
+        addrs = self._nodes_by_type.setdefault(node_type, [])
+        if addr not in addrs:
+            addrs.append(addr)
+        self._addr_lookup[addr] = node_type
+
+    @staticmethod
+    def _normalise_type_section(
+        node_type: str,
+        section: Any,
+        default_addrs: Iterable[str] | None = None,
+    ) -> dict[str, Any]:
+        """Return a standard mapping for a node type section."""
+
+        addrs: list[str] = []
+        if default_addrs is not None:
+            addrs = [str(addr).strip() for addr in default_addrs if str(addr).strip()]
+
+        settings: dict[str, Any] = {}
+
+        if isinstance(section, dict):
+            raw_addrs = section.get("addrs")
+            if isinstance(raw_addrs, Iterable) and not isinstance(raw_addrs, (str, bytes)):
+                addrs = [str(item).strip() for item in raw_addrs if str(item).strip()]
+            raw_settings = section.get("settings")
+            if isinstance(raw_settings, dict):
+                settings = {str(addr).strip(): data for addr, data in raw_settings.items() if str(addr).strip()}
+
+        # Ensure addrs contains any addresses present in settings
+        for addr in settings:
+            if addr not in addrs:
+                addrs.append(addr)
+
+        return {"addrs": addrs, "settings": settings}
 
     def update_nodes(
         self,
@@ -113,7 +153,7 @@ class StateCoordinator(
                         err,
                         exc_info=err,
                     )
-        self._addr_map = None
+        self._refresh_node_cache()
 
     async def async_refresh_heater(self, node: str | tuple[str, str]) -> None:
         """Refresh settings for a specific node and push the update to listeners."""
@@ -144,15 +184,13 @@ class StateCoordinator(
                 )
                 return
 
-            addr_map, reverse = self._addr_lookup()
+            self._ensure_inventory()
+            reverse = dict(self._addr_lookup)
             resolved_type = node_type or reverse.get(addr, "htr")
 
-            if resolved_type == "htr":
-                payload = await self.client.get_htr_settings(dev_id, addr)
-            else:
-                payload = await self.client.get_node_settings(
-                    dev_id, (resolved_type, addr)
-                )
+            payload = await self.client.get_node_settings(
+                dev_id, (resolved_type, addr)
+            )
 
             if not isinstance(payload, dict):
                 _LOGGER.debug(
@@ -189,53 +227,73 @@ class StateCoordinator(
 
             node_type = resolved_type
 
-            nodes_by_type: dict[str, dict[str, Any]] = {}
-            existing_nodes = dev_data.get("nodes_by_type")
-            if isinstance(existing_nodes, dict):
-                for n_type, section in existing_nodes.items():
-                    if not isinstance(section, dict):
-                        continue
-                    addrs_list = section.get("addrs")
-                    if isinstance(addrs_list, list):
-                        addrs_copy = [
-                            str(item).strip() for item in addrs_list if str(item).strip()
-                        ]
-                    else:
-                        addrs_copy = list(addr_map.get(n_type, []))
-                    settings_map = section.get("settings")
-                    settings_copy = (
-                        dict(settings_map) if isinstance(settings_map, dict) else {}
-                    )
-                    nodes_by_type[n_type] = {
-                        "addrs": addrs_copy,
-                        "settings": settings_copy,
-                    }
+            existing_nodes = {}
+            raw_existing = dev_data.get("nodes_by_type")
+            if isinstance(raw_existing, dict):
+                existing_nodes.update(raw_existing)
 
-            for n_type, addrs_for_type in addr_map.items():
-                nodes_by_type.setdefault(
-                    n_type,
-                    {"addrs": list(addrs_for_type), "settings": {}},
+            for key, value in dev_data.items():
+                if key in {"dev_id", "name", "raw", "connected", "nodes", "nodes_by_type"}:
+                    continue
+                if isinstance(value, dict):
+                    existing_nodes.setdefault(key, value)
+
+            cache_map = dict(self._nodes_by_type)
+            if node_type not in cache_map:
+                cache_map[node_type] = []
+
+            all_types = set(existing_nodes) | set(cache_map)
+            nodes_by_type: dict[str, dict[str, Any]] = {}
+            for n_type in all_types:
+                default_addrs = cache_map.get(n_type, [])
+                section = existing_nodes.get(n_type)
+                nodes_by_type[n_type] = self._normalise_type_section(
+                    n_type, section, default_addrs
                 )
 
-            section = nodes_by_type.setdefault(
-                node_type, {"addrs": [], "settings": {}}
+            bucket = nodes_by_type.setdefault(
+                node_type,
+                self._normalise_type_section(node_type, {}, cache_map.get(node_type, [])),
             )
-            if addr not in section["addrs"]:
-                section["addrs"].append(addr)
-            section_settings = section.setdefault("settings", {})
-            section_settings[addr] = payload
-            nodes_by_type[node_type] = {
-                "addrs": list(section["addrs"]),
-                "settings": dict(section_settings),
+            if addr not in bucket["addrs"]:
+                bucket["addrs"].append(addr)
+            bucket.setdefault("settings", {})[addr] = payload
+
+            self._register_node_address(node_type, addr)
+            cached_addrs = self._nodes_by_type.get(node_type, [])
+            merged_addrs: list[str] = []
+            for candidate in [*cached_addrs, *bucket["addrs"]]:
+                if candidate not in merged_addrs:
+                    merged_addrs.append(candidate)
+            bucket["addrs"] = merged_addrs
+
+            for n_type, cached in self._nodes_by_type.items():
+                section = nodes_by_type.setdefault(
+                    n_type,
+                    self._normalise_type_section(n_type, {}, cached),
+                )
+                merged: list[str] = []
+                for candidate in [*cached, *section["addrs"]]:
+                    if candidate not in merged:
+                        merged.append(candidate)
+                section["addrs"] = merged
+
+            dev_data["nodes"] = self._nodes
+            dev_data["nodes_by_type"] = {
+                n_type: {"addrs": list(section["addrs"]), "settings": dict(section["settings"])}
+                for n_type, section in nodes_by_type.items()
             }
 
-            legacy = nodes_by_type.get("htr")
-            if legacy is None:
-                legacy = {"addrs": list(addr_map.get("htr", [])), "settings": {}}
-                nodes_by_type["htr"] = legacy
+            for n_type, section in dev_data["nodes_by_type"].items():
+                dev_data[n_type] = section
 
-            dev_data["nodes_by_type"] = nodes_by_type
-            dev_data["htr"] = legacy
+            heater_section = dev_data["nodes_by_type"].get("htr")
+            if heater_section is None:
+                heater_section = self._normalise_type_section(
+                    "htr", {}, self._nodes_by_type.get("htr", [])
+                )
+                dev_data["nodes_by_type"]["htr"] = heater_section
+            dev_data["htr"] = heater_section
             new_data[dev_id] = dev_data
             self.async_set_updated_data(new_data)
             success = True
@@ -269,64 +327,90 @@ class StateCoordinator(
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Fetch heater settings for a subset of addresses on each poll."""
         dev_id = self._dev_id
-        addr_map, reverse = self._addr_lookup()
+        self._ensure_inventory()
+        addr_map = dict(self._nodes_by_type)
+        reverse = dict(self._addr_lookup)
         addrs = [addr for addrs in addr_map.values() for addr in addrs]
         try:
             prev_dev = (self.data or {}).get(dev_id, {})
             prev_by_type: dict[str, dict[str, Any]] = {}
+
             existing_nodes = prev_dev.get("nodes_by_type")
             if isinstance(existing_nodes, dict):
                 for node_type, section in existing_nodes.items():
-                    if not isinstance(section, dict):
-                        continue
-                    settings = section.get("settings")
-                    if isinstance(settings, dict):
-                        prev_by_type[node_type] = dict(settings)
-            prev_htr = prev_dev.get("htr") or {}
-            if isinstance(prev_htr, dict):
-                legacy_settings = prev_htr.get("settings")
-                if isinstance(legacy_settings, dict):
-                    bucket = prev_by_type.setdefault("htr", {})
-                    bucket.update(legacy_settings)
+                    normalised = self._normalise_type_section(
+                        node_type,
+                        section,
+                        addr_map.get(node_type, []),
+                    )
+                    if normalised["settings"]:
+                        prev_by_type[node_type] = dict(normalised["settings"])
 
-            settings_by_type: dict[str, dict[str, Any]] = {}
-            for node_type, addrs_for_type in addr_map.items():
-                settings_by_type[node_type] = dict(
-                    prev_by_type.get(node_type, {})
+            for key, value in prev_dev.items():
+                if key in {"dev_id", "name", "raw", "connected", "nodes", "nodes_by_type"}:
+                    continue
+                if not isinstance(value, dict):
+                    continue
+                normalised = self._normalise_type_section(
+                    key,
+                    value,
+                    addr_map.get(key, []),
                 )
+                if normalised["settings"]:
+                    bucket = prev_by_type.setdefault(key, {})
+                    bucket.update(normalised["settings"])
+
+            all_types = set(addr_map) | set(prev_by_type)
+            settings_by_type: dict[str, dict[str, Any]] = {
+                node_type: dict(prev_by_type.get(node_type, {})) for node_type in all_types
+            }
 
             if addrs:
-                start = self._rr_index.get(dev_id, 0) % len(addrs)
+                start_index = self._rr_index.get(dev_id, 0) % len(addrs)
                 count = min(HTR_SETTINGS_PER_CYCLE, len(addrs))
                 for k in range(count):
-                    idx = (start + k) % len(addrs)
+                    idx = (start_index + k) % len(addrs)
                     addr = addrs[idx]
                     node_type = reverse.get(addr, "htr")
-                    if node_type == "htr":
-                        js = await self.client.get_htr_settings(dev_id, addr)
-                    else:
-                        js = await self.client.get_node_settings(
-                            dev_id, (node_type, addr)
-                        )
+                    js = await self.client.get_node_settings(
+                        dev_id, (node_type, addr)
+                    )
                     if isinstance(js, dict):
                         bucket = settings_by_type.setdefault(node_type, {})
                         bucket[addr] = js
-                self._rr_index[dev_id] = (start + count) % len(addrs)
+                self._rr_index[dev_id] = (start_index + count) % len(addrs)
 
             dev_name = (self._device.get("name") or f"Device {dev_id}").strip()
 
-            nodes_by_type = {
-                node_type: {
-                    "addrs": list(addrs_for_type),
-                    "settings": dict(settings_by_type.get(node_type, {})),
-                }
-                for node_type, addrs_for_type in addr_map.items()
-            }
+            for node_type, settings in settings_by_type.items():
+                for addr in settings:
+                    self._register_node_address(node_type, str(addr))
 
-            legacy = nodes_by_type.get("htr")
-            if legacy is None:
-                legacy = {"addrs": [], "settings": {}}
-                nodes_by_type["htr"] = legacy
+            addr_map = dict(self._nodes_by_type)
+
+            combined_types = set(addr_map) | set(settings_by_type)
+            nodes_by_type: dict[str, dict[str, Any]] = {}
+            for node_type in combined_types:
+                cached_addrs = addr_map.get(node_type, [])
+                settings = dict(settings_by_type.get(node_type, {}))
+                final_addrs: list[str] = []
+                for candidate in [*cached_addrs, *settings.keys()]:
+                    addr_str = str(candidate).strip()
+                    if not addr_str or addr_str in final_addrs:
+                        continue
+                    final_addrs.append(addr_str)
+                nodes_by_type[node_type] = {
+                    "addrs": final_addrs,
+                    "settings": settings,
+                }
+
+            heater_section = nodes_by_type.get("htr")
+            if heater_section is None:
+                heater_section = {
+                    "addrs": list(addr_map.get("htr", [])),
+                    "settings": dict(settings_by_type.get("htr", {})),
+                }
+                nodes_by_type["htr"] = heater_section
 
             result = {
                 dev_id: {
@@ -336,9 +420,13 @@ class StateCoordinator(
                     "connected": True,
                     "nodes": self._nodes,
                     "nodes_by_type": nodes_by_type,
-                    "htr": legacy,
-                }
+                },
             }
+
+            for node_type, section in nodes_by_type.items():
+                result[dev_id][node_type] = section
+
+            result[dev_id]["htr"] = nodes_by_type.get("htr", {"addrs": [], "settings": {}})
 
         except TimeoutError as err:
             raise UpdateFailed("API timeout") from err
