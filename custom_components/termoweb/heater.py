@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 import logging
 from typing import Any
 
@@ -36,6 +36,40 @@ def _iter_nodes(nodes: Any) -> Iterable[Node]:
         inventory = []
 
     yield from inventory
+
+
+def log_skipped_nodes(
+    platform_name: str,
+    nodes_by_type: Mapping[str, Iterable[Node] | None],
+    *,
+    logger: logging.Logger | None = None,
+    skipped_types: Iterable[str] = ("pmo", "thm"),
+) -> None:
+    """Log skipped TermoWeb nodes for a given platform."""
+
+    log = logger or _LOGGER
+    platform = str(platform_name or "").strip()
+    if platform and not platform.lower().endswith("platform"):
+        platform = f"{platform} platform"
+    elif not platform:
+        platform = "platform"
+
+    for node_type in skipped_types:
+        nodes = nodes_by_type.get(node_type)
+        if not nodes:
+            continue
+
+        addrs = ", ".join(
+            sorted(
+                str(getattr(node, "addr", "")).strip() for node in _iter_nodes(nodes)
+            )
+        )
+        log.debug(
+            "Skipping TermoWeb %s nodes for %s: %s",
+            node_type,
+            platform,
+            addrs or "<no-addr>",
+        )
 
 
 def build_heater_name_map(

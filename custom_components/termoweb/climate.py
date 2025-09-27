@@ -18,7 +18,7 @@ from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
 from .const import DOMAIN
-from .heater import HeaterNodeBase, prepare_heater_platform_data
+from .heater import HeaterNodeBase, log_skipped_nodes, prepare_heater_platform_data
 from .nodes import HeaterNode
 from .utils import HEATER_NODE_TYPES, float_or_none
 
@@ -65,17 +65,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 )
             )
 
-    for skipped_type in ("pmo", "thm"):
-        skipped_nodes = nodes_by_type.get(skipped_type, [])
-        if skipped_nodes:
-            addrs = ", ".join(
-                sorted(str(getattr(node, "addr", "")) for node in skipped_nodes)
-            )
-            _LOGGER.debug(
-                "Skipping TermoWeb %s nodes for climate platform: %s",
-                skipped_type,
-                addrs or "<no-addr>",
-            )
+    log_skipped_nodes("climate", nodes_by_type, logger=_LOGGER)
     if new_entities:
         _LOGGER.debug("Adding %d TermoWeb heater entities", len(new_entities))
         async_add_entities(new_entities)
