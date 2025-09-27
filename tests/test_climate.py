@@ -81,11 +81,26 @@ def test_async_setup_entry_creates_entities() -> None:
             "nodes": [
                 {"type": "htr", "addr": "A1", "name": " Living Room "},
                 {"type": "HTR", "addr": "B2"},
+                {"type": "acm", "addr": "C3", "name": " Basement Accumulator "},
                 {"type": "other", "addr": "X"},
             ]
         }
         coordinator_data = {
-            dev_id: {"nodes": nodes, "htr": {"settings": {}}, "version": "3.1.4"}
+            dev_id: {
+                "nodes": nodes,
+                "htr": {"settings": {"A1": {}, "B2": {}}, "addrs": ["A1", "B2"]},
+                "nodes_by_type": {
+                    "htr": {
+                        "settings": {"A1": {}, "B2": {}},
+                        "addrs": ["A1", "B2"],
+                    },
+                    "acm": {
+                        "settings": {"C3": {"units": "C"}},
+                        "addrs": ["C3"],
+                    },
+                },
+                "version": "3.1.4",
+            }
         }
         coordinator = FakeCoordinator(hass, coordinator_data)
 
@@ -114,11 +129,18 @@ def test_async_setup_entry_creates_entities() -> None:
         entry = types.SimpleNamespace(entry_id=entry_id)
         await async_setup_entry(hass, entry, _async_add_entities)
 
-        assert len(added) == 2
-        assert all(isinstance(entity, HeaterClimateEntity) for entity in added)
+        assert len(added) == 3
+        entities_by_addr = {entity._addr: entity for entity in added}
+        assert set(entities_by_addr) == {"A1", "B2", "C3"}
+        assert isinstance(entities_by_addr["A1"], HeaterClimateEntity)
+        assert isinstance(entities_by_addr["B2"], HeaterClimateEntity)
+        acc = entities_by_addr["C3"]
+        assert isinstance(acc, climate_module.AccumulatorClimateEntity)
+        assert acc.available
         names = {entity._addr: entity._attr_name for entity in added}
         assert names["A1"] == "Living Room"
         assert names["B2"] == "Heater B2"
+        assert names["C3"] == "Basement Accumulator"
 
         registered = [name for name, _, _ in platform.registered]
         assert registered == ["set_schedule", "set_preset_temperatures"]
@@ -127,7 +149,10 @@ def test_async_setup_entry_creates_entities() -> None:
             info = entity.device_info
             assert info["identifiers"] == {(DOMAIN, dev_id, entity._addr)}
             assert info["manufacturer"] == "TermoWeb"
-            assert info["model"] == "Heater"
+            expected_model = "Accumulator"
+            if getattr(entity, "_node_type", "htr") != "acm":
+                expected_model = "Heater"
+            assert info["model"] == expected_model
             assert info["via_device"] == (DOMAIN, dev_id)
 
         schedule_name, _, schedule_handler = platform.registered[0]
@@ -136,7 +161,7 @@ def test_async_setup_entry_creates_entities() -> None:
         assert preset_name == "set_preset_temperatures"
 
         schedule_prog = [0] * 168
-        first = added[0]
+        first = entities_by_addr["A1"]
         first.async_set_schedule = AsyncMock()
         await schedule_handler(first, ServiceCall({"prog": schedule_prog}))
         first.async_set_schedule.assert_awaited_once_with(schedule_prog)
@@ -147,7 +172,7 @@ def test_async_setup_entry_creates_entities() -> None:
             ptemp=[18.0, 19.0, 20.0]
         )
 
-        second = added[1]
+        second = entities_by_addr["B2"]
         second.async_set_preset_temperatures = AsyncMock()
         await preset_handler(
             second,
@@ -219,6 +244,7 @@ def test_async_setup_entry_creates_accumulator_entity() -> None:
         acc = added[0]
         assert isinstance(acc, climate_module.AccumulatorClimateEntity)
         assert acc._attr_unique_id == f"{DOMAIN}:{dev_id}:acm:7:climate"
+        assert acc.available
         assert acc.device_info["model"] == "Accumulator"
 
         prog = [0, 1, 2] * 56

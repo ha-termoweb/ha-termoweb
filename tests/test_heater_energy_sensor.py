@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 import copy
 import types
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from conftest import _install_stubs
+from conftest import _install_stubs, make_ws_payload
 
 _install_stubs()
 
@@ -27,6 +28,8 @@ EnergyStateCoordinator = (
 HeaterTemperatureSensor = sensor_module.HeaterTemperatureSensor
 HeaterEnergyTotalSensor = sensor_module.HeaterEnergyTotalSensor
 HeaterPowerSensor = sensor_module.HeaterPowerSensor
+AccumulatorEnergyTotalSensor = sensor_module.AccumulatorEnergyTotalSensor
+AccumulatorPowerSensor = sensor_module.AccumulatorPowerSensor
 InstallationTotalEnergySensor = sensor_module.InstallationTotalEnergySensor
 async_setup_sensor_entry = sensor_module.async_setup_entry
 signal_ws_data = const_module.signal_ws_data
@@ -51,66 +54,141 @@ def test_coordinator_and_sensors() -> None:
                 [{"t": 1900, "counter": "1.5"}],
             ]
         )
+        client.get_node_samples = AsyncMock(
+            side_effect=[
+                [{"t": 1000, "counter": "3.0"}],
+                [{"t": 1900, "counter": "3.5"}],
+            ]
+        )
 
         hass = HomeAssistant()
-        coord = EnergyStateCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
+        coord = EnergyStateCoordinator(
+            hass, client, "1", {"htr": ["A"], "acm": ["B"]}
+        )
 
         await coord.async_refresh()
         await coord.async_refresh()
 
-        assert coord.data["1"]["htr"]["energy"]["A"] == pytest.approx(0.0015)
-        power = coord.data["1"]["htr"]["power"]["A"]
-        assert power == pytest.approx(2.0, rel=1e-3)
+        device_data = coord.data["1"]
+        assert device_data["htr"]["energy"]["A"] == pytest.approx(0.0015)
+        assert device_data["htr"]["power"]["A"] == pytest.approx(2.0, rel=1e-3)
+        acm_section = device_data["nodes_by_type"]["acm"]
+        assert acm_section["energy"]["B"] == pytest.approx(0.0035)
+        assert acm_section["power"]["B"] == pytest.approx(2.0, rel=1e-3)
 
-        energy_sensor = HeaterEnergyTotalSensor(
-            coord, "entry", "1", "A", "Energy", "e1", "Heater"
-        )
-        power_sensor = HeaterPowerSensor(
-            coord, "entry", "1", "A", "Power", "p1", "Heater"
-        )
-        energy_sensor.hass = power_sensor.hass = hass
-        await energy_sensor.async_added_to_hass()
-        await power_sensor.async_added_to_hass()
+        sensors = {
+            ("htr", "energy"): HeaterEnergyTotalSensor(
+                coord,
+                "entry",
+                "1",
+                "A",
+                "Energy",
+                f"{DOMAIN}:1:htr:A:energy",
+                "Heater",
+            ),
+            ("htr", "power"): HeaterPowerSensor(
+                coord,
+                "entry",
+                "1",
+                "A",
+                "Power",
+                f"{DOMAIN}:1:htr:A:power",
+                "Heater",
+            ),
+            ("acm", "energy"): AccumulatorEnergyTotalSensor(
+                coord,
+                "entry",
+                "1",
+                "B",
+                "Accumulator Energy",
+                f"{DOMAIN}:1:acm:B:energy",
+                "Accumulator",
+                node_type="acm",
+            ),
+            ("acm", "power"): AccumulatorPowerSensor(
+                coord,
+                "entry",
+                "1",
+                "B",
+                "Accumulator Power",
+                f"{DOMAIN}:1:acm:B:power",
+                "Accumulator",
+                node_type="acm",
+            ),
+        }
 
+        for sensor in sensors.values():
+            sensor.hass = hass
+            await sensor.async_added_to_hass()
+
+        energy_sensor = sensors[("htr", "energy")]
         assert energy_sensor.device_class == SensorDeviceClass.ENERGY
         assert energy_sensor.state_class == SensorStateClass.TOTAL_INCREASING
         assert energy_sensor.native_unit_of_measurement == "kWh"
+        assert energy_sensor._attr_unique_id == f"{DOMAIN}:1:htr:A:energy"
+        assert sensors[("acm", "energy")]._attr_unique_id == f"{DOMAIN}:1:acm:B:energy"
+        assert sensors[("acm", "power")]._attr_unique_id == f"{DOMAIN}:1:acm:B:power"
 
         signal = signal_ws_data("entry")
-        sensors = {
-            "energy": energy_sensor,
-            "power": power_sensor,
-        }
+
         expected_initial = {
-            "energy": pytest.approx(0.0015),
-            "power": pytest.approx(2.0, rel=1e-3),
+            ("htr", "energy"): pytest.approx(0.0015),
+            ("htr", "power"): pytest.approx(2.0, rel=1e-3),
+            ("acm", "energy"): pytest.approx(0.0035),
+            ("acm", "power"): pytest.approx(2.0, rel=1e-3),
         }
-        for metric, sensor in sensors.items():
-            assert sensor.native_value == expected_initial[metric]
+        for key, sensor in sensors.items():
+            assert sensor.native_value == expected_initial[key]
 
-        first_value: float = energy_sensor.native_value  # type: ignore[assignment]
+        energy_baselines = {
+            key: sensor.native_value
+            for key, sensor in sensors.items()
+            if key[1] == "energy"
+        }
 
-        for metric, bad_value in {"energy": "bad", "power": "oops"}.items():
-            coord.data["1"]["htr"][metric]["A"] = bad_value
+        def _set_metric(node_type: str, metric: str, value: Any) -> None:
+            section = coord.data["1"]["nodes_by_type"][node_type][metric]
+            addr = "A" if node_type == "htr" else "B"
+            section[addr] = value
+
+        for node_type, metric in sensors:
+            _set_metric(node_type, metric, "bad" if metric == "energy" else "oops")
 
         for sensor in sensors.values():
             assert sensor.native_value is None
             sensor.schedule_update_ha_state = MagicMock()
 
-        for metric, new_value in {"energy": 0.002, "power": 123.0}.items():
-            coord.data["1"]["htr"][metric]["A"] = new_value
+        _set_metric("htr", "energy", 0.002)
+        _set_metric("htr", "power", 123.0)
 
-        dispatcher_send(signal, {"dev_id": "1", "addr": "A"})
+        dispatcher_send(signal, make_ws_payload("1", "A"))
 
-        expected_updated = {
-            "energy": pytest.approx(0.002),
-            "power": pytest.approx(123.0),
-        }
-        for metric, sensor in sensors.items():
-            sensor.schedule_update_ha_state.assert_called_once()
-            assert sensor.native_value == expected_updated[metric]
+        for key, sensor in sensors.items():
+            node_type, metric = key
+            if node_type == "htr":
+                sensor.schedule_update_ha_state.assert_called_once()
+                expected = 0.002 if metric == "energy" else 123.0
+                assert sensor.native_value == pytest.approx(expected)
+            else:
+                sensor.schedule_update_ha_state.assert_not_called()
 
-        assert energy_sensor.native_value >= first_value
+        _set_metric("acm", "energy", 0.004)
+        _set_metric("acm", "power", 456.0)
+
+        dispatcher_send(signal, make_ws_payload("1", "B", node_type="acm"))
+
+        for key, sensor in sensors.items():
+            node_type, metric = key
+            if node_type == "acm":
+                sensor.schedule_update_ha_state.assert_called_once()
+                expected = 0.004 if metric == "energy" else 456.0
+                assert sensor.native_value == pytest.approx(expected)
+            else:
+                assert sensor.schedule_update_ha_state.call_count == 1
+
+        for key, baseline in energy_baselines.items():
+            new_value = sensors[key].native_value
+            assert new_value is not None and new_value >= baseline  # type: ignore[operator]
 
         for sensor in sensors.values():
             sensor.schedule_update_ha_state.reset_mock()
@@ -121,9 +199,15 @@ def test_coordinator_and_sensors() -> None:
             mock_unsub.assert_called_once()
             assert sensor._handle_ws_message not in dispatch_map.get(signal, [])
 
-        dispatcher_send(signal, {"dev_id": "1", "addr": "A"})
+        dispatcher_send(signal, make_ws_payload("1", "A"))
+        dispatcher_send(signal, make_ws_payload("1", "B", node_type="acm"))
         for sensor in sensors.values():
             sensor.schedule_update_ha_state.assert_not_called()
+
+        assert client.get_htr_samples.await_count == 2
+        assert client.get_node_samples.await_count == 2
+        node_call = client.get_node_samples.await_args_list[0]
+        assert node_call.args[:2] == ("1", ("acm", "B"))
 
     asyncio.run(_run())
 
