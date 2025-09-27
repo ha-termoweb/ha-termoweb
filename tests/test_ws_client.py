@@ -14,6 +14,7 @@ from conftest import _install_stubs
 
 _install_stubs()
 
+import custom_components.termoweb.utils as utils
 import custom_components.termoweb.ws_client as ws_core
 
 
@@ -2242,19 +2243,108 @@ def test_dispatch_nodes_uses_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     assert {
         key: sorted(value) for key, value in addr_map_arg.items()
     } == {"acm": ["A1"], "htr": ["01", "02"]}
-    inventory = helper_calls[0][1]
-    assert inventory is not None
-    assert sorted(
-        (getattr(node, "type", None), getattr(node, "addr", None)) for node in inventory
-    ) == [("acm", "A1"), ("htr", "01"), ("htr", "02")]
+    inventory_arg = helper_calls[0][1]
+    assert inventory_arg is None
+    assert coordinator.nodes_updates
+    raw_nodes_arg, inventory = coordinator.nodes_updates[0]
+    assert raw_nodes_arg == payload
     assert energy.calls == [{"htr": ["01", "02"], "acm": ["A1"]}]
     record = hass.data[module.DOMAIN]["entry"]
     assert "node_inventory" in record and record["node_inventory"] is inventory
+    assert sorted(
+        (getattr(node, "type", None), getattr(node, "addr", None)) for node in inventory
+    ) == [("acm", "A1"), ("htr", "01"), ("htr", "02")]
+    assert coordinator.nodes_updates[0][1] is record["node_inventory"]
     assert {
         key: sorted(value) for key, value in result.items()
     } == {"acm": ["A1"], "htr": ["01", "02"]}
     assert dispatcher_calls
 
+
+def test_dispatch_nodes_reuses_cached_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_ws_client()
+    Client = module.WebSocket09Client
+
+    helper_calls: list[tuple[Any, Any]] = []
+
+    original_helper = Client._apply_heater_addresses
+
+    def helper(self: Any, addr_map: Any, *, inventory: Any = None) -> Any:
+        helper_calls.append((addr_map, inventory))
+        return original_helper(self, addr_map, inventory=inventory)
+
+    monkeypatch.setattr(Client, "_apply_heater_addresses", helper)
+
+    class FakeEnergyCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[Any] = []
+
+        def update_addresses(self, addrs: Any) -> None:
+            self.calls.append(addrs)
+
+    energy = FakeEnergyCoordinator()
+
+    class DummyLoop:
+        def call_soon_threadsafe(self, callback: Any) -> None:
+            callback()
+
+    cached_payload = {"nodes": [{"addr": "01", "type": "htr"}]}
+    cached_inventory = module.build_node_inventory(cached_payload)
+
+    hass = types.SimpleNamespace(
+        loop=DummyLoop(),
+        data={
+            module.DOMAIN: {
+                "entry": {
+                    "ws_state": {},
+                    "energy_coordinator": energy,
+                    "node_inventory": list(cached_inventory),
+                    "nodes": {},
+                }
+            }
+        },
+    )
+
+    class RecordingCoordinator:
+        def __init__(self) -> None:
+            self.nodes_updates: list[Any] = []
+            self.data: dict[str, Any] = {}
+
+        def update_nodes(self, nodes: dict[str, Any], inventory: list[Any]) -> None:
+            self.nodes_updates.append((nodes, inventory))
+
+    coordinator = RecordingCoordinator()
+    api = types.SimpleNamespace(_session=None)
+    client = Client(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        api_client=api,
+        coordinator=coordinator,
+    )
+
+    def explode_build(raw_nodes: Any) -> list[Any]:  # pragma: no cover - defensive
+        raise AssertionError("build_node_inventory should not be called")
+
+    monkeypatch.setattr(utils, "build_node_inventory", explode_build)
+
+    payload = {"nodes": [{"addr": "01", "type": "htr"}]}
+
+    result = client._dispatch_nodes(payload)
+
+    assert result == {"htr": ["01"]}
+    assert helper_calls
+    assert helper_calls[0][1] is None
+    assert coordinator.nodes_updates
+    raw_nodes_arg, inventory = coordinator.nodes_updates[0]
+    assert raw_nodes_arg == payload
+    record = hass.data[module.DOMAIN]["entry"]
+    assert record["nodes"] == payload
+    assert record["node_inventory"] is inventory
+    assert inventory and inventory[0] is cached_inventory[0]
+    assert energy.calls == [{"htr": ["01"]}]
 
 def test_mark_event_promotes_to_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load_ws_client()
