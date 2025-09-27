@@ -1324,14 +1324,22 @@ def test_import_energy_history_requested_map_filters(monkeypatch: pytest.MonkeyP
             "config_entry": entry,
         }
 
-        monkeypatch.setattr(
-            mod,
-            "_heater_address_map",
-            lambda _inventory: (
-                {"htr": ["A", "B"], "acm": ["B"], "pmo": []},
-                {"A": {"htr"}, "B": {"acm"}},
-            ),
-        )
+        helper_calls: list[dict[str, Any]] = []
+
+        def fake_addresses_by_node_type(nodes, *, known_types=None):
+            helper_calls.append(
+                {
+                    "nodes": list(nodes),
+                    "known_types": None if known_types is None else set(known_types),
+                }
+            )
+            assert known_types == mod.HEATER_NODE_TYPES
+            return (
+                {"htr": ["A"], "acm": ["B"], "pmo": ["ignored"]},
+                set(),
+            )
+
+        monkeypatch.setattr(mod, "addresses_by_node_type", fake_addresses_by_node_type)
 
         uid_a = f"{const.DOMAIN}:dev:htr:A:energy"
         uid_b_legacy = f"{const.DOMAIN}:dev:htr:B:energy"
@@ -1385,6 +1393,8 @@ def test_import_energy_history_requested_map_filters(monkeypatch: pytest.MonkeyP
         assert client.get_node_samples.await_count >= 2
         progress = entry.options[mod.OPTION_ENERGY_HISTORY_PROGRESS]
         assert set(progress) >= {"htr:A", "acm:B"}
+        assert helper_calls
+        assert helper_calls[0]["known_types"] == mod.HEATER_NODE_TYPES
 
     asyncio.run(_run())
 
@@ -1431,11 +1441,19 @@ def test_import_energy_history_resets_requested_progress(
             "config_entry": entry,
         }
 
-        monkeypatch.setattr(
-            mod,
-            "_heater_address_map",
-            lambda _inventory: ({"pmo": []}, {}),
-        )
+        helper_calls: list[dict[str, Any]] = []
+
+        def fake_addresses_by_node_type(nodes, *, known_types=None):
+            helper_calls.append(
+                {
+                    "nodes": list(nodes),
+                    "known_types": None if known_types is None else set(known_types),
+                }
+            )
+            assert known_types == mod.HEATER_NODE_TYPES
+            return ({"pmo": ["X"]}, set())
+
+        monkeypatch.setattr(mod, "addresses_by_node_type", fake_addresses_by_node_type)
 
         fake_now = 5 * 86_400
 
@@ -1462,6 +1480,8 @@ def test_import_energy_history_resets_requested_progress(
         )
 
         assert entry.options[mod.OPTION_ENERGY_HISTORY_PROGRESS] == {}
+        assert helper_calls
+        assert helper_calls[0]["known_types"] == mod.HEATER_NODE_TYPES
 
     asyncio.run(_run())
 

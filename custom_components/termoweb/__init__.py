@@ -39,7 +39,7 @@ from .const import (
 )
 from .coordinator import StateCoordinator
 from .nodes import build_node_inventory
-from .utils import HEATER_NODE_TYPES
+from .utils import HEATER_NODE_TYPES, addresses_by_node_type
 
 # Re-export legacy WS client for backward compatibility (tests may patch it).
 from .ws_client_legacy import WebSocket09Client  # noqa: F401
@@ -115,20 +115,20 @@ def _heater_address_map(
 ) -> tuple[dict[str, list[str]], dict[str, set[str]]]:
     """Return mapping of heater node types to addresses and reverse lookup."""
 
-    by_type: dict[str, list[str]] = {}
-    reverse: dict[str, set[str]] = {}
+    raw_map, _unknown = addresses_by_node_type(
+        inventory,
+        known_types=HEATER_NODE_TYPES,
+    )
+    by_type = {
+        node_type: addresses
+        for node_type, addresses in raw_map.items()
+        if node_type in HEATER_NODE_TYPES and addresses
+    }
 
-    for node in inventory:
-        node_type = str(getattr(node, "type", "")).strip().lower()
-        if node_type not in HEATER_NODE_TYPES:
-            continue
-        addr = str(getattr(node, "addr", "")).strip()
-        if not addr:
-            continue
-        addrs = by_type.setdefault(node_type, [])
-        if addr not in addrs:
-            addrs.append(addr)
-        reverse.setdefault(addr, set()).add(node_type)
+    reverse: dict[str, set[str]] = {}
+    for node_type, addresses in by_type.items():
+        for address in addresses:
+            reverse.setdefault(address, set()).add(node_type)
 
     return by_type, reverse
 
