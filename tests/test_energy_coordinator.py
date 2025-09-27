@@ -81,7 +81,12 @@ def test_coordinator_success_resets_backoff() -> None:
 
         await coord.async_refresh()
 
-        assert coord.data["dev"]["htr"]["settings"]["A"] == {"mode": "auto"}
+        dev = coord.data["dev"]
+        assert dev["htr"]["settings"]["A"] == {"mode": "auto"}
+        nodes_by_type = dev.get("nodes_by_type")
+        assert nodes_by_type is not None
+        assert nodes_by_type["htr"]["settings"]["A"] == {"mode": "auto"}
+        assert nodes_by_type["htr"]["addrs"] == ["A"]
         assert coord._backoff == 0
         assert coord.update_interval == timedelta(seconds=coord._base_interval)
 
@@ -175,6 +180,10 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
         htr = dev["htr"]
         assert htr["settings"]["A"] == {"mode": "auto"}
         assert htr["addrs"] == ["A", "B"]
+        nodes_by_type = dev.get("nodes_by_type")
+        assert nodes_by_type is not None
+        assert nodes_by_type["htr"]["settings"]["A"] == {"mode": "auto"}
+        assert nodes_by_type["htr"]["addrs"] == ["A", "B"]
 
         await coord.async_refresh_heater("B")
         assert len(updates) == 2
@@ -184,6 +193,10 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
         assert htr_second["settings"]["B"] == {"mode": "eco"}
         assert htr_second["addrs"] == ["A", "B"]
         assert htr_second["addrs"] is not htr["addrs"]
+        nodes_by_type_second = second["dev"].get("nodes_by_type")
+        assert nodes_by_type_second is not None
+        assert nodes_by_type_second["htr"]["settings"]["B"] == {"mode": "eco"}
+        assert nodes_by_type_second["htr"]["addrs"] == ["A", "B"]
 
     asyncio.run(_run())
 
@@ -226,6 +239,9 @@ def test_refresh_heater_populates_missing_metadata() -> None:
         assert result["nodes"] == nodes
         assert result["connected"] is False
         assert result["htr"]["settings"]["A"] == {"mode": "heat"}
+        nodes_by_type = result.get("nodes_by_type")
+        assert nodes_by_type is not None
+        assert nodes_by_type["htr"]["settings"]["A"] == {"mode": "heat"}
 
     asyncio.run(_run())
 
@@ -333,20 +349,20 @@ def test_energy_regression_resets_last() -> None:
         await coord.async_refresh()
         assert coord.data["1"]["htr"]["energy"]["A"] == pytest.approx(0.001)
         assert "A" not in coord.data["1"]["htr"]["power"]
-        assert coord._last[("1", "A")] == (1000.0, pytest.approx(0.001))
+        assert coord._last[("1", "htr", "A")] == (1000.0, pytest.approx(0.001))
 
         await coord.async_refresh()
         second_data = coord.data["1"]["htr"]
         assert second_data["energy"]["A"] == pytest.approx(0.002)
         assert second_data["power"]["A"] == pytest.approx(6.0, rel=1e-3)
-        assert coord._last[("1", "A")] == (1600.0, pytest.approx(0.002))
+        assert coord._last[("1", "htr", "A")] == (1600.0, pytest.approx(0.002))
 
         await coord.async_refresh()
 
         final_data = coord.data["1"]["htr"]
         assert final_data["energy"]["A"] == pytest.approx(0.0015)
         assert "A" not in final_data["power"]
-        assert coord._last[("1", "A")] == (1500.0, pytest.approx(0.0015))
+        assert coord._last[("1", "htr", "A")] == (1500.0, pytest.approx(0.0015))
 
     asyncio.run(_run())
 
@@ -514,6 +530,7 @@ def test_energy_state_coordinator_update_addresses_filters_duplicates() -> None:
     coord.update_addresses(["A", " ", "B", "A", "B ", ""])
 
     assert coord._addrs == ["A", "B"]
+    assert coord._addresses_by_type == {"htr": ["A", "B"]}
 
 
 def test_energy_state_coordinator_update_addresses_accepts_map() -> None:
@@ -524,6 +541,7 @@ def test_energy_state_coordinator_update_addresses_accepts_map() -> None:
     coord.update_addresses({"htr": ["A", "A"], "acm": ["B", ""], "foo": ["X"]})
 
     assert coord._addrs == ["A", "B"]
+    assert coord._addresses_by_type == {"htr": ["A"], "acm": ["B"]}
 
 
 def test_coordinator_rate_limit_backoff(monkeypatch: pytest.MonkeyPatch) -> None:

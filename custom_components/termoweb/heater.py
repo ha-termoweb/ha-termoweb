@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 import logging
 from typing import Any
 
@@ -13,49 +13,74 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_data
+from .nodes import Node, build_node_inventory
+from .utils import HEATER_NODE_TYPES
 
 _LOGGER = logging.getLogger(__name__)
 
 
+def _iter_nodes(nodes: Any) -> Iterable[Node]:
+    """Yield :class:`Node` instances from ``nodes`` when possible."""
+
+    if isinstance(nodes, Iterable) and not isinstance(nodes, dict):
+        candidate = list(nodes)
+        if candidate and all(isinstance(node, Node) for node in candidate):
+            yield from candidate
+            return
+        nodes = candidate
+
+    try:
+        inventory = build_node_inventory(nodes)
+    except ValueError:  # pragma: no cover - defensive
+        inventory = []
+
+    yield from inventory
+
+
 def build_heater_name_map(
     nodes: Any, default_factory: Callable[[str], str]
-) -> dict[str, str]:
-    """Return a mapping of heater address -> friendly name.
+) -> dict[Any, Any]:
+    """Return a mapping of heater node identifiers to friendly names.
 
-    The TermoWeb API returns node metadata via ``/mgr/nodes``.  Both the
-    climate and sensor platforms previously duplicated the logic that parsed
-    that structure.  The helper tolerates malformed payloads and ensures we
-    keep backwards compatible naming semantics by falling back to the
-    ``default_factory`` when necessary.
+    The mapping exposes multiple lookup styles:
+
+    * ``(node_type, addr)`` -> resolved friendly name
+    * ``"htr"`` -> legacy heater-only mapping of ``addr`` -> friendly name
+    * ``"by_type"`` -> ``{node_type: {addr: name}}`` for all heater nodes
     """
 
-    name_map: dict[str, str] = {}
+    by_type: dict[str, dict[str, str]] = {}
+    by_node: dict[tuple[str, str], str] = {}
 
-    node_list = None
-    if isinstance(nodes, dict):
-        node_list = nodes.get("nodes")
+    for node in _iter_nodes(nodes):
+        node_type = str(getattr(node, "type", "")).strip().lower()
+        if node_type not in HEATER_NODE_TYPES:
+            continue
 
-    if isinstance(node_list, list):
-        for node in node_list:
-            if not isinstance(node, dict):
-                continue
-            if (node.get("type") or "").lower() != "htr":
-                continue
+        addr = str(getattr(node, "addr", "")).strip()
+        if not addr or addr.lower() == "none":
+            continue
 
-            addr = node.get("addr")
-            if addr is None:
-                continue
+        default_name = default_factory(addr)
+        raw_name = getattr(node, "name", "")
+        resolved = default_name
+        if isinstance(raw_name, str):
+            candidate = raw_name.strip()
+            if candidate:
+                resolved = candidate
 
-            addr_str = str(addr)
-            raw_name = node.get("name")
-            default_name = default_factory(addr_str)
-            if isinstance(raw_name, str):
-                candidate = raw_name.strip()
-                name_map[addr_str] = candidate or default_name
-            else:
-                name_map[addr_str] = default_name
+        by_node[(node_type, addr)] = resolved
+        bucket = by_type.setdefault(node_type, {})
+        bucket[addr] = resolved
 
-    return name_map
+    result: dict[Any, Any] = {"htr": dict(by_type.get("htr", {}))}
+    if by_type:
+        result["by_type"] = {k: dict(v) for k, v in by_type.items()}
+
+    for key, value in by_node.items():
+        result[key] = value
+
+    return result
 
 
 class HeaterNodeBase(CoordinatorEntity):
@@ -73,6 +98,7 @@ class HeaterNodeBase(CoordinatorEntity):
         unique_id: str | None = None,
         *,
         device_name: str | None = None,
+        node_type: str | None = None,
     ) -> None:
         """Initialise a heater entity tied to a TermoWeb device."""
         super().__init__(coordinator)
@@ -80,7 +106,11 @@ class HeaterNodeBase(CoordinatorEntity):
         self._dev_id = dev_id
         self._addr = str(addr)
         self._attr_name = name
-        self._attr_unique_id = unique_id or f"{DOMAIN}:{dev_id}:htr:{self._addr}"
+        resolved_type = str(node_type or "htr").strip().lower() or "htr"
+        self._node_type = resolved_type
+        self._attr_unique_id = (
+            unique_id or f"{DOMAIN}:{dev_id}:{resolved_type}:{self._addr}"
+        )
         self._device_name = device_name or name
         self._unsub_ws = None
 
@@ -173,6 +203,18 @@ class HeaterNodeBase(CoordinatorEntity):
         record = self._device_record()
         if record is None:
             return {}
+        node_type = getattr(self, "_node_type", "htr")
+        if node_type == "htr":
+            legacy = record.get("htr")
+            if isinstance(legacy, dict):
+                return legacy
+
+        by_type = record.get("nodes_by_type")
+        if isinstance(by_type, dict):
+            section = by_type.get(node_type)
+            if isinstance(section, dict):
+                return section
+
         heaters = record.get("htr")
         return heaters if isinstance(heaters, dict) else {}
 

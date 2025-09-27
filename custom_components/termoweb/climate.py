@@ -20,7 +20,7 @@ import voluptuous as vol
 from .const import DOMAIN
 from .heater import HeaterNodeBase, build_heater_name_map
 from .nodes import HeaterNode, build_node_inventory
-from .utils import HEATER_NODE_TYPES, addresses_by_type, float_or_none
+from .utils import HEATER_NODE_TYPES, addresses_by_node_type, float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,20 +40,39 @@ async def async_setup_entry(hass, entry, async_add_entities):
     if not inventory and nodes:
         inventory = build_node_inventory(nodes)
         data["node_inventory"] = inventory
-    addrs: list[str] = addresses_by_type(inventory, HEATER_NODE_TYPES)
+    default_name = lambda addr: f"Heater {addr}"  # noqa: E731
 
-    name_map = build_heater_name_map(nodes, lambda addr: f"Heater {addr}")
+    addrs_by_type, _ = addresses_by_node_type(
+        inventory, known_types=HEATER_NODE_TYPES
+    )
 
-    new_entities = [
-        HeaterClimateEntity(
-            coordinator,
-            entry.entry_id,
-            dev_id,
-            addr,
-            name_map.get(addr, f"Heater {addr}"),
-        )
-        for addr in addrs
-    ]
+    name_map = build_heater_name_map(nodes, default_name)
+    names_by_type: dict[str, dict[str, str]] = name_map.get("by_type", {})
+    legacy_names: dict[str, str] = name_map.get("htr", {})
+
+    new_entities: list[HeaterClimateEntity] = []
+    for node_type, addrs in addrs_by_type.items():
+        if node_type not in HEATER_NODE_TYPES:
+            continue
+        per_type = names_by_type.get(node_type, {})
+        for addr in addrs:
+            addr_str = str(addr)
+            resolved_name = (
+                per_type.get(addr_str)
+                or name_map.get((node_type, addr_str))
+                or legacy_names.get(addr_str)
+                or default_name(addr_str)
+            )
+            new_entities.append(
+                HeaterClimateEntity(
+                    coordinator,
+                    entry.entry_id,
+                    dev_id,
+                    addr_str,
+                    resolved_name,
+                    node_type=node_type,
+                )
+            )
     if new_entities:
         _LOGGER.debug("Adding %d TermoWeb heater entities", len(new_entities))
         async_add_entities(new_entities)
@@ -130,10 +149,23 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         dev_id: str,
         addr: str,
         name: str,
+        *,
+        node_type: str | None = None,
     ) -> None:
         """Initialise the climate entity for a TermoWeb heater."""
         HeaterNode.__init__(self, name=name, addr=addr)
-        HeaterNodeBase.__init__(self, coordinator, entry_id, dev_id, addr, self.name)
+        resolved_type = str(node_type or getattr(self, "type", "htr")).strip().lower()
+        if resolved_type and resolved_type != getattr(self, "type", ""):
+            self.type = resolved_type
+        HeaterNodeBase.__init__(
+            self,
+            coordinator,
+            entry_id,
+            dev_id,
+            addr,
+            self.name,
+            node_type=resolved_type,
+        )
 
         self._refresh_fallback: asyncio.Task | None = None
 
