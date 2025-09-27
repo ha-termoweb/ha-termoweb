@@ -16,15 +16,14 @@ from aiohttp import ClientError
 from custom_components.termoweb import coordinator as coordinator_module
 from custom_components.termoweb import sensor as sensor_module
 from custom_components.termoweb import const as const_module
+from custom_components.termoweb.nodes import build_node_inventory
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import dispatcher as dispatcher_module
 from homeassistant.helpers.dispatcher import dispatcher_send
 
-EnergyStateCoordinator = (
-    coordinator_module.EnergyStateCoordinator
-)
+EnergyStateCoordinator = coordinator_module.EnergyStateCoordinator
 HeaterTemperatureSensor = sensor_module.HeaterTemperatureSensor
 HeaterEnergyTotalSensor = sensor_module.HeaterEnergyTotalSensor
 HeaterPowerSensor = sensor_module.HeaterPowerSensor
@@ -64,9 +63,7 @@ def test_coordinator_and_sensors() -> None:
         )
 
         hass = HomeAssistant()
-        coord = EnergyStateCoordinator(
-            hass, client, "1", {"htr": ["A"], "acm": ["B"]}
-        )
+        coord = EnergyStateCoordinator(hass, client, "1", {"htr": ["A"], "acm": ["B"]})
 
         await coord.async_refresh()
         await coord.async_refresh()
@@ -231,7 +228,7 @@ def test_sensor_async_setup_entry_defaults_and_skips_invalid() -> None:
                 {"type": "pmo", "addr": "P1"},
             ]
         }
-        inventory = sensor_module.build_node_inventory(raw_nodes)
+        inventory = build_node_inventory(raw_nodes)
         inventory.append(types.SimpleNamespace(type=" ", addr="extra"))
         inventory.append(types.SimpleNamespace(type="htr", addr=" "))
 
@@ -317,7 +314,7 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
             "client": types.SimpleNamespace(),
             "dev_id": dev_id,
             "nodes": nodes_meta,
-            "node_inventory": sensor_module.build_node_inventory(nodes_meta),
+            "node_inventory": build_node_inventory(nodes_meta),
         }
         hass.data = {DOMAIN: {entry.entry_id: record}}
 
@@ -341,11 +338,14 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
             "Total Energy",
         ]
 
-        with patch.object(
-            EnergyStateCoordinator,
-            "async_config_entry_first_refresh",
-            new=refresh_mock,
-        ), patch.object(sensor_module, "_LOGGER", logger_mock):
+        with (
+            patch.object(
+                EnergyStateCoordinator,
+                "async_config_entry_first_refresh",
+                new=refresh_mock,
+            ),
+            patch.object(sensor_module, "_LOGGER", logger_mock),
+        ):
             await async_setup_sensor_entry(hass, entry, _add_entities)
 
             assert "energy_coordinator" in record
@@ -577,7 +577,9 @@ def test_total_energy_sensor() -> None:
 
         await coord.async_refresh()
 
-        total_sensor = InstallationTotalEnergySensor(coord, "entry", "1", "Total Energy", "tot")
+        total_sensor = InstallationTotalEnergySensor(
+            coord, "entry", "1", "Total Energy", "tot"
+        )
         total_sensor.hass = hass
         await total_sensor.async_added_to_hass()
 
@@ -675,7 +677,9 @@ def test_energy_and_power_sensor_properties() -> None:
 
         coordinator.data = copy.deepcopy(base_data)
 
-    total_sensor = InstallationTotalEnergySensor(coordinator, "entry", "dev", "Total", "tot")
+    total_sensor = InstallationTotalEnergySensor(
+        coordinator, "entry", "dev", "Total", "tot"
+    )
     total_info = total_sensor.device_info
     assert total_info == {"identifiers": {(DOMAIN, "dev")}}
     assert total_sensor.available is True
@@ -712,7 +716,9 @@ def test_energy_sensor_respects_scale_metadata() -> None:
         "uid",
         "Node",
     )
-    total_sensor = InstallationTotalEnergySensor(coordinator, "entry", "dev", "Total", "tot")
+    total_sensor = InstallationTotalEnergySensor(
+        coordinator, "entry", "dev", "Total", "tot"
+    )
 
     assert energy_sensor.native_value == pytest.approx(1.5)
     assert total_sensor.native_value == pytest.approx(2.0)

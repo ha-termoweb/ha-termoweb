@@ -10,15 +10,68 @@ from conftest import _install_stubs, make_ws_payload
 _install_stubs()
 
 from custom_components.termoweb import heater as heater_module
-from custom_components.termoweb.nodes import HeaterNode
+from custom_components.termoweb.nodes import HeaterNode, build_node_inventory
 from homeassistant.core import HomeAssistant
 
 HeaterNodeBase = heater_module.HeaterNodeBase
 build_heater_name_map = heater_module.build_heater_name_map
+prepare_heater_platform_data = heater_module.prepare_heater_platform_data
 
 
 def _make_heater(coordinator: SimpleNamespace) -> HeaterNodeBase:
     return HeaterNodeBase(coordinator, "entry", "dev", "A", "Heater A")
+
+
+def test_prepare_heater_platform_data_groups_nodes() -> None:
+    entry_data = {
+        "nodes": {
+            "nodes": [
+                {"type": "HTR", "addr": "1", "name": " Lounge "},
+                {"type": "acm", "addr": "2"},
+                {"type": "thm", "addr": "3"},
+                {"type": "htr", "addr": "4"},
+            ]
+        }
+    }
+
+    inventory, nodes_by_type, addrs_by_type, resolve_name = (
+        prepare_heater_platform_data(
+            entry_data,
+            default_name_simple=lambda addr: f"Heater {addr}",
+        )
+    )
+
+    assert entry_data["node_inventory"] == inventory
+    assert [node.addr for node in nodes_by_type.get("htr", [])] == ["1", "4"]
+    assert addrs_by_type["htr"] == ["1", "4"]
+    assert addrs_by_type["acm"] == ["2"]
+    assert resolve_name("htr", "1") == "Lounge"
+    assert resolve_name("htr", "4") == "Heater 4"
+    assert resolve_name("acm", "2") == "Accumulator 2"
+
+    cached_inventory, *_ = prepare_heater_platform_data(
+        {"node_inventory": list(inventory)},
+        default_name_simple=lambda addr: f"Heater {addr}",
+    )
+    assert cached_inventory == list(inventory)
+
+    legacy_entry = {
+        "nodes": {"nodes": [{"type": "htr", "addr": "9", "name": " Kitchen "}]},
+        "node_inventory": build_node_inventory(
+            {"nodes": [{"type": "acm", "addr": "8"}]}
+        ),
+    }
+
+    _, legacy_nodes_by_type, _, legacy_resolve = prepare_heater_platform_data(
+        legacy_entry,
+        default_name_simple=lambda addr: f"Heater {addr}",
+    )
+
+    assert legacy_nodes_by_type.get("htr") is None or not legacy_nodes_by_type.get(
+        "htr"
+    )
+    assert legacy_resolve("htr", "9") == "Kitchen"
+    assert legacy_resolve("foo", "9") == "Kitchen"
 
 
 def test_build_heater_name_map_handles_invalid_entries() -> None:
@@ -94,12 +147,8 @@ def test_payload_matching_honours_node_type() -> None:
         node_type="acm",
     )
 
-    assert heater._payload_matches_heater(
-        make_ws_payload("dev", "A", node_type="acm")
-    )
-    assert heater._payload_matches_heater(
-        make_ws_payload("dev", "A", node_type="ACM")
-    )
+    assert heater._payload_matches_heater(make_ws_payload("dev", "A", node_type="acm"))
+    assert heater._payload_matches_heater(make_ws_payload("dev", "A", node_type="ACM"))
     assert heater._payload_matches_heater(make_ws_payload("dev", None, node_type="acm"))
     assert not heater._payload_matches_heater(
         make_ws_payload("dev", "A", node_type="htr")
@@ -141,9 +190,7 @@ class _FakeDict(dict):
 
 def test_device_record_fallback_dict() -> None:
     hass = HomeAssistant()
-    coordinator = SimpleNamespace(
-        hass=hass, data=_FakeDict({"dev": {"nodes": "ok"}})
-    )
+    coordinator = SimpleNamespace(hass=hass, data=_FakeDict({"dev": {"nodes": "ok"}}))
     heater = _make_heater(coordinator)
 
     assert heater._device_record() == {"nodes": "ok"}
@@ -171,7 +218,9 @@ def test_heater_section_falls_back_to_legacy_data() -> None:
         hass=hass,
         data={"dev": {"htr": {"settings": {"A": {"mode": "auto"}}}}},
     )
-    heater = HeaterNodeBase(coordinator, "entry", "dev", "A", "Heater A", node_type="acm")
+    heater = HeaterNodeBase(
+        coordinator, "entry", "dev", "A", "Heater A", node_type="acm"
+    )
 
     section = heater._heater_section()
     assert section == {"settings": {"A": {"mode": "auto"}}}
@@ -179,9 +228,7 @@ def test_heater_section_falls_back_to_legacy_data() -> None:
 
 def test_heater_settings_missing_mapping() -> None:
     hass = HomeAssistant()
-    coordinator = SimpleNamespace(
-        hass=hass, data={"dev": {"htr": {"settings": []}}}
-    )
+    coordinator = SimpleNamespace(hass=hass, data={"dev": {"htr": {"settings": []}}})
     heater = _make_heater(coordinator)
 
     assert heater.heater_settings() is None
