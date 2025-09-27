@@ -20,6 +20,7 @@ from custom_components.termoweb.const import (
     HTR_ENERGY_UPDATE_INTERVAL,
     signal_ws_data,
 )
+from custom_components.termoweb.utils import normalize_heater_addresses
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_connect, dispatcher_send
 from homeassistant.helpers.update_coordinator import UpdateFailed
@@ -963,8 +964,11 @@ def test_energy_state_coordinator_update_addresses_filters_duplicates() -> None:
 
     coord.update_addresses(["A", " ", "B", "A", "B ", ""])
 
-    assert coord._addrs == ["A", "B"]
-    assert coord._addresses_by_type == {"htr": ["A", "B"]}
+    expected_map, _ = normalize_heater_addresses(["A", " ", "B", "A", "B ", ""])
+    filtered_expected = {key: list(value) for key, value in expected_map.items() if value}
+    assert coord._addresses_by_type == filtered_expected
+    expected_flat = [addr for addrs in filtered_expected.values() for addr in addrs]
+    assert coord._addrs == expected_flat
 
 
 def test_energy_state_coordinator_update_addresses_ignores_invalid_types() -> None:
@@ -974,8 +978,13 @@ def test_energy_state_coordinator_update_addresses_ignores_invalid_types() -> No
 
     coord.update_addresses({" ": ["skip"], "htr": ["A"], "acm": ["", "B"], "foo": ["X"]})
 
-    assert coord._addrs == ["A", "B"]
-    assert coord._addresses_by_type == {"htr": ["A"], "acm": ["B"]}
+    expected_map, _ = normalize_heater_addresses(
+        {" ": ["skip"], "htr": ["A"], "acm": ["", "B"], "foo": ["X"]}
+    )
+    filtered_expected = {key: list(value) for key, value in expected_map.items() if value}
+    assert coord._addresses_by_type == filtered_expected
+    expected_flat = [addr for addrs in filtered_expected.values() for addr in addrs]
+    assert coord._addrs == expected_flat
 
 
 def test_energy_state_coordinator_update_addresses_accepts_map() -> None:
@@ -985,8 +994,36 @@ def test_energy_state_coordinator_update_addresses_accepts_map() -> None:
 
     coord.update_addresses({"htr": ["A", "A"], "acm": ["B", ""], "foo": ["X"]})
 
-    assert coord._addrs == ["A", "B"]
-    assert coord._addresses_by_type == {"htr": ["A"], "acm": ["B"]}
+    expected_map, _ = normalize_heater_addresses(
+        {"htr": ["A", "A"], "acm": ["B", ""], "foo": ["X"]}
+    )
+    filtered_expected = {key: list(value) for key, value in expected_map.items() if value}
+    assert coord._addresses_by_type == filtered_expected
+    expected_flat = [addr for addrs in filtered_expected.values() for addr in addrs]
+    assert coord._addrs == expected_flat
+
+
+def test_energy_state_coordinator_update_addresses_uses_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hass = HomeAssistant()
+    client = types.SimpleNamespace()
+    calls: list[Any] = []
+
+    def fake_normalize(addrs: Any) -> tuple[dict[str, list[str]], dict[str, str]]:
+        calls.append(addrs)
+        return {"htr": ["A"]}, {"htr": "htr"}
+
+    monkeypatch.setattr(coord_module, "normalize_heater_addresses", fake_normalize)
+
+    coord = EnergyStateCoordinator(hass, client, "dev", [])  # type: ignore[arg-type]
+    assert calls == [[]]
+
+    coord.update_addresses(["ignored"])
+
+    assert calls[-1] == ["ignored"]
+    assert coord._addresses_by_type == {"htr": ["A"]}
+    assert coord._compat_aliases == {"htr": "htr"}
 
 
 def test_energy_state_coordinator_async_update_adds_legacy_bucket() -> None:

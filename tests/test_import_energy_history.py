@@ -1326,6 +1326,7 @@ def test_import_energy_history_requested_map_filters(monkeypatch: pytest.MonkeyP
         }
 
         helper_calls: list[dict[str, Any]] = []
+        normalize_calls: list[Any] = []
 
         def fake_addresses_by_node_type(nodes, *, known_types=None):
             helper_calls.append(
@@ -1341,6 +1342,14 @@ def test_import_energy_history_requested_map_filters(monkeypatch: pytest.MonkeyP
             )
 
         monkeypatch.setattr(mod, "addresses_by_node_type", fake_addresses_by_node_type)
+
+        original_normalize = mod.normalize_heater_addresses
+
+        def fake_normalize(addrs: Any) -> tuple[dict[str, list[str]], dict[str, str]]:
+            normalize_calls.append(addrs)
+            return original_normalize(addrs)
+
+        monkeypatch.setattr(mod, "normalize_heater_addresses", fake_normalize)
 
         uid_a = f"{const.DOMAIN}:dev:htr:A:energy"
         uid_b_legacy = f"{const.DOMAIN}:dev:htr:B:energy"
@@ -1396,6 +1405,7 @@ def test_import_energy_history_requested_map_filters(monkeypatch: pytest.MonkeyP
         assert set(progress) >= {"htr:A", "acm:B"}
         assert helper_calls
         assert helper_calls[0]["known_types"] == mod.HEATER_NODE_TYPES
+        assert normalize_calls
 
     asyncio.run(_run())
 
