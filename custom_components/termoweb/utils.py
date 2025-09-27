@@ -55,33 +55,6 @@ def ensure_node_inventory(
     return []
 
 
-def addresses_by_type(nodes: Iterable[Node], node_types: Iterable[str]) -> list[str]:
-    """Return unique addresses for nodes whose ``type`` matches ``node_types``."""
-
-    valid_types: set[str] = set()
-    for node_type in node_types:
-        if node_type is None:
-            continue
-        valid_types.add(str(node_type).strip().lower())
-    result: list[str] = []
-    seen: set[str] = set()
-
-    if not valid_types:
-        return result
-
-    for node in nodes:
-        node_type = str(getattr(node, "type", "")).strip().lower()
-        if node_type not in valid_types:
-            continue
-        addr = str(getattr(node, "addr", "")).strip()
-        if not addr or addr in seen:
-            continue
-        seen.add(addr)
-        result.append(addr)
-
-    return result
-
-
 def addresses_by_node_type(
     nodes: Iterable[Node],
     *,
