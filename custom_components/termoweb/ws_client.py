@@ -104,7 +104,7 @@ class TermoWebSocketClient:
         self._engineio_ping_timeout: float = 60.0
         self._engineio_last_pong: float | None = None
 
-        self._handshake: dict[str, Any] | None = None
+        self._handshake_payload: dict[str, Any] | None = None
         self._nodes: dict[str, Any] = {}
         self._nodes_raw: dict[str, Any] = {}
 
@@ -880,7 +880,7 @@ class TermoWebSocketClient:
     def _handle_handshake(self, data: Any) -> None:
         """Process the initial handshake payload from the server."""
         if isinstance(data, dict):
-            self._handshake = deepcopy(data)
+            self._handshake_payload = deepcopy(data)
             self._update_status("connected")
         else:
             _LOGGER.debug("WS %s: invalid handshake payload", self.dev_id)
