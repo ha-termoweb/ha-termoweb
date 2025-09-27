@@ -196,10 +196,8 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
             assert isinstance(energy_coord, EnergyStateCoordinator)
             assert refresh_mock.await_count == 1
 
-            heater_addrs = sensor_module.addresses_by_type(
-                record["node_inventory"], sensor_module.HEATER_NODE_TYPES
-            )
-            expected_count = len(heater_addrs) * 3 + 1
+            heater_addrs = energy_coord._addresses_by_type
+            expected_count = sum(len(addrs) for addrs in heater_addrs.values()) * 3 + 1
             assert len(add_calls) == 1
             assert len(add_calls[0]) == expected_count
             assert len(added_entities) == expected_count

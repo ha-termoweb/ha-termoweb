@@ -31,7 +31,27 @@ def test_build_heater_name_map_handles_invalid_entries() -> None:
 
     result = build_heater_name_map(nodes, lambda addr: f"Heater {addr}")
 
-    assert result == {"5": "Heater 5", "6": "Heater 6"}
+    assert result.get(("htr", "5")) == "Heater 5"
+    assert result.get(("htr", "6")) == "Heater 6"
+    assert result.get("htr") == {"5": "Heater 5", "6": "Heater 6"}
+    assert result.get("by_type", {}).get("htr") == {"5": "Heater 5", "6": "Heater 6"}
+
+
+def test_heater_base_unique_id_includes_node_type() -> None:
+    coordinator = SimpleNamespace(hass=None)
+    heater = HeaterNodeBase(
+        coordinator,
+        "entry",
+        "dev",
+        "A",
+        "Heater A",
+        node_type="acm",
+    )
+
+    expected = f"{heater_module.DOMAIN}:dev:acm:A"
+    assert heater._attr_unique_id == expected
+    if hasattr(heater, "unique_id"):
+        assert heater.unique_id == expected
 
 
 def test_heater_base_async_added_without_hass() -> None:

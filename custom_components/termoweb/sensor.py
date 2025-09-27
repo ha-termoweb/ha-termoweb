@@ -19,7 +19,7 @@ from .const import DOMAIN, signal_ws_data
 from .coordinator import EnergyStateCoordinator
 from .heater import HeaterNodeBase, build_heater_name_map
 from .nodes import build_node_inventory
-from .utils import HEATER_NODE_TYPES, addresses_by_type, float_or_none
+from .utils import HEATER_NODE_TYPES, addresses_by_node_type, float_or_none
 
 _WH_TO_KWH = 1 / 1000.0
 
@@ -91,63 +91,83 @@ async def async_setup_entry(hass, entry, async_add_entities):
     if not inventory and nodes:
         inventory = build_node_inventory(nodes)
         data["node_inventory"] = inventory
-    addrs: list[str] = addresses_by_type(inventory, HEATER_NODE_TYPES)
+    addrs_by_type_raw, _ = addresses_by_node_type(
+        inventory, known_types=HEATER_NODE_TYPES
+    )
+    addrs_by_type: dict[str, list[str]] = {
+        node_type: [str(addr) for addr in addrs]
+        for node_type, addrs in addrs_by_type_raw.items()
+        if node_type in HEATER_NODE_TYPES
+    }
 
     energy_coordinator: EnergyStateCoordinator | None = data.get(
         "energy_coordinator",
     )
     if energy_coordinator is None:
         energy_coordinator = EnergyStateCoordinator(
-            hass, data["client"], dev_id, addrs
+            hass, data["client"], dev_id, addrs_by_type
         )
         data["energy_coordinator"] = energy_coordinator
         await energy_coordinator.async_config_entry_first_refresh()
     else:
-        energy_coordinator.update_addresses(addrs)
+        energy_coordinator.update_addresses(addrs_by_type)
 
     name_map = build_heater_name_map(
         nodes, lambda addr: f"Node {addr}"
     )
 
+    names_by_type: dict[str, dict[str, str]] = name_map.get("by_type", {})
+    legacy_names: dict[str, str] = name_map.get("htr", {})
+
     new_entities: list[SensorEntity] = []
-    for addr in addrs:
-        base_name = name_map.get(addr, f"Node {addr}")
-        uid_temp = f"{DOMAIN}:{dev_id}:htr:{addr}:temp"
-        new_entities.append(
-            HeaterTemperatureSensor(
-                coordinator,
-                entry.entry_id,
-                dev_id,
-                addr,
-                f"{base_name} Temperature",
-                uid_temp,
-                base_name,
+    for node_type, addrs in addrs_by_type.items():
+        per_type = names_by_type.get(node_type, {})
+        for addr in addrs:
+            base_name = (
+                per_type.get(addr)
+                or name_map.get((node_type, addr))
+                or legacy_names.get(addr)
+                or f"Node {addr}"
             )
-        )
-        uid_energy = f"{DOMAIN}:{dev_id}:htr:{addr}:energy"
-        new_entities.append(
-            HeaterEnergyTotalSensor(
-                energy_coordinator,
-                entry.entry_id,
-                dev_id,
-                addr,
-                f"{base_name} Energy",
-                uid_energy,
-                base_name,
+            uid_temp = f"{DOMAIN}:{dev_id}:{node_type}:{addr}:temp"
+            new_entities.append(
+                HeaterTemperatureSensor(
+                    coordinator,
+                    entry.entry_id,
+                    dev_id,
+                    addr,
+                    f"{base_name} Temperature",
+                    uid_temp,
+                    base_name,
+                    node_type=node_type,
+                )
             )
-        )
-        uid_power = f"{DOMAIN}:{dev_id}:htr:{addr}:power"
-        new_entities.append(
-            HeaterPowerSensor(
-                energy_coordinator,
-                entry.entry_id,
-                dev_id,
-                addr,
-                f"{base_name} Power",
-                uid_power,
-                base_name,
+            uid_energy = f"{DOMAIN}:{dev_id}:{node_type}:{addr}:energy"
+            new_entities.append(
+                HeaterEnergyTotalSensor(
+                    energy_coordinator,
+                    entry.entry_id,
+                    dev_id,
+                    addr,
+                    f"{base_name} Energy",
+                    uid_energy,
+                    base_name,
+                    node_type=node_type,
+                )
             )
-        )
+            uid_power = f"{DOMAIN}:{dev_id}:{node_type}:{addr}:power"
+            new_entities.append(
+                HeaterPowerSensor(
+                    energy_coordinator,
+                    entry.entry_id,
+                    dev_id,
+                    addr,
+                    f"{base_name} Power",
+                    uid_power,
+                    base_name,
+                    node_type=node_type,
+                )
+            )
 
     uid_total = f"{DOMAIN}:{dev_id}:energy_total"
     new_entities.append(
@@ -182,6 +202,8 @@ class HeaterTemperatureSensor(HeaterNodeBase, SensorEntity):
         name: str,
         unique_id: str,
         device_name: str,
+        *,
+        node_type: str | None = None,
     ) -> None:
         """Initialise the heater temperature sensor entity."""
         super().__init__(
@@ -192,6 +214,7 @@ class HeaterTemperatureSensor(HeaterNodeBase, SensorEntity):
             name,
             unique_id,
             device_name=device_name,
+            node_type=node_type,
         )
 
     @property
@@ -225,6 +248,8 @@ class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
         name: str,
         unique_id: str,
         device_name: str,
+        *,
+        node_type: str | None = None,
     ) -> None:
         """Initialise a heater energy-derived sensor entity."""
         super().__init__(
@@ -235,6 +260,7 @@ class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
             name,
             unique_id,
             device_name=device_name,
+            node_type=node_type,
         )
 
     def _device_available(self, device_entry: dict[str, Any] | None) -> bool:
@@ -347,15 +373,31 @@ class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
     def native_value(self) -> float | None:
         """Return the summed energy usage across all heaters."""
         d = (self.coordinator.data or {}).get(self._dev_id, {})
-        energy = (d.get("htr") or {}).get("energy") or {}
+        sections: list[dict[str, Any]] = []
+        seen: set[int] = set()
+        nodes_by_type = d.get("nodes_by_type")
+        if isinstance(nodes_by_type, dict):
+            for node_type in HEATER_NODE_TYPES:
+                section = nodes_by_type.get(node_type)
+                if not isinstance(section, dict):
+                    continue
+                energy_map = section.get("energy")
+                if isinstance(energy_map, dict):
+                    sections.append(energy_map)
+                    seen.add(id(energy_map))
+        legacy = (d.get("htr") or {}).get("energy")
+        if isinstance(legacy, dict) and id(legacy) not in seen:
+            sections.append(legacy)
+
         total = 0.0
         found = False
-        for val in energy.values():
-            normalised = _normalise_energy_value(self.coordinator, val)
-            if normalised is None:
-                continue
-            total += normalised
-            found = True
+        for energy_map in sections:
+            for val in energy_map.values():
+                normalised = _normalise_energy_value(self.coordinator, val)
+                if normalised is None:
+                    continue
+                total += normalised
+                found = True
         if not found:
             return None
         return total
