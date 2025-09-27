@@ -56,7 +56,9 @@ def test_coordinator_and_sensors() -> None:
         )
         client.get_node_samples = AsyncMock(
             side_effect=[
+                [{"t": 1000, "counter": "1.0"}],
                 [{"t": 1000, "counter": "3.0"}],
+                [{"t": 1900, "counter": "1.5"}],
                 [{"t": 1900, "counter": "3.5"}],
             ]
         )
@@ -204,10 +206,15 @@ def test_coordinator_and_sensors() -> None:
         for sensor in sensors.values():
             sensor.schedule_update_ha_state.assert_not_called()
 
-        assert client.get_htr_samples.await_count == 2
-        assert client.get_node_samples.await_count == 2
-        node_call = client.get_node_samples.await_args_list[0]
-        assert node_call.args[:2] == ("1", ("acm", "B"))
+        assert client.get_htr_samples.await_count == 0
+        assert client.get_node_samples.await_count == 4
+        call_args = [call.args[:2] for call in client.get_node_samples.await_args_list]
+        assert call_args[:4] == [
+            ("1", ("htr", "A")),
+            ("1", ("acm", "B")),
+            ("1", ("htr", "A")),
+            ("1", ("acm", "B")),
+        ]
 
     asyncio.run(_run())
 
@@ -553,7 +560,7 @@ def test_heater_temp_sensor() -> None:
 def test_total_energy_sensor() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.get_htr_samples = AsyncMock(
+        client.get_node_samples = AsyncMock(
             side_effect=[
                 [{"t": 1000, "counter": "1.0"}],
                 [{"t": 1000, "counter": "2.0"}],
@@ -561,13 +568,22 @@ def test_total_energy_sensor() -> None:
         )
 
         hass = HomeAssistant()
-        coord = EnergyStateCoordinator(hass, client, "1", ["A", "B"])  # type: ignore[arg-type]
+        coord = EnergyStateCoordinator(
+            hass,
+            client,
+            "1",
+            {"htr": ["A"], "acm": ["B"]},
+        )
 
         await coord.async_refresh()
 
         total_sensor = InstallationTotalEnergySensor(coord, "entry", "1", "Total Energy", "tot")
         total_sensor.hass = hass
         await total_sensor.async_added_to_hass()
+
+        nodes_by_type = coord.data["1"]["nodes_by_type"]
+        assert nodes_by_type["htr"] is coord.data["1"]["htr"]
+        assert nodes_by_type["acm"] is coord.data["1"]["acm"]
 
         assert total_sensor.device_class == SensorDeviceClass.ENERGY
         assert total_sensor.state_class == SensorStateClass.TOTAL_INCREASING
@@ -581,7 +597,7 @@ def test_total_energy_sensor() -> None:
         total_sensor.schedule_update_ha_state = MagicMock()
 
         coord.data["1"]["htr"]["energy"]["A"] = 0.0015
-        coord.data["1"]["htr"]["energy"]["B"] = 0.0025
+        coord.data["1"]["acm"]["energy"]["B"] = 0.0025
         coord.data["1"]["htr"]["energy"]["C"] = "bad"
         dispatcher_send(signal, {"dev_id": "1", "addr": "A"})
 
