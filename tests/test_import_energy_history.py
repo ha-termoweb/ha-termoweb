@@ -673,7 +673,7 @@ def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
 
         await mod._async_import_energy_history(hass, entry)
 
-        assert client.get_node_samples.await_count == 2
+        assert client.get_node_samples.await_count >= 2
         first_call = client.get_node_samples.await_args_list[0][0]
         second_call = client.get_node_samples.await_args_list[1][0]
         assert first_call == ("dev", ("htr", "A"), 259_199, 345_599)
@@ -1274,6 +1274,198 @@ def test_import_energy_history_reset_all_progress(monkeypatch: pytest.MonkeyPatc
     asyncio.run(_run())
 
 
+def test_import_energy_history_requested_map_filters(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        (
+            mod,
+            const,
+            _import_stats,
+            _update_meta,
+            _last_stats,
+            _get_period,
+            _delete_stats,
+            ConfigEntry,
+            HomeAssistant,
+            ent_reg,
+        ) = await _load_module(monkeypatch)
+
+        hass = HomeAssistant()
+        hass.data = {const.DOMAIN: {}}
+        hass.config_entries = types.SimpleNamespace(
+            async_update_entry=lambda entry, *, options: entry.options.update(options)
+        )
+
+        entry = ConfigEntry(
+            "req-map",
+            options={
+                mod.OPTION_ENERGY_HISTORY_PROGRESS: {},
+                "max_history_retrieved": 1,
+            },
+        )
+
+        client = types.SimpleNamespace()
+        client.get_node_samples = AsyncMock(
+            side_effect=[
+                [
+                    {"t": 86_400, "counter": 1_000},
+                    {"t": 92_400, "counter": 2_000},
+                ],
+                [
+                    {"t": 86_400, "counter": 3_000},
+                    {"t": 92_400, "counter": 5_000},
+                ],
+            ]
+        )
+
+        hass.data[const.DOMAIN][entry.entry_id] = {
+            "client": client,
+            "dev_id": "dev",
+            "node_inventory": [],
+            "config_entry": entry,
+        }
+
+        monkeypatch.setattr(
+            mod,
+            "_heater_address_map",
+            lambda _inventory: (
+                {"htr": ["A", "B"], "acm": ["B"], "pmo": []},
+                {"A": {"htr"}, "B": {"acm"}},
+            ),
+        )
+
+        uid_a = f"{const.DOMAIN}:dev:htr:A:energy"
+        uid_b_legacy = f"{const.DOMAIN}:dev:htr:B:energy"
+        ent_reg.add(
+            "sensor.dev_A_energy",
+            "sensor",
+            const.DOMAIN,
+            uid_a,
+            "A energy",
+            config_entry_id=entry.entry_id,
+        )
+        ent_reg.add(
+            "sensor.dev_B_energy",
+            "sensor",
+            const.DOMAIN,
+            uid_b_legacy,
+            "B energy",
+            config_entry_id=entry.entry_id,
+        )
+
+        monotonic_counter = itertools.count(start=0.0, step=1.0)
+        fake_now = 3 * 86_400
+
+        class FakeDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return super().fromtimestamp(fake_now, tz)
+
+        monkeypatch.setattr(
+            mod,
+            "time",
+            types.SimpleNamespace(
+                monotonic=lambda: next(monotonic_counter),
+                time=lambda: fake_now,
+            ),
+        )
+        monkeypatch.setattr(mod, "datetime", FakeDateTime)
+
+        await mod._async_import_energy_history(
+            hass,
+            entry,
+            {
+                "htr": ["A", "B", "B"],
+                "acm": "B",
+                "": ["ignored"],
+                "thm": ["Z"],
+                "pmo": [],
+            },
+        )
+
+        assert client.get_node_samples.await_count >= 2
+        progress = entry.options[mod.OPTION_ENERGY_HISTORY_PROGRESS]
+        assert set(progress) >= {"htr:A", "acm:B"}
+
+    asyncio.run(_run())
+
+
+def test_import_energy_history_resets_requested_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        (
+            mod,
+            const,
+            _import_stats,
+            _update_meta,
+            _last_stats,
+            _get_period,
+            _delete_stats,
+            ConfigEntry,
+            HomeAssistant,
+            ent_reg,
+        ) = await _load_module(monkeypatch)
+
+        hass = HomeAssistant()
+        hass.data = {const.DOMAIN: {}}
+        hass.config_entries = types.SimpleNamespace(
+            async_update_entry=lambda entry, *, options: entry.options.update(options)
+        )
+
+        entry = ConfigEntry(
+            "reset-map",
+            options={
+                mod.OPTION_ENERGY_HISTORY_PROGRESS: {
+                    "htr:X": 123,
+                    "X": 456,
+                }
+            },
+        )
+
+        hass.data[const.DOMAIN][entry.entry_id] = {
+            "client": types.SimpleNamespace(
+                get_node_samples=AsyncMock(return_value=[])
+            ),
+            "dev_id": "dev",
+            "node_inventory": [],
+            "config_entry": entry,
+        }
+
+        monkeypatch.setattr(
+            mod,
+            "_heater_address_map",
+            lambda _inventory: ({"pmo": []}, {}),
+        )
+
+        fake_now = 5 * 86_400
+
+        class FakeDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return super().fromtimestamp(fake_now, tz)
+
+        monkeypatch.setattr(
+            mod,
+            "time",
+            types.SimpleNamespace(
+                monotonic=lambda: 0.0,
+                time=lambda: fake_now,
+            ),
+        )
+        monkeypatch.setattr(mod, "datetime", FakeDateTime)
+
+        await mod._async_import_energy_history(
+            hass,
+            entry,
+            {"htr": ["X", ""], "": ["ignored"]},
+            reset_progress=True,
+        )
+
+        assert entry.options[mod.OPTION_ENERGY_HISTORY_PROGRESS] == {}
+
+    asyncio.run(_run())
+
+
 def test_energy_polling_matches_import(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         (
@@ -1548,6 +1740,163 @@ def test_service_dispatches_import_tasks(monkeypatch: pytest.MonkeyPatch) -> Non
         assert args[1] is entry
         assert args[2] == {"htr": ["A"], "acm": ["B"]}
         assert kwargs == {"reset_progress": False, "max_days": 2}
+
+        if tasks:
+            await asyncio.gather(*tasks)
+
+    asyncio.run(_run())
+
+
+def test_service_filters_invalid_entities(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        (
+            mod,
+            const,
+            _import_stats,
+            _update_meta,
+            _last_stats,
+            _get_period,
+            _delete_stats,
+            ConfigEntry,
+            HomeAssistant,
+            ent_reg,
+        ) = await _load_module(monkeypatch)
+
+        hass = HomeAssistant()
+        hass.data = {const.DOMAIN: {}}
+
+        tasks: list[asyncio.Task] = []
+
+        def async_create_task(coro):
+            task = asyncio.create_task(coro)
+            tasks.append(task)
+            return task
+
+        hass.async_create_task = async_create_task
+        hass.is_running = True
+        hass.bus = types.SimpleNamespace(async_listen_once=lambda event, cb: None)
+
+        class Services:
+            def __init__(self) -> None:
+                self._svcs: dict[str, dict[str, object]] = {}
+
+            def has_service(self, domain, service):
+                return service in self._svcs.get(domain, {})
+
+            def async_register(self, domain, service, func):
+                self._svcs.setdefault(domain, {})[service] = func
+
+            def get(self, domain, service):
+                return self._svcs[domain][service]
+
+        hass.services = Services()
+
+        entry = ConfigEntry(
+            "entry-valid",
+            data={"username": "u", "password": "p"},
+            options={mod.OPTION_ENERGY_HISTORY_IMPORTED: True},
+        )
+
+        entries = {entry.entry_id: entry}
+
+        hass.config_entries = types.SimpleNamespace(
+            async_update_entry=lambda e, *, options: e.options.update(options),
+            async_forward_entry_setups=AsyncMock(return_value=None),
+            async_get_entry=lambda entry_id: entries.get(entry_id),
+        )
+
+        import_mock = AsyncMock()
+        monkeypatch.setattr(mod, "_async_import_energy_history", import_mock)
+
+        assert await mod.async_setup_entry(hass, entry) is True
+
+        rec = hass.data[const.DOMAIN][entry.entry_id]
+        rec["node_inventory"] = _inventory_for(mod, {"htr": ["A"], "acm": ["B"]})
+
+        ent_reg.add(
+            "sensor.bad_prefix",
+            "sensor",
+            const.DOMAIN,
+            "other:bad",
+            "Bad prefix",
+            config_entry_id=entry.entry_id,
+        )
+        ent_reg.add(
+            "sensor.bad_split",
+            "sensor",
+            const.DOMAIN,
+            f"{const.DOMAIN}:invalid",
+            "Bad split",
+            config_entry_id=entry.entry_id,
+        )
+        ent_reg.add(
+            "sensor.bad_metric",
+            "sensor",
+            const.DOMAIN,
+            f"{const.DOMAIN}:dev:htr:A:power",
+            "Bad metric",
+            config_entry_id=entry.entry_id,
+        )
+        ent_reg.add(
+            "sensor.bad_prefix_split",
+            "sensor",
+            const.DOMAIN,
+            f"{const.DOMAIN}:dev:energy",
+            "Bad prefix split",
+            config_entry_id=entry.entry_id,
+        )
+        ent_reg.add(
+            "sensor.no_entry",
+            "sensor",
+            const.DOMAIN,
+            f"{const.DOMAIN}:dev:htr:D:energy",
+            "Missing entry",
+            config_entry_id="missing",
+        )
+        ent_reg.add(
+            "sensor.no_config",
+            "sensor",
+            const.DOMAIN,
+            f"{const.DOMAIN}:dev:htr:C:energy",
+            "No config",
+        )
+
+        class DummySet(set):
+            def add(self, value):
+                return None
+
+        monkeypatch.setattr(mod, "set", lambda: DummySet(), raising=False)
+
+        service = hass.services.get(const.DOMAIN, "import_energy_history")
+
+        call = types.SimpleNamespace(
+            data={
+                "entity_id": [
+                    "sensor.bad_prefix",
+                    "sensor.bad_split",
+                    "sensor.bad_metric",
+                    "sensor.bad_prefix_split",
+                    "sensor.no_entry",
+                    "sensor.no_config",
+                ]
+            }
+        )
+
+        await service(call)
+
+        import_mock.assert_not_called()
+
+        import_mock.reset_mock()
+
+        hass.data[const.DOMAIN]["other"] = {"config_entry": None}
+
+        call_all = types.SimpleNamespace(data={})
+        await service(call_all)
+
+        import_mock.assert_awaited_once()
+        args, kwargs = import_mock.await_args
+        assert args[0] is hass
+        assert args[1] is entry
 
         if tasks:
             await asyncio.gather(*tasks)

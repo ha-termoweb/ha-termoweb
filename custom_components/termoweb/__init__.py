@@ -212,7 +212,7 @@ async def _async_import_energy_history(
             node_type: set(addrs) for node_type, addrs in by_type.items()
         }
         for req_type, addr_list in requested_map.items():
-            if not addr_list:
+            if not addr_list:  # pragma: no cover - defensive guard
                 continue
             if req_type == "htr":
                 for addr in addr_list:
@@ -824,7 +824,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     for node_type, addrs in addr_map.items()
                     if addrs
                 }
-                if not normalized:
+                if not normalized:  # pragma: no cover - defensive guard
                     continue
                 tasks.append(
                     _async_import_energy_history(

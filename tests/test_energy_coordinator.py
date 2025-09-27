@@ -202,6 +202,34 @@ def test_refresh_heater_skips_invalid_inputs() -> None:
     asyncio.run(_run())
 
 
+def test_register_node_address_strips_and_skips_blank() -> None:
+    client = types.SimpleNamespace(get_node_settings=AsyncMock())
+    hass = HomeAssistant()
+    nodes = {"nodes": []}
+    coord = StateCoordinator(
+        hass,
+        client,
+        30,
+        "dev",
+        {"name": "Device"},
+        nodes,  # type: ignore[arg-type]
+    )
+
+    coord._nodes_by_type = {}
+    coord._addr_lookup = {}
+
+    coord._register_node_address("", "")
+    coord._register_node_address("htr", " ")
+
+    assert coord._nodes_by_type == {}
+    assert coord._addr_lookup == {}
+
+    coord._register_node_address(" htr ", " A ")
+
+    assert coord._nodes_by_type == {"htr": ["A"]}
+    assert coord._addr_lookup == {"A": "htr"}
+
+
 def test_refresh_heater_updates_existing_and_new_data() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
@@ -325,6 +353,39 @@ def test_refresh_heater_handles_tuple_and_acm() -> None:
         assert "2" in addrs
         assert acm_section["settings"]["2"] == {"mode": "auto"}
         assert "htr" in latest["nodes_by_type"]
+
+    asyncio.run(_run())
+
+
+def test_async_refresh_heater_adds_missing_type() -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_node_settings = AsyncMock(return_value={"mode": "eco"})
+
+        hass = HomeAssistant()
+        nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
+        coord = StateCoordinator(
+            hass,
+            client,
+            30,
+            "dev",
+            {"name": "Device"},
+            nodes,  # type: ignore[arg-type]
+        )
+
+        coord._nodes_by_type = {"htr": ["A"]}
+        coord._addr_lookup = {"A": "htr"}
+        coord.data = {
+            "dev": {
+                "nodes_by_type": {"htr": {"addrs": ["A"], "settings": {"A": {"mode": "manual"}}}}
+            }
+        }
+
+        await coord.async_refresh_heater(("acm", "B"))
+
+        assert coord._nodes_by_type["acm"] == ["B"]
+        dev_data = coord.data["dev"]
+        assert dev_data["nodes_by_type"]["acm"]["settings"]["B"] == {"mode": "eco"}
 
     asyncio.run(_run())
 
@@ -478,6 +539,38 @@ def test_state_coordinator_async_update_data_reuses_previous() -> None:
     asyncio.run(_run())
 
 
+def test_async_update_data_skips_non_dict_sections() -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_node_settings = AsyncMock(return_value={"mode": "heat"})
+
+        hass = HomeAssistant()
+        nodes = {"nodes": [{"addr": "B", "type": "acm"}]}
+        coord = StateCoordinator(
+            hass,
+            client,
+            30,
+            "dev",
+            {"name": "Device"},
+            nodes,  # type: ignore[arg-type]
+        )
+
+        coord.data = {
+            "dev": {
+                "nodes_by_type": {"acm": {"addrs": ["B"], "settings": {"B": {"mode": "manual"}}}},
+                "misc": "invalid",
+            }
+        }
+
+        result = await coord._async_update_data()
+
+        dev_data = result["dev"]
+        assert "htr" in dev_data["nodes_by_type"]
+        assert client.get_node_settings.await_count == 1
+
+    asyncio.run(_run())
+
+
 def test_counter_reset(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
@@ -590,6 +683,25 @@ def test_energy_samples_invalid_strings() -> None:
         data = coord.data["dev"]["htr"]
         assert data["energy"] == {}
         assert data["power"] == {}
+
+    asyncio.run(_run())
+
+
+def test_energy_coordinator_alias_creates_canonical_bucket() -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_node_samples = AsyncMock(return_value=[])
+
+        hass = HomeAssistant()
+        coord = EnergyStateCoordinator(hass, client, "dev", [])
+        coord._addresses_by_type = {"legacy": []}
+        coord._compat_aliases = {"htr": "htr", "legacy": "acm"}
+
+        result = await coord._async_update_data()
+
+        dev = result["dev"]
+        assert "acm" in dev
+        assert dev["legacy"] is dev["acm"]
 
     asyncio.run(_run())
 
