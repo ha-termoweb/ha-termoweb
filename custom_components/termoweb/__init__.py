@@ -229,12 +229,12 @@ async def _async_import_energy_history(
     if not selected_map:
         selected_map = {node_type: list(addrs) for node_type, addrs in by_type.items()}
 
-    for node_type in list(selected_map):
-        deduped = _dedupe(selected_map[node_type])
+    cleaned_map: dict[str, list[str]] = {}
+    for node_type, addrs in selected_map.items():
+        deduped = _dedupe(addrs)
         if deduped:
-            selected_map[node_type] = deduped
-        else:
-            selected_map.pop(node_type)
+            cleaned_map[node_type] = deduped
+    selected_map = cleaned_map
 
     all_pairs: list[tuple[str, str]] = [
         (node_type, addr) for node_type, addrs in by_type.items() for addr in addrs
