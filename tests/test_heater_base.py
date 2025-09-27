@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from types import SimpleNamespace
 from typing import Any
 
@@ -134,6 +135,18 @@ def test_build_heater_name_map_accepts_iterables_of_dicts() -> None:
 
     assert result.get(("acm", "2")) == "Heater 2"
     assert result.get("htr", {}).get("1") == "Heater 1"
+
+
+def test_log_skipped_nodes_defaults_platform_name(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    nodes_by_type = {"thm": [SimpleNamespace(addr="7")]}
+
+    with caplog.at_level(logging.DEBUG):
+        heater_module.log_skipped_nodes("", nodes_by_type, skipped_types=["thm"])
+
+    messages = [record.message for record in caplog.records]
+    assert any("platform" in message for message in messages)
 
 
 def test_iter_nodes_yields_existing_node_objects() -> None:
