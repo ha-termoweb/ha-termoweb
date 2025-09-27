@@ -2123,8 +2123,8 @@ def test_engineio_ws_client_flow(
         )
         await asyncio.sleep(0)
         handshake_payload["devs"][0]["id"] = "mutated"
-        assert client._handshake is not None
-        assert client._handshake["devs"][0]["id"] == "dev"
+        assert client._handshake_payload is not None
+        assert client._handshake_payload["devs"][0]["id"] == "dev"
 
         initial_update = {
             "nodes": {
