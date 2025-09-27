@@ -150,7 +150,7 @@ async def _load_module(
 
     monkeypatch.setattr(api_module, "RESTClient", _FakeRESTClient)
 
-    ws_module = importlib.import_module("custom_components.termoweb.ws_client_legacy")
+    ws_module = importlib.import_module("custom_components.termoweb.ws_client")
 
     class _FakeWSClient:
         def __init__(self, hass: Any, dev_id: str, *args: Any, **kwargs: Any) -> None:

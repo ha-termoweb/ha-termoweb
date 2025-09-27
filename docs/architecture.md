@@ -9,7 +9,7 @@ The TermoWeb integration bridges Home Assistant to the vendor cloud that supervi
 - **REST client** – `RESTClient` performs authenticated HTTP requests to enumerate devices, read heater settings, and push schedule/temperature updates back to the cloud API.【F:custom_components/termoweb/api.py†L269-L360】
 - **Polling coordinator** – `StateCoordinator` periodically refreshes node state via the REST client and maintains cached per-device data that HA platforms consume.【F:custom_components/termoweb/coordinator.py†L22-L211】
 - **Entities** – climate/sensor/binary-sensor/button entities subscribe to coordinator data and the dispatcher, then send writes through the shared REST client (e.g., updating schedules or presets) for the supported node types.【F:custom_components/termoweb/heater.py†L61-L136】【F:custom_components/termoweb/climate.py†L245-L420】
-- **WebSocket client** – `WebSocket09Client` maintains the legacy Socket.IO session, folds push events into the coordinator cache, and dispatches targeted signals so entities update immediately while also feeding connection health back to setup logic.【F:custom_components/termoweb/ws_client_legacy.py†L40-L541】
+- **WebSocket client** – `WebSocket09Client` maintains the legacy Socket.IO session, folds push events into the coordinator cache, and dispatches targeted signals so entities update immediately while also feeding connection health back to setup logic.【F:custom_components/termoweb/ws_client.py†L40-L541】
 - **Energy history importer** – the `import_energy_history` service gathers hourly energy counters via REST, rate-limits calls, and writes the resulting statistics into Home Assistant’s recorder database.【F:custom_components/termoweb/__init__.py†L160-L670】
 - **TermoWeb cloud & hardware** – the documented API provides REST endpoints for device metadata, heater settings, and energy samples alongside a Socket.IO push channel, all representing the household gateway and heaters managed by the vendor backend.【F:docs/termoweb_api.md†L1-L176】
 
@@ -73,7 +73,7 @@ flowchart LR
     Gateway --> Thm
 ```
 
-The flow shows how configuration and runtime components share the authenticated REST client, how polling and push updates keep entity state fresh, and how energy statistics are imported for the Recorder. The TermoWeb cloud in turn brokers communication with the household gateway that relays commands and telemetry for the attached heaters, accumulators, power monitors, and thermostats.【F:custom_components/termoweb/__init__.py†L453-L670】【F:custom_components/termoweb/ws_client_legacy.py†L40-L541】【F:docs/termoweb_api.md†L1-L176】
+The flow shows how configuration and runtime components share the authenticated REST client, how polling and push updates keep entity state fresh, and how energy statistics are imported for the Recorder. The TermoWeb cloud in turn brokers communication with the household gateway that relays commands and telemetry for the attached heaters, accumulators, power monitors, and thermostats.【F:custom_components/termoweb/__init__.py†L453-L670】【F:custom_components/termoweb/ws_client.py†L40-L541】【F:docs/termoweb_api.md†L1-L176】
 
 ## Python class hierarchy
 
@@ -96,7 +96,7 @@ The flow shows how configuration and runtime components share the authenticated 
   - **StateRefreshButton** (`ButtonEntity`) – triggers immediate coordinator refreshes for the gateway device.【F:custom_components/termoweb/button.py†L18-L40】
   - **InstallationTotalEnergySensor** (`SensorEntity`) – aggregates heater energy metrics across the installation using the energy coordinator feed.【F:custom_components/termoweb/sensor.py†L281-L337】
 - **Websocket client**
-  - **WebSocket09Client** – socket.io client that streams push updates, maintains heartbeat loops, and dispatches payloads back into coordinator caches and dispatcher channels.【F:custom_components/termoweb/ws_client_legacy.py†L40-L195】
+  - **WebSocket09Client** – socket.io client that streams push updates, maintains heartbeat loops, and dispatches payloads back into coordinator caches and dispatcher channels.【F:custom_components/termoweb/ws_client.py†L40-L195】
 
 ### Class relationships diagram
 

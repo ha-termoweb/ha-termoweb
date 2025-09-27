@@ -14,7 +14,8 @@ from conftest import _install_stubs
 _install_stubs()
 
 import custom_components.termoweb.ws_client as ws_core
-import custom_components.termoweb.ws_client_legacy as ws_client_legacy
+
+ws_client_legacy = ws_core
 
 
 def _load_ws_client(

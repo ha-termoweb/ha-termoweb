@@ -1098,4 +1098,20 @@ class TermoWebSocketClient:
             and (now - self._connected_since) >= 300
         ):
             self._healthy_since = now
-            self._update_status("healthy")
+
+
+# ----------------------------------------------------------------------
+# Backwards compatibility aliases
+# ----------------------------------------------------------------------
+WebSocket09Client = TermoWebSocketClient
+DucaheatWSClient = TermoWebSocketClient
+
+__all__ = [
+    "DucaheatWSClient",
+    "EngineIOHandshake",
+    "HandshakeError",
+    "TermoWebSocketClient",
+    "WSStats",
+    "WebSocket09Client",
+]
+

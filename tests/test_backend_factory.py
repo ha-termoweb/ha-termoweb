@@ -11,8 +11,10 @@ from custom_components.termoweb.backend import termoweb as termoweb_backend
 from custom_components.termoweb.backend.ducaheat import DucaheatBackend
 from custom_components.termoweb.backend.termoweb import TermoWebBackend
 from custom_components.termoweb.const import BRAND_DUCAHEAT
-from custom_components.termoweb.ws_client import TermoWebSocketClient
-from custom_components.termoweb.ws_client_legacy import WebSocket09Client
+from custom_components.termoweb.ws_client import (
+    TermoWebSocketClient,
+    WebSocket09Client,
+)
 
 
 class DummyHttpClient:

@@ -10,7 +10,8 @@ from typing import Any, Iterable
 import pytest
 
 import custom_components.termoweb.ws_client as ws_core
-import custom_components.termoweb.ws_client_v2 as ws_v2
+
+ws_v2 = ws_core
 
 
 def test_ducaheat_ws_client_flow(
