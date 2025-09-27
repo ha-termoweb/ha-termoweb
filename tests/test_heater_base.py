@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from conftest import _install_stubs
+import pytest
+
+from conftest import _install_stubs, make_ws_payload
 
 _install_stubs()
 
@@ -37,7 +39,13 @@ def test_build_heater_name_map_handles_invalid_entries() -> None:
     assert result.get("by_type", {}).get("htr") == {"5": "Heater 5", "6": "Heater 6"}
 
 
-def test_heater_base_unique_id_includes_node_type() -> None:
+@pytest.mark.parametrize(
+    ("node_type", "expected_type"),
+    [("htr", "htr"), ("ACM", "acm")],
+)
+def test_heater_base_unique_id_includes_node_type(
+    node_type: str, expected_type: str
+) -> None:
     coordinator = SimpleNamespace(hass=None)
     heater = HeaterNodeBase(
         coordinator,
@@ -45,13 +53,43 @@ def test_heater_base_unique_id_includes_node_type() -> None:
         "dev",
         "A",
         "Heater A",
+        node_type=node_type,
+    )
+
+    expected = f"{heater_module.DOMAIN}:dev:{expected_type}:{heater._addr}"
+    assert heater._attr_unique_id == expected
+    assert heater._node_type == expected_type
+    if hasattr(heater, "unique_id"):
+        assert heater.unique_id == expected
+
+
+def test_payload_matching_honours_node_type() -> None:
+    coordinator = SimpleNamespace(hass=None)
+    heater = HeaterNodeBase(
+        coordinator,
+        "entry",
+        "dev",
+        "A",
+        "Accumulator A",
         node_type="acm",
     )
 
-    expected = f"{heater_module.DOMAIN}:dev:acm:A"
-    assert heater._attr_unique_id == expected
-    if hasattr(heater, "unique_id"):
-        assert heater.unique_id == expected
+    assert heater._payload_matches_heater(
+        make_ws_payload("dev", "A", node_type="acm")
+    )
+    assert heater._payload_matches_heater(
+        make_ws_payload("dev", "A", node_type="ACM")
+    )
+    assert heater._payload_matches_heater(make_ws_payload("dev", None, node_type="acm"))
+    assert not heater._payload_matches_heater(
+        make_ws_payload("dev", "A", node_type="htr")
+    )
+    assert not heater._payload_matches_heater(
+        make_ws_payload("dev", "B", node_type="acm")
+    )
+    assert not heater._payload_matches_heater(
+        make_ws_payload("other", "A", node_type="acm")
+    )
 
 
 def test_heater_base_async_added_without_hass() -> None:

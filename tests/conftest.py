@@ -777,6 +777,26 @@ def _install_stubs() -> None:
     dispatcher_mod.async_dispatcher_send = async_dispatcher_send
     dispatcher_mod.dispatcher_send = async_dispatcher_send
 
+    def make_ws_payload(
+        dev_id: str,
+        addr: Any | None = None,
+        *,
+        node_type: str | None = None,
+        **extra: Any,
+    ) -> dict[str, Any]:
+        """Return a websocket payload for tests with optional node type."""
+
+        payload: dict[str, Any] = {"dev_id": dev_id}
+        if addr is not None:
+            payload["addr"] = addr
+        if node_type is not None:
+            payload["node_type"] = node_type
+        payload.update(extra)
+        return payload
+
+    dispatcher_mod.make_ws_payload = make_ws_payload
+    globals()["make_ws_payload"] = make_ws_payload
+
     class DeviceInfo(dict):
         pass
 
