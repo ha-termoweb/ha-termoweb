@@ -202,6 +202,20 @@ def test_async_setup_entry_happy_path(
     import_mock.assert_awaited_once_with(stub_hass, entry)
 
 
+def test_heater_address_map_filters_invalid_nodes(termoweb_init: Any) -> None:
+    inventory = [
+        SimpleNamespace(type="htr", addr="A"),
+        SimpleNamespace(type="acm", addr=" "),
+        SimpleNamespace(type="unknown", addr="B"),
+        SimpleNamespace(type="pmo", addr=""),
+    ]
+
+    by_type, reverse = termoweb_init._heater_address_map(inventory)
+
+    assert by_type == {"htr": ["A"]}
+    assert reverse == {"A": {"htr"}}
+
+
 def test_async_setup_entry_auth_error(
     termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
