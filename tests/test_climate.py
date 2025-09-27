@@ -263,6 +263,56 @@ def test_async_setup_entry_default_names_and_invalid_nodes() -> None:
     asyncio.run(_run())
 
 
+def test_async_setup_entry_skips_blank_addresses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry_id = "entry-skip"
+        dev_id = "dev-skip"
+        coordinator_data = {"nodes": {}, "htr": {"settings": {}}}
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            coordinator_data,
+            client=AsyncMock(),
+        )
+
+        hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "coordinator": coordinator,
+                    "dev_id": dev_id,
+                    "client": AsyncMock(),
+                }
+            }
+        }
+
+        blank_node = types.SimpleNamespace(addr="  ")
+        valid_node = types.SimpleNamespace(addr="7")
+
+        def fake_prepare(*args: Any, **kwargs: Any) -> tuple[Any, Any, Any, Any]:
+            return ([], {"htr": [blank_node, valid_node]}, {}, lambda *_: "Heater")
+
+        monkeypatch.setattr(
+            climate_module, "prepare_heater_platform_data", fake_prepare
+        )
+
+        added: list[HeaterClimateEntity] = []
+
+        def _add_entities(entities: list[HeaterClimateEntity]) -> None:
+            added.extend(entities)
+
+        entry = types.SimpleNamespace(entry_id=entry_id)
+        await async_setup_entry(hass, entry, _add_entities)
+
+        assert len(added) == 1
+        assert added[0]._attr_unique_id.endswith(":htr:7:climate")
+
+    asyncio.run(_run())
+
+
 def test_async_setup_entry_creates_accumulator_entity() -> None:
     async def _run() -> None:
         _reset_environment()

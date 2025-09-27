@@ -83,6 +83,20 @@ def test_ensure_node_inventory_falls_back_to_record_nodes() -> None:
     assert [node.addr for node in record.get("node_inventory", [])] == ["C"]
 
 
+def test_ensure_node_inventory_sets_empty_cache_when_missing() -> None:
+    class LazyDict(dict):
+        def get(self, key, default=None):
+            if key == "node_inventory" and key not in self:
+                return []
+            return super().get(key, default)
+
+    record = LazyDict()
+    result = ensure_node_inventory(record, nodes=None)
+
+    assert result == []
+    assert record["node_inventory"] == []
+
+
 def test_addresses_by_node_type_skips_invalid_entries() -> None:
     nodes = [
         types.SimpleNamespace(type=" ", addr="skip"),

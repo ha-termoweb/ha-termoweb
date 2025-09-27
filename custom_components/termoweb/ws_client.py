@@ -209,7 +209,7 @@ class TermoWebSocketClient:
                 self._hs_fail_count = 0
                 self._hs_fail_start = 0.0
                 self._hb_send_interval = max(5.0, min(30.0, hb_timeout * 0.45))
-                await self._connect_ws_legacy(sid)
+                await self._connect_ws(sid)
                 await self._join_namespace()
                 await self._send_snapshot_request()
                 await self._subscribe_htr_samples()
@@ -270,9 +270,7 @@ class TermoWebSocketClient:
             delay = self._backoff_seq[
                 min(self._backoff_idx, len(self._backoff_seq) - 1)
             ]
-            self._backoff_idx = min(
-                self._backoff_idx + 1, len(self._backoff_seq) - 1
-            )
+            self._backoff_idx = min(self._backoff_idx + 1, len(self._backoff_seq) - 1)
             jitter = random.uniform(0.8, 1.2)
             await asyncio.sleep(delay * jitter)
 
@@ -315,6 +313,10 @@ class TermoWebSocketClient:
                     return sid, hb
         except (TimeoutError, aiohttp.ClientError) as err:
             raise HandshakeError(-1, url, str(err)) from err
+
+    async def _connect_ws(self, sid: str) -> None:
+        """Establish the legacy websocket connection (compatibility alias)."""
+        await self._connect_ws_legacy(sid)
 
     async def _connect_ws_legacy(self, sid: str) -> None:
         """Establish the websocket connection using the handshake session id."""
@@ -378,7 +380,9 @@ class TermoWebSocketClient:
             except Exception:  # pragma: no cover - defensive  # noqa: BLE001
                 fallback = []
             if fallback:
-                addr_map["htr"] = [str(addr).strip() for addr in fallback if str(addr).strip()]
+                addr_map["htr"] = [
+                    str(addr).strip() for addr in fallback if str(addr).strip()
+                ]
         normalized_map: dict[str, list[str]] = {}
         for node_type in HEATER_NODE_TYPES:
             addrs = addr_map.get(node_type)
@@ -391,7 +395,10 @@ class TermoWebSocketClient:
         for node_type in order:
             addrs = normalized_map.get(node_type) or []
             for addr in addrs:
-                payload = {"name": "subscribe", "args": [f"/{node_type}/{addr}/samples"]}
+                payload = {
+                    "name": "subscribe",
+                    "args": [f"/{node_type}/{addr}/samples"],
+                }
                 await self._send_text(
                     f"5::{WS_NAMESPACE}:{json.dumps(payload, separators=(',', ':'))}"
                 )
@@ -438,7 +445,7 @@ class TermoWebSocketClient:
                 await asyncio.sleep(self._hb_send_interval)
                 await self._send_text("2::")
         except asyncio.CancelledError:
-            raise
+            return
         except (aiohttp.ClientError, RuntimeError):
             return
 
@@ -464,7 +471,9 @@ class TermoWebSocketClient:
             if msg.type not in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
                 continue
             data = (
-                msg.data if isinstance(msg.data, str) else msg.data.decode("utf-8", "ignore")
+                msg.data
+                if isinstance(msg.data, str)
+                else msg.data.decode("utf-8", "ignore")
             )
             self._stats.frames_total += 1
             if data.startswith("2::"):
@@ -540,7 +549,9 @@ class TermoWebSocketClient:
             if not isinstance(path, str):
                 continue
             paths.append(path)
-            dev_map: dict[str, Any] = (self._coordinator.data or {}).get(self.dev_id) or {}
+            dev_map: dict[str, Any] = (self._coordinator.data or {}).get(
+                self.dev_id
+            ) or {}
             if not dev_map:
                 htr_bucket: dict[str, Any] = {
                     "addrs": [],
@@ -566,7 +577,9 @@ class TermoWebSocketClient:
                     inventory: list[Any] = []
                     try:
                         inventory = build_node_inventory(body)
-                    except Exception as err:  # pragma: no cover - defensive  # noqa: BLE001
+                    except (
+                        Exception
+                    ) as err:  # pragma: no cover - defensive  # noqa: BLE001
                         _LOGGER.debug(
                             "WS %s: failed to build node inventory: %s",
                             self.dev_id,
@@ -778,7 +791,9 @@ class TermoWebSocketClient:
             timeout_s = float(ping_timeout) / 1000.0
         except (TypeError, ValueError):
             timeout_s = 60.0
-        return EngineIOHandshake(sid=sid, ping_interval=interval_s, ping_timeout=timeout_s)
+        return EngineIOHandshake(
+            sid=sid, ping_interval=interval_s, ping_timeout=timeout_s
+        )
 
     async def _engineio_connect(self, sid: str) -> None:
         """Upgrade the Engine.IO session to a websocket transport."""
@@ -839,7 +854,9 @@ class TermoWebSocketClient:
             if msg.type not in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
                 continue
             data = (
-                msg.data if isinstance(msg.data, str) else msg.data.decode("utf-8", "ignore")
+                msg.data
+                if isinstance(msg.data, str)
+                else msg.data.decode("utf-8", "ignore")
             )
             self._stats.frames_total += 1
             if data == "3":
@@ -1021,14 +1038,16 @@ class TermoWebSocketClient:
     async def _get_token(self) -> str:
         """Reuse the REST client token for websocket authentication."""
         headers = await self._client._authed_headers()  # noqa: SLF001
-        auth_header = headers.get("Authorization") if isinstance(headers, dict) else None
+        auth_header = (
+            headers.get("Authorization") if isinstance(headers, dict) else None
+        )
         if not auth_header:
             raise RuntimeError("authorization token missing")
         return auth_header.split(" ", 1)[1]
 
     async def _force_refresh_token(self) -> None:
         """Force the REST client to fetch a fresh access token."""
-        with suppress(AttributeError):
+        with suppress(AttributeError, RuntimeError):
             self._client._access_token = None  # type: ignore[attr-defined]  # noqa: SLF001
         await self._client._ensure_token()  # noqa: SLF001
 
@@ -1081,9 +1100,11 @@ class TermoWebSocketClient:
                 self._stats.last_paths = uniq
         elif count_event:
             self._stats.events_total += 1
-        state_bucket: dict[str, Any] = self.hass.data.setdefault(DOMAIN, {}).setdefault(
-            self.entry_id, {}
-        ).setdefault("ws_state", {})
+        state_bucket: dict[str, Any] = (
+            self.hass.data.setdefault(DOMAIN, {})
+            .setdefault(self.entry_id, {})
+            .setdefault("ws_state", {})
+        )
         state: dict[str, Any] = state_bucket.setdefault(self.dev_id, {})
         state["last_event_at"] = now
         state["frames_total"] = self._stats.frames_total
@@ -1091,13 +1112,14 @@ class TermoWebSocketClient:
         if self._protocol == "engineio2":
             if self._healthy_since is None:
                 self._healthy_since = now
-            self._update_status("healthy")
+                self._update_status("healthy")
         elif (
             self._connected_since
             and not self._healthy_since
             and (now - self._connected_since) >= 300
         ):
             self._healthy_since = now
+            self._update_status("healthy")
 
 
 # ----------------------------------------------------------------------
@@ -1114,4 +1136,3 @@ __all__ = [
     "WSStats",
     "WebSocket09Client",
 ]
-
