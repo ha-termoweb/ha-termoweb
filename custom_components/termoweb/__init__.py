@@ -23,7 +23,7 @@ from homeassistant.helpers import aiohttp_client, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.loader import async_get_integration
 
-from .api import BackendAuthError, RESTClient, BackendRateLimitError
+from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend import Backend, DucaheatRESTClient, WsClientProto, create_backend
 from .const import (
     CONF_BRAND,
@@ -39,7 +39,7 @@ from .const import (
 )
 from .coordinator import StateCoordinator
 from .nodes import build_node_inventory
-from .utils import HEATER_NODE_TYPES, addresses_by_node_type
+from .utils import HEATER_NODE_TYPES, addresses_by_node_type, ensure_node_inventory
 
 # Re-export legacy WS client for backward compatibility (tests may patch it).
 from .ws_client_legacy import WebSocket09Client  # noqa: F401
@@ -157,12 +157,7 @@ async def _async_import_energy_history(
         return
     client: RESTClient = rec["client"]
     dev_id: str = rec["dev_id"]
-    inventory: list[Any] = list(rec.get("node_inventory") or [])
-    if not inventory:
-        nodes_payload = rec.get("nodes")
-        if nodes_payload:
-            inventory = build_node_inventory(nodes_payload)
-            rec["node_inventory"] = inventory
+    inventory: list[Any] = ensure_node_inventory(rec)
 
     by_type, reverse_lookup = _heater_address_map(inventory)
 

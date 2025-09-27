@@ -15,7 +15,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from .api import RESTClient
 from .const import API_BASE, DOMAIN, WS_NAMESPACE, signal_ws_data, signal_ws_status
 from .nodes import NODE_CLASS_BY_TYPE, build_node_inventory
-from .utils import HEATER_NODE_TYPES, addresses_by_node_type
+from .utils import HEATER_NODE_TYPES, addresses_by_node_type, ensure_node_inventory
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -310,29 +310,23 @@ class WebSocket09Client:
         """Request push updates for heater and accumulator energy samples."""
 
         inventory: list[Any] = []
+        record: dict[str, Any] | None = None
         coordinator_inventory = getattr(self._coordinator, "_node_inventory", None)
         if isinstance(coordinator_inventory, list) and coordinator_inventory:
             inventory = list(coordinator_inventory)
         else:
-            raw_nodes = getattr(self._coordinator, "_nodes", None)
-            if raw_nodes:
+            record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
+            coordinator_nodes = getattr(self._coordinator, "_nodes", None)
+            if isinstance(record, dict):
+                inventory = ensure_node_inventory(record, nodes=coordinator_nodes)
+            elif coordinator_nodes is not None:
                 try:
-                    inventory = build_node_inventory(raw_nodes)
+                    inventory = build_node_inventory(coordinator_nodes)
                 except Exception:  # pragma: no cover - defensive
                     inventory = []
 
-        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-        if not inventory and isinstance(record, dict):
-            cached_inventory = record.get("node_inventory")
-            if isinstance(cached_inventory, list) and cached_inventory:
-                inventory = list(cached_inventory)
-            else:
-                raw_nodes = record.get("nodes")
-                if raw_nodes:
-                    try:
-                        inventory = build_node_inventory(raw_nodes)
-                    except Exception:  # pragma: no cover - defensive
-                        inventory = []
+        if record is None:
+            record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
 
         addr_map: dict[str, list[str]] = {}
         if inventory:

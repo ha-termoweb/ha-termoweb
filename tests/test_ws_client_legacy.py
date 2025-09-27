@@ -1199,16 +1199,6 @@ def test_subscribe_htr_samples_uses_cached_and_raw_inventory(monkeypatch):
             def __bool__(self) -> bool:  # pragma: no cover - behaviour hook
                 return True
 
-        orig_build = module.build_node_inventory
-
-        build_calls: list[Any] = []
-
-        def fake_build(payload: Any) -> list[Any]:
-            build_calls.append(payload)
-            return orig_build(payload)
-
-        monkeypatch.setattr(module, "build_node_inventory", fake_build)
-
         def fake_addresses(inventory: list[Any], known_types: Any = None) -> tuple[dict[str, Any], set[str]]:
             mapping: dict[str, Any] = {"htr": [node.addr for node in inventory if getattr(node, "type", "") == "htr"]}
             mapping["acm"] = TruthyEmpty()
@@ -1217,7 +1207,7 @@ def test_subscribe_htr_samples_uses_cached_and_raw_inventory(monkeypatch):
         monkeypatch.setattr(module, "addresses_by_node_type", fake_addresses)
 
         hass = types.SimpleNamespace(loop=asyncio.get_event_loop())
-        cached_inventory = orig_build({"nodes": [{"type": "htr", "addr": "01"}]})
+        cached_inventory = module.build_node_inventory({"nodes": [{"type": "htr", "addr": "01"}]})
         hass.data = {
             module.DOMAIN: {
                 "entry": {
@@ -1250,25 +1240,24 @@ def test_subscribe_htr_samples_uses_cached_and_raw_inventory(monkeypatch):
         ws = DummyWS()
         client._ws = ws
 
-        # First call should use cached inventory (line 328)
+        # First call should use cached inventory
         await client._subscribe_htr_samples()
-        assert build_calls[0] == coordinator._nodes
         assert ws.sent == [
             '5::/api/v2/socket_io:{"name":"subscribe","args":["/htr/01/samples"]}'
         ]
+        record = hass.data[module.DOMAIN]["entry"]
+        assert [node.addr for node in record["node_inventory"]] == ["01"]
 
-        # Second call should rebuild from raw nodes when cache is absent (lines 332-333)
-        hass.data[module.DOMAIN]["entry"]["node_inventory"] = []
+        # Second call should rebuild from raw nodes when cache is absent
+        record["node_inventory"] = []
         coordinator._node_inventory = []
-        build_calls.clear()
         ws.sent.clear()
 
         await client._subscribe_htr_samples()
-        assert build_calls[0] == coordinator._nodes
-        assert build_calls[1] == hass.data[module.DOMAIN]["entry"]["nodes"]
         assert ws.sent == [
             '5::/api/v2/socket_io:{"name":"subscribe","args":["/htr/02/samples"]}'
         ]
+        assert [node.addr for node in record["node_inventory"]] == ["02"]
 
     asyncio.run(_run())
 
