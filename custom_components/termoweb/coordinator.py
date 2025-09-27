@@ -115,16 +115,27 @@ class StateCoordinator(
                     )
         self._addr_map = None
 
-    async def async_refresh_heater(self, addr: str) -> None:
-        """Refresh settings for a specific heater and push the update to listeners."""
+    async def async_refresh_heater(self, node: str | tuple[str, str]) -> None:
+        """Refresh settings for a specific node and push the update to listeners."""
 
         dev_id = self._dev_id
         success = False
+        if isinstance(node, tuple) and len(node) == 2:
+            raw_type, raw_addr = node
+            node_type = str(raw_type or "").strip().lower()
+            addr = str(raw_addr or "").strip()
+        else:
+            node_type = ""
+            addr = str(node or "").strip()
+
         _LOGGER.info(
-            "Refreshing heater settings for device %s heater %s",
+            "Refreshing heater settings for device %s node_type=%s addr=%s",
             dev_id,
+            node_type or "<auto>",
             addr,
         )
+        resolved_type = node_type or "htr"
+
         try:
             if not addr:
                 _LOGGER.error(
@@ -133,12 +144,21 @@ class StateCoordinator(
                 )
                 return
 
-            payload = await self.client.get_htr_settings(dev_id, addr)
+            addr_map, reverse = self._addr_lookup()
+            resolved_type = node_type or reverse.get(addr, "htr")
+
+            if resolved_type == "htr":
+                payload = await self.client.get_htr_settings(dev_id, addr)
+            else:
+                payload = await self.client.get_node_settings(
+                    dev_id, (resolved_type, addr)
+                )
 
             if not isinstance(payload, dict):
                 _LOGGER.debug(
-                    "Ignoring unexpected heater settings payload for device %s heater %s: %s",
+                    "Ignoring unexpected heater settings payload for device %s %s %s: %s",
                     dev_id,
+                    resolved_type,
                     addr,
                     payload,
                 )
@@ -167,8 +187,7 @@ class StateCoordinator(
                 dev_data.setdefault("nodes", self._nodes)
                 dev_data.setdefault("connected", True)
 
-            addr_map, reverse = self._addr_lookup()
-            node_type = reverse.get(addr, "htr")
+            node_type = resolved_type
 
             nodes_by_type: dict[str, dict[str, Any]] = {}
             existing_nodes = dev_data.get("nodes_by_type")
@@ -223,23 +242,26 @@ class StateCoordinator(
 
         except TimeoutError as err:
             _LOGGER.error(
-                "Timeout refreshing heater settings for device %s heater %s",
+                "Timeout refreshing heater settings for device %s %s %s",
                 dev_id,
+                node_type or resolved_type,
                 addr,
                 exc_info=err,
             )
         except (ClientError, BackendRateLimitError, BackendAuthError) as err:
             _LOGGER.error(
-                "Failed to refresh heater settings for device %s heater %s: %s",
+                "Failed to refresh heater settings for device %s %s %s: %s",
                 dev_id,
+                node_type or resolved_type,
                 addr,
                 err,
                 exc_info=err,
             )
         finally:
             _LOGGER.info(
-                "Finished heater settings refresh for device %s heater %s (success=%s)",
+                "Finished heater settings refresh for device %s %s %s (success=%s)",
                 dev_id,
+                node_type or resolved_type,
                 addr,
                 success,
             )
@@ -279,9 +301,14 @@ class StateCoordinator(
                 for k in range(count):
                     idx = (start + k) % len(addrs)
                     addr = addrs[idx]
-                    js = await self.client.get_htr_settings(dev_id, addr)
+                    node_type = reverse.get(addr, "htr")
+                    if node_type == "htr":
+                        js = await self.client.get_htr_settings(dev_id, addr)
+                    else:
+                        js = await self.client.get_node_settings(
+                            dev_id, (node_type, addr)
+                        )
                     if isinstance(js, dict):
-                        node_type = reverse.get(addr, "htr")
                         bucket = settings_by_type.setdefault(node_type, {})
                         bucket[addr] = js
                 self._rr_index[dev_id] = (start + count) % len(addrs)
@@ -344,7 +371,7 @@ class EnergyStateCoordinator(
         hass: HomeAssistant,
         client: RESTClient,
         dev_id: str,
-        addrs: list[str],
+        addrs: Iterable[str] | Mapping[str, Iterable[str]],
     ) -> None:
         """Initialize the heater energy coordinator."""
         super().__init__(
@@ -423,9 +450,14 @@ class EnergyStateCoordinator(
                 now = time.time()
                 start = now - 3600  # fetch recent samples
                 try:
-                    samples = await self.client.get_htr_samples(
-                        dev_id, addr, start, now
-                    )
+                    if node_type == "htr":
+                        samples = await self.client.get_htr_samples(
+                            dev_id, addr, start, now
+                        )
+                    else:
+                        samples = await self.client.get_node_samples(
+                            dev_id, (node_type, addr), start, now
+                        )
                 except (ClientError, BackendRateLimitError, BackendAuthError):
                     samples = []
 

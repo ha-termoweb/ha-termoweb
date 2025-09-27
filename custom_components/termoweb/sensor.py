@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 import logging
 import math
 from typing import Any
@@ -18,8 +19,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN, signal_ws_data
 from .coordinator import EnergyStateCoordinator
 from .heater import HeaterNodeBase, build_heater_name_map
-from .nodes import build_node_inventory
-from .utils import HEATER_NODE_TYPES, addresses_by_node_type, float_or_none
+from .nodes import Node, build_node_inventory
+from .utils import HEATER_NODE_TYPES, float_or_none
 
 _WH_TO_KWH = 1 / 1000.0
 
@@ -91,14 +92,22 @@ async def async_setup_entry(hass, entry, async_add_entities):
     if not inventory and nodes:
         inventory = build_node_inventory(nodes)
         data["node_inventory"] = inventory
-    addrs_by_type_raw, _ = addresses_by_node_type(
-        inventory, known_types=HEATER_NODE_TYPES
-    )
-    addrs_by_type: dict[str, list[str]] = {
-        node_type: [str(addr) for addr in addrs]
-        for node_type, addrs in addrs_by_type_raw.items()
-        if node_type in HEATER_NODE_TYPES
-    }
+    nodes_by_type: dict[str, list[Node]] = defaultdict(list)
+    for node in inventory:
+        node_type = str(getattr(node, "type", "")).strip().lower()
+        if not node_type:
+            continue
+        nodes_by_type[node_type].append(node)
+
+    addrs_by_type: dict[str, list[str]] = {}
+    for node_type in HEATER_NODE_TYPES:
+        addrs: list[str] = []
+        for node in nodes_by_type.get(node_type, []):
+            addr_str = str(getattr(node, "addr", "")).strip()
+            if not addr_str:
+                continue
+            addrs.append(addr_str)
+        addrs_by_type[node_type] = addrs
 
     energy_coordinator: EnergyStateCoordinator | None = data.get(
         "energy_coordinator",
@@ -112,61 +121,97 @@ async def async_setup_entry(hass, entry, async_add_entities):
     else:
         energy_coordinator.update_addresses(addrs_by_type)
 
-    name_map = build_heater_name_map(
-        nodes, lambda addr: f"Node {addr}"
-    )
+    default_name_simple = lambda addr: f"Node {addr}"  # noqa: E731
+
+    def default_name(addr: str, node_type: str | None = None) -> str:
+        if (node_type or "").lower() == "acm":
+            return f"Accumulator {addr}"
+        return default_name_simple(addr)
+
+    name_map = build_heater_name_map(nodes, default_name_simple)
 
     names_by_type: dict[str, dict[str, str]] = name_map.get("by_type", {})
     legacy_names: dict[str, str] = name_map.get("htr", {})
 
-    new_entities: list[SensorEntity] = []
-    for node_type, addrs in addrs_by_type.items():
+    def resolve_name(node_type: str, addr: str) -> str:
         per_type = names_by_type.get(node_type, {})
-        for addr in addrs:
-            base_name = (
-                per_type.get(addr)
-                or name_map.get((node_type, addr))
-                or legacy_names.get(addr)
-                or f"Node {addr}"
-            )
-            uid_temp = f"{DOMAIN}:{dev_id}:{node_type}:{addr}:temp"
+        return (
+            per_type.get(addr)
+            or name_map.get((node_type, addr))
+            or legacy_names.get(addr)
+            or default_name(addr, node_type)
+        )
+
+    new_entities: list[SensorEntity] = []
+    for node_type in HEATER_NODE_TYPES:
+        nodes_for_type = nodes_by_type.get(node_type, [])
+        if not nodes_for_type:
+            continue
+        for node in nodes_for_type:
+            addr_str = str(getattr(node, "addr", "")).strip()
+            if not addr_str:
+                continue
+            base_name = resolve_name(node_type, addr_str)
+            uid_prefix = f"{DOMAIN}:{dev_id}:{node_type}:{addr_str}"
+            temp_cls: type[HeaterTemperatureSensor]
+            energy_cls: type[HeaterEnergyTotalSensor]
+            power_cls: type[HeaterPowerSensor]
+            if node_type == "acm":
+                temp_cls = AccumulatorTemperatureSensor
+                energy_cls = AccumulatorEnergyTotalSensor
+                power_cls = AccumulatorPowerSensor
+            else:
+                temp_cls = HeaterTemperatureSensor
+                energy_cls = HeaterEnergyTotalSensor
+                power_cls = HeaterPowerSensor
+
             new_entities.append(
-                HeaterTemperatureSensor(
+                temp_cls(
                     coordinator,
                     entry.entry_id,
                     dev_id,
-                    addr,
+                    addr_str,
                     f"{base_name} Temperature",
-                    uid_temp,
+                    f"{uid_prefix}:temp",
                     base_name,
                     node_type=node_type,
                 )
             )
-            uid_energy = f"{DOMAIN}:{dev_id}:{node_type}:{addr}:energy"
             new_entities.append(
-                HeaterEnergyTotalSensor(
+                energy_cls(
                     energy_coordinator,
                     entry.entry_id,
                     dev_id,
-                    addr,
+                    addr_str,
                     f"{base_name} Energy",
-                    uid_energy,
+                    f"{uid_prefix}:energy",
                     base_name,
                     node_type=node_type,
                 )
             )
-            uid_power = f"{DOMAIN}:{dev_id}:{node_type}:{addr}:power"
             new_entities.append(
-                HeaterPowerSensor(
+                power_cls(
                     energy_coordinator,
                     entry.entry_id,
                     dev_id,
-                    addr,
+                    addr_str,
                     f"{base_name} Power",
-                    uid_power,
+                    f"{uid_prefix}:power",
                     base_name,
                     node_type=node_type,
                 )
+            )
+
+    for skipped_type in ("pmo", "thm"):
+        skipped_nodes = nodes_by_type.get(skipped_type, [])
+        if skipped_nodes:
+            addrs = ", ".join(
+                sorted(str(getattr(node, "addr", "")) for node in skipped_nodes)
+            )
+            _LOGGER.debug(
+                "Skipping TermoWeb %s nodes for sensor platform: %s",
+                skipped_type,
+                addrs or "<no-addr>",
             )
 
     uid_total = f"{DOMAIN}:{dev_id}:energy_total"
@@ -318,6 +363,18 @@ class HeaterPowerSensor(HeaterEnergyBase):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "W"
     _metric_key = "power"
+
+
+class AccumulatorTemperatureSensor(HeaterTemperatureSensor):
+    """Temperature sensor for accumulator nodes."""
+
+
+class AccumulatorEnergyTotalSensor(HeaterEnergyTotalSensor):
+    """Total energy sensor for accumulator nodes."""
+
+
+class AccumulatorPowerSensor(HeaterPowerSensor):
+    """Power sensor for accumulator nodes."""
 
 
 class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):

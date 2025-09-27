@@ -157,6 +157,14 @@ class HeaterNodeBase(CoordinatorEntity):
         """Return True when the websocket payload targets this heater."""
         if payload.get("dev_id") != self._dev_id:
             return False
+        payload_type = payload.get("node_type")
+        if payload_type is not None:
+            try:
+                payload_type_str = str(payload_type).strip().lower()
+            except Exception:  # pragma: no cover - defensive
+                payload_type_str = ""
+            if payload_type_str and payload_type_str != self._node_type:
+                return False
         addr = payload.get("addr")
         if addr is None:
             return True
@@ -240,11 +248,12 @@ class HeaterNodeBase(CoordinatorEntity):
     @property
     def device_info(self) -> DeviceInfo:
         """Expose Home Assistant device metadata for the heater."""
+        model = "Accumulator" if self._node_type == "acm" else "Heater"
         return DeviceInfo(
             identifiers={(DOMAIN, self._dev_id, self._addr)},
             name=self._device_name,
             manufacturer="TermoWeb",
-            model="Heater",
+            model=model,
             via_device=(DOMAIN, self._dev_id),
         )
 
