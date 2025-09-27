@@ -15,7 +15,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from .api import RESTClient
 from .const import API_BASE, DOMAIN, WS_NAMESPACE, signal_ws_data, signal_ws_status
 from .nodes import NODE_CLASS_BY_TYPE, build_node_inventory
-from .utils import addresses_by_node_type
+from .utils import HEATER_NODE_TYPES, addresses_by_node_type
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -307,15 +307,105 @@ class WebSocket09Client:
         )
 
     async def _subscribe_htr_samples(self) -> None:
-        """Request push updates for heater energy samples."""
-        addrs = (
-            self._coordinator._addrs() if hasattr(self._coordinator, "_addrs") else []
-        )
-        for addr in addrs:
-            payload = {"name": "subscribe", "args": [f"/htr/{addr}/samples"]}
-            await self._send_text(
-                f"5::{WS_NAMESPACE}:{json.dumps(payload, separators=(',', ':'))}"
+        """Request push updates for heater and accumulator energy samples."""
+
+        inventory: list[Any] = []
+        coordinator_inventory = getattr(self._coordinator, "_node_inventory", None)
+        if isinstance(coordinator_inventory, list) and coordinator_inventory:
+            inventory = list(coordinator_inventory)
+        else:
+            raw_nodes = getattr(self._coordinator, "_nodes", None)
+            if raw_nodes:
+                try:
+                    inventory = build_node_inventory(raw_nodes)
+                except Exception:  # pragma: no cover - defensive
+                    inventory = []
+
+        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
+        if not inventory and isinstance(record, dict):
+            cached_inventory = record.get("node_inventory")
+            if isinstance(cached_inventory, list) and cached_inventory:
+                inventory = list(cached_inventory)
+            else:
+                raw_nodes = record.get("nodes")
+                if raw_nodes:
+                    try:
+                        inventory = build_node_inventory(raw_nodes)
+                    except Exception:  # pragma: no cover - defensive
+                        inventory = []
+
+        addr_map: dict[str, list[str]] = {}
+        if inventory:
+            type_to_addrs, _ = addresses_by_node_type(
+                inventory, known_types=NODE_CLASS_BY_TYPE
             )
+            for node_type, addrs in type_to_addrs.items():
+                if node_type in HEATER_NODE_TYPES and addrs:
+                    addr_map[node_type] = list(addrs)
+
+        if not addr_map and hasattr(self._coordinator, "_addrs"):
+            try:
+                fallback = list(self._coordinator._addrs())
+            except Exception:  # pragma: no cover - defensive
+                fallback = []
+            if fallback:
+                addr_map["htr"] = [str(addr).strip() for addr in fallback if str(addr).strip()]
+
+        normalized_map: dict[str, list[str]] = {}
+        for node_type in HEATER_NODE_TYPES:
+            addrs = addr_map.get(node_type)
+            if addrs:
+                normalized_map[node_type] = list(addrs)
+        normalized_map.setdefault("htr", list(addr_map.get("htr") or []))
+
+        if not any(normalized_map.values()):
+            return
+
+        order = ["htr"] + [t for t in sorted(HEATER_NODE_TYPES) if t != "htr"]
+        for node_type in order:
+            addrs = normalized_map.get(node_type) or []
+            for addr in addrs:
+                payload = {"name": "subscribe", "args": [f"/{node_type}/{addr}/samples"]}
+                await self._send_text(
+                    f"5::{WS_NAMESPACE}:{json.dumps(payload, separators=(',', ':'))}"
+                )
+
+        if isinstance(record, dict):
+            if inventory:
+                record["node_inventory"] = inventory
+            energy_coordinator = record.get("energy_coordinator")
+            if hasattr(energy_coordinator, "update_addresses"):
+                energy_coordinator.update_addresses(normalized_map)
+
+        coordinator_data = getattr(self._coordinator, "data", None)
+        if isinstance(coordinator_data, dict):
+            dev_map = coordinator_data.get(self.dev_id)
+            if isinstance(dev_map, dict):
+                nodes_by_type: dict[str, Any] = dev_map.setdefault("nodes_by_type", {})
+                for node_type, addrs in normalized_map.items():
+                    if not addrs and node_type != "htr":
+                        continue
+                    bucket = nodes_by_type.get(node_type)
+                    if bucket is None:
+                        bucket = {
+                            "addrs": [],
+                            "settings": {},
+                            "advanced": {},
+                            "samples": {},
+                        }
+                        nodes_by_type[node_type] = bucket
+                    else:
+                        bucket.setdefault("addrs", [])
+                        bucket.setdefault("settings", {})
+                        bucket.setdefault("advanced", {})
+                        bucket.setdefault("samples", {})
+                    if addrs:
+                        bucket["addrs"] = list(addrs)
+                if "htr" in nodes_by_type:
+                    dev_map["htr"] = nodes_by_type["htr"]
+                updated = dict(coordinator_data)
+                updated[self.dev_id] = dev_map
+                self._coordinator.data = updated  # type: ignore[attr-defined]
 
     # ----------------- Loops -----------------
 
