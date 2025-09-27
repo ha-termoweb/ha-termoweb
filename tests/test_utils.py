@@ -5,13 +5,17 @@ from typing import Any
 
 import pytest
 
+from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.nodes import build_node_inventory
 
 from custom_components.termoweb.utils import (
     HEATER_NODE_TYPES,
+    _entry_gateway_record,
     addresses_by_node_type,
+    build_gateway_device_info,
     ensure_node_inventory,
     float_or_none,
+    normalize_heater_addresses,
 )
 
 
@@ -107,6 +111,47 @@ def test_float_or_none(value, expected) -> None:
 @pytest.mark.parametrize("value", ["nan", "inf"])
 def test_float_or_none_non_finite_strings(value) -> None:
     assert float_or_none(value) is None
+
+
+def test_entry_gateway_record_handles_invalid_sources() -> None:
+    assert _entry_gateway_record(None, "entry") is None
+
+    hass = types.SimpleNamespace(data={DOMAIN: {}})
+    assert _entry_gateway_record(hass, None) is None
+
+    hass = types.SimpleNamespace(data={DOMAIN: []})
+    assert _entry_gateway_record(hass, "entry") is None
+
+    hass = types.SimpleNamespace(data={DOMAIN: {"entry": []}})
+    assert _entry_gateway_record(hass, "entry") is None
+
+
+def test_build_gateway_device_info_defaults_without_entry() -> None:
+    hass = types.SimpleNamespace(data={})
+
+    info = build_gateway_device_info(hass, "entry", "dev")
+
+    assert info["identifiers"] == {(DOMAIN, "dev")}
+    assert info["manufacturer"] == "TermoWeb"
+    assert "sw_version" not in info
+
+
+def test_build_gateway_device_info_uses_brand_and_version() -> None:
+    hass = types.SimpleNamespace(
+        data={DOMAIN: {"entry": {"brand": "  Ducaheat  ", "version": 7}}}
+    )
+
+    info = build_gateway_device_info(hass, "entry", "dev")
+
+    assert info["manufacturer"] == "Ducaheat"
+    assert info["sw_version"] == "7"
+
+
+def test_normalize_heater_addresses_with_none() -> None:
+    mapping, aliases = normalize_heater_addresses(None)
+
+    assert mapping == {"htr": []}
+    assert aliases == {"htr": "htr"}
 
 
 def test_get_brand_api_base_fallback() -> None:
