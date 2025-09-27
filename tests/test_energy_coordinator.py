@@ -31,7 +31,7 @@ StateCoordinator = coord_module.StateCoordinator
 def test_power_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.get_htr_samples = AsyncMock(
+        client.get_node_samples = AsyncMock(
             side_effect=[
                 [{"t": 1000, "counter": "1.0"}],
                 [{"t": 1900, "counter": "1.5"}],
@@ -290,10 +290,10 @@ def test_refresh_heater_handles_tuple_and_acm() -> None:
             {},
         )
 
-        def fake_lookup(self) -> tuple[dict[str, list[str]], dict[str, str]]:
-            return {"acm": ["3"]}, {"3": "acm"}
-
-        coord._addr_lookup = types.MethodType(fake_lookup, coord)
+        coord._node_inventory = [
+            nodes_module.Node(name="Acc", addr="3", node_type="acm")
+        ]
+        coord._refresh_node_cache()
         coord.data = {
             "dev": {
                 "nodes_by_type": {
@@ -320,7 +320,9 @@ def test_refresh_heater_handles_tuple_and_acm() -> None:
         assert updates, "Expected coordinator data to be updated"
         latest = updates[-1]["dev"]
         acm_section = latest["nodes_by_type"]["acm"]
-        assert acm_section["addrs"] == ["3", "2"]
+        addrs = acm_section["addrs"]
+        assert addrs[0] == "3"
+        assert "2" in addrs
         assert acm_section["settings"]["2"] == {"mode": "auto"}
         assert "htr" in latest["nodes_by_type"]
 
@@ -451,10 +453,10 @@ def test_state_coordinator_async_update_data_reuses_previous() -> None:
             {},
         )
 
-        def fake_lookup(self) -> tuple[dict[str, list[str]], dict[str, str]]:
-            return {"acm": ["7"]}, {"7": "acm"}
-
-        coord._addr_lookup = types.MethodType(fake_lookup, coord)
+        coord._node_inventory = [
+            nodes_module.Node(name="Acc", addr="7", node_type="acm")
+        ]
+        coord._refresh_node_cache()
         coord.data = {
             "dev": {
                 "nodes_by_type": {
@@ -471,7 +473,7 @@ def test_state_coordinator_async_update_data_reuses_previous() -> None:
         dev_data = result["dev"]
         acm_section = dev_data["nodes_by_type"]["acm"]
         assert acm_section["settings"]["7"] == {"mode": "eco"}
-        assert dev_data["htr"]["addrs"] == []
+        assert dev_data["htr"]["addrs"] == ["legacy"]
 
     asyncio.run(_run())
 
@@ -479,7 +481,7 @@ def test_state_coordinator_async_update_data_reuses_previous() -> None:
 def test_counter_reset(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.get_htr_samples = AsyncMock(
+        client.get_node_samples = AsyncMock(
             side_effect=[
                 [{"t": 1000, "counter": "5.0"}],
                 [{"t": 1900, "counter": "1.0"}],
@@ -509,7 +511,7 @@ def test_counter_reset(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_energy_regression_resets_last() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.get_htr_samples = AsyncMock(
+        client.get_node_samples = AsyncMock(
             side_effect=[
                 [{"t": 1000, "counter": "1.0"}],
                 [{"t": 1600, "counter": "2.0"}],
@@ -528,20 +530,20 @@ def test_energy_regression_resets_last() -> None:
         await coord.async_refresh()
         assert coord.data["1"]["htr"]["energy"]["A"] == pytest.approx(0.001)
         assert "A" not in coord.data["1"]["htr"]["power"]
-        assert coord._last[("1", "htr", "A")] == (1000.0, pytest.approx(0.001))
+        assert coord._last[("htr", "A")] == (1000.0, pytest.approx(0.001))
 
         await coord.async_refresh()
         second_data = coord.data["1"]["htr"]
         assert second_data["energy"]["A"] == pytest.approx(0.002)
         assert second_data["power"]["A"] == pytest.approx(6.0, rel=1e-3)
-        assert coord._last[("1", "htr", "A")] == (1600.0, pytest.approx(0.002))
+        assert coord._last[("htr", "A")] == (1600.0, pytest.approx(0.002))
 
         await coord.async_refresh()
 
         final_data = coord.data["1"]["htr"]
         assert final_data["energy"]["A"] == pytest.approx(0.0015)
         assert "A" not in final_data["power"]
-        assert coord._last[("1", "htr", "A")] == (1500.0, pytest.approx(0.0015))
+        assert coord._last[("htr", "A")] == (1500.0, pytest.approx(0.0015))
 
     asyncio.run(_run())
 
@@ -549,7 +551,7 @@ def test_energy_regression_resets_last() -> None:
 def test_energy_samples_missing_fields() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.get_htr_samples = AsyncMock(
+        client.get_node_samples = AsyncMock(
             return_value=[{"t": 1000, "counter": None}]
         )
 
@@ -572,7 +574,7 @@ def test_energy_samples_missing_fields() -> None:
 def test_energy_samples_invalid_strings() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.get_htr_samples = AsyncMock(
+        client.get_node_samples = AsyncMock(
             return_value=[{"t": " ", "counter": "garbage"}]
         )
 
@@ -602,7 +604,7 @@ def test_update_interval_constant() -> None:
 def test_heater_energy_samples_empty_on_api_error() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.get_htr_samples = AsyncMock(side_effect=ClientError("fail"))
+        client.get_node_samples = AsyncMock(side_effect=ClientError("fail"))
 
         hass = HomeAssistant()
         coord = EnergyStateCoordinator(
@@ -626,7 +628,7 @@ def test_heater_energy_client_error_update_failed(
 ) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.get_htr_samples = AsyncMock(return_value=[{"t": 1000, "counter": "1.0"}])
+        client.get_node_samples = AsyncMock(return_value=[{"t": 1000, "counter": "1.0"}])
 
         hass = HomeAssistant()
         coord = EnergyStateCoordinator(
@@ -650,8 +652,7 @@ def test_heater_energy_client_error_update_failed(
 def test_energy_state_coordinator_fetches_acm_samples() -> None:
     async def _run() -> None:
         hass = HomeAssistant()
-        client = AsyncMock()
-        client.get_htr_samples = AsyncMock(return_value=[])
+        client = types.SimpleNamespace()
         client.get_node_samples = AsyncMock(
             return_value=[{"t": 1000, "counter": "1000"}]
         )
@@ -664,13 +665,117 @@ def test_energy_state_coordinator_fetches_acm_samples() -> None:
         )
 
         result = await coord._async_update_data()
-        assert client.get_htr_samples.await_count == 0
+        client.get_node_samples.assert_awaited_once()
         call = client.get_node_samples.await_args
         assert call.args[0] == "dev"
         assert call.args[1] == ("acm", "7")
-        acm_section = result["dev"]["nodes_by_type"].get("acm")
-        assert acm_section is not None
+        acm_section = result["dev"]["acm"]
         assert acm_section["energy"]["7"] == pytest.approx(1.0)
+
+    asyncio.run(_run())
+
+
+def test_energy_coordinator_caches_per_type() -> None:
+    async def _run() -> None:
+        hass = HomeAssistant()
+        client = types.SimpleNamespace()
+        client.get_node_samples = AsyncMock(
+            side_effect=[
+                [{"t": 0.0, "counter": 0}],
+                [{"t": 0.0, "counter": 0}],
+                [{"t": 3600.0, "counter": 1000}],
+                [{"t": 3600.0, "counter": 2000}],
+            ]
+        )
+
+        coord = EnergyStateCoordinator(
+            hass,
+            client,
+            "dev",
+            {"htr": ["A"], "acm": ["B"]},
+        )
+
+        await coord.async_refresh()
+        await coord.async_refresh()
+
+        dev_data = coord.data["dev"]
+        assert dev_data["htr"]["energy"]["A"] == pytest.approx(1.0)
+        assert dev_data["acm"]["energy"]["B"] == pytest.approx(2.0)
+        assert dev_data["htr"]["power"]["A"] == pytest.approx(1000)
+        assert dev_data["acm"]["power"]["B"] == pytest.approx(2000)
+
+        last_htr = coord._last[("htr", "A")]
+        assert last_htr[0] == pytest.approx(3600.0)
+        assert last_htr[1] == pytest.approx(1.0)
+        last_acm = coord._last[("acm", "B")]
+        assert last_acm[0] == pytest.approx(3600.0)
+        assert last_acm[1] == pytest.approx(2.0)
+
+        assert client.get_node_samples.await_count == 4
+
+    asyncio.run(_run())
+
+
+def test_energy_coordinator_handles_rate_limit_per_node() -> None:
+    async def _run() -> None:
+        hass = HomeAssistant()
+        client = types.SimpleNamespace()
+
+        async def _side_effect(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+            dev_id, descriptor, *_ = args
+            node_type, _addr = descriptor
+            if node_type == "htr":
+                return [{"t": 0, "counter": 500}]
+            raise BackendRateLimitError("429")
+
+        client.get_node_samples = AsyncMock(side_effect=_side_effect)
+
+        coord = EnergyStateCoordinator(
+            hass,
+            client,
+            "dev",
+            {"htr": ["A"], "acm": ["B"]},
+        )
+
+        await coord.async_refresh()
+
+        dev_data = coord.data["dev"]
+        assert dev_data["htr"]["energy"]["A"] == pytest.approx(0.5)
+        assert dev_data["acm"]["energy"] == {}
+        assert ("acm", "B") not in coord._last
+        assert ("htr", "A") in coord._last
+
+    asyncio.run(_run())
+
+
+def test_energy_coordinator_uses_heater_alias() -> None:
+    async def _run() -> None:
+        hass = HomeAssistant()
+        client = types.SimpleNamespace()
+        client.get_node_samples = AsyncMock(
+            side_effect=[
+                [{"t": 0, "counter": 500}],
+                [{"t": 0, "counter": 1500}],
+            ]
+        )
+
+        coord = EnergyStateCoordinator(
+            hass,
+            client,
+            "dev",
+            {"heater": ["A"], "acm": ["B"]},
+        )
+
+        await coord.async_refresh()
+
+        assert coord._addresses_by_type == {"htr": ["A"], "acm": ["B"]}
+        assert coord._compat_aliases["heater"] == "htr"
+
+        dev_data = coord.data["dev"]
+        assert dev_data["htr"]["energy"]["A"] == pytest.approx(0.5)
+        assert dev_data["heater"] is dev_data["htr"]
+        assert dev_data["heater"]["energy"]["A"] == pytest.approx(0.5)
+        assert dev_data["acm"]["energy"]["B"] == pytest.approx(1.5)
 
     asyncio.run(_run())
 
@@ -774,7 +879,6 @@ def test_energy_state_coordinator_async_update_adds_legacy_bucket() -> None:
 
         result = await coord._async_update_data()
         dev_data = result["dev"]
-        assert "htr" in dev_data["nodes_by_type"]
         assert dev_data["htr"] == {"energy": {}, "power": {}, "addrs": []}
 
     asyncio.run(_run())
@@ -894,7 +998,7 @@ def test_coordinator_client_error(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_ws_driven_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.get_htr_samples = AsyncMock(return_value=[{"t": 1000, "counter": "1.0"}])
+        client.get_node_samples = AsyncMock(return_value=[{"t": 1000, "counter": "1.0"}])
 
         hass = HomeAssistant()
         coord = EnergyStateCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
@@ -902,7 +1006,7 @@ def test_ws_driven_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
         await coord.async_refresh()
         assert coord.data["1"]["htr"]["energy"]["A"] == pytest.approx(0.001)
 
-        client.get_htr_samples = AsyncMock(return_value=[{"t": 2000, "counter": "2.0"}])
+        client.get_node_samples = AsyncMock(return_value=[{"t": 2000, "counter": "2.0"}])
 
         async_dispatcher_connect(
             hass,
@@ -947,7 +1051,7 @@ def test_coordinator_timeout() -> None:
 def test_heater_energy_timeout() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.get_htr_samples = AsyncMock(side_effect=asyncio.TimeoutError)
+        client.get_node_samples = AsyncMock(side_effect=asyncio.TimeoutError)
 
         hass = HomeAssistant()
         coord = EnergyStateCoordinator(

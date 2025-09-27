@@ -473,7 +473,8 @@ class EnergyStateCoordinator(
         self._addresses_by_type: dict[str, list[str]] = {}
         self._addr_lookup: dict[str, str] = {}
         self._addrs: list[str] = []
-        self._last: dict[tuple[str, str, str], tuple[float, float]] = {}
+        self._compat_aliases: dict[str, str] = {}
+        self._last: dict[tuple[str, str], tuple[float, float]] = {}
         self.update_addresses(addrs)
 
     def update_addresses(
@@ -482,6 +483,7 @@ class EnergyStateCoordinator(
         """Replace the tracked heater addresses with ``addrs``."""
 
         cleaned_map: dict[str, list[str]] = {}
+        compat_aliases: dict[str, str] = {}
 
         if isinstance(addrs, Mapping):
             sources = addrs.items()
@@ -492,6 +494,12 @@ class EnergyStateCoordinator(
             node_type_str = str(node_type or "").strip().lower()
             if not node_type_str:
                 continue
+            alias_target: str | None = None
+            if node_type_str in {"heater", "heaters", "htr"}:
+                alias_target = "htr"
+            if alias_target is not None and node_type_str != alias_target:
+                compat_aliases[node_type_str] = alias_target
+                node_type_str = alias_target
             if node_type_str not in HEATER_NODE_TYPES:
                 continue
             bucket = cleaned_map.setdefault(node_type_str, [])
@@ -503,110 +511,116 @@ class EnergyStateCoordinator(
                 seen.add(addr_str)
                 bucket.append(addr_str)
 
-        if "htr" not in cleaned_map:
-            cleaned_map["htr"] = []
+        cleaned_map.setdefault("htr", [])
+        compat_aliases["htr"] = "htr"
 
         self._addresses_by_type = cleaned_map
+        self._compat_aliases = compat_aliases
         self._addr_lookup = {
-            addr: node_type for node_type, addrs_for_type in cleaned_map.items() for addr in addrs_for_type
-        }
-        self._addrs = [addr for addrs_for_type in cleaned_map.values() for addr in addrs_for_type]
-
-        valid_keys = {
-            (self._dev_id, node_type, addr)
+            addr: node_type
             for node_type, addrs_for_type in cleaned_map.items()
             for addr in addrs_for_type
         }
-        self._last = {
-            key: value for key, value in self._last.items() if key in valid_keys
+        self._addrs = [
+            addr for addrs_for_type in cleaned_map.values() for addr in addrs_for_type
+        ]
+
+        valid_keys = {
+            (node_type, addr)
+            for node_type, addrs_for_type in cleaned_map.items()
+            for addr in addrs_for_type
         }
+        self._last = {key: value for key, value in self._last.items() if key in valid_keys}
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Fetch recent heater energy samples and derive totals and power."""
         dev_id = self._dev_id
-        addrs = self._addrs
         try:
-            energy_by_type: dict[str, dict[str, float]] = {
-                node_type: {} for node_type in self._addresses_by_type
-            }
-            power_by_type: dict[str, dict[str, float]] = {
-                node_type: {} for node_type in self._addresses_by_type
-            }
+            energy_by_type: dict[str, dict[str, float]] = {}
+            power_by_type: dict[str, dict[str, float]] = {}
 
-            for addr in addrs:
-                node_type = self._addr_lookup.get(addr, "htr")
-                now = time.time()
-                start = now - 3600  # fetch recent samples
-                try:
-                    if node_type == "htr":
-                        samples = await self.client.get_htr_samples(
-                            dev_id, addr, start, now
-                        )
-                    else:
+            for node_type, addrs_for_type in self._addresses_by_type.items():
+                for addr in addrs_for_type:
+                    now = time.time()
+                    start = now - 3600  # fetch recent samples
+                    try:
                         samples = await self.client.get_node_samples(
                             dev_id, (node_type, addr), start, now
                         )
-                except (ClientError, BackendRateLimitError, BackendAuthError):
-                    samples = []
+                    except (ClientError, BackendRateLimitError, BackendAuthError):
+                        samples = []
 
-                if not samples:
-                    _LOGGER.debug(
-                        "No energy samples for device %s heater %s", dev_id, addr
-                    )
-                    continue
-
-                last = samples[-1]
-                counter = float_or_none(last.get("counter"))
-                t = float_or_none(last.get("t"))
-                if counter is None or t is None:
-                    _LOGGER.debug(
-                        "Latest sample missing 't' or 'counter' for device %s heater %s",
-                        dev_id,
-                        addr,
-                    )
-                    continue
-
-                kwh = counter / 1000.0
-                energy_bucket = energy_by_type.setdefault(node_type, {})
-                energy_bucket[addr] = kwh
-
-                key = (dev_id, node_type, addr)
-                prev = self._last.get(key)
-                if prev:
-                    prev_t, prev_kwh = prev
-                    if kwh < prev_kwh or t <= prev_t:
-                        self._last[key] = (t, kwh)
+                    if not samples:
+                        _LOGGER.debug(
+                            "No energy samples for device %s node %s:%s",
+                            dev_id,
+                            node_type,
+                            addr,
+                        )
                         continue
-                    dt_hours = (t - prev_t) / 3600
-                    if dt_hours > 0:
-                        delta_kwh = kwh - prev_kwh
-                        power = delta_kwh / dt_hours * 1000
-                        power_bucket = power_by_type.setdefault(node_type, {})
-                        power_bucket[addr] = power
-                    self._last[key] = (t, kwh)
-                else:
-                    self._last[key] = (t, kwh)
 
-            nodes_by_type = {}
+                    last = samples[-1]
+                    counter = float_or_none(last.get("counter"))
+                    t = float_or_none(last.get("t"))
+                    if counter is None or t is None:
+                        _LOGGER.debug(
+                            "Latest sample missing 't' or 'counter' for device %s node %s:%s",
+                            dev_id,
+                            node_type,
+                            addr,
+                        )
+                        continue
+
+                    kwh = counter / 1000.0
+                    energy_bucket = energy_by_type.setdefault(node_type, {})
+                    energy_bucket[addr] = kwh
+
+                    key = (node_type, addr)
+                    prev = self._last.get(key)
+                    if prev:
+                        prev_t, prev_kwh = prev
+                        if kwh < prev_kwh or t <= prev_t:
+                            self._last[key] = (t, kwh)
+                            continue
+                        dt_hours = (t - prev_t) / 3600
+                        if dt_hours > 0:
+                            delta_kwh = kwh - prev_kwh
+                            power = delta_kwh / dt_hours * 1000
+                            power_bucket = power_by_type.setdefault(node_type, {})
+                            power_bucket[addr] = power
+                        self._last[key] = (t, kwh)
+                    else:
+                        self._last[key] = (t, kwh)
+
+            dev_data: dict[str, Any] = {"dev_id": dev_id}
             for node_type, addrs_for_type in self._addresses_by_type.items():
-                nodes_by_type[node_type] = {
+                dev_data[node_type] = {
                     "energy": dict(energy_by_type.get(node_type, {})),
                     "power": dict(power_by_type.get(node_type, {})),
                     "addrs": list(addrs_for_type),
                 }
 
-            legacy = nodes_by_type.get("htr")
-            if legacy is None:
-                legacy = {"energy": {}, "power": {}, "addrs": []}
-                nodes_by_type["htr"] = legacy
-
-            result: dict[str, dict[str, Any]] = {
-                dev_id: {
-                    "dev_id": dev_id,
-                    "nodes_by_type": nodes_by_type,
-                    "htr": legacy,
+            heater_data = dev_data.get("htr")
+            if heater_data is None:
+                heater_data = {
+                    "energy": {},
+                    "power": {},
+                    "addrs": list(self._addresses_by_type.get("htr", [])),
                 }
-            }
+                dev_data["htr"] = heater_data
+
+            for alias, canonical in self._compat_aliases.items():
+                canonical_data = dev_data.get(canonical)
+                if canonical_data is None:
+                    canonical_data = {
+                        "energy": {},
+                        "power": {},
+                        "addrs": list(self._addresses_by_type.get(canonical, [])),
+                    }
+                    dev_data[canonical] = canonical_data
+                dev_data[alias] = canonical_data
+
+            result: dict[str, dict[str, Any]] = {dev_id: dev_data}
 
         except TimeoutError as err:
             raise UpdateFailed("API timeout") from err
