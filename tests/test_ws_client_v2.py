@@ -9,7 +9,9 @@ from typing import Any, Iterable
 
 import pytest
 
-import custom_components.termoweb.ws_client_v2 as ws_v2
+import custom_components.termoweb.ws_client as ws_core
+
+ws_v2 = ws_core
 
 
 def test_ducaheat_ws_client_flow(
@@ -21,9 +23,11 @@ def test_ducaheat_ws_client_flow(
         dispatcher_calls.append((signal, payload))
 
     monkeypatch.setattr(ws_v2, "async_dispatcher_send", fake_dispatcher)
+    monkeypatch.setattr(ws_core, "async_dispatcher_send", fake_dispatcher)
 
     async def _run() -> None:
         loop = asyncio.get_running_loop()
+        caplog.set_level(logging.DEBUG, logger=ws_core.__name__)
         caplog.set_level(logging.DEBUG, logger=ws_v2.__name__)
         node_updates: list[tuple[dict[str, Any], list[Any]]] = []
         energy_updates: list[Any] = []
@@ -131,6 +135,7 @@ def test_ducaheat_ws_client_flow(
             if signal == status_signal
         ]
         assert status_updates == [
+            "starting",
             "connecting",
             "connected",
             "healthy",
@@ -193,9 +198,11 @@ def test_ducaheat_ws_client_logs_unknown_types(
         dispatcher_calls.append((signal, payload))
 
     monkeypatch.setattr(ws_v2, "async_dispatcher_send", fake_dispatcher)
+    monkeypatch.setattr(ws_core, "async_dispatcher_send", fake_dispatcher)
 
     async def _run() -> None:
         loop = asyncio.get_running_loop()
+        caplog.set_level(logging.DEBUG, logger=ws_core.__name__)
         caplog.set_level(logging.DEBUG, logger=ws_v2.__name__)
 
         node_updates: list[tuple[dict[str, Any], list[Any]]] = []
@@ -255,6 +262,7 @@ def test_ducaheat_ws_client_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
         dispatcher_calls.append((signal, payload))
 
     monkeypatch.setattr(ws_v2, "async_dispatcher_send", fake_dispatcher)
+    monkeypatch.setattr(ws_core, "async_dispatcher_send", fake_dispatcher)
 
     async def _run() -> None:
         loop = asyncio.get_running_loop()
@@ -299,7 +307,9 @@ def test_ducaheat_ws_client_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
             for signal, payload in dispatcher_calls
             if signal == status_signal
         ]
-        assert status_updates.count("connecting") == 1
+        assert status_updates[0] == "starting"
+        assert status_updates.count("disconnected") == 1
+        assert status_updates[-1] == "stopped"
         assert client.hass.data[ws_v2.DOMAIN]["entry"]["ws_state"]["dev"]["status"] == "stopped"
         assert client._status == "stopped"
 
@@ -340,6 +350,7 @@ def test_stop_handles_cancelled_task(monkeypatch: pytest.MonkeyPatch) -> None:
         dispatcher_calls.append((signal, payload))
 
     monkeypatch.setattr(ws_v2, "async_dispatcher_send", fake_dispatcher)
+    monkeypatch.setattr(ws_core, "async_dispatcher_send", fake_dispatcher)
 
     async def _run() -> None:
         loop = asyncio.get_running_loop()

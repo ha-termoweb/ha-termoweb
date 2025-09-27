@@ -4,6 +4,7 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any
 
+from ..ws_client import TermoWebSocketClient
 from .base import Backend, WsClientProto
 
 
@@ -12,12 +13,12 @@ class TermoWebBackend(Backend):
 
     def _resolve_ws_client_cls(self) -> type[Any]:
         """Return the websocket client class compatible with this backend."""
+
         module = import_module("custom_components.termoweb.__init__")
         ws_cls = getattr(module, "WebSocket09Client", None)
-        if ws_cls is None:
-            legacy_module = import_module("custom_components.termoweb.ws_client_legacy")
-            ws_cls = legacy_module.WebSocket09Client
-        return ws_cls
+        if isinstance(ws_cls, type):
+            return ws_cls
+        return TermoWebSocketClient
 
     def create_ws_client(
         self,
@@ -26,13 +27,18 @@ class TermoWebBackend(Backend):
         dev_id: str,
         coordinator: Any,
     ) -> WsClientProto:
-        """Instantiate the legacy websocket client used by TermoWeb."""
+        """Instantiate the unified websocket client for TermoWeb."""
 
         ws_cls = self._resolve_ws_client_cls()
+        kwargs: dict[str, Any] = {
+            "entry_id": entry_id,
+            "dev_id": dev_id,
+            "api_client": self.client,
+            "coordinator": coordinator,
+        }
+        if issubclass(ws_cls, TermoWebSocketClient):
+            kwargs["protocol"] = "socketio09"
         return ws_cls(
             hass,
-            entry_id=entry_id,
-            dev_id=dev_id,
-            api_client=self.client,
-            coordinator=coordinator,
+            **kwargs,
         )

@@ -1,3 +1,5 @@
+"""Constants for the TermoWeb integration."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -80,7 +82,7 @@ ACCEPT_LANGUAGE: Final = "en-US,en;q=0.8"
 # but we keep this constant for compatibility where needed.
 INTEGRATION_VERSION: Final = "1.0.0"
 
-# Socket.IO namespace (used by ws_client_legacy)
+# Socket.IO namespace used by the websocket client implementation
 WS_NAMESPACE: Final = "/api/v2/socket_io"
 
 # --- Dispatcher signal helpers (WS → entities) ---

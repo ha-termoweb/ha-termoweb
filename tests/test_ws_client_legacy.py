@@ -13,7 +13,9 @@ from conftest import _install_stubs
 
 _install_stubs()
 
-import custom_components.termoweb.ws_client_legacy as ws_client_legacy
+import custom_components.termoweb.ws_client as ws_core
+
+ws_client_legacy = ws_core
 
 
 def _load_ws_client(
@@ -206,6 +208,7 @@ def test_runner_backoff_after_handshake_errors(
                 return 160.0
 
         monkeypatch.setattr(module.time, "time", fake_time)
+        monkeypatch.setattr(ws_core.time, "time", fake_time)
 
         sleep_calls: list[float] = []
 
@@ -213,6 +216,7 @@ def test_runner_backoff_after_handshake_errors(
             sleep_calls.append(delay)
 
         monkeypatch.setattr(module.asyncio, "sleep", fake_sleep)
+        monkeypatch.setattr(ws_core.asyncio, "sleep", fake_sleep)
 
         jitter_args: list[tuple[float, float]] = []
 
@@ -221,6 +225,7 @@ def test_runner_backoff_after_handshake_errors(
             return 1.1
 
         monkeypatch.setattr(module.random, "uniform", fake_uniform)
+        monkeypatch.setattr(ws_core.random, "uniform", fake_uniform)
 
         attempt = 0
 
@@ -386,6 +391,7 @@ def test_runner_handles_handshake_events_and_disconnect(
             await orig_sleep(0)
 
         monkeypatch.setattr(module.asyncio, "sleep", fast_sleep)
+        monkeypatch.setattr(ws_core.asyncio, "sleep", fast_sleep)
 
         orig_read_loop = module.WebSocket09Client._read_loop
 
@@ -636,6 +642,7 @@ def test_read_loop_handles_error_frames_and_health(monkeypatch: pytest.MonkeyPat
         )
 
         monkeypatch.setattr(module.time, "time", lambda: 1000.0)
+        monkeypatch.setattr(ws_core.time, "time", lambda: 1000.0)
 
         with pytest.raises(ValueError, match="socket exploded"):
             await client._read_loop()
@@ -881,6 +888,7 @@ def test_handle_event_updates_state_and_dispatch(
         coordinator=coordinator,
     )
     monkeypatch.setattr(module.time, "time", lambda: 1000.0)
+    monkeypatch.setattr(ws_core.time, "time", lambda: 1000.0)
 
     event = {
         "name": "data",
@@ -1363,6 +1371,7 @@ def test_mark_event_promotes_to_healthy(monkeypatch: pytest.MonkeyPatch) -> None
     client._stats.frames_total = 7
     client._stats.events_total = 3
     monkeypatch.setattr(module.time, "time", lambda: 805.0)
+    monkeypatch.setattr(ws_core.time, "time", lambda: 805.0)
 
     client._mark_event(paths=None)
 
@@ -1417,6 +1426,7 @@ def test_heartbeat_loop_sends_until_cancel(monkeypatch: pytest.MonkeyPatch) -> N
             await orig_sleep(0)
 
         monkeypatch.setattr(module.asyncio, "sleep", fast_sleep)
+        monkeypatch.setattr(ws_core.asyncio, "sleep", fast_sleep)
 
         now = 2_000.0
 

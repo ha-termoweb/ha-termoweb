@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from custom_components.termoweb.api import RESTClient
 from custom_components.termoweb.backend.ducaheat import DucaheatBackend, DucaheatRESTClient
-from custom_components.termoweb.ws_client_v2 import DucaheatWSClient
+from custom_components.termoweb.ws_client import DucaheatWSClient
 
 
 class DummyClient:

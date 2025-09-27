@@ -1021,7 +1021,10 @@ class TermoWebSocketClient:
     async def _get_token(self) -> str:
         """Reuse the REST client token for websocket authentication."""
         headers = await self._client._authed_headers()  # noqa: SLF001
-        return headers["Authorization"].split(" ", 1)[1]
+        auth_header = headers.get("Authorization") if isinstance(headers, dict) else None
+        if not auth_header:
+            raise RuntimeError("authorization token missing")
+        return auth_header.split(" ", 1)[1]
 
     async def _force_refresh_token(self) -> None:
         """Force the REST client to fetch a fresh access token."""
@@ -1095,4 +1098,20 @@ class TermoWebSocketClient:
             and (now - self._connected_since) >= 300
         ):
             self._healthy_since = now
-            self._update_status("healthy")
+
+
+# ----------------------------------------------------------------------
+# Backwards compatibility aliases
+# ----------------------------------------------------------------------
+WebSocket09Client = TermoWebSocketClient
+DucaheatWSClient = TermoWebSocketClient
+
+__all__ = [
+    "DucaheatWSClient",
+    "EngineIOHandshake",
+    "HandshakeError",
+    "TermoWebSocketClient",
+    "WSStats",
+    "WebSocket09Client",
+]
+

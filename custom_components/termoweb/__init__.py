@@ -26,8 +26,8 @@ from homeassistant.loader import async_get_integration
 from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend import Backend, DucaheatRESTClient, WsClientProto, create_backend
 from .const import (
-    CONF_BRAND,
     BRAND_DUCAHEAT,
+    CONF_BRAND,
     DEFAULT_BRAND,
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
@@ -42,7 +42,7 @@ from .nodes import build_node_inventory
 from .utils import HEATER_NODE_TYPES, addresses_by_node_type, ensure_node_inventory
 
 # Re-export legacy WS client for backward compatibility (tests may patch it).
-from .ws_client_legacy import WebSocket09Client  # noqa: F401
+from .ws_client import TermoWebSocketClient as WebSocket09Client  # noqa: F401
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -815,7 +815,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 if not ent:
                     continue
                 normalized = {
-                    node_type: list(sorted(addrs))
+                    node_type: sorted(addrs)
                     for node_type, addrs in addr_map.items()
                     if addrs
                 }
