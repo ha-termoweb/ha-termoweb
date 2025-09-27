@@ -119,43 +119,15 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 continue
             base_name = resolve_name(node_type, addr_str)
             uid_prefix = f"{DOMAIN}:{dev_id}:{node_type}:{addr_str}"
-            temp_cls: type[HeaterTemperatureSensor] = HeaterTemperatureSensor
-            energy_cls: type[HeaterEnergyTotalSensor] = HeaterEnergyTotalSensor
-            power_cls: type[HeaterPowerSensor] = HeaterPowerSensor
-
-            new_entities.append(
-                temp_cls(
+            new_entities.extend(
+                _create_heater_sensors(
                     coordinator,
-                    entry.entry_id,
-                    dev_id,
-                    addr_str,
-                    f"{base_name} Temperature",
-                    f"{uid_prefix}:temp",
-                    base_name,
-                    node_type=node_type,
-                )
-            )
-            new_entities.append(
-                energy_cls(
                     energy_coordinator,
                     entry.entry_id,
                     dev_id,
                     addr_str,
-                    f"{base_name} Energy",
-                    f"{uid_prefix}:energy",
                     base_name,
-                    node_type=node_type,
-                )
-            )
-            new_entities.append(
-                power_cls(
-                    energy_coordinator,
-                    entry.entry_id,
-                    dev_id,
-                    addr_str,
-                    f"{base_name} Power",
-                    f"{uid_prefix}:power",
-                    base_name,
+                    uid_prefix,
                     node_type=node_type,
                 )
             )
@@ -310,6 +282,60 @@ class HeaterPowerSensor(HeaterEnergyBase):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "W"
     _metric_key = "power"
+
+
+def _create_heater_sensors(
+    coordinator: Any,
+    energy_coordinator: EnergyStateCoordinator,
+    entry_id: str,
+    dev_id: str,
+    addr: str,
+    base_name: str,
+    uid_prefix: str,
+    *,
+    node_type: str | None = None,
+    temperature_cls: type[HeaterTemperatureSensor] = HeaterTemperatureSensor,
+    energy_cls: type[HeaterEnergyTotalSensor] = HeaterEnergyTotalSensor,
+    power_cls: type[HeaterPowerSensor] = HeaterPowerSensor,
+) -> tuple[
+    HeaterTemperatureSensor,
+    HeaterEnergyTotalSensor,
+    HeaterPowerSensor,
+]:
+    """Create the three heater node sensors for the given node."""
+
+    temperature = temperature_cls(
+        coordinator,
+        entry_id,
+        dev_id,
+        addr,
+        f"{base_name} Temperature",
+        f"{uid_prefix}:temp",
+        base_name,
+        node_type=node_type,
+    )
+    energy = energy_cls(
+        energy_coordinator,
+        entry_id,
+        dev_id,
+        addr,
+        f"{base_name} Energy",
+        f"{uid_prefix}:energy",
+        base_name,
+        node_type=node_type,
+    )
+    power = power_cls(
+        energy_coordinator,
+        entry_id,
+        dev_id,
+        addr,
+        f"{base_name} Power",
+        f"{uid_prefix}:power",
+        base_name,
+        node_type=node_type,
+    )
+
+    return (temperature, energy, power)
 
 
 class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
