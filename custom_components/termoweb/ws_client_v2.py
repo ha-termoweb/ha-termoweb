@@ -17,12 +17,12 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .const import DOMAIN, WS_NAMESPACE, signal_ws_data, signal_ws_status
 from .utils import extract_heater_addrs
-from .ws_client_legacy import HandshakeError, WSStats
+from .ws_shared import HandshakeError, TermoWebWSShared
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class TermoWebWSV2Client:
+class TermoWebWSV2Client(TermoWebWSShared):
     """Socket.IO v2 client used by the Ducaheat backend."""
 
     def __init__(
@@ -37,66 +37,25 @@ class TermoWebWSV2Client:
         handshake_fail_threshold: int = 5,
     ) -> None:
         """Initialize the websocket client with integration helpers."""
-        self.hass = hass
-        self.entry_id = entry_id
-        self.dev_id = dev_id
+        super().__init__(
+            hass,
+            entry_id=entry_id,
+            dev_id=dev_id,
+            task_name=f"{DOMAIN}-ws-v2-{dev_id}",
+        )
         self._client = api_client
         self._coordinator = coordinator
         self._session = session or api_client._session  # noqa: SLF001
-        self._task: asyncio.Task | None = None
-        self._ws: aiohttp.ClientWebSocketResponse | None = None
 
-        self._closing = False
-        self._connected_since: float | None = None
-        self._healthy_since: float | None = None
         self._hb_send_interval: float = 20.0
         self._ping_timeout: float = 60.0
-        self._hb_task: asyncio.Task | None = None
 
         self._backoff_seq = [5, 10, 30, 120, 300]
         self._backoff_idx = 0
 
-        self._stats = WSStats()
         self._hs_fail_count = 0
         self._hs_fail_start = 0.0
         self._hs_fail_threshold = handshake_fail_threshold
-
-    # ----------------- Public control -----------------
-
-    def start(self) -> asyncio.Task:
-        """Start the websocket runner task if not already running."""
-        if self._task and not self._task.done():
-            return self._task
-        self._closing = False
-        self._task = self.hass.loop.create_task(
-            self._runner(), name=f"{DOMAIN}-ws-v2-{self.dev_id}"
-        )
-        return self._task
-
-    async def stop(self) -> None:
-        """Stop the websocket client and cancel background tasks."""
-        self._closing = True
-        if self._hb_task:
-            self._hb_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._hb_task
-            self._hb_task = None
-        if self._ws:
-            with contextlib.suppress(TimeoutError, aiohttp.ClientError, RuntimeError):
-                await self._ws.close(
-                    code=aiohttp.WSCloseCode.GOING_AWAY, message=b"client stop"
-                )
-            self._ws = None
-        if self._task:
-            self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._task
-            self._task = None
-        self._update_status("stopped")
-
-    def is_running(self) -> bool:
-        """Return True if the websocket runner task is active."""
-        return bool(self._task and not self._task.done())
 
     # ----------------- Core loop -----------------
 
@@ -571,53 +530,5 @@ class TermoWebWSV2Client:
             return base.rstrip("/")
         return "https://api-tevolve.termoweb.net"
 
-    def _update_status(self, status: str) -> None:
-        state_bucket = self.hass.data[DOMAIN][self.entry_id].setdefault("ws_state", {})
-        state = state_bucket.setdefault(self.dev_id, {})
-        now = time.time()
-        state["status"] = status
-        state["last_event_at"] = self._stats.last_event_ts or None
-        state["healthy_since"] = self._healthy_since
-        state["healthy_minutes"] = (
-            int((now - self._healthy_since) / 60) if self._healthy_since else 0
-        )
-        state["frames_total"] = self._stats.frames_total
-        state["events_total"] = self._stats.events_total
 
-        async_dispatcher_send(
-            self.hass,
-            signal_ws_status(self.entry_id),
-            {"dev_id": self.dev_id, "status": status},
-        )
-
-    def _mark_event(self, *, paths: list[str] | None) -> None:
-        now = time.time()
-        self._stats.last_event_ts = now
-        if paths:
-            self._stats.events_total += 1
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                uniq: list[str] = []
-                for path in paths:
-                    if path not in uniq:
-                        uniq.append(path)
-                    if len(uniq) >= 5:
-                        break
-                self._stats.last_paths = uniq
-
-        domain_bucket: dict[str, Any] = self.hass.data.setdefault(DOMAIN, {})
-        entry_bucket: dict[str, Any] = domain_bucket.setdefault(self.entry_id, {})
-        state_bucket: dict[str, dict[str, Any]] = entry_bucket.setdefault(
-            "ws_state", {}
-        )
-        state: dict[str, Any] = state_bucket.setdefault(self.dev_id, {})
-        state["last_event_at"] = now
-        state["frames_total"] = self._stats.frames_total
-        state["events_total"] = self._stats.events_total
-
-        if (
-            self._connected_since
-            and not self._healthy_since
-            and (now - self._connected_since) >= 300
-        ):
-            self._healthy_since = now
-            self._update_status("healthy")
+__all__ = ["TermoWebWSV2Client", "HandshakeError", "signal_ws_status"]

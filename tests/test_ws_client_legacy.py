@@ -14,6 +14,7 @@ from conftest import _install_stubs
 _install_stubs()
 
 import custom_components.termoweb.ws_client_legacy as ws_client_legacy
+import custom_components.termoweb.ws_shared as ws_shared
 
 
 def _load_ws_client(
@@ -29,6 +30,13 @@ def _load_ws_client(
         defaults.get_responses = list(get_responses or [])
         defaults.ws_connect_results = list(ws_connect_results or [])
     return module
+
+
+def _patch_dispatcher(
+    module: Any, monkeypatch: pytest.MonkeyPatch, dispatcher: Any
+) -> None:
+    monkeypatch.setattr(module, "async_dispatcher_send", dispatcher)
+    monkeypatch.setattr(ws_shared, "async_dispatcher_send", dispatcher)
 
 
 def test_handshake_error_attributes_and_start_reuses_task() -> None:
@@ -270,7 +278,7 @@ def test_runner_handles_handshake_events_and_disconnect(
     async def _run() -> None:
         module = _load_ws_client()
         dispatcher = MagicMock()
-        monkeypatch.setattr(module, "async_dispatcher_send", dispatcher)
+        _patch_dispatcher(module, monkeypatch, dispatcher)
         aiohttp = module.aiohttp
 
         orig_sleep = asyncio.sleep
@@ -828,7 +836,8 @@ def test_handshake_status_error_raises_handshake_error() -> None:
 
 def test_handle_event_updates_state_and_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load_ws_client()
-    module.async_dispatcher_send = MagicMock()
+    dispatcher = MagicMock()
+    _patch_dispatcher(module, monkeypatch, dispatcher)
     loop = asyncio.new_event_loop()
     hass = types.SimpleNamespace(
         loop=loop,
@@ -891,7 +900,7 @@ def test_handle_event_updates_state_and_dispatch(monkeypatch: pytest.MonkeyPatch
     assert dev_data["htr"]["advanced"]["01"] == {"adv": True}
     assert dev_data["raw"]["misc"] == {"foo": "bar"}
     assert client._stats.events_total == 1
-    module.async_dispatcher_send.assert_has_calls(
+    dispatcher.assert_has_calls(
         [
             call(
                 hass,
@@ -910,7 +919,7 @@ def test_handle_event_updates_state_and_dispatch(monkeypatch: pytest.MonkeyPatch
             ),
         ]
     )
-    assert module.async_dispatcher_send.call_count == 3
+    assert dispatcher.call_count == 3
 
     ws_state = hass.data[module.DOMAIN]["entry"]["ws_state"]["dev"]
     assert ws_state["last_event_at"] == 1000.0
@@ -956,7 +965,8 @@ def test_subscribe_htr_samples_sends_expected_payloads():
 
 def test_mark_event_promotes_to_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load_ws_client()
-    module.async_dispatcher_send = MagicMock()
+    dispatcher = MagicMock()
+    _patch_dispatcher(module, monkeypatch, dispatcher)
     loop = asyncio.new_event_loop()
     hass = types.SimpleNamespace(
         loop=loop,
@@ -986,7 +996,7 @@ def test_mark_event_promotes_to_healthy(monkeypatch: pytest.MonkeyPatch) -> None
     assert ws_state["frames_total"] == 7
     assert ws_state["events_total"] == 3
     assert client._healthy_since == 805.0
-    module.async_dispatcher_send.assert_called_with(
+    dispatcher.assert_called_with(
         hass,
         module.signal_ws_status("entry"),
         {"dev_id": "dev", "status": "healthy"},
@@ -998,7 +1008,7 @@ def test_heartbeat_loop_sends_until_cancel(monkeypatch: pytest.MonkeyPatch) -> N
     async def _run() -> None:
         module = _load_ws_client()
         dispatcher = MagicMock()
-        monkeypatch.setattr(module, "async_dispatcher_send", dispatcher)
+        _patch_dispatcher(module, monkeypatch, dispatcher)
         loop = asyncio.get_event_loop()
         hass = types.SimpleNamespace(loop=loop, data={module.DOMAIN: {"entry": {}}})
         coordinator = types.SimpleNamespace()
@@ -1224,7 +1234,7 @@ def test_read_loop_handles_close_and_error_messages() -> None:
     asyncio.run(_run())
 
 
-def test_handle_event_seeds_device_state() -> None:
+def test_handle_event_seeds_device_state(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load_ws_client()
     loop = types.SimpleNamespace(create_task=lambda *_args, **_kwargs: None)
     hass = types.SimpleNamespace(loop=loop, data={})
@@ -1237,6 +1247,7 @@ def test_handle_event_seeds_device_state() -> None:
         api_client=api,
         coordinator=coordinator,
     )
+    _patch_dispatcher(module, monkeypatch, MagicMock())
     client._stats.frames_total = 0
     event = {
         "name": "data",
@@ -1577,10 +1588,10 @@ def test_mark_event_unique_paths() -> None:
         api_client=types.SimpleNamespace(_session=None),
         coordinator=coordinator,
     )
-    old_level = module._LOGGER.level
-    module._LOGGER.setLevel(logging.DEBUG)
+    old_level = ws_shared._LOGGER.level
+    ws_shared._LOGGER.setLevel(logging.DEBUG)
     try:
         client._mark_event(paths=["/a", "/a", "/b", "/c", "/d", "/e"])
     finally:
-        module._LOGGER.setLevel(old_level)
+        ws_shared._LOGGER.setLevel(old_level)
     assert client._stats.last_paths == ["/a", "/b", "/c", "/d", "/e"]

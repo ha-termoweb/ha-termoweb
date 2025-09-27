@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 import json
 import logging
 import random
 import time
+from collections.abc import Iterable
 from typing import Any
 
 import aiohttp
@@ -15,29 +15,14 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from .api import TermoWebClient
 from .const import API_BASE, DOMAIN, WS_NAMESPACE, signal_ws_data, signal_ws_status
 from .utils import extract_heater_addrs
+from .ws_shared import HandshakeError, TermoWebWSShared
 
 _LOGGER = logging.getLogger(__name__)
 
 HandshakeResult = tuple[str, int]  # (sid, heartbeat_timeout_s)
 
 
-class HandshakeError(RuntimeError):
-    def __init__(self, status: int, url: str, body_snippet: str) -> None:
-        super().__init__(f"handshake failed (status={status})")
-        self.status = status
-        self.url = url
-        self.body_snippet = body_snippet
-
-
-@dataclass
-class WSStats:
-    frames_total: int = 0
-    events_total: int = 0
-    last_event_ts: float = 0.0
-    last_paths: list[str] | None = None
-
-
-class TermoWebWSLegacyClient:
+class TermoWebWSLegacyClient(TermoWebWSShared):
     """Minimal read-only Socket.IO 0.9 client for TermoWeb cloud.
 
     Behavior:
@@ -62,69 +47,23 @@ class TermoWebWSLegacyClient:
         session: aiohttp.ClientSession | None = None,
         handshake_fail_threshold: int = 5,
     ) -> None:
-        self.hass = hass
-        self.entry_id = entry_id
-        self.dev_id = dev_id
+        super().__init__(
+            hass,
+            entry_id=entry_id,
+            dev_id=dev_id,
+            task_name=f"{DOMAIN}-ws-{dev_id}",
+        )
         self._client = api_client
         self._coordinator = coordinator
         self._session = session or api_client._session  # reuse HA session
-        self._task: asyncio.Task | None = None
-        self._ws: aiohttp.ClientWebSocketResponse | None = None
-
-        self._closing = False
-        self._connected_since: float | None = None
-        self._healthy_since: float | None = None
         self._hb_send_interval: float = 27.0  # default; refined from handshake timeout
-        self._hb_task: asyncio.Task | None = None
 
         self._backoff_seq = [5, 10, 30, 120, 300]  # seconds
         self._backoff_idx = 0
 
-        self._stats = WSStats()
         self._hs_fail_count: int = 0
         self._hs_fail_start: float = 0.0
         self._hs_fail_threshold: int = handshake_fail_threshold
-
-    # ----------------- Public control -----------------
-
-    def start(self) -> asyncio.Task:
-        if self._task and not self._task.done():
-            return self._task
-        self._closing = False
-        self._task = self.hass.loop.create_task(
-            self._runner(), name=f"{DOMAIN}-ws-{self.dev_id}"
-        )
-        return self._task
-
-    async def stop(self) -> None:
-        """Cancel tasks and close WS cleanly."""
-        self._closing = True
-        if self._hb_task:
-            self._hb_task.cancel()
-            try:
-                await self._hb_task
-            except asyncio.CancelledError:
-                pass
-            self._hb_task = None
-        if self._ws:
-            try:
-                await self._ws.close(
-                    code=aiohttp.WSCloseCode.GOING_AWAY, message=b"client stop"
-                )
-            except Exception:
-                pass
-            self._ws = None
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-            self._task = None
-        self._update_status("stopped")
-
-    def is_running(self) -> bool:
-        return bool(self._task and not self._task.done())
 
     # ----------------- Core loop -----------------
 
@@ -519,57 +458,8 @@ class TermoWebWSLegacyClient:
             return base.rstrip("/")
         return API_BASE
 
-    def _update_status(self, status: str) -> None:
-        # Update shared state bucket (hass.data[...] managed by integration)
-        state_bucket = self.hass.data[DOMAIN][self.entry_id].setdefault("ws_state", {})
-        s = state_bucket.setdefault(self.dev_id, {})
-        now = time.time()
-        s["status"] = status
-        s["last_event_at"] = self._stats.last_event_ts or None
-        s["healthy_since"] = self._healthy_since
-        s["healthy_minutes"] = (
-            int((now - self._healthy_since) / 60) if self._healthy_since else 0
-        )
-        s["frames_total"] = self._stats.frames_total
-        s["events_total"] = self._stats.events_total
+    def _ws_close_exceptions(self) -> Iterable[type[BaseException]]:  # type: ignore[override]
+        return (Exception,)
 
-        # Dispatch a status update so the hub entity & setup logic can react (e.g., stretch polling)
-        async_dispatcher_send(
-            self.hass,
-            signal_ws_status(self.entry_id),
-            {"dev_id": self.dev_id, "status": status},
-        )
 
-    def _mark_event(self, *, paths: list[str] | None) -> None:
-        now = time.time()
-        self._stats.last_event_ts = now
-        if paths:
-            self._stats.events_total += 1
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                # Keep only first few distinct paths for compact debug
-                uniq = []
-                for p in paths:
-                    if p not in uniq:
-                        uniq.append(p)
-                    if len(uniq) >= 5:
-                        break
-                self._stats.last_paths = uniq
-
-        domain_bucket: dict[str, Any] = self.hass.data.setdefault(DOMAIN, {})
-        entry_bucket: dict[str, Any] = domain_bucket.setdefault(self.entry_id, {})
-        state_bucket: dict[str, dict[str, Any]] = entry_bucket.setdefault(
-            "ws_state", {}
-        )
-        state: dict[str, Any] = state_bucket.setdefault(self.dev_id, {})
-        state["last_event_at"] = now
-        state["frames_total"] = self._stats.frames_total
-        state["events_total"] = self._stats.events_total
-
-        # Health heuristic: connected and alive for ≥ 300s => healthy
-        if (
-            self._connected_since
-            and not self._healthy_since
-            and (now - self._connected_since) >= 300
-        ):
-            self._healthy_since = now
-            self._update_status("healthy")
+__all__ = ["TermoWebWSLegacyClient", "HandshakeError", "signal_ws_status"]
