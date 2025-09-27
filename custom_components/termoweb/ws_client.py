@@ -506,7 +506,7 @@ class TermoWebSocketClient:
             if data.startswith("0::"):
                 raise RuntimeError("server disconnect")
 
-    def _handle_event(self, evt: dict[str, Any]) -> None:  # noqa: C901
+    def _handle_event(self, evt: dict[str, Any]) -> None:
         """Process a Socket.IO 0.9 event payload."""
         if not isinstance(evt, dict):
             return
@@ -575,61 +575,52 @@ class TermoWebSocketClient:
                             dev_map, nodes_by_type, node_type
                         )
                         bucket["addrs"] = list(addrs)
-                    if hasattr(self._coordinator, "update_nodes"):
-                        self._coordinator.update_nodes(body, inventory)
-                    record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-                    if isinstance(record, dict):
-                        record["nodes"] = body
-                        record["node_inventory"] = inventory
-                        energy_coordinator = record.get("energy_coordinator")
-                        if hasattr(energy_coordinator, "update_addresses"):
-                            energy_coordinator.update_addresses(type_to_addrs)
                     updated_nodes = True
-            else:
-                node_type, addr = _extract_type_addr(path)
-                if (
-                    node_type
-                    and addr
-                    and path.endswith("/settings")
-                    and node_type != "mgr"
-                ):
-                    bucket = self._ensure_type_bucket(
-                        dev_map, nodes_by_type, node_type
-                    )
-                    settings_map: dict[str, Any] = bucket.setdefault("settings", {})
-                    if isinstance(body, dict):
-                        settings_map[addr] = body
-                        updated_addrs.append((node_type, addr))
-                    continue
-                if (
-                    node_type
-                    and addr
-                    and path.endswith("/advanced_setup")
-                    and node_type != "mgr"
-                ):
-                    bucket = self._ensure_type_bucket(
-                        dev_map, nodes_by_type, node_type
-                    )
-                    adv_map: dict[str, Any] = bucket.setdefault("advanced", {})
-                    if isinstance(body, dict):
-                        adv_map[addr] = body
-                    continue
-                if (
-                    node_type
-                    and addr
-                    and path.endswith("/samples")
-                    and node_type != "mgr"
-                ):
-                    bucket = self._ensure_type_bucket(
-                        dev_map, nodes_by_type, node_type
-                    )
-                    samples_map: dict[str, Any] = bucket.setdefault("samples", {})
-                    samples_map[addr] = body
-                    sample_addrs.append((node_type, addr))
-                    continue
-                raw = dev_map.setdefault("raw", {})
-                key = path.strip("/").replace("/", "_")
-                raw[key] = body
+                continue
+            node_type, addr = _extract_type_addr(path)
+            if (
+                node_type
+                and addr
+                and path.endswith("/settings")
+                and node_type != "mgr"
+            ):
+                bucket = self._ensure_type_bucket(
+                    dev_map, nodes_by_type, node_type
+                )
+                settings_map: dict[str, Any] = bucket.setdefault("settings", {})
+                if isinstance(body, dict):
+                    settings_map[addr] = body
+                    updated_addrs.append((node_type, addr))
+                continue
+            if (
+                node_type
+                and addr
+                and path.endswith("/advanced_setup")
+                and node_type != "mgr"
+            ):
+                bucket = self._ensure_type_bucket(
+                    dev_map, nodes_by_type, node_type
+                )
+                adv_map: dict[str, Any] = bucket.setdefault("advanced", {})
+                if isinstance(body, dict):
+                    adv_map[addr] = body
+                continue
+            if (
+                node_type
+                and addr
+                and path.endswith("/samples")
+                and node_type != "mgr"
+            ):
+                bucket = self._ensure_type_bucket(
+                    dev_map, nodes_by_type, node_type
+                )
+                samples_map: dict[str, Any] = bucket.setdefault("samples", {})
+                samples_map[addr] = body
+                sample_addrs.append((node_type, addr))
+                continue
+            raw = dev_map.setdefault("raw", {})
+            key = path.strip("/").replace("/", "_")
+            raw[key] = body
         self._mark_event(paths=paths)
         payload_base = {
             "dev_id": self.dev_id,
