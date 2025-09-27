@@ -15,7 +15,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_data
 from .nodes import Node, build_node_inventory
-from .utils import HEATER_NODE_TYPES
+from .utils import HEATER_NODE_TYPES, ensure_node_inventory
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -96,10 +96,7 @@ def prepare_heater_platform_data(
     """Return node metadata and name resolution helpers for a config entry."""
 
     nodes = entry_data.get("nodes")
-    inventory = list(entry_data.get("node_inventory") or [])
-    if not inventory and nodes:
-        inventory = build_node_inventory(nodes)
-        entry_data["node_inventory"] = inventory
+    inventory = ensure_node_inventory(entry_data, nodes=nodes)
 
     nodes_by_type: dict[str, list[Node]] = defaultdict(list)
     explicit_names: set[tuple[str, str]] = set()
