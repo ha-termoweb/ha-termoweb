@@ -11,6 +11,7 @@ from conftest import _install_stubs
 _install_stubs()
 
 import custom_components.termoweb.ws_client_v2 as ws_client_v2  # noqa: E402
+import custom_components.termoweb.ws_shared as ws_shared  # noqa: E402
 
 
 def _configure_defaults(*, get_responses: list[Any] | None = None, ws_results: list[Any] | None = None) -> None:
@@ -19,6 +20,13 @@ def _configure_defaults(*, get_responses: list[Any] | None = None, ws_results: l
     if defaults is not None:
         defaults.get_responses = list(get_responses or [])
         defaults.ws_connect_results = list(ws_results or [])
+
+
+def _patch_dispatcher(
+    module: Any, monkeypatch: pytest.MonkeyPatch, dispatcher: Any
+) -> None:
+    monkeypatch.setattr(module, "async_dispatcher_send", dispatcher)
+    monkeypatch.setattr(ws_shared, "async_dispatcher_send", dispatcher)
 
 
 def test_runner_performs_handshake_and_dispatches_events(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -69,7 +77,7 @@ def test_runner_performs_handshake_and_dispatches_events(monkeypatch: pytest.Mon
         def fake_dispatch(hass_obj: Any, signal: str, payload: dict[str, Any]) -> None:
             dispatch_calls.append((signal, payload))
 
-        monkeypatch.setattr(module, "async_dispatcher_send", fake_dispatch)
+        _patch_dispatcher(module, monkeypatch, fake_dispatch)
 
         client = module.TermoWebWSV2Client(
             hass,
@@ -157,7 +165,7 @@ def test_handle_event_merges_updates(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_dispatch(hass_obj: Any, signal: str, payload: dict[str, Any]) -> None:
         dispatch_calls.append((signal, payload))
 
-    monkeypatch.setattr(module, "async_dispatcher_send", fake_dispatch)
+    _patch_dispatcher(module, monkeypatch, fake_dispatch)
 
     client = module.TermoWebWSV2Client(
         hass,
@@ -275,9 +283,9 @@ def test_stop_cancels_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
         update_calls: list[str] = []
-        monkeypatch.setattr(
+        _patch_dispatcher(
             module,
-            "async_dispatcher_send",
+            monkeypatch,
             lambda *args, **kwargs: update_calls.append(args[1]),
         )
 
@@ -1157,7 +1165,7 @@ def test_handle_event_skips_empty_update_batches(monkeypatch: pytest.MonkeyPatch
     def fake_dispatch(hass_obj: Any, signal: str, payload: dict[str, Any]) -> None:
         sent.append(payload)
 
-    monkeypatch.setattr(module, "async_dispatcher_send", fake_dispatch)
+    _patch_dispatcher(module, monkeypatch, fake_dispatch)
 
     client._handle_event("dev_data", [])
     assert sent == []
@@ -1409,7 +1417,7 @@ def test_update_status_records_state(monkeypatch: pytest.MonkeyPatch) -> None:
     def record_dispatch(hass_obj: Any, signal: str, payload: dict[str, Any]) -> None:
         statuses.append(payload)
 
-    monkeypatch.setattr(module, "async_dispatcher_send", record_dispatch)
+    _patch_dispatcher(module, monkeypatch, record_dispatch)
 
     client._update_status("connected")
 
@@ -1452,9 +1460,9 @@ def test_mark_event_tracks_health(monkeypatch: pytest.MonkeyPatch) -> None:
     def record_status(status: str) -> None:
         statuses.append(status)
 
-    monkeypatch.setattr(module, "async_dispatcher_send", fake_dispatch)
+    _patch_dispatcher(module, monkeypatch, fake_dispatch)
     monkeypatch.setattr(client, "_update_status", record_status)
-    monkeypatch.setattr(module._LOGGER, "isEnabledFor", lambda level: True)
+    monkeypatch.setattr(ws_shared._LOGGER, "isEnabledFor", lambda level: True)
     monkeypatch.setattr(module.time, "time", lambda: 360.0)
 
     client._mark_event(paths=["/a", "/a", "/b", "/c", "/d", "/e"])  # 6 entries -> dedupe
