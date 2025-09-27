@@ -10,31 +10,9 @@ from custom_components.termoweb.nodes import build_node_inventory
 from custom_components.termoweb.utils import (
     HEATER_NODE_TYPES,
     addresses_by_node_type,
-    addresses_by_type,
     ensure_node_inventory,
     float_or_none,
 )
-
-
-def test_addresses_by_type_filters_and_deduplicates() -> None:
-    inventory = build_node_inventory(
-        {
-            "nodes": [
-                {"type": "htr", "addr": "A"},
-                {"type": "foo", "addr": "B"},
-                {"type": "acm", "addr": 1},
-                {"type": "HTR", "addr": "A"},
-            ]
-        }
-    )
-
-    assert addresses_by_type(inventory, HEATER_NODE_TYPES) == ["A", "1"]
-
-
-def test_addresses_by_type_handles_missing_types() -> None:
-    inventory = build_node_inventory({"nodes": [{"type": "htr", "addr": "A"}]})
-
-    assert addresses_by_type(inventory, [None]) == []
 
 
 def test_ensure_node_inventory_returns_cached_copy() -> None:
