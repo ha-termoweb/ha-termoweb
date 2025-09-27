@@ -282,6 +282,61 @@ def test_sensor_async_setup_entry_defaults_and_skips_invalid() -> None:
     asyncio.run(_run())
 
 
+def test_sensor_async_setup_entry_ignores_blank_addresses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        hass = HomeAssistant()
+        entry = types.SimpleNamespace(entry_id="entry-skip")
+        dev_id = "dev-skip"
+
+        coordinator = types.SimpleNamespace(hass=hass, data={dev_id: {}})
+
+        hass.data = {
+            DOMAIN: {
+                entry.entry_id: {
+                    "coordinator": coordinator,
+                    "client": types.SimpleNamespace(),
+                    "dev_id": dev_id,
+                    "energy_coordinator": types.SimpleNamespace(
+                        update_addresses=lambda addrs: None
+                    ),
+                }
+            }
+        }
+
+        blank_node = types.SimpleNamespace(addr=" ")
+        valid_node = types.SimpleNamespace(addr="9")
+
+        def fake_prepare(*args: Any, **kwargs: Any) -> tuple[Any, Any, Any, Any]:
+            return (
+                [],
+                {"acm": [blank_node, valid_node]},
+                {"acm": ["9"]},
+                lambda *_: "Heater",
+            )
+
+        monkeypatch.setattr(
+            sensor_module, "prepare_heater_platform_data", fake_prepare
+        )
+
+        added: list[Any] = []
+
+        def _add_entities(entities: list[Any]) -> None:
+            added.extend(entities)
+
+        await async_setup_sensor_entry(hass, entry, _add_entities)
+
+        ids = [
+            getattr(sensor, "unique_id", getattr(sensor, "_attr_unique_id", ""))
+            for sensor in added
+        ]
+        assert any(":acm:9" in uid for uid in ids)
+        assert not any("::" in uid for uid in ids)
+
+    asyncio.run(_run())
+
+
 def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> None:
     async def _run() -> None:
         hass = HomeAssistant()

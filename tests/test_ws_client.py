@@ -152,6 +152,716 @@ def test_stop_handles_exceptions_and_updates_status() -> None:
     asyncio.run(_run())
 
 
+def test_ws_url_uses_client_api_base() -> None:
+    module = _load_ws_client()
+
+    async def _run() -> None:
+        loop = asyncio.get_running_loop()
+        hass = types.SimpleNamespace(
+            loop=loop,
+            data={module.DOMAIN: {"entry": {"ws_state": {}}}},
+        )
+        coordinator = types.SimpleNamespace()
+
+        class TokenClient:
+            api_base = "https://api-tevolve.example.com/base/"
+
+            async def _authed_headers(self) -> dict[str, str]:
+                return {"Authorization": "Bearer scoped-token"}
+
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=TokenClient(),
+            coordinator=coordinator,
+        )
+
+        url = await client.ws_url()
+        assert url == (
+            "https://api-tevolve.example.com/base/api/v2/socket_io?token=scoped-token"
+        )
+
+    asyncio.run(_run())
+
+
+def test_runner_dispatches_engineio() -> None:
+    module = _load_ws_client()
+
+    async def _run() -> None:
+        loop = asyncio.get_running_loop()
+        hass = types.SimpleNamespace(
+            loop=loop, data={module.DOMAIN: {"entry": {"ws_state": {}}}}
+        )
+
+        class FakeClient:
+            api_base = "https://api-tevolve.termoweb.net/"
+
+            async def _authed_headers(self) -> dict[str, str]:
+                return {"Authorization": "Bearer tok"}
+
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=FakeClient(),
+            coordinator=types.SimpleNamespace(),
+            protocol="engineio2",
+        )
+
+        calls: list[str] = []
+
+        async def fake_engineio(self: Any) -> None:
+            calls.append("engineio")
+
+        async def fake_socketio(self: Any) -> None:
+            calls.append("socketio")
+
+        client._run_engineio_v2 = types.MethodType(fake_engineio, client)
+        client._run_socketio_09 = types.MethodType(fake_socketio, client)
+        client._protocol_hint = "engineio2"
+
+        await client._runner()
+
+        assert calls == ["engineio"]
+
+    asyncio.run(_run())
+
+
+def test_run_engineio_v2_handles_flow_and_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_ws_client()
+
+    async def _run() -> None:
+        loop = asyncio.get_running_loop()
+        hass = types.SimpleNamespace(
+            loop=loop, data={module.DOMAIN: {"entry": {"ws_state": {}}}}
+        )
+        coordinator = types.SimpleNamespace()
+        session = module.aiohttp.testing.FakeClientSession()
+
+        class FakeClient:
+            api_base = "https://api-tevolve.termoweb.net/"
+
+            async def _authed_headers(self) -> dict[str, str]:
+                return {"Authorization": "Bearer token"}
+
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=FakeClient(),
+            coordinator=coordinator,
+            session=session,
+            protocol="engineio2",
+        )
+
+        statuses: list[str] = []
+        client._update_status = MagicMock(side_effect=lambda status: statuses.append(status))
+
+        handshake_effects: list[Any] = [
+            module.HandshakeError(503, "https://api", "fail"),
+            module.EngineIOHandshake(sid="sid-a", ping_interval=10.0, ping_timeout=20.0),
+            module.EngineIOHandshake(sid="sid-b", ping_interval=12.0, ping_timeout=24.0),
+        ]
+
+        async def fake_handshake(self: Any) -> module.EngineIOHandshake:
+            effect = handshake_effects.pop(0)
+            if isinstance(effect, Exception):
+                raise effect
+            return effect
+
+        async def fake_connect(self: Any, sid: str) -> None:
+            self._engineio_ws = module.aiohttp.testing.FakeWebSocket()
+            await self._engineio_send("40")
+
+        read_effects: list[Any] = [RuntimeError("boom"), asyncio.CancelledError()]
+
+        async def fake_read_loop(self: Any) -> None:
+            effect = read_effects.pop(0)
+            if isinstance(effect, asyncio.CancelledError):
+                raise effect
+            if isinstance(effect, Exception):
+                raise effect
+            self._closing = True
+            return None
+
+        async def fake_ping_loop(self: Any) -> None:
+            await asyncio.sleep(0)
+
+        send_calls: list[str] = []
+
+        async def fake_send(self: Any, data: str) -> None:
+            send_calls.append(data)
+            if self._engineio_ws:
+                await self._engineio_ws.send_str(data)
+
+        client._engineio_handshake = types.MethodType(fake_handshake, client)
+        client._engineio_connect = types.MethodType(fake_connect, client)
+        client._engineio_read_loop = types.MethodType(fake_read_loop, client)
+        client._engineio_ping_loop = types.MethodType(fake_ping_loop, client)
+        client._engineio_send = types.MethodType(fake_send, client)
+
+        sleep_delays: list[float] = []
+
+        async def fake_sleep(delay: float) -> None:
+            sleep_delays.append(delay)
+
+        monkeypatch.setattr(module.asyncio, "sleep", fake_sleep)
+        monkeypatch.setattr(ws_core.asyncio, "sleep", fake_sleep)
+        monkeypatch.setattr(module.random, "uniform", lambda a, b: 1.0)
+
+        await client._run_engineio_v2()
+
+        assert statuses[0] == "connecting"
+        assert "connected" in statuses
+        assert statuses[-1] == "disconnected"
+        assert client._engineio_sid == "sid-b"
+        assert client._ping_task is None
+        assert client._engineio_ws is None
+        assert sleep_delays
+        assert send_calls
+
+    asyncio.run(_run())
+
+
+def test_run_engineio_v2_waits_without_session() -> None:
+    module = _load_ws_client()
+
+    async def _run() -> None:
+        loop = asyncio.get_running_loop()
+        hass = types.SimpleNamespace(
+            loop=loop, data={module.DOMAIN: {"entry": {"ws_state": {}}}}
+        )
+        coordinator = types.SimpleNamespace()
+
+        class FakeClient:
+            api_base = "https://api-tevolve.termoweb.net/"
+
+            async def _authed_headers(self) -> dict[str, str]:
+                return {"Authorization": "Bearer token"}
+
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=FakeClient(),
+            coordinator=coordinator,
+            session=None,
+            protocol="engineio2",
+        )
+
+        client._stop_event.set()
+        await client._run_engineio_v2()
+
+    asyncio.run(_run())
+
+
+def test_engineio_handshake_parsing_and_errors() -> None:
+    module = _load_ws_client()
+
+    async def _run() -> None:
+        loop = asyncio.get_running_loop()
+        hass = types.SimpleNamespace(
+            loop=loop, data={module.DOMAIN: {"entry": {"ws_state": {}}}}
+        )
+        coordinator = types.SimpleNamespace()
+
+        class FakeClient:
+            api_base = "https://api-tevolve.termoweb.net/"
+
+            async def _authed_headers(self) -> dict[str, str]:
+                return {"Authorization": "Bearer token"}
+
+        session = module.aiohttp.testing.FakeClientSession(
+            get_responses=[
+                (
+                    200,
+                    '0{"sid":"abc","pingInterval":5000,"pingTimeout":"15000"}',
+                )
+            ]
+        )
+
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=FakeClient(),
+            coordinator=coordinator,
+            session=session,
+            protocol="engineio2",
+        )
+
+        handshake = await client._engineio_handshake()
+        assert handshake.sid == "abc"
+        assert handshake.ping_interval == 5.0
+        assert handshake.ping_timeout == 15.0
+
+        client._session = module.aiohttp.testing.FakeClientSession(
+            get_responses=[(500, "oops")]
+        )
+        with pytest.raises(module.HandshakeError) as err:
+            await client._engineio_handshake()
+        assert err.value.body_snippet == "oops"
+
+        class RaisingContext:
+            async def __aenter__(self) -> None:
+                raise module.aiohttp.ClientError("boom")
+
+            async def __aexit__(self, exc_type, exc, tb) -> bool:
+                return False
+
+        class RaisingSession:
+            def get(self, *args: Any, **kwargs: Any) -> RaisingContext:
+                return RaisingContext()
+
+        client._session = RaisingSession()
+        with pytest.raises(module.HandshakeError) as err2:
+            await client._engineio_handshake()
+        assert err2.value.status == -1
+
+        parsed = module.TermoWebSocketClient._parse_engineio_handshake(
+            '0{"sid":"sid-x","pingInterval":"bad","pingTimeout":null}'
+        )
+        assert parsed.ping_interval == 25.0
+        assert parsed.ping_timeout == 60.0
+
+        with pytest.raises(RuntimeError):
+            module.TermoWebSocketClient._parse_engineio_handshake("no-json")
+        with pytest.raises(RuntimeError):
+            module.TermoWebSocketClient._parse_engineio_handshake("0{}")
+        with pytest.raises(RuntimeError):
+            module.TermoWebSocketClient._parse_engineio_handshake(
+                '0{"sid":"abc","pingInterval":bad}'
+            )
+
+    asyncio.run(_run())
+
+
+def test_engineio_connect_and_send() -> None:
+    module = _load_ws_client()
+
+    async def _run() -> None:
+        loop = asyncio.get_running_loop()
+        hass = types.SimpleNamespace(
+            loop=loop, data={module.DOMAIN: {"entry": {"ws_state": {}}}}
+        )
+        coordinator = types.SimpleNamespace()
+
+        class FakeClient:
+            api_base = "https://api-tevolve.termoweb.net/api/"
+
+            async def _authed_headers(self) -> dict[str, str]:
+                return {"Authorization": "Bearer abc"}
+
+        session = module.aiohttp.testing.FakeClientSession(
+            ws_connect_results=[module.aiohttp.testing.FakeWebSocket()]
+        )
+
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=FakeClient(),
+            coordinator=coordinator,
+            session=session,
+            protocol="engineio2",
+        )
+
+        await client._engineio_connect("sid-123")
+        assert client._engineio_ws is not None
+        assert session.ws_connect_calls
+        call = session.ws_connect_calls[0]
+        assert "sid=sid-123" in call["url"]
+        assert "token=abc" in call["url"]
+        assert call["kwargs"]["protocols"] == ("websocket",)
+        assert client._engineio_ws.sent[0] == "40"
+
+        await client._engineio_send("2")
+        assert client._engineio_ws.sent[-1] == "2"
+
+        client._engineio_ws = None
+        await client._engineio_send("ignored")
+
+    asyncio.run(_run())
+
+
+def test_engineio_ping_loop_handles_cancel_and_failures() -> None:
+    module = _load_ws_client()
+
+    async def _run() -> None:
+        loop = asyncio.get_running_loop()
+        hass = types.SimpleNamespace(
+            loop=loop, data={module.DOMAIN: {"entry": {"ws_state": {}}}}
+        )
+        coordinator = types.SimpleNamespace()
+
+        class FakeClient:
+            api_base = "https://api-tevolve.termoweb.net/"
+
+            async def _authed_headers(self) -> dict[str, str]:
+                return {"Authorization": "Bearer token"}
+
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=FakeClient(),
+            coordinator=coordinator,
+            protocol="engineio2",
+        )
+
+        client._engineio_ping_interval = 0.0
+        client._engineio_send = AsyncMock(return_value=None)
+
+        task = asyncio.create_task(client._engineio_ping_loop())
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        client._engineio_send = AsyncMock(side_effect=RuntimeError("fail"))
+        client._engineio_ping_interval = 0.0
+        await client._engineio_ping_loop()
+
+    asyncio.run(_run())
+
+
+def test_subscribe_samples_uses_coordinator_nodes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_ws_client()
+
+    async def _run() -> None:
+        loop = asyncio.get_running_loop()
+        hass = types.SimpleNamespace(loop=loop, data={})
+        coordinator_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
+        coordinator = types.SimpleNamespace(_nodes=coordinator_nodes)
+
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=types.SimpleNamespace(_session=None),
+            coordinator=coordinator,
+        )
+
+        hass.data[module.DOMAIN][client.entry_id] = None
+
+        calls: list[Any] = []
+
+        def fake_build(raw: Any) -> list[Any]:
+            calls.append(raw)
+            return [types.SimpleNamespace(type="htr", addr="1")]
+
+        monkeypatch.setattr(module, "build_node_inventory", fake_build)
+        monkeypatch.setattr(ws_core, "build_node_inventory", fake_build)
+
+        client._send_text = AsyncMock(return_value=None)
+
+        await client._subscribe_htr_samples()
+
+        assert calls and calls[0] is coordinator_nodes
+        assert client._send_text.await_count >= 1
+
+    asyncio.run(_run())
+
+
+def test_engineio_read_loop_processes_messages() -> None:
+    module = _load_ws_client()
+
+    async def _run() -> None:
+        loop = asyncio.get_running_loop()
+        hass = types.SimpleNamespace(
+            loop=loop, data={module.DOMAIN: {"entry": {"ws_state": {}}}}
+        )
+        coordinator = types.SimpleNamespace()
+
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=types.SimpleNamespace(_session=None),
+            coordinator=coordinator,
+            protocol="engineio2",
+        )
+
+        client._engineio_send = AsyncMock(return_value=None)
+        client._mark_event = MagicMock()
+        client._on_frame = MagicMock()
+
+        ws = module.aiohttp.testing.FakeWebSocket(
+            messages=[
+                {"type": 99, "data": None},
+                {
+                    "type": module.aiohttp.WSMsgType.TEXT,
+                    "data": "3",
+                },
+                {
+                    "type": module.aiohttp.WSMsgType.TEXT,
+                    "data": "2",
+                },
+                {
+                    "type": module.aiohttp.WSMsgType.BINARY,
+                    "data": b'42{"event":"update","data":{}}',
+                },
+                {
+                    "type": module.aiohttp.WSMsgType.TEXT,
+                    "data": "41",
+                    "extra": "bye",
+                },
+            ]
+        )
+
+        client._engineio_ws = ws
+
+        with pytest.raises(RuntimeError, match="disconnect"):
+            await client._engineio_read_loop()
+
+        assert client._engineio_send.call_args_list[-1].args[0] == "3"
+        assert client._mark_event.call_args_list
+        assert client._on_frame.called
+
+    asyncio.run(_run())
+
+
+def test_engineio_read_loop_handles_closed_and_error_states() -> None:
+    module = _load_ws_client()
+
+    async def _run() -> None:
+        loop = asyncio.get_running_loop()
+        hass = types.SimpleNamespace(
+            loop=loop, data={module.DOMAIN: {"entry": {"ws_state": {}}}}
+        )
+        coordinator = types.SimpleNamespace()
+
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=types.SimpleNamespace(_session=None),
+            coordinator=coordinator,
+            protocol="engineio2",
+        )
+
+        ws_closed = module.aiohttp.testing.FakeWebSocket(
+            messages=[
+                {
+                    "type": module.aiohttp.WSMsgType.CLOSED,
+                    "data": None,
+                    "extra": "done",
+                }
+            ]
+        )
+        closed_exc = RuntimeError("closed")
+        ws_closed.set_exception(closed_exc)
+        client._engineio_ws = ws_closed
+        with pytest.raises(RuntimeError) as err:
+            await client._engineio_read_loop()
+        assert err.value is closed_exc
+
+        ws_closed2 = module.aiohttp.testing.FakeWebSocket(
+            messages=[
+                {
+                    "type": module.aiohttp.WSMsgType.CLOSED,
+                    "data": None,
+                    "extra": "bye",
+                }
+            ]
+        )
+        client._engineio_ws = ws_closed2
+        with pytest.raises(RuntimeError, match="engine.io websocket closed"):
+            await client._engineio_read_loop()
+
+        ws_error = module.aiohttp.testing.FakeWebSocket(
+            messages=[{"type": module.aiohttp.WSMsgType.ERROR, "data": None}]
+        )
+        ws_error.set_exception(None)
+        client._engineio_ws = ws_error
+        with pytest.raises(RuntimeError, match="websocket error"):
+            await client._engineio_read_loop()
+
+    asyncio.run(_run())
+
+
+def test_engineio_read_loop_waits_without_socket() -> None:
+    module = _load_ws_client()
+
+    async def _run() -> None:
+        loop = asyncio.get_running_loop()
+        hass = types.SimpleNamespace(
+            loop=loop, data={module.DOMAIN: {"entry": {"ws_state": {}}}}
+        )
+        coordinator = types.SimpleNamespace()
+
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=types.SimpleNamespace(_session=None),
+            coordinator=coordinator,
+            protocol="engineio2",
+        )
+
+        client._engineio_ws = None
+        client._stop_event.set()
+        await client._engineio_read_loop()
+
+    asyncio.run(_run())
+
+
+def test_engineio_read_loop_raises_error_exception() -> None:
+    module = _load_ws_client()
+
+    async def _run() -> None:
+        loop = asyncio.get_running_loop()
+        hass = types.SimpleNamespace(
+            loop=loop, data={module.DOMAIN: {"entry": {"ws_state": {}}}}
+        )
+        coordinator = types.SimpleNamespace()
+
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=types.SimpleNamespace(_session=None),
+            coordinator=coordinator,
+            protocol="engineio2",
+        )
+
+        ws = module.aiohttp.testing.FakeWebSocket(
+            messages=[{"type": module.aiohttp.WSMsgType.ERROR, "data": None}]
+        )
+        ws.set_exception(RuntimeError("boom"))
+        client._engineio_ws = ws
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await client._engineio_read_loop()
+
+    asyncio.run(_run())
+
+
+def test_handle_payload_helpers_update_nodes() -> None:
+    module = _load_ws_client()
+
+    async def _run() -> None:
+        loop = asyncio.get_running_loop()
+        record: dict[str, Any] = {"ws_state": {}, "nodes": {}, "node_inventory": []}
+        hass = types.SimpleNamespace(loop=loop, data={module.DOMAIN: {"entry": record}})
+
+        class FakeEnergyCoordinator:
+            def __init__(self) -> None:
+                self.updates: list[dict[str, list[str]]] = []
+
+            def update_addresses(self, addrs: dict[str, list[str]]) -> None:
+                self.updates.append({k: list(v) for k, v in addrs.items()})
+
+        record["energy_coordinator"] = FakeEnergyCoordinator()
+
+        class RecordingCoordinator:
+            def __init__(self) -> None:
+                self.calls: list[tuple[Any, Any]] = []
+                self.data: dict[str, Any] = {}
+
+            def update_nodes(self, nodes: Any, inventory: Any) -> None:
+                self.calls.append((nodes, inventory))
+
+        coordinator = RecordingCoordinator()
+
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=types.SimpleNamespace(_session=None),
+            coordinator=coordinator,
+        )
+
+        assert client._extract_nodes("invalid") is None
+        client._handle_handshake("bad-payload")
+        client._handle_handshake({"devs": [{"id": "dev"}]})
+        assert client._handshake_payload is not None
+
+        client._handle_dev_data({})
+        client._handle_update({})
+
+        initial_payload = {"nodes": {"htr": {"status": {"01": {"temp": 20}}}}}
+        client._handle_dev_data(initial_payload)
+
+        incremental = {"nodes": {"htr": {"status": {"02": {"temp": 22}}}}}
+        client._handle_update(incremental)
+
+        await asyncio.sleep(0)
+
+        assert coordinator.calls
+        assert "nodes" in record
+        assert "node_inventory" in record
+
+    asyncio.run(_run())
+
+
+def test_stop_cleans_engineio_resources() -> None:
+    async def _run() -> None:
+        module = _load_ws_client()
+
+        hass = types.SimpleNamespace(
+            loop=asyncio.get_event_loop(), data={module.DOMAIN: {"entry": {}}}
+        )
+        coordinator = types.SimpleNamespace()
+        api = types.SimpleNamespace(_session=None)
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=api,
+            coordinator=coordinator,
+        )
+
+        updates: list[str] = []
+        client._update_status = MagicMock(side_effect=lambda status: updates.append(status))
+
+        class FakeTask:
+            def __init__(self) -> None:
+                self.cancelled = False
+
+            def cancel(self) -> None:
+                self.cancelled = True
+
+            def done(self) -> bool:
+                return False
+
+            def __await__(self):  # type: ignore[override]
+                async def _inner() -> None:
+                    return None
+
+                return _inner().__await__()
+
+        class DummyWS:
+            def __init__(self) -> None:
+                self.closed = 0
+
+            async def close(self, *args: Any, **kwargs: Any) -> None:
+                self.closed += 1
+
+        ping_task = FakeTask()
+        client._ping_task = ping_task
+        engine_ws = DummyWS()
+        client._engineio_ws = engine_ws
+        client._task = asyncio.create_task(asyncio.sleep(0))
+
+        await asyncio.sleep(0)
+        await client.stop()
+
+        assert ping_task.cancelled
+        assert client._ping_task is None
+        assert engine_ws.closed == 1
+        assert client._engineio_ws is None
+        assert client._task is None
+        assert updates[-1] == "stopped"
+
+    asyncio.run(_run())
+
+
 def test_runner_backoff_after_handshake_errors(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -72,6 +73,28 @@ def test_prepare_heater_platform_data_groups_nodes() -> None:
     )
     assert legacy_resolve("htr", "9") == "Kitchen"
     assert legacy_resolve("foo", "9") == "Kitchen"
+
+
+def test_prepare_heater_platform_data_skips_blank_types(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    blank_node = SimpleNamespace(type="  ", addr="5")
+    valid_node = SimpleNamespace(type="htr", addr="6")
+
+    def fake_ensure(record: dict[str, Any], *, nodes: Any | None = None) -> list[Any]:
+        return [blank_node, valid_node]
+
+    monkeypatch.setattr(heater_module, "ensure_node_inventory", fake_ensure)
+
+    entry_data: dict[str, Any] = {}
+
+    _, nodes_by_type, addrs_by_type, _ = prepare_heater_platform_data(
+        entry_data,
+        default_name_simple=lambda addr: f"Heater {addr}",
+    )
+
+    assert [node.addr for node in nodes_by_type.get("htr", [])] == ["6"]
+    assert addrs_by_type["htr"] == ["6"]
 
 
 def test_build_heater_name_map_handles_invalid_entries() -> None:
