@@ -12,7 +12,7 @@ from typing import Any, Callable
 import pytest
 from unittest.mock import AsyncMock
 
-from conftest import _install_stubs
+from conftest import FakeCoordinator, _install_stubs
 
 _install_stubs()
 
@@ -51,47 +51,6 @@ class FakeWSClient:
     async def stop(self) -> None:
         self.stop_calls += 1
 
-
-class FakeCoordinator:
-    instances: list["FakeCoordinator"] = []
-
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        client: Any,
-        base_interval: int,
-        dev_id: str,
-        dev: dict[str, Any],
-        nodes: dict[str, Any],
-        node_inventory: list[Any] | None = None,
-    ) -> None:
-        self.hass = hass
-        self.client = client
-        self.base_interval = base_interval
-        self.dev_id = dev_id
-        self.dev = dev
-        self.nodes = nodes
-        self.node_inventory = list(node_inventory or [])
-        self.update_interval = timedelta(seconds=base_interval)
-        self.data: dict[str, Any] = {dev_id: dev}
-        self.listeners: list[Callable[[], None]] = []
-        self.refresh_calls = 0
-        type(self).instances.append(self)
-
-    async def async_config_entry_first_refresh(self) -> None:
-        self.refresh_calls += 1
-
-    def async_add_listener(self, listener: Callable[[], None]) -> None:
-        self.listeners.append(listener)
-
-    def update_nodes(
-        self,
-        nodes: dict[str, Any],
-        node_inventory: list[Any] | None = None,
-    ) -> None:
-        self.nodes = nodes
-        if node_inventory is not None:
-            self.node_inventory = list(node_inventory)
 
 
 class BaseFakeClient:

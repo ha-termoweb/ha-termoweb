@@ -212,6 +212,72 @@ def test_coordinator_and_sensors() -> None:
     asyncio.run(_run())
 
 
+def test_sensor_async_setup_entry_defaults_and_skips_invalid() -> None:
+    async def _run() -> None:
+        hass = HomeAssistant()
+        entry = types.SimpleNamespace(entry_id="entry-default")
+        dev_id = "dev-default"
+        raw_nodes = {
+            "nodes": [
+                {"type": "htr", "addr": "1"},
+                {"type": "acm", "addr": "2"},
+                {"type": "pmo", "addr": "P1"},
+            ]
+        }
+        inventory = sensor_module.build_node_inventory(raw_nodes)
+        inventory.append(types.SimpleNamespace(type=" ", addr="extra"))
+        inventory.append(types.SimpleNamespace(type="htr", addr=" "))
+
+        coordinator = types.SimpleNamespace(
+            hass=hass,
+            data={
+                dev_id: {
+                    "nodes": {},
+                    "htr": {"settings": {}, "energy": {}, "power": {}},
+                }
+            },
+        )
+
+        energy_coord = types.SimpleNamespace(update_addresses=MagicMock())
+
+        hass.data = {
+            DOMAIN: {
+                entry.entry_id: {
+                    "coordinator": coordinator,
+                    "client": types.SimpleNamespace(),
+                    "dev_id": dev_id,
+                    "nodes": {},
+                    "node_inventory": inventory,
+                    "energy_coordinator": energy_coord,
+                }
+            }
+        }
+
+        added: list = []
+
+        def _add_entities(entities: list) -> None:
+            added.extend(entities)
+
+        await async_setup_sensor_entry(hass, entry, _add_entities)
+
+        energy_coord.update_addresses.assert_called_once()
+
+        names = sorted(
+            getattr(ent, "_attr_name", getattr(ent, "name", None)) for ent in added
+        )
+        assert names == [
+            "Accumulator 2 Energy",
+            "Accumulator 2 Power",
+            "Accumulator 2 Temperature",
+            "Node 1 Energy",
+            "Node 1 Power",
+            "Node 1 Temperature",
+            "Total Energy",
+        ]
+
+    asyncio.run(_run())
+
+
 def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> None:
     async def _run() -> None:
         hass = HomeAssistant()

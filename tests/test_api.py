@@ -208,6 +208,19 @@ def test_ensure_token_missing_access_token() -> None:
     asyncio.run(_run())
 
 
+def test_resolve_node_descriptor_validations() -> None:
+    client = RESTClient(FakeSession(), "user", "pass")
+
+    with pytest.raises(ValueError, match="Unsupported node descriptor"):
+        client._resolve_node_descriptor("htr")
+
+    with pytest.raises(ValueError, match="Invalid node type"):
+        client._resolve_node_descriptor(("  ", "1"))
+
+    with pytest.raises(ValueError, match="Invalid node address"):
+        client._resolve_node_descriptor(("htr", ""))
+
+
 def test_ensure_token_non_numeric_expires_in(monkeypatch) -> None:
     fake_time = 1000.0
 

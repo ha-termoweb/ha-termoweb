@@ -1155,6 +1155,203 @@ def test_subscribe_htr_samples_sends_expected_payloads():
     asyncio.run(_run())
 
 
+def test_subscribe_htr_samples_returns_when_no_addresses():
+    async def _run() -> None:
+        module = _load_ws_client()
+        Client = module.WebSocket09Client
+
+        hass = types.SimpleNamespace(
+            loop=asyncio.get_event_loop(), data={module.DOMAIN: {"entry": {}}}
+        )
+        coordinator = types.SimpleNamespace(_node_inventory=[], _nodes={}, data={})
+        api = types.SimpleNamespace(_session=None)
+        client = Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=api,
+            coordinator=coordinator,
+        )
+
+        class DummyWS:
+            def __init__(self) -> None:
+                self.sent: list[str] = []
+
+            async def send_str(self, data: str) -> None:
+                self.sent.append(data)
+
+        ws = DummyWS()
+        client._ws = ws
+
+        await client._subscribe_htr_samples()
+
+        assert ws.sent == []
+
+    asyncio.run(_run())
+
+
+def test_subscribe_htr_samples_uses_cached_and_raw_inventory(monkeypatch):
+    async def _run() -> None:
+        module = _load_ws_client()
+        Client = module.WebSocket09Client
+
+        class TruthyEmpty(list):
+            def __bool__(self) -> bool:  # pragma: no cover - behaviour hook
+                return True
+
+        orig_build = module.build_node_inventory
+
+        build_calls: list[Any] = []
+
+        def fake_build(payload: Any) -> list[Any]:
+            build_calls.append(payload)
+            return orig_build(payload)
+
+        monkeypatch.setattr(module, "build_node_inventory", fake_build)
+
+        def fake_addresses(inventory: list[Any], known_types: Any = None) -> tuple[dict[str, Any], set[str]]:
+            mapping: dict[str, Any] = {"htr": [node.addr for node in inventory if getattr(node, "type", "") == "htr"]}
+            mapping["acm"] = TruthyEmpty()
+            return mapping, set()
+
+        monkeypatch.setattr(module, "addresses_by_node_type", fake_addresses)
+
+        hass = types.SimpleNamespace(loop=asyncio.get_event_loop())
+        cached_inventory = orig_build({"nodes": [{"type": "htr", "addr": "01"}]})
+        hass.data = {
+            module.DOMAIN: {
+                "entry": {
+                    "node_inventory": cached_inventory,
+                    "nodes": {"nodes": [{"type": "htr", "addr": "02"}]},
+                    "energy_coordinator": types.SimpleNamespace(update_addresses=MagicMock()),
+                }
+            }
+        }
+
+        coordinator = types.SimpleNamespace(
+            _node_inventory=[], _nodes={"nodes": []}, data={"dev": {}}, hass=hass
+        )
+        api = types.SimpleNamespace(_session=None)
+        client = Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=api,
+            coordinator=coordinator,
+        )
+
+        class DummyWS:
+            def __init__(self) -> None:
+                self.sent: list[str] = []
+
+            async def send_str(self, data: str) -> None:
+                self.sent.append(data)
+
+        ws = DummyWS()
+        client._ws = ws
+
+        # First call should use cached inventory (line 328)
+        await client._subscribe_htr_samples()
+        assert build_calls[0] == coordinator._nodes
+        assert ws.sent == [
+            '5::/api/v2/socket_io:{"name":"subscribe","args":["/htr/01/samples"]}'
+        ]
+
+        # Second call should rebuild from raw nodes when cache is absent (lines 332-333)
+        hass.data[module.DOMAIN]["entry"]["node_inventory"] = []
+        coordinator._node_inventory = []
+        build_calls.clear()
+        ws.sent.clear()
+
+        await client._subscribe_htr_samples()
+        assert build_calls[0] == coordinator._nodes
+        assert build_calls[1] == hass.data[module.DOMAIN]["entry"]["nodes"]
+        assert ws.sent == [
+            '5::/api/v2/socket_io:{"name":"subscribe","args":["/htr/02/samples"]}'
+        ]
+
+    asyncio.run(_run())
+
+
+def test_subscribe_htr_samples_handles_empty_non_htr(monkeypatch):
+    async def _run() -> None:
+        module = _load_ws_client()
+        Client = module.WebSocket09Client
+
+        class Stage1Sequence:
+            def __iter__(self):
+                return iter(())
+
+            def __bool__(self) -> bool:
+                return True
+
+        class Stage1List(list):
+            def __bool__(self) -> bool:
+                return True
+
+        class Stage2List(list):
+            def __bool__(self) -> bool:
+                return False
+
+        orig_list = list
+
+        class StageAwareList(list):
+            def __new__(cls, iterable=()):  # type: ignore[override]
+                if isinstance(iterable, Stage1Sequence):
+                    return Stage1List(orig_list(iterable))
+                if isinstance(iterable, Stage1List):
+                    return Stage2List(orig_list(iterable))
+                return list.__new__(cls, orig_list(iterable))
+
+        monkeypatch.setitem(module.__dict__, "list", StageAwareList)
+
+        def fake_addresses(inventory: list[Any], known_types: Any = None) -> tuple[dict[str, Any], set[str]]:
+            mapping: dict[str, Any] = {"htr": [node.addr for node in inventory if getattr(node, "type", "") == "htr"]}
+            mapping["acm"] = Stage1Sequence()
+            return mapping, set()
+
+        monkeypatch.setattr(module, "addresses_by_node_type", fake_addresses)
+
+        hass = types.SimpleNamespace(
+            loop=asyncio.get_event_loop(),
+            data={module.DOMAIN: {"entry": {"energy_coordinator": types.SimpleNamespace(update_addresses=MagicMock())}}},
+        )
+        coordinator = types.SimpleNamespace(
+            _node_inventory=module.list(
+                module.build_node_inventory({"nodes": [{"type": "htr", "addr": "01"}]})
+            ),
+            _nodes={},
+            data={"dev": {}},
+        )
+        api = types.SimpleNamespace(_session=None)
+        client = Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=api,
+            coordinator=coordinator,
+        )
+
+        class DummyWS:
+            def __init__(self) -> None:
+                self.sent: list[str] = []
+
+            async def send_str(self, data: str) -> None:
+                self.sent.append(data)
+
+        ws = DummyWS()
+        client._ws = ws
+
+        await client._subscribe_htr_samples()
+
+        # Only the heater address should be subscribed; accumulator skipped via continue
+        assert ws.sent == [
+            '5::/api/v2/socket_io:{"name":"subscribe","args":["/htr/01/samples"]}'
+        ]
+
+    asyncio.run(_run())
+
+
 def test_mark_event_promotes_to_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load_ws_client()
     module.async_dispatcher_send = MagicMock()
@@ -1483,6 +1680,53 @@ def test_handle_event_invalid_inputs_are_ignored() -> None:
     client._handle_event({"name": "data", "args": ["bad"]})
     client._handle_event({"name": "data", "args": [["not-dict"]]})
     client._handle_event({"name": "data", "args": [[{"path": None, "body": {}}]]})
+
+
+def test_handle_event_adds_missing_htr_bucket(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_ws_client()
+    Client = module.WebSocket09Client
+
+    loop = asyncio.new_event_loop()
+    hass = types.SimpleNamespace(
+        loop=loop,
+        data={module.DOMAIN: {"entry": {"energy_coordinator": types.SimpleNamespace(update_addresses=MagicMock())}}},
+    )
+    class FakeDevMap(dict):
+        def __contains__(self, key: Any) -> bool:
+            if key == "htr":
+                return False
+            return super().__contains__(key)
+
+    coordinator = types.SimpleNamespace(data={"dev": FakeDevMap({"nodes_by_type": {}})})
+    session = module.aiohttp.testing.FakeClientSession()
+    api = types.SimpleNamespace(_session=session)
+    client = Client(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        api_client=api,
+        coordinator=coordinator,
+        session=session,
+    )
+
+    event = {
+        "name": "data",
+        "args": [
+            [
+                {"path": "", "body": {}},
+                {
+                    "path": "/api/v2/devs/dev/mgr/nodes",
+                    "body": {"nodes": [{"type": "htr", "addr": "1"}]},
+                },
+            ]
+        ],
+    }
+
+    client._handle_event(event)
+    dev_state = coordinator.data["dev"]
+    assert dev_state["htr"]["addrs"] == ["1"]
+
+    loop.close()
 
 
 def test_parse_handshake_body_defaults() -> None:

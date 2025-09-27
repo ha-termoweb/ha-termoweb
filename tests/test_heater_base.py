@@ -10,6 +10,7 @@ from conftest import _install_stubs, make_ws_payload
 _install_stubs()
 
 from custom_components.termoweb import heater as heater_module
+from custom_components.termoweb.nodes import HeaterNode
 from homeassistant.core import HomeAssistant
 
 HeaterNodeBase = heater_module.HeaterNodeBase
@@ -37,6 +38,25 @@ def test_build_heater_name_map_handles_invalid_entries() -> None:
     assert result.get(("htr", "6")) == "Heater 6"
     assert result.get("htr") == {"5": "Heater 5", "6": "Heater 6"}
     assert result.get("by_type", {}).get("htr") == {"5": "Heater 5", "6": "Heater 6"}
+
+
+def test_build_heater_name_map_accepts_iterables_of_dicts() -> None:
+    nodes_iter = (
+        {"type": "htr", "addr": "1"},
+        {"type": "acm", "addr": "2"},
+    )
+
+    result = build_heater_name_map(nodes_iter, lambda addr: f"Heater {addr}")
+
+    assert result.get(("acm", "2")) == "Heater 2"
+    assert result.get("htr", {}).get("1") == "Heater 1"
+
+
+def test_iter_nodes_yields_existing_node_objects() -> None:
+    nodes = [HeaterNode(name="Living", addr="1")]
+
+    yielded = list(heater_module._iter_nodes(nodes))
+    assert yielded == nodes
 
 
 @pytest.mark.parametrize(
@@ -143,6 +163,18 @@ def test_heater_section_handles_missing_device() -> None:
     heater = _make_heater(coordinator)
 
     assert heater._heater_section() == {}
+
+
+def test_heater_section_falls_back_to_legacy_data() -> None:
+    hass = HomeAssistant()
+    coordinator = SimpleNamespace(
+        hass=hass,
+        data={"dev": {"htr": {"settings": {"A": {"mode": "auto"}}}}},
+    )
+    heater = HeaterNodeBase(coordinator, "entry", "dev", "A", "Heater A", node_type="acm")
+
+    section = heater._heater_section()
+    assert section == {"settings": {"A": {"mode": "auto"}}}
 
 
 def test_heater_settings_missing_mapping() -> None:

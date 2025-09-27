@@ -201,6 +201,58 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
     asyncio.run(_run())
 
 
+def test_refresh_heater_handles_tuple_and_acm() -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_node_settings = AsyncMock(return_value={"mode": "auto"})
+
+        hass = HomeAssistant()
+        coord = StateCoordinator(
+            hass,
+            client,
+            30,
+            "dev",
+            {"name": "Device"},
+            {},
+        )
+
+        def fake_lookup(self) -> tuple[dict[str, list[str]], dict[str, str]]:
+            return {"acm": ["3"]}, {"3": "acm"}
+
+        coord._addr_lookup = types.MethodType(fake_lookup, coord)
+        coord.data = {
+            "dev": {
+                "nodes_by_type": {
+                    "acm": {"addrs": "bad", "settings": {"1": {"prev": True}}},
+                    "weird": [],
+                }
+            }
+        }
+
+        updates: list[dict[str, dict[str, Any]]] = []
+
+        def _set_updated_data(self, data: dict[str, dict[str, Any]]) -> None:
+            updates.append(data)
+            self.data = data
+
+        coord.async_set_updated_data = types.MethodType(  # type: ignore[attr-defined]
+            _set_updated_data,
+            coord,
+        )
+
+        await coord.async_refresh_heater(("acm", "2"))
+
+        client.get_node_settings.assert_awaited_once()
+        assert updates, "Expected coordinator data to be updated"
+        latest = updates[-1]["dev"]
+        acm_section = latest["nodes_by_type"]["acm"]
+        assert acm_section["addrs"] == ["3", "2"]
+        assert acm_section["settings"]["2"] == {"mode": "auto"}
+        assert "htr" in latest["nodes_by_type"]
+
+    asyncio.run(_run())
+
+
 def test_refresh_heater_populates_missing_metadata() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
@@ -293,6 +345,46 @@ def test_refresh_heater_handles_errors(caplog: pytest.LogCaptureFixture) -> None
             await coord.async_refresh_heater("A")
         assert "Failed to refresh heater settings" in caplog.text
         assert updates == []
+
+    asyncio.run(_run())
+
+
+def test_state_coordinator_async_update_data_reuses_previous() -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_node_settings = AsyncMock(return_value={"mode": "eco"})
+
+        hass = HomeAssistant()
+        coord = StateCoordinator(
+            hass,
+            client,
+            30,
+            "dev",
+            {"name": " Device "},
+            {},
+        )
+
+        def fake_lookup(self) -> tuple[dict[str, list[str]], dict[str, str]]:
+            return {"acm": ["7"]}, {"7": "acm"}
+
+        coord._addr_lookup = types.MethodType(fake_lookup, coord)
+        coord.data = {
+            "dev": {
+                "nodes_by_type": {
+                    "acm": {"settings": {"7": {"prev": True}}},
+                    "bad": [],
+                },
+                "htr": {"settings": {"legacy": {"mode": "auto"}}},
+            }
+        }
+
+        result = await coord._async_update_data()
+
+        client.get_node_settings.assert_awaited_once()
+        dev_data = result["dev"]
+        acm_section = dev_data["nodes_by_type"]["acm"]
+        assert acm_section["settings"]["7"] == {"mode": "eco"}
+        assert dev_data["htr"]["addrs"] == []
 
     asyncio.run(_run())
 
@@ -561,6 +653,17 @@ def test_energy_state_coordinator_update_addresses_filters_duplicates() -> None:
     assert coord._addresses_by_type == {"htr": ["A", "B"]}
 
 
+def test_energy_state_coordinator_update_addresses_ignores_invalid_types() -> None:
+    hass = HomeAssistant()
+    client = types.SimpleNamespace()
+    coord = EnergyStateCoordinator(hass, client, "dev", [])  # type: ignore[arg-type]
+
+    coord.update_addresses({" ": ["skip"], "htr": ["A"], "acm": ["", "B"], "foo": ["X"]})
+
+    assert coord._addrs == ["A", "B"]
+    assert coord._addresses_by_type == {"htr": ["A"], "acm": ["B"]}
+
+
 def test_energy_state_coordinator_update_addresses_accepts_map() -> None:
     hass = HomeAssistant()
     client = types.SimpleNamespace()
@@ -570,6 +673,24 @@ def test_energy_state_coordinator_update_addresses_accepts_map() -> None:
 
     assert coord._addrs == ["A", "B"]
     assert coord._addresses_by_type == {"htr": ["A"], "acm": ["B"]}
+
+
+def test_energy_state_coordinator_async_update_adds_legacy_bucket() -> None:
+    async def _run() -> None:
+        hass = HomeAssistant()
+        client = types.SimpleNamespace()
+        coord = EnergyStateCoordinator(hass, client, "dev", [])  # type: ignore[arg-type]
+
+        coord._addresses_by_type = {"acm": []}
+        coord._addr_lookup = {}
+        coord._addrs = []
+
+        result = await coord._async_update_data()
+        dev_data = result["dev"]
+        assert "htr" in dev_data["nodes_by_type"]
+        assert dev_data["htr"] == {"energy": {}, "power": {}, "addrs": []}
+
+    asyncio.run(_run())
 
 
 def test_coordinator_rate_limit_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
