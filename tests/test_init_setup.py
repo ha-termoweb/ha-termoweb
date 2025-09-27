@@ -188,9 +188,8 @@ def test_async_setup_entry_happy_path(
     assert isinstance(record["client"], HappyClient)
     assert isinstance(record["coordinator"], FakeCoordinator)
     assert record["coordinator"].refresh_calls == 1
-    assert termoweb_init.addresses_by_type(
-        record["node_inventory"], termoweb_init.HEATER_NODE_TYPES
-    ) == ["A", "B"]
+    by_type, _ = termoweb_init._heater_address_map(record["node_inventory"])
+    assert by_type == {"htr": ["A"], "acm": ["B"]}
     assert [node.addr for node in record["node_inventory"]] == ["A", "B"]
     assert [node.type for node in record["node_inventory"]] == ["htr", "acm"]
     assert stub_hass.client_session_calls == 1
@@ -318,7 +317,7 @@ def test_import_energy_history_service_invocation(
             return {
                 "nodes": [
                     {"addr": "A", "type": "htr"},
-                    {"addr": "B", "type": "htr"},
+                    {"addr": "B", "type": "acm"},
                 ]
             }
 
@@ -346,7 +345,7 @@ def test_import_energy_history_service_invocation(
         )
         registry.add(
             "sensor.dev_b_energy",
-            unique_id=f"{termoweb_init.DOMAIN}:dev-1:htr:B:energy",
+            unique_id=f"{termoweb_init.DOMAIN}:dev-1:acm:B:energy",
             platform=termoweb_init.DOMAIN,
             config_entry_id=entry.entry_id,
         )
@@ -363,7 +362,7 @@ def test_import_energy_history_service_invocation(
         args, kwargs = import_mock.await_args
         assert args[0] is stub_hass
         assert args[1] is entry
-        assert set(args[2]) == {"A", "B"}
+        assert args[2] == {"htr": ["A"], "acm": ["B"]}
         assert kwargs == {"reset_progress": True, "max_days": 10}
 
         import_mock.reset_mock()
@@ -373,7 +372,7 @@ def test_import_energy_history_service_invocation(
         args, kwargs = import_mock.await_args
         assert args[0] is stub_hass
         assert args[1] is entry
-        assert args[2] is None
+        assert args[2] == {"htr": ["A"], "acm": ["B"]}
         assert kwargs == {"reset_progress": False, "max_days": 3}
 
     asyncio.run(_run())
