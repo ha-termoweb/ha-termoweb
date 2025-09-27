@@ -13,13 +13,17 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import UnitOfTemperature
 from homeassistant.core import callback
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_data
 from .coordinator import EnergyStateCoordinator
-from .heater import HeaterNodeBase, log_skipped_nodes, prepare_heater_platform_data
+from .heater import (
+    DispatcherSubscriptionHelper,
+    HeaterNodeBase,
+    log_skipped_nodes,
+    prepare_heater_platform_data,
+)
 from .utils import HEATER_NODE_TYPES, build_gateway_device_info, float_or_none
 
 _WH_TO_KWH = 1 / 1000.0
@@ -333,15 +337,22 @@ class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
         self._dev_id = dev_id
         self._attr_name = name
         self._attr_unique_id = unique_id
-        self._unsub_ws = None
+        self._ws_subscription = DispatcherSubscriptionHelper(self)
 
     async def async_added_to_hass(self) -> None:
         """Register websocket callbacks once the entity is added."""
         await super().async_added_to_hass()
-        self._unsub_ws = async_dispatcher_connect(
+        if self.hass is None:
+            return
+        self._ws_subscription.subscribe(
             self.hass, signal_ws_data(self._entry_id), self._on_ws_data
         )
-        self.async_on_remove(lambda: self._unsub_ws() if self._unsub_ws else None)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Tidy up websocket listeners prior to entity removal."""
+
+        self._ws_subscription.unsubscribe()
+        await super().async_will_remove_from_hass()
 
     @property
     def device_info(self) -> DeviceInfo:
