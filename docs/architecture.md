@@ -9,7 +9,7 @@ The TermoWeb integration bridges Home Assistant to the vendor cloud that supervi
 - **REST client** – `RESTClient` performs authenticated HTTP requests to enumerate devices, read heater settings, and push schedule/temperature updates back to the cloud API.【F:custom_components/termoweb/api.py†L269-L360】
 - **Polling coordinator** – `StateCoordinator` periodically refreshes node state via the REST client and maintains cached per-device data that HA platforms consume.【F:custom_components/termoweb/coordinator.py†L22-L211】
 - **Entities** – climate/sensor/binary-sensor/button entities subscribe to coordinator data and the dispatcher, then send writes through the shared REST client (e.g., updating schedules or presets) for the supported node types.【F:custom_components/termoweb/heater.py†L61-L136】【F:custom_components/termoweb/climate.py†L245-L420】
-- **WebSocket client** – `WebSocket09Client` maintains the legacy Socket.IO session, folds push events into the coordinator cache, and dispatches targeted signals so entities update immediately while also feeding connection health back to setup logic.【F:custom_components/termoweb/ws_client.py†L40-L541】
+- **WebSocket client** – `TermoWebSocketClient` automatically detects whether the account requires the legacy Socket.IO 0.9 handshake or the newer Engine.IO/WebSocket upgrade, manages reconnection/heartbeat loops for both protocols, merges push events into coordinator caches, and dispatches connection health/status signals for entities and setup logic.【F:custom_components/termoweb/ws_client.py†L57-L449】
 - **Energy history importer** – the `import_energy_history` service gathers hourly energy counters via REST, rate-limits calls, and writes the resulting statistics into Home Assistant’s recorder database.【F:custom_components/termoweb/__init__.py†L160-L670】
 - **TermoWeb cloud & hardware** – the documented API provides REST endpoints for device metadata, heater settings, and energy samples alongside a Socket.IO push channel, all representing the household gateway and heaters managed by the vendor backend.【F:docs/termoweb_api.md†L1-L176】
 
@@ -25,7 +25,7 @@ flowchart LR
         Client["RESTClient\n(REST helper)"]
         Coord["StateCoordinator\n(polling cache)"]
         Entities["Platforms & Entities\n(climate / sensor / binary_sensor / button)"]
-        WS["WebSocket09Client\n(Socket.IO listener)"]
+    WS["TermoWebSocketClient\n(WS protocol detector)"]
         Service[import_energy_history Service]
         Recorder[HA Recorder / Statistics]
     end
@@ -73,7 +73,7 @@ flowchart LR
     Gateway --> Thm
 ```
 
-The flow shows how configuration and runtime components share the authenticated REST client, how polling and push updates keep entity state fresh, and how energy statistics are imported for the Recorder. The TermoWeb cloud in turn brokers communication with the household gateway that relays commands and telemetry for the attached heaters, accumulators, power monitors, and thermostats.【F:custom_components/termoweb/__init__.py†L453-L670】【F:custom_components/termoweb/ws_client.py†L40-L541】【F:docs/termoweb_api.md†L1-L176】
+The flow shows how configuration and runtime components share the authenticated REST client, how polling and push updates keep entity state fresh, and how energy statistics are imported for the Recorder. The TermoWeb cloud in turn brokers communication with the household gateway that relays commands and telemetry for the attached heaters, accumulators, power monitors, and thermostats.【F:custom_components/termoweb/__init__.py†L453-L670】【F:custom_components/termoweb/ws_client.py†L57-L449】【F:docs/termoweb_api.md†L1-L176】
 
 ## Python class hierarchy
 
@@ -96,7 +96,7 @@ The flow shows how configuration and runtime components share the authenticated 
   - **StateRefreshButton** (`ButtonEntity`) – triggers immediate coordinator refreshes for the gateway device.【F:custom_components/termoweb/button.py†L18-L40】
   - **InstallationTotalEnergySensor** (`SensorEntity`) – aggregates heater energy metrics across the installation using the energy coordinator feed.【F:custom_components/termoweb/sensor.py†L281-L337】
 - **Websocket client**
-  - **WebSocket09Client** – socket.io client that streams push updates, maintains heartbeat loops, and dispatches payloads back into coordinator caches and dispatcher channels.【F:custom_components/termoweb/ws_client.py†L40-L195】
+  - **TermoWebSocketClient** – unified websocket manager that supports both Socket.IO 0.9 polling/websocket upgrade and Engine.IO v2 websockets while streaming updates into coordinator caches and dispatcher channels.【F:custom_components/termoweb/ws_client.py†L57-L449】
 
 ### Class relationships diagram
 
@@ -114,7 +114,7 @@ classDiagram
 
     %% Integration classes
     class RESTClient
-    class WebSocket09Client
+    class TermoWebSocketClient
     class TermoWebConfigFlow
     class TermoWebOptionsFlow
     class StateCoordinator
@@ -155,7 +155,7 @@ classDiagram
     TermoWebOptionsFlow --> StateCoordinator : adjusts interval
     StateCoordinator --> RESTClient : polls
     EnergyStateCoordinator --> RESTClient : fetches energy
-    WebSocket09Client --> StateCoordinator : pushes updates
+    TermoWebSocketClient --> StateCoordinator : pushes updates
     HeaterNodeBase --> StateCoordinator : consumes data
     HeaterEnergyBase --> EnergyStateCoordinator : reads samples
     GatewayOnlineBinarySensor --> StateCoordinator : monitors status
