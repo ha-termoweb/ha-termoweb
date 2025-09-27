@@ -1853,6 +1853,7 @@ def test_subscribe_htr_samples_sends_expected_payloads(
 
     async def _run() -> None:
         energy_updates: list[Any] = []
+        normalize_calls: list[Any] = []
 
         class FakeEnergyCoordinator:
             def update_addresses(self, addrs: Any) -> None:
@@ -1860,6 +1861,15 @@ def test_subscribe_htr_samples_sends_expected_payloads(
                     energy_updates.append({k: list(v) for k, v in addrs.items()})
                 else:
                     energy_updates.append(list(addrs))
+
+        def fake_normalize(
+            addrs: Any,
+        ) -> tuple[dict[str, list[str]], dict[str, str]]:
+            normalize_calls.append(addrs)
+            return {
+                "htr": ["01", "02"],
+                "acm": ["A1"],
+            }, {"htr": "htr", "acm": "acm"}
 
         hass = types.SimpleNamespace(
             loop=asyncio.get_event_loop(),
@@ -1910,6 +1920,8 @@ def test_subscribe_htr_samples_sends_expected_payloads(
         ws = DummyWS()
         client._ws = ws
 
+        monkeypatch.setattr(module, "normalize_heater_addresses", fake_normalize)
+
         await client._subscribe_htr_samples()
 
         assert ws.sent == [
@@ -1918,6 +1930,7 @@ def test_subscribe_htr_samples_sends_expected_payloads(
             '5::/api/v2/socket_io:{"name":"subscribe","args":["/acm/A1/samples"]}',
         ]
 
+        assert normalize_calls == [{"htr": ["01", "02"], "acm": ["A1"]}]
         dev_map = coordinator.data["dev"]
         assert dev_map["nodes_by_type"]["acm"]["addrs"] == ["A1"]
         assert dev_map["htr"] is dev_map["nodes_by_type"]["htr"]
