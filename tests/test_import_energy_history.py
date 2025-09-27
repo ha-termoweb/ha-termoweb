@@ -1257,7 +1257,15 @@ def test_import_energy_history_reset_all_progress(monkeypatch: pytest.MonkeyPatc
             ("dev", "htr", "B", 259_199, 345_599),
             ("dev", "htr", "B", 172_799, 259_199),
         ]
-        assert len(updates) == 8
+        assert len(updates) == client.get_node_samples.await_count + 2
+        assert all(
+            mod.OPTION_ENERGY_HISTORY_PROGRESS in update for update in updates
+        )
+        assert mod.OPTION_ENERGY_HISTORY_IMPORTED not in updates[0]
+        assert all(
+            mod.OPTION_ENERGY_HISTORY_IMPORTED not in update
+            for update in updates[1:-1]
+        )
         assert updates[0][mod.OPTION_ENERGY_HISTORY_PROGRESS] == {}
         final_update = updates[-1]
         assert final_update[mod.OPTION_ENERGY_HISTORY_PROGRESS] == {

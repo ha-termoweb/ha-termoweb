@@ -245,6 +245,19 @@ async def _async_import_energy_history(
         except (TypeError, ValueError):
             return now_ts
 
+    def _write_progress_options(
+        progress_state: Mapping[str, int], *, imported: bool | None = None
+    ) -> None:
+        """Persist energy import progress to the config entry options."""
+
+        options = dict(entry.options)
+        options[OPTION_ENERGY_HISTORY_PROGRESS] = dict(progress_state)
+        if imported is False:
+            options.pop(OPTION_ENERGY_HISTORY_IMPORTED, None)
+        elif imported:
+            options[OPTION_ENERGY_HISTORY_IMPORTED] = True
+        hass.config_entries.async_update_entry(entry, options=options)
+
     if reset_progress:
         if nodes is None:
             progress.clear()
@@ -259,10 +272,7 @@ async def _async_import_energy_history(
                     for addr in addr_list:
                         progress.pop(f"{req_type}:{addr}", None)
                         progress.pop(addr, None)
-        options = dict(entry.options)
-        options[OPTION_ENERGY_HISTORY_PROGRESS] = progress
-        options.pop(OPTION_ENERGY_HISTORY_IMPORTED, None)
-        hass.config_entries.async_update_entry(entry, options=options)
+        _write_progress_options(progress, imported=False)
     elif entry.options.get(OPTION_ENERGY_HISTORY_IMPORTED):
         _LOGGER.debug("%s: energy history already imported", entry.entry_id)
         return
@@ -336,9 +346,7 @@ async def _async_import_energy_history(
             start_ts = chunk_start
             progress[f"{node_type}:{addr}"] = start_ts
             progress.pop(addr, None)
-            options = dict(entry.options)
-            options[OPTION_ENERGY_HISTORY_PROGRESS] = progress
-            hass.config_entries.async_update_entry(entry, options=options)
+            _write_progress_options(progress)
 
         if not all_samples:
             _LOGGER.debug("%s: no samples fetched", addr)
@@ -558,12 +566,10 @@ async def _async_import_energy_history(
         except Exception as err:  # pragma: no cover - log & continue
             _LOGGER.exception("%s: statistics insert failed: %s", addr, err)
 
-    options = dict(entry.options)
-    options[OPTION_ENERGY_HISTORY_PROGRESS] = progress
-    # If all heaters are imported down to the target date mark import as complete
+    imported_flag: bool | None = None
     if all(_progress_value(node_type, addr) <= target for node_type, addr in all_pairs):
-        options[OPTION_ENERGY_HISTORY_IMPORTED] = True
-    hass.config_entries.async_update_entry(entry, options=options)
+        imported_flag = True
+    _write_progress_options(progress, imported=imported_flag)
     _LOGGER.debug("%s: energy import complete", entry.entry_id)
 
 
