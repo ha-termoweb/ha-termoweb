@@ -19,7 +19,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_data
 from .coordinator import EnergyStateCoordinator
-from .heater import HeaterNodeBase, prepare_heater_platform_data
+from .heater import HeaterNodeBase, log_skipped_nodes, prepare_heater_platform_data
 from .utils import HEATER_NODE_TYPES, build_gateway_device_info, float_or_none
 
 _WH_TO_KWH = 1 / 1000.0
@@ -160,17 +160,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 )
             )
 
-    for skipped_type in ("pmo", "thm"):
-        skipped_nodes = nodes_by_type.get(skipped_type, [])
-        if skipped_nodes:
-            addrs = ", ".join(
-                sorted(str(getattr(node, "addr", "")) for node in skipped_nodes)
-            )
-            _LOGGER.debug(
-                "Skipping TermoWeb %s nodes for sensor platform: %s",
-                skipped_type,
-                addrs or "<no-addr>",
-            )
+    log_skipped_nodes("sensor", nodes_by_type, logger=_LOGGER)
 
     uid_total = f"{DOMAIN}:{dev_id}:energy_total"
     new_entities.append(
@@ -320,6 +310,8 @@ class HeaterPowerSensor(HeaterEnergyBase):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "W"
     _metric_key = "power"
+
+
 class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
     """Total energy consumption across all heaters."""
 

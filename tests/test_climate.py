@@ -7,7 +7,7 @@ import time
 from collections import deque
 from collections.abc import Coroutine
 import types
-from typing import Any, Deque, cast
+from typing import Any, Deque, Iterable, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -202,7 +202,9 @@ def test_async_setup_entry_creates_entities() -> None:
     asyncio.run(_run())
 
 
-def test_async_setup_entry_default_names_and_invalid_nodes() -> None:
+def test_async_setup_entry_default_names_and_invalid_nodes(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     async def _run() -> None:
         _reset_environment()
         hass = HomeAssistant()
@@ -253,12 +255,42 @@ def test_async_setup_entry_default_names_and_invalid_nodes() -> None:
 
         entity_platform_module._set_current_platform(EntityPlatform())
 
+        calls: list[tuple[str, dict[str, Any]]] = []
+        original_helper = climate_module.log_skipped_nodes
+
+        def _mock_helper(
+            platform_name: str,
+            nodes_by_type: dict[str, Any],
+            *,
+            logger: logging.Logger | None = None,
+            skipped_types: Iterable[str] = ("pmo", "thm"),
+        ) -> None:
+            calls.append((platform_name, nodes_by_type))
+            original_helper(
+                platform_name,
+                nodes_by_type,
+                logger=logger or climate_module._LOGGER,
+                skipped_types=skipped_types,
+            )
+
+        monkeypatch.setattr(climate_module, "log_skipped_nodes", _mock_helper)
+
         entry = types.SimpleNamespace(entry_id=entry_id)
-        await async_setup_entry(hass, entry, _add_entities)
+        caplog.clear()
+        with caplog.at_level(logging.DEBUG, logger=climate_module._LOGGER.name):
+            await async_setup_entry(hass, entry, _add_entities)
 
         names = sorted(entity._attr_name for entity in added)
         assert names == ["Accumulator 2", "Heater 1"]
         assert all(entity._addr in {"1", "2"} for entity in added)
+
+        assert calls and calls[0][0] == "climate"
+        assert "pmo" in calls[0][1]
+        messages = [record.getMessage() for record in caplog.records]
+        assert any(
+            "Skipping TermoWeb pmo nodes for climate platform: P1" in message
+            for message in messages
+        )
 
     asyncio.run(_run())
 
