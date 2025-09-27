@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import copy
 import types
-from typing import Any
+from typing import Any, Iterable
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -215,7 +216,9 @@ def test_coordinator_and_sensors() -> None:
     asyncio.run(_run())
 
 
-def test_sensor_async_setup_entry_defaults_and_skips_invalid() -> None:
+def test_sensor_async_setup_entry_defaults_and_skips_invalid(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     async def _run() -> None:
         hass = HomeAssistant()
         entry = types.SimpleNamespace(entry_id="entry-default")
@@ -261,7 +264,29 @@ def test_sensor_async_setup_entry_defaults_and_skips_invalid() -> None:
         def _add_entities(entities: list) -> None:
             added.extend(entities)
 
-        await async_setup_sensor_entry(hass, entry, _add_entities)
+        calls: list[tuple[str, dict[str, Any]]] = []
+        original_helper = sensor_module.log_skipped_nodes
+
+        def _mock_helper(
+            platform_name: str,
+            nodes_by_type: dict[str, Any],
+            *,
+            logger: logging.Logger | None = None,
+            skipped_types: Iterable[str] = ("pmo", "thm"),
+        ) -> None:
+            calls.append((platform_name, nodes_by_type))
+            original_helper(
+                platform_name,
+                nodes_by_type,
+                logger=logger or sensor_module._LOGGER,
+                skipped_types=skipped_types,
+            )
+
+        monkeypatch.setattr(sensor_module, "log_skipped_nodes", _mock_helper)
+
+        caplog.clear()
+        with caplog.at_level(logging.DEBUG, logger=sensor_module._LOGGER.name):
+            await async_setup_sensor_entry(hass, entry, _add_entities)
 
         energy_coord.update_addresses.assert_called_once()
 
@@ -277,6 +302,14 @@ def test_sensor_async_setup_entry_defaults_and_skips_invalid() -> None:
             "Node 1 Temperature",
             "Total Energy",
         ]
+
+        assert calls and calls[0][0] == "sensor"
+        assert "pmo" in calls[0][1]
+        messages = [record.getMessage() for record in caplog.records]
+        assert any(
+            "Skipping TermoWeb pmo nodes for sensor platform: P1" in message
+            for message in messages
+        )
 
     asyncio.run(_run())
 
@@ -315,9 +348,7 @@ def test_sensor_async_setup_entry_ignores_blank_addresses(
                 lambda *_: "Heater",
             )
 
-        monkeypatch.setattr(
-            sensor_module, "prepare_heater_platform_data", fake_prepare
-        )
+        monkeypatch.setattr(sensor_module, "prepare_heater_platform_data", fake_prepare)
 
         added: list[Any] = []
 

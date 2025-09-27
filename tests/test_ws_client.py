@@ -1596,6 +1596,16 @@ def test_handle_event_updates_state_and_dispatch(
             else:
                 energy_updates.append(list(addrs))
 
+    dispatch_payloads: list[dict[str, Any]] = []
+
+    orig_dispatch = module.WebSocket09Client._dispatch_nodes
+
+    def record_dispatch(self: Any, payload: dict[str, Any]) -> dict[str, list[str]]:
+        dispatch_payloads.append(copy.deepcopy(payload))
+        return orig_dispatch(self, payload)
+
+    monkeypatch.setattr(module.WebSocket09Client, "_dispatch_nodes", record_dispatch)
+
     hass = types.SimpleNamespace(
         loop=loop,
         data={
@@ -1647,6 +1657,8 @@ def test_handle_event_updates_state_and_dispatch(
 
     client._handle_event(event)
     loop.run_until_complete(asyncio.sleep(0))
+
+    assert dispatch_payloads == [event["args"][0][0]["body"]]
 
     dev_data = coordinator.data["dev"]
     assert dev_data["nodes"] == {
