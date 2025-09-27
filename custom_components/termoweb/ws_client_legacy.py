@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable
 import json
 import logging
 import random
 import time
-from collections.abc import Iterable
 from typing import Any
 
 import aiohttp
@@ -14,8 +14,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .api import TermoWebClient
 from .const import API_BASE, DOMAIN, WS_NAMESPACE, signal_ws_data, signal_ws_status
-from .utils import extract_heater_addrs
-from .ws_shared import HandshakeError, TermoWebWSShared
+from .ws_shared import HandshakeError, TermoWebWSShared, apply_updates
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -323,79 +322,12 @@ class TermoWebWSLegacyClient(TermoWebWSShared):
         if not isinstance(batch, list):
             return
 
-        paths: list[str] = []
-        # Apply updates to coordinator.data in-place to keep shape compatible with current entities.
-        updated_nodes = False
-        updated_addrs: list[str] = []
-        sample_addrs: list[str] = []
-
-        for item in batch:
-            if not isinstance(item, dict):
-                continue
-            path = item.get("path")
-            body = item.get("body")
-            if not isinstance(path, str):
-                continue
-            paths.append(path)
-
-            # Normalize
-            dev_map: dict[str, Any] = (self._coordinator.data or {}).get(
-                self.dev_id
-            ) or {}
-            if not dev_map:
-                # Seed minimal structure if coordinator has not put this dev yet
-                dev_map = {
-                    "dev_id": self.dev_id,
-                    "name": f"Device {self.dev_id}",
-                    "raw": {},
-                    "connected": True,
-                    "nodes": None,
-                    "htr": {"addrs": [], "settings": {}},
-                }
-                # put into coordinator cache
-                cur = dict(self._coordinator.data or {})
-                cur[self.dev_id] = dev_map
-                # Not calling async_set_updated_data: we dispatch directly after write.
-                self._coordinator.data = cur  # type: ignore[attr-defined]
-
-            # Routes
-            if path.endswith("/mgr/nodes"):
-                # body is nodes payload
-                if isinstance(body, dict):
-                    dev_map["nodes"] = body
-                    addrs = extract_heater_addrs(body)
-                    dev_map.setdefault("htr", {}).setdefault("settings", {})
-                    dev_map["htr"]["addrs"] = addrs
-                    updated_nodes = True
-
-            elif "/htr/" in path and path.endswith("/settings"):
-                # /api/v2/devs/{dev_id}/htr/{addr}/settings => push path uses '/htr/<addr>/settings'
-                addr = path.split("/htr/")[1].split("/")[0]
-                settings_map: dict[str, Any] = dev_map.setdefault("htr", {}).setdefault(
-                    "settings", {}
-                )
-                if isinstance(body, dict):
-                    settings_map[addr] = body
-                    updated_addrs.append(addr)
-
-            elif "/htr/" in path and path.endswith("/advanced_setup"):
-                # Store for diagnostics/future; entities ignore for now
-                addr = path.split("/htr/")[1].split("/")[0]
-                adv_map: dict[str, Any] = dev_map.setdefault("htr", {}).setdefault(
-                    "advanced", {}
-                )
-                if isinstance(body, dict):
-                    adv_map[addr] = body
-
-            elif "/htr/" in path and path.endswith("/samples"):
-                addr = path.split("/htr/")[1].split("/")[0]
-                sample_addrs.append(addr)
-
-            else:
-                # Other top-level paths, store compactly under raw
-                raw = dev_map.setdefault("raw", {})
-                key = path.strip("/").replace("/", "_")
-                raw[key] = body
+        (
+            paths,
+            updated_nodes,
+            updated_addrs,
+            sample_addrs,
+        ) = apply_updates(self._coordinator, self.dev_id, batch)
 
         # Dispatch (one compact signal)
         self._mark_event(paths=paths)
@@ -406,13 +338,13 @@ class TermoWebWSLegacyClient(TermoWebWSShared):
                 signal_ws_data(self.entry_id),
                 {**payload_base, "addr": None, "kind": "nodes"},
             )
-        for addr in set(updated_addrs):
+        for addr in updated_addrs:
             async_dispatcher_send(
                 self.hass,
                 signal_ws_data(self.entry_id),
                 {**payload_base, "addr": addr, "kind": "htr_settings"},
             )
-        for addr in set(sample_addrs):
+        for addr in sample_addrs:
             async_dispatcher_send(
                 self.hass,
                 signal_ws_data(self.entry_id),
@@ -462,4 +394,4 @@ class TermoWebWSLegacyClient(TermoWebWSShared):
         return (Exception,)
 
 
-__all__ = ["TermoWebWSLegacyClient", "HandshakeError", "signal_ws_status"]
+__all__ = ["HandshakeError", "TermoWebWSLegacyClient", "signal_ws_status"]

@@ -15,6 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .const import DOMAIN, signal_ws_status
+from .utils import extract_heater_addrs
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -173,4 +174,79 @@ class TermoWebWSShared:
         domain_bucket: dict[str, Any] = self.hass.data.setdefault(DOMAIN, {})
         entry_bucket: dict[str, Any] = domain_bucket.setdefault(self.entry_id, {})
         return entry_bucket.setdefault("ws_state", {})
+
+
+def apply_updates(
+    coordinator: Any,
+    dev_id: str,
+    updates: Iterable[dict[str, Any] | None],
+) -> tuple[list[str], bool, list[str], list[str]]:
+    """Normalize websocket updates into coordinator data and collect change hints."""
+
+    paths: list[str] = []
+    updated_nodes = False
+    updated_addrs: list[str] = []
+    sample_addrs: list[str] = []
+
+    for item in updates:
+        if not isinstance(item, dict):
+            continue
+        path = item.get("path")
+        body = item.get("body")
+        if not isinstance(path, str):
+            continue
+        paths.append(path)
+
+        current = getattr(coordinator, "data", None) or {}
+        dev_map: dict[str, Any] = current.get(dev_id) or {}
+        if not dev_map:
+            dev_map = {
+                "dev_id": dev_id,
+                "name": f"Device {dev_id}",
+                "raw": {},
+                "connected": True,
+                "nodes": None,
+                "htr": {"addrs": [], "settings": {}},
+            }
+            cur = dict(current)
+            cur[dev_id] = dev_map
+            coordinator.data = cur  # type: ignore[attr-defined]
+            current = cur
+
+        if path.endswith("/mgr/nodes"):
+            if isinstance(body, dict):
+                dev_map["nodes"] = body
+                addrs = extract_heater_addrs(body)
+                htr_map: dict[str, Any] = dev_map.setdefault("htr", {})
+                htr_map.setdefault("settings", {})
+                htr_map["addrs"] = addrs
+                updated_nodes = True
+
+        elif "/htr/" in path and path.endswith("/settings"):
+            addr = path.split("/htr/")[1].split("/")[0]
+            htr_map = dev_map.setdefault("htr", {})
+            settings_map: dict[str, Any] = htr_map.setdefault("settings", {})
+            if isinstance(body, dict):
+                settings_map[addr] = body
+                updated_addrs.append(addr)
+
+        elif "/htr/" in path and path.endswith("/advanced_setup"):
+            addr = path.split("/htr/")[1].split("/")[0]
+            htr_map = dev_map.setdefault("htr", {})
+            adv_map: dict[str, Any] = htr_map.setdefault("advanced", {})
+            if isinstance(body, dict):
+                adv_map[addr] = body
+
+        elif "/htr/" in path and path.endswith("/samples"):
+            addr = path.split("/htr/")[1].split("/")[0]
+            sample_addrs.append(addr)
+
+        else:
+            raw = dev_map.setdefault("raw", {})
+            key = path.strip("/").replace("/", "_")
+            raw[key] = body
+
+    deduped_settings = list(dict.fromkeys(updated_addrs))
+    deduped_samples = list(dict.fromkeys(sample_addrs))
+    return paths, updated_nodes, deduped_settings, deduped_samples
 
