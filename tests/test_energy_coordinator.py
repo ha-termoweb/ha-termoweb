@@ -29,6 +29,69 @@ EnergyStateCoordinator = coord_module.EnergyStateCoordinator
 StateCoordinator = coord_module.StateCoordinator
 
 
+def test_ensure_inventory_rebuilds_and_refreshes_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = types.SimpleNamespace(get_node_settings=AsyncMock())
+    hass = HomeAssistant()
+    nodes = {"nodes": [{"addr": "1", "type": "htr"}]}
+    coord = StateCoordinator(
+        hass,
+        client,
+        30,
+        "dev",
+        {"name": "Device"},
+        nodes,  # type: ignore[arg-type]
+    )
+
+    sentinel = [nodes_module.Node(name="Heater", addr="1", node_type="htr")]
+
+    def _fake_builder(raw: Any) -> list[nodes_module.Node]:
+        assert raw == nodes
+        return sentinel
+
+    monkeypatch.setattr(coord_module, "build_node_inventory", _fake_builder)
+
+    coord._nodes = nodes
+    coord._node_inventory = []
+
+    inventory = coord._ensure_inventory()
+
+    assert inventory is sentinel
+    assert coord._nodes_by_type == {"htr": ["1"]}
+    assert coord._addr_lookup == {"1": "htr"}
+
+
+def test_update_nodes_uses_provided_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = types.SimpleNamespace(get_node_settings=AsyncMock())
+    hass = HomeAssistant()
+    coord = StateCoordinator(
+        hass,
+        client,
+        30,
+        "dev",
+        {"name": "Device"},
+        {},
+    )
+
+    builder_called = False
+
+    def _fake_builder(raw: Any) -> list[nodes_module.Node]:
+        nonlocal builder_called
+        builder_called = True
+        return []
+
+    monkeypatch.setattr(coord_module, "build_node_inventory", _fake_builder)
+
+    provided = [nodes_module.Node(name="Acc", addr="2", node_type="acm")]
+    coord.update_nodes({"nodes": []}, provided)
+
+    assert coord._node_inventory == provided
+    assert coord._nodes_by_type == {"acm": ["2"]}
+    assert coord._addr_lookup == {"2": "acm"}
+    assert builder_called is False
+
+
 def test_power_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
