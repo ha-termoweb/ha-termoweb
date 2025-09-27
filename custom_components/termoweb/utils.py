@@ -134,7 +134,9 @@ def addresses_by_node_type(
 
     known: set[str] | None = None
     if known_types is not None:
-        known = {str(node_type).strip().lower() for node_type in known_types if node_type}
+        known = {
+            str(node_type).strip().lower() for node_type in known_types if node_type
+        }
 
     result: dict[str, list[str]] = {}
     seen: dict[str, set[str]] = {}
@@ -156,6 +158,45 @@ def addresses_by_node_type(
             unknown.add(node_type)
 
     return result, unknown
+
+
+def build_heater_address_map(
+    nodes: Iterable[Any],
+    *,
+    heater_types: Iterable[str] | None = None,
+) -> tuple[dict[str, list[str]], dict[str, set[str]]]:
+    """Return mapping of heater node types to addresses and reverse lookup."""
+
+    allowed_types: set[str]
+    if heater_types is None:
+        allowed_types = set(HEATER_NODE_TYPES)
+    else:
+        allowed_types = {
+            str(node_type).strip().lower()
+            for node_type in heater_types
+            if str(node_type or "").strip()
+        }
+
+    if not allowed_types:
+        return {}, {}
+
+    by_type_raw, _ = addresses_by_node_type(
+        nodes,
+        known_types=allowed_types,
+    )
+
+    by_type: dict[str, list[str]] = {
+        node_type: list(addresses)
+        for node_type, addresses in by_type_raw.items()
+        if node_type in allowed_types and addresses
+    }
+
+    reverse: dict[str, set[str]] = {}
+    for node_type, addresses in by_type.items():
+        for address in addresses:
+            reverse.setdefault(address, set()).add(node_type)
+
+    return by_type, reverse
 
 
 def float_or_none(value: Any) -> float | None:

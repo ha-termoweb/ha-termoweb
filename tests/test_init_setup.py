@@ -21,6 +21,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import entity_registry as entity_registry_mod
 
+from custom_components.termoweb.utils import build_heater_address_map
+
 
 class FakeWSClient:
     def __init__(
@@ -188,7 +190,7 @@ def test_async_setup_entry_happy_path(
     assert isinstance(record["client"], HappyClient)
     assert isinstance(record["coordinator"], FakeCoordinator)
     assert record["coordinator"].refresh_calls == 1
-    by_type, _ = termoweb_init._heater_address_map(record["node_inventory"])
+    by_type, _ = build_heater_address_map(record["node_inventory"])
     assert by_type == {"htr": ["A"], "acm": ["B"]}
     assert [node.addr for node in record["node_inventory"]] == ["A", "B"]
     assert [node.type for node in record["node_inventory"]] == ["htr", "acm"]
@@ -202,7 +204,7 @@ def test_async_setup_entry_happy_path(
     import_mock.assert_awaited_once_with(stub_hass, entry)
 
 
-def test_heater_address_map_filters_invalid_nodes(termoweb_init: Any) -> None:
+def test_build_heater_address_map_filters_invalid_nodes(termoweb_init: Any) -> None:
     inventory = [
         SimpleNamespace(type="htr", addr="A"),
         SimpleNamespace(type="acm", addr=" "),
@@ -210,7 +212,7 @@ def test_heater_address_map_filters_invalid_nodes(termoweb_init: Any) -> None:
         SimpleNamespace(type="pmo", addr=""),
     ]
 
-    by_type, reverse = termoweb_init._heater_address_map(inventory)
+    by_type, reverse = build_heater_address_map(inventory)
 
     assert by_type == {"htr": ["A"]}
     assert reverse == {"A": {"htr"}}

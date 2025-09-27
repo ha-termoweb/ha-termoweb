@@ -15,7 +15,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_data
 from .nodes import Node, build_node_inventory
-from .utils import HEATER_NODE_TYPES, addresses_by_node_type, ensure_node_inventory
+from .utils import HEATER_NODE_TYPES, build_heater_address_map, ensure_node_inventory
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -198,13 +198,12 @@ def prepare_heater_platform_data(
         if addr and getattr(node, "name", "").strip():
             explicit_names.add((node_type, addr))
 
-    type_to_addresses, _unknown = addresses_by_node_type(
-        inventory, known_types=HEATER_NODE_TYPES
-    )
+    type_to_addresses, _reverse_lookup = build_heater_address_map(inventory)
 
-    addrs_by_type: dict[str, list[str]] = {}
-    for node_type in HEATER_NODE_TYPES:
-        addrs_by_type[node_type] = list(type_to_addresses.get(node_type, []))
+    addrs_by_type: dict[str, list[str]] = {
+        node_type: list(type_to_addresses.get(node_type, []))
+        for node_type in HEATER_NODE_TYPES
+    }
 
     name_map = build_heater_name_map(nodes, default_name_simple)
     names_by_type: dict[str, dict[str, str]] = name_map.get("by_type", {})
