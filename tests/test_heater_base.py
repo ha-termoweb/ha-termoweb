@@ -31,6 +31,8 @@ def test_prepare_heater_platform_data_groups_nodes() -> None:
                 {"type": "acm", "addr": "2"},
                 {"type": "thm", "addr": "3"},
                 {"type": "htr", "addr": "4"},
+                {"type": "HTR", "addr": "4"},
+                {"type": "ACM", "addr": "2"},
             ]
         }
     }
@@ -43,9 +45,15 @@ def test_prepare_heater_platform_data_groups_nodes() -> None:
     )
 
     assert entry_data["node_inventory"] == inventory
-    assert [node.addr for node in nodes_by_type.get("htr", [])] == ["1", "4"]
+    htr_nodes = nodes_by_type.get("htr", [])
+    assert [node.addr for node in htr_nodes] == ["1", "4", "4"]
+    assert all(hasattr(node, "addr") for node in htr_nodes)
     assert addrs_by_type["htr"] == ["1", "4"]
+    assert len(addrs_by_type["htr"]) == len(set(addrs_by_type["htr"]))
+    acm_nodes = nodes_by_type.get("acm", [])
+    assert [node.addr for node in acm_nodes] == ["2", "2"]
     assert addrs_by_type["acm"] == ["2"]
+    assert len(addrs_by_type["acm"]) == len(set(addrs_by_type["acm"]))
     assert resolve_name("htr", "1") == "Lounge"
     assert resolve_name("htr", "4") == "Heater 4"
     assert resolve_name("acm", "2") == "Accumulator 2"
