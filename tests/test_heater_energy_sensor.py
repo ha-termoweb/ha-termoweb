@@ -17,6 +17,7 @@ from custom_components.termoweb import coordinator as coordinator_module
 from custom_components.termoweb import sensor as sensor_module
 from custom_components.termoweb import const as const_module
 from custom_components.termoweb.nodes import build_node_inventory
+from custom_components.termoweb.utils import build_gateway_device_info
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant
@@ -630,11 +631,28 @@ def test_total_energy_sensor() -> None:
 
         await coord.async_refresh()
 
+        entry_id = "entry"
+        coord.data.setdefault("1", {}).setdefault("raw", {})["model"] = "EnergyHub"
+        hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "coordinator": coord,
+                    "dev_id": "1",
+                    "version": "9.9.9",
+                }
+            }
+        }
         total_sensor = InstallationTotalEnergySensor(
-            coord, "entry", "1", "Total Energy", "tot"
+            coord, entry_id, "1", "Total Energy", "tot"
         )
         total_sensor.hass = hass
         await total_sensor.async_added_to_hass()
+
+        info = total_sensor.device_info
+        expected_info = build_gateway_device_info(hass, entry_id, "1")
+        assert info == expected_info
+        assert info["sw_version"] == "9.9.9"
+        assert info["model"] == "EnergyHub"
 
         nodes_by_type = coord.data["1"]["nodes_by_type"]
         assert nodes_by_type["htr"] is coord.data["1"]["htr"]
@@ -733,8 +751,18 @@ def test_energy_and_power_sensor_properties() -> None:
     total_sensor = InstallationTotalEnergySensor(
         coordinator, "entry", "dev", "Total", "tot"
     )
+    total_sensor.hass = hass
+    hass.data = {
+        DOMAIN: {
+            "entry": {
+                "coordinator": coordinator,
+                "dev_id": "dev",
+            }
+        }
+    }
     total_info = total_sensor.device_info
-    assert total_info == {"identifiers": {(DOMAIN, "dev")}}
+    expected_total_info = build_gateway_device_info(hass, "entry", "dev")
+    assert total_info == expected_total_info
     assert total_sensor.available is True
     assert total_sensor.native_value == pytest.approx(1.5)
     assert total_sensor.extra_state_attributes == {"dev_id": "dev"}

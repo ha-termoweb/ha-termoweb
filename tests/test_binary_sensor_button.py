@@ -11,6 +11,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 import custom_components.termoweb.binary_sensor as binary_sensor_module
 import custom_components.termoweb.button as button_module
 from custom_components.termoweb.const import DOMAIN, signal_ws_status
+from custom_components.termoweb.utils import build_gateway_device_info
 
 GatewayOnlineBinarySensor = (
     binary_sensor_module.GatewayOnlineBinarySensor
@@ -71,11 +72,8 @@ def test_binary_sensor_setup_and_dispatch() -> None:
         assert entity.is_on is True
 
         info = entity.device_info
-        assert info["identifiers"] == {(DOMAIN, dev_id)}
-        assert info["manufacturer"] == "TermoWeb"
-        assert info["name"] == "TermoWeb Gateway"
-        assert info["model"] == "TW-GW"
-        assert info["sw_version"] == "2.1.0"
+        expected_info = build_gateway_device_info(hass, entry.entry_id, dev_id)
+        assert info == expected_info
 
         attrs = entity.extra_state_attributes
         assert attrs == {
@@ -138,11 +136,12 @@ def test_refresh_button_device_info_and_press() -> None:
         assert len(seen_ids) == 1
 
         info = button_entity.device_info
-        assert info["identifiers"] == {(DOMAIN, dev_id)}
-        assert info["manufacturer"] == "TermoWeb"
-        assert info["name"] == "TermoWeb Gateway"
-        assert info["model"] == "Gateway/Controller"
-        assert info["configuration_url"] == "https://control.termoweb.net"
+        expected_info = build_gateway_device_info(
+            hass,
+            entry.entry_id,
+            dev_id,
+        )
+        assert info == expected_info
 
         await button_entity.async_press()
         coordinator.async_request_refresh.assert_awaited_once()
