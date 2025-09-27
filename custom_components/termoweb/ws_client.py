@@ -572,15 +572,6 @@ class TermoWebSocketClient:
                             dev_map, nodes_by_type, node_type
                         )
                         bucket["addrs"] = list(addrs)
-                    if hasattr(self._coordinator, "update_nodes"):
-                        self._coordinator.update_nodes(body, inventory)
-                    record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-                    if isinstance(record, dict):
-                        record["nodes"] = body
-                        record["node_inventory"] = inventory
-                        energy_coordinator = record.get("energy_coordinator")
-                        if hasattr(energy_coordinator, "update_addresses"):
-                            energy_coordinator.update_addresses(type_to_addrs)
                     updated_nodes = True
             else:
                 node_type, addr = _extract_type_addr(path)
