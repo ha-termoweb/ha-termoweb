@@ -212,7 +212,7 @@ def test_heater_base_async_added_without_hass() -> None:
 
         assert heater.hass is None
         await heater.async_added_to_hass()
-        assert heater._unsub_ws is None
+        assert not heater._ws_subscription.is_connected
 
     asyncio.run(_run())
 
