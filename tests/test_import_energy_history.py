@@ -177,6 +177,7 @@ async def _load_module(
     init_module = importlib.reload(
         importlib.import_module("custom_components.termoweb.__init__")
     )
+    monkeypatch.setattr(init_module, "WebSocket09Client", _FakeWSClient)
 
     ConfigEntry = importlib.import_module("homeassistant.config_entries").ConfigEntry
     HomeAssistant = importlib.import_module("homeassistant.core").HomeAssistant

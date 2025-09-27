@@ -7,9 +7,9 @@ from .factory import create_backend
 
 __all__ = [
     "Backend",
+    "DucaheatBackend",
+    "DucaheatRESTClient",
     "HttpClientProto",
     "WsClientProto",
     "create_backend",
-    "DucaheatBackend",
-    "DucaheatRESTClient",
 ]
