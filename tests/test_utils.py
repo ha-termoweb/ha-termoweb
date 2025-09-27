@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import types
+
 import pytest
 
 from custom_components.termoweb.nodes import build_node_inventory
-from custom_components.termoweb.utils import HEATER_NODE_TYPES, addresses_by_type, float_or_none
+
+from custom_components.termoweb.utils import (
+    HEATER_NODE_TYPES,
+    addresses_by_node_type,
+    addresses_by_type,
+    float_or_none,
+)
 
 
 def test_addresses_by_type_filters_and_deduplicates() -> None:
@@ -28,6 +36,17 @@ def test_addresses_by_type_handles_missing_types() -> None:
     assert addresses_by_type(inventory, [None]) == []
 
 
+def test_addresses_by_node_type_skips_invalid_entries() -> None:
+    nodes = [
+        types.SimpleNamespace(type=" ", addr="skip"),
+        types.SimpleNamespace(type="acm", addr=""),
+        types.SimpleNamespace(type="acm", addr="B"),
+        types.SimpleNamespace(type="acm", addr="B"),
+    ]
+
+    mapping, unknown = addresses_by_node_type(nodes, known_types=["htr"])
+    assert mapping == {"acm": ["B"]}
+    assert unknown == {"acm"}
 
 
 @pytest.mark.parametrize(

@@ -1,7 +1,8 @@
 import asyncio
 from types import SimpleNamespace
 
-from custom_components.termoweb.backend.ducaheat import DucaheatBackend
+from custom_components.termoweb.api import RESTClient
+from custom_components.termoweb.backend.ducaheat import DucaheatBackend, DucaheatRESTClient
 from custom_components.termoweb.ws_client_v2 import DucaheatWSClient
 
 
@@ -72,3 +73,102 @@ def test_dummy_client_get_node_settings_accepts_acm() -> None:
     data = asyncio.run(_run())
     assert data["type"] == "acm"
     assert data["addr"] == "3"
+
+
+def test_ducaheat_rest_client_passthrough_for_non_htr(monkeypatch) -> None:
+    async def _run() -> None:
+        session = SimpleNamespace()
+        client = DucaheatRESTClient(session, "user", "pass")
+
+        captured: dict[str, object] = {}
+
+        async def fake_super(self, dev_id: str, node: tuple[str, str]):
+            captured["args"] = (dev_id, node)
+            return {"ok": True}
+
+        monkeypatch.setattr(RESTClient, "get_node_settings", fake_super)
+
+        result = await client.get_node_settings("dev", ("pmo", "9"))
+        assert result == {"ok": True}
+        assert captured["args"] == ("dev", ("pmo", "9"))
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_rest_client_normalises_acm(monkeypatch) -> None:
+    async def _run() -> None:
+        session = SimpleNamespace()
+        client = DucaheatRESTClient(session, "user", "pass")
+
+        async def fake_super(self, dev_id: str, node: tuple[str, str]):
+            return {"status": {"mode": "AUTO"}}
+
+        monkeypatch.setattr(RESTClient, "get_node_settings", fake_super)
+
+        seen: dict[str, object] = {}
+
+        def fake_normalise(self, payload, *, node_type: str = "htr"):
+            seen["node_type"] = node_type
+            seen["payload"] = payload
+            return {"normalized": True}
+
+        monkeypatch.setattr(DucaheatRESTClient, "_normalise_settings", fake_normalise)
+
+        result = await client.get_node_settings("dev", ("acm", "2"))
+        assert result == {"normalized": True}
+        assert seen["node_type"] == "acm"
+        assert seen["payload"] == {"status": {"mode": "AUTO"}}
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_rest_set_node_settings_routes_non_htr(monkeypatch) -> None:
+    async def _run() -> None:
+        session = SimpleNamespace()
+        client = DucaheatRESTClient(session, "user", "pass")
+
+        captured: dict[str, object] = {}
+
+        async def fake_super(self, dev_id: str, node: tuple[str, str], **kwargs):
+            captured["args"] = (dev_id, node, kwargs)
+            return {"ok": True}
+
+        monkeypatch.setattr(RESTClient, "set_node_settings", fake_super)
+
+        result = await client.set_node_settings(
+            "dev",
+            ("acm", "4"),
+            mode="auto",
+            stemp=20.5,
+        )
+
+        assert result == {"ok": True}
+        assert captured["args"] == (
+            "dev",
+            ("acm", "4"),
+            {"mode": "auto", "stemp": 20.5, "prog": None, "ptemp": None, "units": "C"},
+        )
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_rest_get_node_samples_forwards_non_htr(monkeypatch) -> None:
+    async def _run() -> None:
+        session = SimpleNamespace()
+        client = DucaheatRESTClient(session, "user", "pass")
+
+        captured: dict[str, object] = {}
+
+        async def fake_super(
+            self, dev_id: str, node: tuple[str, str], start: float, stop: float
+        ):
+            captured["args"] = (dev_id, node, start, stop)
+            return [{"t": 1}]
+
+        monkeypatch.setattr(RESTClient, "get_node_samples", fake_super)
+
+        result = await client.get_node_samples("dev", ("acm", "7"), 1.0, 2.0)
+        assert result == [{"t": 1}]
+        assert captured["args"] == ("dev", ("acm", "7"), 1.0, 2.0)
+
+    asyncio.run(_run())

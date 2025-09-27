@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 import types
 from typing import Any, Callable, Iterable
+from unittest.mock import AsyncMock
 
 
 ConfigEntryAuthFailedStub = type(
@@ -976,6 +977,60 @@ def _install_stubs() -> None:
 
 
 _install_stubs()
+
+
+class FakeCoordinator:
+    """Reusable coordinator stub shared across tests."""
+
+    instances: list["FakeCoordinator"] = []
+
+    def __init__(
+        self,
+        hass: Any,
+        client: Any | None = None,
+        base_interval: int = 0,
+        dev_id: str = "dev",
+        dev: dict[str, Any] | None = None,
+        nodes: dict[str, Any] | None = None,
+        node_inventory: Iterable[Any] | None = None,
+        *,
+        data: dict[str, Any] | None = None,
+    ) -> None:
+        self.hass = hass
+        self.client = client
+        self.base_interval = base_interval
+        self.dev_id = dev_id
+        self.dev = dev or {}
+        self.nodes = nodes or {}
+        self.node_inventory = list(node_inventory or [])
+        self.update_interval = dt.timedelta(seconds=base_interval or 0)
+        if data is not None:
+            self.data = data
+        elif dev_id:
+            self.data = {dev_id: self.dev}
+        else:
+            self.data = {}
+        self.listeners: list[Callable[[], None]] = []
+        self.refresh_calls = 0
+        self.async_request_refresh = AsyncMock()
+        self.async_refresh_heater = AsyncMock()
+        type(self).instances.append(self)
+
+    async def async_config_entry_first_refresh(self) -> None:
+        self.refresh_calls += 1
+
+    def async_add_listener(self, listener: Callable[[], None]) -> None:
+        if callable(listener):
+            self.listeners.append(listener)
+
+    def update_nodes(
+        self,
+        nodes: dict[str, Any],
+        node_inventory: Iterable[Any] | None = None,
+    ) -> None:
+        self.nodes = nodes
+        if node_inventory is not None:
+            self.node_inventory = list(node_inventory)
 
 
 def pytest_runtest_setup(item: Any) -> None:  # pragma: no cover - ensure isolation

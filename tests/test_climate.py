@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from conftest import _install_stubs
+from conftest import FakeCoordinator, _install_stubs
 
 _install_stubs()
 
@@ -36,26 +36,37 @@ def _reset_environment() -> None:
     entity_platform_module._set_current_platform(EntityPlatform())
     dispatcher_module._dispatch_map = {}
     dt_util.NOW = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
+    FakeCoordinator.instances.clear()
+
+
+def _make_coordinator(
+    hass: HomeAssistant,
+    dev_id: str,
+    record: dict[str, Any],
+    *,
+    client: Any | None = None,
+    node_inventory: list[Any] | None = None,
+) -> FakeCoordinator:
+    return FakeCoordinator(
+        hass,
+        client=client,
+        dev_id=dev_id,
+        dev=record,
+        nodes=record.get("nodes", {}),
+        node_inventory=node_inventory,
+        data={dev_id: record},
+    )
 
 
 # -------------------- Helpers for tests --------------------
 
 
-class FakeCoordinator:
-    def __init__(self, hass: HomeAssistant, data: dict[str, Any]) -> None:
-        self.hass = hass
-        self.data = data
-        self.async_request_refresh: AsyncMock = AsyncMock()
-        self.async_refresh_heater: AsyncMock = AsyncMock()
-
-    def async_add_listener(self, *_args: Any, **_kwargs: Any) -> None:
-        return None
-
-
 def test_termoweb_heater_is_heater_node() -> None:
     _reset_environment()
     hass = HomeAssistant()
-    coordinator = FakeCoordinator(hass, {"dev": {"htr": {"settings": {}}, "nodes": {}}})
+    dev_id = "dev"
+    coordinator_data = {dev_id: {"htr": {"settings": {}}, "nodes": {}}}
+    coordinator = _make_coordinator(hass, dev_id, coordinator_data[dev_id])
 
     heater = HeaterClimateEntity(
         coordinator,
@@ -102,7 +113,13 @@ def test_async_setup_entry_creates_entities() -> None:
                 "version": "3.1.4",
             }
         }
-        coordinator = FakeCoordinator(hass, coordinator_data)
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            coordinator_data[dev_id],
+            client=AsyncMock(),
+            node_inventory=coordinator_data[dev_id].get("node_inventory"),
+        )
 
         hass.data = {
             DOMAIN: {
@@ -185,6 +202,67 @@ def test_async_setup_entry_creates_entities() -> None:
     asyncio.run(_run())
 
 
+def test_async_setup_entry_default_names_and_invalid_nodes() -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry_id = "entry-default"
+        dev_id = "dev-default"
+        raw_nodes = {
+            "nodes": [
+                {"type": "htr", "addr": "1"},
+                {"type": "acm", "addr": "2"},
+                {"type": "pmo", "addr": "P1"},
+            ]
+        }
+        inventory = climate_module.build_node_inventory(raw_nodes)
+        inventory.append(types.SimpleNamespace(type="  ", addr="extra"))
+        inventory.append(types.SimpleNamespace(type="htr", addr=" "))
+
+        coordinator_data = {
+            dev_id: {
+                "nodes": {},
+                "htr": {"settings": {}},
+                "nodes_by_type": {},
+            }
+        }
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            coordinator_data[dev_id],
+            client=AsyncMock(),
+            node_inventory=inventory,
+        )
+
+        hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "coordinator": coordinator,
+                    "dev_id": dev_id,
+                    "client": AsyncMock(),
+                    "nodes": {},
+                    "node_inventory": inventory,
+                }
+            }
+        }
+
+        added: list[HeaterClimateEntity] = []
+
+        def _add_entities(entities: list[HeaterClimateEntity]) -> None:
+            added.extend(entities)
+
+        entity_platform_module._set_current_platform(EntityPlatform())
+
+        entry = types.SimpleNamespace(entry_id=entry_id)
+        await async_setup_entry(hass, entry, _add_entities)
+
+        names = sorted(entity._attr_name for entity in added)
+        assert names == ["Accumulator 2", "Heater 1"]
+        assert all(entity._addr in {"1", "2"} for entity in added)
+
+    asyncio.run(_run())
+
+
 def test_async_setup_entry_creates_accumulator_entity() -> None:
     async def _run() -> None:
         _reset_environment()
@@ -201,17 +279,23 @@ def test_async_setup_entry_creates_accumulator_entity() -> None:
             "prog": [0, 1, 2] * 56,
             "units": "C",
         }
-        coordinator = FakeCoordinator(
+        coordinator_data = {
+            dev_id: {
+                "nodes": nodes,
+                "nodes_by_type": {
+                    "acm": {"addrs": ["7"], "settings": {"7": dict(settings)}}
+                },
+                "htr": {"settings": {}},
+            }
+        }
+        coordinator = _make_coordinator(
             hass,
-            {
-                dev_id: {
-                    "nodes": nodes,
-                    "nodes_by_type": {
-                        "acm": {"addrs": ["7"], "settings": {"7": dict(settings)}}
-                    },
-                    "htr": {"settings": {}},
-                }
-            },
+            dev_id,
+            coordinator_data[dev_id],
+            client=AsyncMock(),
+            node_inventory=list(
+                coordinator_data[dev_id]["nodes_by_type"]["acm"]["settings"].keys()
+            ),
         )
 
         client = AsyncMock()
@@ -264,6 +348,37 @@ def test_async_setup_entry_creates_accumulator_entity() -> None:
     asyncio.run(_run())
 
 
+def test_async_write_settings_without_client_returns_false() -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        dev_id = "dev-missing-client"
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            {"htr": {"settings": {}}, "nodes": {}},
+        )
+        hass.data = {
+            DOMAIN: {
+                "entry": {
+                    "coordinator": coordinator,
+                    "dev_id": dev_id,
+                    "client": None,
+                }
+            }
+        }
+
+        heater = HeaterClimateEntity(coordinator, "entry", dev_id, "1", "Heater 1")
+        heater.hass = hass
+
+        success = await heater._async_write_settings(
+            log_context="test", mode="auto", stemp=20.0
+        )
+        assert success is False
+
+    asyncio.run(_run())
+
+
 def test_async_setup_entry_rebuilds_inventory_when_missing() -> None:
     async def _run() -> None:
         _reset_environment()
@@ -277,14 +392,11 @@ def test_async_setup_entry_rebuilds_inventory_when_missing() -> None:
             ]
         }
 
-        coordinator = FakeCoordinator(
+        coordinator = _make_coordinator(
             hass,
-            {
-                dev_id: {
-                    "nodes": nodes,
-                    "htr": {"settings": {"11": {}, "22": {}}},
-                }
-            },
+            dev_id,
+            {"nodes": nodes, "htr": {"settings": {"11": {}, "22": {}}}},
+            client=AsyncMock(),
         )
 
         record: dict[str, Any] = {
@@ -321,9 +433,11 @@ def test_refresh_fallback_skips_when_hass_inactive(
         entry_id = "entry"
         dev_id = "dev"
         addr = "A"
-        coordinator = FakeCoordinator(
+        coordinator = _make_coordinator(
             hass,
-            {dev_id: {"nodes": {"nodes": []}, "htr": {"settings": {addr: {}}}}},
+            dev_id,
+            {"nodes": {"nodes": []}, "htr": {"settings": {addr: {}}}},
+            client=AsyncMock(),
         )
 
         hass.data = {
@@ -392,9 +506,11 @@ def test_heater_additional_cancelled_edges(
             "prog": list(base_prog),
             "units": "C",
         }
-        coordinator = FakeCoordinator(
+        coordinator = _make_coordinator(
             hass,
-            {dev_id: {"nodes": {"nodes": []}, "htr": {"settings": {addr: settings}}}},
+            dev_id,
+            {"nodes": {"nodes": []}, "htr": {"settings": {addr: settings}}},
+            client=AsyncMock(),
         )
         client = AsyncMock()
         client.set_htr_settings = AsyncMock()
@@ -508,7 +624,12 @@ def test_heater_properties_and_ws_update() -> None:
                 "version": "2.0.0",
             }
         }
-        coordinator = FakeCoordinator(hass, coordinator_data)
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            coordinator_data[dev_id],
+            client=AsyncMock(),
+        )
         hass.data = {
             DOMAIN: {
                 entry_id: {
@@ -666,7 +787,12 @@ def test_heater_write_paths_and_errors(
             }
         }
 
-        coordinator = FakeCoordinator(hass, coordinator_data)
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            coordinator_data[dev_id],
+            client=AsyncMock(),
+        )
         client = AsyncMock()
         hass.data = {
             DOMAIN: {
@@ -1080,9 +1206,11 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
             "prog": list(base_prog),
             "units": "C",
         }
-        coordinator = FakeCoordinator(
+        coordinator = _make_coordinator(
             hass,
-            {dev_id: {"nodes": {"nodes": []}, "htr": {"settings": {addr: settings}}}},
+            dev_id,
+            {"nodes": {"nodes": []}, "htr": {"settings": {addr: settings}}},
+            client=AsyncMock(),
         )
         client = AsyncMock()
         client.set_htr_settings = AsyncMock()
@@ -1257,9 +1385,11 @@ def test_heater_cancelled_paths_propagate(
             "prog": list(base_prog),
             "units": "C",
         }
-        coordinator = FakeCoordinator(
+        coordinator = _make_coordinator(
             hass,
-            {dev_id: {"nodes": {"nodes": []}, "htr": {"settings": {addr: settings}}}},
+            dev_id,
+            {"nodes": {"nodes": []}, "htr": {"settings": {addr: settings}}},
+            client=AsyncMock(),
         )
         client = AsyncMock()
         client.set_htr_settings = AsyncMock()
