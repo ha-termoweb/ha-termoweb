@@ -280,6 +280,237 @@ def test_refresh_heater_handles_errors(caplog: pytest.LogCaptureFixture) -> None
     asyncio.run(_run())
 
 
+def test_inventory_handles_mixed_payloads() -> None:
+    hass = HomeAssistant()
+    nodes = {
+        "nodes": [
+            {"addr": " 1 ", "type": "HTR"},
+            {"addr": None, "type": "acm"},
+        ],
+        "htrs": [{"addr": "2"}, "  "],
+        "acms": {"addrs": ["4", "", "4"]},
+        "thermostats": [{"addr": "5"}, "6", ""],
+    }
+
+    coord = TermoWebCoordinator(
+        hass,
+        types.SimpleNamespace(),
+        30,
+        "dev",
+        {"name": " Device "},
+        nodes,  # type: ignore[arg-type]
+    )
+
+    addr_map, reverse = coord._addr_lookup()
+
+    assert addr_map["htr"] == ["1", "2", " 1 "]
+    assert addr_map["acm"] == ["4"]
+    assert addr_map["thermostat"] == ["5", "6"]
+    assert reverse["1"] == "htr"
+    assert reverse["4"] == "acm"
+    assert coord._addrs() == ["1", "2", " 1 "]
+
+def test_inventory_handles_node_list_payload() -> None:
+    hass = HomeAssistant()
+    coord = TermoWebCoordinator(
+        hass,
+        types.SimpleNamespace(),
+        30,
+        "dev",
+        {},
+        [
+            {"addr": "7", "type": "THM"},
+            {"addr": "8", "type": None},
+            "ignored",
+        ],  # type: ignore[arg-type]
+    )
+
+    addr_map, reverse = coord._addr_lookup()
+
+    assert addr_map["thm"] == ["7"]
+    assert addr_map["htr"] == ["8"]
+    assert reverse == {"7": "thm", "8": "htr"}
+
+
+def test_normalise_type_section_varied_inputs() -> None:
+    hass = HomeAssistant()
+    coord = TermoWebCoordinator(
+        hass,
+        types.SimpleNamespace(),
+        30,
+        "dev",
+        {},
+        {"nodes": []},  # type: ignore[arg-type]
+    )
+
+    tuple_section = {
+        "addrs": (" 7 ", "8", ""),
+        "settings": {"7": {"mode": "heat"}, "8": None},
+    }
+    result = coord._normalise_type_section("thm", tuple_section, ["9", "7", ""])
+    assert result == {"addrs": ["9", "7", "8"], "settings": {"7": {"mode": "heat"}}}
+
+    string_section = {
+        "addrs": " 10 ",
+        "settings": {"10": 1, 11: {"foo": "bar"}, "skip": None},
+    }
+    str_result = coord._normalise_type_section("acm", string_section, [])
+    assert str_result == {"addrs": ["10"], "settings": {"10": 1, "11": {"foo": "bar"}}}
+
+    list_result = coord._normalise_type_section("pmo", [" 12 ", "", "12"], ["13"])
+    assert list_result == {"addrs": ["13", "12"], "settings": {}}
+
+
+def test_fetch_settings_prefers_generic_getter() -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_node_settings = AsyncMock(return_value={"ok": True})
+        client.get_htr_settings = AsyncMock(return_value={"wrong": True})
+
+        hass = HomeAssistant()
+        coord = TermoWebCoordinator(
+            hass,
+            client,
+            30,
+            "dev",
+            {},
+            {"nodes": []},  # type: ignore[arg-type]
+        )
+
+        result = await coord._fetch_settings("thm", "A")
+        assert result == {"ok": True}
+        client.get_node_settings.assert_awaited_once_with("dev", ("thm", "A"))
+        client.get_htr_settings.assert_not_called()
+
+        client.get_node_settings = AsyncMock(return_value="bad")
+        assert await coord._fetch_settings("thm", "A") is None
+
+        delattr(client, "get_node_settings")
+        client.get_htr_settings = AsyncMock(return_value={"mode": "heat"})
+        assert await coord._fetch_settings("htr", "A") == {"mode": "heat"}
+        client.get_htr_settings.assert_awaited_with("dev", "A")
+
+        client.get_htr_settings = AsyncMock(return_value="oops")
+        assert await coord._fetch_settings("htr", "A") is None
+
+        empty_client = types.SimpleNamespace()
+        other = TermoWebCoordinator(
+            hass,
+            empty_client,
+            30,
+            "dev",
+            {},
+            {"nodes": []},  # type: ignore[arg-type]
+        )
+        assert await other._fetch_settings("thm", "A") is None
+
+    asyncio.run(_run())
+
+
+def test_refresh_heater_accepts_typed_address() -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_node_settings = AsyncMock(return_value={"mode": "auto"})
+
+        hass = HomeAssistant()
+        nodes = {"nodes": [{"addr": "A", "type": "thm"}]}
+        coord = TermoWebCoordinator(
+            hass,
+            client,
+            15,
+            "dev",
+            {"name": " Device "},
+            nodes,  # type: ignore[arg-type]
+        )
+
+        updates: list[dict[str, dict[str, Any]]] = []
+
+        def _set_updated_data(self, data: dict[str, dict[str, Any]]) -> None:
+            updates.append(data)
+            self.data = data
+
+        coord.async_set_updated_data = types.MethodType(  # type: ignore[attr-defined]
+            _set_updated_data,
+            coord,
+        )
+
+        await coord.async_refresh_heater(("THM", "A"))
+
+        assert updates, "Expected async_set_updated_data to be called"
+        dev = updates[-1]["dev"]
+        assert dev["htr"]["settings"] == {}
+        assert dev["nodes_by_type"]["thm"]["settings"]["A"] == {"mode": "auto"}
+
+    asyncio.run(_run())
+
+
+def test_async_update_data_merges_previous_sections() -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_node_settings = AsyncMock(return_value={"mode": "fresh"})
+
+        hass = HomeAssistant()
+        nodes = {
+            "nodes": [
+                {"addr": "A", "type": "htr"},
+                {"addr": "B", "type": "thm"},
+            ]
+        }
+        coord = TermoWebCoordinator(
+            hass,
+            client,
+            30,
+            "dev",
+            {"name": " Device "},
+            nodes,  # type: ignore[arg-type]
+        )
+
+        coord.data = {
+            "dev": {
+                "dev_id": "dev",
+                "name": "Old",
+                "raw": {"name": "Old"},
+                "connected": False,
+                "nodes": nodes,
+                "nodes_by_type": {
+                    "htr": {"addrs": ["A"], "settings": {"A": {"mode": "hold"}}},
+                    "legacy": {
+                        "addrs": ("L", "L2"),
+                        "settings": {"L": {"mode": "legacy"}, "L2": None},
+                    },
+                    "thm": {"addrs": ["B"], "settings": {"B": {"mode": "cool"}}},
+                },
+                "htr": {"addrs": ["A"], "settings": {"A": {"mode": "hold"}}},
+                "legacy": {"addrs": ["L"], "settings": {"L": {"mode": "legacy"}}},
+                "auxiliary": {
+                    "addrs": ["B1", ""],
+                    "settings": {"B1": {"temp": 20}, "skip": None},
+                },
+                "ignored": "skip",
+            }
+        }
+
+        result = await coord._async_update_data()
+        data = result["dev"]
+
+        assert data["dev_id"] == "dev"
+        assert data["name"] == "Device"
+        assert data["connected"] is True
+        assert data["nodes_by_type"]["htr"]["settings"]["A"] == {"mode": "fresh"}
+        assert data["nodes_by_type"]["thm"]["settings"]["B"] == {"mode": "cool"}
+        assert data["nodes_by_type"]["legacy"] == {
+            "addrs": ["L", "L2"],
+            "settings": {"L": {"mode": "legacy"}},
+        }
+        assert data["nodes_by_type"]["auxiliary"] == {
+            "addrs": ["B1"],
+            "settings": {"B1": {"temp": 20}},
+        }
+        assert coord._rr_index["dev"] == 1
+
+    asyncio.run(_run())
+
+
 def test_counter_reset(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
