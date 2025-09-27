@@ -566,27 +566,7 @@ class TermoWebSocketClient:
             if path.endswith("/mgr/nodes"):
                 if isinstance(body, dict):
                     dev_map["nodes"] = body
-                    inventory: list[Any] = []
-                    try:
-                        inventory = build_node_inventory(body)
-                    except (
-                        Exception
-                    ) as err:  # pragma: no cover - defensive  # noqa: BLE001
-                        _LOGGER.debug(
-                            "WS %s: failed to build node inventory: %s",
-                            self.dev_id,
-                            err,
-                            exc_info=err,
-                        )
-                    type_to_addrs, unknown_types = addresses_by_node_type(
-                        inventory, known_types=NODE_CLASS_BY_TYPE
-                    )
-                    if unknown_types:
-                        _LOGGER.debug(
-                            "WS %s: unknown node types in inventory: %s",
-                            self.dev_id,
-                            ", ".join(sorted(unknown_types)),
-                        )
+                    type_to_addrs = self._dispatch_nodes(body)
                     for node_type, addrs in type_to_addrs.items():
                         bucket = self._ensure_type_bucket(
                             dev_map, nodes_by_type, node_type
@@ -934,12 +914,32 @@ class TermoWebSocketClient:
             return nodes
         return None
 
-    def _dispatch_nodes(self, snapshot: dict[str, Any]) -> None:
-        """Publish the node snapshot to the coordinator and listeners."""
+    def _dispatch_nodes(self, payload: dict[str, Any]) -> dict[str, list[str]]:
+        """Publish node updates and return the address map by node type.
+
+        ``payload`` may be either the normalised snapshot produced by
+        :meth:`_build_nodes_snapshot` or the raw ``/mgr/nodes`` response used
+        by the legacy websocket client.
+        """
+
+        if not isinstance(payload, dict):
+            return {}
+
+        is_snapshot = isinstance(payload.get("nodes_by_type"), dict)
+        raw_nodes: Any
+        snapshot: dict[str, Any]
+
+        if is_snapshot:
+            snapshot = payload
+            raw_nodes = snapshot.get("nodes")
+        else:
+            raw_nodes = payload
+            snapshot = {"nodes": deepcopy(raw_nodes), "nodes_by_type": {}}
+
         record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
         inventory: list[Any] = []
         try:
-            inventory = build_node_inventory(snapshot.get("nodes"))
+            inventory = build_node_inventory(raw_nodes)
         except Exception as err:  # pragma: no cover - defensive  # noqa: BLE001
             _LOGGER.debug(
                 "WS %s: failed to build node inventory: %s",
@@ -947,24 +947,39 @@ class TermoWebSocketClient:
                 err,
                 exc_info=err,
             )
-        if hasattr(self._coordinator, "update_nodes"):
-            self._coordinator.update_nodes(snapshot.get("nodes"), inventory)
-        if isinstance(record, dict):
-            record["nodes"] = snapshot.get("nodes")
-            record["node_inventory"] = inventory
-            addr_map, unknown_types = addresses_by_node_type(
-                inventory, known_types=NODE_CLASS_BY_TYPE
+
+        addr_map, unknown_types = addresses_by_node_type(
+            inventory, known_types=NODE_CLASS_BY_TYPE
+        )
+        if unknown_types:
+            _LOGGER.debug(
+                "WS %s: unknown node types in inventory: %s",
+                self.dev_id,
+                ", ".join(sorted(unknown_types)),
             )
-            if unknown_types:
-                _LOGGER.debug(
-                    "WS %s: unknown node types in inventory: %s",
-                    self.dev_id,
-                    ", ".join(sorted(unknown_types)),
-                )
+
+        if not is_snapshot:
+            nodes_by_type = {
+                node_type: {"addrs": list(addrs)} for node_type, addrs in addr_map.items()
+            }
+            snapshot["nodes_by_type"] = nodes_by_type
+            if "htr" in nodes_by_type:
+                snapshot.setdefault("htr", nodes_by_type["htr"])
+
+        if raw_nodes is None:
+            raw_nodes = {}
+
+        if hasattr(self._coordinator, "update_nodes"):
+            self._coordinator.update_nodes(raw_nodes, inventory)
+
+        if isinstance(record, dict):
+            record["nodes"] = raw_nodes
+            record["node_inventory"] = inventory
             energy_coordinator = record.get("energy_coordinator")
             if hasattr(energy_coordinator, "update_addresses"):
                 energy_coordinator.update_addresses(addr_map)
-        payload = {
+
+        payload_copy = {
             "dev_id": self.dev_id,
             "node_type": None,
             "nodes": deepcopy(snapshot.get("nodes")),
@@ -973,13 +988,21 @@ class TermoWebSocketClient:
 
         def _send() -> None:
             """Fire the dispatcher signal with the latest node payload."""
+
             async_dispatcher_send(
                 self.hass,
                 signal_ws_data(self.entry_id),
-                payload,
+                payload_copy,
             )
 
-        self.hass.loop.call_soon_threadsafe(_send)
+        loop = getattr(self.hass, "loop", None)
+        call_soon = getattr(loop, "call_soon_threadsafe", None)
+        if callable(call_soon):
+            call_soon(_send)
+        else:  # pragma: no cover - legacy hass loop stub
+            _send()
+
+        return {node_type: list(addrs) for node_type, addrs in addr_map.items()}
 
     @staticmethod
     def _build_nodes_snapshot(nodes: dict[str, Any]) -> dict[str, Any]:

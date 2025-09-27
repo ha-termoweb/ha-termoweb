@@ -1177,18 +1177,38 @@ def test_runner_handles_handshake_events_and_disconnect(
             for call in dispatcher.call_args_list
             if call.args[1] == data_signal
         ]
-        assert len(data_payloads) == 4
+        assert len(data_payloads) == 5
+        aggregate_payloads = [
+            payload
+            for payload in data_payloads
+            if "kind" not in payload
+            and "nodes" in payload
+            and "nodes_by_type" in payload
+        ]
+        assert len(aggregate_payloads) == 1
+        assert aggregate_payloads[0]["nodes"] == {
+            "nodes": [
+                {"addr": "01", "type": "htr"},
+                {"addr": "02", "type": "HTR"},
+            ]
+        }
+        assert aggregate_payloads[0]["nodes_by_type"] == {
+            "htr": {"addrs": ["01", "02"]},
+        }
+
+        per_node_payloads = [payload for payload in data_payloads if "kind" in payload]
+        assert len(per_node_payloads) == 4
         ts = client._stats.last_event_ts
         assert {
             (p["kind"], p["addr"])
-            for p in data_payloads
+            for p in per_node_payloads
         } == {
             ("nodes", None),
             ("htr_settings", "01"),
             ("htr_settings", "02"),
             ("htr_samples", "02"),
         }
-        for payload in data_payloads:
+        for payload in per_node_payloads:
             assert payload["dev_id"] == "dev"
             assert payload["ts"] == ts
 
@@ -1626,6 +1646,7 @@ def test_handle_event_updates_state_and_dispatch(
     }
 
     client._handle_event(event)
+    loop.run_until_complete(asyncio.sleep(0))
 
     dev_data = coordinator.data["dev"]
     assert dev_data["nodes"] == {
@@ -1642,6 +1663,28 @@ def test_handle_event_updates_state_and_dispatch(
     assert dev_data["nodes_by_type"]["acm"]["settings"]["03"] == {"mode": "eco"}
     assert dev_data["raw"]["misc"] == {"foo": "bar"}
     assert client._stats.events_total == 1
+
+    aggregate_payloads = [
+        call.args[2]
+        for call in module.async_dispatcher_send.call_args_list
+        if call.args[1] == module.signal_ws_data("entry")
+        and "nodes" in call.args[2]
+        and "nodes_by_type" in call.args[2]
+        and "kind" not in call.args[2]
+    ]
+    assert len(aggregate_payloads) == 1
+    assert aggregate_payloads[0]["nodes"] == {
+        "nodes": [
+            {"addr": "01", "type": "htr"},
+            {"addr": "02", "type": "HTR"},
+            {"addr": "03", "type": "acm"},
+        ]
+    }
+    assert aggregate_payloads[0]["nodes_by_type"] == {
+        "acm": {"addrs": ["03"]},
+        "htr": {"addrs": ["01", "02"]},
+    }
+
     module.async_dispatcher_send.assert_has_calls(
         [
             call(
@@ -1691,7 +1734,7 @@ def test_handle_event_updates_state_and_dispatch(
         ],
         any_order=True,
     )
-    assert module.async_dispatcher_send.call_count == 4
+    assert module.async_dispatcher_send.call_count == 5
 
     assert len(node_updates) == 1
     assert node_updates[0][0] == {
