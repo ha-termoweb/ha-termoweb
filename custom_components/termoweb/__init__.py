@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime, timedelta
 import logging
 import time
@@ -39,7 +39,7 @@ from .const import (
 )
 from .coordinator import StateCoordinator
 from .nodes import build_node_inventory
-from .utils import HEATER_NODE_TYPES, addresses_by_type
+from .utils import HEATER_NODE_TYPES
 
 # Re-export legacy WS client for backward compatibility (tests may patch it).
 from .ws_client_legacy import WebSocket09Client  # noqa: F401
@@ -110,10 +110,33 @@ def _store_statistics(
     async_add_external_statistics(hass, ext_meta, stats)
 
 
+def _heater_address_map(
+    inventory: Iterable[Any],
+) -> tuple[dict[str, list[str]], dict[str, set[str]]]:
+    """Return mapping of heater node types to addresses and reverse lookup."""
+
+    by_type: dict[str, list[str]] = {}
+    reverse: dict[str, set[str]] = {}
+
+    for node in inventory:
+        node_type = str(getattr(node, "type", "")).strip().lower()
+        if node_type not in HEATER_NODE_TYPES:
+            continue
+        addr = str(getattr(node, "addr", "")).strip()
+        if not addr:
+            continue
+        addrs = by_type.setdefault(node_type, [])
+        if addr not in addrs:
+            addrs.append(addr)
+        reverse.setdefault(addr, set()).add(node_type)
+
+    return by_type, reverse
+
+
 async def _async_import_energy_history(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    addrs: Iterable[str] | None = None,
+    nodes: Mapping[str, Iterable[str]] | Iterable[str] | None = None,
     *,
     reset_progress: bool = False,
     max_days: int | None = None,
@@ -140,12 +163,87 @@ async def _async_import_energy_history(
         if nodes_payload:
             inventory = build_node_inventory(nodes_payload)
             rec["node_inventory"] = inventory
-    all_addrs: list[str] = addresses_by_type(inventory, HEATER_NODE_TYPES)
-    target_addrs = (
-        all_addrs
-        if addrs is None
-        else [a for a in all_addrs if a in {str(x) for x in addrs}]
-    )
+
+    by_type, reverse_lookup = _heater_address_map(inventory)
+
+    def _normalise_addresses(value: Iterable[Any] | Any) -> list[str]:
+        """Return cleaned list of address strings."""
+
+        if isinstance(value, str) or not isinstance(value, Iterable):
+            candidates = [value]
+        else:
+            candidates = list(value)
+
+        result: list[str] = []
+        for candidate in candidates:
+            addr = str(candidate).strip()
+            if addr:
+                result.append(addr)
+        return result
+
+    requested_map: dict[str, list[str]] | None
+    if nodes is None:
+        requested_map = None
+    elif isinstance(nodes, Mapping):
+        requested_map = {}
+        for node_type, raw_addrs in nodes.items():
+            node_type_str = str(node_type or "").strip().lower()
+            if not node_type_str:
+                continue
+            addr_list = _normalise_addresses(raw_addrs)
+            if addr_list:
+                requested_map[node_type_str] = addr_list
+    else:
+        requested_map = {"htr": _normalise_addresses(nodes)}
+
+    def _dedupe(seq: Iterable[str]) -> list[str]:
+        seen: set[str] = set()
+        result: list[str] = []
+        for item in seq:
+            if item in seen:
+                continue
+            seen.add(item)
+            result.append(item)
+        return result
+
+    selected_map: dict[str, list[str]] = {}
+    if requested_map:
+        available_sets: dict[str, set[str]] = {
+            node_type: set(addrs) for node_type, addrs in by_type.items()
+        }
+        for req_type, addr_list in requested_map.items():
+            if not addr_list:
+                continue
+            if req_type == "htr":
+                for addr in addr_list:
+                    for actual_type in reverse_lookup.get(addr, set()):
+                        selected_map.setdefault(actual_type, []).append(addr)
+            else:
+                available = available_sets.get(req_type)
+                if not available:
+                    continue
+                filtered = [addr for addr in addr_list if addr in available]
+                if filtered:
+                    selected_map.setdefault(req_type, []).extend(filtered)
+
+    if not selected_map:
+        selected_map = {node_type: list(addrs) for node_type, addrs in by_type.items()}
+
+    for node_type in list(selected_map):
+        deduped = _dedupe(selected_map[node_type])
+        if deduped:
+            selected_map[node_type] = deduped
+        else:
+            selected_map.pop(node_type)
+
+    all_pairs: list[tuple[str, str]] = [
+        (node_type, addr) for node_type, addrs in by_type.items() for addr in addrs
+    ]
+    target_pairs: list[tuple[str, str]] = [
+        (node_type, addr)
+        for node_type, addrs in selected_map.items()
+        for addr in addrs
+    ]
 
     day = 24 * 3600
     # Determine the end of the import window.  To avoid importing
@@ -174,12 +272,29 @@ async def _async_import_energy_history(
         entry.options.get(OPTION_ENERGY_HISTORY_PROGRESS, {})
     )
 
+    def _progress_value(node_type: str, addr: str) -> int:
+        raw = progress.get(f"{node_type}:{addr}")
+        if raw is None:
+            raw = progress.get(addr)
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return now_ts
+
     if reset_progress:
-        if addrs is None:
+        if nodes is None:
             progress.clear()
         else:
-            for addr in target_addrs:
+            cleared_any = False
+            for node_type, addr in target_pairs:
+                progress.pop(f"{node_type}:{addr}", None)
                 progress.pop(addr, None)
+                cleared_any = True
+            if not cleared_any and requested_map:
+                for req_type, addr_list in requested_map.items():
+                    for addr in addr_list:
+                        progress.pop(f"{req_type}:{addr}", None)
+                        progress.pop(addr, None)
         options = dict(entry.options)
         options[OPTION_ENERGY_HISTORY_PROGRESS] = progress
         options.pop(OPTION_ENERGY_HISTORY_IMPORTED, None)
@@ -188,10 +303,14 @@ async def _async_import_energy_history(
         _LOGGER.debug("%s: energy history already imported", entry.entry_id)
         return
 
+    if not target_pairs:
+        _LOGGER.debug("%s: no heater nodes selected for energy import", dev_id)
+        return
+
     _LOGGER.debug("%s: importing hourly samples down to %s", dev_id, _iso_date(target))
 
     async def _rate_limited_fetch(
-        addr: str, start: int, stop: int
+        node_type: str, addr: str, start: int, stop: int
     ) -> list[dict[str, Any]]:
         """Fetch heater samples while respecting the shared rate limit."""
         global _LAST_SAMPLES_QUERY
@@ -200,34 +319,47 @@ async def _async_import_energy_history(
             wait = 1 - (now - _LAST_SAMPLES_QUERY)
             if wait > 0:
                 _LOGGER.debug(
-                    "%s/%s: sleeping %.2fs before query", addr, _iso_date(start), wait
+                    "%s:%s/%s: sleeping %.2fs before query",
+                    node_type,
+                    addr,
+                    _iso_date(start),
+                    wait,
                 )
                 await asyncio.sleep(wait)
             _LAST_SAMPLES_QUERY = time.monotonic()
         _LOGGER.debug(
-            "%s: requesting samples %s-%s", addr, _iso_date(start), _iso_date(stop)
+            "%s:%s: requesting samples %s-%s",
+            node_type,
+            addr,
+            _iso_date(start),
+            _iso_date(stop),
         )
         try:
-            return await client.get_htr_samples(dev_id, addr, start, stop)
+            return await client.get_node_samples(
+                dev_id, (node_type, addr), start, stop
+            )
         except asyncio.CancelledError:  # pragma: no cover - allow cancellation
             raise
         except Exception as err:  # pragma: no cover - defensive
-            _LOGGER.debug("%s: error fetching samples: %s", addr, err)
+            _LOGGER.debug("%s:%s: error fetching samples: %s", node_type, addr, err)
             return []
 
     ent_reg: er.EntityRegistry | None = er.async_get(hass)
-    for addr in target_addrs:
-        _LOGGER.debug("%s: importing history for heater %s", dev_id, addr)
+    for node_type, addr in target_pairs:
+        _LOGGER.debug(
+            "%s: importing history for %s %s", dev_id, node_type or "htr", addr
+        )
         # Collect all samples across the requested range.  We will process
         # them after the loop in chronological order.
         all_samples: list[dict[str, Any]] = []
-        start_ts = int(progress.get(addr, now_ts))
+        start_ts = _progress_value(node_type, addr)
         while start_ts > target:
             chunk_start = max(start_ts - day, target)
-            samples = await _rate_limited_fetch(addr, chunk_start, start_ts)
+            samples = await _rate_limited_fetch(node_type, addr, chunk_start, start_ts)
 
             _LOGGER.debug(
-                "%s: fetched %d samples for %s-%s",
+                "%s:%s: fetched %d samples for %s-%s",
+                node_type,
                 addr,
                 len(samples),
                 _iso_date(chunk_start),
@@ -238,7 +370,8 @@ async def _async_import_energy_history(
             all_samples.extend(samples)
 
             start_ts = chunk_start
-            progress[addr] = start_ts
+            progress[f"{node_type}:{addr}"] = start_ts
+            progress.pop(addr, None)
             options = dict(entry.options)
             options[OPTION_ENERGY_HISTORY_PROGRESS] = progress
             hass.config_entries.async_update_entry(entry, options=options)
@@ -251,12 +384,19 @@ async def _async_import_energy_history(
         all_samples_sorted = sorted(all_samples, key=lambda s: s.get("t", 0))
 
         # Resolve the entity_id for the heater's energy sensor
-        uid = f"{DOMAIN}:{dev_id}:htr:{addr}:energy"
+        uid = f"{DOMAIN}:{dev_id}:{node_type}:{addr}:energy"
         entity_id = (
             ent_reg.async_get_entity_id("sensor", DOMAIN, uid) if ent_reg else None
         )
+        if not entity_id and node_type != "htr":
+            legacy_uid = f"{DOMAIN}:{dev_id}:htr:{addr}:energy"
+            entity_id = (
+                ent_reg.async_get_entity_id("sensor", DOMAIN, legacy_uid)
+                if ent_reg
+                else None
+            )
         if not entity_id:
-            _LOGGER.debug("%s: no energy sensor found", addr)
+            _LOGGER.debug("%s:%s: no energy sensor found", node_type, addr)
             continue
 
         first_ts = int(all_samples_sorted[0].get("t", 0))
@@ -457,7 +597,7 @@ async def _async_import_energy_history(
     options = dict(entry.options)
     options[OPTION_ENERGY_HISTORY_PROGRESS] = progress
     # If all heaters are imported down to the target date mark import as complete
-    if all(progress.get(addr, now_ts) <= target for addr in all_addrs):
+    if all(_progress_value(node_type, addr) <= target for node_type, addr in all_pairs):
         options[OPTION_ENERGY_HISTORY_IMPORTED] = True
     hass.config_entries.async_update_entry(entry, options=options)
     _LOGGER.debug("%s: energy import complete", entry.entry_id)
@@ -509,7 +649,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ).strip()
     nodes = await client.get_nodes(dev_id)
     node_inventory = build_node_inventory(nodes)
-    addrs = addresses_by_type(node_inventory, HEATER_NODE_TYPES)
 
     if node_inventory:
         type_counts = Counter(node.type for node in node_inventory)
@@ -645,39 +784,73 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ent_reg = er.async_get(hass)
             if isinstance(ent_ids, str):
                 ent_ids = [ent_ids]
-            entry_map: dict[str, set[str]] = {}
+            entry_map: dict[str, dict[str, set[str]]] = {}
+
+            def _parse_energy_unique_id(unique_id: str) -> tuple[str, str] | None:
+                if not unique_id or not unique_id.startswith(f"{DOMAIN}:"):
+                    return None
+                try:
+                    remainder = unique_id.split(":", 1)[1]
+                    prefix, metric = remainder.rsplit(":", 1)
+                except ValueError:
+                    return None
+                if metric != "energy":
+                    return None
+                try:
+                    _dev_part, node_type, addr = prefix.rsplit(":", 2)
+                except ValueError:
+                    return None
+                return node_type, addr
+
             for eid in ent_ids:
                 er_ent = ent_reg.async_get(eid)
                 if not er_ent or er_ent.platform != DOMAIN:
                     continue
-                parts = (er_ent.unique_id or "").split(":")
-                if len(parts) >= 4 and parts[0] == DOMAIN and parts[2] == "htr":
-                    entry_map.setdefault(er_ent.config_entry_id, set()).add(parts[3])
-            for entry_id, addr_set in entry_map.items():
+                parsed = _parse_energy_unique_id(er_ent.unique_id or "")
+                if not parsed:
+                    continue
+                node_type, addr = parsed
+                entry_id = er_ent.config_entry_id
+                if not entry_id:
+                    continue
+                entry_map.setdefault(entry_id, {}).setdefault(node_type, set()).add(addr)
+
+            for entry_id, addr_map in entry_map.items():
                 ent = hass.config_entries.async_get_entry(entry_id)
-                if ent:
-                    tasks.append(
-                        _async_import_energy_history(
-                            hass,
-                            ent,
-                            addr_set,
-                            reset_progress=reset,
-                            max_days=max_days,
-                        )
+                if not ent:
+                    continue
+                normalized = {
+                    node_type: list(sorted(addrs))
+                    for node_type, addrs in addr_map.items()
+                    if addrs
+                }
+                if not normalized:
+                    continue
+                tasks.append(
+                    _async_import_energy_history(
+                        hass,
+                        ent,
+                        normalized,
+                        reset_progress=reset,
+                        max_days=max_days,
                     )
+                )
         else:
             for rec in hass.data.get(DOMAIN, {}).values():
                 ent: ConfigEntry | None = rec.get("config_entry")
-                if ent:
-                    tasks.append(
-                        _async_import_energy_history(
-                            hass,
-                            ent,
-                            None,
-                            reset_progress=reset,
-                            max_days=max_days,
-                        )
+                if not ent:
+                    continue
+                inventory: Iterable[Any] = rec.get("node_inventory") or []
+                by_type, _ = _heater_address_map(inventory)
+                tasks.append(
+                    _async_import_energy_history(
+                        hass,
+                        ent,
+                        by_type,
+                        reset_progress=reset,
+                        max_days=max_days,
                     )
+                )
         if tasks:
             _LOGGER.debug("import_energy_history: awaiting %d tasks", len(tasks))
             results = await asyncio.gather(*tasks, return_exceptions=True)
