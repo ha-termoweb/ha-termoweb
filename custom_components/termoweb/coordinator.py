@@ -593,32 +593,42 @@ class EnergyStateCoordinator(
                         self._last[key] = (t, kwh)
 
             dev_data: dict[str, Any] = {"dev_id": dev_id}
+            nodes_by_type: dict[str, dict[str, Any]] = {}
+
             for node_type, addrs_for_type in self._addresses_by_type.items():
-                dev_data[node_type] = {
+                bucket = {
                     "energy": dict(energy_by_type.get(node_type, {})),
                     "power": dict(power_by_type.get(node_type, {})),
                     "addrs": list(addrs_for_type),
                 }
+                dev_data[node_type] = bucket
+                nodes_by_type[node_type] = bucket
 
-            heater_data = dev_data.get("htr")
+            heater_data = nodes_by_type.get("htr")
             if heater_data is None:
                 heater_data = {
-                    "energy": {},
-                    "power": {},
+                    "energy": dict(energy_by_type.get("htr", {})),
+                    "power": dict(power_by_type.get("htr", {})),
                     "addrs": list(self._addresses_by_type.get("htr", [])),
                 }
+                nodes_by_type["htr"] = heater_data
                 dev_data["htr"] = heater_data
 
             for alias, canonical in self._compat_aliases.items():
-                canonical_data = dev_data.get(canonical)
-                if canonical_data is None:
-                    canonical_data = {
+                canonical_bucket = nodes_by_type.get(canonical)
+                if canonical_bucket is None:
+                    canonical_bucket = {
                         "energy": {},
                         "power": {},
                         "addrs": list(self._addresses_by_type.get(canonical, [])),
                     }
-                    dev_data[canonical] = canonical_data
-                dev_data[alias] = canonical_data
+                    nodes_by_type[canonical] = canonical_bucket
+                    dev_data[canonical] = canonical_bucket
+                dev_data[alias] = canonical_bucket
+                if alias not in nodes_by_type:
+                    nodes_by_type[alias] = canonical_bucket
+
+            dev_data["nodes_by_type"] = nodes_by_type
 
             result: dict[str, dict[str, Any]] = {dev_id: dev_data}
 

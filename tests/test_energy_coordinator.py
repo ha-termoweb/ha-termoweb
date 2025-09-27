@@ -671,6 +671,9 @@ def test_energy_state_coordinator_fetches_acm_samples() -> None:
         assert call.args[1] == ("acm", "7")
         acm_section = result["dev"]["acm"]
         assert acm_section["energy"]["7"] == pytest.approx(1.0)
+        nodes_by_type = result["dev"]["nodes_by_type"]
+        assert nodes_by_type["acm"] is acm_section
+        assert nodes_by_type["htr"] is result["dev"]["htr"]
 
     asyncio.run(_run())
 
@@ -703,6 +706,9 @@ def test_energy_coordinator_caches_per_type() -> None:
         assert dev_data["acm"]["energy"]["B"] == pytest.approx(2.0)
         assert dev_data["htr"]["power"]["A"] == pytest.approx(1000)
         assert dev_data["acm"]["power"]["B"] == pytest.approx(2000)
+        nodes_by_type = dev_data["nodes_by_type"]
+        assert nodes_by_type["htr"] is dev_data["htr"]
+        assert nodes_by_type["acm"] is dev_data["acm"]
 
         last_htr = coord._last[("htr", "A")]
         assert last_htr[0] == pytest.approx(3600.0)
@@ -776,6 +782,10 @@ def test_energy_coordinator_uses_heater_alias() -> None:
         assert dev_data["heater"] is dev_data["htr"]
         assert dev_data["heater"]["energy"]["A"] == pytest.approx(0.5)
         assert dev_data["acm"]["energy"]["B"] == pytest.approx(1.5)
+        nodes_by_type = dev_data["nodes_by_type"]
+        assert nodes_by_type["htr"] is dev_data["htr"]
+        assert nodes_by_type["heater"] is dev_data["htr"]
+        assert nodes_by_type["acm"] is dev_data["acm"]
 
     asyncio.run(_run())
 
