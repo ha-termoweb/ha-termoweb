@@ -468,6 +468,34 @@ def test_heater_energy_client_error_update_failed(
     asyncio.run(_run())
 
 
+def test_energy_state_coordinator_fetches_acm_samples() -> None:
+    async def _run() -> None:
+        hass = HomeAssistant()
+        client = AsyncMock()
+        client.get_htr_samples = AsyncMock(return_value=[])
+        client.get_node_samples = AsyncMock(
+            return_value=[{"t": 1000, "counter": "1000"}]
+        )
+
+        coord = EnergyStateCoordinator(
+            hass,
+            client,
+            "dev",
+            {"acm": ["7"]},
+        )
+
+        result = await coord._async_update_data()
+        assert client.get_htr_samples.await_count == 0
+        call = client.get_node_samples.await_args
+        assert call.args[0] == "dev"
+        assert call.args[1] == ("acm", "7")
+        acm_section = result["dev"]["nodes_by_type"].get("acm")
+        assert acm_section is not None
+        assert acm_section["energy"]["7"] == pytest.approx(1.0)
+
+    asyncio.run(_run())
+
+
 def test_state_coordinator_update_nodes_rebuilds_inventory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

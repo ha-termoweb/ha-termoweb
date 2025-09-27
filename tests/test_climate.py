@@ -160,6 +160,84 @@ def test_async_setup_entry_creates_entities() -> None:
     asyncio.run(_run())
 
 
+def test_async_setup_entry_creates_accumulator_entity() -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry_id = "entry-acm"
+        dev_id = "dev-acm"
+        nodes = {"nodes": [{"type": "acm", "addr": "7", "name": "Store"}]}
+        settings = {
+            "mode": "manual",
+            "state": "idle",
+            "mtemp": "19.0",
+            "stemp": "21.0",
+            "ptemp": ["18.0", "19.0", "20.0"],
+            "prog": [0, 1, 2] * 56,
+            "units": "C",
+        }
+        coordinator = FakeCoordinator(
+            hass,
+            {
+                dev_id: {
+                    "nodes": nodes,
+                    "nodes_by_type": {
+                        "acm": {"addrs": ["7"], "settings": {"7": dict(settings)}}
+                    },
+                    "htr": {"settings": {}},
+                }
+            },
+        )
+
+        client = AsyncMock()
+        client.set_node_settings = AsyncMock()
+        client.set_htr_settings = AsyncMock()
+
+        hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "coordinator": coordinator,
+                    "dev_id": dev_id,
+                    "client": client,
+                    "nodes": nodes,
+                    "node_inventory": climate_module.build_node_inventory(nodes),
+                }
+            }
+        }
+
+        added: list[climate_module.HeaterClimateEntity] = []
+
+        def _async_add_entities(
+            entities: list[climate_module.HeaterClimateEntity],
+        ) -> None:
+            added.extend(entities)
+
+        entry = types.SimpleNamespace(entry_id=entry_id)
+        await async_setup_entry(hass, entry, _async_add_entities)
+
+        assert len(added) == 1
+        acc = added[0]
+        assert isinstance(acc, climate_module.AccumulatorClimateEntity)
+        assert acc._attr_unique_id == f"{DOMAIN}:{dev_id}:acm:7:climate"
+        assert acc.device_info["model"] == "Accumulator"
+
+        prog = [0, 1, 2] * 56
+        await acc.async_set_schedule(list(prog))
+        call = client.set_node_settings.await_args
+        assert call.args == (dev_id, ("acm", "7"))
+        assert call.kwargs["prog"] == list(prog)
+        assert call.kwargs["units"] == "C"
+        client.set_node_settings.reset_mock()
+
+        await acc.async_set_preset_temperatures(ptemp=[18.5, 19.5, 20.5])
+        call = client.set_node_settings.await_args
+        assert call.kwargs["ptemp"] == [18.5, 19.5, 20.5]
+        assert call.kwargs["units"] == "C"
+        assert client.set_htr_settings.await_count == 0
+
+    asyncio.run(_run())
+
+
 def test_async_setup_entry_rebuilds_inventory_when_missing() -> None:
     async def _run() -> None:
         _reset_environment()
@@ -635,7 +713,7 @@ def test_heater_write_paths_and_errors(
             assert coordinator.async_refresh_heater.await_count == 0
             waiter.set_result(None)
             await task
-            coordinator.async_refresh_heater.assert_awaited_once_with(addr)
+            coordinator.async_refresh_heater.assert_awaited_once_with(("htr", addr))
             coordinator.async_refresh_heater.reset_mock()
             assert heater._refresh_fallback is None
 
@@ -709,14 +787,14 @@ def test_heater_write_paths_and_errors(
         await heater.async_set_schedule(list(base_prog))
         assert client.set_htr_settings.await_count == 1
         assert settings_after["prog"] == prev_prog
-        assert "Optimistic prog update failed" in caplog.text
+        assert "Optimistic update failed" in caplog.text
         waiter = await _pop_waiter()
         task = heater._refresh_fallback
         assert task is not None
         coordinator.data = old_data
         waiter.set_result(None)
         await task
-        coordinator.async_refresh_heater.assert_awaited_once_with(addr)
+        coordinator.async_refresh_heater.assert_awaited_once_with(("htr", addr))
         coordinator.async_refresh_heater.reset_mock()
         assert heater._refresh_fallback is None
         client.set_htr_settings.reset_mock()
@@ -778,14 +856,14 @@ def test_heater_write_paths_and_errors(
         await heater.async_set_preset_temperatures(ptemp=[19.2, 20.2, 21.2])
         assert client.set_htr_settings.await_count == 1
         assert settings_after["ptemp"] == prev_ptemp
-        assert "Optimistic ptemp update failed" in caplog.text
+        assert "Optimistic update failed" in caplog.text
         waiter = await _pop_waiter()
         task = heater._refresh_fallback
         assert task is not None
         coordinator.data = old_data
         waiter.set_result(None)
         await task
-        coordinator.async_refresh_heater.assert_awaited_once_with(addr)
+        coordinator.async_refresh_heater.assert_awaited_once_with(("htr", addr))
         coordinator.async_refresh_heater.reset_mock()
         assert heater._refresh_fallback is None
         client.set_htr_settings.reset_mock()
@@ -889,7 +967,7 @@ def test_heater_write_paths_and_errors(
         await heater._ensure_write_task()
         assert heater._write_task is not None
         await heater._write_task
-        assert "Write failed" in caplog.text
+        assert "Mode/setpoint write failed" in caplog.text
         assert heater._refresh_fallback is None
         assert not fallback_waiters
         client.set_htr_settings.side_effect = None
@@ -913,7 +991,7 @@ def test_heater_write_paths_and_errors(
 
         waiter_b.set_result(None)
         await task_b
-        coordinator.async_refresh_heater.assert_awaited_once_with(addr)
+        coordinator.async_refresh_heater.assert_awaited_once_with(("htr", addr))
         coordinator.async_refresh_heater.reset_mock()
 
         caplog.clear()
@@ -1126,7 +1204,7 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
         task = heater._refresh_fallback
         assert task is not None
         await task
-        coordinator.async_refresh_heater.assert_awaited_once_with(addr)
+        coordinator.async_refresh_heater.assert_awaited_once_with(("htr", addr))
         assert heater._refresh_fallback is None
 
     asyncio.run(_run())

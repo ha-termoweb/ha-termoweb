@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any
+from collections import defaultdict
+from typing import Any, Callable
 
 from homeassistant.components.climate import (
     ClimateEntity,
@@ -19,8 +20,8 @@ import voluptuous as vol
 
 from .const import DOMAIN
 from .heater import HeaterNodeBase, build_heater_name_map
-from .nodes import HeaterNode, build_node_inventory
-from .utils import HEATER_NODE_TYPES, addresses_by_node_type, float_or_none
+from .nodes import HeaterNode, Node, build_node_inventory
+from .utils import HEATER_NODE_TYPES, float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,38 +41,66 @@ async def async_setup_entry(hass, entry, async_add_entities):
     if not inventory and nodes:
         inventory = build_node_inventory(nodes)
         data["node_inventory"] = inventory
-    default_name = lambda addr: f"Heater {addr}"  # noqa: E731
+    default_name_simple = lambda addr: f"Heater {addr}"  # noqa: E731
 
-    addrs_by_type, _ = addresses_by_node_type(
-        inventory, known_types=HEATER_NODE_TYPES
-    )
+    def default_name(addr: str, node_type: str | None = None) -> str:
+        if (node_type or "").lower() == "acm":
+            return f"Accumulator {addr}"
+        return default_name_simple(addr)
 
-    name_map = build_heater_name_map(nodes, default_name)
+    nodes_by_type: dict[str, list[Node]] = defaultdict(list)
+    for node in inventory:
+        node_type = str(getattr(node, "type", "")).strip().lower()
+        if not node_type:
+            continue
+        nodes_by_type[node_type].append(node)
+
+    name_map = build_heater_name_map(nodes, default_name_simple)
     names_by_type: dict[str, dict[str, str]] = name_map.get("by_type", {})
     legacy_names: dict[str, str] = name_map.get("htr", {})
 
-    new_entities: list[HeaterClimateEntity] = []
-    for node_type, addrs in addrs_by_type.items():
-        if node_type not in HEATER_NODE_TYPES:
-            continue
+    def _resolve_name(node_type: str, addr_str: str) -> str:
         per_type = names_by_type.get(node_type, {})
-        for addr in addrs:
-            addr_str = str(addr)
-            resolved_name = (
-                per_type.get(addr_str)
-                or name_map.get((node_type, addr_str))
-                or legacy_names.get(addr_str)
-                or default_name(addr_str)
-            )
+        return (
+            per_type.get(addr_str)
+            or name_map.get((node_type, addr_str))
+            or legacy_names.get(addr_str)
+            or default_name(addr_str, node_type)
+        )
+
+    new_entities: list[ClimateEntity] = []
+    for node_type in HEATER_NODE_TYPES:
+        for node in nodes_by_type.get(node_type, []):
+            addr_str = str(getattr(node, "addr", "")).strip()
+            if not addr_str:
+                continue
+            resolved_name = _resolve_name(node_type, addr_str)
+            unique_id = f"{DOMAIN}:{dev_id}:{node_type}:{addr_str}:climate"
+            entity_cls: type[HeaterClimateEntity]
+            if node_type == "acm":
+                entity_cls = AccumulatorClimateEntity
+            else:
+                entity_cls = HeaterClimateEntity
             new_entities.append(
-                HeaterClimateEntity(
+                entity_cls(
                     coordinator,
                     entry.entry_id,
                     dev_id,
                     addr_str,
                     resolved_name,
+                    unique_id,
                     node_type=node_type,
                 )
+            )
+
+    for skipped_type in ("pmo", "thm"):
+        skipped_nodes = nodes_by_type.get(skipped_type, [])
+        if skipped_nodes:
+            addrs = ", ".join(sorted(str(getattr(node, "addr", "")) for node in skipped_nodes))
+            _LOGGER.debug(
+                "Skipping TermoWeb %s nodes for climate platform: %s",
+                skipped_type,
+                addrs or "<no-addr>",
             )
     if new_entities:
         _LOGGER.debug("Adding %d TermoWeb heater entities", len(new_entities))
@@ -149,6 +178,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         dev_id: str,
         addr: str,
         name: str,
+        unique_id: str | None = None,
         *,
         node_type: str | None = None,
     ) -> None:
@@ -164,6 +194,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             dev_id,
             addr,
             self.name,
+            unique_id,
             node_type=resolved_type,
         )
 
@@ -200,13 +231,131 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         except Exception:
             return None
 
+    def _settings_maps(self) -> list[dict[str, Any]]:
+        """Return all cached settings maps referencing this node."""
+        data = (self.coordinator.data or {}).get(self._dev_id, {})
+        maps: list[dict[str, Any]] = []
+        seen: set[int] = set()
+
+        if isinstance(data, dict):
+            by_type = data.get("nodes_by_type")
+            if isinstance(by_type, dict):
+                section = by_type.get(self._node_type)
+                if isinstance(section, dict):
+                    settings_map = section.get("settings")
+                    if isinstance(settings_map, dict) and id(settings_map) not in seen:
+                        maps.append(settings_map)
+                        seen.add(id(settings_map))
+
+            legacy = data.get("htr")
+            if isinstance(legacy, dict):
+                settings_map = legacy.get("settings")
+                if isinstance(settings_map, dict) and id(settings_map) not in seen:
+                    maps.append(settings_map)
+                    seen.add(id(settings_map))
+
+        return maps
+
+    def _optimistic_update(self, mutator: Callable[[dict[str, Any]], None]) -> None:
+        """Apply ``mutator`` to cached settings and refresh state if changed."""
+        try:
+            updated = False
+            for settings_map in self._settings_maps():
+                cur = settings_map.get(self._addr)
+                if isinstance(cur, dict):
+                    mutator(cur)
+                    updated = True
+            if updated:
+                self.async_write_ha_state()
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:  # pragma: no cover - defensive
+            _LOGGER.debug(
+                "Optimistic update failed dev=%s type=%s addr=%s: %s",
+                self._dev_id,
+                self._node_type,
+                self._addr,
+                err,
+            )
+
+    async def _async_write_settings(
+        self,
+        *,
+        log_context: str,
+        mode: str | None = None,
+        stemp: float | None = None,
+        prog: list[int] | None = None,
+        ptemp: list[float] | None = None,
+    ) -> bool:
+        """Submit a settings update to the TermoWeb API."""
+        client = self._client()
+        if client is None:
+            _LOGGER.error(
+                "%s failed dev=%s type=%s addr=%s: client unavailable",
+                log_context,
+                self._dev_id,
+                self._node_type,
+                self._addr,
+            )
+            return False
+
+        try:
+            await self._async_submit_settings(
+                client,
+                mode=mode,
+                stemp=stemp,
+                prog=prog,
+                ptemp=ptemp,
+                units=self._units(),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:
+            status = getattr(err, "status", None)
+            body = getattr(err, "body", None) or getattr(err, "message", None) or str(err)
+            _LOGGER.error(
+                "%s failed dev=%s type=%s addr=%s: status=%s body=%s",
+                log_context,
+                self._dev_id,
+                self._node_type,
+                self._addr,
+                status,
+                (str(body)[:200] if body else ""),
+            )
+            return False
+
+        return True
+
+    async def _async_submit_settings(
+        self,
+        client,
+        *,
+        mode: str | None,
+        stemp: float | None,
+        prog: list[int] | None,
+        ptemp: list[float] | None,
+        units: str,
+    ) -> None:
+        """Send settings via the heater-specific API."""
+
+        await client.set_htr_settings(
+            self._dev_id,
+            self._addr,
+            mode=mode,
+            stemp=stemp,
+            prog=prog,
+            ptemp=ptemp,
+            units=units,
+        )
+
     # -------------------- WS updates --------------------
     @callback
     def _handle_ws_event(self, payload: dict) -> None:
         """React to websocket updates for this heater."""
         kind = payload.get("kind")
         addr = payload.get("addr")
-        if kind == "htr_settings" and addr is not None and self._refresh_fallback:
+        expected_kind = f"{self._node_type}_settings"
+        if kind == expected_kind and addr is not None and self._refresh_fallback:
             if not self._refresh_fallback.done():
                 self._refresh_fallback.cancel()
             self._refresh_fallback = None
@@ -318,52 +467,25 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             )
             return
 
-        client = self._client()
-        try:
-            await client.set_htr_settings(
-                self._dev_id, self._addr, prog=prog2, units=self._units()
-            )
-            _LOGGER.debug(
-                "Schedule write OK dev=%s addr=%s (prog_len=%d)",
-                self._dev_id,
-                self._addr,
-                len(prog2),
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            status = getattr(e, "status", None)
-            body = getattr(e, "body", None) or getattr(e, "message", None) or str(e)
-            _LOGGER.error(
-                "Schedule write failed dev=%s addr=%s: status=%s body=%s",
-                self._dev_id,
-                self._addr,
-                status,
-                (str(body)[:200] if body else ""),
-            )
+        success = await self._async_write_settings(
+            log_context="Schedule write",
+            prog=prog2,
+        )
+        if not success:
             return
 
-        # Optimistic local update so HA shows the change immediately
-        try:
-            d = (self.coordinator.data or {}).get(self._dev_id, {})
-            htr = d.get("htr") or {}
-            settings_map = htr.get("settings") or {}
-            cur = settings_map.get(self._addr)
-            if isinstance(cur, dict):
-                cur["prog"] = list(prog2)
-                self.async_write_ha_state()
-                _LOGGER.debug(
-                    "Optimistic prog applied dev=%s addr=%s", self._dev_id, self._addr
-                )
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            _LOGGER.debug(
-                "Optimistic prog update failed dev=%s addr=%s: %s",
-                self._dev_id,
-                self._addr,
-                e,
-            )
+        _LOGGER.debug(
+            "Schedule write OK dev=%s type=%s addr=%s (prog_len=%d)",
+            self._dev_id,
+            self._node_type,
+            self._addr,
+            len(prog2),
+        )
+
+        def _apply(cur: dict[str, Any]) -> None:
+            cur["prog"] = list(prog2)
+
+        self._optimistic_update(_apply)
 
         # Expect WS echo; schedule refresh if it doesn't arrive soon.
         self._schedule_refresh_fallback()
@@ -401,49 +523,25 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             )
             return
 
-        client = self._client()
-        try:
-            await client.set_htr_settings(
-                self._dev_id, self._addr, ptemp=p2, units=self._units()
-            )
-            _LOGGER.debug(
-                "Preset write OK dev=%s addr=%s ptemp=%s", self._dev_id, self._addr, p2
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            status = getattr(e, "status", None)
-            body = getattr(e, "body", None) or getattr(e, "message", None) or str(e)
-            _LOGGER.error(
-                "Preset write failed dev=%s addr=%s: status=%s body=%s",
-                self._dev_id,
-                self._addr,
-                status,
-                (str(body)[:200] if body else ""),
-            )
+        success = await self._async_write_settings(
+            log_context="Preset write",
+            ptemp=p2,
+        )
+        if not success:
             return
 
-        # Optimistic local update so HA shows the change immediately
-        try:
-            d = (self.coordinator.data or {}).get(self._dev_id, {})
-            htr = d.get("htr") or {}
-            settings_map = htr.get("settings") or {}
-            cur = settings_map.get(self._addr)
-            if isinstance(cur, dict):
-                cur["ptemp"] = [f"{t:.1f}" if isinstance(t, float) else t for t in p2]
-                self.async_write_ha_state()
-                _LOGGER.debug(
-                    "Optimistic ptemp applied dev=%s addr=%s", self._dev_id, self._addr
-                )
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            _LOGGER.debug(
-                "Optimistic ptemp update failed dev=%s addr=%s: %s",
-                self._dev_id,
-                self._addr,
-                e,
-            )
+        _LOGGER.debug(
+            "Preset write OK dev=%s type=%s addr=%s ptemp=%s",
+            self._dev_id,
+            self._node_type,
+            self._addr,
+            p2,
+        )
+
+        def _apply(cur: dict[str, Any]) -> None:
+            cur["ptemp"] = [f"{t:.1f}" if isinstance(t, float) else t for t in p2]
+
+        self._optimistic_update(_apply)
 
         # Expect WS echo; schedule refresh if it doesn't arrive soon.
         self._schedule_refresh_fallback()
@@ -548,7 +646,6 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         if mode is None and stemp is None:
             return
 
-        client = self._client()
         mode_api = None
         if mode is not None:
             mode_api = {
@@ -556,78 +653,47 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 HVACMode.AUTO: "auto",
                 HVACMode.HEAT: "manual",
             }.get(mode, str(mode))
-        try:
-            _LOGGER.info(
-                "POST htr settings dev=%s addr=%s mode=%s stemp=%s",
-                self._dev_id,
-                self._addr,
-                mode_api,
-                stemp,
-            )
-            await client.set_htr_settings(
-                self._dev_id,
-                self._addr,
-                mode=mode_api,
-                stemp=stemp,
-                units=self._units(),
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            status = getattr(e, "status", None)
-            body = getattr(e, "body", None) or getattr(e, "message", None) or str(e)
-            _LOGGER.error(
-                "Write failed dev=%s addr=%s mode=%s stemp=%s: status=%s body=%s",
-                self._dev_id,
-                self._addr,
-                mode_api,
-                stemp,
-                status,
-                (str(body)[:200] if body else ""),
-            )
+        _LOGGER.info(
+            "POST %s settings dev=%s addr=%s mode=%s stemp=%s",
+            self._node_type,
+            self._dev_id,
+            self._addr,
+            mode_api,
+            stemp,
+        )
+
+        success = await self._async_write_settings(
+            log_context="Mode/setpoint write",
+            mode=mode_api,
+            stemp=stemp,
+        )
+        if not success:
             return
 
-        # Optimistic local update so HA shows the change immediately.
-        try:
-            updated = False
-            d = (self.coordinator.data or {}).get(self._dev_id, {})
-            htr = d.get("htr") or {}
-            settings_map = htr.get("settings") or {}
-            cur = settings_map.get(self._addr)
-            if isinstance(cur, dict):
-                if mode_api is not None:
-                    cur["mode"] = mode_api
-                    updated = True
-                if stemp is not None:
-                    stemp_str: Any = stemp
-                    try:
-                        stemp_float = float(stemp)
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception:
-                        pass
-                    else:
-                        stemp_str = f"{stemp_float:.1f}"
-                    cur["stemp"] = stemp_str
-                    updated = True
-                if updated:
-                    self.async_write_ha_state()
-                    _LOGGER.debug(
-                        "Optimistic mode/stemp applied dev=%s addr=%s mode=%s stemp=%s",
-                        self._dev_id,
-                        self._addr,
-                        mode_api,
-                        stemp,
-                    )
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            _LOGGER.debug(
-                "Optimistic state update failed dev=%s addr=%s: %s",
-                self._dev_id,
-                self._addr,
-                e,
-            )
+        def _apply(cur: dict[str, Any]) -> None:
+            if mode_api is not None:
+                cur["mode"] = mode_api
+            if stemp is not None:
+                stemp_str: Any = stemp
+                try:
+                    stemp_float = float(stemp)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    pass
+                else:
+                    stemp_str = f"{stemp_float:.1f}"
+                cur["stemp"] = stemp_str
+
+        self._optimistic_update(_apply)
+        _LOGGER.debug(
+            "Optimistic mode/stemp applied dev=%s type=%s addr=%s mode=%s stemp=%s",
+            self._dev_id,
+            self._node_type,
+            self._addr,
+            mode_api,
+            stemp,
+        )
 
         # Expect WS echo; schedule refresh if it doesn't arrive soon.
         self._schedule_refresh_fallback()
@@ -680,7 +746,9 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                     )
                     return
 
-                await self.coordinator.async_refresh_heater(self._addr)
+                await self.coordinator.async_refresh_heater(
+                    (self._node_type, self._addr)
+                )
                 if task and self._refresh_fallback is task:
                     self._refresh_fallback = None
                     return
@@ -699,4 +767,28 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
         self._refresh_fallback = asyncio.create_task(
             _fallback(), name=f"termoweb-fallback-{self._dev_id}-{self._addr}"
+        )
+
+
+class AccumulatorClimateEntity(HeaterClimateEntity):
+    """HA climate entity for TermoWeb accumulator nodes."""
+
+    async def _async_submit_settings(  # type: ignore[override]
+        self,
+        client,
+        *,
+        mode: str | None,
+        stemp: float | None,
+        prog: list[int] | None,
+        ptemp: list[float] | None,
+        units: str,
+    ) -> None:
+        await client.set_node_settings(
+            self._dev_id,
+            (self._node_type, self._addr),
+            mode=mode,
+            stemp=stemp,
+            prog=prog,
+            ptemp=ptemp,
+            units=units,
         )
