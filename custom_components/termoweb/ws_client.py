@@ -17,7 +17,12 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from .api import RESTClient
 from .const import API_BASE, DOMAIN, WS_NAMESPACE, signal_ws_data, signal_ws_status
 from .nodes import NODE_CLASS_BY_TYPE, build_node_inventory
-from .utils import HEATER_NODE_TYPES, addresses_by_node_type, ensure_node_inventory
+from .utils import (
+    HEATER_NODE_TYPES,
+    addresses_by_node_type,
+    ensure_node_inventory,
+    normalize_heater_addresses,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -347,7 +352,7 @@ class TermoWebSocketClient:
             f"5::{WS_NAMESPACE}:{json.dumps(payload, separators=(',', ':'))}"
         )
 
-    async def _subscribe_htr_samples(self) -> None:  # noqa: C901
+    async def _subscribe_htr_samples(self) -> None:
         """Request push updates for heater and accumulator energy samples."""
         inventory: list[Any] = []
         record: dict[str, Any] | None = None
@@ -383,15 +388,13 @@ class TermoWebSocketClient:
                 addr_map["htr"] = [
                     str(addr).strip() for addr in fallback if str(addr).strip()
                 ]
-        normalized_map: dict[str, list[str]] = {}
-        for node_type in HEATER_NODE_TYPES:
-            addrs = addr_map.get(node_type)
-            if addrs:
-                normalized_map[node_type] = list(addrs)
-        normalized_map.setdefault("htr", list(addr_map.get("htr") or []))
+        normalized_map, _compat_aliases = normalize_heater_addresses(addr_map)
         if not any(normalized_map.values()):
             return
-        order = ["htr"] + [t for t in sorted(HEATER_NODE_TYPES) if t != "htr"]
+        other_types = sorted(
+            node_type for node_type in normalized_map if node_type != "htr"
+        )
+        order = ["htr", *other_types]
         for node_type in order:
             addrs = normalized_map.get(node_type) or []
             for addr in addrs:
