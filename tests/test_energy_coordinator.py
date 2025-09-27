@@ -64,10 +64,15 @@ def test_power_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_coordinator_success_resets_backoff() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.get_htr_settings = AsyncMock(return_value={"mode": "auto"})
+        client.get_node_settings = AsyncMock(return_value={"mode": "auto"})
 
         hass = HomeAssistant()
-        nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
+        nodes = {
+            "nodes": [
+                {"addr": "A", "type": "htr"},
+                {"addr": "B", "type": "acm"},
+            ]
+        }
         coord = StateCoordinator(
             hass,
             client,
@@ -82,13 +87,72 @@ def test_coordinator_success_resets_backoff() -> None:
         await coord.async_refresh()
 
         dev = coord.data["dev"]
+        client.get_node_settings.assert_called_once_with("dev", ("htr", "A"))
         assert dev["htr"]["settings"]["A"] == {"mode": "auto"}
         nodes_by_type = dev.get("nodes_by_type")
         assert nodes_by_type is not None
         assert nodes_by_type["htr"]["settings"]["A"] == {"mode": "auto"}
         assert nodes_by_type["htr"]["addrs"] == ["A"]
+        assert nodes_by_type["acm"]["addrs"] == ["B"]
+        assert nodes_by_type["acm"]["settings"] == {}
+        assert dev["htr"] is nodes_by_type["htr"]
         assert coord._backoff == 0
         assert coord.update_interval == timedelta(seconds=coord._base_interval)
+
+    asyncio.run(_run())
+
+
+def test_state_coordinator_round_robin_mixed_types() -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_node_settings = AsyncMock(
+            side_effect=[
+                {"mode": "auto"},
+                {"mode": "eco"},
+                {"mode": "charge"},
+            ]
+        )
+
+        hass = HomeAssistant()
+        nodes = {
+            "nodes": [
+                {"addr": "A", "type": "htr"},
+                {"addr": "C", "type": "htr"},
+                {"addr": "B", "type": "acm"},
+            ]
+        }
+        coord = StateCoordinator(
+            hass,
+            client,
+            30,
+            "dev",
+            {"name": "Device"},
+            nodes,  # type: ignore[arg-type]
+        )
+
+        await coord.async_refresh()
+        await coord.async_refresh()
+        await coord.async_refresh()
+
+        dev = coord.data["dev"]
+        assert coord._rr_index["dev"] == 0
+        assert client.get_node_settings.await_args_list[0].args == (
+            "dev",
+            ("htr", "A"),
+        )
+        assert client.get_node_settings.await_args_list[1].args == (
+            "dev",
+            ("htr", "C"),
+        )
+        assert client.get_node_settings.await_args_list[2].args == (
+            "dev",
+            ("acm", "B"),
+        )
+        assert dev["nodes_by_type"]["htr"]["settings"]["A"] == {"mode": "auto"}
+        assert dev["nodes_by_type"]["htr"]["settings"]["C"] == {"mode": "eco"}
+        assert dev["nodes_by_type"]["acm"]["settings"]["B"] == {"mode": "charge"}
+        assert dev["htr"] is dev["nodes_by_type"]["htr"]
+        assert dev["acm"] is dev["nodes_by_type"]["acm"]
 
     asyncio.run(_run())
 
@@ -96,10 +160,15 @@ def test_coordinator_success_resets_backoff() -> None:
 def test_refresh_heater_skips_invalid_inputs() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.get_htr_settings = AsyncMock()
+        client.get_node_settings = AsyncMock()
 
         hass = HomeAssistant()
-        nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
+        nodes = {
+            "nodes": [
+                {"addr": "A", "type": "htr"},
+                {"addr": "B", "type": "acm"},
+            ]
+        }
         coord = StateCoordinator(
             hass,
             client,
@@ -122,12 +191,12 @@ def test_refresh_heater_skips_invalid_inputs() -> None:
 
         coord.data = {"dev": {"htr": {"settings": {"A": {"mode": "manual"}}}}}
         await coord.async_refresh_heater("")
-        client.get_htr_settings.assert_not_called()
+        client.get_node_settings.assert_not_called()
         assert updates == []
 
         coord.data = {"dev": {"htr": {"settings": {}}}}
         await coord.async_refresh_heater("A")
-        client.get_htr_settings.assert_called_once()
+        client.get_node_settings.assert_called_once_with("dev", ("htr", "A"))
         assert updates == []
 
     asyncio.run(_run())
@@ -136,7 +205,7 @@ def test_refresh_heater_skips_invalid_inputs() -> None:
 def test_refresh_heater_updates_existing_and_new_data() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.get_htr_settings = AsyncMock(
+        client.get_node_settings = AsyncMock(
             side_effect=[{"mode": "auto"}, {"mode": "eco"}]
         )
 
@@ -145,6 +214,7 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
             "nodes": [
                 {"addr": "A", "type": "htr"},
                 {"addr": "B", "type": "htr"},
+                {"addr": "C", "type": "acm"},
             ]
         }
         coord = StateCoordinator(
@@ -169,6 +239,7 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
 
         coord.data = None
         await coord.async_refresh_heater("A")
+        client.get_node_settings.assert_called_with("dev", ("htr", "A"))
         assert len(updates) == 1
         first = updates[-1]
         dev = first["dev"]
@@ -186,6 +257,7 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
         assert nodes_by_type["htr"]["addrs"] == ["A", "B"]
 
         await coord.async_refresh_heater("B")
+        assert client.get_node_settings.await_args_list[-1].args == ("dev", ("htr", "B"))
         assert len(updates) == 2
         second = updates[-1]
         htr_second = second["dev"]["htr"]
@@ -197,6 +269,8 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
         assert nodes_by_type_second is not None
         assert nodes_by_type_second["htr"]["settings"]["B"] == {"mode": "eco"}
         assert nodes_by_type_second["htr"]["addrs"] == ["A", "B"]
+        assert nodes_by_type_second["acm"]["addrs"] == ["C"]
+        assert nodes_by_type_second["acm"]["settings"] == {}
 
     asyncio.run(_run())
 
@@ -256,10 +330,15 @@ def test_refresh_heater_handles_tuple_and_acm() -> None:
 def test_refresh_heater_populates_missing_metadata() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.get_htr_settings = AsyncMock(return_value={"mode": "heat"})
+        client.get_node_settings = AsyncMock(return_value={"mode": "heat"})
 
         hass = HomeAssistant()
-        nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
+        nodes = {
+            "nodes": [
+                {"addr": "A", "type": "htr"},
+                {"addr": "B", "type": "acm"},
+            ]
+        }
         coord = StateCoordinator(
             hass,
             client,
@@ -286,6 +365,7 @@ def test_refresh_heater_populates_missing_metadata() -> None:
 
         assert updates, "Expected async_set_updated_data to be called"
         result = updates[-1]["dev"]
+        client.get_node_settings.assert_called_once_with("dev", ("htr", "A"))
         assert result["name"] == "Device"
         assert result["raw"] == {"name": " Device "}
         assert result["nodes"] == nodes
@@ -294,6 +374,7 @@ def test_refresh_heater_populates_missing_metadata() -> None:
         nodes_by_type = result.get("nodes_by_type")
         assert nodes_by_type is not None
         assert nodes_by_type["htr"]["settings"]["A"] == {"mode": "heat"}
+        assert nodes_by_type["acm"]["addrs"] == ["B"]
 
     asyncio.run(_run())
 
@@ -301,7 +382,7 @@ def test_refresh_heater_populates_missing_metadata() -> None:
 def test_refresh_heater_handles_errors(caplog: pytest.LogCaptureFixture) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.get_htr_settings = AsyncMock(
+        client.get_node_settings = AsyncMock(
             side_effect=[
                 "not-a-dict",
                 TimeoutError("slow"),
@@ -310,7 +391,12 @@ def test_refresh_heater_handles_errors(caplog: pytest.LogCaptureFixture) -> None
         )
 
         hass = HomeAssistant()
-        nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
+        nodes = {
+            "nodes": [
+                {"addr": "A", "type": "htr"},
+                {"addr": "B", "type": "acm"},
+            ]
+        }
         coord = StateCoordinator(
             hass,
             client,
@@ -334,6 +420,7 @@ def test_refresh_heater_handles_errors(caplog: pytest.LogCaptureFixture) -> None
         coord.data = {"dev": {"htr": {"settings": {}}}}
         await coord.async_refresh_heater("A")
         assert updates == []
+        assert client.get_node_settings.await_args_list[-1].args == ("dev", ("htr", "A"))
 
         caplog.clear()
         with caplog.at_level("ERROR"):
@@ -699,7 +786,7 @@ def test_coordinator_rate_limit_backoff(monkeypatch: pytest.MonkeyPatch) -> None
             raise BackendRateLimitError("429")
 
         client = types.SimpleNamespace()
-        client.get_htr_settings = AsyncMock(side_effect=_raise_rate_limit)
+        client.get_node_settings = AsyncMock(side_effect=_raise_rate_limit)
 
         hass = HomeAssistant()
         nodes = {"nodes": [{"addr": "A", "type": "htr"}, {"addr": "B", "type": "htr"}]}
@@ -720,13 +807,19 @@ def test_coordinator_rate_limit_backoff(monkeypatch: pytest.MonkeyPatch) -> None
                 await coord.async_refresh()
             assert coord._backoff == backoff
             assert coord.update_interval == timedelta(seconds=backoff)
-            assert client.get_htr_settings.await_args_list[-1].args[1] == "A"
+            assert client.get_node_settings.await_args_list[-1].args == (
+                "1",
+                ("htr", "A"),
+            )
 
         with pytest.raises(UpdateFailed, match="Rate limited; backing off to 3600s"):
             await coord.async_refresh()
         assert coord._backoff == 3600
         assert coord.update_interval == timedelta(seconds=3600)
-        assert client.get_htr_settings.await_args_list[-1].args[1] == "A"
+        assert client.get_node_settings.await_args_list[-1].args == (
+            "1",
+            ("htr", "A"),
+        )
 
     class RaisingLogger:
         def debug(
@@ -752,10 +845,15 @@ def test_coordinator_rate_limit_backoff(monkeypatch: pytest.MonkeyPatch) -> None
 def test_coordinator_client_error(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.get_htr_settings = AsyncMock(side_effect=ClientError("boom"))
+        client.get_node_settings = AsyncMock(side_effect=ClientError("boom"))
 
         hass = HomeAssistant()
-        nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
+        nodes = {
+            "nodes": [
+                {"addr": "A", "type": "htr"},
+                {"addr": "B", "type": "acm"},
+            ]
+        }
         coord = StateCoordinator(
             hass,
             client,
@@ -767,7 +865,10 @@ def test_coordinator_client_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
         with pytest.raises(UpdateFailed, match="API error: boom"):
             await coord.async_refresh()
-        assert client.get_htr_settings.await_args_list[-1].args[1] == "A"
+        assert client.get_node_settings.await_args_list[-1].args == (
+            "1",
+            ("htr", "A"),
+        )
 
     class RaisingLogger:
         def debug(
@@ -824,7 +925,7 @@ def test_ws_driven_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_coordinator_timeout() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.get_htr_settings = AsyncMock(side_effect=TimeoutError)
+        client.get_node_settings = AsyncMock(side_effect=TimeoutError)
 
         hass = HomeAssistant()
         nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
