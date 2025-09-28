@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from types import SimpleNamespace
 from typing import Any
 
@@ -12,6 +13,7 @@ _install_stubs()
 
 from custom_components.termoweb import heater as heater_module
 from custom_components.termoweb.nodes import HeaterNode, build_node_inventory
+from custom_components.termoweb.utils import build_heater_address_map
 from homeassistant.core import HomeAssistant
 
 HeaterNodeBase = heater_module.HeaterNodeBase
@@ -54,6 +56,12 @@ def test_prepare_heater_platform_data_groups_nodes() -> None:
     assert [node.addr for node in acm_nodes] == ["2", "2"]
     assert addrs_by_type["acm"] == ["2"]
     assert len(addrs_by_type["acm"]) == len(set(addrs_by_type["acm"]))
+    helper_map, helper_reverse = build_heater_address_map(inventory)
+    assert addrs_by_type == {
+        node_type: helper_map.get(node_type, [])
+        for node_type in heater_module.HEATER_NODE_TYPES
+    }
+    assert helper_reverse == {"1": {"htr"}, "2": {"acm"}, "4": {"htr"}}
     assert resolve_name("htr", "1") == "Lounge"
     assert resolve_name("htr", "4") == "Heater 4"
     assert resolve_name("acm", "2") == "Accumulator 2"
@@ -96,13 +104,15 @@ def test_prepare_heater_platform_data_skips_blank_types(
 
     entry_data: dict[str, Any] = {}
 
-    _, nodes_by_type, addrs_by_type, _ = prepare_heater_platform_data(
+    inventory, nodes_by_type, addrs_by_type, _ = prepare_heater_platform_data(
         entry_data,
         default_name_simple=lambda addr: f"Heater {addr}",
     )
 
     assert [node.addr for node in nodes_by_type.get("htr", [])] == ["6"]
     assert addrs_by_type["htr"] == ["6"]
+    helper_map, _ = build_heater_address_map(inventory)
+    assert helper_map == {"htr": ["6"]}
 
 
 def test_build_heater_name_map_handles_invalid_entries() -> None:
@@ -134,6 +144,18 @@ def test_build_heater_name_map_accepts_iterables_of_dicts() -> None:
 
     assert result.get(("acm", "2")) == "Heater 2"
     assert result.get("htr", {}).get("1") == "Heater 1"
+
+
+def test_log_skipped_nodes_defaults_platform_name(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    nodes_by_type = {"thm": [SimpleNamespace(addr="7")]}
+
+    with caplog.at_level(logging.DEBUG):
+        heater_module.log_skipped_nodes("", nodes_by_type, skipped_types=["thm"])
+
+    messages = [record.message for record in caplog.records]
+    assert any("platform" in message for message in messages)
 
 
 def test_iter_nodes_yields_existing_node_objects() -> None:
@@ -199,7 +221,7 @@ def test_heater_base_async_added_without_hass() -> None:
 
         assert heater.hass is None
         await heater.async_added_to_hass()
-        assert heater._unsub_ws is None
+        assert not heater._ws_subscription.is_connected
 
     asyncio.run(_run())
 

@@ -13,13 +13,17 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import UnitOfTemperature
 from homeassistant.core import callback
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_data
 from .coordinator import EnergyStateCoordinator
-from .heater import HeaterNodeBase, log_skipped_nodes, prepare_heater_platform_data
+from .heater import (
+    DispatcherSubscriptionHelper,
+    HeaterNodeBase,
+    log_skipped_nodes,
+    prepare_heater_platform_data,
+)
 from .utils import HEATER_NODE_TYPES, build_gateway_device_info, float_or_none
 
 _WH_TO_KWH = 1 / 1000.0
@@ -119,43 +123,15 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 continue
             base_name = resolve_name(node_type, addr_str)
             uid_prefix = f"{DOMAIN}:{dev_id}:{node_type}:{addr_str}"
-            temp_cls: type[HeaterTemperatureSensor] = HeaterTemperatureSensor
-            energy_cls: type[HeaterEnergyTotalSensor] = HeaterEnergyTotalSensor
-            power_cls: type[HeaterPowerSensor] = HeaterPowerSensor
-
-            new_entities.append(
-                temp_cls(
+            new_entities.extend(
+                _create_heater_sensors(
                     coordinator,
-                    entry.entry_id,
-                    dev_id,
-                    addr_str,
-                    f"{base_name} Temperature",
-                    f"{uid_prefix}:temp",
-                    base_name,
-                    node_type=node_type,
-                )
-            )
-            new_entities.append(
-                energy_cls(
                     energy_coordinator,
                     entry.entry_id,
                     dev_id,
                     addr_str,
-                    f"{base_name} Energy",
-                    f"{uid_prefix}:energy",
                     base_name,
-                    node_type=node_type,
-                )
-            )
-            new_entities.append(
-                power_cls(
-                    energy_coordinator,
-                    entry.entry_id,
-                    dev_id,
-                    addr_str,
-                    f"{base_name} Power",
-                    f"{uid_prefix}:power",
-                    base_name,
+                    uid_prefix,
                     node_type=node_type,
                 )
             )
@@ -312,6 +288,60 @@ class HeaterPowerSensor(HeaterEnergyBase):
     _metric_key = "power"
 
 
+def _create_heater_sensors(
+    coordinator: Any,
+    energy_coordinator: EnergyStateCoordinator,
+    entry_id: str,
+    dev_id: str,
+    addr: str,
+    base_name: str,
+    uid_prefix: str,
+    *,
+    node_type: str | None = None,
+    temperature_cls: type[HeaterTemperatureSensor] = HeaterTemperatureSensor,
+    energy_cls: type[HeaterEnergyTotalSensor] = HeaterEnergyTotalSensor,
+    power_cls: type[HeaterPowerSensor] = HeaterPowerSensor,
+) -> tuple[
+    HeaterTemperatureSensor,
+    HeaterEnergyTotalSensor,
+    HeaterPowerSensor,
+]:
+    """Create the three heater node sensors for the given node."""
+
+    temperature = temperature_cls(
+        coordinator,
+        entry_id,
+        dev_id,
+        addr,
+        f"{base_name} Temperature",
+        f"{uid_prefix}:temp",
+        base_name,
+        node_type=node_type,
+    )
+    energy = energy_cls(
+        energy_coordinator,
+        entry_id,
+        dev_id,
+        addr,
+        f"{base_name} Energy",
+        f"{uid_prefix}:energy",
+        base_name,
+        node_type=node_type,
+    )
+    power = power_cls(
+        energy_coordinator,
+        entry_id,
+        dev_id,
+        addr,
+        f"{base_name} Power",
+        f"{uid_prefix}:power",
+        base_name,
+        node_type=node_type,
+    )
+
+    return (temperature, energy, power)
+
+
 class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
     """Total energy consumption across all heaters."""
 
@@ -333,15 +363,22 @@ class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
         self._dev_id = dev_id
         self._attr_name = name
         self._attr_unique_id = unique_id
-        self._unsub_ws = None
+        self._ws_subscription = DispatcherSubscriptionHelper(self)
 
     async def async_added_to_hass(self) -> None:
         """Register websocket callbacks once the entity is added."""
         await super().async_added_to_hass()
-        self._unsub_ws = async_dispatcher_connect(
+        if self.hass is None:
+            return
+        self._ws_subscription.subscribe(
             self.hass, signal_ws_data(self._entry_id), self._on_ws_data
         )
-        self.async_on_remove(lambda: self._unsub_ws() if self._unsub_ws else None)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Tidy up websocket listeners prior to entity removal."""
+
+        self._ws_subscription.unsubscribe()
+        await super().async_will_remove_from_hass()
 
     @property
     def device_info(self) -> DeviceInfo:

@@ -422,18 +422,18 @@ def test_engineio_handshake_parsing_and_errors() -> None:
             await client._engineio_handshake()
         assert err2.value.status == -1
 
-        parsed = module.TermoWebSocketClient._parse_engineio_handshake(
+        parsed = module.WebSocketClient._parse_engineio_handshake(
             '0{"sid":"sid-x","pingInterval":"bad","pingTimeout":null}'
         )
         assert parsed.ping_interval == 25.0
         assert parsed.ping_timeout == 60.0
 
         with pytest.raises(RuntimeError):
-            module.TermoWebSocketClient._parse_engineio_handshake("no-json")
+            module.WebSocketClient._parse_engineio_handshake("no-json")
         with pytest.raises(RuntimeError):
-            module.TermoWebSocketClient._parse_engineio_handshake("0{}")
+            module.WebSocketClient._parse_engineio_handshake("0{}")
         with pytest.raises(RuntimeError):
-            module.TermoWebSocketClient._parse_engineio_handshake(
+            module.WebSocketClient._parse_engineio_handshake(
                 '0{"sid":"abc","pingInterval":bad}'
             )
 
@@ -2346,6 +2346,7 @@ def test_dispatch_nodes_reuses_cached_inventory(
     assert inventory and inventory[0] is cached_inventory[0]
     assert energy.calls == [{"htr": ["01"]}]
 
+
 def test_mark_event_promotes_to_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load_ws_client()
     module.async_dispatcher_send = MagicMock()
@@ -2384,6 +2385,45 @@ def test_mark_event_promotes_to_healthy(monkeypatch: pytest.MonkeyPatch) -> None
         module.signal_ws_status("entry"),
         {"dev_id": "dev", "status": "healthy"},
     )
+    loop.close()
+
+
+def test_status_and_event_share_state_bucket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_ws_client()
+    module.async_dispatcher_send = MagicMock()
+    loop = asyncio.new_event_loop()
+    hass = types.SimpleNamespace(loop=loop, data={})
+    coordinator = types.SimpleNamespace()
+    api = types.SimpleNamespace(_session=None)
+    client = module.WebSocket09Client(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        api_client=api,
+        coordinator=coordinator,
+    )
+
+    state = hass.data[module.DOMAIN]["entry"]["ws_state"]["dev"]
+    assert client._ws_state_bucket() is state
+
+    monkeypatch.setattr(module.time, "time", lambda: 1000.0)
+    client._update_status("connecting")
+    assert hass.data[module.DOMAIN]["entry"]["ws_state"]["dev"] is state
+    assert state["status"] == "connecting"
+
+    client._stats.frames_total = 4
+    client._stats.events_total = 2
+    monkeypatch.setattr(module.time, "time", lambda: 1500.0)
+    client._mark_event(paths=None, count_event=True)
+
+    assert hass.data[module.DOMAIN]["entry"]["ws_state"]["dev"] is state
+    assert state["status"] == "connecting"
+    assert state["frames_total"] == 4
+    assert state["events_total"] == 3
+    assert state["last_event_at"] == 1500.0
+
     loop.close()
 
 
@@ -3044,7 +3084,7 @@ def test_detect_protocol_uses_hint_and_base() -> None:
     loop = types.SimpleNamespace(create_task=lambda *_args, **_kwargs: None)
     hass = types.SimpleNamespace(loop=loop, data={module.DOMAIN: {"entry": {}}})
     coordinator = types.SimpleNamespace()
-    client = module.TermoWebSocketClient(
+    client = module.WebSocketClient(
         hass,
         entry_id="entry",
         dev_id="dev",
@@ -3108,7 +3148,7 @@ def test_engineio_ws_client_flow(
             async def _authed_headers(self) -> dict[str, str]:
                 return {"Authorization": "Bearer tok"}
 
-        client = module.TermoWebSocketClient(
+        client = module.WebSocketClient(
             hass,
             entry_id="entry",
             dev_id="dev",
@@ -3268,7 +3308,7 @@ def test_engineio_logs_unknown_types(
             async def _authed_headers(self) -> dict[str, str]:
                 return {"Authorization": "Bearer tok"}
 
-        client = module.TermoWebSocketClient(
+        client = module.WebSocketClient(
             hass,
             entry_id="entry",
             dev_id="dev",
@@ -3322,7 +3362,7 @@ def test_engineio_stop_handles_cancelled_task(
             async def _authed_headers(self) -> dict[str, str]:
                 return {"Authorization": "Bearer token"}
 
-        client = module.TermoWebSocketClient(
+        client = module.WebSocketClient(
             hass,
             entry_id="entry",
             dev_id="dev",
@@ -3331,7 +3371,7 @@ def test_engineio_stop_handles_cancelled_task(
             protocol="engineio2",
         )
 
-        async def hanging_runner(self: module.TermoWebSocketClient) -> None:
+        async def hanging_runner(self: module.WebSocketClient) -> None:
             self._protocol = "engineio2"
             self._update_status("connecting")
             try:
@@ -3380,7 +3420,7 @@ def test_engineio_ws_url_requires_token() -> None:
             async def _authed_headers(self) -> dict[str, str]:
                 return {}
 
-        client = module.TermoWebSocketClient(
+        client = module.WebSocketClient(
             hass,
             entry_id="entry",
             dev_id="dev",
