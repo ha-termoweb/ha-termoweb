@@ -2018,12 +2018,20 @@ def test_subscribe_htr_samples_uses_cached_and_raw_inventory(monkeypatch):
             def __bool__(self) -> bool:  # pragma: no cover - behaviour hook
                 return True
 
-        def fake_addresses(inventory: list[Any], known_types: Any = None) -> tuple[dict[str, Any], set[str]]:
-            mapping: dict[str, Any] = {"htr": [node.addr for node in inventory if getattr(node, "type", "") == "htr"]}
+        def fake_helper(
+            inventory: list[Any],
+            *,
+            heater_types: Any | None = None,
+        ) -> tuple[dict[str, Any], dict[str, set[str]]]:
+            mapping: dict[str, Any] = {
+                "htr": [
+                    node.addr for node in inventory if getattr(node, "type", "") == "htr"
+                ]
+            }
             mapping["acm"] = TruthyEmpty()
-            return mapping, set()
+            return mapping, {}
 
-        monkeypatch.setattr(module, "addresses_by_node_type", fake_addresses)
+        monkeypatch.setattr(module, "build_heater_address_map", fake_helper)
 
         hass = types.SimpleNamespace(loop=asyncio.get_event_loop())
         cached_inventory = module.build_node_inventory({"nodes": [{"type": "htr", "addr": "01"}]})
@@ -2113,12 +2121,20 @@ def test_subscribe_htr_samples_handles_empty_non_htr(monkeypatch):
 
         monkeypatch.setitem(module.__dict__, "list", StageAwareList)
 
-        def fake_addresses(inventory: list[Any], known_types: Any = None) -> tuple[dict[str, Any], set[str]]:
-            mapping: dict[str, Any] = {"htr": [node.addr for node in inventory if getattr(node, "type", "") == "htr"]}
+        def fake_helper(
+            inventory: list[Any],
+            *,
+            heater_types: Any | None = None,
+        ) -> tuple[dict[str, Any], dict[str, set[str]]]:
+            mapping: dict[str, Any] = {
+                "htr": [
+                    node.addr for node in inventory if getattr(node, "type", "") == "htr"
+                ]
+            }
             mapping["acm"] = Stage1Sequence()
-            return mapping, set()
+            return mapping, {}
 
-        monkeypatch.setattr(module, "addresses_by_node_type", fake_addresses)
+        monkeypatch.setattr(module, "build_heater_address_map", fake_helper)
 
         hass = types.SimpleNamespace(
             loop=asyncio.get_event_loop(),
