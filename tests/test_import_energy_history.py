@@ -154,9 +154,6 @@ async def _load_module(
         async def get_nodes(self, dev_id: str) -> dict[str, Any]:
             return {"nodes": [{"type": "htr", "addr": "A"}]}
 
-        async def get_htr_settings(self, dev_id: str, addr: str) -> dict[str, Any]:
-            return {}
-
         async def get_node_settings(
             self, dev_id: str, node: tuple[str, str | int]
         ) -> dict[str, Any]:
@@ -170,16 +167,6 @@ async def _load_module(
             stop: int | None = None,
         ) -> list[dict[str, Any]]:
             return []
-
-        async def get_htr_samples(
-            self,
-            dev_id: str,
-            addr: str,
-            start: int | None = None,
-            stop: int | None = None,
-        ) -> list[dict[str, Any]]:
-            return await self.get_node_samples(dev_id, ("htr", addr), start, stop)
-
     monkeypatch.setattr(api_module, "RESTClient", _FakeRESTClient)
 
     ws_module = importlib.import_module("custom_components.termoweb.ws_client")
@@ -1727,7 +1714,6 @@ def test_energy_polling_matches_import(monkeypatch: pytest.MonkeyPatch) -> None:
                 ]
             )
         )
-        client.get_htr_samples = client.get_node_samples
 
         coordinator = coord_mod.EnergyStateCoordinator(
             hass,

@@ -47,12 +47,6 @@ else:
 def test_coordinator_and_sensors() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.get_htr_samples = AsyncMock(
-            side_effect=[
-                [{"t": 1000, "counter": "1.0"}],
-                [{"t": 1900, "counter": "1.5"}],
-            ]
-        )
         client.get_node_samples = AsyncMock(
             side_effect=[
                 [{"t": 1000, "counter": "1.0"}],
@@ -215,7 +209,6 @@ def test_coordinator_and_sensors() -> None:
         for sensor in sensors.values():
             sensor.schedule_update_ha_state.assert_not_called()
 
-        assert client.get_htr_samples.await_count == 0
         assert client.get_node_samples.await_count == 4
         call_args = [call.args[:2] for call in client.get_node_samples.await_args_list]
         assert call_args[:4] == [
