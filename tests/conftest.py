@@ -1,15 +1,17 @@
 # ruff: noqa: D100,D101,D102,D103,D104,D105,D106,D107,INP001,E402
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import enum
-import asyncio
 import time
 from pathlib import Path
 import sys
 import types
 from typing import Any, Callable, Iterable
 from unittest.mock import AsyncMock
+
+import pytest
 
 
 ConfigEntryAuthFailedStub = type(
@@ -22,6 +24,34 @@ ConfigEntryNotReadyStub = type(
     (Exception,),
     {"__module__": "homeassistant.exceptions"},
 )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register custom pytest markers used across the suite."""
+
+    if not config.pluginmanager.hasplugin("pytest_asyncio"):
+        config.addinivalue_line(
+            "markers", "asyncio: mark test as requiring asyncio event loop support."
+        )
+
+
+def pytest_pyfunc_call(pyfuncitem: pytest.Function) -> bool | None:
+    """Execute async tests when pytest-asyncio is unavailable."""
+
+    if pyfuncitem.config.pluginmanager.hasplugin("pytest_asyncio"):
+        return None
+
+    testfunction = pyfuncitem.obj
+    if not asyncio.iscoroutinefunction(testfunction):
+        return None
+
+    marker = pyfuncitem.get_closest_marker("asyncio")
+    if marker is None:
+        return None
+
+    with asyncio.Runner(debug=False) as runner:
+        runner.run(testfunction(**pyfuncitem.funcargs))
+    return True
 
 
 def _install_stubs() -> None:
