@@ -44,6 +44,76 @@ def _integration_attr(name: str, default: Any) -> Any:
     return getattr(module, name, default)
 
 
+@dataclass(slots=True)
+class _IntegrationDependencies:
+    """Cache integration-level helpers resolved via ``_integration_attr``."""
+
+    logger: logging.Logger
+    async_mod: Any
+    datetime_mod: Any
+    time_mod: Any
+    ensure_inventory: Callable[..., Any]
+    build_map: Callable[..., Any]
+    normalize: Callable[..., Any]
+    registry_mod: Any
+    store_stats: Callable[..., Any]
+    set_factory: Callable[..., Any]
+    stats_period: Callable[..., Any]
+    last_stats_fn: Callable[..., Any]
+    clear_stats_fn: Callable[..., Any]
+
+
+_INTEGRATION_DEPS: _IntegrationDependencies | None = None
+
+
+def _resolve_integration_dependencies() -> _IntegrationDependencies:
+    """Return freshly resolved integration helpers."""
+
+    return _IntegrationDependencies(
+        logger=_integration_attr("_LOGGER", _LOGGER),
+        async_mod=_integration_attr("asyncio", asyncio),
+        datetime_mod=_integration_attr("datetime", datetime),
+        time_mod=_integration_attr("time", time),
+        ensure_inventory=_integration_attr(
+            "ensure_node_inventory", ensure_node_inventory
+        ),
+        build_map=_integration_attr(
+            "build_heater_address_map", build_heater_address_map
+        ),
+        normalize=_integration_attr(
+            "normalize_heater_addresses", normalize_heater_addresses
+        ),
+        registry_mod=_integration_attr("er", er),
+        store_stats=_integration_attr("_store_statistics", _store_statistics),
+        set_factory=_integration_attr("set", set),
+        stats_period=_integration_attr(
+            "_statistics_during_period_compat", _statistics_during_period_compat
+        ),
+        last_stats_fn=_integration_attr(
+            "_get_last_statistics_compat", _get_last_statistics_compat
+        ),
+        clear_stats_fn=_integration_attr(
+            "_clear_statistics_compat", _clear_statistics_compat
+        ),
+    )
+
+
+def _get_integration_dependencies() -> _IntegrationDependencies:
+    """Return cached integration helpers, resolving them on first use."""
+
+    global _INTEGRATION_DEPS
+    if _INTEGRATION_DEPS is None:
+        _INTEGRATION_DEPS = _resolve_integration_dependencies()
+    return _INTEGRATION_DEPS
+
+
+def _reset_integration_dependencies_cache() -> None:
+    """Reset the cached integration helpers (primarily for tests)."""
+
+    global _INTEGRATION_DEPS
+    _INTEGRATION_DEPS = None
+
+
 @dataclass
 class RateLimitState:
     """Track rate limit state for hourly sample queries."""
@@ -287,25 +357,21 @@ async def async_import_energy_history(
 ) -> None:
     """Fetch historical hourly samples and insert statistics."""
 
-    logger = _integration_attr("_LOGGER", _LOGGER)
-    async_mod = _integration_attr("asyncio", asyncio)
-    datetime_mod = _integration_attr("datetime", datetime)
-    time_mod = _integration_attr("time", time)
-    ensure_inventory = _integration_attr("ensure_node_inventory", ensure_node_inventory)
-    build_map = _integration_attr("build_heater_address_map", build_heater_address_map)
-    normalize = _integration_attr("normalize_heater_addresses", normalize_heater_addresses)
-    registry_mod = _integration_attr("er", er)
-    store_stats = _integration_attr("_store_statistics", _store_statistics)
-    set_factory: Callable[..., set[Any]] = _integration_attr("set", set)
-    stats_period = _integration_attr(
-        "_statistics_during_period_compat", _statistics_during_period_compat
-    )
-    last_stats_fn = _integration_attr(
-        "_get_last_statistics_compat", _get_last_statistics_compat
-    )
-    clear_stats_fn = _integration_attr(
-        "_clear_statistics_compat", _clear_statistics_compat
-    )
+    deps = _get_integration_dependencies()
+
+    logger = deps.logger
+    async_mod = deps.async_mod
+    datetime_mod = deps.datetime_mod
+    time_mod = deps.time_mod
+    ensure_inventory = deps.ensure_inventory
+    build_map = deps.build_map
+    normalize = deps.normalize
+    registry_mod = deps.registry_mod
+    store_stats = deps.store_stats
+    set_factory: Callable[..., set[Any]] = deps.set_factory
+    stats_period = deps.stats_period
+    last_stats_fn = deps.last_stats_fn
+    clear_stats_fn = deps.clear_stats_fn
 
     rec = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if not rec:
@@ -355,9 +421,7 @@ async def async_import_energy_history(
         (node_type, addr) for node_type, addrs in by_type.items() for addr in addrs
     ]
     target_pairs: list[tuple[str, str]] = [
-        (node_type, addr)
-        for node_type, addrs in selected_map.items()
-        for addr in addrs
+        (node_type, addr) for node_type, addrs in selected_map.items() for addr in addrs
     ]
 
     day = 24 * 3600
@@ -442,9 +506,7 @@ async def async_import_energy_history(
             _iso_date(stop),
         )
         try:
-            return await client.get_node_samples(
-                dev_id, (node_type, addr), start, stop
-            )
+            return await client.get_node_samples(dev_id, (node_type, addr), start, stop)
         except async_mod.CancelledError:  # pragma: no cover - allow cancellation
             raise
         except Exception as err:  # pragma: no cover - defensive
@@ -453,7 +515,9 @@ async def async_import_energy_history(
 
     ent_reg: er.EntityRegistry | None = registry_mod.async_get(hass)
     for node_type, addr in target_pairs:
-        logger.debug("%s: importing history for %s %s", dev_id, node_type or "htr", addr)
+        logger.debug(
+            "%s: importing history for %s %s", dev_id, node_type or "htr", addr
+        )
         all_samples: list[dict[str, Any]] = []
         start_ts = _progress_value(node_type, addr)
         while start_ts > target:
@@ -563,7 +627,9 @@ async def async_import_energy_history(
                 raise
             except Exception as err:  # pragma: no cover - defensive
                 logger.error(
-                    "%s: error fetching last statistics for offset: %s", addr, err,
+                    "%s: error fetching last statistics for offset: %s",
+                    addr,
+                    err,
                     exc_info=True,
                 )
 
@@ -609,7 +675,9 @@ async def async_import_energy_history(
                 raise
             except Exception as err:  # pragma: no cover - defensive
                 logger.error(
-                    "%s: error checking for overlapping statistics: %s", addr, err,
+                    "%s: error checking for overlapping statistics: %s",
+                    addr,
+                    err,
                     exc_info=True,
                 )
 
@@ -635,7 +703,9 @@ async def async_import_energy_history(
                 raise
             except Exception as err:  # pragma: no cover - defensive
                 logger.error(
-                    "%s: failed to clear overlapping statistics: %s", addr, err,
+                    "%s: failed to clear overlapping statistics: %s",
+                    addr,
+                    err,
                     exc_info=True,
                 )
 
@@ -705,11 +775,12 @@ async def async_register_import_energy_history_service(
     if hass.services.has_service(DOMAIN, "import_energy_history"):
         return
 
-    logger = _integration_attr("_LOGGER", _LOGGER)
-    async_mod = _integration_attr("asyncio", asyncio)
-    build_map = _integration_attr("build_heater_address_map", build_heater_address_map)
-    normalize = _integration_attr("normalize_heater_addresses", normalize_heater_addresses)
-    registry_mod = _integration_attr("er", er)
+    deps = _get_integration_dependencies()
+
+    logger = deps.logger
+    async_mod = deps.async_mod
+    build_map = deps.build_map
+    registry_mod = deps.registry_mod
 
     async def _service_import_energy_history(call) -> None:
         """Handle the import_energy_history service call."""
@@ -743,7 +814,9 @@ async def async_register_import_energy_history_service(
                 entry_id = er_ent.config_entry_id
                 if not entry_id:
                     continue
-                entry_map.setdefault(entry_id, {}).setdefault(node_type, set()).add(addr)
+                entry_map.setdefault(entry_id, {}).setdefault(node_type, set()).add(
+                    addr
+                )
 
             for entry_id, addr_map in entry_map.items():
                 ent = hass.config_entries.async_get_entry(entry_id)
@@ -815,4 +888,3 @@ def async_schedule_initial_energy_import(
         hass.async_create_task(_schedule_import())
     else:
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _schedule_import)
-
