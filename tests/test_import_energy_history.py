@@ -169,6 +169,29 @@ async def _load_module(
             return []
     monkeypatch.setattr(api_module, "RESTClient", _FakeRESTClient)
 
+    client_module = importlib.import_module("custom_components.termoweb.client")
+
+    def _fake_create_rest_client(
+        hass: Any, username: str, password: str, brand: str | None
+    ) -> _FakeRESTClient:
+        session = client_module.aiohttp_client.async_get_clientsession(hass)
+        normalized = brand or client_module.DEFAULT_BRAND
+        return _FakeRESTClient(
+            session,
+            username,
+            password,
+            api_base=client_module.get_brand_api_base(normalized),
+            basic_auth_b64=client_module.get_brand_basic_auth(normalized),
+        )
+
+    async def _fake_async_list(client: _FakeRESTClient) -> list[dict[str, Any]]:
+        return await client.list_devices()
+
+    monkeypatch.setattr(client_module, "create_rest_client", _fake_create_rest_client)
+    monkeypatch.setattr(
+        client_module, "async_list_devices_with_logging", _fake_async_list
+    )
+
     ws_module = importlib.import_module("custom_components.termoweb.ws_client")
 
     class _FakeWSClient:
