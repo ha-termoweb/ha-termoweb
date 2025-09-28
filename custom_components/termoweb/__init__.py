@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 from collections import Counter
 from collections.abc import Iterable, Mapping
-from datetime import datetime, timedelta
+from datetime import datetime as _datetime, timedelta
 import logging
-import time
+import time as _time
 from typing import Any
 
 from aiohttp import ClientError
@@ -79,6 +79,41 @@ PLATFORMS = ["button", "binary_sensor", "climate", "sensor"]
 
 reset_samples_rate_limit_state()
 
+datetime = _datetime
+time = _time
+
+
+def create_rest_client(
+    hass: HomeAssistant, username: str, password: str, brand: str
+) -> RESTClient:
+    """Return a REST client configured for the selected brand."""
+
+    session = aiohttp_client.async_get_clientsession(hass)
+    api_base = get_brand_api_base(brand)
+    basic_auth = get_brand_basic_auth(brand)
+    client_cls = DucaheatRESTClient if brand == BRAND_DUCAHEAT else RESTClient
+    return client_cls(
+        session,
+        username,
+        password,
+        api_base=api_base,
+        basic_auth_b64=basic_auth,
+    )
+
+
+async def async_list_devices(client: RESTClient) -> Any:
+    """Call ``list_devices`` logging auth/connection issues consistently."""
+
+    try:
+        return await client.list_devices()
+    except BackendAuthError as err:
+        _LOGGER.info("list_devices auth error: %s", err)
+        raise
+    except (TimeoutError, ClientError, BackendRateLimitError) as err:
+        _LOGGER.info("list_devices connection error: %s", err)
+        raise
+
+
 async def _async_import_energy_history(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -102,7 +137,6 @@ async def _async_import_energy_history(
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up the TermoWeb integration for a config entry."""
-    session = aiohttp_client.async_get_clientsession(hass)
     username = entry.data["username"]
     password = entry.data["password"]
     base_interval = int(
@@ -111,27 +145,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
     )
     brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
-    api_base = get_brand_api_base(brand)
-    basic_auth = get_brand_basic_auth(brand)
 
     version = await _async_get_integration_version(hass)
 
-    client_cls = DucaheatRESTClient if brand == BRAND_DUCAHEAT else RESTClient
-    client = client_cls(
-        session,
-        username,
-        password,
-        api_base=api_base,
-        basic_auth_b64=basic_auth,
-    )
+    client = create_rest_client(hass, username, password, brand)
     backend = create_backend(brand=brand, client=client)
     try:
-        devices = await client.list_devices()
+        devices = await async_list_devices(client)
     except BackendAuthError as err:
-        _LOGGER.info("list_devices auth error: %s", err)
         raise ConfigEntryAuthFailed from err
     except (TimeoutError, ClientError, BackendRateLimitError) as err:
-        _LOGGER.info("list_devices connection error: %s", err)
         raise ConfigEntryNotReady from err
 
     if not devices:
@@ -254,13 +277,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
 
     # Always-on push: start for all current devices
-    for dev_id in (coordinator.data or {}).keys():
+    for dev_id in coordinator.data or {}:
         hass.async_create_task(_start_ws(dev_id))
 
     # Start for any devices discovered later
     def _on_coordinator_updated() -> None:
         """Start websocket clients for newly discovered devices."""
-        for dev_id in (coordinator.data or {}).keys():
+        for dev_id in coordinator.data or {}:
             if dev_id not in data["ws_tasks"]:
                 hass.async_create_task(_start_ws(dev_id))
 
