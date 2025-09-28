@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from custom_components.termoweb import utils as utils_module
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.nodes import build_node_inventory
 
@@ -238,11 +239,34 @@ def test_get_brand_api_base_fallback() -> None:
     assert const.get_brand_api_base("unknown-brand") == const.API_BASE
 
 
-def test_build_heater_energy_unique_id_round_trip() -> None:
+def test_build_heater_energy_unique_id_round_trip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, object, dict[str, Any]]] = []
+
+    original_normalize_type = utils_module.normalize_node_type
+    original_normalize_addr = utils_module.normalize_node_addr
+
+    def _record_type(value, **kwargs):
+        calls.append(("type", value, kwargs))
+        return original_normalize_type(value, **kwargs)
+
+    def _record_addr(value, **kwargs):
+        calls.append(("addr", value, kwargs))
+        return original_normalize_addr(value, **kwargs)
+
+    monkeypatch.setattr(utils_module, "normalize_node_type", _record_type)
+    monkeypatch.setattr(utils_module, "normalize_node_addr", _record_addr)
+
     unique_id = build_heater_energy_unique_id(" dev ", " ACM ", " 01 ")
 
     assert unique_id == f"{DOMAIN}:dev:acm:01:energy"
     assert parse_heater_energy_unique_id(unique_id) == ("dev", "acm", "01")
+    assert calls == [
+        ("addr", " dev ", {}),
+        ("type", " ACM ", {}),
+        ("addr", " 01 ", {}),
+    ]
 
 
 @pytest.mark.parametrize(

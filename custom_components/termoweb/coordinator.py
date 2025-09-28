@@ -199,6 +199,54 @@ class StateCoordinator(
         """Add ``addr`` to the cached map for ``node_type`` if missing."""
         self._merge_address_payload({node_type: [addr]})
 
+    def _merge_nodes_by_type(
+        self,
+        cache_map: Mapping[str, Iterable[str]],
+        current_sections: Mapping[str, Any] | None,
+        new_payload: Mapping[str, Mapping[str, Any]] | None,
+    ) -> dict[str, dict[str, Any]]:
+        """Merge cached addresses, existing sections and payload settings."""
+
+        sections: dict[str, Any] = {}
+        if isinstance(current_sections, Mapping):
+            sections = dict(current_sections)
+
+        payload_map: dict[str, Mapping[str, Any]] = {}
+        if isinstance(new_payload, Mapping):
+            payload_map = dict(new_payload)
+
+        merged_types = set(cache_map) | set(sections) | set(payload_map)
+        nodes_by_type: dict[str, dict[str, Any]] = {}
+
+        for node_type in merged_types:
+            default_addrs = cache_map.get(node_type, [])
+            section = sections.get(node_type)
+            normalized = self._normalise_type_section(
+                node_type, section, default_addrs
+            )
+
+            payload_settings = payload_map.get(node_type)
+            if isinstance(payload_settings, Mapping):
+                settings_bucket = normalized.setdefault("settings", {})
+                for raw_addr, data in payload_settings.items():
+                    addr = normalize_node_addr(raw_addr)
+                    if not addr:
+                        continue
+                    settings_bucket[addr] = data
+                    if addr not in normalized["addrs"]:
+                        normalized["addrs"].append(addr)
+
+            cache_addrs = cache_map.get(node_type)
+            if cache_addrs:
+                for raw_addr in cache_addrs:
+                    addr = normalize_node_addr(raw_addr)
+                    if addr and addr not in normalized["addrs"]:
+                        normalized["addrs"].append(addr)
+
+            nodes_by_type[node_type] = normalized
+
+        return nodes_by_type
+
     @staticmethod
     def _normalise_type_section(
         node_type: str,
@@ -356,46 +404,13 @@ class StateCoordinator(
                     existing_nodes.setdefault(key, value)
 
             cache_map = dict(self._nodes_by_type)
-            if node_type not in cache_map:
-                cache_map[node_type] = []
-
-            all_types = set(existing_nodes) | set(cache_map)
-            nodes_by_type: dict[str, dict[str, Any]] = {}
-            for n_type in all_types:
-                default_addrs = cache_map.get(n_type, [])
-                section = existing_nodes.get(n_type)
-                nodes_by_type[n_type] = self._normalise_type_section(
-                    n_type, section, default_addrs
-                )
-
-            bucket = nodes_by_type.setdefault(
-                node_type,
-                self._normalise_type_section(
-                    node_type, {}, cache_map.get(node_type, [])
-                ),
-            )
-            if addr not in bucket["addrs"]:
-                bucket["addrs"].append(addr)
-            bucket.setdefault("settings", {})[addr] = payload
-
             self._register_node_address(node_type, addr)
-            cached_addrs = self._nodes_by_type.get(node_type, [])
-            merged_addrs: list[str] = []
-            for candidate in [*cached_addrs, *bucket["addrs"]]:
-                if candidate not in merged_addrs:
-                    merged_addrs.append(candidate)
-            bucket["addrs"] = merged_addrs
-
-            for n_type, cached in self._nodes_by_type.items():
-                section = nodes_by_type.setdefault(
-                    n_type,
-                    self._normalise_type_section(n_type, {}, cached),
-                )
-                merged: list[str] = []
-                for candidate in [*cached, *section["addrs"]]:
-                    if candidate not in merged:
-                        merged.append(candidate)
-                section["addrs"] = merged
+            payload_map = {node_type: {addr: payload}}
+            nodes_by_type = self._merge_nodes_by_type(
+                cache_map,
+                existing_nodes,
+                payload_map,
+            )
 
             dev_data["nodes"] = self._nodes
             dev_data["nodes_by_type"] = {
@@ -517,21 +532,29 @@ class StateCoordinator(
 
             addr_map = dict(self._nodes_by_type)
 
-            combined_types = set(addr_map) | set(settings_by_type)
-            nodes_by_type: dict[str, dict[str, Any]] = {}
-            for node_type in combined_types:
-                cached_addrs = addr_map.get(node_type, [])
-                settings = dict(settings_by_type.get(node_type, {}))
-                final_addrs: list[str] = []
-                for candidate in [*cached_addrs, *settings.keys()]:
-                    addr_str = normalize_node_addr(candidate)
-                    if not addr_str or addr_str in final_addrs:
-                        continue
-                    final_addrs.append(addr_str)
-                nodes_by_type[node_type] = {
-                    "addrs": final_addrs,
-                    "settings": settings,
-                }
+            existing_nodes: dict[str, Any] = {}
+            raw_nodes = prev_dev.get("nodes_by_type")
+            if isinstance(raw_nodes, dict):
+                existing_nodes.update(raw_nodes)
+
+            for key, value in prev_dev.items():
+                if key in {
+                    "dev_id",
+                    "name",
+                    "raw",
+                    "connected",
+                    "nodes",
+                    "nodes_by_type",
+                }:
+                    continue
+                if isinstance(value, dict):
+                    existing_nodes.setdefault(key, value)
+
+            nodes_by_type = self._merge_nodes_by_type(
+                addr_map,
+                existing_nodes,
+                settings_by_type,
+            )
 
             heater_section = _ensure_heater_section(
                 nodes_by_type,

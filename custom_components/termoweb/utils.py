@@ -30,7 +30,7 @@ def build_heater_energy_unique_id(
 ) -> str:
     """Return the canonical unique ID for a heater energy sensor."""
 
-    dev = str(dev_id).strip()
+    dev = normalize_node_addr(dev_id)
     node = normalize_node_type(node_type)
     address = normalize_node_addr(addr)
     if not dev or not node or not address:

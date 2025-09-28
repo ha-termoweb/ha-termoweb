@@ -367,7 +367,12 @@ class HeaterNodeBase(CoordinatorEntity):
         addr = payload.get("addr")
         if addr is None:
             return True
-        return normalize_node_addr(addr) == self._addr
+
+        payload_addr = normalize_node_addr(addr)
+        if not payload_addr:
+            return not self._addr
+
+        return payload_addr == self._addr
 
     @callback
     def _handle_ws_event(self, _payload: dict) -> None:
