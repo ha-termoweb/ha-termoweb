@@ -123,6 +123,16 @@ class RateLimitState:
     set_last_query: Callable[[float], None]
 
 
+@dataclass(slots=True)
+class _RecorderStatisticsHelpers:
+    """Container for recorder statistics helper callables."""
+
+    executor: Callable[..., Awaitable[Any]] | None
+    instance: Any | None
+    sync: Callable[..., Any] | None
+    async_fn: Callable[..., Awaitable[Any]] | None
+
+
 _SAMPLES_QUERY_LOCK = asyncio.Lock()
 _LAST_SAMPLES_QUERY = 0.0
 
@@ -154,6 +164,58 @@ def reset_samples_rate_limit_state() -> None:
     """Reset the shared rate limiter tracking to its initial state."""
 
     _set_last_samples_query(0.0)
+
+
+def _resolve_statistics_helpers(
+    hass: HomeAssistant,
+    sync_name: str,
+    async_name: str,
+) -> _RecorderStatisticsHelpers:
+    """Return the recorder statistics helpers for compatibility shims."""
+
+    executor: Callable[..., Awaitable[Any]] | None = None
+    instance: Any | None = None
+    sync_helper: Callable[..., Any] | None = None
+    async_helper: Callable[..., Awaitable[Any]] | None = None
+
+    statistics_mod: Any | None = None
+    get_instance: Callable[[HomeAssistant], Any] | None = None
+
+    try:
+        from homeassistant.components.recorder import (
+            get_instance as _get_instance,
+            statistics as statistics_mod,
+        )
+    except (ImportError, AttributeError):  # pragma: no cover - defensive
+        statistics_mod = None
+        get_instance = None
+    else:
+        get_instance = _get_instance
+
+    if statistics_mod is not None:
+        sync_candidate = getattr(statistics_mod, sync_name, None)
+        if callable(sync_candidate) and get_instance is not None:
+            instance = get_instance(hass)
+            executor = instance.async_add_executor_job
+            sync_helper = sync_candidate
+
+    if statistics_mod is None:
+        try:
+            from homeassistant.components.recorder import statistics as statistics_mod
+        except (ImportError, AttributeError):  # pragma: no cover - defensive
+            statistics_mod = None
+
+    if statistics_mod is not None:
+        async_candidate = getattr(statistics_mod, async_name, None)
+        if callable(async_candidate):
+            async_helper = async_candidate
+
+    return _RecorderStatisticsHelpers(
+        executor=executor,
+        instance=instance,
+        sync=sync_helper,
+        async_fn=async_helper,
+    )
 
 
 def _iso_date(ts: int) -> str:
@@ -211,19 +273,15 @@ async def _statistics_during_period_compat(  # pragma: no cover - compatibility 
 ) -> dict[str, list[Any]] | None:
     """Fetch statistics for a period using the best available API."""
 
-    try:
-        from homeassistant.components.recorder import get_instance as _get_instance
-        from homeassistant.components.recorder.statistics import (
-            statistics_during_period as _statistics_during_period,
-        )
-    except (ImportError, AttributeError):  # pragma: no cover - defensive
-        _statistics_during_period = None
-        _get_instance = None  # type: ignore[assignment]
+    helpers = _resolve_statistics_helpers(
+        hass,
+        "statistics_during_period",
+        "async_get_statistics_during_period",
+    )
 
-    if _statistics_during_period and _get_instance:
-        instance = _get_instance(hass)
-        return await instance.async_add_executor_job(
-            _statistics_during_period,
+    if helpers.sync and helpers.executor:
+        return await helpers.executor(
+            helpers.sync,
             hass,
             start_time,
             end_time,
@@ -233,14 +291,10 @@ async def _statistics_during_period_compat(  # pragma: no cover - compatibility 
             None,
         )
 
-    try:
-        from homeassistant.components.recorder.statistics import (
-            async_get_statistics_during_period as _async_get_statistics_during_period,
-        )
-    except (ImportError, AttributeError):  # pragma: no cover - defensive
+    if helpers.async_fn is None:
         return None
 
-    return await _async_get_statistics_during_period(
+    return await helpers.async_fn(
         hass,
         start_time,
         end_time,
@@ -261,37 +315,29 @@ async def _get_last_statistics_compat(  # pragma: no cover - compatibility shim
 
     types = types or {"state", "sum"}
 
-    try:
-        from homeassistant.components.recorder import get_instance as _get_instance
-        from homeassistant.components.recorder.statistics import (
-            get_last_statistics as _get_last_statistics,
-        )
-    except (ImportError, AttributeError):  # pragma: no cover - defensive
-        _get_last_statistics = None
-        _get_instance = None  # type: ignore[assignment]
+    helpers = _resolve_statistics_helpers(
+        hass,
+        "get_last_statistics",
+        "async_get_last_statistics",
+    )
 
-    if _get_last_statistics and _get_instance and start_time is None:
-        instance = _get_instance(hass)
-        return await instance.async_add_executor_job(
-            _get_last_statistics,
+    if helpers.sync and helpers.executor and start_time is None:
+        return await helpers.executor(
+            helpers.sync,
             hass,
             number_of_stats,
             statistic_id,
             types,
         )
 
-    try:
-        from homeassistant.components.recorder.statistics import (
-            async_get_last_statistics as _async_get_last_statistics,
-        )
-    except (ImportError, AttributeError):  # pragma: no cover - defensive
+    if helpers.async_fn is None:
         return None
 
     kwargs: dict[str, Any] = {"types": types}
     if start_time is not None:
         kwargs["start_time"] = start_time
 
-    return await _async_get_last_statistics(
+    return await helpers.async_fn(
         hass,
         number_of_stats,
         [statistic_id],
@@ -308,29 +354,21 @@ async def _clear_statistics_compat(  # pragma: no cover - compatibility shim
 ) -> str | None:
     """Clear statistics using whichever helper is available."""
 
-    try:
-        from homeassistant.components.recorder import get_instance as _get_instance
-        from homeassistant.components.recorder.statistics import (
-            clear_statistics as _clear_statistics,
-        )
-    except (ImportError, AttributeError):  # pragma: no cover - defensive
-        _clear_statistics = None
-        _get_instance = None  # type: ignore[assignment]
+    helpers = _resolve_statistics_helpers(
+        hass,
+        "clear_statistics",
+        "async_delete_statistics",
+    )
 
-    if _clear_statistics and _get_instance:
-        instance = _get_instance(hass)
-        await instance.async_add_executor_job(
-            _clear_statistics,
-            instance,
+    if helpers.sync and helpers.executor and helpers.instance is not None:
+        await helpers.executor(
+            helpers.sync,
+            helpers.instance,
             [statistic_id],
         )
         return "clear"
 
-    try:
-        from homeassistant.components.recorder.statistics import (
-            async_delete_statistics as _async_delete_statistics,
-        )
-    except (ImportError, AttributeError):  # pragma: no cover - defensive
+    if helpers.async_fn is None:
         return None
 
     delete_args: dict[str, Any] = {}
@@ -340,9 +378,9 @@ async def _clear_statistics_compat(  # pragma: no cover - compatibility shim
         delete_args["end_time"] = end_time
 
     try:
-        await _async_delete_statistics(hass, [statistic_id], **delete_args)
+        await helpers.async_fn(hass, [statistic_id], **delete_args)
     except TypeError:  # pragma: no cover - older signature fallback
-        await _async_delete_statistics(hass, [statistic_id])
+        await helpers.async_fn(hass, [statistic_id])
     return "delete"  # pragma: no cover - dependent on async helper availability
 
 
