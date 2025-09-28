@@ -221,6 +221,15 @@ def test_resolve_node_descriptor_validations() -> None:
         client._resolve_node_descriptor(("htr", ""))
 
 
+def test_resolve_node_descriptor_normalises_values() -> None:
+    client = RESTClient(FakeSession(), "user", "pass")
+
+    node = AccumulatorNode(name=" Storage ", addr=" 007 ")
+    assert client._resolve_node_descriptor(node) == ("acm", "007")
+
+    assert client._resolve_node_descriptor(("HTR", " 08 ")) == ("htr", "08")
+
+
 def test_ensure_token_non_numeric_expires_in(monkeypatch) -> None:
     fake_time = 1000.0
 

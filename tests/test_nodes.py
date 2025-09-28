@@ -147,6 +147,15 @@ def test_build_node_inventory_falls_back_to_node_type_field() -> None:
     assert nodes[0].addr == "05"
 
 
+def test_build_node_inventory_falls_back_to_address_field() -> None:
+    payload = {"nodes": [{"type": "HTR", "addr": " ", "address": " 09 "}]}
+
+    nodes = build_node_inventory(payload)
+
+    assert len(nodes) == 1
+    assert nodes[0].addr == "09"
+
+
 def test_utils_normalization_matches_node_inventory() -> None:
     payload = {"nodes": [{"type": " HTR ", "addr": " 01 "}]}
 
