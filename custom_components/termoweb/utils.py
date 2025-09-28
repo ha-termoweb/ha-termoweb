@@ -110,16 +110,7 @@ def ensure_node_inventory(
 
     return []
 
-
-def build_node_inventory(raw_nodes: Any) -> list["Node"]:  # noqa: UP037
-    """Return canonical node inventory using the shared builder."""
-
-    from .nodes import build_node_inventory as _build_node_inventory  # noqa: PLC0415
-
-    return _build_node_inventory(raw_nodes)
-
-
-def _normalize_node_identifier(
+def normalize_node_type(
     value: Any,
     *,
     default: str = "",
