@@ -1,10 +1,11 @@
 """Unified websocket client for TermoWeb backends."""
 
 import asyncio
-from collections.abc import AsyncIterator, Iterable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import partial
 import json
 import logging
 import random
@@ -438,9 +439,9 @@ class WebSocketClient:
     async def _heartbeat_loop(self) -> None:
         """Send periodic heartbeat frames to keep the connection alive."""
         try:
-            while True:
-                await asyncio.sleep(self._hb_send_interval)
-                await self._send_text("2::")
+            await self._run_heartbeat(
+                self._hb_send_interval, partial(self._send_text, "2::")
+            )
         except asyncio.CancelledError:
             return
         except (aiohttp.ClientError, RuntimeError):
@@ -750,9 +751,9 @@ class WebSocketClient:
     async def _engineio_ping_loop(self) -> None:
         """Send Engine.IO ping packets at the negotiated interval."""
         try:
-            while True:
-                await asyncio.sleep(self._engineio_ping_interval)
-                await self._engineio_send("2")
+            await self._run_heartbeat(
+                self._engineio_ping_interval, partial(self._engineio_send, "2")
+            )
         except asyncio.CancelledError:
             raise
         except (aiohttp.ClientError, OSError, RuntimeError):
@@ -1035,6 +1036,15 @@ class WebSocketClient:
     # ------------------------------------------------------------------
     # Helpers shared across implementations
     # ------------------------------------------------------------------
+    async def _run_heartbeat(
+        self, interval: float, sender: Callable[[], Awaitable[None]]
+    ) -> None:
+        """Run a heartbeat sender coroutine at a fixed cadence."""
+
+        while True:
+            await asyncio.sleep(interval)
+            await sender()
+
     def _parse_handshake_body(self, body: str) -> HandshakeResult:
         """Parse the Socket.IO handshake response into (sid, timeout)."""
         parts = (body or "").strip().split(":")
