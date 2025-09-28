@@ -8,11 +8,19 @@ from typing import Any, cast
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.loader import async_get_integration
 
 from .const import DOMAIN
 from .nodes import Node, build_node_inventory
 
 HEATER_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm"})
+
+
+async def async_get_integration_version(hass: HomeAssistant) -> str:
+    """Return the installed integration version string."""
+
+    integration = await async_get_integration(hass, DOMAIN)
+    return integration.version or "unknown"
 
 
 def build_heater_energy_unique_id(

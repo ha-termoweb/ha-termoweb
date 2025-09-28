@@ -743,6 +743,50 @@ def test_engineio_read_loop_raises_error_exception() -> None:
     asyncio.run(_run())
 
 
+@pytest.mark.parametrize(
+    "context",
+    ["websocket", "engine.io websocket"],
+)
+def test_ws_payload_stream_raises_close_for_both_protocols(context: str) -> None:
+    module = _load_ws_client()
+
+    async def _run() -> None:
+        loop = asyncio.get_running_loop()
+        hass = types.SimpleNamespace(
+            loop=loop, data={module.DOMAIN: {"entry": {"ws_state": {}}}}
+        )
+        coordinator = types.SimpleNamespace()
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=types.SimpleNamespace(_session=None),
+            coordinator=coordinator,
+        )
+
+        class DummyWS:
+            def __init__(self) -> None:
+                self.close_code = 4000
+
+            async def receive(self) -> Any:
+                return types.SimpleNamespace(
+                    type=module.aiohttp.WSMsgType.CLOSE,
+                    data=None,
+                    extra="gone",
+                )
+
+            def exception(self) -> None:
+                return None
+
+        ws = DummyWS()
+        with pytest.raises(
+            RuntimeError, match=f"{context} closed: code=4000 reason=gone"
+        ):
+            await anext(client._ws_payload_stream(ws, context=context))
+
+    asyncio.run(_run())
+
+
 def test_handle_payload_helpers_update_nodes() -> None:
     module = _load_ws_client()
 
@@ -2618,6 +2662,68 @@ def test_read_loop_returns_when_ws_missing() -> None:
         )
         client._ws = None
         assert await client._read_loop() is None
+
+    asyncio.run(_run())
+
+
+@pytest.mark.parametrize(
+    ("ws_attr", "context", "method", "terminal", "error_match"),
+    [
+        ("_ws", "websocket", "_read_loop", "0::", "server disconnect"),
+        (
+            "_engineio_ws",
+            "engine.io websocket",
+            "_engineio_read_loop",
+            "41",
+            "engine.io server disconnect",
+        ),
+    ],
+)
+def test_read_loops_delegate_to_shared_stream(
+    ws_attr: str, context: str, method: str, terminal: str, error_match: str
+) -> None:
+    module = _load_ws_client()
+
+    async def _run() -> None:
+        loop = asyncio.get_running_loop()
+        hass = types.SimpleNamespace(
+            loop=loop, data={module.DOMAIN: {"entry": {"ws_state": {}}}}
+        )
+        coordinator = types.SimpleNamespace()
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=types.SimpleNamespace(_session=None),
+            coordinator=coordinator,
+        )
+
+        ws = module.aiohttp.testing.FakeWebSocket()
+        ws.queue_message({
+            "type": module.aiohttp.WSMsgType.TEXT,
+            "data": terminal,
+        })
+        setattr(client, ws_attr, ws)
+
+        seen: list[str] = []
+        contexts: list[str] = []
+        orig_stream = client._ws_payload_stream
+
+        async def fake_stream(self: Any, ws_obj: Any, *, context: str) -> Any:
+            assert ws_obj is ws
+            contexts.append(context)
+            async for payload in orig_stream(ws_obj, context=context):
+                seen.append(payload)
+                yield payload
+
+        client._ws_payload_stream = types.MethodType(fake_stream, client)
+
+        with pytest.raises(RuntimeError, match=error_match):
+            await getattr(client, method)()
+
+        assert client._stats.frames_total == 1
+        assert seen == [terminal]
+        assert contexts == [context]
 
     asyncio.run(_run())
 

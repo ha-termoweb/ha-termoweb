@@ -14,7 +14,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.loader import async_get_integration
 
 from . import energy as energy_module
 from .api import BackendAuthError, BackendRateLimitError, RESTClient
@@ -46,6 +45,7 @@ from .energy import (
 from .nodes import build_node_inventory
 from .utils import (
     HEATER_NODE_TYPES as _HEATER_NODE_TYPES,
+    async_get_integration_version as _async_get_integration_version,
     build_heater_address_map as _build_heater_address_map,
     ensure_node_inventory as _ensure_node_inventory,
     normalize_heater_addresses as _normalize_heater_addresses,
@@ -114,9 +114,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     api_base = get_brand_api_base(brand)
     basic_auth = get_brand_basic_auth(brand)
 
-    # DRY version: read from manifest
-    integration = await async_get_integration(hass, DOMAIN)
-    version = integration.version or "unknown"
+    version = await _async_get_integration_version(hass)
 
     client_cls = DucaheatRESTClient if brand == BRAND_DUCAHEAT else RESTClient
     client = client_cls(
