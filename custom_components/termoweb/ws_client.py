@@ -19,16 +19,17 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from .api import RESTClient
 from .const import API_BASE, DOMAIN, WS_NAMESPACE, signal_ws_data, signal_ws_status
 from .heater import prepare_heater_platform_data
-from .nodes import NODE_CLASS_BY_TYPE
+from .nodes import NODE_CLASS_BY_TYPE, build_node_inventory as _build_node_inventory
 from .utils import (
     HEATER_NODE_TYPES,
     addresses_by_node_type,
-    build_node_inventory,  # noqa: F401 - re-exported for tests
     ensure_node_inventory,
     normalize_heater_addresses,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+build_node_inventory = _build_node_inventory  # re-exported for tests
 
 HandshakeResult = tuple[str, int]
 
@@ -127,6 +128,7 @@ class WebSocketClient:
         """Start the websocket client background task."""
         if self._task and not self._task.done():
             return self._task
+        _LOGGER.debug("WS %s: start requested", self.dev_id)
         self._closing = False
         self._stop_event = asyncio.Event()
         self._task = self.hass.loop.create_task(
@@ -136,6 +138,7 @@ class WebSocketClient:
 
     async def stop(self) -> None:
         """Cancel tasks and close websocket sessions."""
+        _LOGGER.debug("WS %s: stop requested", self.dev_id)
         self._closing = True
         self._stop_event.set()
         if self._hb_task:
@@ -186,6 +189,7 @@ class WebSocketClient:
         self._update_status("starting")
         try:
             self._protocol = self._detect_protocol()
+            _LOGGER.debug("WS %s: selected protocol %s", self.dev_id, self._protocol)
             if self._protocol == "engineio2":
                 await self._run_engineio_v2()
             else:
@@ -211,11 +215,19 @@ class WebSocketClient:
         while not self._closing:
             should_retry = True
             try:
+                _LOGGER.debug("WS %s: initiating Socket.IO 0.9 handshake", self.dev_id)
                 sid, hb_timeout = await self._handshake()
+                _LOGGER.debug(
+                    "WS %s: handshake succeeded sid=%s hb_timeout=%s",
+                    self.dev_id,
+                    sid,
+                    hb_timeout,
+                )
                 self._hs_fail_count = 0
                 self._hs_fail_start = 0.0
                 self._hb_send_interval = max(5.0, min(30.0, hb_timeout * 0.45))
                 await self._connect_ws(sid)
+                _LOGGER.debug("WS %s: websocket connection established", self.dev_id)
                 await self._join_namespace()
                 await self._send_snapshot_request()
                 await self._subscribe_htr_samples()
@@ -624,6 +636,11 @@ class WebSocketClient:
                     "node_type": node_type,
                 },
             )
+        self._log_legacy_update(
+            updated_nodes=updated_nodes,
+            updated_addrs=updated_addrs,
+            sample_addrs=sample_addrs,
+        )
 
     # ------------------------------------------------------------------
     # Engine.IO / Socket.IO v2 implementation
@@ -638,11 +655,20 @@ class WebSocketClient:
         while not self._closing:
             should_retry = True
             try:
+                _LOGGER.debug("WS %s: initiating Engine.IO handshake", self.dev_id)
                 handshake = await self._engineio_handshake()
+                _LOGGER.debug(
+                    "WS %s: Engine.IO handshake sid=%s interval=%.1fs timeout=%.1fs",
+                    self.dev_id,
+                    handshake.sid,
+                    handshake.ping_interval,
+                    handshake.ping_timeout,
+                )
                 self._engineio_sid = handshake.sid
                 self._engineio_ping_interval = max(5.0, handshake.ping_interval)
                 self._engineio_ping_timeout = max(5.0, handshake.ping_timeout)
                 await self._engineio_connect(handshake.sid)
+                _LOGGER.debug("WS %s: Engine.IO websocket established", self.dev_id)
                 self._connected_since = time.time()
                 self._healthy_since = None
                 self._update_status("connected")
@@ -753,6 +779,7 @@ class WebSocketClient:
             compress=0,
             protocols=("websocket",),
         )
+        _LOGGER.debug("WS %s: upgraded Engine.IO session sid=%s", self.dev_id, sid)
         await self._engineio_send("40")
 
     async def _engineio_ping_loop(self) -> None:
@@ -867,6 +894,27 @@ class WebSocketClient:
         if nodes is None:
             _LOGGER.debug("WS %s: %s without nodes", self.dev_id, event)
             return
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            changed = self._collect_update_addresses(nodes)
+            if merge:
+                if changed:
+                    _LOGGER.debug(
+                        "WS %s: update event for %s",
+                        self.dev_id,
+                        ", ".join(
+                            f"{node_type}/{addr}" for node_type, addr in changed
+                        ),
+                    )
+                else:
+                    _LOGGER.debug(
+                        "WS %s: update event without address changes", self.dev_id
+                    )
+            else:
+                _LOGGER.debug(
+                    "WS %s: dev_data snapshot contains %d node groups",
+                    self.dev_id,
+                    len(nodes),
+                )
         if merge and self._nodes_raw:
             self._merge_nodes(self._nodes_raw, nodes)
         else:
@@ -883,6 +931,42 @@ class WebSocketClient:
         if isinstance(nodes, dict):
             return nodes
         return None
+
+    @staticmethod
+    def _collect_update_addresses(nodes: Mapping[str, Any]) -> list[tuple[str, str]]:
+        """Return a sorted list of ``(node_type, addr)`` pairs in ``nodes``."""
+
+        found: set[tuple[str, str]] = set()
+        for node_type, payload in nodes.items():
+            if not isinstance(node_type, str) or not isinstance(payload, Mapping):
+                continue
+            for section in payload.values():
+                if not isinstance(section, Mapping):
+                    continue
+                for addr, value in section.items():
+                    if isinstance(addr, str) and value is not None:
+                        found.add((node_type, addr))
+        return sorted(found)
+
+    def _log_legacy_update(
+        self,
+        *,
+        updated_nodes: bool,
+        updated_addrs: Iterable[tuple[str, str]],
+        sample_addrs: Iterable[tuple[str, str]],
+    ) -> None:
+        """Emit debug logging for the legacy websocket update batch."""
+
+        if not _LOGGER.isEnabledFor(logging.DEBUG):
+            return
+        addr_pairs = {f"{node_type}/{addr}" for node_type, addr in updated_addrs}
+        addr_pairs.update(f"{node_type}/{addr}" for node_type, addr in sample_addrs)
+        if addr_pairs:
+            _LOGGER.debug(
+                "WS %s: legacy update for %s", self.dev_id, ", ".join(sorted(addr_pairs))
+            )
+        elif updated_nodes:
+            _LOGGER.debug("WS %s: legacy nodes refresh", self.dev_id)
 
     def _dispatch_nodes(self, payload: dict[str, Any]) -> dict[str, list[str]]:
         """Publish node updates and return the address map by node type.
