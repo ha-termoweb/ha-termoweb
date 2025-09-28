@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 
 import pytest
 
+import custom_components.termoweb.nodes as nodes_module
 from custom_components.termoweb.nodes import (
     AccumulatorNode,
     HeaterNode,
@@ -193,3 +195,23 @@ def test_node_init_uses_normalization_helpers() -> None:
     )
     assert node.addr == normalize_node_addr(" 42 ")
     assert node.name == "Normalised"
+
+
+def test_extract_heater_addrs_ignores_blank_addresses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload: dict[str, object] = {"nodes": []}
+
+    fake_nodes = [
+        SimpleNamespace(type="htr", addr="A"),
+        SimpleNamespace(type="htr", addr="  "),
+        SimpleNamespace(type="acm", addr="B"),
+    ]
+
+    def fake_build(raw: object) -> list[SimpleNamespace]:
+        assert raw is payload
+        return list(fake_nodes)
+
+    monkeypatch.setattr(nodes_module, "build_node_inventory", fake_build)
+
+    assert nodes_module.extract_heater_addrs(payload) == ["A", "B"]
