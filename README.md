@@ -1,6 +1,6 @@
 # TermoWeb heaters for Home Assistant
 
-Control your **TermoWeb** electric heaters in **Home Assistant** — from the HA app, automations, scenes, and voice assistants.
+Control your **TermoWeb** or **Ducaheat** electric heaters in **Home Assistant** — from the HA app, automations, scenes, and voice assistants.
 
 [![Open in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ha-termoweb&repository=ha-termoweb&category=integration)
 [![Open your Home Assistant instance and start setting up the integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=termoweb)
@@ -11,21 +11,28 @@ Control your **TermoWeb** electric heaters in **Home Assistant** — from the HA
 
 ## Who is this for?
 
-For someone who runs Home Assistant and already uses the **TermoWeb** mobile app or signs in at **control.termoweb.net** (or **control2.termoweb.net**) to manage their electric heaters. They want to see and control those heaters in Home Assistant, use automations (e.g., bedtime setback), and enable voice control. The manufacturer’s app doesn’t integrate with HA — this add-on provides the missing link.
+For someone who runs Home Assistant and already uses the **TermoWeb**, **Tevolve** or **Ducaheat** mobile app to manage their electric heaters. They want to see and control those heaters in Home Assistant, use automations, and enable voice control. The manufacturer’s app doesn’t integrate with HA — this add-on provides the missing link.
 
 ---
 
-## Brands commonly using the TermoWeb app
+## Brands using the TermoWeb app
 
 These product lines are documented to work with the **TermoWeb** portal/app:
 
+- **ATC (UK/Ireland)**: **Sun Ray Wifi** radiators with Wifi gateway. (**verified and fully working**)
 - **S&P — Soler & Palau**: “**TermoWeb**” kits and **EMI-TECH TermoWeb** radiators.
 - **Ecotermi / Linea Plus**: **Serie TermoWeb** radiators.
 - **EHC — Electric Heating Company**: **eco SAVE** Smart Gateway kits that register on the TermoWeb portal.
-- **ATC (UK/Ireland)**: **Sun Ray Wifi** radiators with Wifi gateway.
-
 
 > If a brand isn’t listed but the user signs in at **control.termoweb.net** (or **control2.termoweb.net**) with an app called **TermoWeb**, this integration should work.
+
+## Ducasa with Ducaheat app.
+
+Support for Ducasa branded heaters (with the Ducaheat app), accumulators and other devices is currently in testing (See Issue #1), because Ducasa use a different backend with a more modern and slightly different API. We expect to have a working prototype in early October 2025 and will be working towards full implementation before the end of the year. 
+
+## Tevolve app
+
+We do not yet have integration with heaters using the Tevolve-app, but it looks like the protocol is very similar if not identical to the TermoWeb and Ducaheat apps. If you have a heater that uses the Tevolve mobile app for control, leave an issue so we can test it. 
 
 ---
 
@@ -46,6 +53,12 @@ These product lines are documented to work with the **TermoWeb** portal/app:
 - A working TermoWeb setup (gateway connected to the router, heaters paired).
 - The **TermoWeb account email & password** (the same used in the mobile app / web).
 - Home Assistant (Core, OS, or Container) with internet access.
+
+---
+
+## The bad news
+
+- This integration is **Internet dependent**, as all interaction with heaters is mediated by the cloud backend. This is not ideal, as part of the HA ethos is local data and control. Unfortunately, we cannot connect directly to the Wifi gateways that are in your home, as they are proprietary and a "black box".
 
 ---
 

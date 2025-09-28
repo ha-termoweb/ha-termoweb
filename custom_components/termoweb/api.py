@@ -13,11 +13,12 @@ from .const import (
     API_BASE,
     BASIC_AUTH_B64,
     DEVS_PATH,
-    HTR_SAMPLES_PATH_FMT,
+    NODE_SAMPLES_PATH_FMT,
     NODES_PATH_FMT,
     TOKEN_PATH,
     USER_AGENT,
 )
+from .nodes import Node, NodeDescriptor, normalize_node_addr, normalize_node_type
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -25,11 +26,11 @@ _LOGGER = logging.getLogger(__name__)
 API_LOG_PREVIEW = False
 
 
-class TermoWebAuthError(Exception):
+class BackendAuthError(Exception):
     """Authentication with TermoWeb failed."""
 
 
-class TermoWebRateLimitError(Exception):
+class BackendRateLimitError(Exception):
     """Server rate-limited the client (HTTP 429)."""
 
 
@@ -45,7 +46,7 @@ def _redact_bearer(text: str | None) -> str:
     )
 
 
-class TermoWebClient:
+class RESTClient:
     """Thin async client for the TermoWeb cloud (HA-safe)."""
 
     def __init__(
@@ -57,6 +58,7 @@ class TermoWebClient:
         api_base: str = API_BASE,
         basic_auth_b64: str = BASIC_AUTH_B64,
     ) -> None:
+        """Initialise the REST client with authentication context."""
         self._session = session
         self._username = username
         self._password = password
@@ -142,9 +144,9 @@ class TermoWebClient:
                             token = await self._ensure_token()
                             headers["Authorization"] = f"Bearer {token}"
                             continue
-                        raise TermoWebAuthError("Unauthorized")
+                        raise BackendAuthError("Unauthorized")
                     if resp.status == 429:
-                        raise TermoWebRateLimitError("Rate limited")
+                        raise BackendRateLimitError("Rate limited")
                     if resp.status in ignore_statuses:
                         return None
                     if resp.status >= 400:
@@ -166,7 +168,7 @@ class TermoWebClient:
                             return body_text
                     return body_text
 
-            except (TermoWebAuthError, TermoWebRateLimitError):
+            except (BackendAuthError, BackendRateLimitError):
                 raise
             except aiohttp.ClientResponseError as e:
                 if e.status not in ignore_statuses:
@@ -187,7 +189,7 @@ class TermoWebClient:
                     _redact_bearer(str(e)),
                 )
                 raise
-        raise TermoWebAuthError("Unauthorized")
+        raise BackendAuthError("Unauthorized")
 
     async def _ensure_token(self) -> str:
         """Ensure a bearer token is present; fetch if missing."""
@@ -226,11 +228,11 @@ class TermoWebClient:
                 _LOGGER.debug("Token resp status=%s", resp.status)
 
                 if resp.status in (400, 401):
-                    raise TermoWebAuthError(
+                    raise BackendAuthError(
                         f"Invalid credentials or client auth failed (status {resp.status})"
                     )
                 if resp.status == 429:
-                    raise TermoWebRateLimitError("Rate limited on token endpoint")
+                    raise BackendRateLimitError("Rate limited on token endpoint")
                 if resp.status >= 400:
                     text = await resp.text()
                     raise aiohttp.ClientResponseError(
@@ -245,7 +247,7 @@ class TermoWebClient:
                 token = js.get("access_token")
                 if not token:
                     _LOGGER.error("No access_token in response JSON")
-                    raise TermoWebAuthError("No access_token in response")
+                    raise BackendAuthError("No access_token in response")
                 self._access_token = token
                 self._token_obtained_at = time.time()
                 expires_in = js.get("expires_in")
@@ -256,6 +258,7 @@ class TermoWebClient:
                 return token
 
     async def _authed_headers(self) -> dict[str, str]:
+        """Return HTTP headers including a valid bearer token."""
         token = await self._ensure_token()
         return {
             "Authorization": f"Bearer {token}",
@@ -283,26 +286,118 @@ class TermoWebClient:
         )
         return []
 
-    async def device_connected(self, dev_id: str) -> bool | None:
-        """Deprecated: connected endpoint often 404s; return None."""
-        return None
-
     async def get_nodes(self, dev_id: str) -> Any:
         """Return raw nodes payload for a device (shape varies by firmware)."""
         headers = await self._authed_headers()
         path = NODES_PATH_FMT.format(dev_id=dev_id)
         return await self._request("GET", path, headers=headers)
 
-    async def get_htr_settings(self, dev_id: str, addr: str | int) -> Any:
-        """Return heater settings/state for a node: GET /htr/{addr}/settings."""
-        headers = await self._authed_headers()
-        path = f"/api/v2/devs/{dev_id}/htr/{addr}/settings"
-        return await self._request("GET", path, headers=headers)
+    async def get_node_settings(self, dev_id: str, node: NodeDescriptor) -> Any:
+        """Return settings/state for a node."""
 
-    async def set_htr_settings(
+        node_type, addr = self._resolve_node_descriptor(node)
+        headers = await self._authed_headers()
+        path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}/settings"
+        data = await self._request("GET", path, headers=headers)
+        self._log_non_htr_payload(
+            node_type=node_type,
+            dev_id=dev_id,
+            addr=addr,
+            stage="GET settings",
+            payload=data,
+        )
+        return data
+
+    def _ensure_temperature(self, value: Any) -> str:
+        """Normalise a numeric temperature to a string with one decimal."""
+
+        try:
+            return f"{float(value):.1f}"
+        except (TypeError, ValueError) as err:
+            raise ValueError(f"Invalid temperature value: {value!r}") from err
+
+    def _ensure_prog(self, prog: list[int]) -> list[int]:
+        """Validate and normalise a weekly program list."""
+
+        if not isinstance(prog, list) or len(prog) != 168:
+            raise ValueError("prog must be a list of 168 integers (0, 1, or 2)")
+        normalised: list[int] = []
+        for value in prog:
+            try:
+                ivalue = int(value)
+            except (TypeError, ValueError) as err:
+                raise ValueError(f"prog contains non-integer value: {value!r}") from err
+            if ivalue not in (0, 1, 2):
+                raise ValueError(f"prog values must be 0, 1, or 2; got {ivalue}")
+            normalised.append(ivalue)
+        return normalised
+
+    def _ensure_ptemp(self, ptemp: list[float]) -> list[str]:
+        """Validate preset temperatures and return formatted strings."""
+
+        if not isinstance(ptemp, list) or len(ptemp) != 3:
+            raise ValueError(
+                "ptemp must be a list of three numeric values [cold, night, day]"
+            )
+        formatted: list[str] = []
+        for value in ptemp:
+            try:
+                formatted.append(self._ensure_temperature(value))
+            except ValueError as err:
+                raise ValueError(f"ptemp contains non-numeric value: {value}") from err
+        return formatted
+
+    def _extract_samples(
+        self, data: Any, *, timestamp_divisor: float = 1.0
+    ) -> list[dict[str, str | int]]:
+        """Normalise heater samples payloads into {"t", "counter"} lists."""
+
+        items: list[Any] | None = None
+        if isinstance(data, dict) and isinstance(data.get("samples"), list):
+            items = data["samples"]
+        elif isinstance(data, list):
+            items = data
+
+        if items is None:
+            _LOGGER.debug(
+                "Unexpected htr samples payload (%s); returning empty list",
+                type(data).__name__,
+            )
+            return []
+
+        samples: list[dict[str, str | int]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                _LOGGER.debug("Unexpected htr sample item: %r", item)
+                continue
+            timestamp = item.get("t")
+            if timestamp is None:
+                timestamp = item.get("timestamp")
+            if not isinstance(timestamp, (int, float)):
+                _LOGGER.debug("Unexpected htr sample shape: %s", item)
+                _LOGGER.debug("Unexpected htr sample timestamp: %r", timestamp)
+                continue
+            counter = item.get("counter")
+            if counter is None:
+                counter = item.get("value")
+            if counter is None:
+                counter = item.get("energy")
+            if counter is None:
+                _LOGGER.debug("Unexpected htr sample shape: %s", item)
+                _LOGGER.debug("Unexpected htr sample counter: %r", item)
+                continue
+            samples.append(
+                {
+                    "t": int(float(timestamp) / timestamp_divisor),
+                    "counter": str(counter),
+                }
+            )
+        return samples
+
+    async def set_node_settings(
         self,
         dev_id: str,
-        addr: str | int,
+        node: NodeDescriptor,
         *,
         mode: str | None = None,  # "auto" | "manual" | "off"
         stemp: float | None = None,  # target setpoint (in current units)
@@ -332,6 +427,8 @@ class TermoWebClient:
         overwriting unrelated settings on the device.
         """
 
+        node_type, addr = self._resolve_node_descriptor(node)
+
         # Validate units
         unit_str: str = units.upper()
         if unit_str not in {"C", "F"}:
@@ -350,72 +447,128 @@ class TermoWebClient:
         # Manual setpoint – format as string with one decimal
         if stemp is not None:
             try:
-                payload["stemp"] = f"{float(stemp):.1f}"
-            except Exception:
-                raise ValueError(f"Invalid stemp value: {stemp}")
+                payload["stemp"] = self._ensure_temperature(stemp)
+            except ValueError as err:
+                raise ValueError(f"Invalid stemp value: {stemp}") from err
 
         # Weekly program – validate length and values
         if prog is not None:
-            if not isinstance(prog, list) or len(prog) != 168:
-                raise ValueError("prog must be a list of 168 integers (0, 1, or 2)")
-            normalized: list[int] = []
-            for v in prog:
-                try:
-                    iv = int(v)
-                except Exception:
-                    raise ValueError(f"prog contains non-integer value: {v}")
-                if iv not in (0, 1, 2):
-                    raise ValueError(f"prog values must be 0, 1, or 2; got {iv}")
-                normalized.append(iv)
-            payload["prog"] = normalized
+            payload["prog"] = self._ensure_prog(prog)
 
         # Preset temperatures – validate length and convert to strings
         if ptemp is not None:
-            if not isinstance(ptemp, list) or len(ptemp) != 3:
-                raise ValueError(
-                    "ptemp must be a list of three numeric values [cold, night, day]"
-                )
-            formatted: list[str] = []
-            for v in ptemp:
-                try:
-                    formatted.append(f"{float(v):.1f}")
-                except Exception:
-                    raise ValueError(f"ptemp contains non-numeric value: {v}")
-            payload["ptemp"] = formatted
+            payload["ptemp"] = self._ensure_ptemp(ptemp)
 
         headers = await self._authed_headers()
-        path = f"/api/v2/devs/{dev_id}/htr/{addr}/settings"
-        return await self._request("POST", path, headers=headers, json=payload)
+        path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}/settings"
+        self._log_non_htr_payload(
+            node_type=node_type,
+            dev_id=dev_id,
+            addr=addr,
+            stage="POST settings",  # request payload
+            payload=payload,
+        )
+        response = await self._request("POST", path, headers=headers, json=payload)
+        self._log_non_htr_payload(
+            node_type=node_type,
+            dev_id=dev_id,
+            addr=addr,
+            stage="POST settings response",
+            payload=response,
+        )
+        return response
 
-    async def get_htr_samples(
+    async def get_node_samples(
         self,
         dev_id: str,
-        addr: str | int,
+        node: NodeDescriptor,
         start: float,
         end: float,
     ) -> list[dict[str, str | int]]:
         """Return heater samples as list of {"t", "counter"} dicts."""
+        node_type, addr = self._resolve_node_descriptor(node)
         headers = await self._authed_headers()
-        path = HTR_SAMPLES_PATH_FMT.format(dev_id=dev_id, addr=addr)
+        path = NODE_SAMPLES_PATH_FMT.format(
+            dev_id=dev_id, node_type=node_type, addr=addr
+        )
         params = {"start": int(start), "end": int(end)}
         data = await self._request("GET", path, headers=headers, params=params)
+        self._log_non_htr_payload(
+            node_type=node_type,
+            dev_id=dev_id,
+            addr=addr,
+            stage="GET samples",
+            payload=data,
+        )
+        return self._extract_samples(data)
 
-        if isinstance(data, dict) and isinstance(data.get("samples"), list):
-            samples: list[dict[str, str | int]] = []
-            for item in data["samples"]:
-                if not isinstance(item, dict):
-                    _LOGGER.debug("Unexpected htr sample item: %r", item)
-                    continue
-                t = item.get("t")
-                counter = item.get("counter")
-                if isinstance(t, (int, float)) and counter is not None:
-                    samples.append({"t": int(t), "counter": str(counter)})
-                else:
-                    _LOGGER.debug("Unexpected htr sample shape: %s", item)
-            return samples
+    async def set_htr_settings(
+        self,
+        dev_id: str,
+        addr: str | int,
+        *,
+        mode: str | None = None,
+        stemp: float | None = None,
+        prog: list[int] | None = None,
+        ptemp: list[float] | None = None,
+        units: str = "C",
+    ) -> Any:
+        """Update heater settings for the specified node."""
+
+        return await self.set_node_settings(
+            dev_id,
+            ("htr", addr),
+            mode=mode,
+            stemp=stemp,
+            prog=prog,
+            ptemp=ptemp,
+            units=units,
+        )
+
+    def _resolve_node_descriptor(self, node: NodeDescriptor) -> tuple[str, str]:
+        """Return ``(node_type, addr)`` for the provided descriptor."""
+
+        if isinstance(node, Node):
+            node_type = node.type
+            addr = node.addr
+        else:
+            if not isinstance(node, tuple) or len(node) != 2:
+                msg = f"Unsupported node descriptor: {node!r}"
+                raise ValueError(msg)
+            node_type, addr = node
+
+        node_type_str = normalize_node_type(node_type)
+        if not node_type_str:
+            msg = f"Invalid node type extracted from descriptor: {node!r}"
+            raise ValueError(msg)
+
+        addr_str = normalize_node_addr(addr)
+        if not addr_str:
+            msg = f"Invalid node address extracted from descriptor: {node!r}"
+            raise ValueError(msg)
+
+        return node_type_str, addr_str
+
+    def _log_non_htr_payload(
+        self,
+        *,
+        node_type: str,
+        dev_id: str,
+        addr: str,
+        stage: str,
+        payload: Any,
+    ) -> None:
+        """Log payloads for unsupported node types at DEBUG level."""
+
+        if node_type == "htr":
+            return
 
         _LOGGER.debug(
-            "Unexpected htr samples payload (%s); returning empty list",
-            type(data).__name__,
+            "%s node %s/%s (%s) payload: %s",
+            stage,
+            dev_id,
+            addr,
+            node_type,
+            _redact_bearer(repr(payload)),
         )
-        return []
+

@@ -51,7 +51,8 @@ def test_get_version_returns_unknown_when_missing(
         return DummyIntegration("")
 
     monkeypatch.setattr(
-        config_flow, "async_get_integration", fake_get_integration
+        "custom_components.termoweb.utils.async_get_integration",
+        fake_get_integration,
     )
 
     result = asyncio.run(config_flow._get_version(hass))
@@ -59,28 +60,24 @@ def test_get_version_returns_unknown_when_missing(
     assert result == "unknown"
 
 
-def test_validate_login_uses_brand_settings(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_validate_login_uses_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     hass = HomeAssistant()
-    calls: list[tuple[Any, str, str, str, str]] = []
+    created: list[tuple[Any, str, str, str]] = []
+    listed: list[Any] = []
+    dummy_client = object()
 
-    class DummyClient:
-        def __init__(
-            self,
-            session: object,
-            username: str,
-            password: str,
-            *,
-            api_base: str,
-            basic_auth_b64: str,
-        ) -> None:
-            calls.append((session, username, password, api_base, basic_auth_b64))
+    def fake_create(
+        hass_in: HomeAssistant, username: str, password: str, brand: str
+    ) -> Any:
+        created.append((hass_in, username, password, brand))
+        return dummy_client
 
-        async def list_devices(self) -> None:
-            calls.append(("listed",))
+    async def fake_list(client: Any) -> list[Any]:
+        listed.append(client)
+        return []
 
-    monkeypatch.setattr(config_flow, "TermoWebClient", DummyClient)
+    monkeypatch.setattr(config_flow, "create_rest_client", fake_create)
+    monkeypatch.setattr(config_flow, "async_list_devices", fake_list)
 
     asyncio.run(
         config_flow._validate_login(
@@ -88,13 +85,44 @@ def test_validate_login_uses_brand_settings(
         )
     )
 
-    assert calls
-    _session, username, password, api_base, basic_auth = calls[0]
-    assert username == "user@example.com"
-    assert password == "pw"
-    assert api_base == config_flow.get_brand_api_base(config_flow.BRAND_DUCAHEAT)
-    assert basic_auth == config_flow.get_brand_basic_auth(config_flow.BRAND_DUCAHEAT)
-    assert calls[-1] == ("listed",)
+    assert created == [
+        (hass, "user@example.com", "pw", config_flow.BRAND_DUCAHEAT)
+    ]
+    assert listed == [dummy_client]
+
+
+@pytest.mark.parametrize(
+    "exc_factory",
+    [
+        lambda: config_flow.BackendAuthError(),
+        lambda: config_flow.BackendRateLimitError(),
+        lambda: config_flow.ClientError(),
+    ],
+)
+def test_validate_login_propagates_exceptions(
+    monkeypatch: pytest.MonkeyPatch, exc_factory: Any
+) -> None:
+    hass = HomeAssistant()
+    dummy_client = object()
+    monkeypatch.setattr(
+        config_flow,
+        "create_rest_client",
+        lambda _hass, _user, _pw, _brand: dummy_client,
+    )
+
+    exc = exc_factory()
+
+    async def fake_list(_client: Any) -> list[Any]:
+        raise exc
+
+    monkeypatch.setattr(config_flow, "async_list_devices", fake_list)
+
+    with pytest.raises(type(exc)):
+        asyncio.run(
+            config_flow._validate_login(
+                hass, "user", "pw", config_flow.DEFAULT_BRAND
+            )
+        )
 
 
 def test_async_step_reconfigure_missing_entry_aborts() -> None:
@@ -114,7 +142,7 @@ def test_async_step_user_initial_form(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_version(_hass: HomeAssistant) -> str:
         return "1.2.3"
 
-    monkeypatch.setattr(config_flow, "_get_version", fake_version)
+    monkeypatch.setattr(config_flow, "async_get_integration_version", fake_version)
 
     result = asyncio.run(flow.async_step_user())
 
@@ -143,7 +171,7 @@ def test_async_step_user_success(monkeypatch: pytest.MonkeyPatch) -> None:
     ) -> None:
         calls.append((username, password, brand))
 
-    monkeypatch.setattr(config_flow, "_get_version", fake_version)
+    monkeypatch.setattr(config_flow, "async_get_integration_version", fake_version)
     monkeypatch.setattr(config_flow, "_validate_login", fake_validate)
 
     result = asyncio.run(
@@ -171,8 +199,8 @@ def test_async_step_user_success(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.parametrize(
     ("raised_factory", "expected"),
     [
-        (lambda: config_flow.TermoWebAuthError(), "invalid_auth"),
-        (lambda: config_flow.TermoWebRateLimitError(), "rate_limited"),
+        (lambda: config_flow.BackendAuthError(), "invalid_auth"),
+        (lambda: config_flow.BackendRateLimitError(), "rate_limited"),
         (lambda: config_flow.ClientError(), "cannot_connect"),
         (lambda: RuntimeError("boom"), "unknown"),
     ],
@@ -191,7 +219,7 @@ def test_async_step_user_errors(
     ) -> None:
         raise raised_factory()
 
-    monkeypatch.setattr(config_flow, "_get_version", fake_version)
+    monkeypatch.setattr(config_flow, "async_get_integration_version", fake_version)
     monkeypatch.setattr(config_flow, "_validate_login", fake_validate)
 
     user_input = {
@@ -233,7 +261,7 @@ def test_async_step_reconfigure_initial_form(
     async def fake_version(_hass: HomeAssistant) -> str:
         return "3.3.3"
 
-    monkeypatch.setattr(config_flow, "_get_version", fake_version)
+    monkeypatch.setattr(config_flow, "async_get_integration_version", fake_version)
 
     result = asyncio.run(flow.async_step_reconfigure())
 
@@ -246,6 +274,36 @@ def test_async_step_reconfigure_initial_form(
     assert _schema_default(schema, "username") == "existing"
     assert _schema_default(schema, "poll_interval") == 180
     assert _schema_default(schema, "brand") == config_flow.BRAND_DUCAHEAT
+
+
+def test_async_step_reconfigure_invalid_brand_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hass = HomeAssistant()
+    entry = ConfigEntry(
+        "entry-id",
+        data={
+            "username": "existing",
+            "poll_interval": 150,
+            config_flow.CONF_BRAND: "legacy",
+        },
+        options={"poll_interval": 150},
+    )
+    hass.config_entries.add_entry(entry)
+
+    flow = _create_flow(hass)
+    flow.context = {"entry_id": entry.entry_id}
+
+    async def fake_version(_hass: HomeAssistant) -> str:
+        return "7.7.7"
+
+    monkeypatch.setattr(config_flow, "_get_version", fake_version)
+
+    result = asyncio.run(flow.async_step_reconfigure())
+
+    assert result["type"] == "form"
+    schema = result["data_schema"]
+    assert _schema_default(schema, "brand") == config_flow.DEFAULT_BRAND
 
 
 def test_async_step_reconfigure_success(
@@ -278,7 +336,7 @@ def test_async_step_reconfigure_success(
         assert password == "new-pass"
         assert brand == config_flow.BRAND_DUCAHEAT
 
-    monkeypatch.setattr(config_flow, "_get_version", fake_version)
+    monkeypatch.setattr(config_flow, "async_get_integration_version", fake_version)
     monkeypatch.setattr(config_flow, "_validate_login", fake_validate)
 
     result = asyncio.run(
@@ -314,8 +372,8 @@ def test_async_step_reconfigure_success(
 @pytest.mark.parametrize(
     ("raised_factory", "expected"),
     [
-        (lambda: config_flow.TermoWebAuthError(), "invalid_auth"),
-        (lambda: config_flow.TermoWebRateLimitError(), "rate_limited"),
+        (lambda: config_flow.BackendAuthError(), "invalid_auth"),
+        (lambda: config_flow.BackendRateLimitError(), "rate_limited"),
         (lambda: config_flow.ClientError(), "cannot_connect"),
         (lambda: RuntimeError("fail"), "unknown"),
     ],
@@ -346,7 +404,7 @@ def test_async_step_reconfigure_errors(
     ) -> None:
         raise raised_factory()
 
-    monkeypatch.setattr(config_flow, "_get_version", fake_version)
+    monkeypatch.setattr(config_flow, "async_get_integration_version", fake_version)
     monkeypatch.setattr(config_flow, "_validate_login", fake_validate)
 
     user_input = {
@@ -384,7 +442,7 @@ def test_options_flow_init_and_submit(
     async def fake_version(_hass: HomeAssistant) -> str:
         return "6.6.6"
 
-    monkeypatch.setattr(config_flow, "_get_version", fake_version)
+    monkeypatch.setattr(config_flow, "async_get_integration_version", fake_version)
 
     initial = asyncio.run(options_flow.async_step_init())
     assert initial["type"] == "form"

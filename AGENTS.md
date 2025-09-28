@@ -30,18 +30,19 @@ The end user of this integration is a non-technical person who has a home automa
 
 ## Development Guidelines
 - Use Python version specified in pyproject.toml and type hints for all new code.
+- Add one-line docstring descriptions to every function.
 - For each commit or task, make the absolute MINIMAL SURGICAL changes and only directly related to the task at hand.
 - Don't Repeat Yourself (DRY) when coding.
-- Use best practices and design patterns.
 - Use defensive programming - anticipate errors, invalid user input, protocol failures, connection problems. Handle and report errors.
 - Log entry and exit of major functions or actions as INFO, log protocol calls and responses as DEBUG, log errors as ERROR. 
 - Lint and reformat with ruff before committing.
-- Run tests with `pytest` and make sure they pass before committing.
-- We aim for 100% test coverage. Every additional piece of code should have corresponding tests.
+- Run tests with `pytest --cov=custom_components.termoweb --cov-report=term-missing` and make sure they pass before committing, with 100% coverage.
+- pytest with coverage take no more than 30 seconds to complete for the entire codebase. If tests take longer, assume there is an async wait problem and interrupt. Do not wait longer than 30 seconds. 
 - All tests must be meaningful. No cheating, no softball easy-to-pass tests. Test actual edge cases, exception handling, incorrect inputs.
 - Focus testing on interfaces between components, and error handling.
 - New features must be documented.
 - Do not make changes to parts of the code that are unrelated to your current task.
+
 
 ## Pull Request Expectations
 - Keep every PR focused on a single feature or test with minimal code changes as needed.

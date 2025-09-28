@@ -3,21 +3,21 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
-import time
 from collections import deque
 from collections.abc import Coroutine
 import types
-from typing import Any, Deque, cast
+from typing import Any, Deque, Iterable, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from conftest import _install_stubs
+from conftest import FakeCoordinator, _install_stubs
 
 _install_stubs()
 
 from custom_components.termoweb import climate as climate_module
-from custom_components.termoweb.const import DOMAIN, signal_ws_data
+from custom_components.termoweb.const import BRAND_TERMOWEB, DOMAIN, signal_ws_data
+from custom_components.termoweb.nodes import HeaterNode, build_node_inventory
 from homeassistant.components.climate import HVACAction, HVACMode
 from homeassistant.const import ATTR_TEMPERATURE
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -26,7 +26,7 @@ from homeassistant.helpers.entity_platform import EntityPlatform
 from homeassistant.helpers import dispatcher as dispatcher_module
 from homeassistant.util import dt as dt_util
 
-TermoWebHeater = climate_module.TermoWebHeater
+HeaterClimateEntity = climate_module.HeaterClimateEntity
 async_setup_entry = climate_module.async_setup_entry
 
 
@@ -35,20 +35,85 @@ def _reset_environment() -> None:
     entity_platform_module._set_current_platform(EntityPlatform())
     dispatcher_module._dispatch_map = {}
     dt_util.NOW = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
+    FakeCoordinator.instances.clear()
+
+
+def _make_coordinator(
+    hass: HomeAssistant,
+    dev_id: str,
+    record: dict[str, Any],
+    *,
+    client: Any | None = None,
+    node_inventory: list[Any] | None = None,
+) -> FakeCoordinator:
+    return FakeCoordinator(
+        hass,
+        client=client,
+        dev_id=dev_id,
+        dev=record,
+        nodes=record.get("nodes", {}),
+        node_inventory=node_inventory,
+        data={dev_id: record},
+    )
 
 
 # -------------------- Helpers for tests --------------------
 
 
-class FakeCoordinator:
-    def __init__(self, hass: HomeAssistant, data: dict[str, Any]) -> None:
-        self.hass = hass
-        self.data = data
-        self.async_request_refresh: AsyncMock = AsyncMock()
-        self.async_refresh_heater: AsyncMock = AsyncMock()
+def test_termoweb_heater_is_heater_node() -> None:
+    _reset_environment()
+    hass = HomeAssistant()
+    dev_id = "dev"
+    coordinator_data = {dev_id: {"htr": {"settings": {}}, "nodes": {}}}
+    coordinator = _make_coordinator(hass, dev_id, coordinator_data[dev_id])
 
-    def async_add_listener(self, *_args: Any, **_kwargs: Any) -> None:
-        return None
+    heater = HeaterClimateEntity(
+        coordinator,
+        "entry",
+        "dev",
+        "1",
+        " Living Room ",
+    )
+
+    assert isinstance(heater, HeaterNode)
+    assert heater.type == "htr"
+    assert heater.addr == "1"
+    assert heater.name == "Living Room"
+
+
+def test_heater_climate_entity_normalizes_node_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _reset_environment()
+    hass = HomeAssistant()
+    dev_id = "dev-acm"
+    coordinator_data = {dev_id: {"htr": {"settings": {}}, "nodes": {}}}
+    coordinator = _make_coordinator(hass, dev_id, coordinator_data[dev_id])
+
+    calls: list[tuple[object, dict[str, Any]]] = []
+
+    original_normalize = climate_module.normalize_node_type
+
+    def _record_normalize(value, **kwargs):
+        calls.append((value, kwargs))
+        return original_normalize(value, **kwargs)
+
+    monkeypatch.setattr(climate_module, "normalize_node_type", _record_normalize)
+
+    heater = HeaterClimateEntity(
+        coordinator,
+        "entry",
+        dev_id,
+        "1",
+        "Heater",
+        node_type=" ACM ",
+    )
+
+    assert heater.type == "acm"
+    assert getattr(heater, "_node_type", "") == "acm"
+    assert heater._attr_unique_id == f"{DOMAIN}:{dev_id}:acm:{heater._addr}"
+    assert calls[0][0] in {"htr", None}
+    assert calls[1][0] == " ACM "
 
 
 def test_async_setup_entry_creates_entities() -> None:
@@ -57,18 +122,38 @@ def test_async_setup_entry_creates_entities() -> None:
         hass = HomeAssistant()
         entry_id = "entry"
         dev_id = "dev1"
-        addrs = ["A1", "B2"]
         nodes = {
             "nodes": [
                 {"type": "htr", "addr": "A1", "name": " Living Room "},
                 {"type": "HTR", "addr": "B2"},
+                {"type": "acm", "addr": "C3", "name": " Basement Accumulator "},
                 {"type": "other", "addr": "X"},
             ]
         }
         coordinator_data = {
-            dev_id: {"nodes": nodes, "htr": {"settings": {}}, "version": "3.1.4"}
+            dev_id: {
+                "nodes": nodes,
+                "htr": {"settings": {"A1": {}, "B2": {}}, "addrs": ["A1", "B2"]},
+                "nodes_by_type": {
+                    "htr": {
+                        "settings": {"A1": {}, "B2": {}},
+                        "addrs": ["A1", "B2"],
+                    },
+                    "acm": {
+                        "settings": {"C3": {"units": "C"}},
+                        "addrs": ["C3"],
+                    },
+                },
+                "version": "3.1.4",
+            }
         }
-        coordinator = FakeCoordinator(hass, coordinator_data)
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            coordinator_data[dev_id],
+            client=AsyncMock(),
+            node_inventory=coordinator_data[dev_id].get("node_inventory"),
+        )
 
         hass.data = {
             DOMAIN: {
@@ -77,15 +162,16 @@ def test_async_setup_entry_creates_entities() -> None:
                     "dev_id": dev_id,
                     "client": AsyncMock(),
                     "nodes": nodes,
-                    "htr_addrs": addrs,
+                    "node_inventory": build_node_inventory(nodes),
                     "version": "3.1.4",
+                    "brand": BRAND_TERMOWEB,
                 }
             }
         }
 
-        added: list[TermoWebHeater] = []
+        added: list[HeaterClimateEntity] = []
 
-        def _async_add_entities(entities: list[TermoWebHeater]) -> None:
+        def _async_add_entities(entities: list[HeaterClimateEntity]) -> None:
             added.extend(entities)
 
         platform = EntityPlatform()
@@ -94,11 +180,18 @@ def test_async_setup_entry_creates_entities() -> None:
         entry = types.SimpleNamespace(entry_id=entry_id)
         await async_setup_entry(hass, entry, _async_add_entities)
 
-        assert len(added) == 2
-        assert all(isinstance(entity, TermoWebHeater) for entity in added)
+        assert len(added) == 3
+        entities_by_addr = {entity._addr: entity for entity in added}
+        assert set(entities_by_addr) == {"A1", "B2", "C3"}
+        assert isinstance(entities_by_addr["A1"], HeaterClimateEntity)
+        assert isinstance(entities_by_addr["B2"], HeaterClimateEntity)
+        acc = entities_by_addr["C3"]
+        assert isinstance(acc, climate_module.AccumulatorClimateEntity)
+        assert acc.available
         names = {entity._addr: entity._attr_name for entity in added}
         assert names["A1"] == "Living Room"
         assert names["B2"] == "Heater B2"
+        assert names["C3"] == "Basement Accumulator"
 
         registered = [name for name, _, _ in platform.registered]
         assert registered == ["set_schedule", "set_preset_temperatures"]
@@ -107,7 +200,10 @@ def test_async_setup_entry_creates_entities() -> None:
             info = entity.device_info
             assert info["identifiers"] == {(DOMAIN, dev_id, entity._addr)}
             assert info["manufacturer"] == "TermoWeb"
-            assert info["model"] == "Heater"
+            expected_model = "Accumulator"
+            if getattr(entity, "_node_type", "htr") != "acm":
+                expected_model = "Heater"
+            assert info["model"] == expected_model
             assert info["via_device"] == (DOMAIN, dev_id)
 
         schedule_name, _, schedule_handler = platform.registered[0]
@@ -116,7 +212,7 @@ def test_async_setup_entry_creates_entities() -> None:
         assert preset_name == "set_preset_temperatures"
 
         schedule_prog = [0] * 168
-        first = added[0]
+        first = entities_by_addr["A1"]
         first.async_set_schedule = AsyncMock()
         await schedule_handler(first, ServiceCall({"prog": schedule_prog}))
         first.async_set_schedule.assert_awaited_once_with(schedule_prog)
@@ -127,7 +223,7 @@ def test_async_setup_entry_creates_entities() -> None:
             ptemp=[18.0, 19.0, 20.0]
         )
 
-        second = added[1]
+        second = entities_by_addr["B2"]
         second.async_set_preset_temperatures = AsyncMock()
         await preset_handler(
             second,
@@ -136,6 +232,307 @@ def test_async_setup_entry_creates_entities() -> None:
         second.async_set_preset_temperatures.assert_awaited_once_with(
             cold=15.0, night=18.0, day=20.0
         )
+
+    asyncio.run(_run())
+
+
+def test_async_setup_entry_default_names_and_invalid_nodes(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry_id = "entry-default"
+        dev_id = "dev-default"
+        raw_nodes = {
+            "nodes": [
+                {"type": "htr", "addr": "1"},
+                {"type": "acm", "addr": "2"},
+                {"type": "pmo", "addr": "P1"},
+            ]
+        }
+        inventory = build_node_inventory(raw_nodes)
+        inventory.append(types.SimpleNamespace(type="  ", addr="extra"))
+        inventory.append(types.SimpleNamespace(type="htr", addr=" "))
+
+        coordinator_data = {
+            dev_id: {
+                "nodes": {},
+                "htr": {"settings": {}},
+                "nodes_by_type": {},
+            }
+        }
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            coordinator_data[dev_id],
+            client=AsyncMock(),
+            node_inventory=inventory,
+        )
+
+        hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "coordinator": coordinator,
+                    "dev_id": dev_id,
+                    "client": AsyncMock(),
+                    "nodes": {},
+                    "node_inventory": inventory,
+                }
+            }
+        }
+
+        added: list[HeaterClimateEntity] = []
+
+        def _add_entities(entities: list[HeaterClimateEntity]) -> None:
+            added.extend(entities)
+
+        entity_platform_module._set_current_platform(EntityPlatform())
+
+        calls: list[tuple[str, dict[str, Any]]] = []
+        original_helper = climate_module.log_skipped_nodes
+
+        def _mock_helper(
+            platform_name: str,
+            nodes_by_type: dict[str, Any],
+            *,
+            logger: logging.Logger | None = None,
+            skipped_types: Iterable[str] = ("pmo", "thm"),
+        ) -> None:
+            calls.append((platform_name, nodes_by_type))
+            original_helper(
+                platform_name,
+                nodes_by_type,
+                logger=logger or climate_module._LOGGER,
+                skipped_types=skipped_types,
+            )
+
+        monkeypatch.setattr(climate_module, "log_skipped_nodes", _mock_helper)
+
+        entry = types.SimpleNamespace(entry_id=entry_id)
+        caplog.clear()
+        with caplog.at_level(logging.DEBUG, logger=climate_module._LOGGER.name):
+            await async_setup_entry(hass, entry, _add_entities)
+
+        names = sorted(entity._attr_name for entity in added)
+        assert names == ["Accumulator 2", "Heater 1"]
+        assert all(entity._addr in {"1", "2"} for entity in added)
+
+        assert calls and calls[0][0] == "climate"
+        assert "pmo" in calls[0][1]
+        messages = [record.getMessage() for record in caplog.records]
+        assert any(
+            "Skipping TermoWeb pmo nodes for climate platform: P1" in message
+            for message in messages
+        )
+
+    asyncio.run(_run())
+
+
+def test_async_setup_entry_skips_blank_addresses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry_id = "entry-skip"
+        dev_id = "dev-skip"
+        coordinator_data = {"nodes": {}, "htr": {"settings": {}}}
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            coordinator_data,
+            client=AsyncMock(),
+        )
+
+        hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "coordinator": coordinator,
+                    "dev_id": dev_id,
+                    "client": AsyncMock(),
+                }
+            }
+        }
+
+        blank_node = types.SimpleNamespace(addr="  ")
+        valid_node = types.SimpleNamespace(addr="7")
+
+        def fake_prepare(*args: Any, **kwargs: Any) -> tuple[Any, Any, Any, Any]:
+            return ([], {"htr": [blank_node, valid_node]}, {}, lambda *_: "Heater")
+
+        monkeypatch.setattr(
+            climate_module, "prepare_heater_platform_data", fake_prepare
+        )
+
+        added: list[HeaterClimateEntity] = []
+
+        def _add_entities(entities: list[HeaterClimateEntity]) -> None:
+            added.extend(entities)
+
+        entry = types.SimpleNamespace(entry_id=entry_id)
+        await async_setup_entry(hass, entry, _add_entities)
+
+        assert len(added) == 1
+        assert added[0]._attr_unique_id.endswith(":htr:7:climate")
+
+    asyncio.run(_run())
+
+
+def test_async_setup_entry_creates_accumulator_entity() -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry_id = "entry-acm"
+        dev_id = "dev-acm"
+        nodes = {"nodes": [{"type": "acm", "addr": "7", "name": "Store"}]}
+        settings = {
+            "mode": "manual",
+            "state": "idle",
+            "mtemp": "19.0",
+            "stemp": "21.0",
+            "ptemp": ["18.0", "19.0", "20.0"],
+            "prog": [0, 1, 2] * 56,
+            "units": "C",
+        }
+        coordinator_data = {
+            dev_id: {
+                "nodes": nodes,
+                "nodes_by_type": {
+                    "acm": {"addrs": ["7"], "settings": {"7": dict(settings)}}
+                },
+                "htr": {"settings": {}},
+            }
+        }
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            coordinator_data[dev_id],
+            client=AsyncMock(),
+            node_inventory=list(
+                coordinator_data[dev_id]["nodes_by_type"]["acm"]["settings"].keys()
+            ),
+        )
+
+        client = AsyncMock()
+        client.set_node_settings = AsyncMock()
+        client.set_htr_settings = AsyncMock()
+
+        hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "coordinator": coordinator,
+                    "dev_id": dev_id,
+                    "client": client,
+                    "nodes": nodes,
+                    "node_inventory": build_node_inventory(nodes),
+                }
+            }
+        }
+
+        added: list[climate_module.HeaterClimateEntity] = []
+
+        def _async_add_entities(
+            entities: list[climate_module.HeaterClimateEntity],
+        ) -> None:
+            added.extend(entities)
+
+        entry = types.SimpleNamespace(entry_id=entry_id)
+        await async_setup_entry(hass, entry, _async_add_entities)
+
+        assert len(added) == 1
+        acc = added[0]
+        assert isinstance(acc, climate_module.AccumulatorClimateEntity)
+        assert acc._attr_unique_id == f"{DOMAIN}:{dev_id}:acm:7:climate"
+        assert acc.available
+        assert acc.device_info["model"] == "Accumulator"
+
+        prog = [0, 1, 2] * 56
+        await acc.async_set_schedule(list(prog))
+        call = client.set_node_settings.await_args
+        assert call.args == (dev_id, ("acm", "7"))
+        assert call.kwargs["prog"] == list(prog)
+        assert call.kwargs["units"] == "C"
+        client.set_node_settings.reset_mock()
+
+        await acc.async_set_preset_temperatures(ptemp=[18.5, 19.5, 20.5])
+        call = client.set_node_settings.await_args
+        assert call.kwargs["ptemp"] == [18.5, 19.5, 20.5]
+        assert call.kwargs["units"] == "C"
+        assert client.set_htr_settings.await_count == 0
+
+    asyncio.run(_run())
+
+
+def test_async_write_settings_without_client_returns_false() -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        dev_id = "dev-missing-client"
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            {"htr": {"settings": {}}, "nodes": {}},
+        )
+        hass.data = {
+            DOMAIN: {
+                "entry": {
+                    "coordinator": coordinator,
+                    "dev_id": dev_id,
+                    "client": None,
+                }
+            }
+        }
+
+        heater = HeaterClimateEntity(coordinator, "entry", dev_id, "1", "Heater 1")
+        heater.hass = hass
+
+        success = await heater._async_write_settings(
+            log_context="test", mode="auto", stemp=20.0
+        )
+        assert success is False
+
+    asyncio.run(_run())
+
+
+def test_async_setup_entry_rebuilds_inventory_when_missing() -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry = types.SimpleNamespace(entry_id="entry-missing")
+        dev_id = "dev-missing"
+        nodes = {
+            "nodes": [
+                {"type": "htr", "addr": "11", "name": " First "},
+                {"type": "HTR", "addr": "22"},
+            ]
+        }
+
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            {"nodes": nodes, "htr": {"settings": {"11": {}, "22": {}}}},
+            client=AsyncMock(),
+        )
+
+        record: dict[str, Any] = {
+            "coordinator": coordinator,
+            "dev_id": dev_id,
+            "client": AsyncMock(),
+            "nodes": nodes,
+        }
+        hass.data = {DOMAIN: {entry.entry_id: record}}
+
+        added: list[HeaterClimateEntity] = []
+
+        def _async_add_entities(entities: list[HeaterClimateEntity]) -> None:
+            added.extend(entities)
+
+        await async_setup_entry(hass, entry, _async_add_entities)
+
+        assert len(added) == 2
+        stored_inventory = hass.data[DOMAIN][entry.entry_id]["node_inventory"]
+        assert [node.addr for node in stored_inventory] == ["11", "22"]
 
     asyncio.run(_run())
 
@@ -152,9 +549,11 @@ def test_refresh_fallback_skips_when_hass_inactive(
         entry_id = "entry"
         dev_id = "dev"
         addr = "A"
-        coordinator = FakeCoordinator(
+        coordinator = _make_coordinator(
             hass,
-            {dev_id: {"nodes": {"nodes": []}, "htr": {"settings": {addr: {}}}}},
+            dev_id,
+            {"nodes": {"nodes": []}, "htr": {"settings": {addr: {}}}},
+            client=AsyncMock(),
         )
 
         hass.data = {
@@ -169,7 +568,7 @@ def test_refresh_fallback_skips_when_hass_inactive(
             }
         }
 
-        heater = TermoWebHeater(coordinator, entry_id, dev_id, addr, "Heater")
+        heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
         await heater.async_added_to_hass()
 
         async def fast_sleep(_delay: float) -> None:
@@ -223,9 +622,11 @@ def test_heater_additional_cancelled_edges(
             "prog": list(base_prog),
             "units": "C",
         }
-        coordinator = FakeCoordinator(
+        coordinator = _make_coordinator(
             hass,
-            {dev_id: {"nodes": {"nodes": []}, "htr": {"settings": {addr: settings}}}},
+            dev_id,
+            {"nodes": {"nodes": []}, "htr": {"settings": {addr: settings}}},
+            client=AsyncMock(),
         )
         client = AsyncMock()
         client.set_htr_settings = AsyncMock()
@@ -242,7 +643,7 @@ def test_heater_additional_cancelled_edges(
             }
         }
 
-        heater = TermoWebHeater(coordinator, entry_id, dev_id, addr, "Heater")
+        heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
         await heater.async_added_to_hass()
 
         class SentinelCancelled(Exception):
@@ -302,9 +703,7 @@ def test_heater_additional_cancelled_edges(
         with pytest.raises(SentinelCancelled):
             await heater._write_after_debounce()
 
-        coordinator.async_refresh_heater = AsyncMock(
-            side_effect=SentinelCancelled()
-        )
+        coordinator.async_refresh_heater = AsyncMock(side_effect=SentinelCancelled())
         heater._refresh_fallback = None
         heater._schedule_refresh_fallback()
         assert heater._refresh_fallback is not None
@@ -339,7 +738,12 @@ def test_heater_properties_and_ws_update() -> None:
                 "version": "2.0.0",
             }
         }
-        coordinator = FakeCoordinator(hass, coordinator_data)
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            coordinator_data[dev_id],
+            client=AsyncMock(),
+        )
         hass.data = {
             DOMAIN: {
                 entry_id: {
@@ -353,7 +757,7 @@ def test_heater_properties_and_ws_update() -> None:
 
         dt_util.NOW = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
 
-        heater = TermoWebHeater(coordinator, entry_id, dev_id, addr, "Living")
+        heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Living")
         assert heater.hass is hass
 
         await heater.async_added_to_hass()
@@ -384,7 +788,7 @@ def test_heater_properties_and_ws_update() -> None:
         assert attrs["program_slot"] == "day"
         assert attrs["program_setpoint"] == pytest.approx(21.0)
 
-        assert heater._unsub_ws is not None
+        assert heater._ws_subscription.is_connected
         heater.schedule_update_ha_state = MagicMock()
         heater._handle_ws_message({"dev_id": dev_id, "addr": addr})
         heater.schedule_update_ha_state.assert_called_once()
@@ -468,12 +872,58 @@ def test_heater_properties_and_ws_update() -> None:
     asyncio.run(_run())
 
 
+def test_write_after_debounce_registers_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry_id = "entry"
+        dev_id = "dev"
+        addr = "1"
+        nodes = {"nodes": [{"type": "htr", "addr": addr}]}
+        record = {
+            "nodes": nodes,
+            "htr": {"settings": {addr: {}}, "addrs": [addr]},
+            "nodes_by_type": {
+                "htr": {"settings": {addr: {}}, "addrs": [addr]},
+            },
+        }
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            record,
+            client=AsyncMock(),
+        )
+        heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
+
+        async def fast_sleep(_delay: float) -> None:
+            return None
+
+        monkeypatch.setattr(climate_module.asyncio, "sleep", fast_sleep)
+
+        heater._pending_mode = HVACMode.HEAT
+        heater._pending_stemp = 21.5
+        heater._async_write_settings = AsyncMock(return_value=True)
+
+        await heater._write_after_debounce()
+
+        key = ("htr", addr)
+        assert key in coordinator.pending_settings
+        pending = coordinator.pending_settings[key]
+        assert pending["mode"] == "manual"
+        assert pending["stemp"] == pytest.approx(21.5)
+
+    asyncio.run(_run())
+
+
 def test_heater_write_paths_and_errors(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     async def _run() -> None:
         _reset_environment()
         from homeassistant.const import ATTR_TEMPERATURE
+
         hass = HomeAssistant()
         entry_id = "entry"
         dev_id = "dev1"
@@ -497,7 +947,12 @@ def test_heater_write_paths_and_errors(
             }
         }
 
-        coordinator = FakeCoordinator(hass, coordinator_data)
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            coordinator_data[dev_id],
+            client=AsyncMock(),
+        )
         client = AsyncMock()
         hass.data = {
             DOMAIN: {
@@ -513,7 +968,7 @@ def test_heater_write_paths_and_errors(
             }
         }
 
-        heater = TermoWebHeater(coordinator, entry_id, dev_id, addr, "Heater")
+        heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
         await heater.async_added_to_hass()
 
         fallback_waiters: Deque[asyncio.Future[None]] = deque()
@@ -570,7 +1025,7 @@ def test_heater_write_paths_and_errors(
             assert coordinator.async_refresh_heater.await_count == 0
             waiter.set_result(None)
             await task
-            coordinator.async_refresh_heater.assert_awaited_once_with(addr)
+            coordinator.async_refresh_heater.assert_awaited_once_with(("htr", addr))
             coordinator.async_refresh_heater.reset_mock()
             assert heater._refresh_fallback is None
 
@@ -644,14 +1099,14 @@ def test_heater_write_paths_and_errors(
         await heater.async_set_schedule(list(base_prog))
         assert client.set_htr_settings.await_count == 1
         assert settings_after["prog"] == prev_prog
-        assert "Optimistic prog update failed" in caplog.text
+        assert "Optimistic update failed" in caplog.text
         waiter = await _pop_waiter()
         task = heater._refresh_fallback
         assert task is not None
         coordinator.data = old_data
         waiter.set_result(None)
         await task
-        coordinator.async_refresh_heater.assert_awaited_once_with(addr)
+        coordinator.async_refresh_heater.assert_awaited_once_with(("htr", addr))
         coordinator.async_refresh_heater.reset_mock()
         assert heater._refresh_fallback is None
         client.set_htr_settings.reset_mock()
@@ -713,14 +1168,14 @@ def test_heater_write_paths_and_errors(
         await heater.async_set_preset_temperatures(ptemp=[19.2, 20.2, 21.2])
         assert client.set_htr_settings.await_count == 1
         assert settings_after["ptemp"] == prev_ptemp
-        assert "Optimistic ptemp update failed" in caplog.text
+        assert "Optimistic update failed" in caplog.text
         waiter = await _pop_waiter()
         task = heater._refresh_fallback
         assert task is not None
         coordinator.data = old_data
         waiter.set_result(None)
         await task
-        coordinator.async_refresh_heater.assert_awaited_once_with(addr)
+        coordinator.async_refresh_heater.assert_awaited_once_with(("htr", addr))
         coordinator.async_refresh_heater.reset_mock()
         assert heater._refresh_fallback is None
         client.set_htr_settings.reset_mock()
@@ -824,7 +1279,7 @@ def test_heater_write_paths_and_errors(
         await heater._ensure_write_task()
         assert heater._write_task is not None
         await heater._write_task
-        assert "Write failed" in caplog.text
+        assert "Mode/setpoint write failed" in caplog.text
         assert heater._refresh_fallback is None
         assert not fallback_waiters
         client.set_htr_settings.side_effect = None
@@ -848,7 +1303,7 @@ def test_heater_write_paths_and_errors(
 
         waiter_b.set_result(None)
         await task_b
-        coordinator.async_refresh_heater.assert_awaited_once_with(addr)
+        coordinator.async_refresh_heater.assert_awaited_once_with(("htr", addr))
         coordinator.async_refresh_heater.reset_mock()
 
         caplog.clear()
@@ -867,7 +1322,7 @@ def test_heater_write_paths_and_errors(
         # -------------------- WS healthy suppresses fallback --------------
         hass.data[DOMAIN][entry_id]["ws_state"][dev_id] = {
             "status": "healthy",
-            "last_event_at": time.time(),
+            "last_event_at": 0,
         }
         client.set_htr_settings.reset_mock()
         await heater.async_set_temperature(**{ATTR_TEMPERATURE: 22.5})
@@ -876,6 +1331,15 @@ def test_heater_write_paths_and_errors(
         assert client.set_htr_settings.await_count == 1
         assert heater._refresh_fallback is None
         assert not fallback_waiters
+        client.set_htr_settings.reset_mock()
+
+        # -------------------- WS status missing triggers fallback ---------
+        hass.data[DOMAIN][entry_id]["ws_state"].pop(dev_id, None)
+        await heater.async_set_temperature(**{ATTR_TEMPERATURE: 24.5})
+        assert heater._write_task is not None
+        await heater._write_task
+        assert heater._refresh_fallback is not None
+        await _complete_fallback_once()
         client.set_htr_settings.reset_mock()
 
         # -------------------- WS down restores fallback -------------------
@@ -894,6 +1358,7 @@ def test_heater_write_paths_and_errors(
 
     asyncio.run(_run())
 
+
 def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         _reset_environment()
@@ -911,9 +1376,11 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
             "prog": list(base_prog),
             "units": "C",
         }
-        coordinator = FakeCoordinator(
+        coordinator = _make_coordinator(
             hass,
-            {dev_id: {"nodes": {"nodes": []}, "htr": {"settings": {addr: settings}}}},
+            dev_id,
+            {"nodes": {"nodes": []}, "htr": {"settings": {addr: settings}}},
+            client=AsyncMock(),
         )
         client = AsyncMock()
         client.set_htr_settings = AsyncMock()
@@ -930,7 +1397,7 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
             }
         }
 
-        heater = TermoWebHeater(coordinator, entry_id, dev_id, addr, "Heater")
+        heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
         await heater.async_added_to_hass()
         orig_cancelled = climate_module.asyncio.CancelledError
 
@@ -992,7 +1459,9 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
                 raise ValueError("cancel float")
 
         with pytest.raises(ValueError):
-            await heater.async_set_preset_temperatures(ptemp=[CancelFloat(), 19.0, 20.0])
+            await heater.async_set_preset_temperatures(
+                ptemp=[CancelFloat(), 19.0, 20.0]
+            )
 
         client.set_htr_settings.reset_mock()
         client.set_htr_settings.side_effect = ValueError("preset cancel")
@@ -1061,7 +1530,7 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
         task = heater._refresh_fallback
         assert task is not None
         await task
-        coordinator.async_refresh_heater.assert_awaited_once_with(addr)
+        coordinator.async_refresh_heater.assert_awaited_once_with(("htr", addr))
         assert heater._refresh_fallback is None
 
     asyncio.run(_run())
@@ -1088,9 +1557,11 @@ def test_heater_cancelled_paths_propagate(
             "prog": list(base_prog),
             "units": "C",
         }
-        coordinator = FakeCoordinator(
+        coordinator = _make_coordinator(
             hass,
-            {dev_id: {"nodes": {"nodes": []}, "htr": {"settings": {addr: settings}}}},
+            dev_id,
+            {"nodes": {"nodes": []}, "htr": {"settings": {addr: settings}}},
+            client=AsyncMock(),
         )
         client = AsyncMock()
         client.set_htr_settings = AsyncMock()
@@ -1107,7 +1578,7 @@ def test_heater_cancelled_paths_propagate(
             }
         }
 
-        heater = TermoWebHeater(coordinator, entry_id, dev_id, addr, "Heater")
+        heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
         await heater.async_added_to_hass()
 
         orig_float = climate_module.float_or_none

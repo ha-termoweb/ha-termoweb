@@ -1,29 +1,24 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable
-from datetime import UTC, datetime, timedelta
+from collections import Counter
+from collections.abc import Iterable, Mapping
+from datetime import datetime as _datetime, timedelta
 import logging
-import time
+import time as _time
 from typing import Any
 
-# Import of recorder statistics helpers is deferred until runtime in
-# _store_statistics to avoid ImportError on Home Assistant versions
-# that do not provide async_update_statistics_metadata or
-# async_import_statistics.  See _store_statistics for details.
-async_import_statistics = None  # type: ignore
-async_update_statistics_metadata = None  # type: ignore
 from aiohttp import ClientError
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from homeassistant.helpers import aiohttp_client, entity_registry as er
+from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.loader import async_get_integration
 
-from .api import TermoWebAuthError, TermoWebClient, TermoWebRateLimitError
-from .backends import get_backend_for_brand
+from . import energy as energy_module
+from .api import BackendAuthError, BackendRateLimitError, RESTClient
+from .backend import Backend, DucaheatRESTClient, WsClientProto, create_backend
+
 from .const import (
     BRAND_DUCAHEAT,
     CONF_BRAND,
@@ -36,426 +31,113 @@ from .const import (
     get_brand_basic_auth,
     signal_ws_status,
 )
-from .coordinator import TermoWebCoordinator
-from .utils import extract_heater_addrs
-from .ws_client_legacy import TermoWebWSLegacyClient
-from .ws_client_v2 import TermoWebWSV2Client
+from .coordinator import StateCoordinator
+from .energy import (
+    DEFAULT_MAX_HISTORY_DAYS as ENERGY_DEFAULT_MAX_HISTORY_DAYS,
+    OPTION_ENERGY_HISTORY_IMPORTED as ENERGY_OPTION_ENERGY_HISTORY_IMPORTED,
+    OPTION_ENERGY_HISTORY_PROGRESS as ENERGY_OPTION_ENERGY_HISTORY_PROGRESS,
+    OPTION_MAX_HISTORY_RETRIEVED as ENERGY_OPTION_MAX_HISTORY_RETRIEVED,
+    async_import_energy_history as _async_import_energy_history_impl,
+    async_register_import_energy_history_service,
+    async_schedule_initial_energy_import,
+    default_samples_rate_limit_state,
+    reset_samples_rate_limit_state,
+)
+from .nodes import (
+    HEATER_NODE_TYPES as _HEATER_NODE_TYPES,
+    build_heater_address_map as _build_heater_address_map,
+    build_node_inventory,
+    ensure_node_inventory as _ensure_node_inventory,
+    normalize_heater_addresses as _normalize_heater_addresses,
+)
+from .utils import async_get_integration_version as _async_get_integration_version
+
+HEATER_NODE_TYPES = _HEATER_NODE_TYPES
+
+OPTION_ENERGY_HISTORY_IMPORTED = ENERGY_OPTION_ENERGY_HISTORY_IMPORTED
+OPTION_ENERGY_HISTORY_PROGRESS = ENERGY_OPTION_ENERGY_HISTORY_PROGRESS
+OPTION_MAX_HISTORY_RETRIEVED = ENERGY_OPTION_MAX_HISTORY_RETRIEVED
+DEFAULT_MAX_HISTORY_DAYS = ENERGY_DEFAULT_MAX_HISTORY_DAYS
+
+build_heater_address_map = _build_heater_address_map
+ensure_node_inventory = _ensure_node_inventory
+normalize_heater_addresses = _normalize_heater_addresses
+
+EVENT_HOMEASSISTANT_STARTED = energy_module.EVENT_HOMEASSISTANT_STARTED
+er = energy_module.er
+_iso_date = energy_module._iso_date
+_store_statistics = energy_module._store_statistics
+_statistics_during_period_compat = energy_module._statistics_during_period_compat
+_get_last_statistics_compat = energy_module._get_last_statistics_compat
+_clear_statistics_compat = energy_module._clear_statistics_compat
+
+# Re-export legacy WS client for backward compatibility (tests may patch it).
+from .ws_client import WebSocketClient as WebSocket09Client  # noqa: F401
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["button", "binary_sensor", "climate", "sensor"]
 
-OPTION_ENERGY_HISTORY_IMPORTED = "energy_history_imported"
-OPTION_ENERGY_HISTORY_PROGRESS = "energy_history_progress"
-OPTION_MAX_HISTORY_RETRIEVED = "max_history_retrieved"
+reset_samples_rate_limit_state()
 
-DEFAULT_MAX_HISTORY_DAYS = 7
-
-# Guard htr/samples API usage
-_SAMPLES_QUERY_LOCK = asyncio.Lock()
-_LAST_SAMPLES_QUERY = 0.0
+datetime = _datetime
+time = _time
 
 
-def _iso_date(ts: int) -> str:
-    """Convert unix timestamp to ISO date."""
-    return datetime.fromtimestamp(ts, UTC).date().isoformat()
+def create_rest_client(
+    hass: HomeAssistant, username: str, password: str, brand: str
+) -> RESTClient:
+    """Return a REST client configured for the selected brand."""
+
+    session = aiohttp_client.async_get_clientsession(hass)
+    api_base = get_brand_api_base(brand)
+    basic_auth = get_brand_basic_auth(brand)
+    client_cls = DucaheatRESTClient if brand == BRAND_DUCAHEAT else RESTClient
+    return client_cls(
+        session,
+        username,
+        password,
+        api_base=api_base,
+        basic_auth_b64=basic_auth,
+    )
 
 
-def _store_statistics(
-    hass: HomeAssistant, metadata: dict[str, Any], stats: list[dict[str, Any]]
-) -> None:
-    """Insert statistics using recorder helpers.
+async def async_list_devices(client: RESTClient) -> Any:
+    """Call ``list_devices`` logging auth/connection issues consistently."""
 
-    This helper dynamically determines whether Home Assistant supports
-    internal statistics import (`async_update_statistics_metadata` and
-    `async_import_statistics`).  If these functions are available, they
-    are used to import the provided statistics for the given metadata.
-    Otherwise, the statistics are stored as external statistics using
-    `async_add_external_statistics`.  The metadata is adjusted for
-    external statistics by converting the dotted statistic_id into
-    colon-separated form and setting the source equal to the domain.
-    """
-    # Attempt to import the internal statistics helpers at runtime.
     try:
-        # On modern Home Assistant versions async_import_statistics is available
-        from homeassistant.components.recorder.statistics import (
-            async_import_statistics as _import_stats,
-        )
-    except ImportError:
-        _import_stats = None
-
-    if _import_stats:
-        # Use internal statistics API.  Import statistics for the provided
-        # metadata.  Metadata updates are handled internally by the recorder.
-        _import_stats(hass, metadata, stats)
-        return
-
-    # Fall back to external statistics API.  Import only when needed.
-    from homeassistant.components.recorder.statistics import (
-        async_add_external_statistics,
-    )
-
-    stat_id: str = metadata["statistic_id"]
-    domain, obj_id = stat_id.split(".", 1)
-    ext_meta = dict(metadata)
-    ext_meta.update(
-        {
-            "statistic_id": f"{domain}:{obj_id}",
-            "source": domain,
-        }
-    )
-    async_add_external_statistics(hass, ext_meta, stats)
+        return await client.list_devices()
+    except BackendAuthError as err:
+        _LOGGER.info("list_devices auth error: %s", err)
+        raise
+    except (TimeoutError, ClientError, BackendRateLimitError) as err:
+        _LOGGER.info("list_devices connection error: %s", err)
+        raise
 
 
 async def _async_import_energy_history(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    addrs: Iterable[str] | None = None,
+    nodes: Mapping[str, Iterable[str]] | Iterable[str] | None = None,
     *,
     reset_progress: bool = False,
     max_days: int | None = None,
 ) -> None:
-    """Fetch historical hourly samples and insert statistics.
+    """Delegate to the energy helper with shared rate limiting."""
 
-    This function collects hourly counter samples from TermoWeb and
-    transforms them into long‑term statistics for energy sensors.  It
-    computes the cumulative sum of hourly deltas rather than using the
-    raw meter value directly, filters out non‑positive deltas to reduce
-    the number of imported points, and ensures timestamps are aligned
-    to the top of the hour.  Statistics are then stored via the
-    recorder helpers.
-    """
-    rec = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-    if not rec:
-        _LOGGER.debug("%s: no record found for energy import", entry.entry_id)
-        return
-    client: TermoWebClient = rec["client"]
-    dev_id: str = rec["dev_id"]
-    all_addrs: list[str] = rec.get("htr_addrs", [])
-    target_addrs = (
-        all_addrs
-        if addrs is None
-        else [a for a in all_addrs if a in {str(x) for x in addrs}]
+    rate_state = default_samples_rate_limit_state()
+    await _async_import_energy_history_impl(
+        hass,
+        entry,
+        nodes,
+        reset_progress=reset_progress,
+        max_days=max_days,
+        rate_limit=rate_state,
     )
-
-    day = 24 * 3600
-    # Determine the end of the import window.  To avoid importing
-    # partial data for the current day (which can cause negative
-    # consumption readings in the Energy dashboard), we import only up to
-    # the start of today (00:00 in UTC).  Live polling of the sensors
-    # will provide today's consumption incrementally.
-    now_dt = datetime.now(UTC)
-    # Compute the start of today (midnight) in UTC.  We subtract one second from
-    # this value when determining the end of the import window so that the
-    # 00:00 sample of the current day is not included.  Without this
-    # adjustment, the importer will fetch a sample at exactly midnight for
-    # the current day.  Home Assistant treats this sample as part of the
-    # next day's statistics, and because most meters reset at midnight, the
-    # resulting `sum` becomes lower than the previous day's final `sum`,
-    # producing a negative consumption bar.  By subtracting one second we
-    # ensure the final range end is 23:59:59 of the previous day.
-    start_of_today = now_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-    now_ts = int(start_of_today.timestamp()) - 1
-    if max_days is None:
-        max_days = int(
-            entry.options.get(OPTION_MAX_HISTORY_RETRIEVED, DEFAULT_MAX_HISTORY_DAYS)
-        )
-    target = now_ts - max_days * day
-    progress: dict[str, int] = dict(
-        entry.options.get(OPTION_ENERGY_HISTORY_PROGRESS, {})
-    )
-
-    if reset_progress:
-        if addrs is None:
-            progress.clear()
-        else:
-            for addr in target_addrs:
-                progress.pop(addr, None)
-        options = dict(entry.options)
-        options[OPTION_ENERGY_HISTORY_PROGRESS] = progress
-        options.pop(OPTION_ENERGY_HISTORY_IMPORTED, None)
-        hass.config_entries.async_update_entry(entry, options=options)
-    elif entry.options.get(OPTION_ENERGY_HISTORY_IMPORTED):
-        _LOGGER.debug("%s: energy history already imported", entry.entry_id)
-        return
-
-    _LOGGER.debug("%s: importing hourly samples down to %s", dev_id, _iso_date(target))
-
-    async def _rate_limited_fetch(
-        addr: str, start: int, stop: int
-    ) -> list[dict[str, Any]]:
-        global _LAST_SAMPLES_QUERY
-        async with _SAMPLES_QUERY_LOCK:
-            now = time.monotonic()
-            wait = 1 - (now - _LAST_SAMPLES_QUERY)
-            if wait > 0:
-                _LOGGER.debug(
-                    "%s/%s: sleeping %.2fs before query", addr, _iso_date(start), wait
-                )
-                await asyncio.sleep(wait)
-            _LAST_SAMPLES_QUERY = time.monotonic()
-        _LOGGER.debug(
-            "%s: requesting samples %s-%s", addr, _iso_date(start), _iso_date(stop)
-        )
-        try:
-            return await client.get_htr_samples(dev_id, addr, start, stop)
-        except asyncio.CancelledError:  # pragma: no cover - allow cancellation
-            raise
-        except Exception as err:  # pragma: no cover - defensive
-            _LOGGER.debug("%s: error fetching samples: %s", addr, err)
-            return []
-
-    ent_reg: er.EntityRegistry | None = er.async_get(hass)
-    for addr in target_addrs:
-        _LOGGER.debug("%s: importing history for heater %s", dev_id, addr)
-        # Collect all samples across the requested range.  We will process
-        # them after the loop in chronological order.
-        all_samples: list[dict[str, Any]] = []
-        start_ts = int(progress.get(addr, now_ts))
-        while start_ts > target:
-            chunk_start = max(start_ts - day, target)
-            samples = await _rate_limited_fetch(addr, chunk_start, start_ts)
-
-            _LOGGER.debug(
-                "%s: fetched %d samples for %s-%s",
-                addr,
-                len(samples),
-                _iso_date(chunk_start),
-                _iso_date(start_ts),
-            )
-
-            # Append all samples as-is for later processing
-            all_samples.extend(samples)
-
-            start_ts = chunk_start
-            progress[addr] = start_ts
-            options = dict(entry.options)
-            options[OPTION_ENERGY_HISTORY_PROGRESS] = progress
-            hass.config_entries.async_update_entry(entry, options=options)
-
-        if not all_samples:
-            _LOGGER.debug("%s: no samples fetched", addr)
-            continue
-
-        # Sort all samples chronologically so that we can compute deltas properly.
-        all_samples_sorted = sorted(all_samples, key=lambda s: s.get("t", 0))
-
-        # Resolve the entity_id for the heater's energy sensor
-        uid = f"{DOMAIN}:{dev_id}:htr:{addr}:energy"
-        entity_id = (
-            ent_reg.async_get_entity_id("sensor", DOMAIN, uid) if ent_reg else None
-        )
-        if not entity_id:
-            _LOGGER.debug("%s: no energy sensor found", addr)
-            continue
-
-        first_ts = int(all_samples_sorted[0].get("t", 0))
-        last_ts = int(all_samples_sorted[-1].get("t", 0))
-        import_start_dt = datetime.fromtimestamp(first_ts, UTC).replace(
-            minute=0, second=0, microsecond=0
-        )
-        import_end_dt = datetime.fromtimestamp(last_ts, UTC).replace(
-            minute=0, second=0, microsecond=0
-        )
-
-        sum_offset = 0.0
-        previous_kwh: float | None = None
-        last_before: dict[str, Any] | None = None
-
-        period_stats: dict[str, list[dict[str, Any]]] | None = None
-        try:
-            from homeassistant.components.recorder.statistics import (
-                async_get_statistics_during_period,
-            )
-        except (ImportError, AttributeError):  # pragma: no cover - defensive
-            async_get_statistics_during_period = None
-
-        if async_get_statistics_during_period:
-            lookback_days = max(2, max_days + 1)
-            lookback_start = import_start_dt - timedelta(days=lookback_days)
-            try:
-                period_stats = await async_get_statistics_during_period(
-                    hass,
-                    lookback_start,
-                    import_end_dt + timedelta(hours=1),
-                    [entity_id],
-                    period="hour",
-                )
-            except asyncio.CancelledError:  # pragma: no cover - allow cancellation
-                raise
-            except Exception as err:  # pragma: no cover - defensive
-                _LOGGER.debug(
-                    "%s: error fetching statistics window %s-%s: %s",
-                    addr,
-                    lookback_start,
-                    import_end_dt,
-                    err,
-                )
-            else:
-                window_values = period_stats.get(entity_id) if period_stats else []
-                if window_values:
-                    before_values = [
-                        val
-                        for val in window_values
-                        if isinstance(val.get("start"), datetime)
-                        and val["start"] < import_start_dt
-                    ]
-                    if before_values:
-                        last_before = before_values[-1]
-
-        if last_before is None:
-            try:
-                from homeassistant.components.recorder.statistics import (
-                    async_get_last_statistics,
-                )
-
-                existing = await async_get_last_statistics(hass, 1, [entity_id])
-                if existing and (vals := existing.get(entity_id)):
-                    candidate = vals[0]
-                    start_dt = candidate.get("start")
-                    if isinstance(start_dt, datetime) and start_dt < import_start_dt:
-                        last_before = candidate
-            except asyncio.CancelledError:  # pragma: no cover - allow cancellation
-                raise
-            except Exception as err:  # pragma: no cover - defensive
-                _LOGGER.debug(
-                    "%s: error fetching last statistics for offset: %s", addr, err
-                )
-
-        if last_before:
-            try:
-                sum_offset = float(last_before.get("sum") or 0.0)
-            except (TypeError, ValueError):  # pragma: no cover - defensive
-                _LOGGER.debug(
-                    "%s: invalid sum offset in existing statistics: %s",
-                    addr,
-                    last_before,
-                )
-                sum_offset = 0.0
-            prev_state = last_before.get("state")
-            if prev_state is not None:
-                try:
-                    previous_kwh = float(prev_state)
-                except (TypeError, ValueError):  # pragma: no cover - defensive
-                    _LOGGER.debug(
-                        "%s: invalid previous state in statistics: %s", addr, prev_state
-                    )
-                    previous_kwh = None
-
-        overlap_exists = False
-        if period_stats is not None:
-            overlap_exists = any(
-                isinstance(val.get("start"), datetime)
-                and import_start_dt <= val["start"] <= import_end_dt
-                for val in period_stats.get(entity_id, [])
-            )
-        else:
-            try:
-                from homeassistant.components.recorder.statistics import (
-                    async_get_last_statistics,
-                )
-
-                overlap_stats = await async_get_last_statistics(
-                    hass, 1, [entity_id], start_time=import_start_dt
-                )
-                overlap_exists = bool(
-                    overlap_stats and overlap_stats.get(entity_id)
-                )
-            except asyncio.CancelledError:  # pragma: no cover - allow cancellation
-                raise
-            except Exception as err:  # pragma: no cover - defensive
-                _LOGGER.debug(
-                    "%s: error checking for overlapping statistics: %s", addr, err
-                )
-
-        if overlap_exists:
-            try:
-                from homeassistant.components.recorder.statistics import (
-                    async_delete_statistics,
-                )
-
-                delete_args: dict[str, Any] = {
-                    "start_time": import_start_dt,
-                    "end_time": import_end_dt + timedelta(hours=1),
-                }
-                try:
-                    await async_delete_statistics(hass, [entity_id], **delete_args)
-                    _LOGGER.debug("%s: cleared overlapping statistics for %s", addr, entity_id)
-                except TypeError:
-                    await async_delete_statistics(hass, [entity_id])
-                    _LOGGER.debug("%s: cleared statistics for %s", addr, entity_id)
-            except asyncio.CancelledError:  # pragma: no cover - allow cancellation
-                raise
-            except ImportError:  # pragma: no cover - defensive
-                _LOGGER.debug(
-                    "%s: async_delete_statistics not available to clear overlap",
-                    addr,
-                )
-            except Exception as err:  # pragma: no cover - defensive
-                _LOGGER.debug("%s: failed to clear overlapping statistics: %s", addr, err)
-
-        stats: list[dict[str, Any]] = []
-        running_sum: float = sum_offset
-        for sample in all_samples_sorted:
-            t = sample.get("t")
-            counter = sample.get("counter")
-            try:
-                ts = int(t)
-                kwh = float(counter) / 1000.0
-            except (TypeError, ValueError):
-                _LOGGER.debug("%s: invalid sample %s", addr, sample)
-                continue
-            # Align start time to the top of the hour
-            start_dt = datetime.fromtimestamp(ts, UTC).replace(
-                minute=0, second=0, microsecond=0
-            )
-            if previous_kwh is None:
-                previous_kwh = kwh
-                continue
-            delta = kwh - previous_kwh
-            # Skip zero or negative deltas to avoid importing non‑consumption hours
-            if delta <= 0:
-                previous_kwh = kwh
-                continue
-            running_sum += delta
-            stats.append({"start": start_dt, "state": kwh, "sum": running_sum})
-            previous_kwh = kwh
-
-        if not stats:
-            _LOGGER.debug("%s: no positive deltas found", addr)
-            continue
-
-        _LOGGER.debug("%s: inserting statistics for %s", addr, entity_id)
-        ent_entry = ent_reg.async_get(entity_id) if ent_reg else None
-        name = getattr(ent_entry, "original_name", None) or entity_id
-
-        # Metadata for internal statistics: source must be 'recorder'
-        metadata = {
-            "source": "recorder",
-            "statistic_id": entity_id,
-            "unit_of_measurement": "kWh",
-            "name": name,
-            "has_sum": True,
-            "has_mean": False,
-        }
-        _LOGGER.debug("%s: adding %d stats entries", addr, len(stats))
-        try:
-            _store_statistics(hass, metadata, stats)
-        except Exception as err:  # pragma: no cover - log & continue
-            _LOGGER.exception("%s: statistics insert failed: %s", addr, err)
-
-    options = dict(entry.options)
-    options[OPTION_ENERGY_HISTORY_PROGRESS] = progress
-    # If all heaters are imported down to the target date mark import as complete
-    if all(progress.get(addr, now_ts) <= target for addr in all_addrs):
-        options[OPTION_ENERGY_HISTORY_IMPORTED] = True
-    hass.config_entries.async_update_entry(entry, options=options)
-    _LOGGER.debug("%s: energy import complete", entry.entry_id)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up the TermoWeb integration for a config entry."""
-    session = aiohttp_client.async_get_clientsession(hass)
     username = entry.data["username"]
     password = entry.data["password"]
     base_interval = int(
@@ -464,27 +146,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
     )
     brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
-    api_base = get_brand_api_base(brand)
-    basic_auth = get_brand_basic_auth(brand)
 
-    # DRY version: read from manifest
-    integration = await async_get_integration(hass, DOMAIN)
-    version = integration.version or "unknown"
+    version = await _async_get_integration_version(hass)
 
-    client = TermoWebClient(
-        session,
-        username,
-        password,
-        api_base=api_base,
-        basic_auth_b64=basic_auth,
-    )
+    client = create_rest_client(hass, username, password, brand)
+    backend = create_backend(brand=brand, client=client)
     try:
-        devices = await client.list_devices()
-    except TermoWebAuthError as err:
-        _LOGGER.info("list_devices auth error: %s", err)
+        devices = await async_list_devices(client)
+    except BackendAuthError as err:
         raise ConfigEntryAuthFailed from err
-    except (TimeoutError, ClientError, TermoWebRateLimitError) as err:
-        _LOGGER.info("list_devices connection error: %s", err)
+    except (TimeoutError, ClientError, BackendRateLimitError) as err:
         raise ConfigEntryNotReady from err
 
     if not devices:
@@ -496,46 +167,60 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         dev.get("dev_id") or dev.get("id") or dev.get("serial_id") or ""
     ).strip()
     nodes = await client.get_nodes(dev_id)
-    addrs = extract_heater_addrs(nodes)
+    node_inventory = build_node_inventory(nodes)
 
-    coordinator = TermoWebCoordinator(hass, client, base_interval, dev_id, dev, nodes)
-    backend_cls = get_backend_for_brand(brand)
-    ws_factory = TermoWebWSV2Client if brand == BRAND_DUCAHEAT else TermoWebWSLegacyClient
-    backend = backend_cls(
+    if node_inventory:
+        type_counts = Counter(node.type for node in node_inventory)
+        summary = ", ".join(f"{node_type}:{count}" for node_type, count in sorted(type_counts.items()))
+    else:
+        summary = "none"
+    _LOGGER.info("%s: discovered node types: %s", dev_id, summary)
+
+    coordinator = StateCoordinator(
         hass,
-        entry_id=entry.entry_id,
-        api_client=client,
-        coordinator=coordinator,
-        ws_client_factory=ws_factory,
+        client,
+        base_interval,
+        dev_id,
+        dev,
+        nodes,
+        node_inventory,
+
     )
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = data = {
-        "client": client,
+        "backend": backend,
+        "client": backend.client,
         "coordinator": coordinator,
         "dev_id": dev_id,
         "nodes": nodes,
-        "htr_addrs": addrs,
+        "node_inventory": node_inventory,
         "config_entry": entry,
         "base_poll_interval": max(base_interval, MIN_POLL_INTERVAL),
         "stretched": False,
         "backend": backend,
         "ws_tasks": {},  # dev_id -> asyncio.Task
-        "ws_clients": {},  # dev_id -> WS client instances
+        "ws_clients": {},  # dev_id -> WS clients
         "ws_state": {},  # dev_id -> status attrs
         "version": version,
         "brand": brand,
     }
 
     async def _start_ws(dev_id: str) -> None:
+        """Ensure a websocket client exists and is running for ``dev_id``."""
+        backend: Backend = data["backend"]
         tasks: dict[str, asyncio.Task] = data["ws_tasks"]
-        clients = data["ws_clients"]
-        backend = data["backend"]
+        clients: dict[str, WsClientProto] = data["ws_clients"]
         if dev_id in tasks and not tasks[dev_id].done():
             return
         ws_client = clients.get(dev_id)
         if not ws_client:
-            ws_client = backend.create_ws_client(dev_id)
+            ws_client = backend.create_ws_client(
+                hass,
+                entry_id=entry.entry_id,
+                dev_id=dev_id,
+                coordinator=coordinator,
+            )
             clients[dev_id] = ws_client
         task = ws_client.start()
         tasks[dev_id] = task
@@ -583,6 +268,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data["recalc_poll"] = _recalc_poll_interval
 
     def _on_ws_status(_payload: dict) -> None:
+        """Recalculate polling intervals when websocket status changes."""
         _recalc_poll_interval()
 
     unsub = async_dispatcher_connect(
@@ -594,12 +280,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
 
     # Always-on push: start for all current devices
-    for dev_id in (coordinator.data or {}).keys():
+    for dev_id in coordinator.data or {}:
         hass.async_create_task(_start_ws(dev_id))
 
     # Start for any devices discovered later
     def _on_coordinator_updated() -> None:
-        for dev_id in (coordinator.data or {}).keys():
+        """Start websocket clients for newly discovered devices."""
+        for dev_id in coordinator.data or {}:
             if dev_id not in data["ws_tasks"]:
                 hass.async_create_task(_start_ws(dev_id))
 
@@ -607,73 +294,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    async def _service_import_energy_history(call) -> None:
-        _LOGGER.debug("service import_energy_history called")
-        reset = bool(call.data.get("reset_progress", False))
-        max_days = call.data.get("max_history_retrieval")
-        ent_ids = call.data.get("entity_id")
-        tasks = []
-        if ent_ids:
-            ent_reg = er.async_get(hass)
-            if isinstance(ent_ids, str):
-                ent_ids = [ent_ids]
-            entry_map: dict[str, set[str]] = {}
-            for eid in ent_ids:
-                er_ent = ent_reg.async_get(eid)
-                if not er_ent or er_ent.platform != DOMAIN:
-                    continue
-                parts = (er_ent.unique_id or "").split(":")
-                if len(parts) >= 4 and parts[0] == DOMAIN and parts[2] == "htr":
-                    entry_map.setdefault(er_ent.config_entry_id, set()).add(parts[3])
-            for entry_id, addr_set in entry_map.items():
-                ent = hass.config_entries.async_get_entry(entry_id)
-                if ent:
-                    tasks.append(
-                        _async_import_energy_history(
-                            hass,
-                            ent,
-                            addr_set,
-                            reset_progress=reset,
-                            max_days=max_days,
-                        )
-                    )
-        else:
-            for rec in hass.data.get(DOMAIN, {}).values():
-                ent: ConfigEntry | None = rec.get("config_entry")
-                if ent:
-                    tasks.append(
-                        _async_import_energy_history(
-                            hass,
-                            ent,
-                            None,
-                            reset_progress=reset,
-                            max_days=max_days,
-                        )
-                    )
-        if tasks:
-            _LOGGER.debug("import_energy_history: awaiting %d tasks", len(tasks))
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            for res in results:
-                if isinstance(res, asyncio.CancelledError):
-                    raise res
-                if isinstance(res, Exception):
-                    _LOGGER.exception("import_energy_history task failed: %s", res)
+    await async_register_import_energy_history_service(
+        hass,
+        _async_import_energy_history,
+    )
 
-    if not hass.services.has_service(DOMAIN, "import_energy_history"):
-        hass.services.async_register(
-            DOMAIN, "import_energy_history", _service_import_energy_history
-        )
-
-    if not entry.options.get(OPTION_ENERGY_HISTORY_IMPORTED):
-        _LOGGER.debug("%s: scheduling initial energy import", entry.entry_id)
-
-        async def _schedule_import(_event: Any | None = None) -> None:
-            await _async_import_energy_history(hass, entry)
-
-        if hass.is_running:
-            hass.async_create_task(_schedule_import())
-        else:
-            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _schedule_import)
+    async_schedule_initial_energy_import(
+        hass,
+        entry,
+        _async_import_energy_history,
+    )
 
     _LOGGER.info("TermoWeb setup complete (v%s)", version)
     return True

@@ -1,3 +1,5 @@
+"""Sensor platform entities for TermoWeb heaters and gateways."""
+
 from __future__ import annotations
 
 import logging
@@ -11,14 +13,20 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import UnitOfTemperature
 from homeassistant.core import callback
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_data
-from .coordinator import TermoWebHeaterEnergyCoordinator
-from .heater import TermoWebHeaterBase, build_heater_name_map
-from .utils import float_or_none
+from .coordinator import EnergyStateCoordinator
+from .heater import (
+    DispatcherSubscriptionHelper,
+    HeaterNodeBase,
+    iter_heater_nodes,
+    log_skipped_nodes,
+    prepare_heater_platform_data,
+)
+from .nodes import HEATER_NODE_TYPES, build_heater_energy_unique_id
+from .utils import build_gateway_device_info, float_or_none
 
 _WH_TO_KWH = 1 / 1000.0
 
@@ -70,11 +78,11 @@ def _normalise_energy_value(coordinator: Any, raw: Any) -> float | None:
                 scale = parsed
 
     if scale is None:
-        if isinstance(coordinator, TermoWebHeaterEnergyCoordinator):
+        if isinstance(coordinator, EnergyStateCoordinator):
             scale = 1.0
-        elif isinstance(raw, int):
-            scale = _WH_TO_KWH
-        elif isinstance(raw, str) and _looks_like_integer_string(raw):
+        elif isinstance(raw, int) or (
+            isinstance(raw, str) and _looks_like_integer_string(raw)
+        ):
             scale = _WH_TO_KWH
         else:
             scale = 1.0
@@ -87,67 +95,50 @@ async def async_setup_entry(hass, entry, async_add_entities):
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
-    nodes = data["nodes"]
-    addrs: list[str] = data["htr_addrs"]
+    inventory, nodes_by_type, addrs_by_type, resolve_name = (
+        prepare_heater_platform_data(
+            data,
+            default_name_simple=lambda addr: f"Node {addr}",
+        )
+    )
 
-    energy_coordinator: TermoWebHeaterEnergyCoordinator | None = data.get(
+    energy_coordinator: EnergyStateCoordinator | None = data.get(
         "energy_coordinator",
     )
     if energy_coordinator is None:
-        energy_coordinator = TermoWebHeaterEnergyCoordinator(
-            hass, data["client"], dev_id, addrs
+        energy_coordinator = EnergyStateCoordinator(
+            hass, data["client"], dev_id, addrs_by_type
         )
         data["energy_coordinator"] = energy_coordinator
         await energy_coordinator.async_config_entry_first_refresh()
-
-    name_map = build_heater_name_map(
-        nodes, lambda addr: f"Node {addr}"
-    )
+    else:
+        energy_coordinator.update_addresses(addrs_by_type)
 
     new_entities: list[SensorEntity] = []
-    for addr in addrs:
-        base_name = name_map.get(addr, f"Node {addr}")
-        uid_temp = f"{DOMAIN}:{dev_id}:htr:{addr}:temp"
-        new_entities.append(
-            TermoWebHeaterTemp(
+    for node_type, _node, addr_str, base_name in iter_heater_nodes(
+        nodes_by_type, resolve_name
+    ):
+        energy_unique_id = build_heater_energy_unique_id(dev_id, node_type, addr_str)
+        uid_prefix = energy_unique_id.rsplit(":", 1)[0]
+        new_entities.extend(
+            _create_heater_sensors(
                 coordinator,
-                entry.entry_id,
-                dev_id,
-                addr,
-                f"{base_name} Temperature",
-                uid_temp,
-                base_name,
-            )
-        )
-        uid_energy = f"{DOMAIN}:{dev_id}:htr:{addr}:energy"
-        new_entities.append(
-            TermoWebHeaterEnergyTotal(
                 energy_coordinator,
                 entry.entry_id,
                 dev_id,
-                addr,
-                f"{base_name} Energy",
-                uid_energy,
+                addr_str,
                 base_name,
+                uid_prefix,
+                energy_unique_id,
+                node_type=node_type,
             )
         )
-        uid_power = f"{DOMAIN}:{dev_id}:htr:{addr}:power"
-        new_entities.append(
-            TermoWebHeaterPower(
-                energy_coordinator,
-                entry.entry_id,
-                dev_id,
-                addr,
-                f"{base_name} Power",
-                uid_power,
-                base_name,
-            )
-        )
+
+    log_skipped_nodes("sensor", nodes_by_type, logger=_LOGGER)
 
     uid_total = f"{DOMAIN}:{dev_id}:energy_total"
     new_entities.append(
-        TermoWebTotalEnergy(
-
+        InstallationTotalEnergySensor(
             energy_coordinator,
             entry.entry_id,
             dev_id,
@@ -161,7 +152,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         async_add_entities(new_entities)
 
 
-class TermoWebHeaterTemp(TermoWebHeaterBase, SensorEntity):
+class HeaterTemperatureSensor(HeaterNodeBase, SensorEntity):
     """Temperature sensor for a single heater node (read-only mtemp)."""
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
@@ -177,7 +168,10 @@ class TermoWebHeaterTemp(TermoWebHeaterBase, SensorEntity):
         name: str,
         unique_id: str,
         device_name: str,
+        *,
+        node_type: str | None = None,
     ) -> None:
+        """Initialise the heater temperature sensor entity."""
         super().__init__(
             coordinator,
             entry_id,
@@ -186,15 +180,18 @@ class TermoWebHeaterTemp(TermoWebHeaterBase, SensorEntity):
             name,
             unique_id,
             device_name=device_name,
+            node_type=node_type,
         )
 
     @property
     def native_value(self) -> float | None:
+        """Return the latest temperature reported by the heater."""
         s = self.heater_settings() or {}
         return float_or_none(s.get("mtemp"))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        """Return metadata describing the heater temperature source."""
         s = self.heater_settings() or {}
         return {
             "dev_id": self._dev_id,
@@ -203,21 +200,24 @@ class TermoWebHeaterTemp(TermoWebHeaterBase, SensorEntity):
         }
 
 
-class TermoWebHeaterMeasurementSensor(TermoWebHeaterBase, SensorEntity):
+class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
     """Base helper for heater measurement sensors such as power and energy."""
 
     _metric_key: str
 
     def __init__(
         self,
-        coordinator: TermoWebHeaterEnergyCoordinator,
+        coordinator: EnergyStateCoordinator,
         entry_id: str,
         dev_id: str,
         addr: str,
         name: str,
         unique_id: str,
         device_name: str,
+        *,
+        node_type: str | None = None,
     ) -> None:
+        """Initialise a heater energy-derived sensor entity."""
         super().__init__(
             coordinator,
             entry_id,
@@ -226,20 +226,25 @@ class TermoWebHeaterMeasurementSensor(TermoWebHeaterBase, SensorEntity):
             name,
             unique_id,
             device_name=device_name,
+            node_type=node_type,
         )
 
     def _device_available(self, device_entry: dict[str, Any] | None) -> bool:
+        """Return True when the heater has a device entry."""
         return isinstance(device_entry, dict)
 
     def _metric_section(self) -> dict[str, Any]:
+        """Return the dictionary with the requested metric values."""
         heater_section = self._heater_section()
         metric = heater_section.get(self._metric_key)
         return metric if isinstance(metric, dict) else {}
 
     def _raw_native_value(self) -> Any:
+        """Return the raw metric value for this heater address."""
         return self._metric_section().get(self._addr)
 
     def _coerce_native_value(self, raw: Any) -> float | None:
+        """Convert the raw metric value into a float."""
         try:
             return float(raw)
         except (TypeError, ValueError):
@@ -247,6 +252,7 @@ class TermoWebHeaterMeasurementSensor(TermoWebHeaterBase, SensorEntity):
 
     @property
     def native_value(self) -> float | None:
+        """Return the processed metric value for Home Assistant."""
         raw = self._raw_native_value()
         if raw is None:
             return None
@@ -254,10 +260,11 @@ class TermoWebHeaterMeasurementSensor(TermoWebHeaterBase, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        """Return identifiers that locate the heater metric."""
         return {"dev_id": self._dev_id, "addr": self._addr}
 
 
-class TermoWebHeaterEnergyTotal(TermoWebHeaterMeasurementSensor):
+class HeaterEnergyTotalSensor(HeaterEnergyBase):
     """Total energy consumption sensor for a heater."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
@@ -266,10 +273,11 @@ class TermoWebHeaterEnergyTotal(TermoWebHeaterMeasurementSensor):
     _metric_key = "energy"
 
     def _coerce_native_value(self, raw: Any) -> float | None:  # type: ignore[override]
+        """Normalise the raw energy metric into kWh."""
         return _normalise_energy_value(self.coordinator, raw)
 
 
-class TermoWebHeaterPower(TermoWebHeaterMeasurementSensor):
+class HeaterPowerSensor(HeaterEnergyBase):
     """Power sensor for a heater."""
 
     _attr_device_class = SensorDeviceClass.POWER
@@ -278,7 +286,62 @@ class TermoWebHeaterPower(TermoWebHeaterMeasurementSensor):
     _metric_key = "power"
 
 
-class TermoWebTotalEnergy(CoordinatorEntity, SensorEntity):
+def _create_heater_sensors(
+    coordinator: Any,
+    energy_coordinator: EnergyStateCoordinator,
+    entry_id: str,
+    dev_id: str,
+    addr: str,
+    base_name: str,
+    uid_prefix: str,
+    energy_unique_id: str,
+    *,
+    node_type: str | None = None,
+    temperature_cls: type[HeaterTemperatureSensor] = HeaterTemperatureSensor,
+    energy_cls: type[HeaterEnergyTotalSensor] = HeaterEnergyTotalSensor,
+    power_cls: type[HeaterPowerSensor] = HeaterPowerSensor,
+) -> tuple[
+    HeaterTemperatureSensor,
+    HeaterEnergyTotalSensor,
+    HeaterPowerSensor,
+]:
+    """Create the three heater node sensors for the given node."""
+
+    temperature = temperature_cls(
+        coordinator,
+        entry_id,
+        dev_id,
+        addr,
+        f"{base_name} Temperature",
+        f"{uid_prefix}:temp",
+        base_name,
+        node_type=node_type,
+    )
+    energy = energy_cls(
+        energy_coordinator,
+        entry_id,
+        dev_id,
+        addr,
+        f"{base_name} Energy",
+        energy_unique_id,
+        base_name,
+        node_type=node_type,
+    )
+    power = power_cls(
+        energy_coordinator,
+        entry_id,
+        dev_id,
+        addr,
+        f"{base_name} Power",
+        f"{uid_prefix}:power",
+        base_name,
+        node_type=node_type,
+    )
+
+    return (temperature, energy, power)
+
+
+class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
     """Total energy consumption across all heaters."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
@@ -287,59 +350,87 @@ class TermoWebTotalEnergy(CoordinatorEntity, SensorEntity):
 
     def __init__(
         self,
-        coordinator: TermoWebHeaterEnergyCoordinator,
+        coordinator: EnergyStateCoordinator,
         entry_id: str,
         dev_id: str,
         name: str,
         unique_id: str,
     ) -> None:
+        """Initialise the installation-wide energy sensor."""
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._dev_id = dev_id
         self._attr_name = name
         self._attr_unique_id = unique_id
-        self._unsub_ws = None
+        self._ws_subscription = DispatcherSubscriptionHelper(self)
 
     async def async_added_to_hass(self) -> None:
+        """Register websocket callbacks once the entity is added."""
         await super().async_added_to_hass()
-        self._unsub_ws = async_dispatcher_connect(
+        if self.hass is None:  # pragma: no cover - defensive guard
+            return
+        self._ws_subscription.subscribe(
             self.hass, signal_ws_data(self._entry_id), self._on_ws_data
         )
-        self.async_on_remove(lambda: self._unsub_ws() if self._unsub_ws else None)
+
+    async def async_will_remove_from_hass(self) -> None:  # pragma: no cover - cleanup
+        """Tidy up websocket listeners prior to entity removal."""
+
+        self._ws_subscription.unsubscribe()
+        await super().async_will_remove_from_hass()
 
     @property
     def device_info(self) -> DeviceInfo:
-        return DeviceInfo(identifiers={(DOMAIN, self._dev_id)})
+        """Return the Home Assistant device metadata for the gateway."""
+        return build_gateway_device_info(self.hass, self._entry_id, self._dev_id)
 
     @callback
     def _on_ws_data(self, payload: dict) -> None:
+        """Handle websocket payloads that may update the totals."""
         if payload.get("dev_id") != self._dev_id:
             return
         self.schedule_update_ha_state()
 
     @property
     def available(self) -> bool:
+        """Return True if the latest coordinator data contains totals."""
         d = (self.coordinator.data or {}).get(self._dev_id)
         return d is not None
 
     @property
     def native_value(self) -> float | None:
+        """Return the summed energy usage across all heaters."""
         d = (self.coordinator.data or {}).get(self._dev_id, {})
-        energy = (d.get("htr") or {}).get("energy") or {}
+        sections: list[dict[str, Any]] = []
+        seen: set[int] = set()
+        nodes_by_type = d.get("nodes_by_type")
+        if isinstance(nodes_by_type, dict):
+            for node_type in HEATER_NODE_TYPES:
+                section = nodes_by_type.get(node_type)
+                if not isinstance(section, dict):
+                    continue
+                energy_map = section.get("energy")
+                if isinstance(energy_map, dict):
+                    sections.append(energy_map)
+                    seen.add(id(energy_map))
+        legacy = (d.get("htr") or {}).get("energy")
+        if isinstance(legacy, dict) and id(legacy) not in seen:
+            sections.append(legacy)
+
         total = 0.0
         found = False
-        for val in energy.values():
-            normalised = _normalise_energy_value(self.coordinator, val)
-            if normalised is None:
-                continue
-            total += normalised
-            found = True
+        for energy_map in sections:
+            for val in energy_map.values():
+                normalised = _normalise_energy_value(self.coordinator, val)
+                if normalised is None:
+                    continue
+                total += normalised
+                found = True
         if not found:
             return None
         return total
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        """Return identifiers describing the aggregated energy value."""
         return {"dev_id": self._dev_id}
-
-

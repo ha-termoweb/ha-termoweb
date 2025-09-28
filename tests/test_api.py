@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+import logging
 import time
 from typing import Any, Callable
 
@@ -10,8 +11,10 @@ import aiohttp
 import pytest
 
 import custom_components.termoweb.api as api
+from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
+from custom_components.termoweb.nodes import AccumulatorNode
 
-TermoWebClient = api.TermoWebClient
+RESTClient = api.RESTClient
 
 
 class MockResponse:
@@ -126,7 +129,7 @@ def test_token_refresh(monkeypatch) -> None:
             ),
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         import custom_components.termoweb.api as api_module
 
@@ -158,9 +161,9 @@ def test_ensure_token_401_raises_auth_error() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
-        with pytest.raises(api.TermoWebAuthError):
+        with pytest.raises(api.BackendAuthError):
             await client._ensure_token()
 
     asyncio.run(_run())
@@ -178,9 +181,9 @@ def test_ensure_token_429_raises_rate_limit_error() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
-        with pytest.raises(api.TermoWebRateLimitError):
+        with pytest.raises(api.BackendRateLimitError):
             await client._ensure_token()
 
     asyncio.run(_run())
@@ -197,12 +200,34 @@ def test_ensure_token_missing_access_token() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
-        with pytest.raises(api.TermoWebAuthError):
+        with pytest.raises(api.BackendAuthError):
             await client._ensure_token()
 
     asyncio.run(_run())
+
+
+def test_resolve_node_descriptor_validations() -> None:
+    client = RESTClient(FakeSession(), "user", "pass")
+
+    with pytest.raises(ValueError, match="Unsupported node descriptor"):
+        client._resolve_node_descriptor("htr")
+
+    with pytest.raises(ValueError, match="Invalid node type"):
+        client._resolve_node_descriptor(("  ", "1"))
+
+    with pytest.raises(ValueError, match="Invalid node address"):
+        client._resolve_node_descriptor(("htr", ""))
+
+
+def test_resolve_node_descriptor_normalises_values() -> None:
+    client = RESTClient(FakeSession(), "user", "pass")
+
+    node = AccumulatorNode(name=" Storage ", addr=" 007 ")
+    assert client._resolve_node_descriptor(node) == ("acm", "007")
+
+    assert client._resolve_node_descriptor(("HTR", " 08 ")) == ("htr", "08")
 
 
 def test_ensure_token_non_numeric_expires_in(monkeypatch) -> None:
@@ -218,7 +243,7 @@ def test_ensure_token_non_numeric_expires_in(monkeypatch) -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         token = await client._ensure_token()
         assert token == "tok"
@@ -229,7 +254,7 @@ def test_ensure_token_non_numeric_expires_in(monkeypatch) -> None:
     asyncio.run(_run())
 
 
-def test_get_htr_samples_success() -> None:
+def test_get_node_samples_success() -> None:
     async def _run() -> None:
         session = FakeSession()
         session.queue_post(
@@ -247,8 +272,8 @@ def test_get_htr_samples_success() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
-        samples = await client.get_htr_samples("dev", "A", 0, 10)
+        client = RESTClient(session, "user", "pass")
+        samples = await client.get_node_samples("dev", ("htr", "A"), 0, 10)
 
         assert samples == [{"t": 1000, "counter": "1.5"}]
         assert len(session.request_calls) == 1
@@ -258,7 +283,7 @@ def test_get_htr_samples_success() -> None:
     asyncio.run(_run())
 
 
-def test_get_htr_samples_404() -> None:
+def test_get_node_samples_404() -> None:
     async def _run() -> None:
         session = FakeSession()
         session.queue_post(
@@ -276,9 +301,9 @@ def test_get_htr_samples_404() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
         with pytest.raises(aiohttp.ClientResponseError) as err:
-            await client.get_htr_samples("dev", "A", 0, 10)
+            await client.get_node_samples("dev", ("htr", "A"), 0, 10)
         assert err.value.status == 404
 
     asyncio.run(_run())
@@ -301,7 +326,7 @@ def test_request_ignore_status_returns_none() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
         result = await client._request(
             "GET", "/missing", headers={}, ignore_statuses=(404,)
         )
@@ -336,11 +361,11 @@ def test_request_refreshes_once_then_raises() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
         headers = await client._authed_headers()
         session.clear_calls()
 
-        with pytest.raises(api.TermoWebAuthError):
+        with pytest.raises(api.BackendAuthError):
             await client._request("GET", "/api/test", headers=headers)
 
         assert len(session.request_calls) == 2
@@ -372,11 +397,11 @@ def test_request_rate_limit_error() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
         headers = await client._authed_headers()
         session.clear_calls()
 
-        with pytest.raises(api.TermoWebRateLimitError):
+        with pytest.raises(api.BackendRateLimitError):
             await client._request("GET", "/api/rate", headers=headers)
 
         assert len(session.request_calls) == 1
@@ -404,7 +429,7 @@ def test_request_5xx_surfaces_client_error() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
         headers = await client._authed_headers()
         session.clear_calls()
 
@@ -429,7 +454,7 @@ def test_request_timeout_propagates() -> None:
         )
         session.queue_request(asyncio.TimeoutError())
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
         headers = await client._authed_headers()
         session.clear_calls()
 
@@ -456,7 +481,7 @@ def test_request_preview_logs_json_fallback(caplog) -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
         result = await client._request("GET", "/api/preview", headers={})
         results.append(result)
 
@@ -475,7 +500,7 @@ def test_request_preview_logs_json_fallback(caplog) -> None:
 
 def test_api_base_property_returns_sanitized() -> None:
     session = FakeSession()
-    client = TermoWebClient(session, "user", "pw", api_base="https://api.example.com/")
+    client = RESTClient(session, "user", "pw", api_base="https://api.example.com/")
 
     assert client.api_base == "https://api.example.com"
 
@@ -499,7 +524,7 @@ def test_request_text_exception_fallback() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pw")
+        client = RESTClient(session, "user", "pw")
         headers = await client._authed_headers()
         session.clear_calls()
 
@@ -528,7 +553,7 @@ def test_request_returns_plain_text() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pw")
+        client = RESTClient(session, "user", "pw")
         headers = await client._authed_headers()
         session.clear_calls()
 
@@ -541,7 +566,7 @@ def test_request_returns_plain_text() -> None:
 def test_ensure_token_uses_cache_without_http() -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pw")
+        client = RESTClient(session, "user", "pw")
         client._access_token = "cached"
         client._token_expiry = time.time() + 1000
 
@@ -563,7 +588,7 @@ def test_ensure_token_concurrent_calls_share_refresh() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pw")
+        client = RESTClient(session, "user", "pw")
         tokens = await asyncio.gather(client._ensure_token(), client._ensure_token())
 
         assert tokens == ["tok", "tok"]
@@ -575,12 +600,12 @@ def test_ensure_token_concurrent_calls_share_refresh() -> None:
 def test_ensure_token_returns_cached_after_lock_entry() -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pw")
+        client = RESTClient(session, "user", "pw")
         client._access_token = None
         client._token_expiry = 0.0
 
         class FakeLock:
-            def __init__(self, owner: TermoWebClient) -> None:
+            def __init__(self, owner: RESTClient) -> None:
                 self._owner = owner
 
             async def __aenter__(self) -> "FakeLock":
@@ -612,7 +637,7 @@ def test_token_request_error_raises_client_response_error() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pw")
+        client = RESTClient(session, "user", "pw")
         with pytest.raises(aiohttp.ClientResponseError) as err:
             await client._ensure_token()
         assert err.value.status == 500
@@ -645,7 +670,7 @@ def test_list_devices_handles_various_shapes() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pw")
+        client = RESTClient(session, "user", "pw")
         first = await client.list_devices()
         second = await client.list_devices()
 
@@ -655,19 +680,10 @@ def test_list_devices_handles_various_shapes() -> None:
     asyncio.run(_run())
 
 
-def test_device_connected_returns_none() -> None:
-    async def _run() -> None:
-        session = FakeSession()
-        client = TermoWebClient(session, "user", "pw")
-        assert await client.device_connected("dev") is None
-
-    asyncio.run(_run())
-
-
 def test_get_nodes_and_settings_use_expected_paths(monkeypatch) -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pw")
+        client = RESTClient(session, "user", "pw")
         client._access_token = "tok"
         client._token_expiry = time.time() + 1000
 
@@ -680,12 +696,81 @@ def test_get_nodes_and_settings_use_expected_paths(monkeypatch) -> None:
         monkeypatch.setattr(client, "_request", fake_request)
 
         await client.get_nodes("dev123")
-        await client.get_htr_settings("dev123", "5")
+        await client.get_node_settings("dev123", ("htr", "5"))
+        await client.get_node_samples("dev123", ("htr", "5"), 0, 10)
 
         assert calls == [
             ("GET", api.NODES_PATH_FMT.format(dev_id="dev123")),
             ("GET", f"/api/v2/devs/dev123/htr/5/settings"),
+            ("GET", f"/api/v2/devs/dev123/htr/5/samples"),
         ]
+
+    asyncio.run(_run())
+
+
+def test_get_node_settings_acm_logs(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(
+                200,
+                {"status": {"mode": "auto"}, "capabilities": {"boost": {"max": 60}}},
+                headers={"Content-Type": "application/json"},
+            )
+        )
+
+        client = RESTClient(session, "user", "pw")
+        client._access_token = "tok"
+        client._token_expiry = time.time() + 1000
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer tok"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        caplog.set_level(logging.DEBUG, logger=api.__name__)
+        node = AccumulatorNode(name="Store", addr="7")
+        data = await client.get_node_settings("dev", node)
+
+        assert data["status"]["mode"] == "auto"
+        assert any(
+            "GET settings node dev/7 (acm) payload" in record.getMessage()
+            for record in caplog.records
+        )
+
+    asyncio.run(_run())
+
+
+def test_get_node_samples_logs_for_unknown_type(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(
+                200,
+                {"unexpected": True},
+                headers={"Content-Type": "application/json"},
+            )
+        )
+
+        client = RESTClient(session, "user", "pw")
+        client._access_token = "tok"
+        client._token_expiry = time.time() + 1000
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer tok"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        caplog.set_level(logging.DEBUG, logger=api.__name__)
+        samples = await client.get_node_samples("dev", ("pmo", "4"), 0, 5)
+
+        assert samples == []
+        assert any(
+            "GET samples node dev/4 (pmo) payload" in record.getMessage()
+            for record in caplog.records
+        )
 
     asyncio.run(_run())
 
@@ -693,7 +778,7 @@ def test_get_nodes_and_settings_use_expected_paths(monkeypatch) -> None:
 def test_set_htr_settings_includes_prog_and_ptemp(monkeypatch) -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pw")
+        client = RESTClient(session, "user", "pw")
         client._access_token = "tok"
         client._token_expiry = time.time() + 1000
 
@@ -729,7 +814,7 @@ def test_request_cancelled_error_propagates() -> None:
 
         session.queue_request(raise_cancelled)
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         with pytest.raises(asyncio.CancelledError):
             await client._request("GET", "/api/cancel", headers={})
@@ -744,7 +829,7 @@ def test_request_generic_exception_logs(caplog: pytest.LogCaptureFixture) -> Non
         session = FakeSession()
         session.queue_request(RuntimeError("upstream Bearer secret-token failure"))
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         headers = {"Authorization": "Bearer secret-token"}
 
@@ -788,11 +873,11 @@ def test_request_final_auth_error_after_retries(monkeypatch) -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
         headers = await client._authed_headers()
         monkeypatch.setattr(api, "range", lambda _n: (0, 0), raising=False)
 
-        with pytest.raises(api.TermoWebAuthError) as err:
+        with pytest.raises(api.BackendAuthError) as err:
             await client._request("GET", "/api/fail", headers=headers)
 
         assert str(err.value) == "Unauthorized"
@@ -805,7 +890,7 @@ def test_request_final_auth_error_after_retries(monkeypatch) -> None:
 def test_set_htr_settings_invalid_units() -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         with pytest.raises(ValueError, match="Invalid units"):
             await client.set_htr_settings("dev", "1", units="kelvin")
@@ -819,7 +904,7 @@ def test_set_htr_settings_invalid_units() -> None:
 def test_set_htr_settings_invalid_program() -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         with pytest.raises(ValueError, match="prog must be a list of 168"):
             await client.set_htr_settings("dev", "1", prog=[0, 1, 2])
@@ -839,7 +924,7 @@ def test_set_htr_settings_invalid_program() -> None:
 def test_set_htr_settings_invalid_temperatures() -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         with pytest.raises(ValueError, match="Invalid stemp value"):
             await client.set_htr_settings("dev", "1", stemp="warm")
@@ -858,7 +943,7 @@ def test_set_htr_settings_invalid_temperatures() -> None:
     asyncio.run(_run())
 
 
-def test_get_htr_samples_empty_payload() -> None:
+def test_get_node_samples_empty_payload() -> None:
     async def _run() -> None:
         session = FakeSession()
         session.queue_post(
@@ -876,15 +961,15 @@ def test_get_htr_samples_empty_payload() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
-        samples = await client.get_htr_samples("dev", "A", 0, 10)
+        client = RESTClient(session, "user", "pass")
+        samples = await client.get_node_samples("dev", ("htr", "A"), 0, 10)
 
         assert samples == []
 
     asyncio.run(_run())
 
 
-def test_get_htr_samples_decreasing_counters() -> None:
+def test_get_node_samples_decreasing_counters() -> None:
     async def _run() -> None:
         session = FakeSession()
         session.queue_post(
@@ -907,8 +992,8 @@ def test_get_htr_samples_decreasing_counters() -> None:
             )
         )
 
-        client = TermoWebClient(session, "user", "pass")
-        samples = await client.get_htr_samples("dev", "A", 0, 10)
+        client = RESTClient(session, "user", "pass")
+        samples = await client.get_node_samples("dev", ("htr", "A"), 0, 10)
 
         assert samples == [
             {"t": 1, "counter": "3.0"},
@@ -918,10 +1003,10 @@ def test_get_htr_samples_decreasing_counters() -> None:
     asyncio.run(_run())
 
 
-def test_get_htr_samples_malformed_items(monkeypatch, caplog) -> None:
+def test_get_node_samples_malformed_items(monkeypatch, caplog) -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         async def fake_headers() -> dict[str, str]:
             return {}
@@ -941,7 +1026,7 @@ def test_get_htr_samples_malformed_items(monkeypatch, caplog) -> None:
         monkeypatch.setattr(client, "_request", fake_request)
 
         with caplog.at_level("DEBUG"):
-            samples = await client.get_htr_samples("dev", "A", 0, 10)
+            samples = await client.get_node_samples("dev", ("htr", "A"), 0, 10)
 
         assert samples == []
 
@@ -952,10 +1037,10 @@ def test_get_htr_samples_malformed_items(monkeypatch, caplog) -> None:
     assert any("Unexpected htr sample shape" in msg for msg in messages)
 
 
-def test_get_htr_samples_unexpected_payload(monkeypatch, caplog) -> None:
+def test_get_node_samples_unexpected_payload(monkeypatch, caplog) -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         async def fake_headers() -> dict[str, str]:
             return {}
@@ -967,7 +1052,7 @@ def test_get_htr_samples_unexpected_payload(monkeypatch, caplog) -> None:
         monkeypatch.setattr(client, "_request", fake_request)
 
         with caplog.at_level("DEBUG"):
-            samples = await client.get_htr_samples("dev", "A", 0, 10)
+            samples = await client.get_node_samples("dev", ("htr", "A"), 0, 10)
 
         assert samples == []
 
@@ -1007,7 +1092,7 @@ def test_request_recovers_after_token_refresh() -> None:
             ),
         )
 
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
         devices = await client.list_devices()
 
         assert devices == [{"dev_id": "1"}]
@@ -1022,7 +1107,7 @@ def test_request_recovers_after_token_refresh() -> None:
 def test_list_devices_unexpected_dict_payload(monkeypatch, caplog) -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         async def fake_headers() -> dict[str, str]:
             return {}
@@ -1048,7 +1133,7 @@ def test_list_devices_unexpected_dict_payload(monkeypatch, caplog) -> None:
 def test_list_devices_unexpected_string_payload(monkeypatch, caplog) -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         async def fake_headers() -> dict[str, str]:
             return {}
@@ -1072,7 +1157,7 @@ def test_list_devices_unexpected_string_payload(monkeypatch, caplog) -> None:
 def test_set_htr_settings_translates_heat(monkeypatch) -> None:
     async def _run() -> None:
         session = FakeSession()
-        client = TermoWebClient(session, "user", "pass")
+        client = RESTClient(session, "user", "pass")
 
         async def fake_headers() -> dict[str, str]:
             return {}
@@ -1093,4 +1178,456 @@ def test_set_htr_settings_translates_heat(monkeypatch) -> None:
 
     asyncio.run(_run())
 
+
+def test_ducaheat_get_node_settings_normalises_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(
+                200,
+                {
+                    "status": {
+                        "mode": "Manual",
+                        "state": "heating",
+                        "stemp": "21.0",
+                        "temp": 20.5,
+                        "units": "c",
+                        "boost_active": True,
+                    },
+                    "setup": {"extra_options": {"boost_temp": "23.0", "boost_time": 45}},
+                    "prog": {
+                        "days": {
+                            "mon": {"slots": [0, 1, 2, 0] * 6},
+                            "tue": {"slots": [1] * 24},
+                            "wed": {"slots": [2] * 24},
+                            "thu": {"slots": [0] * 24},
+                            "fri": {"slots": [1, 2] * 12},
+                            "sat": {"slots": [2, 2, 1, 1] * 6},
+                            "sun": {"slots": [0, 0, 1, 2] * 6},
+                        }
+                    },
+                    "prog_temps": {
+                        "comfort": "21.0",
+                        "eco": "18.0",
+                        "antifrost": "7.0",
+                    },
+                    "addr": "A1",
+                },
+                headers={"Content-Type": "application/json"},
+            )
+        )
+
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        data = await client.get_node_settings("dev", ("htr", "A1"))
+
+        assert data["mode"] == "manual"
+        assert data["state"] == "heating"
+        assert data["stemp"] == "21.0"
+        assert data["mtemp"] == "20.5"
+        assert data["units"] == "C"
+        assert data["boost_active"] is True
+        assert data["boost_time"] == 45
+        assert data["boost_temp"] == "23.0"
+        assert len(data["prog"]) == 168
+        assert data["ptemp"] == ["7.0", "18.0", "21.0"]
+        assert data["raw"]["status"]["mode"] == "Manual"
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_get_node_settings_acm_merges_capabilities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(
+                200,
+                {
+                    "status": {
+                        "mode": "auto",
+                        "capabilities": {"boost": {"max": 90}},
+                    },
+                    "setup": {
+                        "capabilities": {
+                            "boost": {"min": 10},
+                            "charge": {"modes": ["eco"]},
+                        }
+                    },
+                    "capabilities": {"charge": {"levels": [1, 2, 3]}},
+                },
+                headers={"Content-Type": "application/json"},
+            )
+        )
+
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        data = await client.get_node_settings("dev", ("acm", "2"))
+
+        assert data["mode"] == "auto"
+        assert data["capabilities"] == {
+            "boost": {"max": 90, "min": 10},
+            "charge": {"modes": ["eco"], "levels": [1, 2, 3]},
+        }
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_set_htr_settings_writes_segmented(monkeypatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(200, {}, headers={"Content-Type": "application/json"}),
+            MockResponse(200, {}, headers={"Content-Type": "application/json"}),
+            MockResponse(200, {}, headers={"Content-Type": "application/json"}),
+            MockResponse(200, {}, headers={"Content-Type": "application/json"}),
+            MockResponse(200, {}, headers={"Content-Type": "application/json"}),
+        )
+
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        prog_list = [0] * 24 + [1] * 24 + [2] * 24 + [0] * 24 + [1] * 24 + [2] * 24 + [0] * 24
+        ptemp_list = [5.0, 15.0, 21.0]
+
+        result = await client.set_htr_settings(
+            "dev",
+            "A1",
+            mode="manual",
+            stemp=21.2,
+            prog=prog_list,
+            ptemp=ptemp_list,
+            units="C",
+        )
+
+        assert set(result) == {"status", "prog", "prog_temps"}
+        urls = [call[1] for call in session.request_calls]
+        assert urls == [
+            "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/select",
+            "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/status",
+            "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/prog",
+            "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/prog_temps",
+            "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/select",
+        ]
+        status_json = session.request_calls[1][2]["json"]
+        assert status_json == {"mode": "manual", "stemp": "21.2", "units": "C"}
+        prog_json = session.request_calls[2][2]["json"]
+        assert prog_json["days"]["tue"]["slots"] == [1] * 24
+        ptemp_json = session.request_calls[3][2]["json"]
+        assert ptemp_json == {"antifrost": "5.0", "eco": "15.0", "comfort": "21.0"}
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_set_htr_settings_mode_only(monkeypatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(200, {"ok": True}, headers={"Content-Type": "application/json"})
+        )
+
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        result = await client.set_htr_settings("dev", "A1", mode="heat")
+        assert result == {"mode": {"ok": True}}
+
+        assert len(session.request_calls) == 1
+        call = session.request_calls[0]
+        assert call[1] == "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/mode"
+        assert call[2]["json"] == {"mode": "manual"}
+        assert call[2]["headers"]["Authorization"] == "Bearer token"
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_set_htr_settings_invalid_stemp(monkeypatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        with pytest.raises(ValueError) as exc:
+            await client.set_htr_settings("dev", "A1", stemp="bad")
+
+        assert "Invalid stemp value" in str(exc.value)
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_set_htr_settings_invalid_units(monkeypatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(200, {}, headers={"Content-Type": "application/json"})
+        )
+
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        with pytest.raises(ValueError) as exc:
+            await client.set_htr_settings("dev", "A1", stemp=21.0, units="K")
+
+        assert "Invalid units" in str(exc.value)
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_set_htr_settings_prog_only(monkeypatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(200, {}, headers={"Content-Type": "application/json"}),
+            MockResponse(200, {"saved": True}, headers={"Content-Type": "application/json"}),
+            MockResponse(200, {}, headers={"Content-Type": "application/json"}),
+        )
+
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        prog_list = [0] * 168
+
+        result = await client.set_htr_settings("dev", "A1", prog=prog_list)
+        assert result == {"prog": {"saved": True}}
+
+        urls = [call[1] for call in session.request_calls]
+        assert urls == [
+            "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/select",
+            "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/prog",
+            "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/select",
+        ]
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_get_node_samples_converts_ms(monkeypatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(
+                200,
+                {"samples": [{"t": 1_234_500, "counter": 7.5}]},
+                headers={"Content-Type": "application/json"},
+            )
+        )
+
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        samples = await client.get_node_samples("dev", ("htr", "A"), 10, 20)
+        assert samples == [{"t": 1234, "counter": "7.5"}]
+
+        call = session.request_calls[0]
+        assert call[1] == "https://api.termoweb.fake/api/v2/devs/dev/htr/A/samples"
+        assert call[2]["params"] == {"start": 10_000, "end": 20_000}
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_normalise_settings_non_dict() -> None:
+    client = DucaheatRESTClient(
+        FakeSession(),
+        "user",
+        "pass",
+        api_base="https://api.termoweb.fake",
+    )
+    assert client._normalise_settings(123) == {}
+
+
+def test_ducaheat_normalise_settings_fallbacks() -> None:
+    client = DucaheatRESTClient(
+        FakeSession(),
+        "user",
+        "pass",
+        api_base="https://api.termoweb.fake",
+    )
+    payload = {
+        "status": {
+            "set_temp": "20.5",
+            "ambient": 19,
+            "boost_temp": "  23.0 ",
+            "boost_time": 30,
+        },
+        "prog": None,
+        "prog_temps": {"cold": "5", "night": None, "day": " 18 "},
+        "name": "Heater",
+    }
+
+    result = client._normalise_settings(payload)
+    assert result["stemp"] == "20.5"
+    assert result["mtemp"] == "19.0"
+    assert result["boost_temp"] == "23.0"
+    assert result["boost_time"] == 30
+    assert result["ptemp"] == ["5.0", "", "18.0"]
+    assert result["name"] == "Heater"
+
+
+def test_ducaheat_normalise_prog_with_varied_inputs() -> None:
+    client = DucaheatRESTClient(
+        FakeSession(),
+        "user",
+        "pass",
+        api_base="https://api.termoweb.fake",
+    )
+    data = {
+        "mon": {"values": [0, 1, 2]},
+        "tue": [1] * 10,
+        "wed": {"slots": [2] * 30},
+        "fri": {"slots": [0] * 24},
+        "sat": {"values": [1] * 24},
+    }
+
+    result = client._normalise_prog(data)
+    assert result is not None
+    assert len(result) == 168
+    # Monday should extend with zeros to 24 slots
+    assert result[:3] == [0, 1, 2]
+
+
+def test_ducaheat_normalise_prog_invalid_inputs() -> None:
+    client = DucaheatRESTClient(
+        FakeSession(),
+        "user",
+        "pass",
+        api_base="https://api.termoweb.fake",
+    )
+
+    assert client._normalise_prog("bad") is None
+    assert client._normalise_prog({"foo": "bar"}) is None
+    assert client._normalise_prog([0] * 168 + ["x"]) is None
+
+    bad_day = {"days": {"mon": ["x"]}}
+    assert client._normalise_prog(bad_day) is None
+
+
+def test_ducaheat_normalise_prog_temps_variations() -> None:
+    client = DucaheatRESTClient(
+        FakeSession(),
+        "user",
+        "pass",
+        api_base="https://api.termoweb.fake",
+    )
+
+    assert client._normalise_prog_temps("bad") is None
+
+    temps = client._normalise_prog_temps(
+        {"antifrost": None, "eco": " 18.5 ", "comfort": "abc"}
+    )
+    assert temps == ["", "18.5", "abc"]
+
+    weird = client._normalise_prog_temps(
+        {"antifrost": ["bad"], "eco": None, "comfort": 18}
+    )
+    assert weird == ["['bad']", "", "18.0"]
+
+
+def test_ducaheat_safe_temperature_handles_strings() -> None:
+    client = DucaheatRESTClient(
+        FakeSession(),
+        "user",
+        "pass",
+        api_base="https://api.termoweb.fake",
+    )
+
+    assert client._safe_temperature(None) is None
+    assert client._safe_temperature(" 21.2 ") == "21.2"
+    assert client._safe_temperature("   ") is None
+    assert client._safe_temperature("abc") == "abc"
+    assert client._safe_temperature(["oops"]) is None
+
+
+def test_extract_samples_handles_list_payload() -> None:
+    client = DucaheatRESTClient(
+        FakeSession(),
+        "user",
+        "pass",
+        api_base="https://api.termoweb.fake",
+    )
+
+    samples = client._extract_samples(
+        [
+            {"timestamp": 2000.0, "value": 5.5},
+            {"t": "bad"},
+            {"timestamp": 1000, "energy": 3},
+        ]
+    )
+
+    assert samples == [{"t": 2000, "counter": "5.5"}, {"t": 1000, "counter": "3"}]
 

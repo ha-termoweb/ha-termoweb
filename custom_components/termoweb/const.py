@@ -1,3 +1,5 @@
+"""Constants for the TermoWeb integration."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -11,11 +13,8 @@ DOMAIN: Final = "termoweb"
 API_BASE: Final = "https://control.termoweb.net"
 TOKEN_PATH: Final = "/client/token"
 DEVS_PATH: Final = "/api/v2/devs/"
-CONNECTED_PATH_FMT: Final = (
-    "/api/v2/devs/{dev_id}/connected"  # some fw return 404; we tolerate
-)
 NODES_PATH_FMT: Final = "/api/v2/devs/{dev_id}/mgr/nodes"
-HTR_SAMPLES_PATH_FMT: Final = "/api/v2/devs/{dev_id}/htr/{addr}/samples"
+NODE_SAMPLES_PATH_FMT: Final = "/api/v2/devs/{dev_id}/{node_type}/{addr}/samples"
 
 # Public client creds (from APK v2.5.1)
 BASIC_AUTH_B64: Final = "NTIxNzJkYzg0ZjYzZDZjNzU5MDAwMDA1OmJ4djRaM3hVU2U="
@@ -75,12 +74,7 @@ HTR_ENERGY_UPDATE_INTERVAL: Final = timedelta(hours=1)
 USER_AGENT: Final = "TermoWeb/2.5.1 (Android; HomeAssistant Integration)"
 ACCEPT_LANGUAGE: Final = "en-US,en;q=0.8"
 
-# Integration version (also shown in Device Info)
-# NOTE: Other modules may read the version from the manifest at runtime (DRY),
-# but we keep this constant for compatibility where needed.
-INTEGRATION_VERSION: Final = "1.0.0"
-
-# Socket.IO namespace (used by ws_client_legacy)
+# Socket.IO namespace used by the websocket client implementation
 WS_NAMESPACE: Final = "/api/v2/socket_io"
 
 # --- Dispatcher signal helpers (WS → entities) ---
