@@ -21,6 +21,7 @@ from .nodes import NODE_CLASS_BY_TYPE, build_node_inventory
 from .utils import (
     HEATER_NODE_TYPES,
     addresses_by_node_type,
+    build_heater_address_map,
     ensure_node_inventory,
     normalize_heater_addresses,
 )
@@ -370,13 +371,15 @@ class WebSocketClient:
         if record is None:
             record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
         addr_map: dict[str, list[str]] = {}
+        _reverse_lookup: dict[str, set[str]] = {}
         if inventory:
-            type_to_addrs, _ = addresses_by_node_type(
-                inventory, known_types=NODE_CLASS_BY_TYPE
-            )
-            for node_type, addrs in type_to_addrs.items():
-                if node_type in HEATER_NODE_TYPES and addrs:
-                    addr_map[node_type] = list(addrs)
+            helper_map, _reverse_lookup = build_heater_address_map(inventory)
+            if helper_map:
+                addr_map = {
+                    node_type: list(addresses)
+                    for node_type, addresses in helper_map.items()
+                    if node_type in HEATER_NODE_TYPES and addresses
+                }
         if not addr_map and hasattr(self._coordinator, "_addrs"):
             try:
                 fallback = list(self._coordinator._addrs())  # noqa: SLF001
