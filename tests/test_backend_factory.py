@@ -134,14 +134,16 @@ def test_termoweb_backend_resolve_ws_client_cls_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backend = TermoWebBackend(brand="termoweb", client=DummyHttpClient())
-    modules = {
-        "custom_components.termoweb.__init__": SimpleNamespace(WebSocket09Client=None)
-    }
-
-    def fake_import(name: str) -> Any:
-        return modules[name]
-
-    monkeypatch.setattr(termoweb_backend, "import_module", fake_import)
+    monkeypatch.setitem(
+        termoweb_backend.sys.modules,
+        "custom_components.termoweb",
+        SimpleNamespace(WebSocket09Client=None),
+    )
+    monkeypatch.setitem(
+        termoweb_backend.sys.modules,
+        "custom_components.termoweb.__init__",
+        SimpleNamespace(WebSocket09Client=None),
+    )
 
     resolved = backend._resolve_ws_client_cls()
     assert resolved is WebSocketClient
@@ -168,11 +170,11 @@ def test_termoweb_backend_legacy_ws_class(monkeypatch: pytest.MonkeyPatch) -> No
             self.coordinator = coordinator
             self.kwargs = kwargs
 
-    modules = {
-        "custom_components.termoweb.__init__": SimpleNamespace(WebSocket09Client=LegacyWS)
-    }
-
-    monkeypatch.setattr(termoweb_backend, "import_module", modules.__getitem__)
+    monkeypatch.setitem(
+        termoweb_backend.sys.modules,
+        "custom_components.termoweb",
+        SimpleNamespace(WebSocket09Client=LegacyWS),
+    )
 
     loop = asyncio.new_event_loop()
     try:
