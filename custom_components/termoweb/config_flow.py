@@ -150,21 +150,10 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         current_brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
 
         if user_input is None:
-            schema = vol.Schema(
-                {
-                    vol.Required(
-                        CONF_BRAND,
-                        default=current_brand
-                        if current_brand in BRAND_LABELS
-                        else DEFAULT_BRAND,
-                    ): vol.In(BRAND_LABELS),
-                    vol.Required("username", default=current_user): str,
-                    vol.Required("password"): str,
-                    vol.Required(
-                        "poll_interval",
-                        default=max(MIN_POLL_INTERVAL, int(current_poll)),
-                    ): vol.All(int, vol.Range(min=MIN_POLL_INTERVAL, max=MAX_POLL_INTERVAL)),
-                }
+            schema = _login_schema(
+                default_user=current_user,
+                default_poll=current_poll,
+                default_brand=current_brand,
             )
             return self.async_show_form(step_id="reconfigure", data_schema=schema, description_placeholders={"version": ver})
 
@@ -188,19 +177,10 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors["base"] = "unknown"
 
         if errors:
-            schema = vol.Schema(
-                {
-                    vol.Required(
-                        CONF_BRAND,
-                        default=brand if brand in BRAND_LABELS else DEFAULT_BRAND,
-                    ): vol.In(BRAND_LABELS),
-                    vol.Required("username", default=username or current_user): str,
-                    vol.Required("password"): str,
-                    vol.Required(
-                        "poll_interval",
-                        default=max(MIN_POLL_INTERVAL, int(poll_interval)),
-                    ): vol.All(int, vol.Range(min=MIN_POLL_INTERVAL, max=MAX_POLL_INTERVAL)),
-                }
+            schema = _login_schema(
+                default_user=username or current_user,
+                default_poll=poll_interval,
+                default_brand=brand,
             )
             return self.async_show_form(step_id="reconfigure", data_schema=schema, errors=errors, description_placeholders={"version": ver})
 
