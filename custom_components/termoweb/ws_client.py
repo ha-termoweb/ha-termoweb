@@ -908,16 +908,13 @@ class WebSocketClient:
             snapshot = {"nodes": deepcopy(raw_nodes), "nodes_by_type": {}}
 
         record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-        inventory: list[Any] = []
-        try:
-            inventory = build_node_inventory(raw_nodes)
-        except Exception as err:  # pragma: no cover - defensive  # noqa: BLE001
-            _LOGGER.debug(
-                "WS %s: failed to build node inventory: %s",
-                self.dev_id,
-                err,
-                exc_info=err,
-            )
+        record_map: Mapping[str, Any]
+        if isinstance(record, Mapping):
+            record_map = record
+        else:
+            record_map = {}
+
+        inventory = ensure_node_inventory(record_map, nodes=raw_nodes)
 
         addr_map, unknown_types = addresses_by_node_type(
             inventory, known_types=NODE_CLASS_BY_TYPE
@@ -945,8 +942,9 @@ class WebSocketClient:
 
         if isinstance(record, dict):
             record["nodes"] = raw_nodes
+            record["node_inventory"] = inventory
 
-        self._apply_heater_addresses(addr_map, inventory=inventory)
+        self._apply_heater_addresses(addr_map, inventory=None)
 
         payload_copy = {
             "dev_id": self.dev_id,

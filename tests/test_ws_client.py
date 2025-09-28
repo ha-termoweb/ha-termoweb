@@ -14,6 +14,7 @@ from conftest import _install_stubs
 
 _install_stubs()
 
+import custom_components.termoweb.utils as utils
 import custom_components.termoweb.ws_client as ws_core
 
 
@@ -2242,49 +2243,81 @@ def test_dispatch_nodes_uses_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     assert {
         key: sorted(value) for key, value in addr_map_arg.items()
     } == {"acm": ["A1"], "htr": ["01", "02"]}
-    inventory = helper_calls[0][1]
-    assert inventory is not None
-    assert sorted(
-        (getattr(node, "type", None), getattr(node, "addr", None)) for node in inventory
-    ) == [("acm", "A1"), ("htr", "01"), ("htr", "02")]
+    inventory_arg = helper_calls[0][1]
+    assert inventory_arg is None
+    assert coordinator.nodes_updates
+    raw_nodes_arg, inventory = coordinator.nodes_updates[0]
+    assert raw_nodes_arg == payload
     assert energy.calls == [{"htr": ["01", "02"], "acm": ["A1"]}]
     record = hass.data[module.DOMAIN]["entry"]
     assert "node_inventory" in record and record["node_inventory"] is inventory
+    assert sorted(
+        (getattr(node, "type", None), getattr(node, "addr", None)) for node in inventory
+    ) == [("acm", "A1"), ("htr", "01"), ("htr", "02")]
+    assert coordinator.nodes_updates[0][1] is record["node_inventory"]
     assert {
         key: sorted(value) for key, value in result.items()
     } == {"acm": ["A1"], "htr": ["01", "02"]}
     assert dispatcher_calls
 
 
-def test_dispatch_nodes_handles_empty_payload(
+def test_dispatch_nodes_reuses_cached_inventory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     module = _load_ws_client()
-    module.async_dispatcher_send = MagicMock()
-    monkeypatch.setattr(ws_core, "async_dispatcher_send", module.async_dispatcher_send)
+    Client = module.WebSocket09Client
+
+    helper_calls: list[tuple[Any, Any]] = []
+
+    original_helper = Client._apply_heater_addresses
+
+    def helper(self: Any, addr_map: Any, *, inventory: Any = None) -> Any:
+        helper_calls.append((addr_map, inventory))
+        return original_helper(self, addr_map, inventory=inventory)
+
+    monkeypatch.setattr(Client, "_apply_heater_addresses", helper)
+
+    class FakeEnergyCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[Any] = []
+
+        def update_addresses(self, addrs: Any) -> None:
+            self.calls.append(addrs)
+
+    energy = FakeEnergyCoordinator()
 
     class DummyLoop:
         def call_soon_threadsafe(self, callback: Any) -> None:
             callback()
 
+    cached_payload = {"nodes": [{"addr": "01", "type": "htr"}]}
+    cached_inventory = module.build_node_inventory(cached_payload)
+
     hass = types.SimpleNamespace(
         loop=DummyLoop(),
-        data={module.DOMAIN: {"entry": {"ws_state": {}}}},
+        data={
+            module.DOMAIN: {
+                "entry": {
+                    "ws_state": {},
+                    "energy_coordinator": energy,
+                    "node_inventory": list(cached_inventory),
+                    "nodes": {},
+                }
+            }
+        },
     )
 
-    coordinator = types.SimpleNamespace(update_nodes=MagicMock(), data={"dev": {}})
+    class RecordingCoordinator:
+        def __init__(self) -> None:
+            self.nodes_updates: list[Any] = []
+            self.data: dict[str, Any] = {}
+
+        def update_nodes(self, nodes: dict[str, Any], inventory: list[Any]) -> None:
+            self.nodes_updates.append((nodes, inventory))
+
+    coordinator = RecordingCoordinator()
     api = types.SimpleNamespace(_session=None)
-
-    
-def test_dispatch_nodes_returns_empty_for_non_mapping() -> None:
-    module = _load_ws_client()
-
-    loop = types.SimpleNamespace(call_soon_threadsafe=None, create_task=lambda *a, **k: None)
-    hass = types.SimpleNamespace(loop=loop, data={module.DOMAIN: {"entry": {}}})
-    coordinator = types.SimpleNamespace()
-    api = types.SimpleNamespace(_session=None)
-
-    client = module.WebSocket09Client(
+    client = Client(
         hass,
         entry_id="entry",
         dev_id="dev",
@@ -2292,69 +2325,27 @@ def test_dispatch_nodes_returns_empty_for_non_mapping() -> None:
         coordinator=coordinator,
     )
 
-    result = client._dispatch_nodes([1, 2, 3])
+    def explode_build(raw_nodes: Any) -> list[Any]:  # pragma: no cover - defensive
+        raise AssertionError("build_node_inventory should not be called")
 
-    assert result == {}
+    monkeypatch.setattr(utils, "build_node_inventory", explode_build)
 
-
-def test_dispatch_nodes_handles_missing_raw_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
-    module = _load_ws_client()
-
-    dispatched: list[tuple[str, dict[str, Any]]] = []
-
-    def fake_dispatcher(hass: Any, signal: str, payload: dict[str, Any]) -> None:
-        dispatched.append((signal, payload))
-
-    monkeypatch.setattr(module, "async_dispatcher_send", fake_dispatcher)
-
-    captured_raw: list[Any] = []
-
-    def fake_builder(raw: Any) -> list[Any]:
-        captured_raw.append(raw)
-        return []
-
-    monkeypatch.setattr(module, "build_node_inventory", fake_builder)
-    monkeypatch.setattr(module, "addresses_by_node_type", lambda _inv, **_kw: ({}, set()))
-    monkeypatch.setattr(module, "normalize_heater_addresses", lambda addr_map: (addr_map, {}))
-
-    loop = types.SimpleNamespace(
-        call_soon_threadsafe=lambda callback, *args: callback(*args),
-        create_task=lambda *a, **k: None,
-    )
-    hass = types.SimpleNamespace(loop=loop, data={module.DOMAIN: {"entry": {}}})
-    coordinator = types.SimpleNamespace(update_nodes=MagicMock(), data={"dev": {}})
-    api = types.SimpleNamespace(_session=None)
-
-    client = module.WebSocket09Client(
-        hass,
-        entry_id="entry",
-        dev_id="dev",
-        api_client=api,
-        coordinator=coordinator,
-    )
-
-    assert client._dispatch_nodes(None) == {}
-    coordinator.update_nodes.assert_not_called()
-
-    result = client._dispatch_nodes({"nodes": None, "nodes_by_type": {}})
-    coordinator.update_nodes.assert_called_with({}, [])
-    assert result == {}
-
-
-    payload = {"nodes": None, "nodes_by_type": {}}
+    payload = {"nodes": [{"addr": "01", "type": "htr"}]}
 
     result = client._dispatch_nodes(payload)
 
-    assert captured_raw == [None]
-    coordinator.update_nodes.assert_called_once_with({}, [])
-    assert dispatched
-    signal, dispatched_payload = dispatched[0]
-    assert signal == module.signal_ws_data("entry")
-    assert dispatched_payload["dev_id"] == "dev"
-    assert result == {}
-
+    assert result == {"htr": ["01"]}
+    assert helper_calls
+    assert helper_calls[0][1] is None
+    assert coordinator.nodes_updates
+    raw_nodes_arg, inventory = coordinator.nodes_updates[0]
+    assert raw_nodes_arg == payload
     record = hass.data[module.DOMAIN]["entry"]
-    assert record.get("nodes") == {}
+    assert record["nodes"] == payload
+    assert record["node_inventory"] is inventory
+    assert inventory and inventory[0] is cached_inventory[0]
+    assert energy.calls == [{"htr": ["01"]}]
+
 
 def test_mark_event_promotes_to_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load_ws_client()
