@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from typing import Any, Callable
 
 from homeassistant.components.climate import (
@@ -693,21 +692,14 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             ws_state = ws_record.get(self._dev_id)
             if isinstance(ws_state, dict):
                 status = str(ws_state.get("status") or "").lower()
-                last_event_at = ws_state.get("last_event_at")
-                if status in {"connected", "healthy"} and isinstance(
-                    last_event_at, (int, float)
-                ):
-                    now = time.time()
-                    age = now - float(last_event_at)
-                    if age < _WS_ECHO_FALLBACK_REFRESH:
-                        _LOGGER.debug(
-                            "Skipping refresh fallback dev=%s addr=%s ws_status=%s age=%.3f",
-                            self._dev_id,
-                            self._addr,
-                            status,
-                            age,
-                        )
-                        return
+                if status in {"connected", "healthy"}:
+                    _LOGGER.debug(
+                        "Skipping refresh fallback dev=%s addr=%s ws_status=%s",
+                        self._dev_id,
+                        self._addr,
+                        status,
+                    )
+                    return
 
         async def _fallback() -> None:
             """Force a heater refresh after the fallback delay."""

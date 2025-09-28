@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
-import time
 from collections import deque
 from collections.abc import Coroutine
 import types
@@ -1278,7 +1277,7 @@ def test_heater_write_paths_and_errors(
         # -------------------- WS healthy suppresses fallback --------------
         hass.data[DOMAIN][entry_id]["ws_state"][dev_id] = {
             "status": "healthy",
-            "last_event_at": time.time(),
+            "last_event_at": 0,
         }
         client.set_htr_settings.reset_mock()
         await heater.async_set_temperature(**{ATTR_TEMPERATURE: 22.5})
@@ -1287,6 +1286,15 @@ def test_heater_write_paths_and_errors(
         assert client.set_htr_settings.await_count == 1
         assert heater._refresh_fallback is None
         assert not fallback_waiters
+        client.set_htr_settings.reset_mock()
+
+        # -------------------- WS status missing triggers fallback ---------
+        hass.data[DOMAIN][entry_id]["ws_state"].pop(dev_id, None)
+        await heater.async_set_temperature(**{ATTR_TEMPERATURE: 24.5})
+        assert heater._write_task is not None
+        await heater._write_task
+        assert heater._refresh_fallback is not None
+        await _complete_fallback_once()
         client.set_htr_settings.reset_mock()
 
         # -------------------- WS down restores fallback -------------------
