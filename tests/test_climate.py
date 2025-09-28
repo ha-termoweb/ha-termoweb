@@ -82,6 +82,27 @@ def test_termoweb_heater_is_heater_node() -> None:
     assert heater.name == "Living Room"
 
 
+def test_heater_climate_entity_normalizes_node_type() -> None:
+    _reset_environment()
+    hass = HomeAssistant()
+    dev_id = "dev-acm"
+    coordinator_data = {dev_id: {"htr": {"settings": {}}, "nodes": {}}}
+    coordinator = _make_coordinator(hass, dev_id, coordinator_data[dev_id])
+
+    heater = HeaterClimateEntity(
+        coordinator,
+        "entry",
+        dev_id,
+        "1",
+        "Heater",
+        node_type=" ACM ",
+    )
+
+    assert heater.type == "acm"
+    assert getattr(heater, "_node_type", "") == "acm"
+    assert heater._attr_unique_id == f"{DOMAIN}:{dev_id}:acm:{heater._addr}"
+
+
 def test_async_setup_entry_creates_entities() -> None:
     async def _run() -> None:
         _reset_environment()
