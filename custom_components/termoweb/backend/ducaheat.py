@@ -7,16 +7,13 @@ from typing import Any
 
 from ..api import RESTClient
 from ..const import BRAND_DUCAHEAT
-from ..nodes import Node
+from ..nodes import NodeDescriptor
 from ..ws_client import WebSocketClient
 from .base import Backend, WsClientProto
 
 _LOGGER = logging.getLogger(__name__)
 
 _DAY_ORDER = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
-
-NodeDescriptor = Node | tuple[str, str | int]
-
 
 class DucaheatRESTClient(RESTClient):
     """HTTP adapter that speaks the segmented Ducaheat API."""

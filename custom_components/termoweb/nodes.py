@@ -66,6 +66,9 @@ class Node:
         }
 
 
+NodeDescriptor = Node | tuple[str, str | int]
+
+
 class HeaterNode(Node):
     """Heater node (type ``htr``)."""
 

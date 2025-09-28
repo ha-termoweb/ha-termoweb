@@ -18,7 +18,7 @@ from .const import (
     TOKEN_PATH,
     USER_AGENT,
 )
-from .nodes import Node
+from .nodes import Node, NodeDescriptor
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,9 +32,6 @@ class BackendAuthError(Exception):
 
 class BackendRateLimitError(Exception):
     """Server rate-limited the client (HTTP 429)."""
-
-
-NodeDescriptor = Node | tuple[str, str | int]
 
 
 def _redact_bearer(text: str | None) -> str:
