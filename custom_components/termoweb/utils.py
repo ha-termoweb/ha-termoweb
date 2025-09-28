@@ -101,6 +101,64 @@ def ensure_node_inventory(
     return []
 
 
+def normalize_node_type(
+    value: Any,
+    *,
+    default: str = "",
+    use_default_when_falsey: bool = False,
+) -> str:
+    """Return ``value`` as a normalised node type string."""
+
+    raw = value
+    if use_default_when_falsey and not raw:
+        raw = default
+
+    try:
+        normalized = str(raw).strip().lower()
+    except Exception:  # pragma: no cover - defensive  # noqa: BLE001
+        normalized = ""
+
+    if normalized:
+        return normalized
+
+    if default and not use_default_when_falsey:
+        try:
+            return str(default).strip().lower()
+        except Exception:  # pragma: no cover - defensive  # noqa: BLE001
+            return ""
+
+    return ""
+
+
+def normalize_node_addr(
+    value: Any,
+    *,
+    default: str = "",
+    use_default_when_falsey: bool = False,
+) -> str:
+    """Return ``value`` as a normalised node address string."""
+
+    raw = value
+    if use_default_when_falsey and not raw:
+        raw = default
+
+    try:
+        normalized = str(raw).strip()
+    except Exception:  # pragma: no cover - defensive  # noqa: BLE001
+        normalized = ""
+
+    if normalized:
+        return normalized
+
+    if default and not use_default_when_falsey:
+        try:
+            return str(default).strip()
+        except Exception:  # pragma: no cover - defensive  # noqa: BLE001
+            return ""
+
+    return ""
+
+
 def _entry_gateway_record(
     hass: HomeAssistant | None, entry_id: str | None
 ) -> Mapping[str, Any] | None:
@@ -174,19 +232,17 @@ def addresses_by_node_type(
 
     known: set[str] | None = None
     if known_types is not None:
-        known = {
-            str(node_type).strip().lower() for node_type in known_types if node_type
-        }
+        known = {normalize_node_type(node_type) for node_type in known_types if node_type}
 
     result: dict[str, list[str]] = {}
     seen: dict[str, set[str]] = {}
     unknown: set[str] = set()
 
     for node in nodes:
-        node_type = str(getattr(node, "type", "")).strip().lower()
+        node_type = normalize_node_type(getattr(node, "type", ""))
         if not node_type:
             continue
-        addr = str(getattr(node, "addr", "")).strip()
+        addr = normalize_node_addr(getattr(node, "addr", ""))
         if not addr:
             continue
         type_seen = seen.setdefault(node_type, set())
@@ -212,9 +268,9 @@ def build_heater_address_map(
         allowed_types = set(HEATER_NODE_TYPES)
     else:
         allowed_types = {
-            str(node_type).strip().lower()
+            normalize_node_type(node_type, use_default_when_falsey=True)
             for node_type in heater_types
-            if str(node_type or "").strip()
+            if normalize_node_type(node_type, use_default_when_falsey=True)
         }  # pragma: no cover - exercised indirectly in integration
 
     if not allowed_types:
@@ -276,7 +332,10 @@ def normalize_heater_addresses(
         sources = [("htr", addrs)]
 
     for raw_type, values in sources:
-        node_type = str(raw_type or "").strip().lower()
+        node_type = normalize_node_type(
+            raw_type,
+            use_default_when_falsey=True,
+        )
         if not node_type:
             continue
 
@@ -298,7 +357,10 @@ def normalize_heater_addresses(
         bucket = cleaned_map.setdefault(node_type, [])
         seen: set[str] = set(bucket)
         for candidate in candidates:
-            addr = "" if candidate is None else str(candidate).strip()
+            addr = normalize_node_addr(
+                candidate,
+                use_default_when_falsey=True,
+            )
             if not addr or addr in seen:
                 continue
             seen.add(addr)

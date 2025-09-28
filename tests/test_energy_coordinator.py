@@ -110,6 +110,21 @@ def test_set_inventory_from_nodes_defaults_to_empty() -> None:
     assert coord._node_inventory == []
 
 
+def test_normalise_type_section_cleans_addresses() -> None:
+    section = {
+        "addrs": [" 1 ", None, "2"],
+        "settings": {" 1 ": {"mode": "auto"}, None: {"mode": "skip"}},
+    }
+
+    normalized = StateCoordinator._normalise_type_section("htr", section, [" 3 ", ""])
+
+    assert normalized["addrs"] == ["1", "None", "2"]
+    assert normalized["settings"] == {
+        "1": {"mode": "auto"},
+        "None": {"mode": "skip"},
+    }
+
+
 def test_power_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
