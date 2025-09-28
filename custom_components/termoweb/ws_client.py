@@ -389,7 +389,10 @@ class WebSocketClient:
                 addr_map["htr"] = [
                     str(addr).strip() for addr in fallback if str(addr).strip()
                 ]
-        normalized_map, _compat_aliases = normalize_heater_addresses(addr_map)
+        inventory_or_none = inventory or None
+        normalized_map = self._apply_heater_addresses(
+            addr_map, inventory=inventory_or_none
+        )
         if not any(normalized_map.values()):
             return
         other_types = sorted(
@@ -406,7 +409,6 @@ class WebSocketClient:
                 await self._send_text(
                     f"5::{WS_NAMESPACE}:{json.dumps(payload, separators=(',', ':'))}"
                 )
-        self._apply_heater_addresses(normalized_map, inventory=inventory or None)
 
     def _ensure_type_bucket(
         self,
