@@ -205,20 +205,47 @@
       const freezeActive = waitingForEcho || (now < this._freezeUntil);
       const canHydrateNow = this._canHydrateFromState({ freezeActive });
 
+      const progValid = Array.isArray(attrs.prog) && attrs.prog.length === 168;
+      const ptempValid = Array.isArray(attrs.ptemp) && attrs.ptemp.length === 3;
+
       let hydrated = false;
+      const discardProg = () => {
+        this._progLocal = null;
+        this._dirtyProg = false;
+        this._pendingEcho.prog = null;
+        this._lastSent.prog = null;
+        this._freezeUntil = 0;
+        hydrated = true;
+      };
+      const discardPtemp = () => {
+        this._ptempLocal = [null, null, null];
+        this._dirtyPresets = false;
+        this._pendingEcho.ptemp = null;
+        this._lastSent.ptemp = null;
+        this._freezeUntil = 0;
+        hydrated = true;
+      };
+
       if (canHydrateNow) {
-        if (Array.isArray(attrs.prog) && attrs.prog.length === 168) {
+        if (progValid) {
           if (!Array.isArray(this._progLocal) || !deepEqArray(this._progLocal, attrs.prog)) {
             this._progLocal = attrs.prog.slice();
             hydrated = true;
           }
+        } else {
+          discardProg();
         }
-        if (Array.isArray(attrs.ptemp) && attrs.ptemp.length === 3) {
+        if (ptempValid) {
           if (!Array.isArray(this._ptempLocal) || !deepEqArray(this._ptempLocal, attrs.ptemp)) {
             this._ptempLocal = attrs.ptemp.slice();
             hydrated = true;
           }
+        } else {
+          discardPtemp();
         }
+      } else {
+        if (!progValid) discardProg();
+        if (!ptempValid) discardPtemp();
       }
 
       const entityChanged = prevEntity !== this._entity;
@@ -360,9 +387,13 @@
       const attrs = st?.attributes || {};
       if (Array.isArray(attrs.prog) && attrs.prog.length === 168) {
         this._progLocal = attrs.prog.slice();
+      } else {
+        this._progLocal = null;
       }
       if (Array.isArray(attrs.ptemp) && attrs.ptemp.length === 3) {
         this._ptempLocal = attrs.ptemp.slice();
+      } else {
+        this._ptempLocal = [null, null, null];
       }
       this._dirtyProg = false;
       this._dirtyPresets = false;
@@ -382,9 +413,13 @@
       const attrs = st?.attributes || {};
       if (Array.isArray(attrs.prog) && attrs.prog.length === 168) {
         this._progLocal = attrs.prog.slice();
+      } else {
+        this._progLocal = null;
       }
       if (Array.isArray(attrs.ptemp) && attrs.ptemp.length === 3) {
         this._ptempLocal = attrs.ptemp.slice();
+      } else {
+        this._ptempLocal = [null, null, null];
       }
       this._dirtyProg = false;
       this._dirtyPresets = false;
@@ -394,6 +429,7 @@
       this._presetSelection = null;
       this._freezeUntil = 0;
       this._pendingEcho = { prog: null, ptemp: null };
+      this._lastSent = { prog: null, ptemp: null };
       this._render();
     }
 
