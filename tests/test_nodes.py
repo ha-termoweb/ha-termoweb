@@ -14,6 +14,7 @@ from custom_components.termoweb.nodes import (
     ThermostatNode,
     build_node_inventory,
 )
+from custom_components.termoweb.utils import normalize_node_addr, normalize_node_type
 
 
 def test_heater_node_normalises_inputs() -> None:
@@ -134,3 +135,17 @@ def test_build_node_inventory_handles_list_payload(caplog: pytest.LogCaptureFixt
 
 def test_build_node_inventory_tolerates_empty_payload() -> None:
     assert build_node_inventory({"nodes": []}) == []
+
+
+def test_utils_normalization_matches_node_inventory() -> None:
+    payload = {"nodes": [{"type": " HTR ", "addr": " 01 "}]}
+
+    nodes = build_node_inventory(payload)
+    assert len(nodes) == 1
+    node = nodes[0]
+
+    assert normalize_node_type(" HTR ") == node.type
+    assert normalize_node_addr(" 01 ") == node.addr
+    assert (
+        normalize_node_type(None, default="htr", use_default_when_falsey=True) == "htr"
+    )

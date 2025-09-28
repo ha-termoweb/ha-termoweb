@@ -180,6 +180,23 @@ def test_build_heater_name_map_accepts_iterables_of_dicts() -> None:
     assert result.get("htr", {}).get("1") == "Heater 1"
 
 
+def test_prepare_heater_platform_data_resolves_normalized_inputs() -> None:
+    entry_data = {
+        "nodes": {
+            "nodes": [
+                {"type": " hTr ", "addr": " 8 ", "name": "Hall"},
+            ]
+        }
+    }
+
+    _, _, _, resolve_name = prepare_heater_platform_data(
+        entry_data,
+        default_name_simple=lambda addr: f"Heater {addr}",
+    )
+
+    assert resolve_name(" HTR ", " 8 ") == "Hall"
+
+
 def test_log_skipped_nodes_defaults_platform_name(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

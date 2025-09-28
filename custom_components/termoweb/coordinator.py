@@ -15,7 +15,13 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
 from .nodes import Node, build_node_inventory
-from .utils import build_heater_address_map, float_or_none, normalize_heater_addresses
+from .utils import (
+    build_heater_address_map,
+    float_or_none,
+    normalize_heater_addresses,
+    normalize_node_addr,
+    normalize_node_type,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -104,8 +110,8 @@ class StateCoordinator(
         }
 
         for node in inventory:
-            node_type = str(getattr(node, "type", "")).strip().lower()
-            addr = str(getattr(node, "addr", "")).strip()
+            node_type = normalize_node_type(getattr(node, "type", ""))
+            addr = normalize_node_addr(getattr(node, "addr", ""))
             if not node_type or not addr:
                 continue
             bucket = nodes_by_type.setdefault(node_type, [])
@@ -156,7 +162,14 @@ class StateCoordinator(
 
         addrs: list[str] = []
         if default_addrs is not None:
-            addrs = [str(addr).strip() for addr in default_addrs if str(addr).strip()]
+            addrs = [
+                addr
+                for addr in (
+                    normalize_node_addr(candidate)
+                    for candidate in default_addrs
+                )
+                if addr
+            ]
 
         settings: dict[str, Any] = {}
 
@@ -165,13 +178,20 @@ class StateCoordinator(
             if isinstance(raw_addrs, Iterable) and not isinstance(
                 raw_addrs, (str, bytes)
             ):
-                addrs = [str(item).strip() for item in raw_addrs if str(item).strip()]
+                addrs = [
+                    addr
+                    for addr in (
+                        normalize_node_addr(candidate)
+                        for candidate in raw_addrs
+                    )
+                    if addr
+                ]
             raw_settings = section.get("settings")
             if isinstance(raw_settings, dict):
                 settings = {
-                    str(addr).strip(): data
+                    normalized: data
                     for addr, data in raw_settings.items()
-                    if str(addr).strip()
+                    if (normalized := normalize_node_addr(addr))
                 }
 
         # Ensure addrs contains any addresses present in settings
@@ -199,11 +219,17 @@ class StateCoordinator(
         success = False
         if isinstance(node, tuple) and len(node) == 2:
             raw_type, raw_addr = node
-            node_type = str(raw_type or "").strip().lower()
-            addr = str(raw_addr or "").strip()
+            node_type = normalize_node_type(
+                raw_type,
+                use_default_when_falsey=True,
+            )
+            addr = normalize_node_addr(
+                raw_addr,
+                use_default_when_falsey=True,
+            )
         else:
             node_type = ""
-            addr = str(node or "").strip()
+            addr = normalize_node_addr(node, use_default_when_falsey=True)
 
         _LOGGER.info(
             "Refreshing heater settings for device %s node_type=%s addr=%s",
@@ -223,7 +249,9 @@ class StateCoordinator(
 
             self._ensure_inventory()
             reverse = {
-                address: set(types) for address, types in self._addr_lookup.items()
+                normalize_node_addr(address): set(types)
+                for address, types in self._addr_lookup.items()
+                if normalize_node_addr(address)
             }
             addr_types = reverse.get(addr)
             resolved_type = node_type or (
@@ -459,7 +487,7 @@ class StateCoordinator(
                 settings = dict(settings_by_type.get(node_type, {}))
                 final_addrs: list[str] = []
                 for candidate in [*cached_addrs, *settings.keys()]:
-                    addr_str = str(candidate).strip()
+                    addr_str = normalize_node_addr(candidate)
                     if not addr_str or addr_str in final_addrs:
                         continue
                     final_addrs.append(addr_str)

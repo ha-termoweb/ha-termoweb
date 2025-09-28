@@ -15,7 +15,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_data
 from .nodes import Node, build_node_inventory
-from .utils import HEATER_NODE_TYPES, build_heater_address_map, ensure_node_inventory
+from .utils import (
+    HEATER_NODE_TYPES,
+    build_heater_address_map,
+    ensure_node_inventory,
+    normalize_node_addr,
+    normalize_node_type,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -120,7 +126,7 @@ def iter_heater_nodes(
             raw_addr = getattr(node, "addr", "")
             if raw_addr is None:
                 continue
-            addr_str = str(raw_addr).strip()
+            addr_str = normalize_node_addr(raw_addr)
             if not addr_str:
                 continue
             if addr_str.lower() == "none":
@@ -152,7 +158,13 @@ def log_skipped_nodes(
 
         addrs = ", ".join(
             sorted(
-                str(getattr(node, "addr", "")).strip() for node in _iter_nodes(nodes)
+                filter(
+                    None,
+                    (
+                        normalize_node_addr(getattr(node, "addr", ""))
+                        for node in _iter_nodes(nodes)
+                    ),
+                )
             )
         )
         log.debug(
@@ -179,11 +191,11 @@ def build_heater_name_map(
     by_node: dict[tuple[str, str], str] = {}
 
     for node in _iter_nodes(nodes):
-        node_type = str(getattr(node, "type", "")).strip().lower()
+        node_type = normalize_node_type(getattr(node, "type", ""))
         if node_type not in HEATER_NODE_TYPES:
             continue
 
-        addr = str(getattr(node, "addr", "")).strip()
+        addr = normalize_node_addr(getattr(node, "addr", ""))
         if not addr or addr.lower() == "none":
             continue
 
@@ -226,11 +238,11 @@ def prepare_heater_platform_data(
     nodes_by_type: dict[str, list[Node]] = defaultdict(list)
     explicit_names: set[tuple[str, str]] = set()
     for node in inventory:
-        node_type = str(getattr(node, "type", "")).strip().lower()
+        node_type = normalize_node_type(getattr(node, "type", ""))
         if not node_type:
             continue
         nodes_by_type[node_type].append(node)
-        addr = str(getattr(node, "addr", "")).strip()
+        addr = normalize_node_addr(getattr(node, "addr", ""))
         if addr and getattr(node, "name", "").strip():
             explicit_names.add((node_type, addr))
 
@@ -253,8 +265,14 @@ def prepare_heater_platform_data(
     def resolve_name(node_type: str, addr: str) -> str:
         """Resolve the friendly name for ``addr`` of the given node type."""
 
-        node_type_norm = str(node_type or "").strip().lower()
-        addr_str = str(addr or "").strip()
+        node_type_norm = normalize_node_type(
+            node_type,
+            use_default_when_falsey=True,
+        )
+        addr_str = normalize_node_addr(
+            addr,
+            use_default_when_falsey=True,
+        )
         default_simple = default_name_simple(addr_str)
 
         def _candidate(value: Any) -> str | None:
@@ -304,7 +322,11 @@ class HeaterNodeBase(CoordinatorEntity):
         self._dev_id = dev_id
         self._addr = str(addr)
         self._attr_name = name
-        resolved_type = str(node_type or "htr").strip().lower() or "htr"
+        resolved_type = normalize_node_type(
+            node_type,
+            default="htr",
+            use_default_when_falsey=True,
+        ) or "htr"
         self._node_type = resolved_type
         self._attr_unique_id = (
             unique_id or f"{DOMAIN}:{dev_id}:{resolved_type}:{self._addr}"
@@ -339,10 +361,7 @@ class HeaterNodeBase(CoordinatorEntity):
             return False
         payload_type = payload.get("node_type")
         if payload_type is not None:
-            try:
-                payload_type_str = str(payload_type).strip().lower()
-            except Exception:  # pragma: no cover - defensive  # noqa: BLE001
-                payload_type_str = ""
+            payload_type_str = normalize_node_type(payload_type)
             if payload_type_str and payload_type_str != self._node_type:
                 return False
         addr = payload.get("addr")

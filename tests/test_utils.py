@@ -17,6 +17,8 @@ from custom_components.termoweb.utils import (
     ensure_node_inventory,
     float_or_none,
     normalize_heater_addresses,
+    normalize_node_addr,
+    normalize_node_type,
     parse_heater_energy_unique_id,
 )
 
@@ -113,6 +115,52 @@ def test_float_or_none(value, expected) -> None:
 @pytest.mark.parametrize("value", ["nan", "inf"])
 def test_float_or_none_non_finite_strings(value) -> None:
     assert float_or_none(value) is None
+
+
+@pytest.mark.parametrize(
+    "value,default,use_default_when_falsey,expected",
+    [
+        (" HTR ", "htr", False, "htr"),
+        ("AcM", "htr", False, "acm"),
+        (None, "htr", True, "htr"),
+        ("  ", "htr", False, "htr"),
+        (None, "", False, "none"),
+    ],
+)
+def test_normalize_node_type_cases(
+    value: Any, default: str, use_default_when_falsey: bool, expected: str
+) -> None:
+    assert (
+        normalize_node_type(
+            value,
+            default=default,
+            use_default_when_falsey=use_default_when_falsey,
+        )
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    "value,default,use_default_when_falsey,expected",
+    [
+        (" 01 ", "", False, "01"),
+        ("  ", "fallback", False, "fallback"),
+        (None, "", True, ""),
+        (None, "fallback", False, "None"),
+        ("none", "", False, "none"),
+    ],
+)
+def test_normalize_node_addr_cases(
+    value: Any, default: str, use_default_when_falsey: bool, expected: str
+) -> None:
+    assert (
+        normalize_node_addr(
+            value,
+            default=default,
+            use_default_when_falsey=use_default_when_falsey,
+        )
+        == expected
+    )
 
 
 def test_entry_gateway_record_handles_invalid_sources() -> None:
