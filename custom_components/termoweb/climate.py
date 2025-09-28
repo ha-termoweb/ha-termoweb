@@ -3,8 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 import logging
-from typing import Any, Callable
-import time
+from typing import Any
 
 from homeassistant.components.climate import (
     ClimateEntity,
@@ -25,8 +24,8 @@ from .heater import (
     log_skipped_nodes,
     prepare_heater_platform_data,
 )
-from .nodes import HeaterNode
-from .utils import float_or_none, normalize_node_type
+from .nodes import HeaterNode, normalize_node_type
+from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 

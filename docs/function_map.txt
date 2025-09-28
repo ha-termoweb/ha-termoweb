@@ -340,7 +340,7 @@ custom_components/termoweb/sensor.py :: InstallationTotalEnergySensor.native_val
     Return the summed energy usage across all heaters.
 custom_components/termoweb/sensor.py :: InstallationTotalEnergySensor.extra_state_attributes
     Return identifiers describing the aggregated energy value.
-custom_components/termoweb/utils.py :: addresses_by_node_type
+custom_components/termoweb/nodes.py :: addresses_by_node_type
     Return mapping of node type to address list, tracking unknown types.
 custom_components/termoweb/utils.py :: float_or_none
     Return value as ``float`` if possible, else ``None``.

@@ -18,7 +18,7 @@ from homeassistant.helpers import entity_registry as er
 
 from .api import RESTClient
 from .const import DOMAIN
-from .utils import (
+from .nodes import (
     build_heater_address_map,
     build_heater_energy_unique_id,
     ensure_node_inventory,

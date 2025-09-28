@@ -14,10 +14,11 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_data
-from .nodes import Node, build_node_inventory
-from .utils import (
+from .nodes import (
     HEATER_NODE_TYPES,
+    Node,
     build_heater_address_map,
+    build_node_inventory,
     ensure_node_inventory,
     normalize_node_addr,
     normalize_node_type,

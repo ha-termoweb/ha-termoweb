@@ -19,10 +19,11 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from .api import RESTClient
 from .const import API_BASE, DOMAIN, WS_NAMESPACE, signal_ws_data, signal_ws_status
 from .heater import prepare_heater_platform_data
-from .nodes import NODE_CLASS_BY_TYPE, build_node_inventory as _build_node_inventory
-from .utils import (
+from .nodes import (
     HEATER_NODE_TYPES,
+    NODE_CLASS_BY_TYPE,
     addresses_by_node_type,
+    build_node_inventory as _build_node_inventory,
     ensure_node_inventory,
     normalize_heater_addresses,
 )

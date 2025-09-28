@@ -5,22 +5,23 @@ from typing import Any
 
 import pytest
 
-from custom_components.termoweb import utils as utils_module
+from custom_components.termoweb import nodes as nodes_module
 from custom_components.termoweb.const import DOMAIN
-from custom_components.termoweb.nodes import build_node_inventory
-
-from custom_components.termoweb.utils import (
+from custom_components.termoweb.nodes import (
     HEATER_NODE_TYPES,
-    _entry_gateway_record,
     addresses_by_node_type,
-    build_gateway_device_info,
     build_heater_energy_unique_id,
+    build_node_inventory,
     ensure_node_inventory,
-    float_or_none,
     normalize_heater_addresses,
     normalize_node_addr,
     normalize_node_type,
     parse_heater_energy_unique_id,
+)
+from custom_components.termoweb.utils import (
+    _entry_gateway_record,
+    build_gateway_device_info,
+    float_or_none,
 )
 
 
@@ -233,8 +234,8 @@ def test_build_heater_energy_unique_id_round_trip(
 ) -> None:
     calls: list[tuple[str, object, dict[str, Any]]] = []
 
-    original_normalize_type = utils_module.normalize_node_type
-    original_normalize_addr = utils_module.normalize_node_addr
+    original_normalize_type = nodes_module.normalize_node_type
+    original_normalize_addr = nodes_module.normalize_node_addr
 
     def _record_type(value, **kwargs):
         calls.append(("type", value, kwargs))
@@ -244,8 +245,8 @@ def test_build_heater_energy_unique_id_round_trip(
         calls.append(("addr", value, kwargs))
         return original_normalize_addr(value, **kwargs)
 
-    monkeypatch.setattr(utils_module, "normalize_node_type", _record_type)
-    monkeypatch.setattr(utils_module, "normalize_node_addr", _record_addr)
+    monkeypatch.setattr(nodes_module, "normalize_node_type", _record_type)
+    monkeypatch.setattr(nodes_module, "normalize_node_addr", _record_addr)
 
     unique_id = build_heater_energy_unique_id(" dev ", " ACM ", " 01 ")
 

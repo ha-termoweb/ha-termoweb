@@ -15,14 +15,15 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
-from .nodes import Node, build_node_inventory
-from .utils import (
+from .nodes import (
+    Node,
     build_heater_address_map,
-    float_or_none,
+    build_node_inventory,
     normalize_heater_addresses,
     normalize_node_addr,
     normalize_node_type,
 )
+from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 

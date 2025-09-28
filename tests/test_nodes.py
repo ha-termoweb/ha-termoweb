@@ -13,8 +13,9 @@ from custom_components.termoweb.nodes import (
     PowerMonitorNode,
     ThermostatNode,
     build_node_inventory,
+    normalize_node_addr,
+    normalize_node_type,
 )
-from custom_components.termoweb.utils import normalize_node_addr, normalize_node_type
 
 
 def test_heater_node_normalises_inputs() -> None:
