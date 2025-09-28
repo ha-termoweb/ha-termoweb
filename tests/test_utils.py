@@ -239,15 +239,21 @@ def test_get_brand_api_base_fallback() -> None:
 
 
 def test_build_heater_energy_unique_id_round_trip() -> None:
-    unique_id = build_heater_energy_unique_id("dev", "htr", "01")
+    unique_id = build_heater_energy_unique_id(" dev ", " ACM ", " 01 ")
 
-    assert unique_id == f"{DOMAIN}:dev:htr:01:energy"
-    assert parse_heater_energy_unique_id(unique_id) == ("dev", "htr", "01")
+    assert unique_id == f"{DOMAIN}:dev:acm:01:energy"
+    assert parse_heater_energy_unique_id(unique_id) == ("dev", "acm", "01")
 
 
 @pytest.mark.parametrize(
     "dev_id, node_type, addr",
-    [("", "htr", "01"), ("dev", "", "01"), ("dev", "htr", "")],
+    [
+        ("", "htr", "01"),
+        ("dev", "", "01"),
+        ("dev", "htr", ""),
+        ("dev", " ", "01"),
+        ("dev", "htr", "  "),
+    ],
 )
 def test_build_heater_energy_unique_id_requires_components(
     dev_id: str, node_type: str, addr: str

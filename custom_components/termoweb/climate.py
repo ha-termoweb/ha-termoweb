@@ -25,7 +25,7 @@ from .heater import (
     prepare_heater_platform_data,
 )
 from .nodes import HeaterNode
-from .utils import float_or_none
+from .utils import float_or_none, normalize_node_type
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -150,8 +150,12 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
     ) -> None:
         """Initialise the climate entity for a TermoWeb heater."""
         HeaterNode.__init__(self, name=name, addr=addr)
-        resolved_type = str(node_type or getattr(self, "type", "htr")).strip().lower()
-        if resolved_type and resolved_type != getattr(self, "type", ""):
+        resolved_type = normalize_node_type(
+            node_type,
+            default=getattr(self, "type", "htr"),
+            use_default_when_falsey=True,
+        ) or "htr"
+        if resolved_type != getattr(self, "type", ""):
             self.type = resolved_type
         HeaterNodeBase.__init__(
             self,
