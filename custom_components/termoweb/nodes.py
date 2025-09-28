@@ -194,7 +194,15 @@ def build_node_inventory(raw_nodes: Any) -> list[Node]:
             continue
 
         name = payload.get("name") or payload.get("title") or payload.get("label")
-        addr = payload.get("addr") or payload.get("address")
+        addr = normalize_node_addr(
+            payload.get("addr"),
+            use_default_when_falsey=True,
+        )
+        if not addr:
+            addr = normalize_node_addr(
+                payload.get("address"),
+                use_default_when_falsey=True,
+            )
 
         node_cls = _resolve_node_class(node_type)
         if node_cls is Node:

@@ -19,6 +19,7 @@ from .const import (
     USER_AGENT,
 )
 from .nodes import Node, NodeDescriptor
+from .utils import normalize_node_addr, normalize_node_type
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -537,12 +538,12 @@ class RESTClient:
                 raise ValueError(msg)
             node_type, addr = node
 
-        node_type_str = str(node_type or "").strip().lower()
+        node_type_str = normalize_node_type(node_type)
         if not node_type_str:
             msg = f"Invalid node type extracted from descriptor: {node!r}"
             raise ValueError(msg)
 
-        addr_str = str(addr or "").strip()
+        addr_str = normalize_node_addr(addr)
         if not addr_str:
             msg = f"Invalid node address extracted from descriptor: {node!r}"
             raise ValueError(msg)
