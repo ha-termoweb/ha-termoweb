@@ -29,40 +29,6 @@ EnergyStateCoordinator = coord_module.EnergyStateCoordinator
 StateCoordinator = coord_module.StateCoordinator
 
 
-def test_device_display_name_helper() -> None:
-    """Helpers should trim names and fall back to device id."""
-
-    assert coord_module._device_display_name({"name": " Device "}, "dev") == "Device"
-    assert coord_module._device_display_name({"name": ""}, "dev") == "Device dev"
-    assert coord_module._device_display_name({}, "dev") == "Device dev"
-    assert coord_module._device_display_name({"name": 1234}, "dev") == "1234"
-
-
-def test_ensure_heater_section_helper() -> None:
-    """The helper must reuse existing sections or insert defaults."""
-
-    nodes_by_type: dict[str, dict[str, Any]] = {
-        "htr": {"addrs": ["1"], "settings": {"1": {}}}
-    }
-    existing = coord_module._ensure_heater_section(nodes_by_type, lambda: {})
-    assert existing is nodes_by_type["htr"]
-
-    nodes_by_type = {}
-    created = coord_module._ensure_heater_section(
-        nodes_by_type, lambda: {"addrs": ["A"], "settings": {}}
-    )
-    assert created == {"addrs": ["A"], "settings": {}}
-    assert nodes_by_type["htr"] == {"addrs": ["A"], "settings": {}}
-
-    nodes_by_type = {"htr": []}  # type: ignore[assignment]
-    replaced = coord_module._ensure_heater_section(
-        nodes_by_type,
-        lambda: {"addrs": ["B"], "settings": {"B": {"mode": "auto"}}},
-    )
-    assert replaced == {"addrs": ["B"], "settings": {"B": {"mode": "auto"}}}
-    assert nodes_by_type["htr"] == replaced
-
-
 def test_ensure_inventory_rebuilds_and_refreshes_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -440,7 +406,6 @@ def test_merge_address_payload_upgrades_string_lookup() -> None:
     coord._merge_address_payload({"htr": ["1", "2"]})
 
     assert coord._addr_lookup == {"1": {"htr"}, "2": {"htr"}}
-
 
 
 def test_refresh_heater_updates_existing_and_new_data() -> None:

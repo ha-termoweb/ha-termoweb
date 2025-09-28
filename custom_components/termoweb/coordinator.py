@@ -29,22 +29,16 @@ _LOGGER = logging.getLogger(__name__)
 HTR_SETTINGS_PER_CYCLE = 1
 
 
-def _device_display_name(
-    device: Mapping[str, Any] | None, dev_id: str
-) -> str:
+def _device_display_name(device: Mapping[str, Any] | None, dev_id: str) -> str:
     """Return the trimmed device name or a fallback for ``dev_id``."""
 
+    raw_name: Any | None = None
     if isinstance(device, Mapping):
         raw_name = device.get("name")
-    else:  # pragma: no cover - defensive guard
-        raw_name = None
 
-    if isinstance(raw_name, str):
-        trimmed = raw_name.strip()
-        if trimmed:
-            return trimmed
-    elif raw_name is not None:
-        trimmed = str(raw_name).strip()
+    if raw_name is not None:
+        candidate = raw_name if isinstance(raw_name, str) else str(raw_name)
+        trimmed = candidate.strip()
         if trimmed:
             return trimmed
 
@@ -60,8 +54,24 @@ def _ensure_heater_section(
     existing = nodes_by_type.get("htr")
     if isinstance(existing, dict):
         return existing
+    if isinstance(existing, Mapping):
+        section = dict(existing)
+        addrs = section.get("addrs")
+        if isinstance(addrs, Iterable) and not isinstance(addrs, (list, str, bytes)):
+            section["addrs"] = list(addrs)
+        nodes_by_type["htr"] = section
+        return section
 
-    heater_section = factory()
+    candidate = factory()
+    if isinstance(candidate, dict):
+        heater_section = candidate
+    elif isinstance(candidate, Mapping):
+        heater_section = dict(candidate)
+    else:  # pragma: no cover - defensive conversion
+        heater_section = dict(candidate or {})
+    addrs = heater_section.get("addrs")
+    if isinstance(addrs, Iterable) and not isinstance(addrs, (list, str, bytes)):
+        heater_section["addrs"] = list(addrs)
     nodes_by_type["htr"] = heater_section
     return heater_section
 
@@ -202,8 +212,7 @@ class StateCoordinator(
             addrs = [
                 addr
                 for addr in (
-                    normalize_node_addr(candidate)
-                    for candidate in default_addrs
+                    normalize_node_addr(candidate) for candidate in default_addrs
                 )
                 if addr
             ]
@@ -218,8 +227,7 @@ class StateCoordinator(
                 addrs = [
                     addr
                     for addr in (
-                        normalize_node_addr(candidate)
-                        for candidate in raw_addrs
+                        normalize_node_addr(candidate) for candidate in raw_addrs
                     )
                     if addr
                 ]
@@ -293,7 +301,6 @@ class StateCoordinator(
             addr_types = reverse.get(addr)
             resolved_type = node_type or (
                 next(iter(addr_types)) if addr_types else "htr"
-
             )
 
             payload = await self.client.get_node_settings(dev_id, (resolved_type, addr))
@@ -444,9 +451,7 @@ class StateCoordinator(
         dev_id = self._dev_id
         self._ensure_inventory()
         addr_map = dict(self._nodes_by_type)
-        reverse = {
-            address: set(types) for address, types in self._addr_lookup.items()
-        }
+        reverse = {address: set(types) for address, types in self._addr_lookup.items()}
         addrs = [addr for addrs in addr_map.values() for addr in addrs]
         try:
             prev_dev = (self.data or {}).get(dev_id, {})
@@ -498,9 +503,7 @@ class StateCoordinator(
                     addr = addrs[idx]
                     addr_types = reverse.get(addr)
                     node_type = next(iter(addr_types)) if addr_types else "htr"
-                    js = await self.client.get_node_settings(
-                        dev_id, (node_type, addr)
-                    )
+                    js = await self.client.get_node_settings(dev_id, (node_type, addr))
                     if isinstance(js, dict):
                         bucket = settings_by_type.setdefault(node_type, {})
                         bucket[addr] = js
