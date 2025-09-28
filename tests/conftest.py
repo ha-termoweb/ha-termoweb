@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import enum
 import asyncio
+import time
 from pathlib import Path
 import sys
 import types
@@ -28,12 +29,14 @@ def _install_stubs() -> None:
     aiohttp_stub = sys.modules.get("aiohttp") or types.ModuleType("aiohttp")
 
     if not hasattr(aiohttp_stub, "ClientSession"):
+
         class ClientSession:  # pragma: no cover - placeholder
             pass
 
         aiohttp_stub.ClientSession = ClientSession
 
     if not hasattr(aiohttp_stub, "ClientTimeout"):
+
         class ClientTimeout:  # pragma: no cover - placeholder
             def __init__(self, total: int | None = None) -> None:
                 self.total = total
@@ -41,6 +44,7 @@ def _install_stubs() -> None:
         aiohttp_stub.ClientTimeout = ClientTimeout
 
     if not hasattr(aiohttp_stub, "ClientResponseError"):
+
         class ClientResponseError(Exception):  # pragma: no cover - placeholder
             def __init__(
                 self,
@@ -60,12 +64,14 @@ def _install_stubs() -> None:
         aiohttp_stub.ClientResponseError = ClientResponseError
 
     if not hasattr(aiohttp_stub, "ClientError"):
+
         class ClientError(Exception):  # pragma: no cover - placeholder
             pass
 
         aiohttp_stub.ClientError = ClientError
 
     if not hasattr(aiohttp_stub, "WSMsgType"):
+
         class WSMsgType(enum.IntEnum):
             TEXT = 1
             BINARY = 2
@@ -78,6 +84,7 @@ def _install_stubs() -> None:
         WSMsgType = aiohttp_stub.WSMsgType
 
     if not hasattr(aiohttp_stub, "WSCloseCode"):
+
         class WSCloseCode(types.SimpleNamespace):
             GOING_AWAY = 1001
 
@@ -136,7 +143,9 @@ def _install_stubs() -> None:
 
         async def receive(self) -> Any:
             if not self._messages:
-                return types.SimpleNamespace(type=WSMsgType.CLOSED, data=None, extra=None)
+                return types.SimpleNamespace(
+                    type=WSMsgType.CLOSED, data=None, extra=None
+                )
             msg = self._messages.pop(0)
             if callable(msg):
                 msg = msg()
@@ -153,7 +162,9 @@ def _install_stubs() -> None:
         async def send_str(self, data: str) -> None:
             self.sent.append(data)
 
-        async def close(self, code: int | None = None, message: bytes | None = None) -> None:
+        async def close(
+            self, code: int | None = None, message: bytes | None = None
+        ) -> None:
             self.close_code = code
 
         def exception(self) -> BaseException | None:
@@ -361,9 +372,9 @@ def _install_stubs() -> None:
     homeassistant_pkg = sys.modules.get("homeassistant") or types.ModuleType(
         "homeassistant"
     )
-    config_entries_mod = sys.modules.get("homeassistant.config_entries") or types.ModuleType(
+    config_entries_mod = sys.modules.get(
         "homeassistant.config_entries"
-    )
+    ) or types.ModuleType("homeassistant.config_entries")
     const_mod = sys.modules.get("homeassistant.const") or types.ModuleType(
         "homeassistant.const"
     )
@@ -382,18 +393,18 @@ def _install_stubs() -> None:
     entity_registry_mod = sys.modules.get(
         "homeassistant.helpers.entity_registry"
     ) or types.ModuleType("homeassistant.helpers.entity_registry")
-    dispatcher_mod = sys.modules.get("homeassistant.helpers.dispatcher") or types.ModuleType(
+    dispatcher_mod = sys.modules.get(
         "homeassistant.helpers.dispatcher"
-    )
+    ) or types.ModuleType("homeassistant.helpers.dispatcher")
     entity_mod = sys.modules.get("homeassistant.helpers.entity") or types.ModuleType(
         "homeassistant.helpers.entity"
     )
     loader_mod = sys.modules.get("homeassistant.loader") or types.ModuleType(
         "homeassistant.loader"
     )
-    data_entry_flow_mod = sys.modules.get("homeassistant.data_entry_flow") or types.ModuleType(
+    data_entry_flow_mod = sys.modules.get(
         "homeassistant.data_entry_flow"
-    )
+    ) or types.ModuleType("homeassistant.data_entry_flow")
     update_coordinator_mod = sys.modules.get(
         "homeassistant.helpers.update_coordinator"
     ) or types.ModuleType("homeassistant.helpers.update_coordinator")
@@ -409,9 +420,9 @@ def _install_stubs() -> None:
     sensor_mod = sys.modules.get("homeassistant.components.sensor") or types.ModuleType(
         "homeassistant.components.sensor"
     )
-    climate_mod = sys.modules.get("homeassistant.components.climate") or types.ModuleType(
+    climate_mod = sys.modules.get(
         "homeassistant.components.climate"
-    )
+    ) or types.ModuleType("homeassistant.components.climate")
     entity_platform_mod = sys.modules.get(
         "homeassistant.helpers.entity_platform"
     ) or types.ModuleType("homeassistant.helpers.entity_platform")
@@ -444,6 +455,7 @@ def _install_stubs() -> None:
     homeassistant_pkg.data_entry_flow = data_entry_flow_mod
     homeassistant_pkg.components = components_mod
     homeassistant_pkg.loader = loader_mod
+
     def async_get_clientsession(hass: Any) -> ClientSession:
         if hasattr(hass, "client_session_calls"):
             hass.client_session_calls += 1
@@ -544,17 +556,13 @@ def _install_stubs() -> None:
         def __init__(self) -> None:
             self.listeners: list[tuple[str, Callable[[Any], Any]]] = []
 
-        def async_listen_once(
-            self, event: str, callback: Callable[[Any], Any]
-        ) -> None:
+        def async_listen_once(self, event: str, callback: Callable[[Any], Any]) -> None:
             self.listeners.append((event, callback))
 
     class HomeAssistant:
         def __init__(self) -> None:
             self.config_entries = _SimpleConfigEntries()
-            self.dispatcher_connections: list[
-                tuple[str, Callable[[Any], None]]
-            ] = []
+            self.dispatcher_connections: list[tuple[str, Callable[[Any], None]]] = []
             self.data: dict[str, Any] = {}
             self.integration_requests: list[str] = []
             self.is_running = True
@@ -604,9 +612,7 @@ def _install_stubs() -> None:
                 }
             )
 
-        def async_create_entry(
-            self, *, title: str, data: dict[str, Any]
-        ) -> FlowResult:
+        def async_create_entry(self, *, title: str, data: dict[str, Any]) -> FlowResult:
             return FlowResult({"type": "create_entry", "title": title, "data": data})
 
         def async_abort(self, *, reason: str) -> FlowResult:
@@ -631,9 +637,7 @@ def _install_stubs() -> None:
                 }
             )
 
-        def async_create_entry(
-            self, *, title: str, data: dict[str, Any]
-        ) -> FlowResult:
+        def async_create_entry(self, *, title: str, data: dict[str, Any]) -> FlowResult:
             return FlowResult({"type": "create_entry", "title": title, "data": data})
 
     config_entries_mod.ConfigEntry = ConfigEntry
@@ -641,7 +645,7 @@ def _install_stubs() -> None:
     config_entries_mod.OptionsFlow = OptionsFlow
     core_mod.HomeAssistant = HomeAssistant
     core_mod.callback = lambda func: func
-    
+
     class ServiceCall:
         def __init__(self, data: dict[str, Any] | None = None) -> None:
             self.data = data or {}
@@ -651,6 +655,7 @@ def _install_stubs() -> None:
     exceptions_mod.ConfigEntryNotReady = ConfigEntryNotReadyStub
 
     if not hasattr(update_coordinator_mod, "DataUpdateCoordinator"):
+
         class DataUpdateCoordinator:
             def __class_getitem__(cls, _item: Any) -> type:
                 return cls
@@ -706,6 +711,7 @@ def _install_stubs() -> None:
         DataUpdateCoordinator = update_coordinator_mod.DataUpdateCoordinator
 
     if not hasattr(update_coordinator_mod, "CoordinatorEntity"):
+
         class CoordinatorEntity:
             def __init__(self, coordinator: Any) -> None:
                 self.coordinator = coordinator
@@ -734,6 +740,7 @@ def _install_stubs() -> None:
         CoordinatorEntity = update_coordinator_mod.CoordinatorEntity
 
     if not hasattr(update_coordinator_mod, "UpdateFailed"):
+
         class UpdateFailed(Exception):
             pass
 
@@ -765,7 +772,9 @@ def _install_stubs() -> None:
         for callback in callbacks:
             callback(*payload_args if payload_args else ({},))
 
-    def async_dispatcher_send(first: Any, second: Any | None = None, *args: Any) -> None:
+    def async_dispatcher_send(
+        first: Any, second: Any | None = None, *args: Any
+    ) -> None:
         if isinstance(first, str) and (second is None or not isinstance(second, str)):
             actual_signal = first
             payload_args = (() if second is None else (second,)) + args
@@ -1014,6 +1023,7 @@ class FakeCoordinator:
         self.refresh_calls = 0
         self.async_request_refresh = AsyncMock()
         self.async_refresh_heater = AsyncMock()
+        self.pending_settings: dict[tuple[str, str], dict[str, Any]] = {}
         type(self).instances.append(self)
 
     async def async_config_entry_first_refresh(self) -> None:
@@ -1031,6 +1041,24 @@ class FakeCoordinator:
         self.nodes = nodes
         if node_inventory is not None:
             self.node_inventory = list(node_inventory)
+
+    def register_pending_setting(
+        self,
+        node_type: str,
+        addr: str,
+        *,
+        mode: str | None,
+        stemp: float | None,
+        ttl: float = 0.0,
+    ) -> None:
+        """Record pending settings for verification in tests."""
+
+        key = (str(node_type), str(addr))
+        self.pending_settings[key] = {
+            "mode": mode,
+            "stemp": stemp,
+            "expires_at": time.time() + max(ttl, 0.0),
+        }
 
 
 def pytest_runtest_setup(item: Any) -> None:  # pragma: no cover - ensure isolation
