@@ -42,9 +42,6 @@ class HttpClientProto(Protocol):
     ) -> list[dict[str, str | int]]:
         """Return historical samples for the specified node."""
 
-    async def get_htr_settings(self, dev_id: str, addr: str | int) -> Any:
-        """Return heater settings for the specified node."""
-
     async def set_htr_settings(
         self,
         dev_id: str,
@@ -57,15 +54,6 @@ class HttpClientProto(Protocol):
         units: str = "C",
     ) -> Any:
         """Update heater settings for the specified node."""
-
-    async def get_htr_samples(
-        self,
-        dev_id: str,
-        addr: str | int,
-        start: float,
-        stop: float,
-    ) -> list[dict[str, str | int]]:
-        """Return historical heater samples for the specified node."""
 
 
 class WsClientProto(Protocol):

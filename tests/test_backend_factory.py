@@ -27,8 +27,11 @@ class DummyHttpClient:
     async def get_nodes(self, dev_id: str) -> dict[str, Any]:
         return {"dev_id": dev_id}
 
-    async def get_htr_settings(self, dev_id: str, addr: str | int) -> dict[str, Any]:
-        return {"dev_id": dev_id, "addr": addr}
+    async def get_node_settings(
+        self, dev_id: str, node: tuple[str, str | int]
+    ) -> dict[str, Any]:
+        node_type, addr = node
+        return {"dev_id": dev_id, "node_type": node_type, "addr": addr}
 
     async def set_htr_settings(
         self,
@@ -51,14 +54,17 @@ class DummyHttpClient:
             "units": units,
         }
 
-    async def get_htr_samples(
+    async def get_node_samples(
         self,
         dev_id: str,
-        addr: str | int,
+        node: tuple[str, str | int],
         start: float,
         stop: float,
     ) -> list[dict[str, str | int]]:
-        return [{"t": int(start), "counter": "1"}, {"t": int(stop), "counter": "2"}]
+        return [
+            {"t": int(start), "counter": "1"},
+            {"t": int(stop), "counter": "2"},
+        ]
 
 
 def test_create_backend_returns_termoweb_backend() -> None:

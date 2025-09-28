@@ -245,7 +245,7 @@ def test_ensure_token_non_numeric_expires_in(monkeypatch) -> None:
     asyncio.run(_run())
 
 
-def test_get_htr_samples_success() -> None:
+def test_get_node_samples_success() -> None:
     async def _run() -> None:
         session = FakeSession()
         session.queue_post(
@@ -264,7 +264,7 @@ def test_get_htr_samples_success() -> None:
         )
 
         client = RESTClient(session, "user", "pass")
-        samples = await client.get_htr_samples("dev", "A", 0, 10)
+        samples = await client.get_node_samples("dev", ("htr", "A"), 0, 10)
 
         assert samples == [{"t": 1000, "counter": "1.5"}]
         assert len(session.request_calls) == 1
@@ -274,7 +274,7 @@ def test_get_htr_samples_success() -> None:
     asyncio.run(_run())
 
 
-def test_get_htr_samples_404() -> None:
+def test_get_node_samples_404() -> None:
     async def _run() -> None:
         session = FakeSession()
         session.queue_post(
@@ -294,7 +294,7 @@ def test_get_htr_samples_404() -> None:
 
         client = RESTClient(session, "user", "pass")
         with pytest.raises(aiohttp.ClientResponseError) as err:
-            await client.get_htr_samples("dev", "A", 0, 10)
+            await client.get_node_samples("dev", ("htr", "A"), 0, 10)
         assert err.value.status == 404
 
     asyncio.run(_run())
@@ -671,15 +671,6 @@ def test_list_devices_handles_various_shapes() -> None:
     asyncio.run(_run())
 
 
-def test_device_connected_returns_none() -> None:
-    async def _run() -> None:
-        session = FakeSession()
-        client = RESTClient(session, "user", "pw")
-        assert await client.device_connected("dev") is None
-
-    asyncio.run(_run())
-
-
 def test_get_nodes_and_settings_use_expected_paths(monkeypatch) -> None:
     async def _run() -> None:
         session = FakeSession()
@@ -696,11 +687,13 @@ def test_get_nodes_and_settings_use_expected_paths(monkeypatch) -> None:
         monkeypatch.setattr(client, "_request", fake_request)
 
         await client.get_nodes("dev123")
-        await client.get_htr_settings("dev123", "5")
+        await client.get_node_settings("dev123", ("htr", "5"))
+        await client.get_node_samples("dev123", ("htr", "5"), 0, 10)
 
         assert calls == [
             ("GET", api.NODES_PATH_FMT.format(dev_id="dev123")),
             ("GET", f"/api/v2/devs/dev123/htr/5/settings"),
+            ("GET", f"/api/v2/devs/dev123/htr/5/samples"),
         ]
 
     asyncio.run(_run())
@@ -941,7 +934,7 @@ def test_set_htr_settings_invalid_temperatures() -> None:
     asyncio.run(_run())
 
 
-def test_get_htr_samples_empty_payload() -> None:
+def test_get_node_samples_empty_payload() -> None:
     async def _run() -> None:
         session = FakeSession()
         session.queue_post(
@@ -960,14 +953,14 @@ def test_get_htr_samples_empty_payload() -> None:
         )
 
         client = RESTClient(session, "user", "pass")
-        samples = await client.get_htr_samples("dev", "A", 0, 10)
+        samples = await client.get_node_samples("dev", ("htr", "A"), 0, 10)
 
         assert samples == []
 
     asyncio.run(_run())
 
 
-def test_get_htr_samples_decreasing_counters() -> None:
+def test_get_node_samples_decreasing_counters() -> None:
     async def _run() -> None:
         session = FakeSession()
         session.queue_post(
@@ -991,7 +984,7 @@ def test_get_htr_samples_decreasing_counters() -> None:
         )
 
         client = RESTClient(session, "user", "pass")
-        samples = await client.get_htr_samples("dev", "A", 0, 10)
+        samples = await client.get_node_samples("dev", ("htr", "A"), 0, 10)
 
         assert samples == [
             {"t": 1, "counter": "3.0"},
@@ -1001,7 +994,7 @@ def test_get_htr_samples_decreasing_counters() -> None:
     asyncio.run(_run())
 
 
-def test_get_htr_samples_malformed_items(monkeypatch, caplog) -> None:
+def test_get_node_samples_malformed_items(monkeypatch, caplog) -> None:
     async def _run() -> None:
         session = FakeSession()
         client = RESTClient(session, "user", "pass")
@@ -1024,7 +1017,7 @@ def test_get_htr_samples_malformed_items(monkeypatch, caplog) -> None:
         monkeypatch.setattr(client, "_request", fake_request)
 
         with caplog.at_level("DEBUG"):
-            samples = await client.get_htr_samples("dev", "A", 0, 10)
+            samples = await client.get_node_samples("dev", ("htr", "A"), 0, 10)
 
         assert samples == []
 
@@ -1035,7 +1028,7 @@ def test_get_htr_samples_malformed_items(monkeypatch, caplog) -> None:
     assert any("Unexpected htr sample shape" in msg for msg in messages)
 
 
-def test_get_htr_samples_unexpected_payload(monkeypatch, caplog) -> None:
+def test_get_node_samples_unexpected_payload(monkeypatch, caplog) -> None:
     async def _run() -> None:
         session = FakeSession()
         client = RESTClient(session, "user", "pass")
@@ -1050,7 +1043,7 @@ def test_get_htr_samples_unexpected_payload(monkeypatch, caplog) -> None:
         monkeypatch.setattr(client, "_request", fake_request)
 
         with caplog.at_level("DEBUG"):
-            samples = await client.get_htr_samples("dev", "A", 0, 10)
+            samples = await client.get_node_samples("dev", ("htr", "A"), 0, 10)
 
         assert samples == []
 
@@ -1177,7 +1170,7 @@ def test_set_htr_settings_translates_heat(monkeypatch) -> None:
     asyncio.run(_run())
 
 
-def test_ducaheat_get_htr_settings_normalises_payload(
+def test_ducaheat_get_node_settings_normalises_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def _run() -> None:
@@ -1229,7 +1222,7 @@ def test_ducaheat_get_htr_settings_normalises_payload(
 
         monkeypatch.setattr(client, "_authed_headers", fake_headers)
 
-        data = await client.get_htr_settings("dev", "A1")
+        data = await client.get_node_settings("dev", ("htr", "A1"))
 
         assert data["mode"] == "manual"
         assert data["state"] == "heating"
@@ -1466,7 +1459,7 @@ def test_ducaheat_set_htr_settings_prog_only(monkeypatch) -> None:
     asyncio.run(_run())
 
 
-def test_ducaheat_get_htr_samples_converts_ms(monkeypatch) -> None:
+def test_ducaheat_get_node_samples_converts_ms(monkeypatch) -> None:
     async def _run() -> None:
         session = FakeSession()
         session.queue_request(
@@ -1489,7 +1482,7 @@ def test_ducaheat_get_htr_samples_converts_ms(monkeypatch) -> None:
 
         monkeypatch.setattr(client, "_authed_headers", fake_headers)
 
-        samples = await client.get_htr_samples("dev", "A", 10, 20)
+        samples = await client.get_node_samples("dev", ("htr", "A"), 10, 20)
         assert samples == [{"t": 1234, "counter": "7.5"}]
 
         call = session.request_calls[0]

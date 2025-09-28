@@ -286,10 +286,6 @@ class RESTClient:
         )
         return []
 
-    async def device_connected(self, dev_id: str) -> bool | None:
-        """Deprecated: connected endpoint often 404s; return None."""
-        return None
-
     async def get_nodes(self, dev_id: str) -> Any:
         """Return raw nodes payload for a device (shape varies by firmware)."""
         headers = await self._authed_headers()
@@ -506,11 +502,6 @@ class RESTClient:
         )
         return self._extract_samples(data)
 
-    async def get_htr_settings(self, dev_id: str, addr: str | int) -> Any:
-        """Return heater settings/state for a node: GET /htr/{addr}/settings."""
-
-        return await self.get_node_settings(dev_id, ("htr", addr))
-
     async def set_htr_settings(
         self,
         dev_id: str,
@@ -534,16 +525,6 @@ class RESTClient:
             units=units,
         )
 
-    async def get_htr_samples(
-        self,
-        dev_id: str,
-        addr: str | int,
-        start: float,
-        end: float,
-    ) -> list[dict[str, str | int]]:
-        """Return historical heater samples for the specified node."""
-
-        return await self.get_node_samples(dev_id, ("htr", addr), start, end)
     def _resolve_node_descriptor(self, node: NodeDescriptor) -> tuple[str, str]:
         """Return ``(node_type, addr)`` for the provided descriptor."""
 
