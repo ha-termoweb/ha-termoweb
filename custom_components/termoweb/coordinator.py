@@ -144,7 +144,6 @@ class StateCoordinator(
 
     def _register_node_address(self, node_type: str, addr: str) -> None:
         """Add ``addr`` to the cached map for ``node_type`` if missing."""
-
         self._merge_address_payload({node_type: [addr]})
 
     @staticmethod
@@ -229,6 +228,11 @@ class StateCoordinator(
             addr_types = reverse.get(addr)
             resolved_type = node_type or (
                 next(iter(addr_types)) if addr_types else "htr"
+
+            )
+
+            payload = await self.client.get_node_settings(
+                dev_id, (resolved_type, addr)
             )
 
             payload = await self.client.get_node_settings(dev_id, (resolved_type, addr))
