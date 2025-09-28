@@ -848,25 +848,22 @@ class WebSocketClient:
 
     def _handle_dev_data(self, data: Any) -> None:
         """Handle the first full snapshot of nodes from the websocket."""
-        nodes = self._extract_nodes(data)
-        if nodes is None:
-            _LOGGER.debug("WS %s: dev_data without nodes", self.dev_id)
-            return
-        self._nodes_raw = deepcopy(nodes)
-        self._nodes = self._build_nodes_snapshot(self._nodes_raw)
-        self._dispatch_nodes(self._nodes)
-        self._mark_event(paths=None, count_event=True)
+        self._apply_nodes_payload(data, merge=False, event="dev_data")
 
     def _handle_update(self, data: Any) -> None:
         """Merge incremental node updates from the websocket feed."""
-        nodes = self._extract_nodes(data)
+        self._apply_nodes_payload(data, merge=True, event="update")
+
+    def _apply_nodes_payload(self, payload: Any, *, merge: bool, event: str) -> None:
+        """Update cached nodes from the websocket payload and notify listeners."""
+        nodes = self._extract_nodes(payload)
         if nodes is None:
-            _LOGGER.debug("WS %s: update without nodes", self.dev_id)
+            _LOGGER.debug("WS %s: %s without nodes", self.dev_id, event)
             return
-        if not self._nodes_raw:
-            self._nodes_raw = deepcopy(nodes)
-        else:
+        if merge and self._nodes_raw:
             self._merge_nodes(self._nodes_raw, nodes)
+        else:
+            self._nodes_raw = deepcopy(nodes)
         self._nodes = self._build_nodes_snapshot(self._nodes_raw)
         self._dispatch_nodes(self._nodes)
         self._mark_event(paths=None, count_event=True)

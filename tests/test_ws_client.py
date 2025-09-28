@@ -857,8 +857,18 @@ def test_handle_payload_helpers_update_nodes() -> None:
         initial_payload = {"nodes": {"htr": {"status": {"01": {"temp": 20}}}}}
         client._handle_dev_data(initial_payload)
 
+        assert client._nodes_raw == initial_payload["nodes"]
+        assert client._nodes_raw is not initial_payload["nodes"]
+        assert client._nodes["nodes"]["htr"]["status"]["01"]["temp"] == 20
+
         incremental = {"nodes": {"htr": {"status": {"02": {"temp": 22}}}}}
         client._handle_update(incremental)
+
+        assert client._nodes_raw["htr"]["status"]["02"]["temp"] == 22
+        assert client._nodes["nodes"]["htr"]["status"] == {
+            "01": {"temp": 20},
+            "02": {"temp": 22},
+        }
 
         await asyncio.sleep(0)
 
