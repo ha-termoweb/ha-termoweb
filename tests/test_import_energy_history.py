@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import copy
 from datetime import datetime, timezone, timedelta
 import importlib
@@ -19,6 +20,80 @@ from custom_components.termoweb import nodes as nodes_module
 from conftest import _install_stubs
 
 _install_stubs()
+
+
+def test_resolve_statistics_helpers_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fallback import path should expose async helpers when attribute is missing."""
+
+    _install_stubs()
+    energy_module = importlib.import_module("custom_components.termoweb.energy")
+    reset_cache = getattr(energy_module, "_reset_integration_dependencies_cache", None)
+    if reset_cache is not None:
+        reset_cache()
+
+    stats_module = types.ModuleType("homeassistant.components.recorder.statistics")
+
+    def _async_helper(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    stats_module.async_helper = _async_helper  # type: ignore[attr-defined]
+
+    recorder_module = types.ModuleType("homeassistant.components.recorder")
+
+    def _get_instance(_hass: Any) -> Any:
+        return types.SimpleNamespace(async_add_executor_job=None)
+
+    recorder_module.get_instance = _get_instance  # type: ignore[attr-defined]
+    recorder_module.statistics = stats_module  # type: ignore[attr-defined]
+
+    components_module = types.ModuleType("homeassistant.components")
+    components_module.recorder = recorder_module  # type: ignore[attr-defined]
+
+    homeassistant_module = sys.modules.setdefault(
+        "homeassistant", types.ModuleType("homeassistant")
+    )
+    homeassistant_module.components = components_module  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, "homeassistant.components", components_module)
+    monkeypatch.setitem(
+        sys.modules, "homeassistant.components.recorder", recorder_module
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.components.recorder.statistics",
+        stats_module,
+    )
+
+    import_count = {"value": 0}
+    real_import = builtins.__import__
+
+    def _fake_import(
+        name: str,
+        globals_dict: Any | None = None,
+        locals_dict: Any | None = None,
+        fromlist: tuple[str, ...] | list[str] = (),
+        level: int = 0,
+    ) -> Any:
+        if (
+            name == "homeassistant.components.recorder"
+            and fromlist
+            and "statistics" in fromlist
+        ):
+            if import_count["value"] == 0:
+                import_count["value"] += 1
+                raise ImportError("missing statistics")
+        return real_import(name, globals_dict, locals_dict, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
+
+    helpers = energy_module._resolve_statistics_helpers(
+        types.SimpleNamespace(),
+        sync_name="missing_sync",
+        async_name="async_helper",
+    )
+
+    assert helpers.sync is None
+    assert helpers.async_fn is _async_helper
 
 
 async def _load_module(

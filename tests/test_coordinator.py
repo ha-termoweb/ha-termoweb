@@ -50,6 +50,114 @@ def test_ensure_heater_section_helper() -> None:
     assert nodes_by_type["htr"] == created
 
 
+def test_mode_and_pending_key_helpers() -> None:
+    """Mode normalisation and pending key helpers should validate input."""
+
+    assert coord_module.StateCoordinator._normalize_mode_value(None) is None
+    assert (
+        coord_module.StateCoordinator._normalize_mode_value("  Auto ") == "auto"
+    )
+    assert (
+        coord_module.StateCoordinator._normalize_mode_value(123) == "123"
+    )
+
+    hass = HomeAssistant()
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device={"name": "Device"},
+        nodes={},
+    )
+
+    assert coordinator._pending_key("", "") is None
+    assert coordinator._pending_key("htr", "1") == ("htr", "1")
+
+
+def test_prune_and_register_pending_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pending settings helpers should drop expired entries and skip invalid keys."""
+
+    hass = HomeAssistant()
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device={"name": "Device"},
+        nodes={},
+    )
+
+    coordinator.register_pending_setting("", "", mode="auto", stemp=21.0)
+    assert coordinator._pending_settings == {}
+
+    fake_time = {"value": 0.0}
+
+    def _fake_time() -> float:
+        return fake_time["value"]
+
+    monkeypatch.setattr(coord_module.time, "time", _fake_time)
+
+    coordinator._pending_settings[("htr", "1")] = coord_module.PendingSetting(
+        mode="auto",
+        stemp=None,
+        expires_at=10.0,
+    )
+    fake_time["value"] = 20.0
+    coordinator._prune_pending_settings()
+    assert coordinator._pending_settings == {}
+
+
+def test_should_defer_pending_setting_branches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pending settings deferral logic should cover all validation branches."""
+
+    hass = HomeAssistant()
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device={"name": "Device"},
+        nodes={},
+    )
+
+    assert coordinator._should_defer_pending_setting("", "", None) is False
+    assert coordinator._should_defer_pending_setting("htr", "1", {}) is False
+
+    fake_time = {"value": 0.0}
+
+    def _fake_time() -> float:
+        return fake_time["value"]
+
+    monkeypatch.setattr(coord_module.time, "time", _fake_time)
+
+    coordinator._pending_settings[("htr", "1")] = coord_module.PendingSetting(
+        mode="auto",
+        stemp=None,
+        expires_at=1.0,
+    )
+    fake_time["value"] = 5.0
+    assert coordinator._should_defer_pending_setting("htr", "1", {}) is False
+    assert coordinator._pending_settings == {}
+
+    coordinator._pending_settings[("htr", "1")] = coord_module.PendingSetting(
+        mode=None,
+        stemp=None,
+        expires_at=10.0,
+    )
+    fake_time["value"] = 0.0
+    assert coordinator._should_defer_pending_setting("htr", "1", None) is True
+
+    coordinator._pending_settings[("htr", "1")] = coord_module.PendingSetting(
+        mode="auto",
+        stemp=21.0,
+        expires_at=10.0,
+    )
+    payload = {"mode": "manual"}
+    assert coordinator._should_defer_pending_setting("htr", "1", payload) is True
+
 @pytest.mark.asyncio
 async def test_refresh_skips_pending_settings_merge() -> None:
     """Heater refresh should defer merging stale payloads while pending."""
