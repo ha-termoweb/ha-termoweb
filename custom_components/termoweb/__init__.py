@@ -12,13 +12,13 @@ from aiohttp import ClientError
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.loader import async_get_integration
 
 from . import energy as energy_module
 from .api import BackendAuthError, BackendRateLimitError, RESTClient
-from .backend import Backend, DucaheatRESTClient, WsClientProto, create_backend
+from .backend import Backend, WsClientProto, create_backend
+from .client import async_list_devices_with_logging, create_rest_client
 from .const import (
     BRAND_DUCAHEAT,
     CONF_BRAND,
@@ -27,8 +27,6 @@ from .const import (
     DOMAIN,
     MIN_POLL_INTERVAL,
     STRETCHED_POLL_INTERVAL,
-    get_brand_api_base,
-    get_brand_basic_auth,
     signal_ws_status,
 )
 from .coordinator import StateCoordinator
@@ -37,11 +35,11 @@ from .energy import (
     OPTION_ENERGY_HISTORY_IMPORTED as ENERGY_OPTION_ENERGY_HISTORY_IMPORTED,
     OPTION_ENERGY_HISTORY_PROGRESS as ENERGY_OPTION_ENERGY_HISTORY_PROGRESS,
     OPTION_MAX_HISTORY_RETRIEVED as ENERGY_OPTION_MAX_HISTORY_RETRIEVED,
-    default_samples_rate_limit_state,
-    reset_samples_rate_limit_state,
+    async_import_energy_history as _async_import_energy_history_impl,
     async_register_import_energy_history_service,
     async_schedule_initial_energy_import,
-    async_import_energy_history as _async_import_energy_history_impl,
+    default_samples_rate_limit_state,
+    reset_samples_rate_limit_state,
 )
 from .nodes import build_node_inventory
 from .utils import (
@@ -102,7 +100,6 @@ async def _async_import_energy_history(
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up the TermoWeb integration for a config entry."""
-    session = aiohttp_client.async_get_clientsession(hass)
     username = entry.data["username"]
     password = entry.data["password"]
     base_interval = int(
@@ -111,29 +108,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
     )
     brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
-    api_base = get_brand_api_base(brand)
-    basic_auth = get_brand_basic_auth(brand)
 
     # DRY version: read from manifest
     integration = await async_get_integration(hass, DOMAIN)
     version = integration.version or "unknown"
 
-    client_cls = DucaheatRESTClient if brand == BRAND_DUCAHEAT else RESTClient
-    client = client_cls(
-        session,
-        username,
-        password,
-        api_base=api_base,
-        basic_auth_b64=basic_auth,
-    )
+    client: RESTClient = create_rest_client(hass, username, password, brand)
     backend = create_backend(brand=brand, client=client)
     try:
-        devices = await client.list_devices()
+        devices = await async_list_devices_with_logging(client)
     except BackendAuthError as err:
-        _LOGGER.info("list_devices auth error: %s", err)
         raise ConfigEntryAuthFailed from err
     except (TimeoutError, ClientError, BackendRateLimitError) as err:
-        _LOGGER.info("list_devices connection error: %s", err)
         raise ConfigEntryNotReady from err
 
     if not devices:

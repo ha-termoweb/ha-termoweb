@@ -6,6 +6,8 @@ from typing import Any
 
 import pytest
 import voluptuous as vol
+from unittest.mock import AsyncMock
+
 from conftest import _install_stubs
 
 _install_stubs()
@@ -59,28 +61,28 @@ def test_get_version_returns_unknown_when_missing(
     assert result == "unknown"
 
 
-def test_validate_login_uses_brand_settings(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_validate_login_invokes_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     hass = HomeAssistant()
-    calls: list[tuple[Any, str, str, str, str]] = []
+    created: list[tuple[Any, str, str, str]] = []
+    clients: list[Any] = []
 
     class DummyClient:
-        def __init__(
-            self,
-            session: object,
-            username: str,
-            password: str,
-            *,
-            api_base: str,
-            basic_auth_b64: str,
-        ) -> None:
-            calls.append((session, username, password, api_base, basic_auth_b64))
+        pass
 
-        async def list_devices(self) -> None:
-            calls.append(("listed",))
+    def fake_create(
+        hass_arg: HomeAssistant, username: str, password: str, brand: str
+    ) -> DummyClient:
+        created.append((hass_arg, username, password, brand))
+        client = DummyClient()
+        clients.append(client)
+        return client
 
-    monkeypatch.setattr(config_flow, "RESTClient", DummyClient)
+    async_mock = AsyncMock(return_value=[{"dev_id": "123"}])
+
+    monkeypatch.setattr(config_flow, "create_rest_client", fake_create)
+    monkeypatch.setattr(
+        config_flow, "async_list_devices_with_logging", async_mock
+    )
 
     asyncio.run(
         config_flow._validate_login(
@@ -88,13 +90,28 @@ def test_validate_login_uses_brand_settings(
         )
     )
 
-    assert calls
-    _session, username, password, api_base, basic_auth = calls[0]
-    assert username == "user@example.com"
-    assert password == "pw"
-    assert api_base == config_flow.get_brand_api_base(config_flow.BRAND_DUCAHEAT)
-    assert basic_auth == config_flow.get_brand_basic_auth(config_flow.BRAND_DUCAHEAT)
-    assert calls[-1] == ("listed",)
+    assert created == [
+        (hass, "user@example.com", "pw", config_flow.BRAND_DUCAHEAT)
+    ]
+    assert async_mock.await_count == 1
+    assert async_mock.await_args.args == (clients[0],)
+
+
+def test_validate_login_propagates_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    hass = HomeAssistant()
+    client = object()
+    monkeypatch.setattr(
+        config_flow, "create_rest_client", lambda *args, **kwargs: client
+    )
+    async_mock = AsyncMock(side_effect=config_flow.BackendAuthError("boom"))
+    monkeypatch.setattr(
+        config_flow, "async_list_devices_with_logging", async_mock
+    )
+
+    with pytest.raises(config_flow.BackendAuthError):
+        asyncio.run(config_flow._validate_login(hass, "user", "pw", "brand"))
+
+    async_mock.assert_awaited_once_with(client)
 
 
 def test_async_step_reconfigure_missing_entry_aborts() -> None:
