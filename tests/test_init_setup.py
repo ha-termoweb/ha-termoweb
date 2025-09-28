@@ -21,7 +21,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import entity_registry as entity_registry_mod
 
-from custom_components.termoweb.utils import (
+from custom_components.termoweb.nodes import (
     build_heater_address_map,
     build_heater_energy_unique_id,
 )

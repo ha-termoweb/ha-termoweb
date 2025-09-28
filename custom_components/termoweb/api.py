@@ -18,8 +18,7 @@ from .const import (
     TOKEN_PATH,
     USER_AGENT,
 )
-from .nodes import Node, NodeDescriptor
-from .utils import normalize_node_addr, normalize_node_type
+from .nodes import Node, NodeDescriptor, normalize_node_addr, normalize_node_type
 
 _LOGGER = logging.getLogger(__name__)
 

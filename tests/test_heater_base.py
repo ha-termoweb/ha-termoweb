@@ -12,8 +12,11 @@ from conftest import _install_stubs, make_ws_payload
 _install_stubs()
 
 from custom_components.termoweb import heater as heater_module
-from custom_components.termoweb.nodes import HeaterNode, build_node_inventory
-from custom_components.termoweb.utils import build_heater_address_map
+from custom_components.termoweb.nodes import (
+    HeaterNode,
+    build_heater_address_map,
+    build_node_inventory,
+)
 from homeassistant.core import HomeAssistant
 
 HeaterNodeBase = heater_module.HeaterNodeBase
