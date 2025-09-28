@@ -59,7 +59,7 @@ def test_ensure_inventory_rebuilds_and_refreshes_cache(
 
     assert inventory is sentinel
     assert coord._nodes_by_type == {"htr": ["1"]}
-    assert coord._addr_lookup == {"1": "htr"}
+    assert coord._addr_lookup == {"1": {"htr"}}
 
 
 def test_update_nodes_uses_provided_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -88,7 +88,7 @@ def test_update_nodes_uses_provided_inventory(monkeypatch: pytest.MonkeyPatch) -
 
     assert coord._node_inventory == provided
     assert coord._nodes_by_type == {"acm": ["2"]}
-    assert coord._addr_lookup == {"2": "acm"}
+    assert coord._addr_lookup == {"2": {"acm"}}
     assert builder_called is False
 
 
@@ -309,7 +309,7 @@ def test_register_node_address_strips_and_skips_blank() -> None:
     coord._register_node_address(" htr ", " A ")
 
     assert coord._nodes_by_type == {"htr": ["A"]}
-    assert coord._addr_lookup == {"A": "htr"}
+    assert coord._addr_lookup == {"A": {"htr"}}
 
 
 def test_refresh_heater_updates_existing_and_new_data() -> None:
@@ -456,7 +456,7 @@ def test_async_refresh_heater_adds_missing_type() -> None:
         )
 
         coord._nodes_by_type = {"htr": ["A"]}
-        coord._addr_lookup = {"A": "htr"}
+        coord._addr_lookup = {"A": {"htr"}}
         coord.data = {
             "dev": {
                 "nodes_by_type": {"htr": {"addrs": ["A"], "settings": {"A": {"mode": "manual"}}}}
