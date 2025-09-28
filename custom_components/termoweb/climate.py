@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 import logging
 import time
-from typing import Any, Callable
+from typing import Any
 
 from homeassistant.components.climate import (
     ClimateEntity,
@@ -151,11 +152,14 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         """Initialise the climate entity for a TermoWeb heater."""
         HeaterNode.__init__(self, name=name, addr=addr)
 
-        default_type = normalize_node_type(
-            getattr(self, "type", None),
-            default="htr",
-            use_default_when_falsey=True,
-        ) or "htr"
+        default_type = (
+            normalize_node_type(
+                getattr(self, "type", None),
+                default="htr",
+                use_default_when_falsey=True,
+            )
+            or "htr"
+        )
         resolved_type = (
             normalize_node_type(
                 node_type,
@@ -650,6 +654,25 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         )
         if not success:
             return
+
+        register_pending = getattr(self.coordinator, "register_pending_setting", None)
+        if callable(register_pending):
+            try:
+                register_pending(
+                    self._node_type,
+                    self._addr,
+                    mode=mode_api,
+                    stemp=float_or_none(stemp),
+                )
+            except Exception as err:  # pragma: no cover - defensive
+                _LOGGER.debug(
+                    "Failed to register pending settings dev=%s type=%s addr=%s: %s",
+                    self._dev_id,
+                    self._node_type,
+                    self._addr,
+                    err,
+                    exc_info=err,
+                )
 
         def _apply(cur: dict[str, Any]) -> None:
             if mode_api is not None:

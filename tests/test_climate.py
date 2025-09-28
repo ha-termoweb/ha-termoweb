@@ -873,6 +873,51 @@ def test_heater_properties_and_ws_update() -> None:
     asyncio.run(_run())
 
 
+def test_write_after_debounce_registers_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry_id = "entry"
+        dev_id = "dev"
+        addr = "1"
+        nodes = {"nodes": [{"type": "htr", "addr": addr}]}
+        record = {
+            "nodes": nodes,
+            "htr": {"settings": {addr: {}}, "addrs": [addr]},
+            "nodes_by_type": {
+                "htr": {"settings": {addr: {}}, "addrs": [addr]},
+            },
+        }
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            record,
+            client=AsyncMock(),
+        )
+        heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
+
+        async def fast_sleep(_delay: float) -> None:
+            return None
+
+        monkeypatch.setattr(climate_module.asyncio, "sleep", fast_sleep)
+
+        heater._pending_mode = HVACMode.HEAT
+        heater._pending_stemp = 21.5
+        heater._async_write_settings = AsyncMock(return_value=True)
+
+        await heater._write_after_debounce()
+
+        key = ("htr", addr)
+        assert key in coordinator.pending_settings
+        pending = coordinator.pending_settings[key]
+        assert pending["mode"] == "manual"
+        assert pending["stemp"] == pytest.approx(21.5)
+
+    asyncio.run(_run())
+
+
 def test_heater_write_paths_and_errors(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
