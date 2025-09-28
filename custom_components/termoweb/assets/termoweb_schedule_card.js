@@ -84,7 +84,9 @@
       this._dragging = false;
       this._paintValue = null;
       this._selectedMode = 0;
-      this._boundMouseUp = () => this._onMouseUp();
+      this._activePointerId = null;
+      this._windowPointerTracking = false;
+      this._boundWindowPointerUp = (ev) => this._handleWindowPointerFinish(ev);
 
       // Available TermoWeb heater entities
       this._entities = [];
@@ -357,20 +359,38 @@
       this._renderGridOnly();
       this._updateStatusIndicators();
     }
-    _onMouseDown(day, hour) {
+    _handleWindowPointerFinish(ev) {
+      this._onPointerUp(ev);
+    }
+    _onPointerDown(ev, day, hour) {
       if (!this._progLocal) return;
+      if (this._activePointerId != null && this._activePointerId !== ev.pointerId) return;
       this._dragging = true;
+      this._activePointerId = ev.pointerId;
       const i = this._idx(day, hour);
       const next = this._selectedMode;
       this._paintValue = next;
       this._progLocal[i] = next;
       this._dirtyProg = true;
-      window.addEventListener("mouseup", this._boundMouseUp, { once: true });
+      const target = ev.currentTarget;
+      if (target?.setPointerCapture) {
+        try {
+          target.setPointerCapture(ev.pointerId);
+          if (target?.releasePointerCapture) target.releasePointerCapture(ev.pointerId);
+        } catch (err) { /* no-op */ }
+      }
+      if (!this._windowPointerTracking) {
+        window.addEventListener("pointerup", this._boundWindowPointerUp, true);
+        window.addEventListener("pointercancel", this._boundWindowPointerUp, true);
+        this._windowPointerTracking = true;
+      }
       this._renderGridOnly();
       this._updateStatusIndicators();
+      ev.preventDefault();
     }
-    _onMouseOver(day, hour) {
+    _onPointerEnter(ev, day, hour) {
       if (!this._dragging || this._paintValue == null || !this._progLocal) return;
+      if (ev.pointerId !== this._activePointerId) return;
       const i = this._idx(day, hour);
       if (this._progLocal[i] !== this._paintValue) {
         this._progLocal[i] = this._paintValue;
@@ -379,7 +399,23 @@
         this._updateStatusIndicators();
       }
     }
-    _onMouseUp() { this._dragging = false; this._paintValue = null; }
+    _onPointerUp(ev) {
+      if (this._activePointerId !== ev.pointerId) return;
+      const target = ev.currentTarget;
+      if (target?.hasPointerCapture && target.hasPointerCapture(ev.pointerId)) {
+        target.releasePointerCapture(ev.pointerId);
+      } else if (target?.releasePointerCapture) {
+        try { target.releasePointerCapture(ev.pointerId); } catch (err) { /* no-op */ }
+      }
+      this._dragging = false;
+      this._paintValue = null;
+      this._activePointerId = null;
+      if (this._windowPointerTracking) {
+        window.removeEventListener("pointerup", this._boundWindowPointerUp, true);
+        window.removeEventListener("pointercancel", this._boundWindowPointerUp, true);
+        this._windowPointerTracking = false;
+      }
+    }
 
     _revert() {
       // Force re-hydrate from current HA state
@@ -745,8 +781,10 @@
         if (!cell._twBound) {
           cell._twBound = true;
           cell.addEventListener("click", () => this._onCellClick(d, h));
-          cell.addEventListener("mousedown", () => this._onMouseDown(d, h));
-          cell.addEventListener("mouseover", () => this._onMouseOver(d, h));
+          cell.addEventListener("pointerdown", (ev) => this._onPointerDown(ev, d, h));
+          cell.addEventListener("pointerenter", (ev) => this._onPointerEnter(ev, d, h));
+          cell.addEventListener("pointerup", (ev) => this._onPointerUp(ev));
+          cell.addEventListener("pointercancel", (ev) => this._onPointerUp(ev));
         }
       });
     }
