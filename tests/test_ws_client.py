@@ -162,6 +162,64 @@ def test_stop_handles_exceptions_and_updates_status(
     asyncio.run(_run())
 
 
+def test_apply_nodes_payload_logs_without_changes(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Incremental updates without address changes should emit a debug log."""
+
+    module = _load_ws_client()
+    caplog.set_level(logging.DEBUG)
+
+    hass = types.SimpleNamespace(
+        loop=types.SimpleNamespace(create_task=lambda coro, name=None: None)
+    )
+    client = module.WebSocket09Client(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        api_client=types.SimpleNamespace(_session=None),
+        coordinator=types.SimpleNamespace(),
+    )
+
+    monkeypatch.setattr(
+        module.WebSocket09Client,
+        "_collect_update_addresses",
+        staticmethod(lambda _nodes: []),
+    )
+    client._merge_nodes = MagicMock()
+    client._build_nodes_snapshot = MagicMock(return_value={"nodes": {}})
+    client._dispatch_nodes = MagicMock()
+    client._mark_event = MagicMock()
+    client._nodes_raw = {"htr": {}}
+
+    payload = {"nodes": {"htr": {"settings": {}}}}
+    client._apply_nodes_payload(payload, merge=True, event="update")
+
+    assert any(
+        "update event without address changes" in record.getMessage()
+        for record in caplog.records
+    )
+    client._merge_nodes.assert_called_once()
+
+
+def test_collect_update_addresses_ignores_non_mappings() -> None:
+    """Collector should ignore non-dict sections while gathering addresses."""
+
+    module = _load_ws_client()
+    payload = {
+        "htr": {
+            "settings": {"1": {"mode": "auto"}},
+            "energy": [],
+            "other": None,
+        },
+        "bad": "invalid",
+    }
+
+    result = module.WebSocket09Client._collect_update_addresses(payload)
+
+    assert result == [("htr", "1")]
+
+
 def test_ws_url_uses_client_api_base() -> None:
     module = _load_ws_client()
 
