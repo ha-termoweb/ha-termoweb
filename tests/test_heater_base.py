@@ -154,11 +154,12 @@ def test_build_heater_name_map_handles_invalid_entries() -> None:
         "nodes": [
             123,
             {"type": "HTR", "addr": None, "name": "Ignored"},
-            {"type": "foo", "addr": "B", "name": "Skip"},
-            {"type": "htr", "addr": 5, "name": "  "},
-            {"type": "htr", "addr": "6", "name": None},
-        ]
-    }
+        {"type": "foo", "addr": "B", "name": "Skip"},
+        {"type": "htr", "addr": 5, "name": "  "},
+        {"type": "htr", "addr": "6", "name": None},
+        {"type": "htr", "addr": " None ", "name": "Skip None"},
+    ]
+}
 
     result = build_heater_name_map(nodes, lambda addr: f"Heater {addr}")
 
