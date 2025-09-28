@@ -63,6 +63,31 @@ def test_ensure_heater_section_helper() -> None:
     assert nodes_by_type["htr"] == replaced
 
 
+def test_merge_nodes_by_type_skips_invalid_addresses() -> None:
+    """Helper should ignore payload and cache entries without valid addresses."""
+
+    client = types.SimpleNamespace(get_node_settings=AsyncMock())
+    hass = HomeAssistant()
+    coord = StateCoordinator(
+        hass,
+        client,
+        30,
+        "dev",
+        {"name": "Device"},
+        {},
+    )
+
+    cache_map = {"htr": ["", "A"]}
+    current = {"htr": {"addrs": ["  "], "settings": {}}}
+    payload = {"htr": {"": {"bad": True}}}
+
+    merged = coord._merge_nodes_by_type(cache_map, current, payload)
+
+    assert merged["htr"]["addrs"] == ["A"]
+    assert merged["htr"]["settings"] == {}
+    assert "" not in merged["htr"]["settings"]
+
+
 def test_ensure_inventory_rebuilds_and_refreshes_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -720,7 +745,23 @@ def test_refresh_heater_handles_errors(caplog: pytest.LogCaptureFixture) -> None
     asyncio.run(_run())
 
 
-def test_state_coordinator_async_update_data_reuses_previous() -> None:
+def test_state_coordinator_async_update_data_reuses_previous(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[dict[str, list[str]], dict[str, Any], dict[str, dict[str, Any]]]] = []
+    original = StateCoordinator._merge_nodes_by_type
+
+    def _spy(
+        self: StateCoordinator,
+        cache_map: dict[str, list[str]],
+        current_sections: dict[str, Any] | None,
+        new_payload: dict[str, dict[str, Any]] | None,
+    ) -> dict[str, dict[str, Any]]:
+        calls.append((dict(cache_map), dict(current_sections or {}), dict(new_payload or {})))
+        return original(self, cache_map, current_sections, new_payload)
+
+    monkeypatch.setattr(StateCoordinator, "_merge_nodes_by_type", _spy)
+
     async def _run() -> None:
         client = types.SimpleNamespace()
         client.get_node_settings = AsyncMock(return_value={"mode": "eco"})
@@ -758,6 +799,58 @@ def test_state_coordinator_async_update_data_reuses_previous() -> None:
         assert dev_data["htr"]["addrs"] == ["legacy"]
 
     asyncio.run(_run())
+
+    assert len(calls) == 1
+    cache_map, _, payload = calls[0]
+    assert cache_map.get("acm") == ["7"]
+    assert payload.get("acm", {}).get("7") == {"mode": "eco"}
+
+
+def test_async_refresh_heater_uses_merge_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[dict[str, list[str]], dict[str, Any], dict[str, dict[str, Any]]]] = []
+    original = StateCoordinator._merge_nodes_by_type
+
+    def _spy(
+        self: StateCoordinator,
+        cache_map: dict[str, list[str]],
+        current_sections: dict[str, Any] | None,
+        new_payload: dict[str, dict[str, Any]] | None,
+    ) -> dict[str, dict[str, Any]]:
+        calls.append((dict(cache_map), dict(current_sections or {}), dict(new_payload or {})))
+        return original(self, cache_map, current_sections, new_payload)
+
+    monkeypatch.setattr(StateCoordinator, "_merge_nodes_by_type", _spy)
+
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_node_settings = AsyncMock(return_value={"mode": "heat"})
+
+        hass = HomeAssistant()
+        coord = StateCoordinator(
+            hass,
+            client,
+            30,
+            "dev",
+            {"name": " Device "},
+            {},
+        )
+
+        coord._node_inventory = [
+            nodes_module.Node(name="Heater", addr="A", node_type="htr")
+        ]
+        coord._refresh_node_cache()
+
+        await coord.async_refresh_heater("A")
+
+    asyncio.run(_run())
+
+    assert len(calls) == 1
+    cache_map, current, payload = calls[0]
+    assert cache_map == {"htr": ["A"]}
+    assert current == {}
+    assert payload == {"htr": {"A": {"mode": "heat"}}}
 
 
 def test_async_update_data_skips_non_dict_sections() -> None:
