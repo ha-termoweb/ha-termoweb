@@ -95,7 +95,7 @@ class AccumulatorNode(HeaterNode):
     def supports_boost(self) -> bool:
         """Return whether the accumulator exposes boost/runback."""
 
-        return False
+        return True
 
 
 class PowerMonitorNode(Node):

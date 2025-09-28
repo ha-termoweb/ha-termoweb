@@ -31,7 +31,13 @@ def test_accumulator_node_defaults() -> None:
     assert node.name == ""
     assert node.addr == "007"
     assert node.type == "acm"
-    assert node.supports_boost() is False
+    assert node.supports_boost() is True
+
+
+def test_accumulator_supports_boost() -> None:
+    node = AccumulatorNode(name="Storage", addr=3)
+
+    assert node.supports_boost() is True
 
 
 def test_power_monitor_stub() -> None:
