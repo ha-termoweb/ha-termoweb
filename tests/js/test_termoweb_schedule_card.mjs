@@ -226,26 +226,57 @@ card._colorCell = () => {
   colorCalls += 1;
 };
 
-card._onMouseDown(0, 0);
-assert(card._dragging === true, "Mouse down should start dragging");
-assert(card._paintValue === 2, "Mouse down should set paint value");
-assert(card._progLocal[0] === 2, "Mouse down should paint initial cell");
-assert(card._dirtyProg === true, "Mouse down marks program dirty");
-assert(renderCalls === 1, "Mouse down should render grid");
-assert(statusCalls === 1, "Mouse down should update status");
-assert(windowStub._listeners.has("mouseup"), "Mouse down should register mouseup listener");
+const cellStub = {
+  _captured: false,
+  setPointerCaptureCalls: [],
+  releasePointerCaptureCalls: [],
+  setPointerCapture(id) {
+    this._captured = true;
+    this.setPointerCaptureCalls.push(id);
+  },
+  releasePointerCapture(id) {
+    this._captured = false;
+    this.releasePointerCaptureCalls.push(id);
+  },
+  hasPointerCapture() {
+    return this._captured;
+  },
+};
 
-card._onMouseOver(0, 1);
-assert(card._progLocal[1] === 2, "Mouse over should paint new cells while dragging");
-assert(colorCalls === 1, "Mouse over should color cell when value changes");
-assert(statusCalls === 2, "Mouse over should update status when painting");
+const makePointerEvent = (overrides = {}) => ({
+  pointerId: 101,
+  currentTarget: cellStub,
+  preventDefault() {},
+  ...overrides,
+});
 
-card._onMouseOver(0, 1);
-assert(colorCalls === 1, "Mouse over should not repaint identical values");
+card._onPointerDown(makePointerEvent(), 0, 0);
+assert(card._dragging === true, "Pointer down should start dragging");
+assert(card._paintValue === 2, "Pointer down should set paint value");
+assert(card._progLocal[0] === 2, "Pointer down should paint initial cell");
+assert(card._dirtyProg === true, "Pointer down marks program dirty");
+assert(renderCalls === 1, "Pointer down should render grid");
+assert(statusCalls === 1, "Pointer down should update status");
+assert(cellStub.setPointerCaptureCalls.length === 1, "Pointer down captures pointer once");
+assert(cellStub.releasePointerCaptureCalls.length === 1, "Pointer capture released immediately to allow enters");
+assert(windowStub._listeners.has("pointerup"), "Pointer down should register global pointerup listener");
+assert(windowStub._listeners.has("pointercancel"), "Pointer down should register global pointercancel listener");
 
-windowStub.dispatchEvent("mouseup");
-assert(card._dragging === false, "Mouse up should stop dragging");
-assert(card._paintValue === null, "Mouse up clears paint value");
-assert(!windowStub._listeners.has("mouseup"), "Mouse up listener should clear after firing");
+card._onPointerEnter(makePointerEvent({ pointerId: 101 }), 0, 1);
+assert(card._progLocal[1] === 2, "Pointer enter should paint new cells while dragging");
+assert(colorCalls === 1, "Pointer enter should color cell when value changes");
+assert(statusCalls === 2, "Pointer enter should update status when painting");
+
+card._onPointerEnter(makePointerEvent({ pointerId: 101 }), 0, 1);
+assert(colorCalls === 1, "Pointer enter should not repaint identical values");
+
+const pointerUpEvent = makePointerEvent({ pointerId: 101, currentTarget: windowStub });
+windowStub.dispatchEvent("pointerup", pointerUpEvent);
+assert(card._dragging === false, "Pointer up should stop dragging");
+assert(card._paintValue === null, "Pointer up clears paint value");
+assert(card._activePointerId === null, "Pointer up clears active pointer id");
+assert(!windowStub._listeners.has("pointerup"), "Pointer up listener should clear after firing");
+assert(!windowStub._listeners.has("pointercancel"), "Pointer cancel listener should clear after pointer finishes");
+assert(card._windowPointerTracking === false, "Pointer tracking flag should reset after finish");
 
 console.log("All schedule card JS checks passed");
