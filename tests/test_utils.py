@@ -21,6 +21,7 @@ from custom_components.termoweb.nodes import (
 from custom_components.termoweb.utils import (
     _entry_gateway_record,
     build_gateway_device_info,
+    extract_heater_addrs,
     float_or_none,
 )
 
@@ -290,3 +291,23 @@ def test_build_heater_energy_unique_id_requires_components(
 )
 def test_parse_heater_energy_unique_id_invalid(value) -> None:
     assert parse_heater_energy_unique_id(value) is None
+
+
+def test_extract_heater_addrs_filters_duplicates_and_types() -> None:
+    payload = {
+        "nodes": [
+            {"type": "htr", "addr": " A "},
+            {"type": "acm", "addr": "B"},
+            {"type": "pmo", "addr": "p1"},
+            {"type": "htr", "addr": "a"},
+            {"type": "thm", "addr": "t"},
+            {"type": "htr", "addr": "  "},
+        ]
+    }
+
+    assert extract_heater_addrs(payload) == ["A", "B"]
+
+
+@pytest.mark.parametrize("payload", [None, [], "invalid", {"nodes": "bad"}])
+def test_extract_heater_addrs_handles_invalid_payload(payload: Any) -> None:
+    assert extract_heater_addrs(payload) == []

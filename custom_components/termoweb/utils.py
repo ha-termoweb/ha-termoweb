@@ -11,6 +11,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.loader import async_get_integration
 
 from .const import DOMAIN
+from .nodes import extract_heater_addrs as _extract_heater_addrs
 
 
 async def async_get_integration_version(hass: HomeAssistant) -> str:
@@ -104,3 +105,6 @@ def float_or_none(value: Any) -> float | None:
         return num if math.isfinite(num) else None
     except Exception:  # noqa: BLE001
         return None
+
+
+extract_heater_addrs = _extract_heater_addrs
