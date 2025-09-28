@@ -4,6 +4,7 @@ import asyncio
 import copy
 from datetime import datetime, timezone, timedelta
 import importlib
+import inspect
 import itertools
 import logging
 import sys
@@ -70,7 +71,7 @@ async def _load_module(
     class _RecorderInstance:
         def __init__(self) -> None:
             async def _call(func, *args, **kwargs):
-                if asyncio.iscoroutinefunction(func):
+                if inspect.iscoroutinefunction(func):
                     return await func(*args, **kwargs)
                 return func(*args, **kwargs)
 
