@@ -82,12 +82,24 @@ def test_termoweb_heater_is_heater_node() -> None:
     assert heater.name == "Living Room"
 
 
-def test_heater_climate_entity_normalizes_node_type() -> None:
+def test_heater_climate_entity_normalizes_node_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _reset_environment()
     hass = HomeAssistant()
     dev_id = "dev-acm"
     coordinator_data = {dev_id: {"htr": {"settings": {}}, "nodes": {}}}
     coordinator = _make_coordinator(hass, dev_id, coordinator_data[dev_id])
+
+    calls: list[tuple[object, dict[str, Any]]] = []
+
+    original_normalize = climate_module.normalize_node_type
+
+    def _record_normalize(value, **kwargs):
+        calls.append((value, kwargs))
+        return original_normalize(value, **kwargs)
+
+    monkeypatch.setattr(climate_module, "normalize_node_type", _record_normalize)
 
     heater = HeaterClimateEntity(
         coordinator,
@@ -101,6 +113,8 @@ def test_heater_climate_entity_normalizes_node_type() -> None:
     assert heater.type == "acm"
     assert getattr(heater, "_node_type", "") == "acm"
     assert heater._attr_unique_id == f"{DOMAIN}:{dev_id}:acm:{heater._addr}"
+    assert calls[0][0] in {"htr", None}
+    assert calls[1][0] == " ACM "
 
 
 def test_async_setup_entry_creates_entities() -> None:
