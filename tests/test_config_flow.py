@@ -248,6 +248,36 @@ def test_async_step_reconfigure_initial_form(
     assert _schema_default(schema, "brand") == config_flow.BRAND_DUCAHEAT
 
 
+def test_async_step_reconfigure_invalid_brand_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hass = HomeAssistant()
+    entry = ConfigEntry(
+        "entry-id",
+        data={
+            "username": "existing",
+            "poll_interval": 150,
+            config_flow.CONF_BRAND: "legacy",
+        },
+        options={"poll_interval": 150},
+    )
+    hass.config_entries.add_entry(entry)
+
+    flow = _create_flow(hass)
+    flow.context = {"entry_id": entry.entry_id}
+
+    async def fake_version(_hass: HomeAssistant) -> str:
+        return "7.7.7"
+
+    monkeypatch.setattr(config_flow, "_get_version", fake_version)
+
+    result = asyncio.run(flow.async_step_reconfigure())
+
+    assert result["type"] == "form"
+    schema = result["data_schema"]
+    assert _schema_default(schema, "brand") == config_flow.DEFAULT_BRAND
+
+
 def test_async_step_reconfigure_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
