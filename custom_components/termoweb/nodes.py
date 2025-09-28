@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 import logging
 from typing import Any
 
@@ -169,6 +169,19 @@ def _resolve_node_class(node_type: str) -> type[Node]:
     return NODE_CLASS_BY_TYPE.get(node_type, Node)
 
 
+def _normalise_with_fallback(
+    normalizer: Callable[..., str],
+    *candidates: Any,
+) -> str:
+    """Return the first non-empty normalised value from ``candidates``."""
+
+    for candidate in candidates:
+        normalized = normalizer(candidate, use_default_when_falsey=True)
+        if normalized:
+            return normalized
+    return ""
+
+
 def build_node_inventory(raw_nodes: Any) -> list[Node]:
     """Return a list of :class:`Node` instances for the provided payload.
 
@@ -180,29 +193,21 @@ def build_node_inventory(raw_nodes: Any) -> list[Node]:
 
     inventory: list[Node] = []
     for index, payload in enumerate(_iter_node_payload(raw_nodes)):
-        node_type = normalize_node_type(
+        node_type = _normalise_with_fallback(
+            normalize_node_type,
             payload.get("type"),
-            use_default_when_falsey=True,
+            payload.get("node_type"),
         )
-        if not node_type:
-            node_type = normalize_node_type(
-                payload.get("node_type"),
-                use_default_when_falsey=True,
-            )
         if not node_type:
             _LOGGER.debug("Skipping node with missing type at index %s: %s", index, payload)
             continue
 
         name = payload.get("name") or payload.get("title") or payload.get("label")
-        addr = normalize_node_addr(
+        addr = _normalise_with_fallback(
+            normalize_node_addr,
             payload.get("addr"),
-            use_default_when_falsey=True,
+            payload.get("address"),
         )
-        if not addr:
-            addr = normalize_node_addr(
-                payload.get("address"),
-                use_default_when_falsey=True,
-            )
 
         node_cls = _resolve_node_class(node_type)
         if node_cls is Node:

@@ -133,6 +133,14 @@ def test_build_node_inventory_handles_list_payload(caplog: pytest.LogCaptureFixt
     assert any("Skipping node with missing type" in message for message in caplog.messages)
 
 
+def test_build_node_inventory_skips_none_type() -> None:
+    payload = [
+        {"type": None, "addr": "03", "name": "Null type"},
+    ]
+
+    assert build_node_inventory(payload) == []
+
+
 def test_build_node_inventory_tolerates_empty_payload() -> None:
     assert build_node_inventory({"nodes": []}) == []
 
