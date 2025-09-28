@@ -93,6 +93,17 @@ ha-termoweb/ha-termoweb
    - Some systems use **`https://control2.termoweb.net`** — use whichever site is used today.  
 4) Complete the wizard. Heaters will appear under **Devices**; add them to dashboards or use them in automations.
 
+## Debugging
+
+Add the following lines to your HA's configuration.yaml to have debug messages appear in home-assistant.log:
+
+```
+logger:
+  default: warning
+  logs:
+    custom_components.termoweb: debug
+```
+
 ---
 
 ## Tips
