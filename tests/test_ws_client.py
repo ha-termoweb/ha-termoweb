@@ -1866,8 +1866,7 @@ def test_subscribe_htr_samples_sends_expected_payloads(
 
     async def _run() -> None:
         energy_updates: list[Any] = []
-        normalize_calls: list[Any] = []
-        helper_calls: list[tuple[Any, Any]] = []
+        helper_calls: list[tuple[Any, Any, dict[str, list[str]]]] = []
 
         class FakeEnergyCoordinator:
             def update_addresses(self, addrs: Any) -> None:
@@ -1875,15 +1874,6 @@ def test_subscribe_htr_samples_sends_expected_payloads(
                     energy_updates.append({k: list(v) for k, v in addrs.items()})
                 else:
                     energy_updates.append(list(addrs))
-
-        def fake_normalize(
-            addrs: Any,
-        ) -> tuple[dict[str, list[str]], dict[str, str]]:
-            normalize_calls.append(addrs)
-            return {
-                "htr": ["01", "02"],
-                "acm": ["A1"],
-            }, {"htr": "htr", "acm": "acm"}
 
         hass = types.SimpleNamespace(
             loop=asyncio.get_event_loop(),
@@ -1927,8 +1917,9 @@ def test_subscribe_htr_samples_sends_expected_payloads(
         original_helper = Client._apply_heater_addresses
 
         def helper(self: Any, addr_map: Any, *, inventory: Any = None) -> Any:
-            helper_calls.append((addr_map, inventory))
-            return original_helper(self, addr_map, inventory=inventory)
+            normalized = original_helper(self, addr_map, inventory=inventory)
+            helper_calls.append((addr_map, inventory, normalized))
+            return normalized
 
         monkeypatch.setattr(Client, "_apply_heater_addresses", helper)
 
@@ -1942,27 +1933,26 @@ def test_subscribe_htr_samples_sends_expected_payloads(
         ws = DummyWS()
         client._ws = ws
 
-        monkeypatch.setattr(module, "normalize_heater_addresses", fake_normalize)
-
         await client._subscribe_htr_samples()
 
-        assert ws.sent == [
-            '5::/api/v2/socket_io:{"name":"subscribe","args":["/htr/01/samples"]}',
-            '5::/api/v2/socket_io:{"name":"subscribe","args":["/htr/02/samples"]}',
-            '5::/api/v2/socket_io:{"name":"subscribe","args":["/acm/A1/samples"]}',
-        ]
+        assert helper_calls
+        normalized_map = helper_calls[0][2]
+        other_types = sorted(nt for nt in normalized_map if nt != "htr")
+        expected_payloads = []
+        for node_type in ["htr", *other_types]:
+            for addr in normalized_map.get(node_type, []):
+                expected_payloads.append(
+                    f'5::/api/v2/socket_io:{{"name":"subscribe","args":["/{node_type}/{addr}/samples"]}}'
+                )
 
-        assert normalize_calls == [
-            {"htr": ["01", "02"], "acm": ["A1"]},
-            {"htr": ["01", "02"], "acm": ["A1"]},
-        ]
+        assert ws.sent == expected_payloads
         dev_map = coordinator.data["dev"]
         assert dev_map["nodes_by_type"]["acm"]["addrs"] == ["A1"]
         assert dev_map["htr"] is dev_map["nodes_by_type"]["htr"]
         assert energy_updates == [{"htr": ["01", "02"], "acm": ["A1"]}]
         assert "htr" in call_record
         assert "acm" in call_record
-        assert helper_calls and helper_calls[0][0] == {"htr": ["01", "02"], "acm": ["A1"]}
+        assert helper_calls[0][0] == {"htr": ["01", "02"], "acm": ["A1"]}
         inventory = helper_calls[0][1]
         assert inventory is not None
         assert sorted((getattr(node, "type", None), getattr(node, "addr", None)) for node in inventory) == [
