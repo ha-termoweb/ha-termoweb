@@ -18,9 +18,14 @@ from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
 from .const import DOMAIN
-from .heater import HeaterNodeBase, log_skipped_nodes, prepare_heater_platform_data
+from .heater import (
+    HeaterNodeBase,
+    iter_heater_nodes,
+    log_skipped_nodes,
+    prepare_heater_platform_data,
+)
 from .nodes import HeaterNode
-from .utils import HEATER_NODE_TYPES, float_or_none
+from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,29 +46,26 @@ async def async_setup_entry(hass, entry, async_add_entities):
     )
 
     new_entities: list[ClimateEntity] = []
-    for node_type in HEATER_NODE_TYPES:
-        for node in nodes_by_type.get(node_type, []):
-            addr_str = str(getattr(node, "addr", "")).strip()
-            if not addr_str:
-                continue
-            resolved_name = resolve_name(node_type, addr_str)
-            unique_id = f"{DOMAIN}:{dev_id}:{node_type}:{addr_str}:climate"
-            entity_cls: type[HeaterClimateEntity]
-            if node_type == "acm":
-                entity_cls = AccumulatorClimateEntity
-            else:
-                entity_cls = HeaterClimateEntity
-            new_entities.append(
-                entity_cls(
-                    coordinator,
-                    entry.entry_id,
-                    dev_id,
-                    addr_str,
-                    resolved_name,
-                    unique_id,
-                    node_type=node_type,
-                )
+    for node_type, _node, addr_str, resolved_name in iter_heater_nodes(
+        nodes_by_type, resolve_name
+    ):
+        unique_id = f"{DOMAIN}:{dev_id}:{node_type}:{addr_str}:climate"
+        entity_cls: type[HeaterClimateEntity]
+        if node_type == "acm":
+            entity_cls = AccumulatorClimateEntity
+        else:
+            entity_cls = HeaterClimateEntity
+        new_entities.append(
+            entity_cls(
+                coordinator,
+                entry.entry_id,
+                dev_id,
+                addr_str,
+                resolved_name,
+                unique_id,
+                node_type=node_type,
             )
+        )
 
     log_skipped_nodes("climate", nodes_by_type, logger=_LOGGER)
     if new_entities:

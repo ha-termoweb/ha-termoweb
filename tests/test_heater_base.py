@@ -18,6 +18,7 @@ from homeassistant.core import HomeAssistant
 
 HeaterNodeBase = heater_module.HeaterNodeBase
 build_heater_name_map = heater_module.build_heater_name_map
+iter_heater_nodes = heater_module.iter_heater_nodes
 prepare_heater_platform_data = heater_module.prepare_heater_platform_data
 
 
@@ -163,6 +164,77 @@ def test_iter_nodes_yields_existing_node_objects() -> None:
 
     yielded = list(heater_module._iter_nodes(nodes))
     assert yielded == nodes
+
+
+def test_iter_heater_nodes_filters_addresses() -> None:
+    nodes_by_type = {
+        "htr": [SimpleNamespace(addr="1", type="htr"), SimpleNamespace(addr=" ")],
+        "acm": [SimpleNamespace(addr="2", type="acm"), SimpleNamespace(addr=None)],
+        "pmo": [SimpleNamespace(addr="3", type="pmo")],
+    }
+
+    resolved: list[tuple[str, str]] = []
+
+    def fake_resolve(node_type: str, addr: str) -> str:
+        resolved.append((node_type, addr))
+        return f"{node_type}-{addr}"
+
+    yielded = list(iter_heater_nodes(nodes_by_type, fake_resolve))
+
+    assert sorted([(node_type, addr) for node_type, _node, addr, _ in yielded]) == [
+        ("acm", "2"),
+        ("htr", "1"),
+    ]
+    assert sorted(resolved) == [("acm", "2"), ("htr", "1")]
+    resolved.clear()
+
+    resolved_acm: list[tuple[str, str]] = []
+
+    def fake_resolve_acm(node_type: str, addr: str) -> str:
+        resolved_acm.append((node_type, addr))
+        return f"{node_type}-{addr}"
+
+    only_acm = list(
+        iter_heater_nodes(nodes_by_type, fake_resolve_acm, node_types=["acm", "thm"])
+    )
+
+    assert [(node_type, addr) for node_type, _node, addr, _ in only_acm] == [("acm", "2")]
+    assert resolved_acm == [("acm", "2")]
+
+    mapping_nodes = {
+        "htr": {"first": SimpleNamespace(addr="5")},
+        "acm": SimpleNamespace(addr="6"),
+        "pmo": [SimpleNamespace(addr=" None ")],
+        "thm": "ignored",
+    }
+
+    extra_resolved: list[tuple[str, str]] = []
+
+    def extra_resolve(node_type: str, addr: str) -> str:
+        extra_resolved.append((node_type, addr))
+        return f"{node_type}-{addr}"
+
+    extra_results = list(
+        iter_heater_nodes(
+            mapping_nodes,
+            extra_resolve,
+            node_types=["htr", "acm", "pmo", "thm"],
+        )
+    )
+
+    assert extra_results == [
+        ("htr", mapping_nodes["htr"]["first"], "5", "htr-5"),
+        ("acm", mapping_nodes["acm"], "6", "acm-6"),
+    ]
+    assert extra_resolved == [("htr", "5"), ("acm", "6")]
+
+    blank_nodes: dict[str, list[SimpleNamespace] | None] = {"htr": None, "acm": []}
+    assert list(iter_heater_nodes(blank_nodes, fake_resolve)) == []
+
+    assert (
+        list(iter_heater_nodes(nodes_by_type, fake_resolve, node_types=["", "acm"]))
+        == [("acm", nodes_by_type["acm"][0], "2", "acm-2")]
+    )
 
 
 @pytest.mark.parametrize(
