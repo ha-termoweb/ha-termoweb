@@ -14,6 +14,7 @@ from conftest import _install_stubs
 
 _install_stubs()
 
+import custom_components.termoweb.nodes as nodes
 import custom_components.termoweb.utils as utils
 import custom_components.termoweb.ws_client as ws_core
 
@@ -2449,7 +2450,7 @@ def test_dispatch_nodes_reuses_cached_inventory(
     def explode_build(raw_nodes: Any) -> list[Any]:  # pragma: no cover - defensive
         raise AssertionError("build_node_inventory should not be called")
 
-    monkeypatch.setattr(utils, "build_node_inventory", explode_build)
+    monkeypatch.setattr(nodes, "build_node_inventory", explode_build)
 
     payload = {"nodes": [{"addr": "01", "type": "htr"}]}
 
