@@ -25,9 +25,7 @@ async def async_get_integration_version(hass: HomeAssistant) -> str:
     return integration.version or "unknown"
 
 
-def build_heater_energy_unique_id(
-    dev_id: Any, node_type: Any, addr: Any
-) -> str:
+def build_heater_energy_unique_id(dev_id: Any, node_type: Any, addr: Any) -> str:
     """Return the canonical unique ID for a heater energy sensor."""
 
     dev = normalize_node_addr(dev_id)
@@ -111,6 +109,43 @@ def ensure_node_inventory(
         record["node_inventory"] = []
 
     return []
+
+def normalize_node_type(
+    value: Any,
+    *,
+    default: str = "",
+    use_default_when_falsey: bool = False,
+    lowercase: bool,
+) -> str:
+    """Return ``value`` as a normalised node identifier string."""
+
+    raw = value
+    if use_default_when_falsey and not raw:
+        raw = default
+
+    try:
+        normalized = str(raw).strip()
+    except Exception:  # pragma: no cover - defensive  # noqa: BLE001
+        normalized = ""
+    else:
+        if lowercase:
+            normalized = normalized.lower()
+
+    if normalized:
+        return normalized
+
+    if default and not use_default_when_falsey:
+        try:
+            normalized_default = str(default).strip()
+        except Exception:  # pragma: no cover - defensive  # noqa: BLE001
+            return ""
+        if lowercase:
+            normalized_default = normalized_default.lower()
+        return normalized_default
+
+    return ""
+
+
 def normalize_node_type(
     value: Any,
     *,
@@ -119,25 +154,12 @@ def normalize_node_type(
 ) -> str:
     """Return ``value`` as a normalised node type string."""
 
-    raw = value
-    if use_default_when_falsey and not raw:
-        raw = default
-
-    try:
-        normalized = str(raw).strip().lower()
-    except Exception:  # pragma: no cover - defensive  # noqa: BLE001
-        normalized = ""
-
-    if normalized:
-        return normalized
-
-    if default and not use_default_when_falsey:
-        try:
-            return str(default).strip().lower()
-        except Exception:  # pragma: no cover - defensive  # noqa: BLE001
-            return ""
-
-    return ""
+    return _normalize_node_identifier(
+        value,
+        default=default,
+        use_default_when_falsey=use_default_when_falsey,
+        lowercase=True,
+    )
 
 
 def normalize_node_addr(
@@ -148,25 +170,12 @@ def normalize_node_addr(
 ) -> str:
     """Return ``value`` as a normalised node address string."""
 
-    raw = value
-    if use_default_when_falsey and not raw:
-        raw = default
-
-    try:
-        normalized = str(raw).strip()
-    except Exception:  # pragma: no cover - defensive  # noqa: BLE001
-        normalized = ""
-
-    if normalized:
-        return normalized
-
-    if default and not use_default_when_falsey:
-        try:
-            return str(default).strip()
-        except Exception:  # pragma: no cover - defensive  # noqa: BLE001
-            return ""
-
-    return ""
+    return _normalize_node_identifier(
+        value,
+        default=default,
+        use_default_when_falsey=use_default_when_falsey,
+        lowercase=False,
+    )
 
 
 def _entry_gateway_record(
@@ -242,7 +251,9 @@ def addresses_by_node_type(
 
     known: set[str] | None = None
     if known_types is not None:
-        known = {normalize_node_type(node_type) for node_type in known_types if node_type}
+        known = {
+            normalize_node_type(node_type) for node_type in known_types if node_type
+        }
 
     result: dict[str, list[str]] = {}
     seen: dict[str, set[str]] = {}
