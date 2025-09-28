@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
 from datetime import timedelta
 import logging
 import time
@@ -27,6 +28,17 @@ _LOGGER = logging.getLogger(__name__)
 
 # How many heater settings to fetch per device per cycle (keep gentle)
 HTR_SETTINGS_PER_CYCLE = 1
+_PENDING_SETTINGS_TTL = 10.0
+_SETPOINT_TOLERANCE = 0.05
+
+
+@dataclass
+class PendingSetting:
+    """Track expected heater settings awaiting confirmation."""
+
+    mode: str | None
+    stemp: float | None
+    expires_at: float
 
 
 def _device_display_name(device: Mapping[str, Any] | None, dev_id: str) -> str:
@@ -108,6 +120,7 @@ class StateCoordinator(
         self._node_inventory: list[Node] = list(node_inventory or [])
         self._nodes_by_type: dict[str, list[str]] = {}
         self._addr_lookup: dict[str, set[str]] = {}
+        self._pending_settings: dict[tuple[str, str], PendingSetting] = {}
         self._refresh_node_cache()
 
     def _set_inventory_from_nodes(
@@ -199,6 +212,149 @@ class StateCoordinator(
         """Add ``addr`` to the cached map for ``node_type`` if missing."""
         self._merge_address_payload({node_type: [addr]})
 
+    @staticmethod
+    def _normalize_mode_value(value: Any) -> str | None:
+        """Return a canonical string for backend HVAC modes."""
+
+        if value is None:
+            return None
+        if isinstance(value, str):
+            candidate = value.strip().lower()
+        else:
+            candidate = str(value).strip().lower()
+        return candidate or None
+
+    def _pending_key(self, node_type: str, addr: str) -> tuple[str, str] | None:
+        """Return the normalised pending settings key for a node."""
+
+        normalized_type = normalize_node_type(
+            node_type,
+            use_default_when_falsey=True,
+        )
+        normalized_addr = normalize_node_addr(
+            addr,
+            use_default_when_falsey=True,
+        )
+        if not normalized_type or not normalized_addr:
+            return None
+        return normalized_type, normalized_addr
+
+    def _prune_pending_settings(self) -> None:
+        """Drop expired pending settings entries."""
+
+        now = time.time()
+        stale = [
+            key
+            for key, entry in self._pending_settings.items()
+            if entry.expires_at <= now
+        ]
+        for key in stale:
+            self._pending_settings.pop(key, None)
+
+    def register_pending_setting(
+        self,
+        node_type: str,
+        addr: str,
+        *,
+        mode: str | None,
+        stemp: float | None,
+        ttl: float = _PENDING_SETTINGS_TTL,
+    ) -> None:
+        """Record expected heater settings awaiting confirmation."""
+
+        key = self._pending_key(node_type, addr)
+        if key is None:
+            return
+
+        try:
+            ttl_value = float(ttl)
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            ttl_value = _PENDING_SETTINGS_TTL
+        expires_at = time.time() + max(ttl_value, 0.0)
+        normalized_mode = self._normalize_mode_value(mode)
+        normalized_stemp = float_or_none(stemp)
+        self._pending_settings[key] = PendingSetting(
+            mode=normalized_mode,
+            stemp=normalized_stemp,
+            expires_at=expires_at,
+        )
+        _LOGGER.debug(
+            "Registered pending settings dev=%s type=%s addr=%s mode=%s stemp=%s ttl=%.1f",
+            self._dev_id,
+            key[0],
+            key[1],
+            normalized_mode,
+            normalized_stemp,
+            ttl,
+        )
+
+    def _should_defer_pending_setting(
+        self,
+        node_type: str,
+        addr: str,
+        payload: Mapping[str, Any] | None,
+    ) -> bool:
+        """Return True when a pending write should defer payload merging."""
+
+        key = self._pending_key(node_type, addr)
+        if key is None:
+            return False
+
+        entry = self._pending_settings.get(key)
+        if entry is None:
+            return False
+
+        now = time.time()
+        if entry.expires_at <= now:
+            _LOGGER.debug(
+                "Pending settings expired dev=%s type=%s addr=%s", self._dev_id, *key
+            )
+            self._pending_settings.pop(key, None)
+            return False
+
+        mode_expected = entry.mode
+        stemp_expected = entry.stemp
+        if payload is None:
+            _LOGGER.debug(
+                "Deferring merge due to pending settings dev=%s type=%s addr=%s payload=None",
+                self._dev_id,
+                key[0],
+                key[1],
+            )
+            return True
+
+        mode_payload = self._normalize_mode_value(payload.get("mode"))
+        stemp_payload = float_or_none(payload.get("stemp"))
+
+        mode_matches = mode_expected is None or mode_expected == mode_payload
+        stemp_matches = True
+        if stemp_expected is not None:
+            if stemp_payload is None:
+                stemp_matches = False
+            else:
+                stemp_matches = (
+                    abs(stemp_payload - stemp_expected) <= _SETPOINT_TOLERANCE
+                )
+
+        if mode_matches and stemp_matches:
+            _LOGGER.debug(
+                "Pending settings satisfied dev=%s type=%s addr=%s", self._dev_id, *key
+            )
+            self._pending_settings.pop(key, None)
+            return False
+
+        _LOGGER.debug(
+            "Deferring merge due to pending settings dev=%s type=%s addr=%s expected_mode=%s expected_stemp=%s payload_mode=%s payload_stemp=%s",
+            self._dev_id,
+            key[0],
+            key[1],
+            mode_expected,
+            stemp_expected,
+            mode_payload,
+            stemp_payload,
+        )
+        return True
+
     def _merge_nodes_by_type(
         self,
         cache_map: Mapping[str, Iterable[str]],
@@ -221,9 +377,7 @@ class StateCoordinator(
         for node_type in merged_types:
             default_addrs = cache_map.get(node_type, [])
             section = sections.get(node_type)
-            normalized = self._normalise_type_section(
-                node_type, section, default_addrs
-            )
+            normalized = self._normalise_type_section(node_type, section, default_addrs)
 
             payload_settings = payload_map.get(node_type)
             if isinstance(payload_settings, Mapping):
@@ -333,6 +487,7 @@ class StateCoordinator(
         resolved_type = node_type or "htr"
 
         try:
+            self._prune_pending_settings()
             if not addr:
                 _LOGGER.error(
                     "Cannot refresh heater settings without an address for device %s",
@@ -384,6 +539,16 @@ class StateCoordinator(
                 dev_data.setdefault("connected", True)
 
             node_type = resolved_type
+
+            if self._should_defer_pending_setting(node_type, addr, payload):
+                _LOGGER.debug(
+                    "Skipping heater refresh merge for pending settings dev=%s type=%s addr=%s",
+                    dev_id,
+                    node_type,
+                    addr,
+                )
+                success = True
+                return
 
             existing_nodes = {}
             raw_existing = dev_data.get("nodes_by_type")
@@ -469,6 +634,7 @@ class StateCoordinator(
         reverse = {address: set(types) for address, types in self._addr_lookup.items()}
         addrs = [addr for addrs in addr_map.values() for addr in addrs]
         try:
+            self._prune_pending_settings()
             prev_dev = (self.data or {}).get(dev_id, {})
             prev_by_type: dict[str, dict[str, Any]] = {}
 
@@ -520,6 +686,14 @@ class StateCoordinator(
                     node_type = next(iter(addr_types)) if addr_types else "htr"
                     js = await self.client.get_node_settings(dev_id, (node_type, addr))
                     if isinstance(js, dict):
+                        if self._should_defer_pending_setting(node_type, addr, js):
+                            _LOGGER.debug(
+                                "Deferring poll merge for pending settings dev=%s type=%s addr=%s",
+                                dev_id,
+                                node_type,
+                                addr,
+                            )
+                            continue
                         bucket = settings_by_type.setdefault(node_type, {})
                         bucket[addr] = js
                 self._rr_index[dev_id] = (start_index + count) % len(addrs)
