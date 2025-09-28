@@ -20,8 +20,10 @@ from .api import RESTClient
 from .const import DOMAIN
 from .utils import (
     build_heater_address_map,
+    build_heater_energy_unique_id,
     ensure_node_inventory,
     normalize_heater_addresses,
+    parse_heater_energy_unique_id,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -480,12 +482,12 @@ async def async_import_energy_history(
 
         all_samples_sorted = sorted(all_samples, key=lambda s: s.get("t", 0))
 
-        uid = f"{DOMAIN}:{dev_id}:{node_type}:{addr}:energy"
+        uid = build_heater_energy_unique_id(dev_id, node_type, addr)
         entity_id = (
             ent_reg.async_get_entity_id("sensor", DOMAIN, uid) if ent_reg else None
         )
         if not entity_id and node_type != "htr":
-            legacy_uid = f"{DOMAIN}:{dev_id}:htr:{addr}:energy"
+            legacy_uid = build_heater_energy_unique_id(dev_id, "htr", addr)
             entity_id = (
                 ent_reg.async_get_entity_id("sensor", DOMAIN, legacy_uid)
                 if ent_reg
@@ -724,19 +726,10 @@ async def async_register_import_energy_history_service(
             entry_map: dict[str, dict[str, set[str]]] = {}
 
             def _parse_energy_unique_id(unique_id: str) -> tuple[str, str] | None:
-                if not unique_id or not unique_id.startswith(f"{DOMAIN}:"):
+                parsed = parse_heater_energy_unique_id(unique_id)
+                if not parsed:
                     return None
-                try:
-                    remainder = unique_id.split(":", 1)[1]
-                    prefix, metric = remainder.rsplit(":", 1)
-                except ValueError:
-                    return None
-                if metric != "energy":
-                    return None
-                try:
-                    _dev_part, node_type, addr = prefix.rsplit(":", 2)
-                except ValueError:
-                    return None
+                _dev_id, node_type, addr = parsed
                 return node_type, addr
 
             for eid in ent_ids:

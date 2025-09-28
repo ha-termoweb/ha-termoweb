@@ -18,7 +18,10 @@ from custom_components.termoweb import coordinator as coordinator_module
 from custom_components.termoweb import sensor as sensor_module
 from custom_components.termoweb import const as const_module
 from custom_components.termoweb.nodes import build_node_inventory
-from custom_components.termoweb.utils import build_gateway_device_info
+from custom_components.termoweb.utils import (
+    build_gateway_device_info,
+    build_heater_energy_unique_id,
+)
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant
@@ -76,7 +79,7 @@ def test_coordinator_and_sensors() -> None:
                 "1",
                 "A",
                 "Energy",
-                f"{DOMAIN}:1:htr:A:energy",
+                build_heater_energy_unique_id("1", "htr", "A"),
                 "Heater",
             ),
             ("htr", "power"): HeaterPowerSensor(
@@ -94,7 +97,7 @@ def test_coordinator_and_sensors() -> None:
                 "1",
                 "B",
                 "Accumulator Energy",
-                f"{DOMAIN}:1:acm:B:energy",
+                build_heater_energy_unique_id("1", "acm", "B"),
                 "Accumulator",
                 node_type="acm",
             ),
@@ -129,8 +132,12 @@ def test_coordinator_and_sensors() -> None:
         assert energy_sensor.device_class == SensorDeviceClass.ENERGY
         assert energy_sensor.state_class == SensorStateClass.TOTAL_INCREASING
         assert energy_sensor.native_unit_of_measurement == "kWh"
-        assert energy_sensor._attr_unique_id == f"{DOMAIN}:1:htr:A:energy"
-        assert sensors[("acm", "energy")]._attr_unique_id == f"{DOMAIN}:1:acm:B:energy"
+        assert energy_sensor._attr_unique_id == build_heater_energy_unique_id(
+            "1", "htr", "A"
+        )
+        assert sensors[("acm", "energy")]._attr_unique_id == build_heater_energy_unique_id(
+            "1", "acm", "B"
+        )
         assert sensors[("acm", "power")]._attr_unique_id == f"{DOMAIN}:1:acm:B:power"
 
         expected_initial = {

@@ -13,9 +13,11 @@ from custom_components.termoweb.utils import (
     _entry_gateway_record,
     addresses_by_node_type,
     build_gateway_device_info,
+    build_heater_energy_unique_id,
     ensure_node_inventory,
     float_or_none,
     normalize_heater_addresses,
+    parse_heater_energy_unique_id,
 )
 
 
@@ -158,3 +160,37 @@ def test_get_brand_api_base_fallback() -> None:
     from custom_components.termoweb import const
 
     assert const.get_brand_api_base("unknown-brand") == const.API_BASE
+
+
+def test_build_heater_energy_unique_id_round_trip() -> None:
+    unique_id = build_heater_energy_unique_id("dev", "htr", "01")
+
+    assert unique_id == f"{DOMAIN}:dev:htr:01:energy"
+    assert parse_heater_energy_unique_id(unique_id) == ("dev", "htr", "01")
+
+
+@pytest.mark.parametrize(
+    "dev_id, node_type, addr",
+    [("", "htr", "01"), ("dev", "", "01"), ("dev", "htr", "")],
+)
+def test_build_heater_energy_unique_id_requires_components(
+    dev_id: str, node_type: str, addr: str
+) -> None:
+    with pytest.raises(ValueError):
+        build_heater_energy_unique_id(dev_id, node_type, addr)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        "",
+        "not-domain:dev:htr:01:energy",
+        f"{DOMAIN}:dev:htr:01:power",
+        f"{DOMAIN}:dev:htr:energy",
+        f"{DOMAIN}:dev:htr",
+        f"{DOMAIN}:dev::01:energy",
+    ],
+)
+def test_parse_heater_energy_unique_id_invalid(value) -> None:
+    assert parse_heater_energy_unique_id(value) is None

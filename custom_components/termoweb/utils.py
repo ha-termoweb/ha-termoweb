@@ -15,6 +15,38 @@ from .nodes import Node, build_node_inventory
 HEATER_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm"})
 
 
+def build_heater_energy_unique_id(
+    dev_id: Any, node_type: Any, addr: Any
+) -> str:
+    """Return the canonical unique ID for a heater energy sensor."""
+
+    dev = str(dev_id).strip()
+    node = str(node_type).strip()
+    address = str(addr).strip()
+    if not dev or not node or not address:
+        raise ValueError("dev_id, node_type and addr must be provided")
+    return f"{DOMAIN}:{dev}:{node}:{address}:energy"
+
+
+def parse_heater_energy_unique_id(unique_id: str) -> tuple[str, str, str] | None:
+    """Parse a heater energy sensor unique ID into its components."""
+
+    if not isinstance(unique_id, str):
+        return None
+    stripped = unique_id.strip()
+    if not stripped or not stripped.startswith(f"{DOMAIN}:"):
+        return None
+    try:
+        domain, dev, node, address, metric = stripped.split(":", 4)
+    except ValueError:
+        return None
+    if domain != DOMAIN or metric != "energy":
+        return None
+    if not dev or not node or not address:
+        return None
+    return dev, node, address
+
+
 def ensure_node_inventory(
     record: Mapping[str, Any], *, nodes: Any | None = None
 ) -> list[Node]:
