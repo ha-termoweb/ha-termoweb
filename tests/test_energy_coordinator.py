@@ -92,6 +92,24 @@ def test_update_nodes_uses_provided_inventory(monkeypatch: pytest.MonkeyPatch) -
     assert builder_called is False
 
 
+def test_set_inventory_from_nodes_defaults_to_empty() -> None:
+    client = types.SimpleNamespace(get_node_settings=AsyncMock())
+    hass = HomeAssistant()
+    coord = StateCoordinator(
+        hass,
+        client,
+        30,
+        "dev",
+        {"name": "Device"},
+        {},
+    )
+
+    result = coord._set_inventory_from_nodes(None)
+
+    assert result == []
+    assert coord._node_inventory == []
+
+
 def test_power_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()

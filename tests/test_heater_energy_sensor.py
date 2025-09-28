@@ -116,9 +116,20 @@ def test_coordinator_and_sensors() -> None:
             ),
         }
 
+        signal = signal_ws_data("entry")
+
         for sensor in sensors.values():
             sensor.hass = hass
-            await sensor.async_added_to_hass()
+            with patch.object(
+                sensor._ws_subscription,
+                "subscribe",
+                wraps=sensor._ws_subscription.subscribe,
+            ) as mock_subscribe:
+                await sensor.async_added_to_hass()
+            mock_subscribe.assert_called_once_with(
+                hass, signal, sensor._handle_ws_message
+            )
+            assert sensor._ws_subscription.is_connected
 
         energy_sensor = sensors[("htr", "energy")]
         assert energy_sensor.device_class == SensorDeviceClass.ENERGY
@@ -127,8 +138,6 @@ def test_coordinator_and_sensors() -> None:
         assert energy_sensor._attr_unique_id == f"{DOMAIN}:1:htr:A:energy"
         assert sensors[("acm", "energy")]._attr_unique_id == f"{DOMAIN}:1:acm:B:energy"
         assert sensors[("acm", "power")]._attr_unique_id == f"{DOMAIN}:1:acm:B:power"
-
-        signal = signal_ws_data("entry")
 
         expected_initial = {
             ("htr", "energy"): pytest.approx(0.0015),
@@ -191,11 +200,14 @@ def test_coordinator_and_sensors() -> None:
 
         for sensor in sensors.values():
             sensor.schedule_update_ha_state.reset_mock()
-            original_unsub = sensor._unsub_ws
-            sensor._unsub_ws = MagicMock(side_effect=original_unsub)
-            mock_unsub = sensor._unsub_ws
-            await sensor.async_will_remove_from_hass()
-            mock_unsub.assert_called_once()
+            with patch.object(
+                sensor._ws_subscription,
+                "unsubscribe",
+                wraps=sensor._ws_subscription.unsubscribe,
+            ) as mock_unsubscribe:
+                await sensor.async_will_remove_from_hass()
+            mock_unsubscribe.assert_called_once()
+            assert not sensor._ws_subscription.is_connected
             assert sensor._handle_ws_message not in dispatch_map.get(signal, [])
 
         dispatcher_send(signal, make_ws_payload("1", "A"))
@@ -376,6 +388,7 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
             "nodes": [
                 {"type": "HTR", "addr": "1", "name": "Living Room"},
                 {"type": "htr", "addr": "2", "name": "Bedroom"},
+                {"type": "ACM", "addr": "3", "name": "Accumulator"},
             ]
         }
         coordinator = types.SimpleNamespace(
@@ -390,6 +403,11 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
                         },
                         "energy": {"1": 1.0, "2": 2.0},
                         "power": {"1": 100.0, "2": 150.0},
+                    },
+                    "acm": {
+                        "settings": {"3": {"mtemp": "17.0", "units": "C"}},
+                        "energy": {"3": 3.0},
+                        "power": {"3": 200.0},
                     },
                 }
             },
@@ -420,6 +438,9 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
             "Bedroom Temperature",
             "Bedroom Energy",
             "Bedroom Power",
+            "Accumulator Temperature",
+            "Accumulator Energy",
+            "Accumulator Power",
             "Total Energy",
         ]
 
@@ -448,7 +469,19 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
                 getattr(ent, "_attr_name", getattr(ent, "name", None))
                 for ent in add_calls[0]
             ]
-            assert names == expected_names
+            assert sorted(names) == sorted(expected_names)
+            per_node = {}
+            for name in names:
+                if name == "Total Energy":
+                    continue
+                base, _, measurement = name.rpartition(" ")
+                per_node.setdefault(base, set()).add(measurement)
+
+            assert per_node == {
+                "Living Room": {"Temperature", "Energy", "Power"},
+                "Bedroom": {"Temperature", "Energy", "Power"},
+                "Accumulator": {"Temperature", "Energy", "Power"},
+            }
             logger_mock.debug.assert_called_once_with(
                 "Adding %d TermoWeb sensors", expected_count
             )
@@ -468,7 +501,19 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
                 getattr(ent, "_attr_name", getattr(ent, "name", None))
                 for ent in add_calls[1]
             ]
-            assert names_second == expected_names
+            assert sorted(names_second) == sorted(expected_names)
+            per_node_second = {}
+            for name in names_second:
+                if name == "Total Energy":
+                    continue
+                base, _, measurement = name.rpartition(" ")
+                per_node_second.setdefault(base, set()).add(measurement)
+
+            assert per_node_second == {
+                "Living Room": {"Temperature", "Energy", "Power"},
+                "Bedroom": {"Temperature", "Energy", "Power"},
+                "Accumulator": {"Temperature", "Energy", "Power"},
+            }
             logger_mock.debug.assert_called_once_with(
                 "Adding %d TermoWeb sensors", expected_count
             )
@@ -565,12 +610,20 @@ def test_heater_temp_sensor() -> None:
         original_async_on_remove = sensor.async_on_remove
         sensor.async_on_remove = MagicMock(side_effect=original_async_on_remove)
 
-        await sensor.async_added_to_hass()
+        with patch.object(
+            sensor._ws_subscription,
+            "subscribe",
+            wraps=sensor._ws_subscription.subscribe,
+        ) as mock_subscribe:
+            await sensor.async_added_to_hass()
 
         ws_signal = signal_ws_data("entry")
         poll_signal = signal_poll_refresh("entry")
 
-        assert sensor._unsub_ws is not None
+        mock_subscribe.assert_called_once_with(
+            hass, ws_signal, sensor._handle_ws_message
+        )
+        assert sensor._ws_subscription.is_connected
         assert sensor._handle_ws_message in dispatch_map[ws_signal]
         sensor.async_on_remove.assert_called_once()
 
@@ -627,12 +680,14 @@ def test_heater_temp_sensor() -> None:
         sensor.schedule_update_ha_state.assert_called_once()
 
         sensor.schedule_update_ha_state.reset_mock()
-        original_unsub = sensor._unsub_ws
-        assert original_unsub is not None
-        sensor._unsub_ws = MagicMock(side_effect=original_unsub)
-        mock_unsub = sensor._unsub_ws
-        await sensor.async_will_remove_from_hass()
+        with patch.object(
+            sensor._ws_subscription,
+            "unsubscribe",
+            wraps=sensor._ws_subscription.unsubscribe,
+        ) as mock_unsub:
+            await sensor.async_will_remove_from_hass()
         mock_unsub.assert_called_once()
+        assert not sensor._ws_subscription.is_connected
         assert sensor._handle_ws_message not in dispatch_map.get(ws_signal, [])
 
         dispatcher_send(ws_signal, {"dev_id": "dev1", "addr": "A"})
@@ -677,7 +732,12 @@ def test_total_energy_sensor() -> None:
             coord, entry_id, "1", "Total Energy", "tot"
         )
         total_sensor.hass = hass
-        await total_sensor.async_added_to_hass()
+        with patch.object(
+            total_sensor._ws_subscription,
+            "subscribe",
+            wraps=total_sensor._ws_subscription.subscribe,
+        ) as mock_subscribe:
+            await total_sensor.async_added_to_hass()
 
         info = total_sensor.device_info
         expected_info = build_gateway_device_info(hass, entry_id, "1")
@@ -698,6 +758,10 @@ def test_total_energy_sensor() -> None:
         first_value: float = total_sensor.native_value  # type: ignore[assignment]
 
         signal = signal_ws_data("entry")
+        mock_subscribe.assert_called_once_with(
+            hass, signal, total_sensor._on_ws_data
+        )
+        assert total_sensor._ws_subscription.is_connected
         total_sensor.schedule_update_ha_state = MagicMock()
 
         coord.data["1"]["htr"]["energy"]["A"] = 0.0015
@@ -710,11 +774,14 @@ def test_total_energy_sensor() -> None:
         assert total_sensor.native_value == pytest.approx(0.004)
 
         total_sensor.schedule_update_ha_state.reset_mock()
-        original_unsub = total_sensor._unsub_ws
-        total_sensor._unsub_ws = MagicMock(side_effect=original_unsub)
-        mock_total_unsub = total_sensor._unsub_ws
-        await total_sensor.async_will_remove_from_hass()
+        with patch.object(
+            total_sensor._ws_subscription,
+            "unsubscribe",
+            wraps=total_sensor._ws_subscription.unsubscribe,
+        ) as mock_total_unsub:
+            await total_sensor.async_will_remove_from_hass()
         mock_total_unsub.assert_called_once()
+        assert not total_sensor._ws_subscription.is_connected
         assert total_sensor._on_ws_data not in dispatch_map.get(signal, [])
         dispatcher_send(signal, {"dev_id": "1", "addr": "B"})
         total_sensor.schedule_update_ha_state.assert_not_called()

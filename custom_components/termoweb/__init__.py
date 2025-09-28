@@ -40,11 +40,13 @@ from .const import (
 from .coordinator import StateCoordinator
 from .nodes import build_node_inventory
 from .utils import (
-    HEATER_NODE_TYPES,
-    addresses_by_node_type,
+    HEATER_NODE_TYPES as _HEATER_NODE_TYPES,
+    build_heater_address_map,
     ensure_node_inventory,
     normalize_heater_addresses,
 )
+
+HEATER_NODE_TYPES = _HEATER_NODE_TYPES
 
 # Re-export legacy WS client for backward compatibility (tests may patch it).
 from .ws_client import WebSocketClient as WebSocket09Client  # noqa: F401
@@ -115,29 +117,6 @@ def _store_statistics(
     async_add_external_statistics(hass, ext_meta, stats)
 
 
-def _heater_address_map(
-    inventory: Iterable[Any],
-) -> tuple[dict[str, list[str]], dict[str, set[str]]]:
-    """Return mapping of heater node types to addresses and reverse lookup."""
-
-    raw_map, _unknown = addresses_by_node_type(
-        inventory,
-        known_types=HEATER_NODE_TYPES,
-    )
-    by_type = {
-        node_type: addresses
-        for node_type, addresses in raw_map.items()
-        if node_type in HEATER_NODE_TYPES and addresses
-    }
-
-    reverse: dict[str, set[str]] = {}
-    for node_type, addresses in by_type.items():
-        for address in addresses:
-            reverse.setdefault(address, set()).add(node_type)
-
-    return by_type, reverse
-
-
 async def _async_import_energy_history(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -164,7 +143,7 @@ async def _async_import_energy_history(
     dev_id: str = rec["dev_id"]
     inventory: list[Any] = ensure_node_inventory(rec)
 
-    by_type, reverse_lookup = _heater_address_map(inventory)
+    by_type, reverse_lookup = build_heater_address_map(inventory)
 
     requested_map: dict[str, list[str]] | None
     if nodes is None:
@@ -811,7 +790,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 if not ent:
                     continue
                 inventory: Iterable[Any] = rec.get("node_inventory") or []
-                by_type, _ = _heater_address_map(inventory)
+                by_type, _ = build_heater_address_map(inventory)
                 tasks.append(
                     _async_import_energy_history(
                         hass,

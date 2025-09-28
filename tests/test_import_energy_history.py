@@ -13,6 +13,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from custom_components.termoweb import utils as utils_module
+
 from conftest import _install_stubs
 
 _install_stubs()
@@ -1349,7 +1351,9 @@ def test_import_energy_history_requested_map_filters(monkeypatch: pytest.MonkeyP
                 set(),
             )
 
-        monkeypatch.setattr(mod, "addresses_by_node_type", fake_addresses_by_node_type)
+        monkeypatch.setattr(
+            utils_module, "addresses_by_node_type", fake_addresses_by_node_type
+        )
 
         original_normalize = mod.normalize_heater_addresses
 
@@ -1418,6 +1422,59 @@ def test_import_energy_history_requested_map_filters(monkeypatch: pytest.MonkeyP
     asyncio.run(_run())
 
 
+def test_import_energy_history_ignores_unavailable_requested_nodes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        (
+            mod,
+            const,
+            _import_stats,
+            _update_meta,
+            _last_stats,
+            _get_period,
+            _delete_stats,
+            ConfigEntry,
+            HomeAssistant,
+            _ent_reg,
+        ) = await _load_module(monkeypatch)
+
+        hass = HomeAssistant()
+        hass.data = {const.DOMAIN: {}}
+
+        def update_entry(entry: Any, *, options: dict[str, Any]) -> None:
+            entry.options.clear()
+            entry.options.update(options)
+
+        hass.config_entries = types.SimpleNamespace(async_update_entry=update_entry)
+
+        entry = ConfigEntry(
+            "1",
+            options={mod.OPTION_MAX_HISTORY_RETRIEVED: 0},
+        )
+
+        client = types.SimpleNamespace(
+            get_node_samples=AsyncMock(return_value=[]),
+        )
+
+        hass.data[const.DOMAIN][entry.entry_id] = {
+            "client": client,
+            "dev_id": "dev",
+            "node_inventory": _inventory_for(mod, ["A"]),
+            "config_entry": entry,
+        }
+
+        await mod._async_import_energy_history(
+            hass,
+            entry,
+            {"acm": ["99"]},
+        )
+
+        client.get_node_samples.assert_not_called()
+
+    asyncio.run(_run())
+
+
 def test_import_energy_history_resets_requested_progress(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1472,7 +1529,9 @@ def test_import_energy_history_resets_requested_progress(
             assert known_types == mod.HEATER_NODE_TYPES
             return ({"pmo": ["X"]}, set())
 
-        monkeypatch.setattr(mod, "addresses_by_node_type", fake_addresses_by_node_type)
+        monkeypatch.setattr(
+            utils_module, "addresses_by_node_type", fake_addresses_by_node_type
+        )
 
         fake_now = 5 * 86_400
 

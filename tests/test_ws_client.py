@@ -2274,6 +2274,57 @@ def test_dispatch_nodes_handles_empty_payload(
 
     coordinator = types.SimpleNamespace(update_nodes=MagicMock(), data={"dev": {}})
     api = types.SimpleNamespace(_session=None)
+
+    
+def test_dispatch_nodes_returns_empty_for_non_mapping() -> None:
+    module = _load_ws_client()
+
+    loop = types.SimpleNamespace(call_soon_threadsafe=None, create_task=lambda *a, **k: None)
+    hass = types.SimpleNamespace(loop=loop, data={module.DOMAIN: {"entry": {}}})
+    coordinator = types.SimpleNamespace()
+    api = types.SimpleNamespace(_session=None)
+
+    client = module.WebSocket09Client(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        api_client=api,
+        coordinator=coordinator,
+    )
+
+    result = client._dispatch_nodes([1, 2, 3])
+
+    assert result == {}
+
+
+def test_dispatch_nodes_handles_missing_raw_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_ws_client()
+
+    dispatched: list[tuple[str, dict[str, Any]]] = []
+
+    def fake_dispatcher(hass: Any, signal: str, payload: dict[str, Any]) -> None:
+        dispatched.append((signal, payload))
+
+    monkeypatch.setattr(module, "async_dispatcher_send", fake_dispatcher)
+
+    captured_raw: list[Any] = []
+
+    def fake_builder(raw: Any) -> list[Any]:
+        captured_raw.append(raw)
+        return []
+
+    monkeypatch.setattr(module, "build_node_inventory", fake_builder)
+    monkeypatch.setattr(module, "addresses_by_node_type", lambda _inv, **_kw: ({}, set()))
+    monkeypatch.setattr(module, "normalize_heater_addresses", lambda addr_map: (addr_map, {}))
+
+    loop = types.SimpleNamespace(
+        call_soon_threadsafe=lambda callback, *args: callback(*args),
+        create_task=lambda *a, **k: None,
+    )
+    hass = types.SimpleNamespace(loop=loop, data={module.DOMAIN: {"entry": {}}})
+    coordinator = types.SimpleNamespace(update_nodes=MagicMock(), data={"dev": {}})
+    api = types.SimpleNamespace(_session=None)
+
     client = module.WebSocket09Client(
         hass,
         entry_id="entry",
@@ -2289,6 +2340,21 @@ def test_dispatch_nodes_handles_empty_payload(
     coordinator.update_nodes.assert_called_with({}, [])
     assert result == {}
 
+
+    payload = {"nodes": None, "nodes_by_type": {}}
+
+    result = client._dispatch_nodes(payload)
+
+    assert captured_raw == [None]
+    coordinator.update_nodes.assert_called_once_with({}, [])
+    assert dispatched
+    signal, dispatched_payload = dispatched[0]
+    assert signal == module.signal_ws_data("entry")
+    assert dispatched_payload["dev_id"] == "dev"
+    assert result == {}
+
+    record = hass.data[module.DOMAIN]["entry"]
+    assert record.get("nodes") == {}
 
 def test_mark_event_promotes_to_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load_ws_client()

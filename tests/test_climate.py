@@ -754,7 +754,7 @@ def test_heater_properties_and_ws_update() -> None:
         assert attrs["program_slot"] == "day"
         assert attrs["program_setpoint"] == pytest.approx(21.0)
 
-        assert heater._unsub_ws is not None
+        assert heater._ws_subscription.is_connected
         heater.schedule_update_ha_state = MagicMock()
         heater._handle_ws_message({"dev_id": dev_id, "addr": addr})
         heater.schedule_update_ha_state.assert_called_once()

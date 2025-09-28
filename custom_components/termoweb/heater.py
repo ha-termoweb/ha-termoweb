@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterable, Mapping
 import logging
 from typing import Any
 
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import dispatcher
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
@@ -15,9 +15,64 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_data
 from .nodes import Node, build_node_inventory
-from .utils import HEATER_NODE_TYPES, addresses_by_node_type, ensure_node_inventory
+from .utils import HEATER_NODE_TYPES, build_heater_address_map, ensure_node_inventory
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class DispatcherSubscriptionHelper:
+    """Manage dispatcher subscriptions tied to an entity lifecycle."""
+
+    def __init__(self, owner: CoordinatorEntity) -> None:
+        """Initialise the helper for the provided entity."""
+
+        self._owner = owner
+        self._unsub: dispatcher.DispatcherHandle | None = None
+
+    def subscribe(
+        self,
+        hass: HomeAssistant,
+        signal: str,
+        handler: Callable[[dict], None],
+    ) -> None:
+        """Subscribe to a dispatcher signal and register clean-up."""
+
+        self.unsubscribe()
+
+        try:
+            unsubscribe = async_dispatcher_connect(hass, signal, handler)
+        except Exception:  # pragma: no cover - defensive
+            _LOGGER.exception(
+                "Failed to subscribe to dispatcher signal %s for %s",
+                signal,
+                getattr(self._owner, "_attr_unique_id", self._owner),
+            )
+            return
+
+        self._owner.async_on_remove(self.unsubscribe)
+        self._unsub = unsubscribe
+
+    def unsubscribe(self) -> None:
+        """Remove the dispatcher subscription if it exists."""
+
+        unsubscribe = self._unsub
+        if unsubscribe is None:
+            return
+
+        self._unsub = None
+        try:
+            unsubscribe()
+        except Exception:  # pragma: no cover - defensive
+            _LOGGER.exception(
+                "Failed to remove dispatcher listener for %s",
+                getattr(self._owner, "_attr_unique_id", self._owner),
+            )
+
+    @property
+    def is_connected(self) -> bool:
+        """Return True when the dispatcher listener is active."""
+
+        return self._unsub is not None
 
 
 def _iter_nodes(nodes: Any) -> Iterable[Node]:
@@ -143,13 +198,12 @@ def prepare_heater_platform_data(
         if addr and getattr(node, "name", "").strip():
             explicit_names.add((node_type, addr))
 
-    type_to_addresses, _unknown = addresses_by_node_type(
-        inventory, known_types=HEATER_NODE_TYPES
-    )
+    type_to_addresses, _reverse_lookup = build_heater_address_map(inventory)
 
-    addrs_by_type: dict[str, list[str]] = {}
-    for node_type in HEATER_NODE_TYPES:
-        addrs_by_type[node_type] = list(type_to_addresses.get(node_type, []))
+    addrs_by_type: dict[str, list[str]] = {
+        node_type: list(type_to_addresses.get(node_type, []))
+        for node_type in HEATER_NODE_TYPES
+    }
 
     name_map = build_heater_name_map(nodes, default_name_simple)
     names_by_type: dict[str, dict[str, str]] = name_map.get("by_type", {})
@@ -196,8 +250,6 @@ def prepare_heater_platform_data(
 class HeaterNodeBase(CoordinatorEntity):
     """Base entity implementing common TermoWeb heater behaviour."""
 
-    _unsub_ws: dispatcher.DispatcherHandle | None
-
     def __init__(
         self,
         coordinator: Any,
@@ -222,7 +274,7 @@ class HeaterNodeBase(CoordinatorEntity):
             unique_id or f"{DOMAIN}:{dev_id}:{resolved_type}:{self._addr}"
         )
         self._device_name = device_name or name
-        self._unsub_ws = None
+        self._ws_subscription = DispatcherSubscriptionHelper(self)
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to websocket updates once the entity is added to hass."""
@@ -231,30 +283,12 @@ class HeaterNodeBase(CoordinatorEntity):
             return
 
         signal = signal_ws_data(self._entry_id)
-        self._unsub_ws = async_dispatcher_connect(
-            self.hass, signal, self._handle_ws_message
-        )
-        self.async_on_remove(self._remove_ws_listener)
+        self._ws_subscription.subscribe(self.hass, signal, self._handle_ws_message)
 
     async def async_will_remove_from_hass(self) -> None:
         """Tidy up websocket listeners before the entity is removed."""
-        self._remove_ws_listener()
+        self._ws_subscription.unsubscribe()
         await super().async_will_remove_from_hass()
-
-    def _remove_ws_listener(self) -> None:
-        """Disconnect the websocket listener if it is registered."""
-        if self._unsub_ws is None:
-            return
-        try:
-            self._unsub_ws()
-        except Exception:  # pragma: no cover - defensive
-            _LOGGER.exception(
-                "Failed to remove WS listener for dev=%s addr=%s",
-                self._dev_id,
-                self._addr,
-            )
-        finally:
-            self._unsub_ws = None
 
     @callback
     def _handle_ws_message(self, payload: dict) -> None:
@@ -271,7 +305,7 @@ class HeaterNodeBase(CoordinatorEntity):
         if payload_type is not None:
             try:
                 payload_type_str = str(payload_type).strip().lower()
-            except Exception:  # pragma: no cover - defensive
+            except Exception:  # pragma: no cover - defensive  # noqa: BLE001
                 payload_type_str = ""
             if payload_type_str and payload_type_str != self._node_type:
                 return False
