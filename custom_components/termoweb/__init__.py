@@ -18,6 +18,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from . import energy as energy_module
 from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend import Backend, DucaheatRESTClient, WsClientProto, create_backend
+
 from .const import (
     BRAND_DUCAHEAT,
     CONF_BRAND,
@@ -183,6 +184,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         dev,
         nodes,
         node_inventory,
+
     )
 
     hass.data.setdefault(DOMAIN, {})
@@ -196,6 +198,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "config_entry": entry,
         "base_poll_interval": max(base_interval, MIN_POLL_INTERVAL),
         "stretched": False,
+        "backend": backend,
         "ws_tasks": {},  # dev_id -> asyncio.Task
         "ws_clients": {},  # dev_id -> WS clients
         "ws_state": {},  # dev_id -> status attrs

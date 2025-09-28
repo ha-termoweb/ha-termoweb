@@ -1,6 +1,6 @@
 # HA-TermoWeb Architecture Overview
 
-The TermoWeb integration bridges Home Assistant to the vendor cloud that supervises each household gateway and its attached field nodes—electric heaters (`htr`), heat-accumulating storage units (`acm`), power monitors (`pmo`), and thermostats (`thm`). The diagram and notes below summarise how credentials, polling, push updates, and energy history all flow through the integration.
+The TermoWeb integration bridges Home Assistant to the vendor cloud. All reads and writes happen against the backend REST and Socket.IO APIs; the integration never talks directly to the household gateway hardware. Instead, the vendor backend supervises the gateway—an opaque, manufacturer-supplied appliance that relays commands and telemetry between the cloud and the field nodes such as electric heaters (`htr`), heat-accumulating storage units (`acm`), power monitors (`pmo`), and thermostats (`thm`). The diagram and notes below summarise how credentials, polling, push updates, and energy history all flow through the integration.
 
 ## Component responsibilities
 
@@ -11,7 +11,7 @@ The TermoWeb integration bridges Home Assistant to the vendor cloud that supervi
 - **Entities** – climate/sensor/binary-sensor/button entities subscribe to coordinator data and the dispatcher, then send writes through the shared REST client (e.g., updating schedules or presets) for the supported node types.【F:custom_components/termoweb/heater.py†L61-L136】【F:custom_components/termoweb/climate.py†L245-L420】
 - **WebSocket client** – `WebSocketClient` automatically detects whether the account requires the legacy Socket.IO 0.9 handshake or the newer Engine.IO/WebSocket upgrade, manages reconnection/heartbeat loops for both protocols, merges push events into coordinator caches, and dispatches connection health/status signals for entities and setup logic.【F:custom_components/termoweb/ws_client.py†L57-L449】
 - **Energy history importer** – the `import_energy_history` service gathers hourly energy counters via REST, rate-limits calls, and writes the resulting statistics into Home Assistant’s recorder database.【F:custom_components/termoweb/__init__.py†L160-L670】
-- **TermoWeb cloud & hardware** – the documented API provides REST endpoints for device metadata, heater settings, and energy samples alongside a Socket.IO push channel, all representing the household gateway and heaters managed by the vendor backend.【F:docs/termoweb_api.md†L1-L176】
+- **TermoWeb cloud & hardware** – the documented API provides REST endpoints for device metadata, heater settings, and energy samples alongside a Socket.IO push channel. The backend owns communication with each household gateway and the attached heaters; the integration only observes and commands these devices through the cloud API.【F:docs/termoweb_api.md†L1-L176】
 
 ## Integration diagram
 
@@ -74,6 +74,7 @@ flowchart LR
 ```
 
 The flow shows how configuration and runtime components share the authenticated REST client, how polling and push updates keep entity state fresh, and how energy statistics are imported for the Recorder. The TermoWeb cloud in turn brokers communication with the household gateway that relays commands and telemetry for the attached heaters, accumulators, power monitors, and thermostats.【F:custom_components/termoweb/__init__.py†L453-L670】【F:custom_components/termoweb/ws_client.py†L57-L449】【F:docs/termoweb_api.md†L1-L176】
+
 
 ## Python class hierarchy
 
