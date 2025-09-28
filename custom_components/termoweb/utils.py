@@ -4,14 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, MutableMapping
 import math
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.loader import async_get_integration
 
 from .const import DOMAIN
-from .nodes import Node, build_node_inventory
+
+if TYPE_CHECKING:
+    from .nodes import Node
 
 HEATER_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm"})
 
@@ -57,13 +59,21 @@ def parse_heater_energy_unique_id(unique_id: str) -> tuple[str, str, str] | None
 
 def ensure_node_inventory(
     record: Mapping[str, Any], *, nodes: Any | None = None
-) -> list[Node]:
+) -> list["Node"]:  # noqa: UP037
     """Return cached node inventory, rebuilding and caching when missing."""
 
     cacheable = isinstance(record, MutableMapping)
     cached = record.get("node_inventory")
     if isinstance(cached, list) and cached:
-        cached_nodes = [cast(Node, node) for node in cached if isinstance(node, Node)]
+        cached_nodes: list["Node"] = []  # noqa: UP037
+        for node in cached:
+            if not hasattr(node, "as_dict"):
+                continue
+            node_type = normalize_node_type(getattr(node, "type", ""))
+            addr = normalize_node_addr(getattr(node, "addr", ""))
+            if not node_type or not addr:
+                continue
+            cached_nodes.append(cast("Node", node))
         if cached_nodes:
             if cacheable and len(cached_nodes) != len(cached):
                 record["node_inventory"] = list(cached_nodes)
@@ -80,7 +90,9 @@ def ensure_node_inventory(
     last_index = len(payloads) - 1
     for index, raw_nodes in enumerate(payloads):
         try:
-            inventory = build_node_inventory(raw_nodes)
+            from .nodes import build_node_inventory as build_inventory  # noqa: PLC0415
+
+            inventory = build_inventory(raw_nodes)
         except Exception:  # pragma: no cover - defensive  # noqa: BLE001
             inventory = []
 
@@ -99,6 +111,14 @@ def ensure_node_inventory(
         record["node_inventory"] = []
 
     return []
+
+
+def build_node_inventory(raw_nodes: Any) -> list["Node"]:  # noqa: UP037
+    """Return canonical node inventory using the shared builder."""
+
+    from .nodes import build_node_inventory as _build_node_inventory  # noqa: PLC0415
+
+    return _build_node_inventory(raw_nodes)
 
 
 def normalize_node_type(
@@ -224,7 +244,7 @@ def build_gateway_device_info(
 
 
 def addresses_by_node_type(
-    nodes: Iterable[Node],
+    nodes: Iterable["Node"],  # noqa: UP037
     *,
     known_types: Iterable[str] | None = None,
 ) -> tuple[dict[str, list[str]], set[str]]:

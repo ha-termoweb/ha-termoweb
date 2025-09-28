@@ -12,6 +12,7 @@ from custom_components.termoweb.utils import (
     HEATER_NODE_TYPES,
     _entry_gateway_record,
     addresses_by_node_type,
+    build_node_inventory as utils_build_node_inventory,
     build_gateway_device_info,
     build_heater_energy_unique_id,
     ensure_node_inventory,
@@ -44,6 +45,25 @@ def test_ensure_node_inventory_filters_invalid_cached_entries() -> None:
 
     assert [node.addr for node in result] == ["A"]
     assert record.get("node_inventory") == result
+
+
+def test_ensure_node_inventory_skips_node_like_entries_with_missing_fields() -> None:
+    class FakeNode:
+        def __init__(self) -> None:
+            self.type = ""
+            self.addr = "valid"
+
+        def as_dict(self) -> dict[str, Any]:  # pragma: no cover - minimal stub
+            return {}
+
+    raw = {"nodes": [{"type": "htr", "addr": "A"}]}
+    cached = build_node_inventory(raw)
+    cached.append(FakeNode())
+    record = {"node_inventory": cached, "nodes": {}}
+
+    result = ensure_node_inventory(record)
+
+    assert [node.addr for node in result] == ["A"]
 
 
 def test_ensure_node_inventory_builds_and_caches() -> None:
@@ -81,6 +101,14 @@ def test_ensure_node_inventory_sets_empty_cache_when_missing() -> None:
 
     assert result == []
     assert record["node_inventory"] == []
+
+
+def test_utils_build_node_inventory_wrapper() -> None:
+    payload = {"nodes": [{"type": "htr", "addr": "Z1"}]}
+
+    nodes = utils_build_node_inventory(payload)
+
+    assert [node.addr for node in nodes] == ["Z1"]
 
 
 def test_addresses_by_node_type_skips_invalid_entries() -> None:

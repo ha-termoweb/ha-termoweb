@@ -6,6 +6,8 @@ from collections.abc import Iterable
 import logging
 from typing import Any
 
+from .utils import normalize_node_addr, normalize_node_type
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -24,12 +26,16 @@ class Node:
     ) -> None:
         """Initialise a node with normalised metadata."""
 
-        resolved_type = (node_type or self.NODE_TYPE or "").strip().lower()
+        resolved_type = normalize_node_type(
+            node_type,
+            default=self.NODE_TYPE,
+            use_default_when_falsey=True,
+        )
         if not resolved_type:
             msg = "node_type must be provided"
             raise ValueError(msg)
 
-        addr_str = str(addr).strip()
+        addr_str = normalize_node_addr(addr)
         if not addr_str:
             msg = "addr must be provided"
             raise ValueError(msg)
@@ -174,7 +180,15 @@ def build_node_inventory(raw_nodes: Any) -> list[Node]:
 
     inventory: list[Node] = []
     for index, payload in enumerate(_iter_node_payload(raw_nodes)):
-        node_type = str(payload.get("type") or payload.get("node_type") or "").strip().lower()
+        node_type = normalize_node_type(
+            payload.get("type"),
+            use_default_when_falsey=True,
+        )
+        if not node_type:
+            node_type = normalize_node_type(
+                payload.get("node_type"),
+                use_default_when_falsey=True,
+            )
         if not node_type:
             _LOGGER.debug("Skipping node with missing type at index %s: %s", index, payload)
             continue
