@@ -4,7 +4,7 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any
 
-from ..ws_client import TermoWebSocketClient
+from ..ws_client import WebSocketClient
 from .base import Backend, WsClientProto
 
 
@@ -18,7 +18,7 @@ class TermoWebBackend(Backend):
         ws_cls = getattr(module, "WebSocket09Client", None)
         if isinstance(ws_cls, type):
             return ws_cls
-        return TermoWebSocketClient
+        return WebSocketClient
 
     def create_ws_client(
         self,
@@ -36,7 +36,7 @@ class TermoWebBackend(Backend):
             "api_client": self.client,
             "coordinator": coordinator,
         }
-        if issubclass(ws_cls, TermoWebSocketClient):
+        if issubclass(ws_cls, WebSocketClient):
             kwargs["protocol"] = "socketio09"
         return ws_cls(
             hass,

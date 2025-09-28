@@ -8,7 +8,7 @@ from typing import Any
 from ..api import RESTClient
 from ..const import BRAND_DUCAHEAT
 from ..nodes import Node
-from ..ws_client import TermoWebSocketClient
+from ..ws_client import WebSocketClient
 from .base import Backend, WsClientProto
 
 _LOGGER = logging.getLogger(__name__)
@@ -419,7 +419,7 @@ class DucaheatBackend(Backend):
     ) -> WsClientProto:
         """Instantiate the unified websocket client for Ducaheat."""
 
-        return TermoWebSocketClient(
+        return WebSocketClient(
             hass,
             entry_id=entry_id,
             dev_id=dev_id,

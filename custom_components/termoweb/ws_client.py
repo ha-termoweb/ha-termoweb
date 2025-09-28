@@ -60,7 +60,7 @@ class HandshakeError(RuntimeError):
         self.body_snippet = body_snippet
 
 
-class TermoWebSocketClient:
+class WebSocketClient:
     """Unified websocket client supporting legacy and Engine.IO endpoints."""
 
     def __init__(
@@ -114,11 +114,8 @@ class TermoWebSocketClient:
         self._nodes: dict[str, Any] = {}
         self._nodes_raw: dict[str, Any] = {}
 
-        if not hasattr(self.hass, "data") or self.hass.data is None:  # type: ignore[attr-defined]
-            setattr(self.hass, "data", {})  # type: ignore[attr-defined]
-        domain_bucket = self.hass.data.setdefault(DOMAIN, {})  # type: ignore[attr-defined]
-        entry_bucket = domain_bucket.setdefault(self.entry_id, {})
-        entry_bucket.setdefault("ws_state", {})
+        self._ws_state: dict[str, Any] | None = None
+        self._ws_state_bucket()
 
     # ------------------------------------------------------------------
     # Public control
@@ -1037,7 +1034,7 @@ class TermoWebSocketClient:
             if isinstance(value, dict):
                 existing = target.get(key)
                 if isinstance(existing, dict):
-                    TermoWebSocketClient._merge_nodes(existing, value)
+                    WebSocketClient._merge_nodes(existing, value)
                 else:
                     target[key] = deepcopy(value)
             else:
@@ -1087,14 +1084,24 @@ class TermoWebSocketClient:
             return base.rstrip("/")
         return API_BASE
 
+    def _ws_state_bucket(self) -> dict[str, Any]:
+        """Return the websocket state bucket for this device."""
+        if self._ws_state is None:
+            if not hasattr(self.hass, "data") or self.hass.data is None:  # type: ignore[attr-defined]
+                setattr(self.hass, "data", {})  # type: ignore[attr-defined]
+            domain_bucket = self.hass.data.setdefault(DOMAIN, {})  # type: ignore[attr-defined]
+            entry_bucket = domain_bucket.setdefault(self.entry_id, {})
+            ws_state = entry_bucket.setdefault("ws_state", {})
+            self._ws_state = ws_state.setdefault(self.dev_id, {})
+        return self._ws_state
+
     def _update_status(self, status: str) -> None:
         """Publish the websocket status to Home Assistant listeners."""
         if status == self._status and status not in {"healthy", "connected"}:
             return
         self._status = status
         now = time.time()
-        state_bucket = self.hass.data[DOMAIN][self.entry_id].setdefault("ws_state", {})
-        state = state_bucket.setdefault(self.dev_id, {})
+        state = self._ws_state_bucket()
         last_event = self._stats.last_event_ts or self._last_event_at
         state["status"] = status
         state["last_event_at"] = last_event or None
@@ -1129,12 +1136,7 @@ class TermoWebSocketClient:
                 self._stats.last_paths = uniq
         elif count_event:
             self._stats.events_total += 1
-        state_bucket: dict[str, Any] = (
-            self.hass.data.setdefault(DOMAIN, {})
-            .setdefault(self.entry_id, {})
-            .setdefault("ws_state", {})
-        )
-        state: dict[str, Any] = state_bucket.setdefault(self.dev_id, {})
+        state: dict[str, Any] = self._ws_state_bucket()
         state["last_event_at"] = now
         state["frames_total"] = self._stats.frames_total
         state["events_total"] = self._stats.events_total
@@ -1154,14 +1156,14 @@ class TermoWebSocketClient:
 # ----------------------------------------------------------------------
 # Backwards compatibility aliases
 # ----------------------------------------------------------------------
-WebSocket09Client = TermoWebSocketClient
-DucaheatWSClient = TermoWebSocketClient
+WebSocket09Client = WebSocketClient
+DucaheatWSClient = WebSocketClient
 
 __all__ = [
     "DucaheatWSClient",
     "EngineIOHandshake",
     "HandshakeError",
-    "TermoWebSocketClient",
     "WSStats",
     "WebSocket09Client",
+    "WebSocketClient",
 ]

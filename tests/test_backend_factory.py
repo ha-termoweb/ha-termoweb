@@ -12,7 +12,7 @@ from custom_components.termoweb.backend.ducaheat import DucaheatBackend
 from custom_components.termoweb.backend.termoweb import TermoWebBackend
 from custom_components.termoweb.const import BRAND_DUCAHEAT
 from custom_components.termoweb.ws_client import (
-    TermoWebSocketClient,
+    WebSocketClient,
     WebSocket09Client,
 )
 
@@ -93,7 +93,7 @@ def test_termoweb_backend_creates_ws_client() -> None:
     finally:
         loop.close()
 
-    assert isinstance(ws_client, TermoWebSocketClient)
+    assert isinstance(ws_client, WebSocketClient)
     assert isinstance(ws_client, WebSocket09Client)
     assert ws_client.dev_id == "device456"
     assert ws_client.entry_id == "entry123"
@@ -119,7 +119,7 @@ def test_termoweb_backend_fallback_ws_resolution(monkeypatch: pytest.MonkeyPatch
     finally:
         loop.close()
 
-    assert isinstance(ws_client, TermoWebSocketClient)
+    assert isinstance(ws_client, WebSocketClient)
     assert isinstance(ws_client, WebSocket09Client)
     assert ws_client._protocol_hint == "socketio09"
 
@@ -138,7 +138,7 @@ def test_termoweb_backend_resolve_ws_client_cls_fallback(
     monkeypatch.setattr(termoweb_backend, "import_module", fake_import)
 
     resolved = backend._resolve_ws_client_cls()
-    assert resolved is TermoWebSocketClient
+    assert resolved is WebSocketClient
 
 
 def test_termoweb_backend_legacy_ws_class(monkeypatch: pytest.MonkeyPatch) -> None:
