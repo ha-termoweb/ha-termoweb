@@ -528,12 +528,13 @@ async def _async_import_energy_history(
         except asyncio.CancelledError:  # pragma: no cover - allow cancellation
             raise
         except Exception as err:  # pragma: no cover - defensive
-            _LOGGER.debug(
+            _LOGGER.error(
                 "%s: error fetching statistics window %s-%s: %s",
                 addr,
                 lookback_start,
                 import_end_dt,
                 err,
+                exc_info=True,
             )
 
         if period_stats:
@@ -565,8 +566,9 @@ async def _async_import_energy_history(
             except asyncio.CancelledError:  # pragma: no cover - allow cancellation
                 raise
             except Exception as err:  # pragma: no cover - defensive
-                _LOGGER.debug(
-                    "%s: error fetching last statistics for offset: %s", addr, err
+                _LOGGER.error(
+                    "%s: error fetching last statistics for offset: %s", addr, err,
+                    exc_info=True,
                 )
 
         if last_before:
@@ -610,8 +612,9 @@ async def _async_import_energy_history(
             except asyncio.CancelledError:  # pragma: no cover - allow cancellation
                 raise
             except Exception as err:  # pragma: no cover - defensive
-                _LOGGER.debug(
-                    "%s: error checking for overlapping statistics: %s", addr, err
+                _LOGGER.error(
+                    "%s: error checking for overlapping statistics: %s", addr, err,
+                    exc_info=True,
                 )
 
         if overlap_exists:
@@ -635,7 +638,10 @@ async def _async_import_energy_history(
             except asyncio.CancelledError:  # pragma: no cover - allow cancellation
                 raise
             except Exception as err:  # pragma: no cover - defensive
-                _LOGGER.debug("%s: failed to clear overlapping statistics: %s", addr, err)
+                _LOGGER.error(
+                    "%s: failed to clear overlapping statistics: %s", addr, err,
+                    exc_info=True,
+                )
 
         stats: list[dict[str, Any]] = []
         running_sum: float = sum_offset
