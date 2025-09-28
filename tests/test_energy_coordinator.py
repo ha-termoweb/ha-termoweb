@@ -467,7 +467,6 @@ def test_merge_address_payload_upgrades_string_lookup() -> None:
     assert coord._addr_lookup == {"1": {"htr"}, "2": {"htr"}}
 
 
-
 def test_refresh_heater_updates_existing_and_new_data() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
