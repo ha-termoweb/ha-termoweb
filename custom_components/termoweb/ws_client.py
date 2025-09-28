@@ -1,10 +1,11 @@
 """Unified websocket client for TermoWeb backends."""
 
 import asyncio
-from collections.abc import Iterable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import partial
 import json
 import logging
 import random
@@ -437,10 +438,9 @@ class WebSocketClient:
 
     async def _heartbeat_loop(self) -> None:
         """Send periodic heartbeat frames to keep the connection alive."""
+        sender = partial(self._send_text, "2::")
         try:
-            while True:
-                await asyncio.sleep(self._hb_send_interval)
-                await self._send_text("2::")
+            await self._run_heartbeat_loop(self._hb_send_interval, sender)
         except asyncio.CancelledError:
             return
         except (aiohttp.ClientError, RuntimeError):
@@ -451,28 +451,7 @@ class WebSocketClient:
         ws = self._ws
         if ws is None:
             return
-        while True:
-            msg = await ws.receive()
-            if msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSE):
-                exc = ws.exception()
-                if exc is not None:
-                    raise exc
-                raise RuntimeError(
-                    f"websocket closed: code={ws.close_code} reason={msg.extra}"
-                )
-            if msg.type == aiohttp.WSMsgType.ERROR:
-                exc = ws.exception()
-                if exc is not None:
-                    raise exc
-                raise RuntimeError("websocket error")
-            if msg.type not in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
-                continue
-            data = (
-                msg.data
-                if isinstance(msg.data, str)
-                else msg.data.decode("utf-8", "ignore")
-            )
-            self._stats.frames_total += 1
+        async for data in self._ws_payload_stream(ws, context="websocket"):
             if data.startswith("2::"):
                 self._mark_event(paths=None)
                 continue
@@ -770,10 +749,9 @@ class WebSocketClient:
 
     async def _engineio_ping_loop(self) -> None:
         """Send Engine.IO ping packets at the negotiated interval."""
+        sender = partial(self._engineio_send, "2")
         try:
-            while True:
-                await asyncio.sleep(self._engineio_ping_interval)
-                await self._engineio_send("2")
+            await self._run_heartbeat_loop(self._engineio_ping_interval, sender)
         except asyncio.CancelledError:
             raise
         except (aiohttp.ClientError, OSError, RuntimeError):
@@ -791,28 +769,7 @@ class WebSocketClient:
         if ws is None:
             await self._stop_event.wait()
             return
-        while True:
-            msg = await ws.receive()
-            if msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSE):
-                exc = ws.exception()
-                if exc is not None:
-                    raise exc
-                raise RuntimeError(
-                    f"engine.io websocket closed: code={ws.close_code} reason={msg.extra}"
-                )
-            if msg.type == aiohttp.WSMsgType.ERROR:
-                exc = ws.exception()
-                if exc is not None:
-                    raise exc
-                raise RuntimeError("engine.io websocket error")
-            if msg.type not in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
-                continue
-            data = (
-                msg.data
-                if isinstance(msg.data, str)
-                else msg.data.decode("utf-8", "ignore")
-            )
-            self._stats.frames_total += 1
+        async for data in self._ws_payload_stream(ws, context="engine.io websocket"):
             if data == "3":
                 self._engineio_last_pong = time.time()
                 self._mark_event(paths=None, count_event=True)
@@ -826,6 +783,37 @@ class WebSocketClient:
                 continue
             if data.startswith("41"):
                 raise RuntimeError("engine.io server disconnect")
+
+    async def _ws_payload_stream(
+        self,
+        ws: aiohttp.ClientWebSocketResponse,
+        *,
+        context: str,
+    ) -> AsyncIterator[str]:
+        """Yield decoded websocket payloads until the connection terminates."""
+        while True:
+            msg = await ws.receive()
+            if msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSE):
+                exc = ws.exception()
+                if exc is not None:
+                    raise exc
+                raise RuntimeError(
+                    f"{context} closed: code={ws.close_code} reason={msg.extra}"
+                )
+            if msg.type == aiohttp.WSMsgType.ERROR:
+                exc = ws.exception()
+                if exc is not None:
+                    raise exc
+                raise RuntimeError(f"{context} error")
+            if msg.type not in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
+                continue
+            data = (
+                msg.data
+                if isinstance(msg.data, str)
+                else msg.data.decode("utf-8", "ignore")
+            )
+            self._stats.frames_total += 1
+            yield data
 
     def _on_frame(self, payload: str) -> None:
         """Process an incoming Socket.IO v2 frame payload."""
@@ -1057,6 +1045,14 @@ class WebSocketClient:
         except (TypeError, ValueError):
             hb = 60
         return sid, hb
+
+    async def _run_heartbeat_loop(
+        self, interval: float, sender: Callable[[], Awaitable[None]]
+    ) -> None:
+        """Dispatch ``sender`` every ``interval`` seconds."""
+        while True:
+            await asyncio.sleep(interval)
+            await sender()
 
     async def _send_text(self, data: str) -> None:
         """Send a raw Socket.IO text frame if the websocket is open."""

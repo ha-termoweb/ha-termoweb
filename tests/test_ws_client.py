@@ -488,7 +488,9 @@ def test_engineio_connect_and_send() -> None:
     asyncio.run(_run())
 
 
-def test_engineio_ping_loop_handles_cancel_and_failures() -> None:
+def test_engineio_ping_loop_handles_cancel_and_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     module = _load_ws_client()
 
     async def _run() -> None:
@@ -513,18 +515,43 @@ def test_engineio_ping_loop_handles_cancel_and_failures() -> None:
             protocol="engineio2",
         )
 
-        client._engineio_ping_interval = 0.0
-        client._engineio_send = AsyncMock(return_value=None)
+        orig_sleep = asyncio.sleep
+        sleep_calls: list[float] = []
+
+        async def fast_sleep(delay: float) -> None:
+            sleep_calls.append(delay)
+            await orig_sleep(0)
+
+        monkeypatch.setattr(module.asyncio, "sleep", fast_sleep)
+        monkeypatch.setattr(ws_core.asyncio, "sleep", fast_sleep)
+
+        client._engineio_ping_interval = 1.0
+
+        send_calls: list[str] = []
+        send_event = asyncio.Event()
+
+        async def fake_send(payload: str) -> None:
+            send_calls.append(payload)
+            if len(send_calls) >= 3:
+                send_event.set()
+
+        client._engineio_send = AsyncMock(side_effect=fake_send)
 
         task = asyncio.create_task(client._engineio_ping_loop())
-        await asyncio.sleep(0)
+        await asyncio.wait_for(send_event.wait(), timeout=0.2)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
 
+        assert send_calls[:3] == ["2", "2", "2"]
+        assert sleep_calls[:3] == [pytest.approx(1.0)] * 3
+
         client._engineio_send = AsyncMock(side_effect=RuntimeError("fail"))
-        client._engineio_ping_interval = 0.0
+        client._engineio_ping_interval = 0.5
+        sleep_calls.clear()
         await client._engineio_ping_loop()
+
+        assert sleep_calls[:1] == [pytest.approx(0.5)]
 
     asyncio.run(_run())
 
@@ -739,6 +766,50 @@ def test_engineio_read_loop_raises_error_exception() -> None:
 
         with pytest.raises(RuntimeError, match="boom"):
             await client._engineio_read_loop()
+
+    asyncio.run(_run())
+
+
+@pytest.mark.parametrize(
+    "context",
+    ["websocket", "engine.io websocket"],
+)
+def test_ws_payload_stream_raises_close_for_both_protocols(context: str) -> None:
+    module = _load_ws_client()
+
+    async def _run() -> None:
+        loop = asyncio.get_running_loop()
+        hass = types.SimpleNamespace(
+            loop=loop, data={module.DOMAIN: {"entry": {"ws_state": {}}}}
+        )
+        coordinator = types.SimpleNamespace()
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=types.SimpleNamespace(_session=None),
+            coordinator=coordinator,
+        )
+
+        class DummyWS:
+            def __init__(self) -> None:
+                self.close_code = 4000
+
+            async def receive(self) -> Any:
+                return types.SimpleNamespace(
+                    type=module.aiohttp.WSMsgType.CLOSE,
+                    data=None,
+                    extra="gone",
+                )
+
+            def exception(self) -> None:
+                return None
+
+        ws = DummyWS()
+        with pytest.raises(
+            RuntimeError, match=f"{context} closed: code=4000 reason=gone"
+        ):
+            await anext(client._ws_payload_stream(ws, context=context))
 
     asyncio.run(_run())
 
@@ -2618,6 +2689,68 @@ def test_read_loop_returns_when_ws_missing() -> None:
         )
         client._ws = None
         assert await client._read_loop() is None
+
+    asyncio.run(_run())
+
+
+@pytest.mark.parametrize(
+    ("ws_attr", "context", "method", "terminal", "error_match"),
+    [
+        ("_ws", "websocket", "_read_loop", "0::", "server disconnect"),
+        (
+            "_engineio_ws",
+            "engine.io websocket",
+            "_engineio_read_loop",
+            "41",
+            "engine.io server disconnect",
+        ),
+    ],
+)
+def test_read_loops_delegate_to_shared_stream(
+    ws_attr: str, context: str, method: str, terminal: str, error_match: str
+) -> None:
+    module = _load_ws_client()
+
+    async def _run() -> None:
+        loop = asyncio.get_running_loop()
+        hass = types.SimpleNamespace(
+            loop=loop, data={module.DOMAIN: {"entry": {"ws_state": {}}}}
+        )
+        coordinator = types.SimpleNamespace()
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=types.SimpleNamespace(_session=None),
+            coordinator=coordinator,
+        )
+
+        ws = module.aiohttp.testing.FakeWebSocket()
+        ws.queue_message({
+            "type": module.aiohttp.WSMsgType.TEXT,
+            "data": terminal,
+        })
+        setattr(client, ws_attr, ws)
+
+        seen: list[str] = []
+        contexts: list[str] = []
+        orig_stream = client._ws_payload_stream
+
+        async def fake_stream(self: Any, ws_obj: Any, *, context: str) -> Any:
+            assert ws_obj is ws
+            contexts.append(context)
+            async for payload in orig_stream(ws_obj, context=context):
+                seen.append(payload)
+                yield payload
+
+        client._ws_payload_stream = types.MethodType(fake_stream, client)
+
+        with pytest.raises(RuntimeError, match=error_match):
+            await getattr(client, method)()
+
+        assert client._stats.frames_total == 1
+        assert seen == [terminal]
+        assert contexts == [context]
 
     asyncio.run(_run())
 

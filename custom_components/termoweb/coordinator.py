@@ -15,7 +15,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
 from .nodes import Node, build_node_inventory
-from .utils import addresses_by_node_type, float_or_none, normalize_heater_addresses
+from .utils import build_heater_address_map, float_or_none, normalize_heater_addresses
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ class StateCoordinator(
         self._nodes = nodes or {}
         self._node_inventory: list[Node] = list(node_inventory or [])
         self._nodes_by_type: dict[str, list[str]] = {}
-        self._addr_lookup: dict[str, str] = {}
+        self._addr_lookup: dict[str, set[str]] = {}
         self._refresh_node_cache()
 
     def _set_inventory_from_nodes(
@@ -91,19 +91,27 @@ class StateCoordinator(
     def _refresh_node_cache(self) -> None:
         """Rebuild cached mappings of node types to addresses."""
 
-        mapping: dict[str, list[str]] = {}
         inventory = self._node_inventory
-        if inventory:
-            grouped, _unknown = addresses_by_node_type(inventory)
-            for node_type, addrs in grouped.items():
-                mapping[node_type] = list(addrs)
+        forward_map, reverse_map = build_heater_address_map(inventory)
 
-        self._nodes_by_type = mapping
-        reverse: dict[str, str] = {}
-        for node_type, addrs in mapping.items():
-            for addr in addrs:
-                reverse[str(addr)] = node_type
-        self._addr_lookup = reverse
+        nodes_by_type: dict[str, list[str]] = {
+            node_type: list(addresses) for node_type, addresses in forward_map.items()
+        }
+        addr_lookup: dict[str, set[str]] = {
+            str(addr): set(node_types) for addr, node_types in reverse_map.items()
+        }
+
+        for node in inventory:
+            node_type = str(getattr(node, "type", "")).strip().lower()
+            addr = str(getattr(node, "addr", "")).strip()
+            if not node_type or not addr:
+                continue
+            bucket = nodes_by_type.setdefault(node_type, [])
+            nodes_by_type[node_type] = list(dict.fromkeys([*bucket, addr]))
+            addr_lookup.setdefault(addr, set()).add(node_type)
+
+        self._nodes_by_type = nodes_by_type
+        self._addr_lookup = addr_lookup
 
     def _register_node_address(self, node_type: str, addr: str) -> None:
         """Add ``addr`` to the cached map for ``node_type`` if missing."""
@@ -117,7 +125,7 @@ class StateCoordinator(
         addrs = self._nodes_by_type.setdefault(node_type, [])
         if addr not in addrs:
             addrs.append(addr)
-        self._addr_lookup[addr] = node_type
+        self._addr_lookup.setdefault(addr, set()).add(node_type)
 
     @staticmethod
     def _normalise_type_section(
@@ -189,8 +197,13 @@ class StateCoordinator(
                 return
 
             self._ensure_inventory()
-            reverse = dict(self._addr_lookup)
-            resolved_type = node_type or reverse.get(addr, "htr")
+            reverse = {
+                address: set(types) for address, types in self._addr_lookup.items()
+            }
+            addr_types = reverse.get(addr)
+            resolved_type = node_type or (
+                next(iter(addr_types)) if addr_types else "htr"
+            )
 
             payload = await self.client.get_node_settings(
                 dev_id, (resolved_type, addr)
@@ -333,7 +346,9 @@ class StateCoordinator(
         dev_id = self._dev_id
         self._ensure_inventory()
         addr_map = dict(self._nodes_by_type)
-        reverse = dict(self._addr_lookup)
+        reverse = {
+            address: set(types) for address, types in self._addr_lookup.items()
+        }
         addrs = [addr for addrs in addr_map.values() for addr in addrs]
         try:
             prev_dev = (self.data or {}).get(dev_id, {})
@@ -375,7 +390,8 @@ class StateCoordinator(
                 for k in range(count):
                     idx = (start_index + k) % len(addrs)
                     addr = addrs[idx]
-                    node_type = reverse.get(addr, "htr")
+                    addr_types = reverse.get(addr)
+                    node_type = next(iter(addr_types)) if addr_types else "htr"
                     js = await self.client.get_node_settings(
                         dev_id, (node_type, addr)
                     )
