@@ -51,7 +51,8 @@ def test_get_version_returns_unknown_when_missing(
         return DummyIntegration("")
 
     monkeypatch.setattr(
-        config_flow, "async_get_integration", fake_get_integration
+        "custom_components.termoweb.utils.async_get_integration",
+        fake_get_integration,
     )
 
     result = asyncio.run(config_flow._get_version(hass))
@@ -114,7 +115,7 @@ def test_async_step_user_initial_form(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_version(_hass: HomeAssistant) -> str:
         return "1.2.3"
 
-    monkeypatch.setattr(config_flow, "_get_version", fake_version)
+    monkeypatch.setattr(config_flow, "async_get_integration_version", fake_version)
 
     result = asyncio.run(flow.async_step_user())
 
@@ -143,7 +144,7 @@ def test_async_step_user_success(monkeypatch: pytest.MonkeyPatch) -> None:
     ) -> None:
         calls.append((username, password, brand))
 
-    monkeypatch.setattr(config_flow, "_get_version", fake_version)
+    monkeypatch.setattr(config_flow, "async_get_integration_version", fake_version)
     monkeypatch.setattr(config_flow, "_validate_login", fake_validate)
 
     result = asyncio.run(
@@ -191,7 +192,7 @@ def test_async_step_user_errors(
     ) -> None:
         raise raised_factory()
 
-    monkeypatch.setattr(config_flow, "_get_version", fake_version)
+    monkeypatch.setattr(config_flow, "async_get_integration_version", fake_version)
     monkeypatch.setattr(config_flow, "_validate_login", fake_validate)
 
     user_input = {
@@ -233,7 +234,7 @@ def test_async_step_reconfigure_initial_form(
     async def fake_version(_hass: HomeAssistant) -> str:
         return "3.3.3"
 
-    monkeypatch.setattr(config_flow, "_get_version", fake_version)
+    monkeypatch.setattr(config_flow, "async_get_integration_version", fake_version)
 
     result = asyncio.run(flow.async_step_reconfigure())
 
@@ -308,7 +309,7 @@ def test_async_step_reconfigure_success(
         assert password == "new-pass"
         assert brand == config_flow.BRAND_DUCAHEAT
 
-    monkeypatch.setattr(config_flow, "_get_version", fake_version)
+    monkeypatch.setattr(config_flow, "async_get_integration_version", fake_version)
     monkeypatch.setattr(config_flow, "_validate_login", fake_validate)
 
     result = asyncio.run(
@@ -376,7 +377,7 @@ def test_async_step_reconfigure_errors(
     ) -> None:
         raise raised_factory()
 
-    monkeypatch.setattr(config_flow, "_get_version", fake_version)
+    monkeypatch.setattr(config_flow, "async_get_integration_version", fake_version)
     monkeypatch.setattr(config_flow, "_validate_login", fake_validate)
 
     user_input = {
@@ -414,7 +415,7 @@ def test_options_flow_init_and_submit(
     async def fake_version(_hass: HomeAssistant) -> str:
         return "6.6.6"
 
-    monkeypatch.setattr(config_flow, "_get_version", fake_version)
+    monkeypatch.setattr(config_flow, "async_get_integration_version", fake_version)
 
     initial = asyncio.run(options_flow.async_step_init())
     assert initial["type"] == "form"
