@@ -488,7 +488,9 @@ def test_engineio_connect_and_send() -> None:
     asyncio.run(_run())
 
 
-def test_engineio_ping_loop_handles_cancel_and_failures() -> None:
+def test_engineio_ping_loop_handles_cancel_and_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     module = _load_ws_client()
 
     async def _run() -> None:
@@ -513,18 +515,43 @@ def test_engineio_ping_loop_handles_cancel_and_failures() -> None:
             protocol="engineio2",
         )
 
-        client._engineio_ping_interval = 0.0
-        client._engineio_send = AsyncMock(return_value=None)
+        orig_sleep = asyncio.sleep
+        sleep_calls: list[float] = []
+
+        async def fast_sleep(delay: float) -> None:
+            sleep_calls.append(delay)
+            await orig_sleep(0)
+
+        monkeypatch.setattr(module.asyncio, "sleep", fast_sleep)
+        monkeypatch.setattr(ws_core.asyncio, "sleep", fast_sleep)
+
+        client._engineio_ping_interval = 1.0
+
+        send_calls: list[str] = []
+        send_event = asyncio.Event()
+
+        async def fake_send(payload: str) -> None:
+            send_calls.append(payload)
+            if len(send_calls) >= 3:
+                send_event.set()
+
+        client._engineio_send = AsyncMock(side_effect=fake_send)
 
         task = asyncio.create_task(client._engineio_ping_loop())
-        await asyncio.sleep(0)
+        await asyncio.wait_for(send_event.wait(), timeout=0.2)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
 
+        assert send_calls[:3] == ["2", "2", "2"]
+        assert sleep_calls[:3] == [pytest.approx(1.0)] * 3
+
         client._engineio_send = AsyncMock(side_effect=RuntimeError("fail"))
-        client._engineio_ping_interval = 0.0
+        client._engineio_ping_interval = 0.5
+        sleep_calls.clear()
         await client._engineio_ping_loop()
+
+        assert sleep_calls[:1] == [pytest.approx(0.5)]
 
     asyncio.run(_run())
 

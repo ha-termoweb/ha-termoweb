@@ -1,10 +1,11 @@
 """Unified websocket client for TermoWeb backends."""
 
 import asyncio
-from collections.abc import Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import partial
 import json
 import logging
 import random
@@ -437,10 +438,9 @@ class WebSocketClient:
 
     async def _heartbeat_loop(self) -> None:
         """Send periodic heartbeat frames to keep the connection alive."""
+        sender = partial(self._send_text, "2::")
         try:
-            while True:
-                await asyncio.sleep(self._hb_send_interval)
-                await self._send_text("2::")
+            await self._run_heartbeat_loop(self._hb_send_interval, sender)
         except asyncio.CancelledError:
             return
         except (aiohttp.ClientError, RuntimeError):
@@ -770,10 +770,9 @@ class WebSocketClient:
 
     async def _engineio_ping_loop(self) -> None:
         """Send Engine.IO ping packets at the negotiated interval."""
+        sender = partial(self._engineio_send, "2")
         try:
-            while True:
-                await asyncio.sleep(self._engineio_ping_interval)
-                await self._engineio_send("2")
+            await self._run_heartbeat_loop(self._engineio_ping_interval, sender)
         except asyncio.CancelledError:
             raise
         except (aiohttp.ClientError, OSError, RuntimeError):
@@ -1057,6 +1056,14 @@ class WebSocketClient:
         except (TypeError, ValueError):
             hb = 60
         return sid, hb
+
+    async def _run_heartbeat_loop(
+        self, interval: float, sender: Callable[[], Awaitable[None]]
+    ) -> None:
+        """Dispatch ``sender`` every ``interval`` seconds."""
+        while True:
+            await asyncio.sleep(interval)
+            await sender()
 
     async def _send_text(self, data: str) -> None:
         """Send a raw Socket.IO text frame if the websocket is open."""
