@@ -110,7 +110,7 @@ def ensure_node_inventory(
 
     return []
 
-def normalize_node_type(
+def _normalize_node_identifier(
     value: Any,
     *,
     default: str = "",
