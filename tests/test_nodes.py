@@ -137,6 +137,16 @@ def test_build_node_inventory_tolerates_empty_payload() -> None:
     assert build_node_inventory({"nodes": []}) == []
 
 
+def test_build_node_inventory_falls_back_to_node_type_field() -> None:
+    payload = {"nodes": [{"type": "", "node_type": " THM ", "addr": "05"}]}
+
+    nodes = build_node_inventory(payload)
+
+    assert len(nodes) == 1
+    assert nodes[0].type == "thm"
+    assert nodes[0].addr == "05"
+
+
 def test_utils_normalization_matches_node_inventory() -> None:
     payload = {"nodes": [{"type": " HTR ", "addr": " 01 "}]}
 
@@ -149,3 +159,19 @@ def test_utils_normalization_matches_node_inventory() -> None:
     assert (
         normalize_node_type(None, default="htr", use_default_when_falsey=True) == "htr"
     )
+
+
+def test_node_init_uses_normalization_helpers() -> None:
+    class DerivedNode(Node):
+        __slots__ = ()
+        NODE_TYPE = "ACM"
+
+    node = DerivedNode(name=" Normalised ", addr=" 42 ", node_type=None)
+
+    assert node.type == normalize_node_type(
+        None,
+        default="ACM",
+        use_default_when_falsey=True,
+    )
+    assert node.addr == normalize_node_addr(" 42 ")
+    assert node.name == "Normalised"
