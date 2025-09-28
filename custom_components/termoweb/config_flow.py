@@ -9,7 +9,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import aiohttp_client
-from homeassistant.loader import async_get_integration
 import voluptuous as vol
 
 from .api import BackendAuthError, BackendRateLimitError, RESTClient
@@ -27,6 +26,7 @@ from .const import (
     get_brand_basic_auth,
     get_brand_label,
 )
+from .utils import async_get_integration_version
 
 BRAND_DUCAHEAT = CONST_BRAND_DUCAHEAT
 
@@ -35,8 +35,7 @@ _LOGGER = logging.getLogger(__name__)
 
 async def _get_version(hass: HomeAssistant) -> str:
     """Read integration version from manifest (DRY)."""
-    integ = await async_get_integration(hass, DOMAIN)
-    return integ.version or "unknown"
+    return await async_get_integration_version(hass)
 
 
 def _login_schema(
