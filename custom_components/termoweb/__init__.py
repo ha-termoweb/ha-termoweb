@@ -47,7 +47,7 @@ from .utils import (
 )
 
 # Re-export legacy WS client for backward compatibility (tests may patch it).
-from .ws_client import TermoWebSocketClient as WebSocket09Client  # noqa: F401
+from .ws_client import WebSocketClient as WebSocket09Client  # noqa: F401
 
 _LOGGER = logging.getLogger(__name__)
 

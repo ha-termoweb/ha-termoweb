@@ -60,7 +60,7 @@ class HandshakeError(RuntimeError):
         self.body_snippet = body_snippet
 
 
-class TermoWebSocketClient:
+class WebSocketClient:
     """Unified websocket client supporting legacy and Engine.IO endpoints."""
 
     def __init__(
@@ -1034,7 +1034,7 @@ class TermoWebSocketClient:
             if isinstance(value, dict):
                 existing = target.get(key)
                 if isinstance(existing, dict):
-                    TermoWebSocketClient._merge_nodes(existing, value)
+                    WebSocketClient._merge_nodes(existing, value)
                 else:
                     target[key] = deepcopy(value)
             else:
@@ -1156,14 +1156,14 @@ class TermoWebSocketClient:
 # ----------------------------------------------------------------------
 # Backwards compatibility aliases
 # ----------------------------------------------------------------------
-WebSocket09Client = TermoWebSocketClient
-DucaheatWSClient = TermoWebSocketClient
+WebSocket09Client = WebSocketClient
+DucaheatWSClient = WebSocketClient
 
 __all__ = [
     "DucaheatWSClient",
     "EngineIOHandshake",
     "HandshakeError",
-    "TermoWebSocketClient",
     "WSStats",
     "WebSocket09Client",
+    "WebSocketClient",
 ]
