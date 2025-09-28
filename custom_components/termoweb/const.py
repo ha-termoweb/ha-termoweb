@@ -13,9 +13,6 @@ DOMAIN: Final = "termoweb"
 API_BASE: Final = "https://control.termoweb.net"
 TOKEN_PATH: Final = "/client/token"
 DEVS_PATH: Final = "/api/v2/devs/"
-CONNECTED_PATH_FMT: Final = (
-    "/api/v2/devs/{dev_id}/connected"  # some fw return 404; we tolerate
-)
 NODES_PATH_FMT: Final = "/api/v2/devs/{dev_id}/mgr/nodes"
 NODE_SAMPLES_PATH_FMT: Final = "/api/v2/devs/{dev_id}/{node_type}/{addr}/samples"
 
@@ -76,11 +73,6 @@ HTR_ENERGY_UPDATE_INTERVAL: Final = timedelta(hours=1)
 # UA / locale (matches app loosely; helps avoid quirky WAF rules)
 USER_AGENT: Final = "TermoWeb/2.5.1 (Android; HomeAssistant Integration)"
 ACCEPT_LANGUAGE: Final = "en-US,en;q=0.8"
-
-# Integration version (also shown in Device Info)
-# NOTE: Other modules may read the version from the manifest at runtime (DRY),
-# but we keep this constant for compatibility where needed.
-INTEGRATION_VERSION: Final = "1.0.0"
 
 # Socket.IO namespace used by the websocket client implementation
 WS_NAMESPACE: Final = "/api/v2/socket_io"
