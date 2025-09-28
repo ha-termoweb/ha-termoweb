@@ -339,6 +339,34 @@ def test_register_node_address_normalizes_aliases() -> None:
     assert coord._addr_lookup == {"A": "htr", "B": "htr"}
 
 
+def test_merge_address_payload_merges_and_deduplicates() -> None:
+    client = types.SimpleNamespace(get_node_settings=AsyncMock())
+    hass = HomeAssistant()
+    nodes = {"nodes": []}
+    coord = StateCoordinator(
+        hass,
+        client,
+        30,
+        "dev",
+        {"name": "Device"},
+        nodes,  # type: ignore[arg-type]
+    )
+
+    coord._nodes_by_type = {"htr": ["1"], "acm": ["5"]}
+    coord._addr_lookup = {"1": "htr", "5": "acm"}
+
+    coord._merge_address_payload(
+        {
+            "heater": ["1", "2", "2", ""],
+            "acm": ["5", "6", None],
+            "foo": ["7"],
+        }
+    )
+
+    assert coord._nodes_by_type == {"htr": ["1", "2"], "acm": ["5", "6"]}
+    assert coord._addr_lookup == {"1": "htr", "2": "htr", "5": "acm", "6": "acm"}
+
+
 def test_refresh_heater_updates_existing_and_new_data() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
