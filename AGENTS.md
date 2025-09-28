@@ -37,6 +37,7 @@ The end user of this integration is a non-technical person who has a home automa
 - Log entry and exit of major functions or actions as INFO, log protocol calls and responses as DEBUG, log errors as ERROR. 
 - Lint and reformat with ruff before committing.
 - Run tests with `pytest --cov=custom_components.termoweb --cov-report=term-missing` and make sure they pass before committing, with 100% coverage.
+- pytest with coverage take no more than 30 seconds to complete for the entire codebase. If tests take longer, assume there is an async wait problem and interrupt. Do not wait longer than 30 seconds. 
 - All tests must be meaningful. No cheating, no softball easy-to-pass tests. Test actual edge cases, exception handling, incorrect inputs.
 - Focus testing on interfaces between components, and error handling.
 - New features must be documented.
