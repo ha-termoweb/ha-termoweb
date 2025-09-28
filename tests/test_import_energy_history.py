@@ -518,7 +518,7 @@ def test_async_import_energy_history_waits_between_queries(
             }
         }
 
-        monkeypatch.setattr(mod, "_LAST_SAMPLES_QUERY", 10.0)
+        monkeypatch.setattr(mod.energy_module, "_LAST_SAMPLES_QUERY", 10.0)
 
         monotonic_values = iter([10.4, 11.4, 11.4])
 
@@ -634,7 +634,7 @@ def test_async_import_energy_history_skips_invalid_samples(
         store = Mock()
         monkeypatch.setattr(mod, "_store_statistics", store)
 
-        monkeypatch.setattr(mod, "_LAST_SAMPLES_QUERY", 0.0)
+        monkeypatch.setattr(mod.energy_module, "_LAST_SAMPLES_QUERY", 0.0)
         monkeypatch.setattr(
             mod,
             "time",

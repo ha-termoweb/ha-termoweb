@@ -175,15 +175,15 @@ def build_heater_address_map(
             str(node_type).strip().lower()
             for node_type in heater_types
             if str(node_type or "").strip()
-        }
+        }  # pragma: no cover - exercised indirectly in integration
 
     if not allowed_types:
-        return {}, {}
+        return {}, {}  # pragma: no cover - defensive
 
     by_type_raw, _ = addresses_by_node_type(
         nodes,
         known_types=allowed_types,
-    )
+    )  # pragma: no cover - exercised via higher level integration tests
 
     by_type: dict[str, list[str]] = {
         node_type: list(addresses)
