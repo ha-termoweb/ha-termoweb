@@ -79,6 +79,46 @@ class BaseFakeClient:
     async def get_nodes(self, dev_id: str) -> dict[str, Any]:
         self.get_nodes_calls.append(dev_id)
         return {}
+
+
+def test_create_rest_client_selects_brand(
+    termoweb_init: Any,
+    stub_hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DefaultClient(BaseFakeClient):
+        async def list_devices(self) -> list[dict[str, Any]]:
+            return []
+
+    class DucaClient(BaseFakeClient):
+        async def list_devices(self) -> list[dict[str, Any]]:
+            return []
+
+    monkeypatch.setattr(termoweb_init, "RESTClient", DefaultClient)
+    monkeypatch.setattr(termoweb_init, "DucaheatRESTClient", DucaClient)
+
+    default_client = termoweb_init.create_rest_client(
+        stub_hass,
+        "user",
+        "pw",
+        termoweb_init.DEFAULT_BRAND,
+    )
+    duca_client = termoweb_init.create_rest_client(
+        stub_hass,
+        "user2",
+        "pw2",
+        termoweb_init.BRAND_DUCAHEAT,
+    )
+
+    assert isinstance(default_client, DefaultClient)
+    assert isinstance(duca_client, DucaClient)
+    assert default_client.api_base == termoweb_init.get_brand_api_base(
+        termoweb_init.DEFAULT_BRAND
+    )
+    assert duca_client.basic_auth_b64 == termoweb_init.get_brand_basic_auth(
+        termoweb_init.BRAND_DUCAHEAT
+    )
+    assert stub_hass.client_session_calls == 2
 async def _drain_tasks(hass: HomeAssistant) -> None:
     if hass.tasks:
         await asyncio.gather(*hass.tasks, return_exceptions=True)
@@ -176,6 +216,25 @@ def test_async_setup_entry_happy_path(
             }
 
     monkeypatch.setattr(termoweb_init, "RESTClient", HappyClient)
+    create_calls: list[tuple[Any, str, str, str]] = []
+    orig_create = termoweb_init.create_rest_client
+
+    def fake_create(
+        hass_in: HomeAssistant, username: str, password: str, brand: str
+    ) -> Any:
+        create_calls.append((hass_in, username, password, brand))
+        return orig_create(hass_in, username, password, brand)
+
+    monkeypatch.setattr(termoweb_init, "create_rest_client", fake_create)
+
+    list_calls: list[Any] = []
+    orig_list_devices = termoweb_init.async_list_devices
+
+    async def fake_async_list(client: Any) -> list[dict[str, Any]]:
+        list_calls.append(client)
+        return await orig_list_devices(client)
+
+    monkeypatch.setattr(termoweb_init, "async_list_devices", fake_async_list)
     import_mock = AsyncMock()
     monkeypatch.setattr(termoweb_init, "_async_import_energy_history", import_mock)
 
@@ -188,6 +247,11 @@ def test_async_setup_entry_happy_path(
         return result
 
     assert asyncio.run(_run()) is True
+    assert create_calls == [
+        (stub_hass, "user", "pw", termoweb_init.DEFAULT_BRAND)
+    ]
+    assert len(list_calls) == 1
+    assert isinstance(list_calls[0], HappyClient)
 
     record = stub_hass.data[termoweb_init.DOMAIN][entry.entry_id]
     assert isinstance(record["client"], HappyClient)

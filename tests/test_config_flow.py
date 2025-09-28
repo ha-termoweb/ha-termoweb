@@ -60,28 +60,24 @@ def test_get_version_returns_unknown_when_missing(
     assert result == "unknown"
 
 
-def test_validate_login_uses_brand_settings(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_validate_login_uses_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     hass = HomeAssistant()
-    calls: list[tuple[Any, str, str, str, str]] = []
+    created: list[tuple[Any, str, str, str]] = []
+    listed: list[Any] = []
+    dummy_client = object()
 
-    class DummyClient:
-        def __init__(
-            self,
-            session: object,
-            username: str,
-            password: str,
-            *,
-            api_base: str,
-            basic_auth_b64: str,
-        ) -> None:
-            calls.append((session, username, password, api_base, basic_auth_b64))
+    def fake_create(
+        hass_in: HomeAssistant, username: str, password: str, brand: str
+    ) -> Any:
+        created.append((hass_in, username, password, brand))
+        return dummy_client
 
-        async def list_devices(self) -> None:
-            calls.append(("listed",))
+    async def fake_list(client: Any) -> list[Any]:
+        listed.append(client)
+        return []
 
-    monkeypatch.setattr(config_flow, "RESTClient", DummyClient)
+    monkeypatch.setattr(config_flow, "create_rest_client", fake_create)
+    monkeypatch.setattr(config_flow, "async_list_devices", fake_list)
 
     asyncio.run(
         config_flow._validate_login(
@@ -89,13 +85,44 @@ def test_validate_login_uses_brand_settings(
         )
     )
 
-    assert calls
-    _session, username, password, api_base, basic_auth = calls[0]
-    assert username == "user@example.com"
-    assert password == "pw"
-    assert api_base == config_flow.get_brand_api_base(config_flow.BRAND_DUCAHEAT)
-    assert basic_auth == config_flow.get_brand_basic_auth(config_flow.BRAND_DUCAHEAT)
-    assert calls[-1] == ("listed",)
+    assert created == [
+        (hass, "user@example.com", "pw", config_flow.BRAND_DUCAHEAT)
+    ]
+    assert listed == [dummy_client]
+
+
+@pytest.mark.parametrize(
+    "exc_factory",
+    [
+        lambda: config_flow.BackendAuthError(),
+        lambda: config_flow.BackendRateLimitError(),
+        lambda: config_flow.ClientError(),
+    ],
+)
+def test_validate_login_propagates_exceptions(
+    monkeypatch: pytest.MonkeyPatch, exc_factory: Any
+) -> None:
+    hass = HomeAssistant()
+    dummy_client = object()
+    monkeypatch.setattr(
+        config_flow,
+        "create_rest_client",
+        lambda _hass, _user, _pw, _brand: dummy_client,
+    )
+
+    exc = exc_factory()
+
+    async def fake_list(_client: Any) -> list[Any]:
+        raise exc
+
+    monkeypatch.setattr(config_flow, "async_list_devices", fake_list)
+
+    with pytest.raises(type(exc)):
+        asyncio.run(
+            config_flow._validate_login(
+                hass, "user", "pw", config_flow.DEFAULT_BRAND
+            )
+        )
 
 
 def test_async_step_reconfigure_missing_entry_aborts() -> None:

@@ -231,10 +231,6 @@ class StateCoordinator(
 
             )
 
-            payload = await self.client.get_node_settings(
-                dev_id, (resolved_type, addr)
-            )
-
             payload = await self.client.get_node_settings(dev_id, (resolved_type, addr))
 
             if not isinstance(payload, dict):

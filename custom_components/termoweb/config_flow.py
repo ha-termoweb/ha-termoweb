@@ -10,10 +10,10 @@ from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
-from homeassistant.helpers import aiohttp_client
 import voluptuous as vol
 
-from .api import BackendAuthError, BackendRateLimitError, RESTClient
+from . import async_list_devices, create_rest_client
+from .api import BackendAuthError, BackendRateLimitError
 from .const import (
     BRAND_DUCAHEAT as CONST_BRAND_DUCAHEAT,
     BRAND_LABELS,
@@ -24,8 +24,6 @@ from .const import (
     DOMAIN,
     MAX_POLL_INTERVAL,
     MIN_POLL_INTERVAL,
-    get_brand_api_base,
-    get_brand_basic_auth,
     get_brand_label,
 )
 from .utils import async_get_integration_version
@@ -66,17 +64,8 @@ async def _validate_login(
     hass: HomeAssistant, username: str, password: str, brand: str
 ) -> None:
     """Ensure the provided credentials authenticate successfully."""
-    session = aiohttp_client.async_get_clientsession(hass)
-    api_base = get_brand_api_base(brand)
-    basic_auth = get_brand_basic_auth(brand)
-    client = RESTClient(
-        session,
-        username,
-        password,
-        api_base=api_base,
-        basic_auth_b64=basic_auth,
-    )
-    await client.list_devices()
+    client = create_rest_client(hass, username, password, brand)
+    await async_list_devices(client)
 
 
 class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
