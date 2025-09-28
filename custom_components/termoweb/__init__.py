@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime, timedelta
 import logging
 import time
-from typing import Any
+from typing import Any, cast
 
 # Import of recorder statistics helpers is deferred until runtime in
 # _store_statistics to avoid ImportError on Home Assistant versions
@@ -71,6 +71,14 @@ def _iso_date(ts: int) -> str:
     return datetime.fromtimestamp(ts, UTC).date().isoformat()
 
 
+def _statistics_row_get(row: Any, key: str) -> Any:
+    """Read a field from a statistics row regardless of its container type."""
+
+    if isinstance(row, dict):
+        return row.get(key)
+    return getattr(row, key, None)
+
+
 def _store_statistics(
     hass: HomeAssistant, metadata: dict[str, Any], stats: list[dict[str, Any]]
 ) -> None:
@@ -115,6 +123,149 @@ def _store_statistics(
         }
     )
     async_add_external_statistics(hass, ext_meta, stats)
+
+
+async def _statistics_during_period_compat(
+    hass: HomeAssistant,
+    start_time: datetime,
+    end_time: datetime,
+    statistic_ids: set[str],
+) -> dict[str, list[Any]] | None:
+    """Fetch statistics for a period using the best available API."""
+
+    try:
+        from homeassistant.components.recorder import get_instance as _get_instance
+        from homeassistant.components.recorder.statistics import (
+            statistics_during_period as _statistics_during_period,
+        )
+    except (ImportError, AttributeError):  # pragma: no cover - defensive
+        _statistics_during_period = None
+        _get_instance = None  # type: ignore[assignment]
+
+    if _statistics_during_period and _get_instance:
+        instance = _get_instance(hass)
+        return await instance.async_add_executor_job(
+            _statistics_during_period,
+            hass,
+            start_time,
+            end_time,
+            statistic_ids,
+            "hour",
+            None,
+            None,
+        )
+
+    try:
+        from homeassistant.components.recorder.statistics import (
+            async_get_statistics_during_period as _async_get_statistics_during_period,
+        )
+    except (ImportError, AttributeError):  # pragma: no cover - defensive
+        return None
+
+    return await _async_get_statistics_during_period(
+        hass,
+        start_time,
+        end_time,
+        list(statistic_ids),
+        period="hour",
+    )
+
+
+async def _get_last_statistics_compat(
+    hass: HomeAssistant,
+    number_of_stats: int,
+    statistic_id: str,
+    *,
+    types: set[str] | None = None,
+    start_time: datetime | None = None,
+) -> dict[str, list[Any]] | None:
+    """Retrieve the last statistics row via synchronous or async helpers."""
+
+    types = types or {"state", "sum"}
+
+    try:
+        from homeassistant.components.recorder import get_instance as _get_instance
+        from homeassistant.components.recorder.statistics import (
+            get_last_statistics as _get_last_statistics,
+        )
+    except (ImportError, AttributeError):  # pragma: no cover - defensive
+        _get_last_statistics = None
+        _get_instance = None  # type: ignore[assignment]
+
+    if _get_last_statistics and _get_instance and start_time is None:
+        instance = _get_instance(hass)
+        return await instance.async_add_executor_job(
+            _get_last_statistics,
+            hass,
+            number_of_stats,
+            statistic_id,
+            False,
+            types,
+        )
+
+    try:
+        from homeassistant.components.recorder.statistics import (
+            async_get_last_statistics as _async_get_last_statistics,
+        )
+    except (ImportError, AttributeError):  # pragma: no cover - defensive
+        return None
+
+    kwargs: dict[str, Any] = {}
+    if start_time is not None:
+        kwargs["start_time"] = start_time
+    return await _async_get_last_statistics(
+        hass,
+        number_of_stats,
+        [statistic_id],
+        **kwargs,
+    )
+
+
+async def _clear_statistics_compat(
+    hass: HomeAssistant,
+    statistic_id: str,
+    *,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+) -> str | None:
+    """Clear statistics for a sensor using the available recorder helper."""
+
+    try:
+        from homeassistant.components.recorder import get_instance as _get_instance
+        from homeassistant.components.recorder.statistics import (
+            clear_statistics as _clear_statistics,
+        )
+    except (ImportError, AttributeError):  # pragma: no cover - defensive
+        _clear_statistics = None
+        _get_instance = None  # type: ignore[assignment]
+
+    if _clear_statistics and _get_instance:
+        instance = _get_instance(hass)
+        await instance.async_add_executor_job(
+            _clear_statistics,
+            instance,
+            [statistic_id],
+        )
+        return "clear"
+
+    try:
+        from homeassistant.components.recorder.statistics import (
+            async_delete_statistics as _async_delete_statistics,
+        )
+    except (ImportError, AttributeError):  # pragma: no cover - defensive
+        return None
+
+    delete_args: dict[str, Any] = {}
+    if start_time is not None:
+        delete_args["start_time"] = start_time
+    if end_time is not None:
+        delete_args["end_time"] = end_time
+
+    try:
+        await _async_delete_statistics(hass, [statistic_id], **delete_args)
+    except TypeError:
+        await _async_delete_statistics(hass, [statistic_id])
+    return "delete"
 
 
 async def _async_import_energy_history(
@@ -363,57 +514,52 @@ async def _async_import_energy_history(
         previous_kwh: float | None = None
         last_before: dict[str, Any] | None = None
 
-        period_stats: dict[str, list[dict[str, Any]]] | None = None
-        try:
-            from homeassistant.components.recorder.statistics import (
-                async_get_statistics_during_period,
-            )
-        except (ImportError, AttributeError):  # pragma: no cover - defensive
-            async_get_statistics_during_period = None
+        lookback_days = max(2, max_days + 1)
+        lookback_start = import_start_dt - timedelta(days=lookback_days)
 
-        if async_get_statistics_during_period:
-            lookback_days = max(2, max_days + 1)
-            lookback_start = import_start_dt - timedelta(days=lookback_days)
-            try:
-                period_stats = await async_get_statistics_during_period(
-                    hass,
-                    lookback_start,
-                    import_end_dt + timedelta(hours=1),
-                    [entity_id],
-                    period="hour",
-                )
-            except asyncio.CancelledError:  # pragma: no cover - allow cancellation
-                raise
-            except Exception as err:  # pragma: no cover - defensive
-                _LOGGER.debug(
-                    "%s: error fetching statistics window %s-%s: %s",
-                    addr,
-                    lookback_start,
-                    import_end_dt,
-                    err,
-                )
-            else:
-                window_values = period_stats.get(entity_id) if period_stats else []
-                if window_values:
-                    before_values = [
-                        val
-                        for val in window_values
-                        if isinstance(val.get("start"), datetime)
-                        and val["start"] < import_start_dt
-                    ]
-                    if before_values:
-                        last_before = before_values[-1]
+        period_stats: dict[str, list[Any]] | None = None
+        try:
+            period_stats = await _statistics_during_period_compat(
+                hass,
+                lookback_start,
+                import_end_dt + timedelta(hours=1),
+                {entity_id},
+            )
+        except asyncio.CancelledError:  # pragma: no cover - allow cancellation
+            raise
+        except Exception as err:  # pragma: no cover - defensive
+            _LOGGER.debug(
+                "%s: error fetching statistics window %s-%s: %s",
+                addr,
+                lookback_start,
+                import_end_dt,
+                err,
+            )
+
+        if period_stats:
+            window_values = period_stats.get(entity_id) or []
+            if window_values:
+                before_values = [
+                    val
+                    for val in window_values
+                    if isinstance(_statistics_row_get(val, "start"), datetime)
+                    and cast(datetime, _statistics_row_get(val, "start"))
+                    < import_start_dt
+                ]
+                if before_values:
+                    last_before = before_values[-1]
 
         if last_before is None:
             try:
-                from homeassistant.components.recorder.statistics import (
-                    async_get_last_statistics,
+                existing = await _get_last_statistics_compat(
+                    hass,
+                    1,
+                    entity_id,
+                    types={"state", "sum"},
                 )
-
-                existing = await async_get_last_statistics(hass, 1, [entity_id])
                 if existing and (vals := existing.get(entity_id)):
                     candidate = vals[0]
-                    start_dt = candidate.get("start")
+                    start_dt = _statistics_row_get(candidate, "start")
                     if isinstance(start_dt, datetime) and start_dt < import_start_dt:
                         last_before = candidate
             except asyncio.CancelledError:  # pragma: no cover - allow cancellation
@@ -425,7 +571,7 @@ async def _async_import_energy_history(
 
         if last_before:
             try:
-                sum_offset = float(last_before.get("sum") or 0.0)
+                sum_offset = float(_statistics_row_get(last_before, "sum") or 0.0)
             except (TypeError, ValueError):  # pragma: no cover - defensive
                 _LOGGER.debug(
                     "%s: invalid sum offset in existing statistics: %s",
@@ -433,7 +579,7 @@ async def _async_import_energy_history(
                     last_before,
                 )
                 sum_offset = 0.0
-            prev_state = last_before.get("state")
+            prev_state = _statistics_row_get(last_before, "state")
             if prev_state is not None:
                 try:
                     previous_kwh = float(prev_state)
@@ -446,22 +592,21 @@ async def _async_import_energy_history(
         overlap_exists = False
         if period_stats is not None:
             overlap_exists = any(
-                isinstance(val.get("start"), datetime)
-                and import_start_dt <= val["start"] <= import_end_dt
+                isinstance(_statistics_row_get(val, "start"), datetime)
+                and import_start_dt
+                <= cast(datetime, _statistics_row_get(val, "start"))
+                <= import_end_dt
                 for val in period_stats.get(entity_id, [])
             )
         else:
             try:
-                from homeassistant.components.recorder.statistics import (
-                    async_get_last_statistics,
+                overlap_stats = await _get_last_statistics_compat(
+                    hass,
+                    1,
+                    entity_id,
+                    start_time=import_start_dt,
                 )
-
-                overlap_stats = await async_get_last_statistics(
-                    hass, 1, [entity_id], start_time=import_start_dt
-                )
-                overlap_exists = bool(
-                    overlap_stats and overlap_stats.get(entity_id)
-                )
+                overlap_exists = bool(overlap_stats and overlap_stats.get(entity_id))
             except asyncio.CancelledError:  # pragma: no cover - allow cancellation
                 raise
             except Exception as err:  # pragma: no cover - defensive
@@ -471,27 +616,24 @@ async def _async_import_energy_history(
 
         if overlap_exists:
             try:
-                from homeassistant.components.recorder.statistics import (
-                    async_delete_statistics,
+                cleared = await _clear_statistics_compat(
+                    hass,
+                    entity_id,
+                    start_time=import_start_dt,
+                    end_time=import_end_dt + timedelta(hours=1),
                 )
-
-                delete_args: dict[str, Any] = {
-                    "start_time": import_start_dt,
-                    "end_time": import_end_dt + timedelta(hours=1),
-                }
-                try:
-                    await async_delete_statistics(hass, [entity_id], **delete_args)
-                    _LOGGER.debug("%s: cleared overlapping statistics for %s", addr, entity_id)
-                except TypeError:
-                    await async_delete_statistics(hass, [entity_id])
+                if cleared == "clear":
                     _LOGGER.debug("%s: cleared statistics for %s", addr, entity_id)
+                elif cleared == "delete":
+                    _LOGGER.debug(
+                        "%s: cleared overlapping statistics for %s", addr, entity_id
+                    )
+                else:
+                    _LOGGER.debug(
+                        "%s: statistics helpers unavailable to clear overlap", addr
+                    )
             except asyncio.CancelledError:  # pragma: no cover - allow cancellation
                 raise
-            except ImportError:  # pragma: no cover - defensive
-                _LOGGER.debug(
-                    "%s: async_delete_statistics not available to clear overlap",
-                    addr,
-                )
             except Exception as err:  # pragma: no cover - defensive
                 _LOGGER.debug("%s: failed to clear overlapping statistics: %s", addr, err)
 
