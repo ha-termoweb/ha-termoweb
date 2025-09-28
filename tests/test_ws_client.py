@@ -1595,11 +1595,19 @@ def test_handshake_wraps_client_error() -> None:
     asyncio.run(_run())
 
 
-def test_handshake_status_error_raises_handshake_error() -> None:
+@pytest.mark.parametrize(
+    "response, expected_status, expected_body",
+    [
+        ({"status": 403, "body": "denied"}, 403, "denied"),
+        ({"status": 503, "body": "oops"}, 503, "oops"),
+    ],
+)
+def test_handshake_status_error_raises_handshake_error(
+    response: dict[str, object], expected_status: int, expected_body: str
+) -> None:
     async def _run() -> None:
         module = _load_ws_client()
-        aiohttp = module.aiohttp
-        session = aiohttp.ClientSession(get_responses=[{"status": 403, "body": "denied"}])
+        session = module.aiohttp.testing.FakeClientSession(get_responses=[response])
 
         hass = types.SimpleNamespace(loop=asyncio.get_event_loop())
         coordinator = types.SimpleNamespace()
@@ -1622,8 +1630,8 @@ def test_handshake_status_error_raises_handshake_error() -> None:
             await client._handshake()
 
         err = ctx.value
-        assert err.status == 403
-        assert err.body_snippet == "denied"
+        assert err.status == expected_status
+        assert err.body_snippet == expected_body
         assert "token=cached" in err.url
         assert api._ensure_token.await_count == 0
         assert api._authed_headers.await_count == 1
@@ -3100,40 +3108,6 @@ def test_runner_cleanup_handles_ws_close_errors() -> None:
         await client._runner()
 
         assert boom_ws.close_calls == 1
-
-    asyncio.run(_run())
-
-
-def test_handshake_status_error_raises_handshake_error() -> None:
-    async def _run() -> None:
-        module = _load_ws_client(get_responses=[{"status": 503, "body": "oops"}])
-        session = module.aiohttp.testing.FakeClientSession()
-        loop = asyncio.get_event_loop()
-        hass = types.SimpleNamespace(
-            loop=loop,
-            data={module.DOMAIN: {"entry": {"ws_state": {}}}},
-        )
-        coordinator = types.SimpleNamespace()
-        api = types.SimpleNamespace(
-            _session=session,
-            _authed_headers=AsyncMock(
-                return_value={"Authorization": "Bearer cached"}
-            ),
-            _ensure_token=AsyncMock(),
-        )
-        client = module.WebSocket09Client(
-            hass,
-            entry_id="entry",
-            dev_id="dev",
-            api_client=api,
-            coordinator=coordinator,
-            session=session,
-        )
-
-        with pytest.raises(module.HandshakeError) as err:
-            await client._handshake()
-
-        assert err.value.status == 503
 
     asyncio.run(_run())
 
