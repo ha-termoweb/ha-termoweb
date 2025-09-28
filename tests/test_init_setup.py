@@ -21,7 +21,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import entity_registry as entity_registry_mod
 
-from custom_components.termoweb.utils import build_heater_address_map
+from custom_components.termoweb.utils import (
+    build_heater_address_map,
+    build_heater_energy_unique_id,
+)
 
 
 class FakeWSClient:
@@ -355,13 +358,13 @@ def test_import_energy_history_service_invocation(
 
         registry.add(
             "sensor.dev_a_energy",
-            unique_id=f"{termoweb_init.DOMAIN}:dev-1:htr:A:energy",
+            unique_id=build_heater_energy_unique_id("dev-1", "htr", "A"),
             platform=termoweb_init.DOMAIN,
             config_entry_id=entry.entry_id,
         )
         registry.add(
             "sensor.dev_b_energy",
-            unique_id=f"{termoweb_init.DOMAIN}:dev-1:acm:B:energy",
+            unique_id=build_heater_energy_unique_id("dev-1", "acm", "B"),
             platform=termoweb_init.DOMAIN,
             config_entry_id=entry.entry_id,
         )
@@ -645,13 +648,13 @@ def test_import_energy_history_service_error_logging(
 
         registry.add(
             "sensor.svc1_energy",
-            unique_id=f"{termoweb_init.DOMAIN}:dev-1:htr:A:energy",
+            unique_id=build_heater_energy_unique_id("dev-1", "htr", "A"),
             platform=termoweb_init.DOMAIN,
             config_entry_id=entry1.entry_id,
         )
         registry.add(
             "sensor.svc2_energy",
-            unique_id=f"{termoweb_init.DOMAIN}:dev-1:htr:B:energy",
+            unique_id=build_heater_energy_unique_id("dev-1", "htr", "B"),
             platform=termoweb_init.DOMAIN,
             config_entry_id=entry2.entry_id,
         )
@@ -818,13 +821,13 @@ def test_import_energy_history_service_handles_string_ids_and_cancelled(
 
         registry.add(
             "sensor.invalid",
-            unique_id=f"{termoweb_init.DOMAIN}:dev-1:htr:A:energy",
+            unique_id=build_heater_energy_unique_id("dev-1", "htr", "A"),
             platform="other",
             config_entry_id=entry.entry_id,
         )
         registry.add(
             "sensor.valid",
-            unique_id=f"{termoweb_init.DOMAIN}:dev-1:htr:A:energy",
+            unique_id=build_heater_energy_unique_id("dev-1", "htr", "A"),
             platform=termoweb_init.DOMAIN,
             config_entry_id=entry.entry_id,
         )

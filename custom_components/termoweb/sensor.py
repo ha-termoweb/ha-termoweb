@@ -25,7 +25,12 @@ from .heater import (
     log_skipped_nodes,
     prepare_heater_platform_data,
 )
-from .utils import HEATER_NODE_TYPES, build_gateway_device_info, float_or_none
+from .utils import (
+    HEATER_NODE_TYPES,
+    build_gateway_device_info,
+    build_heater_energy_unique_id,
+    float_or_none,
+)
 
 _WH_TO_KWH = 1 / 1000.0
 
@@ -117,7 +122,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
     for node_type, _node, addr_str, base_name in iter_heater_nodes(
         nodes_by_type, resolve_name
     ):
-        uid_prefix = f"{DOMAIN}:{dev_id}:{node_type}:{addr_str}"
+        energy_unique_id = build_heater_energy_unique_id(dev_id, node_type, addr_str)
+        uid_prefix = energy_unique_id.rsplit(":", 1)[0]
         new_entities.extend(
             _create_heater_sensors(
                 coordinator,
@@ -127,6 +133,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 addr_str,
                 base_name,
                 uid_prefix,
+                energy_unique_id,
                 node_type=node_type,
             )
         )
@@ -291,6 +298,7 @@ def _create_heater_sensors(
     addr: str,
     base_name: str,
     uid_prefix: str,
+    energy_unique_id: str,
     *,
     node_type: str | None = None,
     temperature_cls: type[HeaterTemperatureSensor] = HeaterTemperatureSensor,
@@ -319,7 +327,7 @@ def _create_heater_sensors(
         dev_id,
         addr,
         f"{base_name} Energy",
-        f"{uid_prefix}:energy",
+        energy_unique_id,
         base_name,
         node_type=node_type,
     )
