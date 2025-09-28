@@ -18,11 +18,11 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .api import RESTClient
 from .const import API_BASE, DOMAIN, WS_NAMESPACE, signal_ws_data, signal_ws_status
+from .heater import prepare_heater_platform_data
 from .nodes import NODE_CLASS_BY_TYPE, build_node_inventory
 from .utils import (
     HEATER_NODE_TYPES,
     addresses_by_node_type,
-    build_heater_address_map,
     ensure_node_inventory,
     normalize_heater_addresses,
 )
@@ -354,34 +354,40 @@ class WebSocketClient:
 
     async def _subscribe_htr_samples(self) -> None:
         """Request push updates for heater and accumulator energy samples."""
-        inventory: list[Any] = []
-        record: dict[str, Any] | None = None
+        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
+        if not isinstance(record, dict):
+            record = {}
+
         coordinator_inventory = getattr(self._coordinator, "_node_inventory", None)
         if isinstance(coordinator_inventory, list) and coordinator_inventory:
-            inventory = list(coordinator_inventory)
-        else:
-            record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-            coordinator_nodes = getattr(self._coordinator, "_nodes", None)
-            if isinstance(record, dict):
-                inventory = ensure_node_inventory(record, nodes=coordinator_nodes)
-            elif coordinator_nodes is not None:
-                try:
-                    inventory = build_node_inventory(coordinator_nodes)
-                except Exception:  # pragma: no cover - defensive  # noqa: BLE001
-                    inventory = []
-        if record is None:
-            record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-        addr_map: dict[str, list[str]] = {}
-        _reverse_lookup: dict[str, set[str]] = {}
-        if inventory:
-            helper_map, _reverse_lookup = build_heater_address_map(inventory)
-            if helper_map:
-                addr_map = {
-                    node_type: list(addresses)
-                    for node_type, addresses in helper_map.items()
-                    if node_type in HEATER_NODE_TYPES and addresses
-                }
-        if not addr_map and hasattr(self._coordinator, "_addrs"):
+            cached = record.get("node_inventory")
+            if not isinstance(cached, list) or not cached:
+                record["node_inventory"] = list(coordinator_inventory)
+
+        coordinator_nodes = getattr(self._coordinator, "_nodes", None)
+        if coordinator_nodes is not None:
+            cached_nodes = record.get("nodes")
+            if not cached_nodes:
+                record["nodes"] = coordinator_nodes
+
+        inventory, _, addrs_by_type, _ = (
+            prepare_heater_platform_data(
+                record,
+                default_name_simple=lambda addr: f"Heater {addr}",
+            )
+        )
+
+        addr_map: dict[str, list[str]] = {
+            node_type: [
+                addr_str
+                for addr in addresses
+                if (addr_str := str(addr).strip())
+            ]
+            for node_type, addresses in addrs_by_type.items()
+            if node_type in HEATER_NODE_TYPES and addresses
+        }
+
+        if not addr_map.get("htr") and hasattr(self._coordinator, "_addrs"):
             try:
                 fallback = list(self._coordinator._addrs())  # noqa: SLF001
             except Exception:  # pragma: no cover - defensive  # noqa: BLE001
