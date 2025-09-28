@@ -1,13 +1,21 @@
 # TermoWeb Function Map
 
-custom_components/termoweb/__init__.py :: _iso_date
+custom_components/termoweb/energy.py :: _iso_date
     Convert unix timestamp to ISO date.
-custom_components/termoweb/__init__.py :: _store_statistics
+custom_components/termoweb/energy.py :: _store_statistics
     Insert statistics using recorder helpers.
-custom_components/termoweb/__init__.py :: _async_import_energy_history
+custom_components/termoweb/energy.py :: default_samples_rate_limit_state
+    Return the shared rate limiter for heater samples queries.
+custom_components/termoweb/energy.py :: reset_samples_rate_limit_state
+    Reset the shared rate limiter tracking to its initial state.
+custom_components/termoweb/energy.py :: async_import_energy_history
     Fetch historical hourly samples and insert statistics.
-custom_components/termoweb/__init__.py :: _async_import_energy_history._rate_limited_fetch
-    Fetch heater samples while respecting the shared rate limit.
+custom_components/termoweb/energy.py :: async_register_import_energy_history_service
+    Register the import_energy_history service if it is missing.
+custom_components/termoweb/energy.py :: async_schedule_initial_energy_import
+    Schedule the initial energy history import for an entry.
+custom_components/termoweb/__init__.py :: _async_import_energy_history
+    Delegate to the energy helper with shared rate limiting.
 custom_components/termoweb/__init__.py :: async_setup_entry
     Set up the TermoWeb integration for a config entry.
 custom_components/termoweb/__init__.py :: async_setup_entry._start_ws
@@ -18,10 +26,6 @@ custom_components/termoweb/__init__.py :: async_setup_entry._on_ws_status
     Recalculate polling intervals when websocket status changes.
 custom_components/termoweb/__init__.py :: async_setup_entry._on_coordinator_updated
     Start websocket clients for newly discovered devices.
-custom_components/termoweb/__init__.py :: async_setup_entry._service_import_energy_history
-    Handle the import_energy_history service call.
-custom_components/termoweb/__init__.py :: async_setup_entry._schedule_import
-    Kick off the initial energy history import task.
 custom_components/termoweb/__init__.py :: async_unload_entry
     Unload a config entry for TermoWeb.
 custom_components/termoweb/__init__.py :: async_migrate_entry

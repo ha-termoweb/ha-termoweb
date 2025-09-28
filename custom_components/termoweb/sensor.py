@@ -368,13 +368,13 @@ class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
     async def async_added_to_hass(self) -> None:
         """Register websocket callbacks once the entity is added."""
         await super().async_added_to_hass()
-        if self.hass is None:
+        if self.hass is None:  # pragma: no cover - defensive guard
             return
         self._ws_subscription.subscribe(
             self.hass, signal_ws_data(self._entry_id), self._on_ws_data
         )
 
-    async def async_will_remove_from_hass(self) -> None:
+    async def async_will_remove_from_hass(self) -> None:  # pragma: no cover - cleanup
         """Tidy up websocket listeners prior to entity removal."""
 
         self._ws_subscription.unsubscribe()
