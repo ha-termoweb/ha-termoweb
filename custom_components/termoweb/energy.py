@@ -128,11 +128,20 @@ class _RecorderStatisticsHelpers:
     """Container for recorder statistics helper callables."""
 
     executor: Callable[..., Awaitable[Any]] | None
-    instance: Any | None
+    sync_target: Any | None
     sync: Callable[..., Any] | None
     async_fn: Callable[..., Awaitable[Any]] | None
 
 
+@dataclass(slots=True)
+class _RecorderModuleImports:
+    """Container for recorder module helper imports."""
+
+    get_instance: Callable[[HomeAssistant], Any] | None
+    statistics: Any | None
+
+
+_RECORDER_IMPORTS: _RecorderModuleImports | None = None
 _SAMPLES_QUERY_LOCK = asyncio.Lock()
 _LAST_SAMPLES_QUERY = 0.0
 
@@ -166,20 +175,15 @@ def reset_samples_rate_limit_state() -> None:
     _set_last_samples_query(0.0)
 
 
-def _resolve_statistics_helpers(
-    hass: HomeAssistant,
-    sync_name: str,
-    async_name: str,
-) -> _RecorderStatisticsHelpers:
-    """Return the recorder statistics helpers for compatibility shims."""
+def _resolve_recorder_imports() -> _RecorderModuleImports:
+    """Return cached recorder helper imports."""
 
-    executor: Callable[..., Awaitable[Any]] | None = None
-    instance: Any | None = None
-    sync_helper: Callable[..., Any] | None = None
-    async_helper: Callable[..., Awaitable[Any]] | None = None
+    global _RECORDER_IMPORTS
+    if _RECORDER_IMPORTS is not None:
+        return _RECORDER_IMPORTS
 
-    statistics_mod: Any | None = None
     get_instance: Callable[[HomeAssistant], Any] | None = None
+    statistics_mod: Any | None = None
 
     try:
         from homeassistant.components.recorder import (
@@ -187,32 +191,55 @@ def _resolve_statistics_helpers(
             statistics as statistics_mod,
         )
     except (ImportError, AttributeError):  # pragma: no cover - defensive
-        statistics_mod = None
-        get_instance = None
-    else:
-        get_instance = _get_instance
-
-    if statistics_mod is not None:
-        sync_candidate = getattr(statistics_mod, sync_name, None)
-        if callable(sync_candidate) and get_instance is not None:
-            instance = get_instance(hass)
-            executor = instance.async_add_executor_job
-            sync_helper = sync_candidate
-
-    if statistics_mod is None:
         try:
             from homeassistant.components.recorder import statistics as statistics_mod
         except (ImportError, AttributeError):  # pragma: no cover - defensive
             statistics_mod = None
+    else:
+        get_instance = _get_instance
+
+    _RECORDER_IMPORTS = _RecorderModuleImports(
+        get_instance=get_instance,
+        statistics=statistics_mod,
+    )
+    return _RECORDER_IMPORTS
+
+
+def _resolve_statistics_helpers(
+    hass: HomeAssistant,
+    sync_name: str,
+    async_name: str,
+    *,
+    sync_uses_instance: bool = False,
+) -> _RecorderStatisticsHelpers:
+    """Return the recorder statistics helpers for compatibility shims."""
+
+    imports = _resolve_recorder_imports()
+
+    statistics_mod: Any | None = imports.statistics
+
+    sync_helper: Callable[..., Any] | None = None
+    async_helper: Callable[..., Awaitable[Any]] | None = None
+    executor: Callable[..., Awaitable[Any]] | None = None
+    sync_target: Any | None = None
 
     if statistics_mod is not None:
+        sync_candidate = getattr(statistics_mod, sync_name, None)
+        if callable(sync_candidate):
+            sync_helper = sync_candidate
+
         async_candidate = getattr(statistics_mod, async_name, None)
         if callable(async_candidate):
             async_helper = async_candidate
 
+    if sync_helper is not None and imports.get_instance is not None:
+        instance = imports.get_instance(hass)
+        executor = instance.async_add_executor_job
+        sync_target = instance if sync_uses_instance else hass
+
     return _RecorderStatisticsHelpers(
         executor=executor,
-        instance=instance,
+        sync_target=sync_target,
         sync=sync_helper,
         async_fn=async_helper,
     )
@@ -279,10 +306,10 @@ async def _statistics_during_period_compat(  # pragma: no cover - compatibility 
         "async_get_statistics_during_period",
     )
 
-    if helpers.sync and helpers.executor:
+    if helpers.sync and helpers.executor and helpers.sync_target is not None:
         return await helpers.executor(
             helpers.sync,
-            hass,
+            helpers.sync_target,
             start_time,
             end_time,
             statistic_ids,
@@ -321,10 +348,15 @@ async def _get_last_statistics_compat(  # pragma: no cover - compatibility shim
         "async_get_last_statistics",
     )
 
-    if helpers.sync and helpers.executor and start_time is None:
+    if (
+        helpers.sync
+        and helpers.executor
+        and helpers.sync_target is not None
+        and start_time is None
+    ):
         return await helpers.executor(
             helpers.sync,
-            hass,
+            helpers.sync_target,
             number_of_stats,
             statistic_id,
             types,
@@ -358,12 +390,13 @@ async def _clear_statistics_compat(  # pragma: no cover - compatibility shim
         hass,
         "clear_statistics",
         "async_delete_statistics",
+        sync_uses_instance=True,
     )
 
-    if helpers.sync and helpers.executor and helpers.instance is not None:
+    if helpers.sync and helpers.executor and helpers.sync_target is not None:
         await helpers.executor(
             helpers.sync,
-            helpers.instance,
+            helpers.sync_target,
             [statistic_id],
         )
         return "clear"
