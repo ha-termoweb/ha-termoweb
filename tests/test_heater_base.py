@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Callable
 
 import pytest
 
@@ -88,8 +88,8 @@ def test_prepare_heater_platform_data_groups_nodes() -> None:
     assert legacy_nodes_by_type.get("htr") is None or not legacy_nodes_by_type.get(
         "htr"
     )
-    assert legacy_resolve("htr", "9") == "Kitchen"
-    assert legacy_resolve("foo", "9") == "Kitchen"
+    assert legacy_resolve("htr", "9") == "Heater 9"
+    assert legacy_resolve("foo", "9") == "Heater 9"
 
 
 def test_prepare_heater_platform_data_skips_blank_types(
@@ -114,6 +114,39 @@ def test_prepare_heater_platform_data_skips_blank_types(
     assert addrs_by_type["htr"] == ["6"]
     helper_map, _ = build_heater_address_map(inventory)
     assert helper_map == {"htr": ["6"]}
+
+
+def test_prepare_heater_platform_data_passes_inventory_to_name_map(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry_data = {
+        "nodes": {"nodes": [{"type": "htr", "addr": "9", "name": "Heater"}]}
+    }
+    expected_inventory = build_node_inventory(entry_data["nodes"])
+
+    def fake_ensure(record: dict[str, Any], *, nodes: Any | None = None) -> list[Any]:
+        return list(expected_inventory)
+
+    calls: list[tuple[Any, Callable[[str], str]]] = []
+
+    def fake_name_map(
+        nodes: Any, default_factory: Callable[[str], str]
+    ) -> dict[Any, Any]:
+        calls.append((nodes, default_factory))
+        return {"htr": {}, "by_type": {}}
+
+    monkeypatch.setattr(heater_module, "ensure_node_inventory", fake_ensure)
+    monkeypatch.setattr(heater_module, "build_heater_name_map", fake_name_map)
+
+    inventory, *_ = prepare_heater_platform_data(
+        entry_data,
+        default_name_simple=lambda addr: f"Heater {addr}",
+    )
+
+    assert calls
+    recorded_nodes, recorded_factory = calls[0]
+    assert recorded_nodes is inventory
+    assert recorded_factory("9") == "Heater 9"
 
 
 def test_build_heater_name_map_handles_invalid_entries() -> None:
