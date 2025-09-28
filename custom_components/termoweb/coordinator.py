@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import timedelta
 import logging
 import time
@@ -27,6 +27,43 @@ _LOGGER = logging.getLogger(__name__)
 
 # How many heater settings to fetch per device per cycle (keep gentle)
 HTR_SETTINGS_PER_CYCLE = 1
+
+
+def _device_display_name(
+    device: Mapping[str, Any] | None, dev_id: str
+) -> str:
+    """Return the trimmed device name or a fallback for ``dev_id``."""
+
+    if isinstance(device, Mapping):
+        raw_name = device.get("name")
+    else:  # pragma: no cover - defensive guard
+        raw_name = None
+
+    if isinstance(raw_name, str):
+        trimmed = raw_name.strip()
+        if trimmed:
+            return trimmed
+    elif raw_name is not None:
+        trimmed = str(raw_name).strip()
+        if trimmed:
+            return trimmed
+
+    return f"Device {dev_id}"
+
+
+def _ensure_heater_section(
+    nodes_by_type: dict[str, dict[str, Any]],
+    factory: Callable[[], dict[str, Any]],
+) -> dict[str, Any]:
+    """Ensure ``nodes_by_type`` contains an ``htr`` section and return it."""
+
+    existing = nodes_by_type.get("htr")
+    if isinstance(existing, dict):
+        return existing
+
+    heater_section = factory()
+    nodes_by_type["htr"] = heater_section
+    return heater_section
 
 
 class StateCoordinator(
@@ -276,10 +313,9 @@ class StateCoordinator(
             dev_data = dict(new_data.get(dev_id) or {})
 
             if not dev_data:
-                dev_name = (self._device.get("name") or f"Device {dev_id}").strip()
                 dev_data = {
                     "dev_id": dev_id,
-                    "name": dev_name,
+                    "name": _device_display_name(self._device, dev_id),
                     "raw": self._device,
                     "connected": True,
                     "nodes": self._nodes,
@@ -287,9 +323,7 @@ class StateCoordinator(
             else:
                 dev_data.setdefault("dev_id", dev_id)
                 if "name" not in dev_data:
-                    dev_data["name"] = (
-                        self._device.get("name") or f"Device {dev_id}"
-                    ).strip()
+                    dev_data["name"] = _device_display_name(self._device, dev_id)
                 dev_data.setdefault("raw", self._device)
                 dev_data.setdefault("nodes", self._nodes)
                 dev_data.setdefault("connected", True)
@@ -368,12 +402,12 @@ class StateCoordinator(
             for n_type, section in dev_data["nodes_by_type"].items():
                 dev_data[n_type] = section
 
-            heater_section = dev_data["nodes_by_type"].get("htr")
-            if heater_section is None:
-                heater_section = self._normalise_type_section(
+            heater_section = _ensure_heater_section(
+                dev_data["nodes_by_type"],
+                lambda: self._normalise_type_section(
                     "htr", {}, self._nodes_by_type.get("htr", [])
-                )
-                dev_data["nodes_by_type"]["htr"] = heater_section
+                ),
+            )
             dev_data["htr"] = heater_section
             new_data[dev_id] = dev_data
             self.async_set_updated_data(new_data)
@@ -472,7 +506,7 @@ class StateCoordinator(
                         bucket[addr] = js
                 self._rr_index[dev_id] = (start_index + count) % len(addrs)
 
-            dev_name = (self._device.get("name") or f"Device {dev_id}").strip()
+            dev_name = _device_display_name(self._device, dev_id)
 
             for node_type, settings in settings_by_type.items():
                 for addr in settings:
@@ -496,13 +530,13 @@ class StateCoordinator(
                     "settings": settings,
                 }
 
-            heater_section = nodes_by_type.get("htr")
-            if heater_section is None:
-                heater_section = {
+            heater_section = _ensure_heater_section(
+                nodes_by_type,
+                lambda: {
                     "addrs": list(addr_map.get("htr", [])),
                     "settings": dict(settings_by_type.get("htr", {})),
-                }
-                nodes_by_type["htr"] = heater_section
+                },
+            )
 
             result = {
                 dev_id: {
@@ -518,9 +552,7 @@ class StateCoordinator(
             for node_type, section in nodes_by_type.items():
                 result[dev_id][node_type] = section
 
-            result[dev_id]["htr"] = nodes_by_type.get(
-                "htr", {"addrs": [], "settings": {}}
-            )
+            result[dev_id]["htr"] = heater_section
 
         except TimeoutError as err:
             raise UpdateFailed("API timeout") from err
@@ -669,15 +701,15 @@ class EnergyStateCoordinator(
                 dev_data[node_type] = bucket
                 nodes_by_type[node_type] = bucket
 
-            heater_data = nodes_by_type.get("htr")
-            if heater_data is None:
-                heater_data = {
+            heater_data = _ensure_heater_section(
+                nodes_by_type,
+                lambda: {
                     "energy": dict(energy_by_type.get("htr", {})),
                     "power": dict(power_by_type.get("htr", {})),
                     "addrs": list(self._addresses_by_type.get("htr", [])),
-                }
-                nodes_by_type["htr"] = heater_data
-                dev_data["htr"] = heater_data
+                },
+            )
+            dev_data["htr"] = heater_data
 
             for alias, canonical in self._compat_aliases.items():
                 canonical_bucket = nodes_by_type.get(canonical)
