@@ -7,7 +7,7 @@
 //     termoweb.set_preset_temperatures
 // - Local edit freeze: while the user is editing or after Save, the card will
 //   NOT hydrate from HA state until the user clicks Refresh, or until a timed
-//   window elapses and the incoming state matches the last-sent payload.
+//   window elapses and the incoming state matches the pending echo payload.
 // - Colors: Cold = Cyan (#00BCD4), Day = Orange (#FB8C00), Night = Dark Blue (#0D47A1)
 // - Indexing: Monday-based; index = day*24 + hour
 //
@@ -67,9 +67,6 @@
       this._freezeUntil = 0; // epoch ms; 0 means not frozen
       this._freezeWindowMs = 15000; // 15s after save
       this._pendingEcho = { prog: null, ptemp: null };
-
-      // Last-sent payloads to detect echo
-      this._lastSent = { prog: null, ptemp: null };
 
       // Track which preset input is actively being edited (focus index: 0=cold,1=night,2=day)
       this._editingPresetIdx = -1;
@@ -215,7 +212,6 @@
         this._progLocal = null;
         this._dirtyProg = false;
         this._pendingEcho.prog = null;
-        this._lastSent.prog = null;
         this._freezeUntil = 0;
         hydrated = true;
       };
@@ -223,7 +219,6 @@
         this._ptempLocal = [null, null, null];
         this._dirtyPresets = false;
         this._pendingEcho.ptemp = null;
-        this._lastSent.ptemp = null;
         this._freezeUntil = 0;
         hydrated = true;
       };
@@ -439,7 +434,6 @@
       this._presetSelection = null;
       this._freezeUntil = 0;
       this._pendingEcho = { prog: null, ptemp: null };
-      this._lastSent = { prog: null, ptemp: null };
       this._render();
     }
 
@@ -465,7 +459,6 @@
       this._presetSelection = null;
       this._freezeUntil = 0;
       this._pendingEcho = { prog: null, ptemp: null };
-      this._lastSent = { prog: null, ptemp: null };
       this._render();
     }
 
@@ -498,7 +491,6 @@
         this._pendingPresetFocusRestore = false;
         this._presetFocusRelease = false;
         this._presetSelection = null;
-        this._lastSent.ptemp = payload.slice();
         this._pendingEcho.ptemp = payload.slice();
         this._freezeUntil = nowMs() + this._freezeWindowMs;
         this._toast("Preset temperatures sent (waiting for device to update)");
@@ -531,7 +523,6 @@
           prog: body,
         });
         this._dirtyProg = false;
-        this._lastSent.prog = body.slice();
         this._pendingEcho.prog = body.slice();
         this._freezeUntil = nowMs() + this._freezeWindowMs;
         this._toast("Schedule sent (waiting for device to update)");
