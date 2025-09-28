@@ -300,6 +300,9 @@ def test_register_node_address_strips_and_skips_blank() -> None:
     coord._nodes_by_type = {}
     coord._addr_lookup = {}
 
+    coord._merge_address_payload(None)
+    coord._merge_address_payload({})
+
     coord._register_node_address("", "")
     coord._register_node_address("htr", " ")
 
@@ -307,9 +310,33 @@ def test_register_node_address_strips_and_skips_blank() -> None:
     assert coord._addr_lookup == {}
 
     coord._register_node_address(" htr ", " A ")
+    coord._register_node_address("htr", "A")
 
     assert coord._nodes_by_type == {"htr": ["A"]}
     assert coord._addr_lookup == {"A": "htr"}
+
+
+def test_register_node_address_normalizes_aliases() -> None:
+    client = types.SimpleNamespace(get_node_settings=AsyncMock())
+    hass = HomeAssistant()
+    nodes = {"nodes": []}
+    coord = StateCoordinator(
+        hass,
+        client,
+        30,
+        "dev",
+        {"name": "Device"},
+        nodes,  # type: ignore[arg-type]
+    )
+
+    coord._nodes_by_type = {}
+    coord._addr_lookup = {}
+
+    coord._register_node_address("heater", "A")
+    coord._register_node_address("heaters", "B")
+
+    assert coord._nodes_by_type == {"htr": ["A", "B"]}
+    assert coord._addr_lookup == {"A": "htr", "B": "htr"}
 
 
 def test_refresh_heater_updates_existing_and_new_data() -> None:
@@ -367,7 +394,10 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
         assert nodes_by_type["htr"]["addrs"] == ["A", "B"]
 
         await coord.async_refresh_heater("B")
-        assert client.get_node_settings.await_args_list[-1].args == ("dev", ("htr", "B"))
+        assert client.get_node_settings.await_args_list[-1].args == (
+            "dev",
+            ("htr", "B"),
+        )
         assert len(updates) == 2
         second = updates[-1]
         htr_second = second["dev"]["htr"]
@@ -459,7 +489,9 @@ def test_async_refresh_heater_adds_missing_type() -> None:
         coord._addr_lookup = {"A": "htr"}
         coord.data = {
             "dev": {
-                "nodes_by_type": {"htr": {"addrs": ["A"], "settings": {"A": {"mode": "manual"}}}}
+                "nodes_by_type": {
+                    "htr": {"addrs": ["A"], "settings": {"A": {"mode": "manual"}}}
+                }
             }
         }
 
@@ -565,7 +597,10 @@ def test_refresh_heater_handles_errors(caplog: pytest.LogCaptureFixture) -> None
         coord.data = {"dev": {"htr": {"settings": {}}}}
         await coord.async_refresh_heater("A")
         assert updates == []
-        assert client.get_node_settings.await_args_list[-1].args == ("dev", ("htr", "A"))
+        assert client.get_node_settings.await_args_list[-1].args == (
+            "dev",
+            ("htr", "A"),
+        )
 
         caplog.clear()
         with caplog.at_level("ERROR"):
@@ -639,7 +674,9 @@ def test_async_update_data_skips_non_dict_sections() -> None:
 
         coord.data = {
             "dev": {
-                "nodes_by_type": {"acm": {"addrs": ["B"], "settings": {"B": {"mode": "manual"}}}},
+                "nodes_by_type": {
+                    "acm": {"addrs": ["B"], "settings": {"B": {"mode": "manual"}}}
+                },
                 "misc": "invalid",
             }
         }
@@ -726,9 +763,7 @@ def test_energy_regression_resets_last() -> None:
 def test_energy_samples_missing_fields() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.get_node_samples = AsyncMock(
-            return_value=[{"t": 1000, "counter": None}]
-        )
+        client.get_node_samples = AsyncMock(return_value=[{"t": 1000, "counter": None}])
 
         hass = HomeAssistant()
         coord = EnergyStateCoordinator(
@@ -822,7 +857,9 @@ def test_heater_energy_client_error_update_failed(
 ) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.get_node_samples = AsyncMock(return_value=[{"t": 1000, "counter": "1.0"}])
+        client.get_node_samples = AsyncMock(
+            return_value=[{"t": 1000, "counter": "1.0"}]
+        )
 
         hass = HomeAssistant()
         coord = EnergyStateCoordinator(
@@ -1046,7 +1083,9 @@ def test_energy_state_coordinator_update_addresses_filters_duplicates() -> None:
     coord.update_addresses(["A", " ", "B", "A", "B ", ""])
 
     expected_map, _ = normalize_heater_addresses(["A", " ", "B", "A", "B ", ""])
-    filtered_expected = {key: list(value) for key, value in expected_map.items() if value}
+    filtered_expected = {
+        key: list(value) for key, value in expected_map.items() if value
+    }
     assert coord._addresses_by_type == filtered_expected
     expected_flat = [addr for addrs in filtered_expected.values() for addr in addrs]
     assert coord._addrs == expected_flat
@@ -1057,12 +1096,16 @@ def test_energy_state_coordinator_update_addresses_ignores_invalid_types() -> No
     client = types.SimpleNamespace()
     coord = EnergyStateCoordinator(hass, client, "dev", [])  # type: ignore[arg-type]
 
-    coord.update_addresses({" ": ["skip"], "htr": ["A"], "acm": ["", "B"], "foo": ["X"]})
+    coord.update_addresses(
+        {" ": ["skip"], "htr": ["A"], "acm": ["", "B"], "foo": ["X"]}
+    )
 
     expected_map, _ = normalize_heater_addresses(
         {" ": ["skip"], "htr": ["A"], "acm": ["", "B"], "foo": ["X"]}
     )
-    filtered_expected = {key: list(value) for key, value in expected_map.items() if value}
+    filtered_expected = {
+        key: list(value) for key, value in expected_map.items() if value
+    }
     assert coord._addresses_by_type == filtered_expected
     expected_flat = [addr for addrs in filtered_expected.values() for addr in addrs]
     assert coord._addrs == expected_flat
@@ -1078,7 +1121,9 @@ def test_energy_state_coordinator_update_addresses_accepts_map() -> None:
     expected_map, _ = normalize_heater_addresses(
         {"htr": ["A", "A"], "acm": ["B", ""], "foo": ["X"]}
     )
-    filtered_expected = {key: list(value) for key, value in expected_map.items() if value}
+    filtered_expected = {
+        key: list(value) for key, value in expected_map.items() if value
+    }
     assert coord._addresses_by_type == filtered_expected
     expected_flat = [addr for addrs in filtered_expected.values() for addr in addrs]
     assert coord._addrs == expected_flat
@@ -1238,7 +1283,9 @@ def test_coordinator_client_error(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_ws_driven_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
-        client.get_node_samples = AsyncMock(return_value=[{"t": 1000, "counter": "1.0"}])
+        client.get_node_samples = AsyncMock(
+            return_value=[{"t": 1000, "counter": "1.0"}]
+        )
 
         hass = HomeAssistant()
         coord = EnergyStateCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
@@ -1246,7 +1293,9 @@ def test_ws_driven_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
         await coord.async_refresh()
         assert coord.data["1"]["htr"]["energy"]["A"] == pytest.approx(0.001)
 
-        client.get_node_samples = AsyncMock(return_value=[{"t": 2000, "counter": "2.0"}])
+        client.get_node_samples = AsyncMock(
+            return_value=[{"t": 2000, "counter": "2.0"}]
+        )
 
         async_dispatcher_connect(
             hass,
