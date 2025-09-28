@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 import logging
 from typing import Any
 
@@ -91,6 +91,42 @@ def _iter_nodes(nodes: Any) -> Iterable[Node]:
         inventory = []
 
     yield from inventory
+
+
+def iter_heater_nodes(
+    nodes_by_type: Mapping[str, Iterable[Node] | None],
+    resolve_name: Callable[[str, str], str],
+    *,
+    node_types: Iterable[str] | None = None,
+) -> Iterator[tuple[str, Node, str, str]]:
+    """Yield heater node metadata for supported node types."""
+
+    types = list(node_types or HEATER_NODE_TYPES)
+    for node_type in types:
+        if not node_type:
+            continue
+        nodes = nodes_by_type.get(node_type)
+        if not nodes:
+            continue
+        if isinstance(nodes, Mapping):
+            iterable: Iterable[Any] = nodes.values()
+        elif isinstance(nodes, (str, bytes)):
+            iterable = ()
+        elif isinstance(nodes, Iterable):
+            iterable = nodes
+        else:
+            iterable = (nodes,)
+        for node in iterable:
+            raw_addr = getattr(node, "addr", "")
+            if raw_addr is None:
+                continue
+            addr_str = str(raw_addr).strip()
+            if not addr_str:
+                continue
+            if addr_str.lower() == "none":
+                continue
+            resolved_name = resolve_name(node_type, addr_str)
+            yield node_type, node, addr_str, resolved_name
 
 
 def log_skipped_nodes(

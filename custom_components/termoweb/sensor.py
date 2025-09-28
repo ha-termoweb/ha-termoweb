@@ -21,6 +21,7 @@ from .coordinator import EnergyStateCoordinator
 from .heater import (
     DispatcherSubscriptionHelper,
     HeaterNodeBase,
+    iter_heater_nodes,
     log_skipped_nodes,
     prepare_heater_platform_data,
 )
@@ -113,28 +114,22 @@ async def async_setup_entry(hass, entry, async_add_entities):
         energy_coordinator.update_addresses(addrs_by_type)
 
     new_entities: list[SensorEntity] = []
-    for node_type in HEATER_NODE_TYPES:
-        nodes_for_type = nodes_by_type.get(node_type, [])
-        if not nodes_for_type:
-            continue
-        for node in nodes_for_type:
-            addr_str = str(getattr(node, "addr", "")).strip()
-            if not addr_str:
-                continue
-            base_name = resolve_name(node_type, addr_str)
-            uid_prefix = f"{DOMAIN}:{dev_id}:{node_type}:{addr_str}"
-            new_entities.extend(
-                _create_heater_sensors(
-                    coordinator,
-                    energy_coordinator,
-                    entry.entry_id,
-                    dev_id,
-                    addr_str,
-                    base_name,
-                    uid_prefix,
-                    node_type=node_type,
-                )
+    for node_type, _node, addr_str, base_name in iter_heater_nodes(
+        nodes_by_type, resolve_name
+    ):
+        uid_prefix = f"{DOMAIN}:{dev_id}:{node_type}:{addr_str}"
+        new_entities.extend(
+            _create_heater_sensors(
+                coordinator,
+                energy_coordinator,
+                entry.entry_id,
+                dev_id,
+                addr_str,
+                base_name,
+                uid_prefix,
+                node_type=node_type,
             )
+        )
 
     log_skipped_nodes("sensor", nodes_by_type, logger=_LOGGER)
 
