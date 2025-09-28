@@ -21,7 +21,12 @@ _install_stubs()
 
 
 async def _load_module(
-    monkeypatch: pytest.MonkeyPatch, *, legacy: bool = False, load_coordinator: bool = False
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    legacy: bool = False,
+    load_coordinator: bool = False,
+    patch_compat: bool = True,
+    new_api_only: bool = False,
 ):
     _install_stubs()
 
@@ -32,6 +37,18 @@ async def _load_module(
     stats_module.async_get_last_statistics = last_stats
     stats_module.async_get_statistics_during_period = get_period
     stats_module.async_delete_statistics = delete_stats
+
+    sync_last_stats = Mock(return_value={})
+    sync_get_period = Mock(return_value={})
+    sync_clear_stats = Mock()
+    stats_module.get_last_statistics = sync_last_stats
+    stats_module.statistics_during_period = sync_get_period
+    stats_module.clear_statistics = sync_clear_stats
+
+    if new_api_only:
+        stats_module.async_get_last_statistics = None  # type: ignore[attr-defined]
+        stats_module.async_get_statistics_during_period = None  # type: ignore[attr-defined]
+        stats_module.async_delete_statistics = None  # type: ignore[attr-defined]
 
     if legacy:
         import_stats = Mock()
@@ -48,6 +65,19 @@ async def _load_module(
         "homeassistant.components.recorder",
         types.ModuleType("homeassistant.components.recorder"),
     )
+    recorder_module = sys.modules["homeassistant.components.recorder"]
+
+    class _RecorderInstance:
+        def __init__(self) -> None:
+            async def _call(func, *args, **kwargs):
+                if asyncio.iscoroutinefunction(func):
+                    return await func(*args, **kwargs)
+                return func(*args, **kwargs)
+
+            self.async_add_executor_job = AsyncMock(side_effect=_call)
+
+    recorder_instance = _RecorderInstance()
+    recorder_module.get_instance = lambda hass: recorder_instance  # type: ignore[attr-defined]
     sys.modules["homeassistant.components.recorder.statistics"] = stats_module
 
     entity_registry_module = importlib.import_module("homeassistant.helpers.entity_registry")
@@ -181,6 +211,21 @@ async def _load_module(
     )
     monkeypatch.setattr(init_module, "WebSocket09Client", _FakeWSClient)
 
+    compat_last = AsyncMock(return_value={})
+    compat_period = AsyncMock(return_value={})
+    compat_clear = AsyncMock(return_value="delete")
+
+    if patch_compat:
+        monkeypatch.setattr(init_module, "_get_last_statistics_compat", compat_last)
+        monkeypatch.setattr(
+            init_module, "_statistics_during_period_compat", compat_period
+        )
+        monkeypatch.setattr(init_module, "_clear_statistics_compat", compat_clear)
+    else:
+        compat_last = None
+        compat_period = None
+        compat_clear = None
+
     ConfigEntry = importlib.import_module("homeassistant.config_entries").ConfigEntry
     HomeAssistant = importlib.import_module("homeassistant.core").HomeAssistant
 
@@ -189,9 +234,9 @@ async def _load_module(
         const_module,
         import_stats,
         update_meta,
-        last_stats,
-        get_period,
-        delete_stats,
+        compat_last or last_stats,
+        compat_period or get_period,
+        compat_clear or delete_stats,
         ConfigEntry,
         HomeAssistant,
         ent_reg,
@@ -874,7 +919,7 @@ def test_import_energy_history_clears_overlap(monkeypatch: pytest.MonkeyPatch) -
         delete_stats.assert_awaited_once()
         del_args, del_kwargs = delete_stats.await_args
         assert del_args[0] is hass
-        assert del_args[1] == ["sensor.dev_A_energy"]
+        assert del_args[1] == "sensor.dev_A_energy"
         assert "start_time" in del_kwargs and "end_time" in del_kwargs
         assert del_kwargs["start_time"] <= overlap_start <= del_kwargs["end_time"]
 
@@ -974,9 +1019,9 @@ def test_import_history_uses_last_stats_and_clears_overlap(
             const,
             import_stats,
             update_meta,
-            _last_stats,
-            _get_period,
-            _delete_stats,
+            last_stats,
+            get_period,
+            delete_stats,
             ConfigEntry,
             HomeAssistant,
             ent_reg,
@@ -1024,9 +1069,6 @@ def test_import_history_uses_last_stats_and_clears_overlap(
             types.SimpleNamespace(time=lambda: fake_now, monotonic=lambda: 10.0),
         )
 
-        stats_module = sys.modules["homeassistant.components.recorder.statistics"]
-        stats_module.async_get_statistics_during_period = None
-
         import_start_dt = mod.datetime.fromtimestamp(
             sample_list[0]["t"], timezone.utc
         ).replace(minute=0, second=0, microsecond=0)
@@ -1039,13 +1081,9 @@ def test_import_history_uses_last_stats_and_clears_overlap(
         }
         second_last = {"sensor.dev_A_energy": [{"start": import_start_dt}]}
 
-        stats_module.async_get_last_statistics = AsyncMock(
-            side_effect=[first_last, second_last]
-        )
-
-        stats_module.async_delete_statistics = AsyncMock(
-            side_effect=[TypeError(), None]
-        )
+        get_period.return_value = None
+        last_stats.side_effect = [first_last, second_last]
+        delete_stats.return_value = "delete"
 
         captured: dict[str, Any] = {}
 
@@ -1056,18 +1094,116 @@ def test_import_history_uses_last_stats_and_clears_overlap(
 
         await mod._async_import_energy_history(hass, entry)
 
-        assert stats_module.async_get_last_statistics.await_count == 2
-        assert stats_module.async_delete_statistics.await_count == 2
-        first_call, second_call = stats_module.async_delete_statistics.await_args_list
-        assert first_call.kwargs["start_time"] == import_start_dt
-        assert "end_time" in first_call.kwargs
-        assert second_call.args == (hass, ["sensor.dev_A_energy"])
+        assert last_stats.await_count == 2
+        delete_call = delete_stats.await_args_list[0]
+        assert delete_call.kwargs["start_time"] == import_start_dt
+        assert "end_time" in delete_call.kwargs
 
         meta = captured["meta"]
         stats = captured["stats"]
         assert meta["statistic_id"] == "sensor.dev_A_energy"
         assert stats
         assert stats[0]["sum"] >= 0.0
+
+    asyncio.run(_run())
+
+
+def test_import_history_uses_sync_recorder_helpers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        (
+            mod,
+            const,
+            import_stats,
+            update_meta,
+            _last_stats,
+            _get_period,
+            _clear_stats,
+            ConfigEntry,
+            HomeAssistant,
+            ent_reg,
+        ) = await _load_module(
+            monkeypatch, patch_compat=False, new_api_only=True
+        )
+
+        hass = HomeAssistant()
+        hass.data = {const.DOMAIN: {}}
+        hass.config_entries = types.SimpleNamespace(
+            async_update_entry=lambda entry, *, options: entry.options.update(options)
+        )
+
+        entry = ConfigEntry(
+            "sync",
+            options={mod.OPTION_MAX_HISTORY_RETRIEVED: 1},
+        )
+
+        client = types.SimpleNamespace()
+        sample_list = [
+            {"t": 345_600, "counter": "1000"},
+            {"t": 349_200, "counter": "1250"},
+            {"t": 352_800, "counter": "1500"},
+        ]
+        client.get_node_samples = AsyncMock(return_value=sample_list)
+
+        hass.data[const.DOMAIN][entry.entry_id] = {
+            "client": client,
+            "dev_id": "dev",
+            "node_inventory": _inventory_for(mod, ["A"]),
+            "config_entry": entry,
+        }
+
+        uid = f"{const.DOMAIN}:dev:htr:A:energy"
+        ent_reg.add("sensor.dev_A_energy", "sensor", const.DOMAIN, uid, "A energy")
+
+        fake_now = 5 * 86_400
+
+        class FakeDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return super().fromtimestamp(fake_now, tz)
+
+        monkeypatch.setattr(mod, "datetime", FakeDateTime)
+        monkeypatch.setattr(
+            mod,
+            "time",
+            types.SimpleNamespace(time=lambda: fake_now, monotonic=lambda: 10.0),
+        )
+
+        stats_module = sys.modules["homeassistant.components.recorder.statistics"]
+        import_start_dt = FakeDateTime.fromtimestamp(sample_list[0]["t"], timezone.utc)
+        import_start_dt = import_start_dt.replace(minute=0, second=0, microsecond=0)
+
+        stats_module.statistics_during_period.return_value = {
+            "sensor.dev_A_energy": [
+                {"start": import_start_dt, "state": "1.5", "sum": "3.0"}
+            ]
+        }
+        stats_module.get_last_statistics.return_value = {
+            "sensor.dev_A_energy": [
+                {
+                    "start": import_start_dt - timedelta(hours=1),
+                    "state": "1.0",
+                    "sum": "2.0",
+                }
+            ]
+        }
+
+        rec_module = importlib.import_module("homeassistant.components.recorder")
+        recorder_instance = rec_module.get_instance(hass)
+
+        await mod._async_import_energy_history(hass, entry)
+
+        calls = recorder_instance.async_add_executor_job.await_args_list
+        called_helpers = [call.args[0] for call in calls]
+        assert stats_module.statistics_during_period in called_helpers
+        assert stats_module.get_last_statistics in called_helpers
+        assert stats_module.clear_statistics in called_helpers
+        stats_module.clear_statistics.assert_called_once_with(
+            recorder_instance, ["sensor.dev_A_energy"]
+        )
+
+        assert import_stats.called
 
     asyncio.run(_run())
 
