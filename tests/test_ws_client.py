@@ -147,6 +147,7 @@ def test_stop_handles_exceptions_and_updates_status(
                 raise RuntimeError("close failed")
 
         client._hb_task = FakeHBTask()
+        client._idle_restart_task = FakeHBTask()
         ws = ExplodingWS()
         client._ws = ws
         client._task = asyncio.create_task(asyncio.sleep(0.1))
@@ -155,6 +156,7 @@ def test_stop_handles_exceptions_and_updates_status(
 
         assert update_calls[-1] == "stopped"
         assert client._hb_task is None
+        assert client._idle_restart_task is None
         assert client._ws is None
         assert client._task is None
         assert ws.calls == 1
@@ -682,6 +684,7 @@ def test_engineio_read_loop_processes_messages() -> None:
 
         client._engineio_send = AsyncMock(return_value=None)
         client._mark_event = MagicMock()
+        client._record_heartbeat = MagicMock()
         client._on_frame = MagicMock()
 
         ws = module.aiohttp.testing.FakeWebSocket(
@@ -713,7 +716,8 @@ def test_engineio_read_loop_processes_messages() -> None:
             await client._engineio_read_loop()
 
         assert client._engineio_send.call_args_list[-1].args[0] == "3"
-        assert client._mark_event.call_args_list
+        assert client._record_heartbeat.called
+        client._mark_event.assert_not_called()
         assert client._on_frame.called
 
     asyncio.run(_run())
@@ -1538,9 +1542,9 @@ def test_read_loop_handles_error_frames_and_health(monkeypatch: pytest.MonkeyPat
             aiohttp.WSMsgType.ERROR,
         ]
         assert client._stats.frames_total == 2
-        assert client._stats.last_event_ts == 1000.0
-        assert client._healthy_since == 1000.0
-        assert updates == ["healthy"]
+        assert client._stats.last_event_ts == 0.0
+        assert client._healthy_since is None
+        assert updates == []
 
     asyncio.run(_run())
 
@@ -2770,6 +2774,228 @@ def test_heartbeat_loop_handles_send_errors() -> None:
         task = asyncio.create_task(client._heartbeat_loop())
         result = await asyncio.wait_for(task, timeout=0.1)
         assert result is None
+
+    asyncio.run(_run())
+
+
+def test_socketio_heartbeat_triggers_idle_restart(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    module = _load_ws_client()
+    caplog.set_level(logging.WARNING, logger=module.__name__)
+
+    async def _run() -> None:
+        loop = asyncio.get_event_loop()
+        hass = types.SimpleNamespace(
+            loop=loop, data={module.DOMAIN: {"entry": {"ws_state": {}}}}
+        )
+        coordinator = types.SimpleNamespace()
+
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=types.SimpleNamespace(_session=None),
+            coordinator=coordinator,
+            protocol="socketio09",
+        )
+
+        class FakeWS:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.closed = False
+
+            async def close(self, *args: Any, **kwargs: Any) -> None:
+                self.calls += 1
+                self.closed = True
+
+        ws = FakeWS()
+        client._ws = ws
+        client._payload_idle_window = 5.0
+        client._last_event_at = 0.0
+        client._healthy_since = None
+
+        monkeypatch.setattr(module.time, "time", lambda: 20.0)
+
+        client._record_heartbeat(source="socketio09")
+        await asyncio.sleep(0)
+
+        assert ws.calls == 1
+        assert client._healthy_since is None
+        assert client._stats.events_total == 0
+        assert client._idle_restart_task is None
+        assert any("no payloads" in record.getMessage() for record in caplog.records)
+
+    asyncio.run(_run())
+
+
+def test_engineio_heartbeat_triggers_idle_restart(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    module = _load_ws_client()
+    caplog.set_level(logging.WARNING, logger=module.__name__)
+
+    async def _run() -> None:
+        loop = asyncio.get_event_loop()
+        hass = types.SimpleNamespace(
+            loop=loop, data={module.DOMAIN: {"entry": {"ws_state": {}}}}
+        )
+        coordinator = types.SimpleNamespace()
+
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=types.SimpleNamespace(_session=None),
+            coordinator=coordinator,
+            protocol="engineio2",
+        )
+
+        class FakeWS:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.closed = False
+
+            async def close(self, *args: Any, **kwargs: Any) -> None:
+                self.calls += 1
+                self.closed = True
+
+        ws = FakeWS()
+        client._engineio_ws = ws
+        client._payload_idle_window = 5.0
+        client._last_event_at = 0.0
+        client._healthy_since = None
+
+        monkeypatch.setattr(module.time, "time", lambda: 20.0)
+
+        client._record_heartbeat(source="engineio2")
+        await asyncio.sleep(0)
+
+        assert ws.calls == 1
+        assert client._healthy_since is None
+        assert client._stats.events_total == 0
+        assert client._idle_restart_task is None
+        assert any(
+            "no payloads" in record.getMessage() and "engineio2" in record.getMessage()
+            for record in caplog.records
+        )
+
+    asyncio.run(_run())
+
+
+def test_record_heartbeat_respects_idle_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_ws_client()
+    hass = types.SimpleNamespace(loop=types.SimpleNamespace(create_task=lambda *_: None))
+    coordinator = types.SimpleNamespace()
+    client = module.WebSocket09Client(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        api_client=types.SimpleNamespace(_session=None),
+        coordinator=coordinator,
+    )
+    client._payload_idle_window = 30.0
+    client._last_event_at = 15.0
+    client._schedule_idle_restart = MagicMock()
+    monkeypatch.setattr(module.time, "time", lambda: 40.0)
+
+    client._record_heartbeat(source="socketio09")
+
+    client._schedule_idle_restart.assert_not_called()
+
+
+def test_schedule_idle_restart_skips_when_pending() -> None:
+    module = _load_ws_client()
+    hass = types.SimpleNamespace(loop=types.SimpleNamespace(create_task=lambda *_: None))
+    coordinator = types.SimpleNamespace()
+    client = module.WebSocket09Client(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        api_client=types.SimpleNamespace(_session=None),
+        coordinator=coordinator,
+    )
+    client._idle_restart_pending = True
+    client._schedule_idle_restart(idle_for=10.0, source="socketio09")
+
+    assert client._idle_restart_pending is True
+    assert client._idle_restart_task is None
+
+
+def test_schedule_idle_restart_without_loop(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    module = _load_ws_client()
+    caplog.set_level(logging.WARNING, logger=module.__name__)
+
+    async def _run() -> None:
+        loop = asyncio.get_event_loop()
+        hass = types.SimpleNamespace(
+            loop=loop, data={module.DOMAIN: {"entry": {"ws_state": {}}}}
+        )
+        coordinator = types.SimpleNamespace()
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=types.SimpleNamespace(_session=None),
+            coordinator=coordinator,
+        )
+
+        class FakeWS:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.closed = False
+
+            async def close(self, *args: Any, **kwargs: Any) -> None:
+                self.calls += 1
+                self.closed = True
+
+        ws = FakeWS()
+        client._ws = ws
+        client.hass.loop = None
+
+        client._schedule_idle_restart(idle_for=12.0, source="socketio09")
+        await asyncio.sleep(0)
+
+        assert ws.calls == 1
+        assert client._idle_restart_pending is False
+        assert client._idle_restart_task is None
+        assert any("socketio09" in record.getMessage() for record in caplog.records)
+
+    asyncio.run(_run())
+
+
+def test_cancel_idle_restart_cancels_task() -> None:
+    module = _load_ws_client()
+
+    async def _run() -> None:
+        loop = asyncio.get_event_loop()
+        hass = types.SimpleNamespace(
+            loop=loop, data={module.DOMAIN: {"entry": {"ws_state": {}}}}
+        )
+        coordinator = types.SimpleNamespace()
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=types.SimpleNamespace(_session=None),
+            coordinator=coordinator,
+        )
+
+        async def pending() -> None:
+            await asyncio.sleep(0.5)
+
+        task = asyncio.create_task(pending())
+        client._idle_restart_task = task
+        client._idle_restart_pending = True
+
+        client._cancel_idle_restart()
+        await asyncio.sleep(0)
+
+        assert task.cancelled()
+        assert client._idle_restart_task is None
+        assert client._idle_restart_pending is False
 
     asyncio.run(_run())
 

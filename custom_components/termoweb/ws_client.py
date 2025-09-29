@@ -119,6 +119,10 @@ class WebSocketClient:
         self._nodes: dict[str, Any] = {}
         self._nodes_raw: dict[str, Any] = {}
 
+        self._payload_idle_window: float = 180.0
+        self._idle_restart_task: asyncio.Task | None = None
+        self._idle_restart_pending = False
+
         self._ws_state: dict[str, Any] | None = None
         self._ws_state_bucket()
 
@@ -152,6 +156,12 @@ class WebSocketClient:
             with suppress(asyncio.CancelledError):
                 await self._ping_task
             self._ping_task = None
+        if self._idle_restart_task:
+            self._idle_restart_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._idle_restart_task
+            self._idle_restart_task = None
+        self._idle_restart_pending = False
         if self._ws:
             with suppress(aiohttp.ClientError, RuntimeError):
                 await self._ws.close(
@@ -474,7 +484,7 @@ class WebSocketClient:
             return
         async for data in self._ws_payload_stream(ws, context="websocket"):
             if data.startswith("2::"):
-                self._mark_event(paths=None)
+                self._record_heartbeat(source="socketio09")
                 continue
             if data.startswith(f"1::{WS_NAMESPACE}"):
                 continue
@@ -809,7 +819,7 @@ class WebSocketClient:
         async for data in self._ws_payload_stream(ws, context="engine.io websocket"):
             if data == "3":
                 self._engineio_last_pong = time.time()
-                self._mark_event(paths=None, count_event=True)
+                self._record_heartbeat(source="engineio2")
                 continue
             if data == "2":
                 await self._engineio_send("3")
@@ -1213,6 +1223,7 @@ class WebSocketClient:
     ) -> None:
         """Record receipt of a websocket event batch for health tracking."""
         now = time.time()
+        self._cancel_idle_restart()
         self._stats.last_event_ts = now
         self._last_event_at = now
         if paths:
@@ -1242,6 +1253,63 @@ class WebSocketClient:
         ):
             self._healthy_since = now
             self._update_status("healthy")
+
+    def _record_heartbeat(self, *, source: str) -> None:
+        """Track heartbeat frames and trigger idle restarts when needed."""
+
+        last_event = self._last_event_at
+        if last_event is None:
+            return
+        now = time.time()
+        idle_for = now - last_event
+        if idle_for < self._payload_idle_window:
+            return
+        self._schedule_idle_restart(idle_for=idle_for, source=source)
+
+    def _schedule_idle_restart(self, *, idle_for: float, source: str) -> None:
+        """Log idle payload detection and close the websocket for restart."""
+
+        if self._closing or self._idle_restart_pending:
+            return
+        self._idle_restart_pending = True
+        _LOGGER.warning(
+            "WS %s: no payloads for %.0f s (%s heartbeat); restarting",
+            self.dev_id,
+            idle_for,
+            source,
+        )
+
+        async def _restart() -> None:
+            try:
+                sockets = [
+                    ws
+                    for ws in (self._engineio_ws, self._ws)
+                    if ws is not None and not ws.closed
+                ]
+                for socket in sockets:
+                    with suppress(aiohttp.ClientError, RuntimeError):
+                        await socket.close(
+                            code=aiohttp.WSCloseCode.GOING_AWAY,
+                            message=b"idle restart",
+                        )
+            finally:
+                self._idle_restart_pending = False
+                self._idle_restart_task = None
+
+        loop = getattr(self.hass, "loop", None)
+        if loop is None:
+            self._idle_restart_task = asyncio.create_task(_restart())
+        else:
+            self._idle_restart_task = loop.create_task(_restart())
+
+    def _cancel_idle_restart(self) -> None:
+        """Cancel any scheduled idle restart due to new payload activity."""
+
+        task = self._idle_restart_task
+        if task and not task.done():
+            task.cancel()
+        self._idle_restart_task = None
+        self._idle_restart_pending = False
 
 
 # ----------------------------------------------------------------------
