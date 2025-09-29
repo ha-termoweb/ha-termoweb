@@ -290,7 +290,7 @@ class WebSocketClient:
         if not path.endswith("/api/v2"):
             path = f"{path}/api/v2" if path else "/api/v2"
         socket_path = f"{path}/socket_io"
-        engineio_path = "socket.io"
+        engineio_path = "api/v2/socket_io"
         query = urlencode({"token": token, "dev_id": self.dev_id})
         url = urlunsplit((scheme, netloc, socket_path, query, ""))
         return url, engineio_path
