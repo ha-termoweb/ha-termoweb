@@ -626,7 +626,7 @@ def test_engineio_connect_and_send() -> None:
         assert "sid=sid-123" in call["url"]
         assert "token=abc" in call["url"]
         assert call["kwargs"]["protocols"] == ("websocket",)
-        assert client._engineio_ws.sent[0] == "40"
+        assert client._engineio_ws.sent[0] == f"40{module.WS_NAMESPACE}"
 
         await client._engineio_send("2")
         assert client._engineio_ws.sent[-1] == "2"
@@ -779,8 +779,28 @@ def test_engineio_read_loop_processes_messages() -> None:
                     "data": "2",
                 },
                 {
+                    "type": module.aiohttp.WSMsgType.TEXT,
+                    "data": f"40{module.WS_NAMESPACE},{{\"ack\":\"ok\"}}",
+                },
+                {
+                    "type": module.aiohttp.WSMsgType.TEXT,
+                    "data": f"40{module.WS_NAMESPACE}",
+                },
+                {
                     "type": module.aiohttp.WSMsgType.BINARY,
-                    "data": b'42{"event":"update","data":{}}',
+                    "data": (
+                        f"42{module.WS_NAMESPACE},{{\"event\":\"update\",\"data\":{{}}}}".encode(
+                            "utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": module.aiohttp.WSMsgType.TEXT,
+                    "data": '42{"event":"legacy","data":{}}',
+                },
+                {
+                    "type": module.aiohttp.WSMsgType.TEXT,
+                    "data": "42",
                 },
                 {
                     "type": module.aiohttp.WSMsgType.TEXT,
@@ -798,7 +818,11 @@ def test_engineio_read_loop_processes_messages() -> None:
         assert client._engineio_send.call_args_list[-1].args[0] == "3"
         assert client._record_heartbeat.called
         client._mark_event.assert_not_called()
-        assert client._on_frame.called
+        assert client._on_frame.call_args_list == [
+            call('{"ack":"ok"}'),
+            call('{"event":"update","data":{}}'),
+            call('{"event":"legacy","data":{}}'),
+        ]
 
     asyncio.run(_run())
 

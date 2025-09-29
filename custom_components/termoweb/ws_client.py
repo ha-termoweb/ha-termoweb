@@ -817,7 +817,7 @@ class WebSocketClient:
             protocols=("websocket",),
         )
         _LOGGER.debug("WS %s: upgraded Engine.IO session sid=%s", self.dev_id, sid)
-        await self._engineio_send("40")
+        await self._engineio_send(f"40{WS_NAMESPACE}")
 
     async def _engineio_ping_loop(self) -> None:
         """Send Engine.IO ping packets at the negotiated interval."""
@@ -851,11 +851,29 @@ class WebSocketClient:
                 await self._engineio_send("3")
                 continue
             if data.startswith("42"):
-                payload = data[2:]
-                self._on_frame(payload)
+                payload = self._socketio_payload(data[2:])
+                if payload:
+                    self._on_frame(payload)
+                continue
+            if data.startswith("40"):
+                payload = self._socketio_payload(data[2:])
+                if payload:
+                    self._on_frame(payload)
                 continue
             if data.startswith("41"):
                 raise RuntimeError("engine.io server disconnect")
+
+    @staticmethod
+    def _socketio_payload(payload: str) -> str:
+        """Strip the Socket.IO namespace prefix from a payload."""
+        if not payload:
+            return payload
+        if payload.startswith("/"):
+            comma_idx = payload.find(",")
+            if comma_idx == -1:
+                return ""
+            return payload[comma_idx + 1 :]
+        return payload
 
     async def _ws_payload_stream(
         self,
