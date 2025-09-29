@@ -12,7 +12,6 @@ import logging
 import random
 import time
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
 from homeassistant.core import HomeAssistant
@@ -682,7 +681,7 @@ class WebSocketClient:
                 self._engineio_sid = handshake.sid
                 self._engineio_ping_interval = max(5.0, handshake.ping_interval)
                 self._engineio_ping_timeout = max(5.0, handshake.ping_timeout)
-                await self._engineio_connect(handshake.sid)
+                await self._engineio_send(f"40{WS_NAMESPACE}")
                 _LOGGER.debug("WS %s: Engine.IO websocket established", self.dev_id)
                 self._connected_since = time.time()
                 self._healthy_since = None
@@ -730,60 +729,69 @@ class WebSocketClient:
             await asyncio.sleep(delay * random.uniform(0.8, 1.2))
 
     async def _engineio_handshake(self) -> EngineIOHandshake:
-        """Perform the Engine.IO polling handshake to obtain session details."""
+        """Open the Engine.IO websocket and parse the handshake frame."""
         token = await self._get_token()
-        base_candidates = self._socket_base_candidates()
-        endpoint_candidates = ["socket_io", "socket.io"]
-        if self._engineio_http_base and self._engineio_http_base in base_candidates:
-            base_candidates.remove(self._engineio_http_base)
-            base_candidates.insert(0, self._engineio_http_base)
-        if self._engineio_endpoint in endpoint_candidates:
-            endpoint_candidates.remove(self._engineio_endpoint)
-            endpoint_candidates.insert(0, self._engineio_endpoint)
+        http_base = self._api_base().rstrip("/")
+        if not http_base.endswith("/api/v2"):
+            http_base = f"{http_base}/api/v2"
+        ws_base = self._upgrade_scheme(http_base)
+        url = (
+            f"{ws_base}/socket_io?token={token}&dev_id={self.dev_id}"
+            "&transport=websocket&EIO=4"
+        )
+        try:
+            ws = await self._session.ws_connect(
+                url,
+                heartbeat=None,
+                timeout=15,
+                autoclose=True,
+                autoping=False,
+                compress=0,
+                protocols=("websocket",),
+            )
+        except aiohttp.ClientResponseError as err:
+            snippet = getattr(err, "message", None) or str(err)
+            raise HandshakeError(err.status or -1, url, snippet) from err
+        except (aiohttp.ClientError, TimeoutError) as err:
+            raise HandshakeError(-1, url, str(err)) from err
 
-        last_error: HandshakeError | None = None
-        for base in base_candidates:
-            for endpoint in endpoint_candidates:
-                t_ms = int(time.time() * 1000)
-                url = (
-                    f"{base}/{endpoint}?EIO=3&transport=polling&token={token}"
-                    f"&dev_id={self.dev_id}&t={t_ms}"
-                )
-                try:
-                    async with asyncio.timeout(15):
-                        async with self._session.get(
-                            url, timeout=aiohttp.ClientTimeout(total=15)
-                        ) as resp:
-                            try:
-                                raw_body = await resp.read()
-                            except AttributeError:
-                                text_body = await resp.text()
-                                raw_body = text_body.encode("utf-8", "ignore")
-                            charset = getattr(resp, "charset", None)
-                            body = self._decode_engineio_handshake(raw_body, charset)
-                            if resp.status >= 400:
-                                raise HandshakeError(resp.status, url, body[:100])
-                except HandshakeError as err:
-                    last_error = err
-                    if err.status == 404:
-                        _LOGGER.debug(
-                            "WS %s: handshake path %s/%s returned 404; trying alternate",
-                            self.dev_id,
-                            base,
-                            endpoint,
-                        )
-                        continue
-                    raise
-                except (TimeoutError, aiohttp.ClientError) as err:
-                    raise HandshakeError(-1, url, str(err)) from err
-                handshake = self._parse_engineio_handshake(body)
-                self._engineio_http_base = base
-                self._engineio_endpoint = endpoint
-                return handshake
+        self._engineio_ws = ws
+        self._engineio_http_base = http_base
+        self._engineio_endpoint = "socket_io"
 
-        if last_error:
-            raise last_error
-        raise HandshakeError(-1, base_candidates[0], "no viable handshake path")
+        try:
+            async with asyncio.timeout(15):
+                msg = await ws.receive()
+        except Exception as err:
+            with suppress(aiohttp.ClientError, RuntimeError):
+                await ws.close()
+            self._engineio_ws = None
+            raise HandshakeError(-1, url, str(err)) from err
+
+        if msg.type != aiohttp.WSMsgType.TEXT:
+            with suppress(aiohttp.ClientError, RuntimeError):
+                await ws.close()
+            self._engineio_ws = None
+            raise RuntimeError("handshake malformed")
+
+        data = msg.data
+        if isinstance(data, bytes):
+            data = data.decode("utf-8", "ignore")
+        if not isinstance(data, str):
+            with suppress(aiohttp.ClientError, RuntimeError):
+                await ws.close()
+            self._engineio_ws = None
+            raise TypeError("handshake payload must be text")
+
+        try:
+            handshake = self._parse_engineio_handshake(data)
+        except Exception:
+            with suppress(aiohttp.ClientError, RuntimeError):
+                await ws.close()
+            self._engineio_ws = None
+            raise
+
+        return handshake
 
     @staticmethod
     def _decode_engineio_handshake(data: bytes, charset: str | None) -> str:
@@ -830,27 +838,6 @@ class WebSocketClient:
         return EngineIOHandshake(
             sid=sid, ping_interval=interval_s, ping_timeout=timeout_s
         )
-
-    async def _engineio_connect(self, sid: str) -> None:
-        """Upgrade the Engine.IO session to a websocket transport."""
-        token = await self._get_token()
-        base = self._upgrade_scheme(self._socket_base())
-        endpoint = self._socket_endpoint()
-        url = (
-            f"{base}/{endpoint}?EIO=3&transport=websocket&sid={sid}&token={token}"
-            f"&dev_id={self.dev_id}"
-        )
-        self._engineio_ws = await self._session.ws_connect(
-            url,
-            heartbeat=None,
-            timeout=15,
-            autoclose=True,
-            autoping=False,
-            compress=0,
-            protocols=("websocket",),
-        )
-        _LOGGER.debug("WS %s: upgraded Engine.IO session sid=%s", self.dev_id, sid)
-        await self._engineio_send(f"40{WS_NAMESPACE}")
 
     async def _engineio_ping_loop(self) -> None:
         """Send Engine.IO ping packets at the negotiated interval."""
@@ -1280,22 +1267,6 @@ class WebSocketClient:
     def _socket_endpoint(self) -> str:
         """Return the active socket endpoint segment."""
         return self._engineio_endpoint or "socket_io"
-
-    def _socket_base_candidates(self) -> list[str]:
-        """Return candidate base URLs for Engine.IO handshakes."""
-        base = self._api_base().rstrip("/")
-        parts = urlsplit(base)
-        host_root = urlunsplit((parts.scheme, parts.netloc, "", "", ""))
-        candidates: list[str] = []
-        for candidate in (base, f"{host_root.rstrip('/')}/api/v2", host_root):
-            candidate = candidate.rstrip("/")
-            if not candidate:
-                continue
-            if candidate not in candidates:
-                candidates.append(candidate)
-        if not candidates:
-            candidates.append(API_BASE.rstrip("/"))
-        return candidates
 
     @staticmethod
     def _upgrade_scheme(url: str) -> str:
