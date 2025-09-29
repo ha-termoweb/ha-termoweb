@@ -1380,7 +1380,43 @@ class WebSocketClient:
 # Backwards compatibility aliases
 # ----------------------------------------------------------------------
 WebSocket09Client = WebSocketClient
-DucaheatWSClient = WebSocketClient
+class DucaheatWSClient(WebSocketClient):
+    """Verbose websocket client variant with payload debug logging."""
+
+    def _on_frame(self, payload: str) -> None:
+        """Log raw Socket.IO frame payloads before processing."""
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug("WS %s (ducaheat): raw frame: %s", self.dev_id, payload)
+        super()._on_frame(payload)
+
+    def _handle_handshake(self, data: Any) -> None:
+        """Log handshake payloads prior to standard handling."""
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug("WS %s (ducaheat): handshake payload: %s", self.dev_id, data)
+        super()._handle_handshake(data)
+
+    def _handle_dev_data(self, data: Any) -> None:
+        """Log initial dev_data snapshots with raw payload details."""
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug("WS %s (ducaheat): dev_data payload: %s", self.dev_id, data)
+        super()._handle_dev_data(data)
+
+    def _handle_update(self, data: Any) -> None:
+        """Log incremental update payloads before applying changes."""
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug("WS %s (ducaheat): update payload: %s", self.dev_id, data)
+        super()._handle_update(data)
+
+    def _apply_nodes_payload(self, payload: Any, *, merge: bool, event: str) -> None:
+        """Log node payload processing context and delegate to base handler."""
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug(
+                "WS %s (ducaheat): applying %s payload (merge=%s)",
+                self.dev_id,
+                event,
+                merge,
+            )
+        super()._apply_nodes_payload(payload, merge=merge, event=event)
 
 __all__ = [
     "DucaheatWSClient",
