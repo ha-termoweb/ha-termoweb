@@ -1,6 +1,7 @@
 """Ducaheat backend implementation and HTTP adapter."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 import logging
 from typing import Any
@@ -24,16 +25,29 @@ class DucaheatRESTClient(RESTClient):
         """Fetch and normalise node settings for the Ducaheat API."""
 
         node_type, addr = self._resolve_node_descriptor(node)
-        if node_type == "htr":
-            headers = await self._authed_headers()
-            path = f"/api/v2/devs/{dev_id}/htr/{addr}"
-            payload = await self._request("GET", path, headers=headers)
+        headers = await self._authed_headers()
+        path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}"
+        payload = await self._request("GET", path, headers=headers)
+
+        if node_type in {"htr", "acm"}:
+            if node_type != "htr":
+                self._log_non_htr_payload(
+                    node_type=node_type,
+                    dev_id=dev_id,
+                    addr=addr,
+                    stage="GET settings",
+                    payload=payload,
+                )
             return self._normalise_settings(payload, node_type=node_type)
 
-        response = await super().get_node_settings(dev_id, (node_type, addr))
-        if node_type == "acm":
-            return self._normalise_settings(response, node_type=node_type)
-        return response
+        self._log_non_htr_payload(
+            node_type=node_type,
+            dev_id=dev_id,
+            addr=addr,
+            stage="GET settings",
+            payload=payload,
+        )
+        return payload
 
     async def set_node_settings(
         self,
@@ -174,6 +188,50 @@ class DucaheatRESTClient(RESTClient):
         data = await self._request("GET", path, headers=headers, params=params)
         return self._extract_samples(data, timestamp_divisor=1000)
 
+    def normalise_ws_nodes(self, nodes: dict[str, Any]) -> dict[str, Any]:
+        """Normalise websocket nodes payloads for Ducaheat specifics."""
+
+        if not isinstance(nodes, dict):
+            return nodes
+
+        normalised: dict[str, Any] = {}
+        for node_type, sections in nodes.items():
+            if not isinstance(sections, Mapping):
+                normalised[node_type] = sections
+                continue
+
+            section_map: dict[str, Any] = {}
+            for section, by_addr in sections.items():
+                if section != "settings" or not isinstance(by_addr, Mapping):
+                    section_map[section] = by_addr
+                    continue
+
+                addr_map: dict[str, Any] = {}
+                for addr, payload in by_addr.items():
+                    if not isinstance(payload, Mapping):
+                        addr_map[addr] = payload
+                        continue
+
+                    addr_map[addr] = self._normalise_ws_settings(payload)
+
+                section_map[section] = addr_map
+
+            normalised[node_type] = section_map
+
+        return normalised
+
+    def _normalise_ws_settings(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Normalise half-hourly program data within websocket settings."""
+
+        settings: dict[str, Any] = dict(payload)
+
+        prog = settings.get("prog")
+        normalised_prog = self._normalise_prog(prog)
+        if normalised_prog is not None:
+            settings["prog"] = normalised_prog
+
+        return settings
+
     def _normalise_settings(
         self, payload: Any, *, node_type: str = "htr"
     ) -> dict[str, Any]:
@@ -229,6 +287,7 @@ class DucaheatRESTClient(RESTClient):
             if formatted is not None:
                 flattened["mtemp"] = formatted
 
+        include_boost = node_type == "acm"
         for extra_key in (
             "boost_active",
             "boost_remaining",
@@ -237,29 +296,32 @@ class DucaheatRESTClient(RESTClient):
             "lock_active",
             "max_power",
         ):
+            if not include_boost and extra_key.startswith("boost"):
+                continue
             if extra_key in status_dict:
                 flattened[extra_key] = status_dict[extra_key]
 
-        extra = setup_dict.get("extra_options")
-        if isinstance(extra, dict):
-            if "boost_time" in extra:
-                flattened["boost_time"] = extra["boost_time"]
-            if "boost_temp" in extra:
-                formatted = self._safe_temperature(extra["boost_temp"])
-                if formatted is not None:
-                    flattened["boost_temp"] = formatted
+        if include_boost:
+            extra = setup_dict.get("extra_options")
+            if isinstance(extra, dict):
+                if "boost_time" in extra:
+                    flattened["boost_time"] = extra["boost_time"]
+                if "boost_temp" in extra:
+                    formatted = self._safe_temperature(extra["boost_temp"])
+                    if formatted is not None:
+                        flattened["boost_temp"] = formatted
 
-        if "boost_temp" not in flattened:
-            boost_temp = status_dict.get("boost_temp")
-            if boost_temp is not None:
-                formatted = self._safe_temperature(boost_temp)
-                if formatted is not None:
-                    flattened["boost_temp"] = formatted
+            if "boost_temp" not in flattened:
+                boost_temp = status_dict.get("boost_temp")
+                if boost_temp is not None:
+                    formatted = self._safe_temperature(boost_temp)
+                    if formatted is not None:
+                        flattened["boost_temp"] = formatted
 
-        if "boost_time" not in flattened:
-            boost_time = status_dict.get("boost_time")
-            if boost_time is not None:
-                flattened["boost_time"] = boost_time
+            if "boost_time" not in flattened:
+                boost_time = status_dict.get("boost_time")
+                if boost_time is not None:
+                    flattened["boost_time"] = boost_time
 
         prog_list = self._normalise_prog(prog)
         if prog_list is not None:
@@ -321,7 +383,7 @@ class DucaheatRESTClient(RESTClient):
         if not isinstance(data, dict):
             return None
 
-        days_section = None
+        days_section: dict[str, Any] | None = None
         if isinstance(data.get("days"), dict):
             days_section = data["days"]
         else:
@@ -329,30 +391,60 @@ class DucaheatRESTClient(RESTClient):
             if candidate:
                 days_section = candidate
 
+        if days_section is None and isinstance(data.get("prog"), dict):
+            days_section = data["prog"]
+
         if not isinstance(days_section, dict):
             return None
 
-        values: list[int] = []
-        for day in _DAY_ORDER:
-            entry = days_section.get(day)
-            slots = None
-            if isinstance(entry, dict):
-                if isinstance(entry.get("slots"), list):
-                    slots = entry["slots"]
-                elif isinstance(entry.get("values"), list):
-                    slots = entry["values"]
-            elif isinstance(entry, list):
-                slots = entry
+        def _coerce_slots(entry: Any) -> list[int] | None:
+            """Convert a day's slots into a 24-value list."""
 
-            if slots is None:
-                slots = [0] * 24
+            candidate = entry
+            if isinstance(candidate, dict):
+                slots_candidate = candidate.get("slots")
+                values_candidate = candidate.get("values")
+                if isinstance(slots_candidate, list):
+                    candidate = slots_candidate
+                else:
+                    candidate = values_candidate
+
+            if candidate is None:
+                return None
+
+            if not isinstance(candidate, list):
+                return None
+
             try:
-                day_values = [int(v) for v in slots[:24]]
+                values = [int(v) for v in candidate]
             except (TypeError, ValueError):
                 return None
-            if len(day_values) < 24:
-                day_values.extend([0] * (24 - len(day_values)))
-            values.extend(day_values[:24])
+
+            if len(values) == 48:
+                values = [max(values[i : i + 2]) for i in range(0, 48, 2)]
+
+            if len(values) < 24:
+                values = values + [0] * (24 - len(values))
+            if len(values) > 24:
+                values = values[:24]
+
+            return values if len(values) == 24 else None
+
+        values: list[int] = []
+        for idx, day in enumerate(_DAY_ORDER):
+            entry = days_section.get(day)
+            if entry is None:
+                entry = days_section.get(str(idx))
+            if entry is None:
+                entry = days_section.get(idx)
+
+            if entry is None:
+                day_values = [0] * 24
+            else:
+                day_values = _coerce_slots(entry)
+                if day_values is None:
+                    return None
+            values.extend(day_values)
 
         return values if len(values) == 168 else None
 
@@ -379,11 +471,15 @@ class DucaheatRESTClient(RESTClient):
     def _serialise_prog(self, prog: list[int]) -> dict[str, Any]:
         """Serialise the 168-slot programme back to API structure."""
         normalised = self._ensure_prog(prog)
-        days: dict[str, Any] = {}
-        for idx, day in enumerate(_DAY_ORDER):
+        half_hour: dict[str, Any] = {}
+        for idx in range(len(_DAY_ORDER)):
             start = idx * 24
-            days[day] = {"slots": normalised[start : start + 24]}
-        return {"days": days}
+            hourly = normalised[start : start + 24]
+            slots: list[int] = []
+            for value in hourly:
+                slots.extend([value, value])
+            half_hour[str(idx)] = slots
+        return {"prog": half_hour}
 
     def _serialise_prog_temps(self, ptemp: list[float]) -> dict[str, str]:
         """Serialise preset temperatures into the API schema."""

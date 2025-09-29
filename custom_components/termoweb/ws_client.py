@@ -931,6 +931,14 @@ class WebSocketClient:
         if nodes is None:
             _LOGGER.debug("WS %s: %s without nodes", self.dev_id, event)
             return
+        normaliser = getattr(self._client, "normalise_ws_nodes", None)
+        if callable(normaliser):
+            try:
+                nodes = normaliser(nodes)  # type: ignore[arg-type]
+            except Exception:  # pragma: no cover - defensive logging only
+                _LOGGER.debug(
+                    "WS %s: normalise_ws_nodes failed; using raw payload", self.dev_id
+                )
         if _LOGGER.isEnabledFor(logging.DEBUG):
             changed = self._collect_update_addresses(nodes)
             if merge:

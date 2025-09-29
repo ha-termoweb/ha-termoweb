@@ -77,22 +77,30 @@ def test_dummy_client_get_node_settings_accepts_acm() -> None:
     assert data["addr"] == "3"
 
 
-def test_ducaheat_rest_client_passthrough_for_non_htr(monkeypatch) -> None:
+def test_ducaheat_rest_client_fetches_generic_node(monkeypatch) -> None:
     async def _run() -> None:
         session = SimpleNamespace()
         client = DucaheatRESTClient(session, "user", "pass")
 
-        captured: dict[str, object] = {}
+        seen: dict[str, object] = {}
 
-        async def fake_super(self, dev_id: str, node: tuple[str, str]):
-            captured["args"] = (dev_id, node)
-            return {"ok": True}
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
 
-        monkeypatch.setattr(RESTClient, "get_node_settings", fake_super)
+        async def fake_request(method: str, path: str, **kwargs: object):
+            seen["method"] = method
+            seen["path"] = path
+            seen["kwargs"] = kwargs
+            return {"status": {"power": 0}}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "_request", fake_request)
 
         result = await client.get_node_settings("dev", ("pmo", "9"))
-        assert result == {"ok": True}
-        assert captured["args"] == ("dev", ("pmo", "9"))
+        assert result == {"status": {"power": 0}}
+        assert seen["method"] == "GET"
+        assert seen["path"] == "/api/v2/devs/dev/pmo/9"
+        assert seen["kwargs"] == {"headers": {"Authorization": "Bearer token"}}
 
     asyncio.run(_run())
 
@@ -102,12 +110,19 @@ def test_ducaheat_rest_client_normalises_acm(monkeypatch) -> None:
         session = SimpleNamespace()
         client = DucaheatRESTClient(session, "user", "pass")
 
-        async def fake_super(self, dev_id: str, node: tuple[str, str]):
+        seen: dict[str, object] = {}
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        async def fake_request(method: str, path: str, **kwargs: object):
+            seen["method"] = method
+            seen["path"] = path
+            seen["kwargs"] = kwargs
             return {"status": {"mode": "AUTO"}}
 
-        monkeypatch.setattr(RESTClient, "get_node_settings", fake_super)
-
-        seen: dict[str, object] = {}
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "_request", fake_request)
 
         def fake_normalise(self, payload, *, node_type: str = "htr"):
             seen["node_type"] = node_type
@@ -120,6 +135,9 @@ def test_ducaheat_rest_client_normalises_acm(monkeypatch) -> None:
         assert result == {"normalized": True}
         assert seen["node_type"] == "acm"
         assert seen["payload"] == {"status": {"mode": "AUTO"}}
+        assert seen["method"] == "GET"
+        assert seen["path"] == "/api/v2/devs/dev/acm/2"
+        assert seen["kwargs"] == {"headers": {"Authorization": "Bearer token"}}
 
     asyncio.run(_run())
 
@@ -174,3 +192,43 @@ def test_ducaheat_rest_get_node_samples_forwards_non_htr(monkeypatch) -> None:
         assert captured["args"] == ("dev", ("acm", "7"), 1.0, 2.0)
 
     asyncio.run(_run())
+
+
+def test_ducaheat_rest_normalise_ws_nodes_prog() -> None:
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+
+    nodes = {
+        "acm": {
+            "settings": {
+                "02": {
+                    "prog": {
+                        "prog": {
+                            str(day): [day % 3] * 48 for day in range(7)
+                        }
+                    },
+                    "mode": "auto",
+                }
+            },
+            "status": {"02": {"temp": 21}},
+        }
+    }
+
+    result = client.normalise_ws_nodes(nodes)
+    settings = result["acm"]["settings"]["02"]
+    assert len(settings["prog"]) == 168
+    assert settings["prog"][24:48] == [1] * 24
+    # Original payload should remain unchanged
+    assert len(nodes["acm"]["settings"]["02"]["prog"]["prog"]["1"]) == 48
+
+
+def test_ducaheat_rest_normalise_ws_nodes_passthrough() -> None:
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+
+    assert client.normalise_ws_nodes(["bad"]) == ["bad"]
+
+    nodes = {"htr": [1, 2, 3]}
+    assert client.normalise_ws_nodes(nodes)["htr"] == [1, 2, 3]
+
+    nodes_with_scalar = {"htr": {"settings": {"01": 5}}}
+    normalised = client.normalise_ws_nodes(nodes_with_scalar)
+    assert normalised["htr"]["settings"]["01"] == 5

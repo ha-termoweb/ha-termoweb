@@ -572,3 +572,8 @@ class RESTClient:
             _redact_bearer(repr(payload)),
         )
 
+    def normalise_ws_nodes(self, nodes: dict[str, Any]) -> dict[str, Any]:
+        """Return websocket node payloads unchanged by default."""
+
+        return nodes
+

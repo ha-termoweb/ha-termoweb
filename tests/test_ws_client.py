@@ -205,6 +205,44 @@ def test_apply_nodes_payload_logs_without_changes(
     client._merge_nodes.assert_called_once()
 
 
+def test_apply_nodes_payload_uses_normaliser(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Client normalisers should transform websocket payloads when available."""
+
+    module = _load_ws_client()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+            self._session = None
+
+        def normalise_ws_nodes(self, nodes: dict[str, Any]) -> dict[str, Any]:
+            self.calls.append(nodes)
+            return {"htr": {"settings": {"01": {"prog": [0] * 168}}}}
+
+    hass = types.SimpleNamespace(
+        loop=types.SimpleNamespace(create_task=lambda coro, name=None: None)
+    )
+    api_client = FakeClient()
+    client = module.WebSocket09Client(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        api_client=api_client,
+        coordinator=types.SimpleNamespace(),
+    )
+
+    client._merge_nodes = MagicMock()
+    client._build_nodes_snapshot = MagicMock(return_value={"nodes": {}})
+    client._dispatch_nodes = MagicMock()
+    client._mark_event = MagicMock()
+
+    payload = {"nodes": {"htr": {"settings": {"01": {"prog": {"prog": {"0": [0] * 48}}}}}}}
+    client._apply_nodes_payload(payload, merge=False, event="snapshot")
+
+    assert api_client.calls == [payload["nodes"]]
+    client._merge_nodes.assert_not_called()
+
+
 def test_collect_update_addresses_ignores_non_mappings() -> None:
     """Collector should ignore non-dict sections while gathering addresses."""
 
