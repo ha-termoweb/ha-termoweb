@@ -1,17 +1,18 @@
 """Unified websocket client for TermoWeb backends."""
 
 import asyncio
+import codecs
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import partial
-import codecs
 import json
 import logging
 import random
 import time
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
 from homeassistant.core import HomeAssistant
@@ -189,9 +190,8 @@ class WebSocketClient:
     async def ws_url(self) -> str:
         """Return the websocket URL using the API client's token helper."""
         token = await self._get_token()
-        base = getattr(self._client, "api_base", None)
-        api_base = base.rstrip("/") if isinstance(base, str) and base else API_BASE
-        return f"{api_base}/api/v2/socket_io?token={token}"
+        socket_base = self._socket_base()
+        return f"{socket_base}/socket.io?token={token}"
 
     # ------------------------------------------------------------------
     # Core loop and protocol dispatch
@@ -729,11 +729,10 @@ class WebSocketClient:
     async def _engineio_handshake(self) -> EngineIOHandshake:
         """Perform the Engine.IO polling handshake to obtain session details."""
         token = await self._get_token()
-        base = self._api_base()
+        base = self._socket_base()
         t_ms = int(time.time() * 1000)
         url = (
-            f"{base}/socket.io/?EIO=3&transport=polling&token={token}&dev_id={self.dev_id}"
-            f"&t={t_ms}"
+            f"{base}/socket.io?EIO=3&transport=polling&token={token}&dev_id={self.dev_id}&t={t_ms}"
         )
         try:
             async with asyncio.timeout(15):
@@ -802,10 +801,9 @@ class WebSocketClient:
     async def _engineio_connect(self, sid: str) -> None:
         """Upgrade the Engine.IO session to a websocket transport."""
         token = await self._get_token()
-        base = self._api_base().replace("https://", "wss://", 1)
+        base = self._upgrade_scheme(self._socket_base())
         url = (
-            f"{base}/socket.io/?EIO=3&transport=websocket&sid={sid}&token={token}"
-            f"&dev_id={self.dev_id}"
+            f"{base}/socket.io?EIO=3&transport=websocket&sid={sid}&token={token}&dev_id={self.dev_id}"
         )
         self._engineio_ws = await self._session.ws_connect(
             url,
@@ -1236,6 +1234,20 @@ class WebSocketClient:
         if isinstance(base, str) and base:
             return base.rstrip("/")
         return API_BASE
+
+    def _socket_base(self) -> str:
+        """Return the Socket.IO base URL ensuring the /api/v2 segment is present."""
+        base = self._api_base()
+        parts = urlsplit(base)
+        path = parts.path.rstrip("/")
+        if not path.endswith("/api/v2"):
+            path = f"{path}/api/v2" if path else "/api/v2"
+        return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+
+    @staticmethod
+    def _upgrade_scheme(url: str) -> str:
+        """Return the websocket scheme for the provided HTTP(S) URL."""
+        return url.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
 
     def _ws_state_bucket(self) -> dict[str, Any]:
         """Return the websocket state bucket for this device."""
