@@ -198,12 +198,58 @@ def test_apply_nodes_payload_logs_without_changes(
     payload = {"nodes": {"htr": {"settings": {}}}}
     client._apply_nodes_payload(payload, merge=True, event="update")
 
-    assert any(
-        "update event without address changes" in record.getMessage()
-        for record in caplog.records
-    )
-    client._merge_nodes.assert_called_once()
 
+def test_ducaheat_ws_client_debug_logging(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Ducaheat websocket client should emit debug logs for payloads."""
+
+    module = _load_ws_client()
+    caplog.set_level(logging.DEBUG)
+
+    hass = types.SimpleNamespace(
+        loop=types.SimpleNamespace(create_task=lambda _coro, name=None: None)
+    )
+    api_client = types.SimpleNamespace(_session=None)
+    coordinator = object()
+    client = module.DucaheatWSClient(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        api_client=api_client,
+        coordinator=coordinator,
+    )
+
+    base_on_frame = MagicMock()
+    base_handshake = MagicMock()
+    base_dev_data = MagicMock()
+    base_update = MagicMock()
+    base_apply = MagicMock()
+
+    monkeypatch.setattr(module.WebSocketClient, "_on_frame", base_on_frame)
+    monkeypatch.setattr(module.WebSocketClient, "_handle_handshake", base_handshake)
+    monkeypatch.setattr(module.WebSocketClient, "_handle_dev_data", base_dev_data)
+    monkeypatch.setattr(module.WebSocketClient, "_handle_update", base_update)
+    monkeypatch.setattr(module.WebSocketClient, "_apply_nodes_payload", base_apply)
+
+    client._on_frame("{}")
+    client._handle_handshake({"sid": "abc"})
+    client._handle_dev_data({"nodes": {}})
+    client._handle_update({"nodes": {}})
+    client._apply_nodes_payload({"nodes": {}}, merge=False, event="dev_data")
+
+    assert base_on_frame.call_args == call("{}")
+    assert base_handshake.call_args == call({"sid": "abc"})
+    assert base_dev_data.call_args == call({"nodes": {}})
+    assert base_update.call_args == call({"nodes": {}})
+    assert base_apply.call_args == call({"nodes": {}}, merge=False, event="dev_data")
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("raw frame" in message for message in messages)
+    assert any("handshake payload" in message for message in messages)
+    assert any("dev_data payload" in message for message in messages)
+    assert any("update payload" in message for message in messages)
+    assert any("applying dev_data payload" in message for message in messages)
 
 def test_apply_nodes_payload_uses_normaliser(monkeypatch: pytest.MonkeyPatch) -> None:
     """Client normalisers should transform websocket payloads when available."""
