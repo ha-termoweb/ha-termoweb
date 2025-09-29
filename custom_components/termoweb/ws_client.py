@@ -116,6 +116,8 @@ class WebSocketClient:
         self._engineio_ping_interval: float = 25.0
         self._engineio_ping_timeout: float = 60.0
         self._engineio_last_pong: float | None = None
+        self._engineio_http_base: str | None = None
+        self._engineio_endpoint: str = "socket_io"
 
         self._handshake_payload: dict[str, Any] | None = None
         self._nodes: dict[str, Any] = {}
@@ -191,7 +193,8 @@ class WebSocketClient:
         """Return the websocket URL using the API client's token helper."""
         token = await self._get_token()
         socket_base = self._socket_base()
-        return f"{socket_base}/socket.io?token={token}"
+        endpoint = self._socket_endpoint()
+        return f"{socket_base}/{endpoint}?token={token}"
 
     # ------------------------------------------------------------------
     # Core loop and protocol dispatch
@@ -729,28 +732,58 @@ class WebSocketClient:
     async def _engineio_handshake(self) -> EngineIOHandshake:
         """Perform the Engine.IO polling handshake to obtain session details."""
         token = await self._get_token()
-        base = self._socket_base()
-        t_ms = int(time.time() * 1000)
-        url = (
-            f"{base}/socket_io?EIO=3&transport=polling&token={token}&dev_id={self.dev_id}&t={t_ms}"
-        )
-        try:
-            async with asyncio.timeout(15):
-                async with self._session.get(
-                    url, timeout=aiohttp.ClientTimeout(total=15)
-                ) as resp:
-                    try:
-                        raw_body = await resp.read()
-                    except AttributeError:
-                        text_body = await resp.text()
-                        raw_body = text_body.encode("utf-8", "ignore")
-                    charset = getattr(resp, "charset", None)
-                    body = self._decode_engineio_handshake(raw_body, charset)
-                    if resp.status >= 400:
-                        raise HandshakeError(resp.status, url, body[:100])
-        except (TimeoutError, aiohttp.ClientError) as err:
-            raise HandshakeError(-1, url, str(err)) from err
-        return self._parse_engineio_handshake(body)
+        base_candidates = self._socket_base_candidates()
+        endpoint_candidates = ["socket_io", "socket.io"]
+        if self._engineio_http_base and self._engineio_http_base in base_candidates:
+            base_candidates.remove(self._engineio_http_base)
+            base_candidates.insert(0, self._engineio_http_base)
+        if self._engineio_endpoint in endpoint_candidates:
+            endpoint_candidates.remove(self._engineio_endpoint)
+            endpoint_candidates.insert(0, self._engineio_endpoint)
+
+        last_error: HandshakeError | None = None
+        for base in base_candidates:
+            for endpoint in endpoint_candidates:
+                t_ms = int(time.time() * 1000)
+                url = (
+                    f"{base}/{endpoint}?EIO=3&transport=polling&token={token}"
+                    f"&dev_id={self.dev_id}&t={t_ms}"
+                )
+                try:
+                    async with asyncio.timeout(15):
+                        async with self._session.get(
+                            url, timeout=aiohttp.ClientTimeout(total=15)
+                        ) as resp:
+                            try:
+                                raw_body = await resp.read()
+                            except AttributeError:
+                                text_body = await resp.text()
+                                raw_body = text_body.encode("utf-8", "ignore")
+                            charset = getattr(resp, "charset", None)
+                            body = self._decode_engineio_handshake(raw_body, charset)
+                            if resp.status >= 400:
+                                raise HandshakeError(resp.status, url, body[:100])
+                except HandshakeError as err:
+                    last_error = err
+                    if err.status == 404:
+                        _LOGGER.debug(
+                            "WS %s: handshake path %s/%s returned 404; trying alternate",
+                            self.dev_id,
+                            base,
+                            endpoint,
+                        )
+                        continue
+                    raise
+                except (TimeoutError, aiohttp.ClientError) as err:
+                    raise HandshakeError(-1, url, str(err)) from err
+                handshake = self._parse_engineio_handshake(body)
+                self._engineio_http_base = base
+                self._engineio_endpoint = endpoint
+                return handshake
+
+        if last_error:
+            raise last_error
+        raise HandshakeError(-1, base_candidates[0], "no viable handshake path")
 
     @staticmethod
     def _decode_engineio_handshake(data: bytes, charset: str | None) -> str:
@@ -802,8 +835,10 @@ class WebSocketClient:
         """Upgrade the Engine.IO session to a websocket transport."""
         token = await self._get_token()
         base = self._upgrade_scheme(self._socket_base())
+        endpoint = self._socket_endpoint()
         url = (
-            f"{base}/socket_io?EIO=3&transport=websocket&sid={sid}&token={token}&dev_id={self.dev_id}"
+            f"{base}/{endpoint}?EIO=3&transport=websocket&sid={sid}&token={token}"
+            f"&dev_id={self.dev_id}"
         )
         self._engineio_ws = await self._session.ws_connect(
             url,
@@ -1236,13 +1271,31 @@ class WebSocketClient:
         return API_BASE
 
     def _socket_base(self) -> str:
-        """Return the Socket.IO base URL ensuring the /api/v2 segment is present."""
-        base = self._api_base()
+        """Return the Socket.IO base URL selected for the current session."""
+        if self._engineio_http_base:
+            return self._engineio_http_base
+        base = self._api_base().rstrip("/")
+        return base or API_BASE
+
+    def _socket_endpoint(self) -> str:
+        """Return the active socket endpoint segment."""
+        return self._engineio_endpoint or "socket_io"
+
+    def _socket_base_candidates(self) -> list[str]:
+        """Return candidate base URLs for Engine.IO handshakes."""
+        base = self._api_base().rstrip("/")
         parts = urlsplit(base)
-        path = parts.path.rstrip("/")
-        if not path.endswith("/api/v2"):
-            path = f"{path}/api/v2" if path else "/api/v2"
-        return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+        host_root = urlunsplit((parts.scheme, parts.netloc, "", "", ""))
+        candidates: list[str] = []
+        for candidate in (base, f"{host_root.rstrip('/')}/api/v2", host_root):
+            candidate = candidate.rstrip("/")
+            if not candidate:
+                continue
+            if candidate not in candidates:
+                candidates.append(candidate)
+        if not candidates:
+            candidates.append(API_BASE.rstrip("/"))
+        return candidates
 
     @staticmethod
     def _upgrade_scheme(url: str) -> str:

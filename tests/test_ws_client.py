@@ -334,7 +334,7 @@ def test_ws_url_uses_client_api_base() -> None:
 
         url = await client.ws_url()
         assert url == (
-            "https://api-tevolve.example.com/base/api/v2/socket.io?token=scoped-token"
+            "https://api-tevolve.example.com/base/socket_io?token=scoped-token"
         )
 
     asyncio.run(_run())
@@ -596,11 +596,13 @@ def test_engineio_handshake_parsing_and_errors() -> None:
         assert session.get_calls
         handshake_url = session.get_calls[0]["url"]
         prefix = (
-            "https://api-tevolve.termoweb.net/api/v2/"
+            "https://api-tevolve.termoweb.net/"
             "socket_io?EIO=3&transport=polling&token=token&dev_id=dev&t="
         )
         assert handshake_url.startswith(prefix)
         assert handshake_url[len(prefix) :].isdigit()
+        assert client._engineio_http_base == "https://api-tevolve.termoweb.net"
+        assert client._engineio_endpoint == "socket_io"
 
         client._session = module.aiohttp.testing.FakeClientSession(
             get_responses=[(500, "oops")]
@@ -639,6 +641,57 @@ def test_engineio_handshake_parsing_and_errors() -> None:
             module.WebSocketClient._parse_engineio_handshake(
                 '0{"sid":"abc","pingInterval":bad}'
             )
+
+    asyncio.run(_run())
+
+
+def test_engineio_handshake_falls_back_to_socket_io_dot() -> None:
+    module = _load_ws_client()
+
+    async def _run() -> None:
+        loop = asyncio.get_running_loop()
+        hass = types.SimpleNamespace(
+            loop=loop, data={module.DOMAIN: {"entry": {"ws_state": {}}}}
+        )
+        coordinator = types.SimpleNamespace()
+
+        class FakeClient:
+            api_base = "https://api-tevolve.termoweb.net/"
+
+            async def _authed_headers(self) -> dict[str, str]:
+                return {"Authorization": "Bearer token"}
+
+        session = module.aiohttp.testing.FakeClientSession(
+            get_responses=[
+                (404, "{\"statusCode\":404,\"message\":\"Cannot GET\"}"),
+                (
+                    200,
+                    '0{"sid":"xyz","pingInterval":5000,"pingTimeout":"15000"}',
+                ),
+            ]
+        )
+
+        client = module.WebSocket09Client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            api_client=FakeClient(),
+            coordinator=coordinator,
+            session=session,
+            protocol="engineio2",
+        )
+
+        handshake = await client._engineio_handshake()
+        assert handshake.sid == "xyz"
+        assert client._engineio_http_base == "https://api-tevolve.termoweb.net"
+        assert client._engineio_endpoint == "socket.io"
+        assert len(session.get_calls) == 2
+        assert session.get_calls[0]["url"].startswith(
+            "https://api-tevolve.termoweb.net/socket_io?"
+        )
+        assert session.get_calls[1]["url"].startswith(
+            "https://api-tevolve.termoweb.net/socket.io?"
+        )
 
     asyncio.run(_run())
 
