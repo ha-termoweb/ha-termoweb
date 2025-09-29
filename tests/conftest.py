@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import datetime as dt
 import enum
 import time
@@ -42,7 +43,7 @@ def pytest_pyfunc_call(pyfuncitem: pytest.Function) -> bool | None:
         return None
 
     testfunction = pyfuncitem.obj
-    if not asyncio.iscoroutinefunction(testfunction):
+    if not inspect.iscoroutinefunction(testfunction):
         return None
 
     marker = pyfuncitem.get_closest_marker("asyncio")
