@@ -6,6 +6,7 @@ from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import partial
+import codecs
 import json
 import logging
 import random
@@ -739,12 +740,37 @@ class WebSocketClient:
                 async with self._session.get(
                     url, timeout=aiohttp.ClientTimeout(total=15)
                 ) as resp:
-                    body = await resp.text()
+                    try:
+                        raw_body = await resp.read()
+                    except AttributeError:
+                        text_body = await resp.text()
+                        raw_body = text_body.encode("utf-8", "ignore")
+                    charset = getattr(resp, "charset", None)
+                    body = self._decode_engineio_handshake(raw_body, charset)
                     if resp.status >= 400:
                         raise HandshakeError(resp.status, url, body[:100])
         except (TimeoutError, aiohttp.ClientError) as err:
             raise HandshakeError(-1, url, str(err)) from err
         return self._parse_engineio_handshake(body)
+
+    @staticmethod
+    def _decode_engineio_handshake(data: bytes, charset: str | None) -> str:
+        """Decode the Engine.IO handshake payload with fallbacks."""
+        candidates: list[tuple[str, str]] = []
+        if charset:
+            candidates.append((charset, "strict"))
+        candidates.extend(
+            [
+                ("utf-8", "strict"),
+                ("iso-8859-1", "strict"),
+            ]
+        )
+        for encoding, errors in candidates:
+            try:
+                return codecs.decode(data, encoding, errors)
+            except (LookupError, UnicodeDecodeError):
+                continue
+        return codecs.decode(data, "utf-8", "ignore")
 
     @staticmethod
     def _parse_engineio_handshake(body: str) -> EngineIOHandshake:

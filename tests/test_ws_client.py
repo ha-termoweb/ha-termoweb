@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 import copy
 import json
 import logging
@@ -253,6 +254,47 @@ def test_ws_url_uses_client_api_base() -> None:
         )
 
     asyncio.run(_run())
+
+
+def test_engineio_handshake_decodes_non_utf8_bytes() -> None:
+    """Handshake bodies with invalid UTF-8 bytes should still parse."""
+
+    module = _load_ws_client()
+    raw = (
+        b"96:0\xff{"
+        b'"sid":"abc123","pingInterval":31000,"pingTimeout":62000}'
+    )
+
+    decoded = module.WebSocketClient._decode_engineio_handshake(
+        raw, "windows-1252"
+    )
+    handshake = module.WebSocketClient._parse_engineio_handshake(decoded)
+
+    assert handshake.sid == "abc123"
+    assert handshake.ping_interval == pytest.approx(31.0)
+    assert handshake.ping_timeout == pytest.approx(62.0)
+
+
+def test_engineio_handshake_decode_fallback_ignore(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fallback decoding should ignore undecodable bytes when codecs are missing."""
+
+    module = _load_ws_client()
+    original_decode = codecs.decode
+
+    def fake_decode(data: bytes, encoding: str = "utf-8", errors: str = "strict") -> str:
+        normalized = encoding.replace("_", "-").lower()
+        if normalized in {"iso-8859-1", "iso8859-1", "latin-1", "latin1"}:
+            raise LookupError
+        return original_decode(data, encoding, errors)
+
+    monkeypatch.setattr(codecs, "decode", fake_decode)
+
+    data = b"\xff\xfeinvalid"
+    decoded = module.WebSocketClient._decode_engineio_handshake(data, None)
+
+    assert decoded == "invalid"
 
 
 def test_runner_dispatches_engineio() -> None:
