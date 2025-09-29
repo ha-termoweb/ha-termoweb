@@ -77,22 +77,30 @@ def test_dummy_client_get_node_settings_accepts_acm() -> None:
     assert data["addr"] == "3"
 
 
-def test_ducaheat_rest_client_passthrough_for_non_htr(monkeypatch) -> None:
+def test_ducaheat_rest_client_fetches_generic_node(monkeypatch) -> None:
     async def _run() -> None:
         session = SimpleNamespace()
         client = DucaheatRESTClient(session, "user", "pass")
 
-        captured: dict[str, object] = {}
+        seen: dict[str, object] = {}
 
-        async def fake_super(self, dev_id: str, node: tuple[str, str]):
-            captured["args"] = (dev_id, node)
-            return {"ok": True}
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
 
-        monkeypatch.setattr(RESTClient, "get_node_settings", fake_super)
+        async def fake_request(method: str, path: str, **kwargs: object):
+            seen["method"] = method
+            seen["path"] = path
+            seen["kwargs"] = kwargs
+            return {"status": {"power": 0}}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "_request", fake_request)
 
         result = await client.get_node_settings("dev", ("pmo", "9"))
-        assert result == {"ok": True}
-        assert captured["args"] == ("dev", ("pmo", "9"))
+        assert result == {"status": {"power": 0}}
+        assert seen["method"] == "GET"
+        assert seen["path"] == "/api/v2/devs/dev/pmo/9"
+        assert seen["kwargs"] == {"headers": {"Authorization": "Bearer token"}}
 
     asyncio.run(_run())
 
@@ -102,12 +110,19 @@ def test_ducaheat_rest_client_normalises_acm(monkeypatch) -> None:
         session = SimpleNamespace()
         client = DucaheatRESTClient(session, "user", "pass")
 
-        async def fake_super(self, dev_id: str, node: tuple[str, str]):
+        seen: dict[str, object] = {}
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        async def fake_request(method: str, path: str, **kwargs: object):
+            seen["method"] = method
+            seen["path"] = path
+            seen["kwargs"] = kwargs
             return {"status": {"mode": "AUTO"}}
 
-        monkeypatch.setattr(RESTClient, "get_node_settings", fake_super)
-
-        seen: dict[str, object] = {}
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "_request", fake_request)
 
         def fake_normalise(self, payload, *, node_type: str = "htr"):
             seen["node_type"] = node_type
@@ -120,6 +135,9 @@ def test_ducaheat_rest_client_normalises_acm(monkeypatch) -> None:
         assert result == {"normalized": True}
         assert seen["node_type"] == "acm"
         assert seen["payload"] == {"status": {"mode": "AUTO"}}
+        assert seen["method"] == "GET"
+        assert seen["path"] == "/api/v2/devs/dev/acm/2"
+        assert seen["kwargs"] == {"headers": {"Authorization": "Bearer token"}}
 
     asyncio.run(_run())
 
