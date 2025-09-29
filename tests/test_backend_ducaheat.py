@@ -192,3 +192,43 @@ def test_ducaheat_rest_get_node_samples_forwards_non_htr(monkeypatch) -> None:
         assert captured["args"] == ("dev", ("acm", "7"), 1.0, 2.0)
 
     asyncio.run(_run())
+
+
+def test_ducaheat_rest_normalise_ws_nodes_prog() -> None:
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+
+    nodes = {
+        "acm": {
+            "settings": {
+                "02": {
+                    "prog": {
+                        "prog": {
+                            str(day): [day % 3] * 48 for day in range(7)
+                        }
+                    },
+                    "mode": "auto",
+                }
+            },
+            "status": {"02": {"temp": 21}},
+        }
+    }
+
+    result = client.normalise_ws_nodes(nodes)
+    settings = result["acm"]["settings"]["02"]
+    assert len(settings["prog"]) == 168
+    assert settings["prog"][24:48] == [1] * 24
+    # Original payload should remain unchanged
+    assert len(nodes["acm"]["settings"]["02"]["prog"]["prog"]["1"]) == 48
+
+
+def test_ducaheat_rest_normalise_ws_nodes_passthrough() -> None:
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+
+    assert client.normalise_ws_nodes(["bad"]) == ["bad"]
+
+    nodes = {"htr": [1, 2, 3]}
+    assert client.normalise_ws_nodes(nodes)["htr"] == [1, 2, 3]
+
+    nodes_with_scalar = {"htr": {"settings": {"01": 5}}}
+    normalised = client.normalise_ws_nodes(nodes_with_scalar)
+    assert normalised["htr"]["settings"]["01"] == 5

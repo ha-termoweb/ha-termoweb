@@ -1,6 +1,7 @@
 """Ducaheat backend implementation and HTTP adapter."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 import logging
 from typing import Any
@@ -186,6 +187,50 @@ class DucaheatRESTClient(RESTClient):
         params = {"start": int(start * 1000), "end": int(stop * 1000)}
         data = await self._request("GET", path, headers=headers, params=params)
         return self._extract_samples(data, timestamp_divisor=1000)
+
+    def normalise_ws_nodes(self, nodes: dict[str, Any]) -> dict[str, Any]:
+        """Normalise websocket nodes payloads for Ducaheat specifics."""
+
+        if not isinstance(nodes, dict):
+            return nodes
+
+        normalised: dict[str, Any] = {}
+        for node_type, sections in nodes.items():
+            if not isinstance(sections, Mapping):
+                normalised[node_type] = sections
+                continue
+
+            section_map: dict[str, Any] = {}
+            for section, by_addr in sections.items():
+                if section != "settings" or not isinstance(by_addr, Mapping):
+                    section_map[section] = by_addr
+                    continue
+
+                addr_map: dict[str, Any] = {}
+                for addr, payload in by_addr.items():
+                    if not isinstance(payload, Mapping):
+                        addr_map[addr] = payload
+                        continue
+
+                    addr_map[addr] = self._normalise_ws_settings(payload)
+
+                section_map[section] = addr_map
+
+            normalised[node_type] = section_map
+
+        return normalised
+
+    def _normalise_ws_settings(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Normalise half-hourly program data within websocket settings."""
+
+        settings: dict[str, Any] = dict(payload)
+
+        prog = settings.get("prog")
+        normalised_prog = self._normalise_prog(prog)
+        if normalised_prog is not None:
+            settings["prog"] = normalised_prog
+
+        return settings
 
     def _normalise_settings(
         self, payload: Any, *, node_type: str = "htr"
@@ -426,11 +471,15 @@ class DucaheatRESTClient(RESTClient):
     def _serialise_prog(self, prog: list[int]) -> dict[str, Any]:
         """Serialise the 168-slot programme back to API structure."""
         normalised = self._ensure_prog(prog)
-        days: dict[str, Any] = {}
-        for idx, day in enumerate(_DAY_ORDER):
+        half_hour: dict[str, Any] = {}
+        for idx in range(len(_DAY_ORDER)):
             start = idx * 24
-            days[day] = {"slots": normalised[start : start + 24]}
-        return {"days": days}
+            hourly = normalised[start : start + 24]
+            slots: list[int] = []
+            for value in hourly:
+                slots.extend([value, value])
+            half_hour[str(idx)] = slots
+        return {"prog": half_hour}
 
     def _serialise_prog_temps(self, ptemp: list[float]) -> dict[str, str]:
         """Serialise preset temperatures into the API schema."""

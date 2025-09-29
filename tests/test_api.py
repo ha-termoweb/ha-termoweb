@@ -1436,7 +1436,8 @@ def test_ducaheat_set_htr_settings_writes_segmented(monkeypatch) -> None:
         status_json = session.request_calls[1][2]["json"]
         assert status_json == {"mode": "manual", "stemp": "21.2", "units": "C"}
         prog_json = session.request_calls[2][2]["json"]
-        assert prog_json["days"]["tue"]["slots"] == [1] * 24
+        assert set(prog_json) == {"prog"}
+        assert prog_json["prog"]["1"] == [1] * 48
         ptemp_json = session.request_calls[3][2]["json"]
         assert ptemp_json == {"antifrost": "5.0", "eco": "15.0", "comfort": "21.0"}
 
@@ -1652,6 +1653,29 @@ def test_ducaheat_normalise_settings_acm_status_boost() -> None:
     assert result["boost_active"] is True
 
 
+def test_ducaheat_normalise_settings_handles_half_hour_prog() -> None:
+    client = DucaheatRESTClient(
+        FakeSession(),
+        "user",
+        "pass",
+        api_base="https://api.termoweb.fake",
+    )
+
+    payload = {
+        "prog": {
+            "prog": {
+                str(day): [day % 3] * 48 for day in range(7)
+            }
+        },
+        "status": {"mode": "AUTO"},
+    }
+
+    result = client._normalise_settings(payload)
+    assert len(result["prog"]) == 168
+    assert result["prog"][:24] == [0] * 24
+    assert result["prog"][24:48] == [1] * 24
+
+
 def test_ducaheat_normalise_prog_with_varied_inputs() -> None:
     client = DucaheatRESTClient(
         FakeSession(),
@@ -1718,6 +1742,31 @@ def test_ducaheat_normalise_prog_temps_variations() -> None:
         {"antifrost": ["bad"], "eco": None, "comfort": 18}
     )
     assert weird == ["['bad']", "", "18.0"]
+
+
+def test_ducaheat_serialise_prog_expands_half_hours() -> None:
+    client = DucaheatRESTClient(
+        FakeSession(),
+        "user",
+        "pass",
+        api_base="https://api.termoweb.fake",
+    )
+
+    prog: list[int] = []
+    for day in range(7):
+        prog.extend([day % 3] * 24)
+
+    serialised = client._serialise_prog(prog)
+    assert set(serialised) == {"prog"}
+    assert len(serialised["prog"]) == 7
+    assert serialised["prog"]["0"] == [0] * 48
+    assert serialised["prog"]["1"] == [1] * 48
+
+
+def test_rest_client_normalise_ws_nodes_passthrough() -> None:
+    client = RESTClient(FakeSession(), "user", "pass", api_base="https://api.fake")
+    payload = {"htr": {"settings": {"01": {}}}}
+    assert client.normalise_ws_nodes(payload) is payload
 
 
 def test_ducaheat_safe_temperature_handles_strings() -> None:
