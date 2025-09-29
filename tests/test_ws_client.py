@@ -551,7 +551,7 @@ def test_engineio_handshake_parsing_and_errors() -> None:
         handshake_url = session.get_calls[0]["url"]
         prefix = (
             "https://api-tevolve.termoweb.net/api/v2/"
-            "socket.io?EIO=3&transport=polling&token=token&dev_id=dev&t="
+            "socket_io?EIO=3&transport=polling&token=token&dev_id=dev&t="
         )
         assert handshake_url.startswith(prefix)
         assert handshake_url[len(prefix) :].isdigit()
@@ -633,7 +633,7 @@ def test_engineio_connect_and_send() -> None:
         call = session.ws_connect_calls[0]
         assert call["url"] == (
             "wss://api-tevolve.termoweb.net/api/v2/"
-            "socket.io?EIO=3&transport=websocket&sid=sid-123&token=abc&dev_id=dev"
+            "socket_io?EIO=3&transport=websocket&sid=sid-123&token=abc&dev_id=dev"
         )
         assert call["kwargs"]["protocols"] == ("websocket",)
         assert client._engineio_ws.sent[0] == f"40{module.WS_NAMESPACE}"
