@@ -119,7 +119,7 @@ class WebSocketClient:
         self._nodes: dict[str, Any] = {}
         self._nodes_raw: dict[str, Any] = {}
 
-        self._payload_idle_window: float = 180.0
+        self._payload_idle_window: float = 3600.0
         self._idle_restart_task: asyncio.Task | None = None
         self._idle_restart_pending = False
 
