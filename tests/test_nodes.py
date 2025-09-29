@@ -215,3 +215,10 @@ def test_extract_heater_addrs_ignores_blank_addresses(
     monkeypatch.setattr(nodes_module, "build_node_inventory", fake_build)
 
     assert nodes_module.extract_heater_addrs(payload) == ["A", "B"]
+
+
+def test_ensure_node_inventory_sets_empty_cache() -> None:
+    record: dict[str, object] = {}
+    result = nodes_module.ensure_node_inventory(record)
+    assert result == []
+    assert record["node_inventory"] == []
