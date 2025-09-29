@@ -732,7 +732,7 @@ class WebSocketClient:
         base = self._socket_base()
         t_ms = int(time.time() * 1000)
         url = (
-            f"{base}/socket.io?EIO=3&transport=polling&token={token}&dev_id={self.dev_id}&t={t_ms}"
+            f"{base}/socket_io?EIO=3&transport=polling&token={token}&dev_id={self.dev_id}&t={t_ms}"
         )
         try:
             async with asyncio.timeout(15):
@@ -803,7 +803,7 @@ class WebSocketClient:
         token = await self._get_token()
         base = self._upgrade_scheme(self._socket_base())
         url = (
-            f"{base}/socket.io?EIO=3&transport=websocket&sid={sid}&token={token}&dev_id={self.dev_id}"
+            f"{base}/socket_io?EIO=3&transport=websocket&sid={sid}&token={token}&dev_id={self.dev_id}"
         )
         self._engineio_ws = await self._session.ws_connect(
             url,
