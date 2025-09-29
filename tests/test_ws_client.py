@@ -288,7 +288,7 @@ def test_ws_url_uses_client_api_base() -> None:
 
         url = await client.ws_url()
         assert url == (
-            "https://api-tevolve.example.com/base/api/v2/socket_io?token=scoped-token"
+            "https://api-tevolve.example.com/base/api/v2/socket.io?token=scoped-token"
         )
 
     asyncio.run(_run())
@@ -547,6 +547,14 @@ def test_engineio_handshake_parsing_and_errors() -> None:
         assert handshake.sid == "abc"
         assert handshake.ping_interval == 5.0
         assert handshake.ping_timeout == 15.0
+        assert session.get_calls
+        handshake_url = session.get_calls[0]["url"]
+        prefix = (
+            "https://api-tevolve.termoweb.net/api/v2/"
+            "socket.io?EIO=3&transport=polling&token=token&dev_id=dev&t="
+        )
+        assert handshake_url.startswith(prefix)
+        assert handshake_url[len(prefix) :].isdigit()
 
         client._session = module.aiohttp.testing.FakeClientSession(
             get_responses=[(500, "oops")]
@@ -600,7 +608,7 @@ def test_engineio_connect_and_send() -> None:
         coordinator = types.SimpleNamespace()
 
         class FakeClient:
-            api_base = "https://api-tevolve.termoweb.net/api/"
+            api_base = "https://api-tevolve.termoweb.net/api/v2/"
 
             async def _authed_headers(self) -> dict[str, str]:
                 return {"Authorization": "Bearer abc"}
@@ -623,8 +631,10 @@ def test_engineio_connect_and_send() -> None:
         assert client._engineio_ws is not None
         assert session.ws_connect_calls
         call = session.ws_connect_calls[0]
-        assert "sid=sid-123" in call["url"]
-        assert "token=abc" in call["url"]
+        assert call["url"] == (
+            "wss://api-tevolve.termoweb.net/api/v2/"
+            "socket.io?EIO=3&transport=websocket&sid=sid-123&token=abc&dev_id=dev"
+        )
         assert call["kwargs"]["protocols"] == ("websocket",)
         assert client._engineio_ws.sent[0] == f"40{module.WS_NAMESPACE}"
 
