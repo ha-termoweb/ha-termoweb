@@ -465,12 +465,10 @@ def test_run_engineio_v2_handles_flow_and_errors(
         async def fake_handshake(self: Any) -> module.EngineIOHandshake:
             effect = handshake_effects.pop(0)
             if isinstance(effect, Exception):
+                self._engineio_ws = None
                 raise effect
-            return effect
-
-        async def fake_connect(self: Any, sid: str) -> None:
             self._engineio_ws = module.aiohttp.testing.FakeWebSocket()
-            await self._engineio_send("40")
+            return effect
 
         read_effects: list[Any] = [RuntimeError("boom"), asyncio.CancelledError()]
 
@@ -494,7 +492,6 @@ def test_run_engineio_v2_handles_flow_and_errors(
                 await self._engineio_ws.send_str(data)
 
         client._engineio_handshake = types.MethodType(fake_handshake, client)
-        client._engineio_connect = types.MethodType(fake_connect, client)
         client._engineio_read_loop = types.MethodType(fake_read_loop, client)
         client._engineio_ping_loop = types.MethodType(fake_ping_loop, client)
         client._engineio_send = types.MethodType(fake_send, client)
@@ -518,6 +515,7 @@ def test_run_engineio_v2_handles_flow_and_errors(
         assert client._engineio_ws is None
         assert sleep_delays
         assert send_calls
+        assert send_calls[0] == f"40{module.WS_NAMESPACE}"
 
     asyncio.run(_run())
 
@@ -571,10 +569,17 @@ def test_engineio_handshake_parsing_and_errors() -> None:
                 return {"Authorization": "Bearer token"}
 
         session = module.aiohttp.testing.FakeClientSession(
-            get_responses=[
-                (
-                    200,
-                    '0{"sid":"abc","pingInterval":5000,"pingTimeout":"15000"}',
+            ws_connect_results=[
+                module.aiohttp.testing.FakeWebSocket(
+                    messages=[
+                        {
+                            "type": module.aiohttp.WSMsgType.TEXT,
+                            "data": (
+                                '0{"sid":"abc","pingInterval":5000,'
+                                '"pingTimeout":"15000"}'
+                            ),
+                        }
+                    ]
                 )
             ]
         )
@@ -593,39 +598,51 @@ def test_engineio_handshake_parsing_and_errors() -> None:
         assert handshake.sid == "abc"
         assert handshake.ping_interval == 5.0
         assert handshake.ping_timeout == 15.0
-        assert session.get_calls
-        handshake_url = session.get_calls[0]["url"]
-        prefix = (
-            "https://api-tevolve.termoweb.net/"
-            "socket_io?EIO=3&transport=polling&token=token&dev_id=dev&t="
+        assert session.ws_connect_calls
+        handshake_call = session.ws_connect_calls[0]
+        assert handshake_call["url"] == (
+            "wss://api-tevolve.termoweb.net/api/v2/socket_io"
+            "?token=token&dev_id=dev&transport=websocket&EIO=4"
         )
-        assert handshake_url.startswith(prefix)
-        assert handshake_url[len(prefix) :].isdigit()
-        assert client._engineio_http_base == "https://api-tevolve.termoweb.net"
+        assert client._engineio_http_base == "https://api-tevolve.termoweb.net/api/v2"
         assert client._engineio_endpoint == "socket_io"
+        ws_url = await client.ws_url()
+        assert ws_url == "https://api-tevolve.termoweb.net/api/v2/socket_io?token=token"
+        client._engineio_ws = None
+
+        def raise_response_error(*, url: str, **kwargs: Any) -> Any:
+            raise module.aiohttp.ClientResponseError(
+                None, (), status=401, message="unauthorized"
+            )
 
         client._session = module.aiohttp.testing.FakeClientSession(
-            get_responses=[(500, "oops")]
+            ws_connect_results=[raise_response_error]
         )
         with pytest.raises(module.HandshakeError) as err:
             await client._engineio_handshake()
-        assert err.value.body_snippet == "oops"
+        assert err.value.status == 401
 
-        class RaisingContext:
-            async def __aenter__(self) -> None:
-                raise module.aiohttp.ClientError("boom")
+        def raise_client_error(*, url: str, **kwargs: Any) -> Any:
+            raise module.aiohttp.ClientError("boom")
 
-            async def __aexit__(self, exc_type, exc, tb) -> bool:
-                return False
-
-        class RaisingSession:
-            def get(self, *args: Any, **kwargs: Any) -> RaisingContext:
-                return RaisingContext()
-
-        client._session = RaisingSession()
+        client._session = module.aiohttp.testing.FakeClientSession(
+            ws_connect_results=[raise_client_error]
+        )
         with pytest.raises(module.HandshakeError) as err2:
             await client._engineio_handshake()
         assert err2.value.status == -1
+
+        def make_raising_ws(*, url: str, **kwargs: Any) -> Any:
+            return module.aiohttp.testing.FakeWebSocket(
+                messages=[lambda: (_ for _ in ()).throw(RuntimeError("rx"))]
+            )
+
+        client._session = module.aiohttp.testing.FakeClientSession(
+            ws_connect_results=[make_raising_ws]
+        )
+        with pytest.raises(module.HandshakeError):
+            await client._engineio_handshake()
+        assert client._engineio_ws is None
 
         parsed = module.WebSocketClient._parse_engineio_handshake(
             '0{"sid":"sid-x","pingInterval":"bad","pingTimeout":null}'
@@ -642,56 +659,63 @@ def test_engineio_handshake_parsing_and_errors() -> None:
                 '0{"sid":"abc","pingInterval":bad}'
             )
 
-    asyncio.run(_run())
-
-
-def test_engineio_handshake_falls_back_to_socket_io_dot() -> None:
-    module = _load_ws_client()
-
-    async def _run() -> None:
-        loop = asyncio.get_running_loop()
-        hass = types.SimpleNamespace(
-            loop=loop, data={module.DOMAIN: {"entry": {"ws_state": {}}}}
-        )
-        coordinator = types.SimpleNamespace()
-
-        class FakeClient:
-            api_base = "https://api-tevolve.termoweb.net/"
-
-            async def _authed_headers(self) -> dict[str, str]:
-                return {"Authorization": "Bearer token"}
-
-        session = module.aiohttp.testing.FakeClientSession(
-            get_responses=[
-                (404, "{\"statusCode\":404,\"message\":\"Cannot GET\"}"),
-                (
-                    200,
-                    '0{"sid":"xyz","pingInterval":5000,"pingTimeout":"15000"}',
-                ),
+        client._session = module.aiohttp.testing.FakeClientSession(
+            ws_connect_results=[
+                module.aiohttp.testing.FakeWebSocket(
+                    messages=[
+                        {"type": module.aiohttp.WSMsgType.TEXT, "data": "no-json"}
+                    ]
+                )
             ]
         )
+        with pytest.raises(RuntimeError):
+            await client._engineio_handshake()
+        assert client._engineio_ws is None
 
-        client = module.WebSocket09Client(
-            hass,
-            entry_id="entry",
-            dev_id="dev",
-            api_client=FakeClient(),
-            coordinator=coordinator,
-            session=session,
-            protocol="engineio2",
+        client._session = module.aiohttp.testing.FakeClientSession(
+            ws_connect_results=[
+                module.aiohttp.testing.FakeWebSocket(
+                    messages=[
+                        {
+                            "type": module.aiohttp.WSMsgType.BINARY,
+                            "data": b'0{"sid":"sid-bin"}',
+                        }
+                    ]
+                )
+            ]
         )
+        with pytest.raises(RuntimeError):
+            await client._engineio_handshake()
+        assert client._engineio_ws is None
 
-        handshake = await client._engineio_handshake()
-        assert handshake.sid == "xyz"
-        assert client._engineio_http_base == "https://api-tevolve.termoweb.net"
-        assert client._engineio_endpoint == "socket.io"
-        assert len(session.get_calls) == 2
-        assert session.get_calls[0]["url"].startswith(
-            "https://api-tevolve.termoweb.net/socket_io?"
+        client._session = module.aiohttp.testing.FakeClientSession(
+            ws_connect_results=[
+                module.aiohttp.testing.FakeWebSocket(
+                    messages=[
+                        {
+                            "type": module.aiohttp.WSMsgType.TEXT,
+                            "data": b'0{"sid":"sid-bytes","pingInterval":5000}',
+                        }
+                    ]
+                )
+            ]
         )
-        assert session.get_calls[1]["url"].startswith(
-            "https://api-tevolve.termoweb.net/socket.io?"
+        handshake_bytes = await client._engineio_handshake()
+        assert handshake_bytes.sid == "sid-bytes"
+        client._engineio_ws = None
+
+        client._session = module.aiohttp.testing.FakeClientSession(
+            ws_connect_results=[
+                module.aiohttp.testing.FakeWebSocket(
+                    messages=[
+                        {"type": module.aiohttp.WSMsgType.TEXT, "data": None}
+                    ]
+                )
+            ]
         )
+        with pytest.raises(TypeError):
+            await client._engineio_handshake()
+        assert client._engineio_ws is None
 
     asyncio.run(_run())
 
@@ -713,7 +737,16 @@ def test_engineio_connect_and_send() -> None:
                 return {"Authorization": "Bearer abc"}
 
         session = module.aiohttp.testing.FakeClientSession(
-            ws_connect_results=[module.aiohttp.testing.FakeWebSocket()]
+            ws_connect_results=[
+                module.aiohttp.testing.FakeWebSocket(
+                    messages=[
+                        {
+                            "type": module.aiohttp.WSMsgType.TEXT,
+                            "data": '0{"sid":"sid-123","pingInterval":5000}',
+                        }
+                    ]
+                )
+            ]
         )
 
         client = module.WebSocket09Client(
@@ -726,16 +759,10 @@ def test_engineio_connect_and_send() -> None:
             protocol="engineio2",
         )
 
-        await client._engineio_connect("sid-123")
+        handshake = await client._engineio_handshake()
+        assert handshake.sid == "sid-123"
         assert client._engineio_ws is not None
-        assert session.ws_connect_calls
-        call = session.ws_connect_calls[0]
-        assert call["url"] == (
-            "wss://api-tevolve.termoweb.net/api/v2/"
-            "socket_io?EIO=3&transport=websocket&sid=sid-123&token=abc&dev_id=dev"
-        )
-        assert call["kwargs"]["protocols"] == ("websocket",)
-        assert client._engineio_ws.sent[0] == f"40{module.WS_NAMESPACE}"
+        assert client._engineio_http_base == "https://api-tevolve.termoweb.net/api/v2"
 
         await client._engineio_send("2")
         assert client._engineio_ws.sent[-1] == "2"
