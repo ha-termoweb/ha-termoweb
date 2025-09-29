@@ -103,6 +103,50 @@ def _make_client(
     return client
 
 
+def test_http_wrapping_handles_missing_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure http assignments tolerate attribute errors and reuse existing sessions."""
+
+    class AltAsyncClient:
+        def __init__(self, **_: Any) -> None:
+            object.__setattr__(self, "_http_raise", True)
+            object.__setattr__(self, "connected", False)
+            object.__setattr__(self, "events", {})
+            object.__setattr__(
+                self,
+                "eio",
+                SimpleNamespace(
+                    start_background_task=lambda target, *a, **kw: None,
+                    http=SimpleNamespace(closed=True),
+                ),
+            )
+
+        def __setattr__(self, name: str, value: Any) -> None:
+            if name == "http" and getattr(self, "_http_raise", False):
+                object.__setattr__(self, "_http_raise", False)
+                raise AttributeError("http not writable")
+            object.__setattr__(self, name, value)
+
+        def on(
+            self, event: str, *, handler: Any, namespace: str | None = None
+        ) -> None:
+            self.events[(event, namespace)] = handler
+
+        async def connect(self, *args: Any, **kwargs: Any) -> None:
+            self.connected = True
+            self.connect_args = (args, kwargs)
+
+        async def disconnect(self) -> None:
+            self.connected = False
+
+        async def emit(self, event: str, *, namespace: str | None = None) -> None:
+            self.last_emit = (event, namespace)
+
+    monkeypatch.setattr(module.socketio, "AsyncClient", AltAsyncClient)
+    client = _make_client(monkeypatch)
+    assert getattr(client._sio, "http").closed is True
+    assert getattr(client._sio.eio, "http").closed is True
+
+
 @pytest.mark.asyncio
 async def test_ws_url_and_engineio_target(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())

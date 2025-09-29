@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import logging
 import random
 import time
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
@@ -75,10 +76,20 @@ class WebSocketClient:
             engineio_logger=_LOGGER.getChild(f"engineio.{dev_id}"),
         )
         self._sio.start_background_task = self._wrap_background_task
+        http_target: Any = self._session
+        if http_target is None or not hasattr(http_target, "closed"):
+            http_target = SimpleNamespace(closed=True)
+        try:
+            self._sio.http = http_target
+        except AttributeError:
+            setattr(self._sio, "http", http_target)
         if hasattr(self._sio, "eio"):
             self._sio.eio.start_background_task = self._wrap_background_task
-            if self._session is not None:
-                self._sio.eio.http = self._session
+            eio_http = getattr(self._sio.eio, "http", None)
+            if eio_http is None or not hasattr(eio_http, "closed"):
+                self._sio.eio.http = http_target
+            else:
+                self._sio.eio.http = eio_http
 
         self._sio.on("connect", handler=self._on_connect)
         self._sio.on("disconnect", handler=self._on_disconnect)
