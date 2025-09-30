@@ -162,7 +162,7 @@ async def test_ws_url_and_engineio_target(monkeypatch: pytest.MonkeyPatch) -> No
         base
         == "https://api.example.com/api/v2/socket_io?token=token&dev_id=device"
     )
-    assert path == "socket.io"
+    assert path == "api/v2/socket_io"
 
 
 @pytest.mark.asyncio
@@ -205,7 +205,7 @@ async def test_ws_url_adds_suffix_when_missing(monkeypatch: pytest.MonkeyPatch) 
     ws_url = await client.ws_url()
     assert ws_url.startswith("https://api.otherhost.com/api/v2/socket_io")
     base, path = await client._build_engineio_target()
-    assert path == "socket.io"
+    assert path == "api/v2/socket_io"
     assert base.startswith(
         "https://api.otherhost.com/api/v2/socket_io?token=token&dev_id=device"
     )
@@ -432,7 +432,7 @@ async def test_connect_once_invokes_socket(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(
         client,
         "_build_engineio_target",
-        AsyncMock(return_value=("https://socket", "socket.io")),
+        AsyncMock(return_value=("https://socket", "api/v2/socket_io")),
     )
     connect_mock = AsyncMock()
     client._sio.connect = connect_mock
