@@ -75,20 +75,44 @@ def _make_client(
             def __init__(self, coro: Any) -> None:
                 self._coro = coro
                 self._cancelled = False
+                self._completed = False
+                cr_code = getattr(coro, "cr_code", None)
+                if cr_code and cr_code.co_name == "_execute_mock_call":
+                    try:
+                        coro.send(None)
+                    except StopIteration:
+                        self._completed = True
+                    except RuntimeError:
+                        # Raised if the coroutine was already awaited/closed.
+                        self._completed = True
+
+            def _close(self) -> None:
+                closer = getattr(self._coro, "close", None)
+                if callable(closer):
+                    try:
+                        closer()
+                    except RuntimeError:
+                        # Closing an already-finished coroutine raises RuntimeError.
+                        pass
 
             def cancel(self) -> None:
                 self._cancelled = True
+                self._close()
 
             def done(self) -> bool:
-                return self._cancelled
+                return self._cancelled or self._completed
 
             def __await__(self):  # type: ignore[no-untyped-def]
-                if self._cancelled:
+                if self._cancelled or self._completed:
                     async def _noop() -> None:
                         return None
 
                     return _noop().__await__()
                 return self._coro.__await__()
+
+            def __del__(self) -> None:
+                if not (self._cancelled or self._completed):
+                    self._close()
 
         def _create_task(coro: Any, **kwargs: Any) -> _DummyTask:
             return _DummyTask(coro)
