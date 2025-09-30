@@ -261,7 +261,7 @@ async def _load_module(
         async def stop(self) -> None:
             return None
 
-    monkeypatch.setattr(ws_module, "WebSocket09Client", _FakeWSClient)
+    monkeypatch.setattr(ws_module, "TermoWebWSClient", _FakeWSClient)
 
     energy_module = importlib.reload(
         importlib.import_module("custom_components.termoweb.energy")
@@ -286,7 +286,7 @@ async def _load_module(
     init_module = importlib.reload(
         importlib.import_module("custom_components.termoweb.__init__")
     )
-    monkeypatch.setattr(init_module, "WebSocket09Client", _FakeWSClient)
+    monkeypatch.setattr(init_module, "TermoWebWSClient", _FakeWSClient)
 
     compat_last = AsyncMock(return_value={})
     compat_period = AsyncMock(return_value={})

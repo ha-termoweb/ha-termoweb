@@ -4,22 +4,22 @@ from __future__ import annotations
 
 import asyncio
 import codecs
-from collections.abc import AsyncIterator, Callable, Iterable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import partial
+import json
 import logging
 import random
 import time
 from types import SimpleNamespace
-from typing import Any, Awaitable
+from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-import json
 import socketio
 
 from .api import RESTClient
@@ -763,7 +763,7 @@ class WebSocketClient:
 # ----------------------------------------------------------------------
 
 
-class WebSocket09Client:
+class TermoWebWSClient(WebSocketClient):
     """Legacy Socket.IO 0.9 websocket client for TermoWeb."""
 
     def __init__(
@@ -991,7 +991,7 @@ class WebSocket09Client:
                         raise HandshakeError(resp.status, url, body)
                     if resp.status != 200:
                         raise HandshakeError(resp.status, url, body)
-        except asyncio.TimeoutError as err:
+        except TimeoutError as err:
             raise HandshakeError(599, url, "timeout") from err
         except aiohttp.ClientError as err:
             raise HandshakeError(598, url, str(err)) from err
@@ -1058,7 +1058,7 @@ class WebSocket09Client:
         if not addr_map.get("htr") and hasattr(self._coordinator, "_addrs"):
             try:
                 fallback = list(self._coordinator._addrs())  # noqa: SLF001
-            except Exception:  # pragma: no cover - defensive
+            except (AttributeError, TypeError, ValueError):
                 fallback = []
             if fallback:
                 addr_map["htr"] = [
@@ -1527,7 +1527,7 @@ class WebSocket09Client:
             if isinstance(value, dict):
                 existing = target.get(key)
                 if isinstance(existing, dict):
-                    WebSocket09Client._merge_nodes(existing, value)
+                    TermoWebWSClient._merge_nodes(existing, value)
                 else:
                     target[key] = deepcopy(value)
             else:
@@ -1570,7 +1570,7 @@ class DucaheatWSClient(WebSocketClient):
 
 __all__ = [
     "DucaheatWSClient",
+    "TermoWebWSClient",
     "WSStats",
-    "WebSocket09Client",
     "WebSocketClient",
 ]

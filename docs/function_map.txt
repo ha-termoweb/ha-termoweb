@@ -346,49 +346,49 @@ custom_components/termoweb/utils.py :: float_or_none
     Return value as ``float`` if possible, else ``None``.
 custom_components/termoweb/ws_client.py :: HandshakeError.__init__
     Capture context for failed Socket.IO handshakes.
-custom_components/termoweb/ws_client.py :: WebSocket09Client.__init__
+custom_components/termoweb/ws_client.py :: TermoWebWSClient.__init__
     Initialise the legacy Socket.IO client wrapper.
-custom_components/termoweb/ws_client.py :: WebSocket09Client.start
+custom_components/termoweb/ws_client.py :: TermoWebWSClient.start
     Start the websocket client background task.
-custom_components/termoweb/ws_client.py :: WebSocket09Client.stop
+custom_components/termoweb/ws_client.py :: TermoWebWSClient.stop
     Cancel tasks and close WS cleanly.
-custom_components/termoweb/ws_client.py :: WebSocket09Client.is_running
+custom_components/termoweb/ws_client.py :: TermoWebWSClient.is_running
     Return True if the websocket client task is active.
-custom_components/termoweb/ws_client.py :: WebSocket09Client._runner
+custom_components/termoweb/ws_client.py :: TermoWebWSClient._runner
     Manage reconnection loops and websocket lifecycle.
-custom_components/termoweb/ws_client.py :: WebSocket09Client._handshake
+custom_components/termoweb/ws_client.py :: TermoWebWSClient._handshake
     GET /socket.io/1/?token=<Bearer>&dev_id=<dev_id>&t=<ms>
-custom_components/termoweb/ws_client.py :: WebSocket09Client._connect_ws
+custom_components/termoweb/ws_client.py :: TermoWebWSClient._connect_ws
     Establish the websocket connection using the handshake session id.
-custom_components/termoweb/ws_client.py :: WebSocket09Client._join_namespace
+custom_components/termoweb/ws_client.py :: TermoWebWSClient._join_namespace
     Enter the API namespace required for TermoWeb events.
-custom_components/termoweb/ws_client.py :: WebSocket09Client._send_snapshot_request
+custom_components/termoweb/ws_client.py :: TermoWebWSClient._send_snapshot_request
     Request the initial device snapshot after connecting.
-custom_components/termoweb/ws_client.py :: WebSocket09Client._subscribe_htr_samples
+custom_components/termoweb/ws_client.py :: TermoWebWSClient._subscribe_htr_samples
     Request push updates for heater energy samples.
-custom_components/termoweb/ws_client.py :: WebSocket09Client._heartbeat_loop
+custom_components/termoweb/ws_client.py :: TermoWebWSClient._heartbeat_loop
     Send periodic heartbeat frames to keep the connection alive.
-custom_components/termoweb/ws_client.py :: WebSocket09Client._read_loop
+custom_components/termoweb/ws_client.py :: TermoWebWSClient._read_loop
     Consume websocket frames and route events.
-custom_components/termoweb/ws_client.py :: WebSocket09Client._handle_event
+custom_components/termoweb/ws_client.py :: TermoWebWSClient._handle_event
     Expecting: {"name": "data", "args": [ [ {"path": "...", "body": {...}}, ... ] ]}
-custom_components/termoweb/ws_client.py :: WebSocket09Client._handle_event._ensure_type_bucket
+custom_components/termoweb/ws_client.py :: TermoWebWSClient._handle_event._ensure_type_bucket
     Return the node bucket for ``node_type``, creating defaults.
-custom_components/termoweb/ws_client.py :: WebSocket09Client._handle_event._extract_type_addr
+custom_components/termoweb/ws_client.py :: TermoWebWSClient._handle_event._extract_type_addr
     Extract the node type and address from a websocket path.
-custom_components/termoweb/ws_client.py :: WebSocket09Client._parse_handshake_body
+custom_components/termoweb/ws_client.py :: TermoWebWSClient._parse_handshake_body
     Parse the Socket.IO handshake response into (sid, timeout).
-custom_components/termoweb/ws_client.py :: WebSocket09Client._send_text
+custom_components/termoweb/ws_client.py :: TermoWebWSClient._send_text
     Send a raw Socket.IO text frame if the websocket is open.
-custom_components/termoweb/ws_client.py :: WebSocket09Client._get_token
+custom_components/termoweb/ws_client.py :: TermoWebWSClient._get_token
     Reuse the REST client token for websocket authentication.
-custom_components/termoweb/ws_client.py :: WebSocket09Client._force_refresh_token
+custom_components/termoweb/ws_client.py :: TermoWebWSClient._force_refresh_token
     Force the REST client to fetch a fresh access token.
-custom_components/termoweb/ws_client.py :: WebSocket09Client._api_base
+custom_components/termoweb/ws_client.py :: TermoWebWSClient._api_base
     Return the base REST API URL used for websocket routes.
-custom_components/termoweb/ws_client.py :: WebSocket09Client._update_status
+custom_components/termoweb/ws_client.py :: TermoWebWSClient._update_status
     Publish the websocket status to Home Assistant listeners.
-custom_components/termoweb/ws_client.py :: WebSocket09Client._mark_event
+custom_components/termoweb/ws_client.py :: TermoWebWSClient._mark_event
     Record receipt of a websocket event batch for health tracking.
 custom_components/termoweb/ws_client.py :: DucaheatWSClient.__init__
     Initialize the client.
