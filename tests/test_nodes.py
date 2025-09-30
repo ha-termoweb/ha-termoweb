@@ -198,26 +198,6 @@ def test_node_init_uses_normalization_helpers() -> None:
     assert node.name == "Normalised"
 
 
-def test_extract_heater_addrs_ignores_blank_addresses(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    payload: dict[str, object] = {"nodes": []}
-
-    fake_nodes = [
-        SimpleNamespace(type="htr", addr="A"),
-        SimpleNamespace(type="htr", addr="  "),
-        SimpleNamespace(type="acm", addr="B"),
-    ]
-
-    def fake_build(raw: object) -> list[SimpleNamespace]:
-        assert raw is payload
-        return list(fake_nodes)
-
-    monkeypatch.setattr(nodes_module, "build_node_inventory", fake_build)
-
-    assert nodes_module.extract_heater_addrs(payload) == ["A", "B"]
-
-
 def test_ensure_node_inventory_sets_empty_cache() -> None:
     record: dict[str, object] = {}
     result = nodes_module.ensure_node_inventory(record)

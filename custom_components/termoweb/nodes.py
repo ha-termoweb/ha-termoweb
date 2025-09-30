@@ -298,32 +298,6 @@ def build_node_inventory(raw_nodes: Any) -> list[Node]:
     return inventory
 
 
-def extract_heater_addrs(nodes_payload: Mapping[str, Any] | None) -> list[str]:
-    """Return heater node addresses extracted from ``nodes_payload``."""
-
-    if not isinstance(nodes_payload, Mapping):
-        return []
-
-    inventory = build_node_inventory(nodes_payload)
-    deduped: list[str] = []
-    seen: set[str] = set()
-
-    for node in inventory:
-        node_type = normalize_node_type(getattr(node, "type", ""))
-        if node_type not in HEATER_NODE_TYPES:
-            continue
-        addr = normalize_node_addr(getattr(node, "addr", ""))
-        if not addr:
-            continue
-        key = addr.casefold()
-        if key in seen:
-            continue
-        deduped.append(addr)
-        seen.add(key)
-
-    return deduped
-
-
 def ensure_node_inventory(
     record: Mapping[str, Any], *, nodes: Any | None = None
 ) -> list[Node]:
