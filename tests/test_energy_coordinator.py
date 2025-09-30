@@ -916,6 +916,64 @@ def test_counter_reset(monkeypatch: pytest.MonkeyPatch) -> None:
     asyncio.run(_run())
 
 
+def test_energy_processing_consistent_between_poll_and_ws(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        monkeypatch.setattr(coord_module.time, "time", lambda: 4000.0)
+        monkeypatch.setattr(coord_module.time, "monotonic", lambda: 4000.0)
+
+        poll_client = types.SimpleNamespace()
+        poll_client.get_node_samples = AsyncMock(
+            side_effect=[
+                [{"t": 1000.0, "counter": 1200.0}],
+                [{"t": 1600.0, "counter": 2400.0}],
+            ]
+        )
+
+        hass = HomeAssistant()
+        poll_coord = EnergyStateCoordinator(
+            hass,
+            poll_client,
+            "dev",
+            ["A"],  # type: ignore[arg-type]
+        )
+
+        await poll_coord.async_refresh()
+        await poll_coord.async_refresh()
+
+        poll_bucket = poll_coord.data["dev"]["htr"]
+        poll_energy = poll_bucket["energy"]["A"]
+        poll_power = poll_bucket["power"]["A"]
+
+        ws_client = types.SimpleNamespace()
+        ws_client.get_node_samples = AsyncMock(
+            return_value=[{"t": 1000.0, "counter": 1200.0}]
+        )
+
+        ws_coord = EnergyStateCoordinator(
+            hass,
+            ws_client,
+            "dev",
+            ["A"],  # type: ignore[arg-type]
+        )
+
+        await ws_coord.async_refresh()
+
+        ws_coord.handle_ws_samples(
+            "dev",
+            {"htr": {"A": {"samples": [{"t": 1600.0, "counter": 2400.0}]}}},
+        )
+
+        ws_bucket = ws_coord.data["dev"]["htr"]
+
+        assert ws_bucket["energy"]["A"] == pytest.approx(poll_energy)
+        assert ws_bucket["power"]["A"] == pytest.approx(poll_power)
+        assert ws_coord._last[("htr", "A")] == poll_coord._last[("htr", "A")]
+
+    asyncio.run(_run())
+
+
 def test_energy_regression_resets_last() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()

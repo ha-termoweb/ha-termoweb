@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
 from datetime import timedelta
 import logging
@@ -835,6 +835,48 @@ class EnergyStateCoordinator(
             key: value for key, value in self._last.items() if key in valid_keys
         }
 
+    def _process_energy_sample(
+        self,
+        node_type: str,
+        addr: str,
+        when: float,
+        counter: float,
+        energy_bucket: MutableMapping[str, float],
+        power_bucket: MutableMapping[str, float],
+        *,
+        prune_power: bool = False,
+    ) -> bool:
+        """Update cached energy and derived power for ``addr``."""
+
+        kwh = counter / 1000.0
+        energy_bucket[addr] = kwh
+        key = (node_type, addr)
+        prev = self._last.get(key)
+        if prev:
+            prev_t, prev_kwh = prev
+            if kwh < prev_kwh or when <= prev_t:
+                self._last[key] = (when, kwh)
+                if prune_power:
+                    power_bucket.pop(addr, None)
+                    return True
+                return False
+
+            dt_hours = (when - prev_t) / 3600.0
+            if dt_hours > 0:
+                delta_kwh = kwh - prev_kwh
+                power_bucket[addr] = delta_kwh / dt_hours * 1000.0
+            elif prune_power:
+                power_bucket.pop(addr, None)
+
+            self._last[key] = (when, kwh)
+            return prune_power
+
+        self._last[key] = (when, kwh)
+        if prune_power:
+            power_bucket.pop(addr, None)
+            return True
+        return False
+
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Fetch recent heater energy samples and derive totals and power."""
         if self._should_skip_poll():
@@ -883,26 +925,16 @@ class EnergyStateCoordinator(
                         )
                         continue
 
-                    kwh = counter / 1000.0
                     energy_bucket = energy_by_type.setdefault(node_type, {})
-                    energy_bucket[addr] = kwh
-
-                    key = (node_type, addr)
-                    prev = self._last.get(key)
-                    if prev:
-                        prev_t, prev_kwh = prev
-                        if kwh < prev_kwh or t <= prev_t:
-                            self._last[key] = (t, kwh)
-                            continue
-                        dt_hours = (t - prev_t) / 3600
-                        if dt_hours > 0:
-                            delta_kwh = kwh - prev_kwh
-                            power = delta_kwh / dt_hours * 1000
-                            power_bucket = power_by_type.setdefault(node_type, {})
-                            power_bucket[addr] = power
-                        self._last[key] = (t, kwh)
-                    else:
-                        self._last[key] = (t, kwh)
+                    power_bucket = power_by_type.setdefault(node_type, {})
+                    self._process_energy_sample(
+                        node_type,
+                        addr,
+                        t,
+                        counter,
+                        energy_bucket,
+                        power_bucket,
+                    )
 
             dev_data: dict[str, Any] = {"dev_id": dev_id}
             nodes_by_type: dict[str, dict[str, Any]] = {}
@@ -1052,28 +1084,16 @@ class EnergyStateCoordinator(
                 if point is None:
                     continue
                 sample_t, counter = point
-                kwh = counter / 1000.0
-                key = (node_type, addr)
-                prev = self._last.get(key)
-                energy_bucket[addr] = kwh
-                if prev:
-                    prev_t, prev_kwh = prev
-                    if kwh < prev_kwh or sample_t <= prev_t:
-                        self._last[key] = (sample_t, kwh)
-                        power_bucket.pop(addr, None)
-                        changed = True
-                        continue
-                    dt_hours = (sample_t - prev_t) / 3600.0
-                    if dt_hours > 0:
-                        delta_kwh = kwh - prev_kwh
-                        power_bucket[addr] = delta_kwh / dt_hours * 1000.0
-                    else:
-                        power_bucket.pop(addr, None)
-                    self._last[key] = (sample_t, kwh)
-                    changed = True
-                else:
-                    self._last[key] = (sample_t, kwh)
-                    power_bucket.pop(addr, None)
+                changed_sample = self._process_energy_sample(
+                    node_type,
+                    addr,
+                    sample_t,
+                    counter,
+                    energy_bucket,
+                    power_bucket,
+                    prune_power=True,
+                )
+                if changed_sample:
                     changed = True
 
         if changed:
