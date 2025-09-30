@@ -1059,16 +1059,12 @@ async def test_dev_data_triggers_sample_subscriptions(
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     entry = client.hass.data[module.DOMAIN]["entry"]
 
-    def fake_prepare(entry_data: dict[str, Any], *, default_name_simple: Any) -> Any:
-        assert entry_data is entry
-        return (
-            ["inventory"],
-            {"htr": []},
-            {"htr": ["1", "2"], "acm": ["7"]},
-            lambda *_: "Heater",
-        )
+    def fake_collect(record: Any, *, coordinator: Any = None) -> Any:
+        assert record is entry
+        assert coordinator is client._coordinator
+        return (["inventory"], {"htr": ["1", "2"], "acm": ["7"]}, {})
 
-    monkeypatch.setattr(module, "prepare_heater_platform_data", fake_prepare)
+    monkeypatch.setattr(module, "collect_heater_sample_addresses", fake_collect)
     emit_mock = AsyncMock()
     client._sio.emit = emit_mock
 
@@ -1089,16 +1085,12 @@ async def test_reconnect_resubscribes_samples(
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     entry = client.hass.data[module.DOMAIN]["entry"]
 
-    def fake_prepare(entry_data: dict[str, Any], *, default_name_simple: Any) -> Any:
-        assert entry_data is entry
-        return (
-            ["inventory"],
-            {"htr": []},
-            {"htr": ["9"]},
-            lambda *_: "Heater",
-        )
+    def fake_collect(record: Any, *, coordinator: Any = None) -> Any:
+        assert record is entry
+        assert coordinator is client._coordinator
+        return (["inventory"], {"htr": ["9"]}, {})
 
-    monkeypatch.setattr(module, "prepare_heater_platform_data", fake_prepare)
+    monkeypatch.setattr(module, "collect_heater_sample_addresses", fake_collect)
     emit_mock = AsyncMock()
     client._sio.emit = emit_mock
 
@@ -1117,16 +1109,16 @@ async def test_sample_subscription_uses_coordinator_fallback(
     entry = client.hass.data[module.DOMAIN]["entry"]
     client._coordinator._addrs = lambda: ["4"]  # type: ignore[attr-defined]
 
-    def fake_prepare(entry_data: dict[str, Any], *, default_name_simple: Any) -> Any:
-        assert entry_data is entry
-        return (
-            ["inventory"],
-            {"acm": []},
-            {"acm": ["2"]},
-            lambda *_: "Heater",
-        )
-
-    monkeypatch.setattr(module, "prepare_heater_platform_data", fake_prepare)
+    monkeypatch.setattr(
+        module,
+        "ensure_node_inventory",
+        MagicMock(return_value=[SimpleNamespace(type="acm", addr="2")]),
+    )
+    monkeypatch.setattr(
+        module,
+        "addresses_by_node_type",
+        MagicMock(return_value=({"acm": ["2"]}, set())),
+    )
     emit_mock = AsyncMock()
     client._sio.emit = emit_mock
 
@@ -1139,15 +1131,15 @@ async def test_sample_subscription_uses_coordinator_fallback(
 
 
 @pytest.mark.asyncio
-async def test_sample_subscription_logs_prepare_errors(
+async def test_sample_subscription_logs_helper_errors(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
 
-    def raising_prepare(*_: Any, **__: Any) -> Any:
+    def raising_collect(*_: Any, **__: Any) -> Any:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(module, "prepare_heater_platform_data", raising_prepare)
+    monkeypatch.setattr(module, "collect_heater_sample_addresses", raising_collect)
     emit_mock = AsyncMock()
     client._sio.emit = emit_mock
 
@@ -1163,18 +1155,16 @@ async def test_sample_subscription_handles_fallback_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
-    entry = client.hass.data[module.DOMAIN]["entry"]
-
-    def fake_prepare(entry_data: dict[str, Any], *, default_name_simple: Any) -> Any:
-        assert entry_data is entry
-        return (
-            ["inventory"],
-            {"acm": []},
-            {"acm": ["1"]},
-            lambda *_: "Heater",
-        )
-
-    monkeypatch.setattr(module, "prepare_heater_platform_data", fake_prepare)
+    monkeypatch.setattr(
+        module,
+        "ensure_node_inventory",
+        MagicMock(return_value=[SimpleNamespace(type="acm", addr="1")]),
+    )
+    monkeypatch.setattr(
+        module,
+        "addresses_by_node_type",
+        MagicMock(return_value=({"acm": ["1"]}, set())),
+    )
 
     def bad_addrs() -> None:
         raise TypeError
@@ -1188,6 +1178,32 @@ async def test_sample_subscription_handles_fallback_errors(
     assert emit_mock.await_args_list == [
         call("subscribe", "/acm/1/samples", namespace=module.WS_NAMESPACE)
     ]
+
+
+@pytest.mark.asyncio
+async def test_legacy_sample_subscription_uses_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _make_legacy_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    entry = client.hass.data[module.DOMAIN]["entry"]
+
+    def fake_collect(record: Any, *, coordinator: Any = None) -> Any:
+        assert record is entry
+        assert coordinator is client._coordinator
+        return (["inventory"], {"htr": ["5"], "acm": ["8"]}, {})
+
+    monkeypatch.setattr(module, "collect_heater_sample_addresses", fake_collect)
+
+    send_mock = AsyncMock()
+    client._send_text = send_mock  # type: ignore[assignment]
+
+    await client._subscribe_htr_samples()
+
+    expected_payloads = [
+        f'5::{module.WS_NAMESPACE}:{{"name":"subscribe","args":["/htr/5/samples"]}}',
+        f'5::{module.WS_NAMESPACE}:{{"name":"subscribe","args":["/acm/8/samples"]}}',
+    ]
+    assert [call.args[0] for call in send_mock.await_args_list] == expected_payloads
 
 
 @pytest.mark.asyncio
