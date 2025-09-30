@@ -1,5 +1,7 @@
-import types
-from typing import Any
+from __future__ import annotations
+
+import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -7,62 +9,86 @@ from conftest import _install_stubs
 
 _install_stubs()
 
-import custom_components.termoweb.backends as backends  # noqa: E402
-from custom_components.termoweb.const import (  # noqa: E402
-    BRAND_DUCAHEAT,
-    BRAND_TERMOWEB,
+from custom_components.termoweb.backend import (  # noqa: E402
+    Backend,
+    DucaheatBackend,
+    TermoWebBackend,
+    create_backend,
 )
+from custom_components.termoweb.const import BRAND_DUCAHEAT  # noqa: E402
+from custom_components.termoweb.ws_client import (  # noqa: E402
+    DucaheatWSClient,
+    TermoWebWSClient,
+    WebSocketClient,
+)
+
+
+class DummyHttpClient:
+    """Minimal HTTP client stub exposing a session attribute."""
+
+    def __init__(self) -> None:
+        self._session = SimpleNamespace()
+
+
+def _make_hass(loop: asyncio.AbstractEventLoop) -> SimpleNamespace:
+    """Return a fake Home Assistant object with the required loop."""
+
+    return SimpleNamespace(loop=loop)
+
+
 def test_backend_factory_returns_expected_clients() -> None:
-    hass = types.SimpleNamespace(
-        loop=types.SimpleNamespace(create_task=lambda coro, name=None: coro),
-        data={},
-    )
-    coordinator = types.SimpleNamespace()
-    api_client = types.SimpleNamespace(_session=types.SimpleNamespace())
+    """Backends created via the factory expose the correct websocket clients."""
 
-    class LegacyStub:
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            self.args = args
-            self.kwargs = kwargs
+    client = DummyHttpClient()
 
-    class EngineStub(LegacyStub):
+    termoweb_backend = create_backend(brand="termoweb", client=client)
+    assert isinstance(termoweb_backend, TermoWebBackend)
+
+    loop = asyncio.new_event_loop()
+    try:
+        hass = _make_hass(loop)
+        ws_client = termoweb_backend.create_ws_client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            coordinator=object(),
+        )
+        assert isinstance(ws_client, WebSocketClient)
+        assert isinstance(ws_client, TermoWebWSClient)
+        assert ws_client._protocol_hint == "socketio09"
+        loop.run_until_complete(ws_client.stop())
+    finally:
+        loop.close()
+
+    ducaheat_backend = create_backend(brand=BRAND_DUCAHEAT, client=client)
+    assert isinstance(ducaheat_backend, DucaheatBackend)
+
+    loop = asyncio.new_event_loop()
+    try:
+        hass = _make_hass(loop)
+        ws_client = ducaheat_backend.create_ws_client(
+            hass,
+            entry_id="entry",
+            dev_id="dev",
+            coordinator=object(),
+        )
+        assert isinstance(ws_client, WebSocketClient)
+        assert isinstance(ws_client, DucaheatWSClient)
+        assert ws_client._protocol_hint == "engineio2"
+        loop.run_until_complete(ws_client.stop())
+    finally:
+        loop.close()
+
+    default_backend = create_backend(brand="unknown", client=client)
+    assert isinstance(default_backend, TermoWebBackend)
+
+
+def test_backend_requires_create_override() -> None:
+    """Attempting to instantiate a backend without a websocket factory fails."""
+
+    class InvalidBackend(Backend):
         pass
 
-    termoweb_backend_cls = backends.get_backend_for_brand(BRAND_TERMOWEB)
-    termoweb_backend = termoweb_backend_cls(
-        hass,
-        entry_id="entry",
-        api_client=api_client,
-        coordinator=coordinator,
-        ws_client_factory=LegacyStub,
-    )
-    legacy_client = termoweb_backend.create_ws_client("dev")
-    assert isinstance(legacy_client, LegacyStub)
-
-    duca_backend_cls = backends.get_backend_for_brand(BRAND_DUCAHEAT)
-    duca_backend = duca_backend_cls(
-        hass,
-        entry_id="entry",
-        api_client=api_client,
-        coordinator=coordinator,
-        ws_client_factory=EngineStub,
-    )
-    v2_client = duca_backend.create_ws_client("dev")
-    assert isinstance(v2_client, EngineStub)
-
-    default_backend_cls = backends.get_backend_for_brand("unknown")
-    assert default_backend_cls is backends.TermowebBackend
-
-
-def test_base_backend_requires_create_override() -> None:
-    hass = types.SimpleNamespace(loop=None, data={})
-    backend = backends.BaseBackend(
-        hass,
-        entry_id="entry",
-        api_client=object(),
-        coordinator=object(),
-        ws_client_factory=lambda *args, **kwargs: None,
-    )
-
-    with pytest.raises(NotImplementedError):
-        backend.create_ws_client("dev")
+    client = DummyHttpClient()
+    with pytest.raises(TypeError):
+        InvalidBackend(brand="termoweb", client=client)
