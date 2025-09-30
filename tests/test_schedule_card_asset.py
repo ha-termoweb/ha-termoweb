@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 
 def test_schedule_card_clears_cache_when_prog_missing() -> None:
     """Ensure cached schedule data is dropped when prog disappears."""
+
+    if shutil.which("node") is None:
+        pytest.skip("Node.js runtime is required for schedule card tests")
 
     repo_root = Path(__file__).resolve().parents[1]
     card_path = repo_root / "custom_components" / "termoweb" / "assets" / "termoweb_schedule_card.js"

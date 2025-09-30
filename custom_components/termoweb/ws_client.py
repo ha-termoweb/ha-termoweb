@@ -352,6 +352,7 @@ class WebSocketClient:
     async def _on_reconnect(self) -> None:
         """Handle socket reconnection attempts."""
         _LOGGER.debug("WS %s: reconnect event", self.dev_id)
+        await self._subscribe_heater_samples()
 
     async def _on_connect_error(self, data: Any) -> None:
         """Log ``connect_error`` events with their payload."""
@@ -391,6 +392,7 @@ class WebSocketClient:
         """Handle the ``dev_data`` payload."""
         self._stats.frames_total += 1
         self._handle_dev_data(data)
+        await self._subscribe_heater_samples()
 
     async def _on_update(self, data: Any) -> None:
         """Handle the ``update`` payload."""
@@ -643,6 +645,66 @@ class WebSocketClient:
                 self._coordinator.data = updated  # type: ignore[attr-defined]
 
         return normalized_map
+
+    async def _subscribe_heater_samples(self) -> None:
+        """Subscribe to heater and accumulator sample updates."""
+
+        try:
+            record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
+            entry_data = record if isinstance(record, dict) else {}
+            inventory, _nodes_by_type, addrs_by_type, _ = prepare_heater_platform_data(
+                entry_data,
+                default_name_simple=lambda addr: f"Heater {addr}",
+            )
+
+            addr_map: dict[str, list[str]] = {
+                node_type: [
+                    addr_str
+                    for addr in addresses
+                    if (addr_str := str(addr).strip())
+                ]
+                for node_type, addresses in addrs_by_type.items()
+                if node_type in HEATER_NODE_TYPES and addresses
+            }
+
+            if not addr_map.get("htr") and hasattr(self._coordinator, "_addrs"):
+                try:
+                    fallback = list(self._coordinator._addrs())  # noqa: SLF001
+                except (AttributeError, TypeError, ValueError):
+                    fallback = []
+                if fallback:
+                    addr_map["htr"] = [
+                        addr_str
+                        for addr in fallback
+                        if (addr_str := str(addr).strip())
+                    ]
+
+            normalized_map, _ = normalize_heater_addresses(addr_map)
+            inventory_or_none = inventory or None
+            normalized_map = self._apply_heater_addresses(
+                normalized_map, inventory=inventory_or_none
+            )
+            if not any(normalized_map.values()):
+                return
+
+            other_types = sorted(
+                node_type for node_type in normalized_map if node_type != "htr"
+            )
+            order = ["htr", *other_types]
+            for node_type in order:
+                addrs = normalized_map.get(node_type) or []
+                for addr in addrs:
+                    await self._sio.emit(
+                        "subscribe",
+                        f"/{node_type}/{addr}/samples",
+                        namespace=WS_NAMESPACE,
+                    )
+        except asyncio.CancelledError:  # pragma: no cover - task lifecycle
+            raise
+        except Exception:  # noqa: BLE001 - defensive logging
+            _LOGGER.debug(
+                "WS %s: sample subscription setup failed", self.dev_id, exc_info=True
+            )
 
     @staticmethod
     def _build_nodes_snapshot(nodes: dict[str, Any]) -> dict[str, Any]:

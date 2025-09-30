@@ -3,7 +3,7 @@ import logging
 import time
 from contextlib import suppress
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
@@ -32,7 +32,7 @@ def patch_async_client(monkeypatch: pytest.MonkeyPatch) -> None:
         def __init__(self, **_: Any) -> None:
             self.connected = False
             self.events: dict[tuple[str, str | None], Any] = {}
-            self.last_emit: tuple[str, str | None] | None = None
+            self.last_emit: tuple[str, Any | None, str | None] | None = None
             self.eio = SimpleNamespace(
                 start_background_task=lambda target, *a, **kw: None,
                 http=None,
@@ -50,8 +50,14 @@ def patch_async_client(monkeypatch: pytest.MonkeyPatch) -> None:
         async def disconnect(self) -> None:
             self.connected = False
 
-        async def emit(self, event: str, *, namespace: str | None = None) -> None:
-            self.last_emit = (event, namespace)
+        async def emit(
+            self,
+            event: str,
+            data: Any | None = None,
+            *,
+            namespace: str | None = None,
+        ) -> None:
+            self.last_emit = (event, data, namespace)
 
     monkeypatch.setattr(module.socketio, "AsyncClient", StubAsyncClient)
 
@@ -235,6 +241,9 @@ def test_http_wrapping_handles_missing_attributes(monkeypatch: pytest.MonkeyPatc
             object.__setattr__(self, "connected", False)
             object.__setattr__(self, "events", {})
             object.__setattr__(
+                self, "last_emit", cast(tuple[str, Any | None, str | None] | None, None)
+            )
+            object.__setattr__(
                 self,
                 "eio",
                 SimpleNamespace(
@@ -261,8 +270,14 @@ def test_http_wrapping_handles_missing_attributes(monkeypatch: pytest.MonkeyPatc
         async def disconnect(self) -> None:
             self.connected = False
 
-        async def emit(self, event: str, *, namespace: str | None = None) -> None:
-            self.last_emit = (event, namespace)
+        async def emit(
+            self,
+            event: str,
+            data: Any | None = None,
+            *,
+            namespace: str | None = None,
+        ) -> None:
+            self.last_emit = (event, data, namespace)
 
     monkeypatch.setattr(module.socketio, "AsyncClient", AltAsyncClient)
     client = _make_client(monkeypatch)
@@ -948,6 +963,144 @@ async def test_ducaheat_client_extended_logging(monkeypatch: pytest.MonkeyPatch)
     await client._on_dev_handshake({})
     await client._on_dev_data({"nodes": {}})
     await client._on_update({"nodes": {}})
+
+
+@pytest.mark.asyncio
+async def test_dev_data_triggers_sample_subscriptions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    entry = client.hass.data[module.DOMAIN]["entry"]
+
+    def fake_prepare(entry_data: dict[str, Any], *, default_name_simple: Any) -> Any:
+        assert entry_data is entry
+        return (
+            ["inventory"],
+            {"htr": []},
+            {"htr": ["1", "2"], "acm": ["7"]},
+            lambda *_: "Heater",
+        )
+
+    monkeypatch.setattr(module, "prepare_heater_platform_data", fake_prepare)
+    emit_mock = AsyncMock()
+    client._sio.emit = emit_mock
+
+    await client._on_dev_data({"nodes": {}})
+
+    expected = [
+        call("subscribe", "/htr/1/samples", namespace=module.WS_NAMESPACE),
+        call("subscribe", "/htr/2/samples", namespace=module.WS_NAMESPACE),
+        call("subscribe", "/acm/7/samples", namespace=module.WS_NAMESPACE),
+    ]
+    assert emit_mock.await_args_list == expected
+
+
+@pytest.mark.asyncio
+async def test_reconnect_resubscribes_samples(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    entry = client.hass.data[module.DOMAIN]["entry"]
+
+    def fake_prepare(entry_data: dict[str, Any], *, default_name_simple: Any) -> Any:
+        assert entry_data is entry
+        return (
+            ["inventory"],
+            {"htr": []},
+            {"htr": ["9"]},
+            lambda *_: "Heater",
+        )
+
+    monkeypatch.setattr(module, "prepare_heater_platform_data", fake_prepare)
+    emit_mock = AsyncMock()
+    client._sio.emit = emit_mock
+
+    await client._on_reconnect()
+
+    assert emit_mock.await_args_list == [
+        call("subscribe", "/htr/9/samples", namespace=module.WS_NAMESPACE)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_sample_subscription_uses_coordinator_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    entry = client.hass.data[module.DOMAIN]["entry"]
+    client._coordinator._addrs = lambda: ["4"]  # type: ignore[attr-defined]
+
+    def fake_prepare(entry_data: dict[str, Any], *, default_name_simple: Any) -> Any:
+        assert entry_data is entry
+        return (
+            ["inventory"],
+            {"acm": []},
+            {"acm": ["2"]},
+            lambda *_: "Heater",
+        )
+
+    monkeypatch.setattr(module, "prepare_heater_platform_data", fake_prepare)
+    emit_mock = AsyncMock()
+    client._sio.emit = emit_mock
+
+    await client._on_dev_data({"nodes": {}})
+
+    assert emit_mock.await_args_list == [
+        call("subscribe", "/htr/4/samples", namespace=module.WS_NAMESPACE),
+        call("subscribe", "/acm/2/samples", namespace=module.WS_NAMESPACE),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_sample_subscription_logs_prepare_errors(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+
+    def raising_prepare(*_: Any, **__: Any) -> Any:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(module, "prepare_heater_platform_data", raising_prepare)
+    emit_mock = AsyncMock()
+    client._sio.emit = emit_mock
+
+    caplog.set_level(logging.DEBUG)
+    await client._on_dev_data({"nodes": {}})
+
+    assert "sample subscription setup failed" in caplog.text
+    emit_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sample_subscription_handles_fallback_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    entry = client.hass.data[module.DOMAIN]["entry"]
+
+    def fake_prepare(entry_data: dict[str, Any], *, default_name_simple: Any) -> Any:
+        assert entry_data is entry
+        return (
+            ["inventory"],
+            {"acm": []},
+            {"acm": ["1"]},
+            lambda *_: "Heater",
+        )
+
+    monkeypatch.setattr(module, "prepare_heater_platform_data", fake_prepare)
+
+    def bad_addrs() -> None:
+        raise TypeError
+
+    client._coordinator._addrs = bad_addrs  # type: ignore[attr-defined]
+    emit_mock = AsyncMock()
+    client._sio.emit = emit_mock
+
+    await client._on_dev_data({"nodes": {}})
+
+    assert emit_mock.await_args_list == [
+        call("subscribe", "/acm/1/samples", namespace=module.WS_NAMESPACE)
+    ]
 
 
 @pytest.mark.asyncio
