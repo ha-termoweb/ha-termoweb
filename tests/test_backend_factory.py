@@ -4,6 +4,8 @@ import asyncio
 from types import SimpleNamespace
 from typing import Any
 
+from types import ModuleType
+
 import pytest
 
 from custom_components.termoweb.backend import create_backend
@@ -13,7 +15,7 @@ from custom_components.termoweb.backend.termoweb import TermoWebBackend
 from custom_components.termoweb.const import BRAND_DUCAHEAT
 from custom_components.termoweb.ws_client import (
     WebSocketClient,
-    WebSocket09Client,
+    TermoWebWSClient,
 )
 
 
@@ -100,7 +102,7 @@ def test_termoweb_backend_creates_ws_client() -> None:
         loop.close()
 
     assert isinstance(ws_client, WebSocketClient)
-    assert isinstance(ws_client, WebSocket09Client)
+    assert isinstance(ws_client, TermoWebWSClient)
     assert ws_client.dev_id == "device456"
     assert ws_client.entry_id == "entry123"
     assert ws_client._coordinator is coordinator
@@ -110,7 +112,7 @@ def test_termoweb_backend_creates_ws_client() -> None:
 def test_termoweb_backend_fallback_ws_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
     import custom_components.termoweb as init_module
 
-    monkeypatch.setattr(init_module, "WebSocket09Client", None)
+    monkeypatch.setattr(init_module, "TermoWebWSClient", None)
     client = DummyHttpClient()
     backend = TermoWebBackend(brand="termoweb", client=client)
     loop = asyncio.new_event_loop()
@@ -126,7 +128,7 @@ def test_termoweb_backend_fallback_ws_resolution(monkeypatch: pytest.MonkeyPatch
         loop.close()
 
     assert isinstance(ws_client, WebSocketClient)
-    assert isinstance(ws_client, WebSocket09Client)
+    assert isinstance(ws_client, TermoWebWSClient)
     assert ws_client._protocol_hint == "socketio09"
 
 
@@ -137,14 +139,82 @@ def test_termoweb_backend_resolve_ws_client_cls_fallback(
     monkeypatch.setitem(
         termoweb_backend.sys.modules,
         "custom_components.termoweb",
-        SimpleNamespace(WebSocket09Client=None),
+        SimpleNamespace(TermoWebWSClient=None),
     )
     monkeypatch.setitem(
         termoweb_backend.sys.modules,
         "custom_components.termoweb.__init__",
-        SimpleNamespace(WebSocket09Client=None),
+        SimpleNamespace(TermoWebWSClient=None),
     )
 
+    resolved = backend._resolve_ws_client_cls()
+    assert resolved is WebSocketClient
+
+
+def test_termoweb_backend_resolve_ws_no_modules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = TermoWebBackend(brand="termoweb", client=DummyHttpClient())
+    monkeypatch.setitem(termoweb_backend.sys.modules, "custom_components.termoweb", None)
+    monkeypatch.setitem(
+        termoweb_backend.sys.modules,
+        "custom_components.termoweb.__init__",
+        None,
+    )
+    resolved = backend._resolve_ws_client_cls()
+    assert resolved is WebSocketClient
+
+
+def test_termoweb_backend_resolve_ws_no_module_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = TermoWebBackend(brand="termoweb", client=DummyHttpClient())
+    marker = object()
+    monkeypatch.setitem(
+        termoweb_backend.sys.modules,
+        "custom_components.termoweb",
+        marker,
+    )
+    monkeypatch.setitem(
+        termoweb_backend.sys.modules,
+        "custom_components.termoweb.__init__",
+        marker,
+    )
+    resolved = backend._resolve_ws_client_cls()
+    assert resolved is WebSocketClient
+
+
+def test_termoweb_backend_resolve_ws_import_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = TermoWebBackend(brand="termoweb", client=DummyHttpClient())
+    module = ModuleType("custom_components.termoweb")
+    module.TermoWebWSClient = None  # type: ignore[attr-defined]
+    init_module = ModuleType("custom_components.termoweb.__init__")
+    init_module.TermoWebWSClient = None  # type: ignore[attr-defined]
+    monkeypatch.setitem(termoweb_backend.sys.modules, module.__name__, module)
+    monkeypatch.setitem(termoweb_backend.sys.modules, init_module.__name__, init_module)
+    def _raise(_: str) -> None:
+        raise ImportError
+
+    monkeypatch.setattr(termoweb_backend, "import_module", _raise)
+    resolved = backend._resolve_ws_client_cls()
+    assert resolved is WebSocketClient
+
+
+def test_termoweb_backend_resolve_ws_missing_attr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = TermoWebBackend(brand="termoweb", client=DummyHttpClient())
+    module = ModuleType("custom_components.termoweb")
+    module.TermoWebWSClient = None  # type: ignore[attr-defined]
+    init_module = ModuleType("custom_components.termoweb.__init__")
+    init_module.TermoWebWSClient = None  # type: ignore[attr-defined]
+    monkeypatch.setitem(termoweb_backend.sys.modules, module.__name__, module)
+    monkeypatch.setitem(termoweb_backend.sys.modules, init_module.__name__, init_module)
+
+    ws_module = ModuleType("custom_components.termoweb.ws_client")
+    monkeypatch.setattr(termoweb_backend, "import_module", lambda name: ws_module)
     resolved = backend._resolve_ws_client_cls()
     assert resolved is WebSocketClient
 
@@ -173,7 +243,7 @@ def test_termoweb_backend_legacy_ws_class(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setitem(
         termoweb_backend.sys.modules,
         "custom_components.termoweb",
-        SimpleNamespace(WebSocket09Client=LegacyWS),
+        SimpleNamespace(TermoWebWSClient=LegacyWS),
     )
 
     loop = asyncio.new_event_loop()

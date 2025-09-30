@@ -1,7 +1,9 @@
 """TermoWeb backend implementation."""
 from __future__ import annotations
 
+from importlib import import_module
 import sys
+from types import ModuleType
 from typing import Any
 
 from custom_components.termoweb.ws_client import WebSocketClient
@@ -15,16 +17,32 @@ class TermoWebBackend(Backend):
     def _resolve_ws_client_cls(self) -> type[Any]:
         """Return the websocket client class compatible with this backend."""
 
+        saw_any_module = False
+        saw_real_module = False
         for module_name in (
             "custom_components.termoweb.__init__",
             "custom_components.termoweb",
         ):
             module = sys.modules.get(module_name)
-            if not module:
+            if module is None:
                 continue
-            ws_cls = getattr(module, "WebSocket09Client", None)
+            saw_any_module = True
+            if isinstance(module, ModuleType):
+                saw_real_module = True
+            ws_cls = getattr(module, "TermoWebWSClient", None)
             if isinstance(ws_cls, type):
                 return ws_cls
+        if not saw_any_module:
+            return WebSocketClient
+        if not saw_real_module:
+            return WebSocketClient
+        try:
+            ws_module = import_module("custom_components.termoweb.ws_client")
+        except ImportError:
+            return WebSocketClient
+        ws_cls = getattr(ws_module, "TermoWebWSClient", None)
+        if isinstance(ws_cls, type):
+            return ws_cls
         return WebSocketClient
 
     def create_ws_client(
