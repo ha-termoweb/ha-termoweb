@@ -60,6 +60,15 @@ def test_binary_sensor_setup_and_dispatch() -> None:
         def _add_entities(entities):
             added.extend(entities)
 
+        guard_coordinator = types.SimpleNamespace(hass=None, data={})
+        guard_entity = GatewayOnlineBinarySensor(
+            guard_coordinator,
+            "guard-entry",
+            "guard-device",
+        )
+        await guard_entity.async_added_to_hass()
+        assert not guard_entity._ws_subscription.is_connected  # pylint: disable=protected-access
+
         await async_setup_binary_sensor_entry(hass, entry, _add_entities)
 
         assert len(added) == 1
@@ -70,6 +79,7 @@ def test_binary_sensor_setup_and_dispatch() -> None:
         await entity.async_added_to_hass()
 
         assert entity.is_on is True
+        assert entity._ws_subscription.is_connected  # pylint: disable=protected-access
 
         info = entity.device_info
         expected_info = build_gateway_device_info(hass, entry.entry_id, dev_id)
@@ -91,6 +101,9 @@ def test_binary_sensor_setup_and_dispatch() -> None:
         entity.schedule_update_ha_state.assert_not_called()
         async_dispatcher_send(hass, signal_ws_status(entry.entry_id), {"dev_id": dev_id})
         entity.schedule_update_ha_state.assert_called_once_with()
+
+        await entity.async_will_remove_from_hass()
+        assert not entity._ws_subscription.is_connected  # pylint: disable=protected-access
 
     asyncio.run(_run())
 
