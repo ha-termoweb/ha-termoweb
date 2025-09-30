@@ -1080,6 +1080,197 @@ def test_ws_samples_update_defers_polling(monkeypatch: pytest.MonkeyPatch) -> No
     asyncio.run(_run())
 
 
+def test_should_skip_poll_conditions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise websocket-driven polling skip decisions."""
+
+    hass = HomeAssistant()
+    client = types.SimpleNamespace()
+    coord = EnergyStateCoordinator(hass, client, "dev", {"htr": ["A"]})
+
+    assert coord._should_skip_poll() is False
+
+    coord.data = {}
+    coord._ws_deadline = None
+    assert coord._should_skip_poll() is False
+
+    coord._ws_deadline = 10.0
+    monkeypatch.setattr(coord_module.time, "monotonic", lambda: 15.0)
+    assert coord._should_skip_poll() is False
+
+    coord.data = {"dev": {}}
+    coord._ws_deadline = 20.0
+    monkeypatch.setattr(coord_module.time, "monotonic", lambda: 5.0)
+    assert coord._should_skip_poll() is True
+
+
+def test_async_update_data_uses_cached_samples(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure websocket freshness skips API polling and returns cached data."""
+
+    async def _run() -> None:
+        hass = HomeAssistant()
+        client = types.SimpleNamespace()
+        coord = EnergyStateCoordinator(hass, client, "dev", {"htr": ["A"]})
+
+        coord.data = {
+            "dev": {
+                "nodes_by_type": {"htr": {"addrs": ["A"], "energy": {"A": 1.0}, "power": {}}},
+                "htr": {"addrs": ["A"], "energy": {"A": 1.0}, "power": {}},
+            }
+        }
+        coord._ws_deadline = 100.0
+
+        monkeypatch.setattr(coord_module.time, "monotonic", lambda: 50.0)
+
+        cached = await coord._async_update_data()
+        assert cached == coord.data
+
+        coord.data = ["bad"]  # type: ignore[assignment]
+        monkeypatch.setattr(coord, "_should_skip_poll", lambda: True)
+        assert await coord._async_update_data() == {}
+
+    asyncio.run(_run())
+
+
+def test_ws_margin_seconds_bounds() -> None:
+    """Verify the websocket margin respects defaults and upper bounds."""
+
+    hass = HomeAssistant()
+    client = types.SimpleNamespace()
+    coord = EnergyStateCoordinator(hass, client, "dev", {"htr": ["A"]})
+
+    coord._ws_lease = -1
+    assert coord._ws_margin_seconds() == coord._ws_margin_default
+
+    coord._ws_lease = 10_000.0
+    assert coord._ws_margin_seconds() == 600.0
+
+
+def test_extract_sample_point_variants() -> None:
+    """Confirm sample extraction tolerates nested mappings and iterables."""
+
+    nested = {"samples": {"samples": [{"t": 100.0, "counter": 2000.0}]}}
+    assert EnergyStateCoordinator._extract_sample_point(nested) == (100.0, 2000.0)
+
+    sequence = [{"t": 10.0, "counter": 1000.0}, {"t": 20.0, "counter": 3000.0}]
+    assert EnergyStateCoordinator._extract_sample_point(sequence) == (20.0, 3000.0)
+
+    assert EnergyStateCoordinator._extract_sample_point({"samples": []}) is None
+    assert EnergyStateCoordinator._extract_sample_point("invalid") is None
+
+
+def test_handle_ws_samples_branching(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise the various guard paths when processing websocket samples."""
+
+    hass = HomeAssistant()
+    client = types.SimpleNamespace()
+    coord = EnergyStateCoordinator(hass, client, "dev", {"htr": ["A"], "acm": ["B"]})
+
+    coord.handle_ws_samples("other", {})
+
+    coord.data = []  # type: ignore[assignment]
+    coord.handle_ws_samples("dev", {})
+
+    coord.data = {"dev": []}  # type: ignore[assignment]
+    coord.handle_ws_samples("dev", {})
+
+    coord.data = {"dev": {"nodes_by_type": []}}  # type: ignore[assignment]
+    coord.handle_ws_samples("dev", {})
+
+    coord.data = {
+        "dev": {
+            "nodes_by_type": {
+                "htr": {"addrs": ["A"], "energy": {}, "power": {}},
+                "acm": [],
+            },
+            "htr": {"addrs": ["A"], "energy": {}, "power": {}},
+        }
+    }
+    coord._last = {("htr", "A"): (float("nan"), 1.0)}
+
+    fake_now = 0.0
+
+    def _fake_time() -> float:
+        return fake_now
+
+    monkeypatch.setattr(coord_module.time, "monotonic", _fake_time)
+    monkeypatch.setattr(coord_module.time, "time", _fake_time)
+
+    updates = {
+        "": {"1": {"samples": []}},
+        "pmo": {"1": {"samples": []}},
+        "htr": {
+            "A": {"samples": []},
+            "unknown": {"samples": [{"t": 100.0, "counter": 500.0}]},
+        },
+    }
+
+    coord.handle_ws_samples("dev", updates, lease_seconds=60.0)
+    assert coord._ws_deadline == pytest.approx(120.0)
+    assert coord.update_interval == timedelta(seconds=300)
+
+    fake_now = 100.0
+    updates = {
+        "acm": {"B": {"samples": [{"t": 200.0, "counter": 0.0}]}},
+        "htr": {
+            "missing": {"samples": [{"t": 0.0, "counter": 0.0}]},
+            "A": {"samples": [{"t": 3600.0, "counter": 2000.0}]},
+        },
+    }
+
+    coord.handle_ws_samples("dev", updates, lease_seconds=120.0)
+
+    energy_bucket = coord.data["dev"]["nodes_by_type"]["htr"].get("energy", {})
+    assert energy_bucket.get("A") == pytest.approx(2.0)
+    assert coord._ws_deadline == pytest.approx(280.0)
+
+    fake_now = 200.0
+    coord.handle_ws_samples(
+        "dev",
+        {"htr": {"A": {"samples": [{"t": 3500.0, "counter": 1000.0}]}}},
+        lease_seconds=0,
+    )
+    assert coord.data["dev"]["nodes_by_type"]["htr"].get("power", {}).get("A") is None
+    assert coord._ws_deadline is None
+
+    fake_now = 300.0
+    coord.handle_ws_samples(
+        "dev",
+        {"htr": {"A": {"samples": [{"t": 7100.0, "counter": 4000.0}]}}},
+    )
+
+    updated = coord.data["dev"]["nodes_by_type"]["htr"]
+    assert updated.get("energy", {}).get("A") == pytest.approx(4.0)
+    assert updated.get("power", {}).get("A") == pytest.approx(3000.0)
+
+    coord._last.pop(("htr", "A"), None)
+    fake_now = 500.0
+    coord.handle_ws_samples(
+        "dev",
+        {"htr": {"A": {"samples": [{"t": 8200.0, "counter": 5000.0}]}}},
+    )
+    assert coord._last[("htr", "A")] == (8200.0, 5.0)
+
+
+def test_handle_ws_samples_skips_empty_points() -> None:
+    """Ensure empty websocket samples do not update coordinator state."""
+
+    hass = HomeAssistant()
+    client = types.SimpleNamespace()
+    coord = EnergyStateCoordinator(hass, client, "dev", {"htr": ["A"]})
+    coord.data = {
+        "dev": {
+            "nodes_by_type": {"htr": {"addrs": ["A"], "energy": {}, "power": {}}},
+            "htr": {"addrs": ["A"], "energy": {}, "power": {}},
+        }
+    }
+
+    coord.handle_ws_samples(
+        "dev",
+        {"htr": {"A": [{"samples": []}, {"samples": []}]}},
+    )
+
+    assert coord._last == {}
+
 def test_heater_energy_samples_empty_on_api_error() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()

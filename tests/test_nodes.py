@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -223,6 +224,32 @@ def test_ensure_node_inventory_sets_empty_cache() -> None:
     result = nodes_module.ensure_node_inventory(record)
     assert result == []
     assert record["node_inventory"] == []
+
+
+def test_collect_heater_sample_addresses_fallbacks() -> None:
+    """Ensure coordinator address fallbacks populate heater mapping."""
+
+    class DummyCoordinator:
+        def _addrs(self) -> list[str]:
+            return [" 2 ", "", "01", "2"]
+
+    record: dict[str, Any] = {"nodes": []}
+
+    inventory, addr_map, compat = nodes_module.collect_heater_sample_addresses(
+        record,
+        coordinator=DummyCoordinator(),
+    )
+
+    assert inventory == []
+    assert addr_map == {"htr": ["2", "01"]}
+    assert compat["htr"] == "htr"
+
+    proxy_record = MappingProxyType({"nodes": []})
+    _, proxy_map, _ = nodes_module.collect_heater_sample_addresses(
+        proxy_record,
+        coordinator=DummyCoordinator(),
+    )
+    assert proxy_map == {"htr": ["2", "01"]}
 
 
 def test_heater_sample_subscription_targets_orders_types() -> None:
