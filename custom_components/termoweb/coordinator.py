@@ -802,6 +802,11 @@ class EnergyStateCoordinator(
         self._addrs: list[str] = []
         self._compat_aliases: dict[str, str] = {}
         self._last: dict[tuple[str, str], tuple[float, float]] = {}
+        self._base_interval = HTR_ENERGY_UPDATE_INTERVAL
+        self._base_interval_seconds = HTR_ENERGY_UPDATE_INTERVAL.total_seconds()
+        self._ws_lease: float = 0.0
+        self._ws_deadline: float | None = None
+        self._ws_margin_default = 60.0
         self.update_addresses(addrs)
 
     def update_addresses(
@@ -832,6 +837,15 @@ class EnergyStateCoordinator(
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Fetch recent heater energy samples and derive totals and power."""
+        if self._should_skip_poll():
+            existing = self.data or {}
+            if not isinstance(existing, dict):
+                return {}
+            _LOGGER.debug(
+                "WS %s: energy poll skipped (fresh websocket samples)",
+                self._dev_id,
+            )
+            return dict(existing)
         dev_id = self._dev_id
         try:
             energy_by_type: dict[str, dict[str, float]] = {}
@@ -935,4 +949,132 @@ class EnergyStateCoordinator(
         except (ClientError, BackendRateLimitError, BackendAuthError) as err:
             raise UpdateFailed(f"API error: {err}") from err
         else:
+            self.update_interval = self._base_interval
+            self._ws_deadline = None
             return result
+
+    def _should_skip_poll(self) -> bool:
+        """Return True when websocket pushes keep energy data fresh."""
+
+        if not isinstance(self.data, dict):
+            return False
+        if self._ws_deadline is None:
+            return False
+        if time.monotonic() >= self._ws_deadline:
+            return False
+        return True
+
+    def _ws_margin_seconds(self) -> float:
+        """Return the buffer to wait after the websocket lease expires."""
+
+        if self._ws_lease <= 0:
+            return self._ws_margin_default
+        return max(self._ws_margin_default, min(self._ws_lease * 0.25, 600.0))
+
+    @staticmethod
+    def _extract_sample_point(payload: Any) -> tuple[float, float] | None:
+        """Extract ``(timestamp, counter)`` from websocket sample payloads."""
+
+        if isinstance(payload, Mapping):
+            nested = payload.get("samples")
+            if nested is not None and nested is not payload:
+                extracted = EnergyStateCoordinator._extract_sample_point(nested)
+                if extracted:
+                    return extracted
+            t = float_or_none(payload.get("t"))
+            counter = float_or_none(payload.get("counter"))
+            if t is None or counter is None:
+                return None
+            return t, counter
+        if isinstance(payload, Iterable) and not isinstance(payload, (str, bytes)):
+            latest: tuple[float, float] | None = None
+            for item in payload:
+                extracted = EnergyStateCoordinator._extract_sample_point(item)
+                if extracted is None:
+                    continue
+                if latest is None or extracted[0] >= latest[0]:
+                    latest = extracted
+            return latest
+        return None
+
+    def handle_ws_samples(
+        self,
+        dev_id: str,
+        updates: Mapping[str, Mapping[str, Any]],
+        *,
+        lease_seconds: float | None = None,
+    ) -> None:
+        """Update cached heater metrics from websocket ``samples`` payloads."""
+
+        if dev_id != self._dev_id or not isinstance(self.data, dict):
+            return
+        dev_data = self.data.get(dev_id)
+        if not isinstance(dev_data, dict):
+            return
+        nodes_by_type = dev_data.get("nodes_by_type")
+        if not isinstance(nodes_by_type, dict):
+            return
+
+        if lease_seconds is not None:
+            self._ws_lease = float(lease_seconds) if lease_seconds > 0 else 0.0
+
+        now = time.monotonic()
+        if self._ws_lease > 0:
+            margin = self._ws_margin_seconds()
+            wait_seconds = max(self._ws_lease + margin, 300.0)
+            interval_seconds = min(self._base_interval_seconds, wait_seconds)
+            new_interval = timedelta(seconds=interval_seconds)
+            if self.update_interval != new_interval:
+                self.update_interval = new_interval
+            self._ws_deadline = now + self._ws_lease + margin
+        else:
+            self._ws_deadline = None
+
+        changed = False
+
+        for raw_type, payload in updates.items():
+            node_type = normalize_node_type(raw_type)
+            if not node_type:
+                continue
+            tracked_addrs = self._addresses_by_type.get(node_type)
+            if not tracked_addrs:
+                continue
+            bucket = nodes_by_type.get(node_type)
+            if not isinstance(bucket, dict):
+                continue
+            energy_bucket = bucket.setdefault("energy", {})
+            power_bucket = bucket.setdefault("power", {})
+            for raw_addr, sample_payload in payload.items():
+                addr = normalize_node_addr(raw_addr)
+                if not addr or addr not in tracked_addrs:
+                    continue
+                point = self._extract_sample_point(sample_payload)
+                if point is None:
+                    continue
+                sample_t, counter = point
+                kwh = counter / 1000.0
+                key = (node_type, addr)
+                prev = self._last.get(key)
+                energy_bucket[addr] = kwh
+                if prev:
+                    prev_t, prev_kwh = prev
+                    if kwh < prev_kwh or sample_t <= prev_t:
+                        self._last[key] = (sample_t, kwh)
+                        power_bucket.pop(addr, None)
+                        changed = True
+                        continue
+                    dt_hours = (sample_t - prev_t) / 3600.0
+                    if dt_hours > 0:
+                        delta_kwh = kwh - prev_kwh
+                        power_bucket[addr] = delta_kwh / dt_hours * 1000.0
+                    else:
+                        power_bucket.pop(addr, None)
+                    self._last[key] = (sample_t, kwh)
+                    changed = True
+                else:
+                    self._last[key] = (sample_t, kwh)
+                    power_bucket.pop(addr, None)
+                    changed = True
+
+        if changed:
+            dev_data["nodes_by_type"] = nodes_by_type

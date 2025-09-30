@@ -27,10 +27,11 @@ from .const import API_BASE, DOMAIN, WS_NAMESPACE, signal_ws_data, signal_ws_sta
 from .nodes import (
     NODE_CLASS_BY_TYPE,
     addresses_by_node_type,
-    collect_heater_sample_addresses,
     build_node_inventory as _build_node_inventory,
+    collect_heater_sample_addresses,
     ensure_node_inventory,
     normalize_heater_addresses,
+    normalize_node_addr,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -703,13 +704,54 @@ class WebSocketClient:
                     self.dev_id,
                     len(nodes),
                 )
+        sample_updates: dict[str, dict[str, Any]] = {}
+        for node_type, type_payload in nodes.items():
+            if not isinstance(node_type, str) or not isinstance(type_payload, Mapping):
+                continue
+            samples = type_payload.get("samples")
+            if not isinstance(samples, Mapping):
+                continue
+            bucket: dict[str, Any] = {}
+            for addr, sample_payload in samples.items():
+                normalised_addr = normalize_node_addr(addr)
+                if not normalised_addr:
+                    continue
+                bucket[normalised_addr] = sample_payload
+            if bucket:
+                sample_updates[node_type] = bucket
+
         if merge and self._nodes_raw:
             self._merge_nodes(self._nodes_raw, nodes)
         else:
             self._nodes_raw = deepcopy(nodes)
         self._nodes = self._build_nodes_snapshot(self._nodes_raw)
         self._dispatch_nodes(self._nodes)
+        if sample_updates:
+            self._forward_sample_updates(sample_updates)
         self._mark_event(paths=None, count_event=True)
+
+    def _forward_sample_updates(
+        self, updates: Mapping[str, Mapping[str, Any]]
+    ) -> None:
+        """Relay websocket heater sample updates to the energy coordinator."""
+
+        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
+        if not isinstance(record, Mapping):
+            return
+        energy_coordinator = record.get("energy_coordinator")
+        handler = getattr(energy_coordinator, "handle_ws_samples", None)
+        if not callable(handler):
+            return
+        try:
+            handler(
+                self.dev_id,
+                {node_type: dict(section) for node_type, section in updates.items()},
+                lease_seconds=self._subscription_ttl,
+            )
+        except Exception:  # noqa: BLE001  # pragma: no cover - defensive logging
+            _LOGGER.debug(
+                "WS %s: forwarding heater samples failed", self.dev_id, exc_info=True
+            )
 
     def _extract_nodes(self, data: Any) -> dict[str, Any] | None:
         """Extract the nodes dictionary from a websocket payload."""

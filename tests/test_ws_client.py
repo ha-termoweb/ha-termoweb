@@ -3,7 +3,7 @@ import logging
 import time
 from contextlib import suppress
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Mapping, cast
 from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
@@ -947,6 +947,44 @@ def test_apply_heater_addresses_updates_energy(monkeypatch: pytest.MonkeyPatch) 
     assert result["htr"] == ["1", "2"]
     assert energy_coordinator.updated == {"htr": ["1", "2"]}
     assert client._coordinator.data is not initial_data
+
+
+def test_apply_nodes_payload_forwards_samples(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sample updates should be forwarded to the energy coordinator."""
+
+    client = _make_client(monkeypatch)
+    calls: list[tuple[str, Mapping[str, Mapping[str, Any]], float | None]] = []
+
+    def handle_ws_samples(
+        dev_id: str,
+        updates: Mapping[str, Mapping[str, Any]],
+        *,
+        lease_seconds: float | None = None,
+    ) -> None:
+        calls.append((dev_id, updates, lease_seconds))
+
+    energy_coordinator = SimpleNamespace(handle_ws_samples=handle_ws_samples)
+    client.hass.data[module.DOMAIN]["entry"]["energy_coordinator"] = energy_coordinator
+    client._subscription_ttl = 123.0
+
+    payload = {
+        "nodes": {
+            "htr": {
+                "samples": {
+                    " 1 ": [{"t": 10.0, "counter": 1000}],
+                }
+            }
+        }
+    }
+
+    client._apply_nodes_payload(payload, merge=False, event="dev_data")
+
+    assert calls
+    dev_id, updates, lease = calls[0]
+    assert dev_id == "device"
+    assert lease == pytest.approx(123.0)
+    assert "htr" in updates
+    assert updates["htr"] == {"1": [{"t": 10.0, "counter": 1000}]}
 
 
 def test_dispatch_nodes_handles_raw_payload(monkeypatch: pytest.MonkeyPatch) -> None:
