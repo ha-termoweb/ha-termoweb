@@ -136,6 +136,59 @@ def iter_heater_nodes(
             yield node_type, node, addr_str, resolved_name
 
 
+def iter_heater_maps(
+    coordinator_cache: Mapping[str, Any] | None,
+    *,
+    map_key: str,
+    node_types: Iterable[str] | None = None,
+) -> Iterator[dict[str, Any]]:
+    """Yield unique heater map dictionaries for ``map_key``."""
+
+    if not isinstance(map_key, str) or not map_key:
+        return
+
+    seen: set[int] = set()
+    cache = coordinator_cache if isinstance(coordinator_cache, Mapping) else {}
+
+    if node_types is None:
+        types = list(HEATER_NODE_TYPES)
+    elif isinstance(node_types, str):
+        types = [node_types]
+    elif isinstance(node_types, bytes):  # pragma: no cover - defensive
+        try:  # pragma: no cover - defensive
+            decoded = node_types.decode()
+        except Exception:  # pragma: no cover - defensive
+            decoded = node_types.decode(errors="ignore")
+        types = [decoded]  # pragma: no cover - defensive
+    else:
+        types = list(node_types)
+
+    nodes_by_type = cache.get("nodes_by_type")
+    if isinstance(nodes_by_type, Mapping):
+        for node_type in types:
+            if not node_type:
+                continue
+            section = nodes_by_type.get(node_type)
+            if not isinstance(section, Mapping):
+                continue
+            candidate = section.get(map_key)
+            if isinstance(candidate, dict):
+                ident = id(candidate)
+                if ident in seen:
+                    continue
+                seen.add(ident)
+                yield candidate
+
+    legacy = cache.get("htr")
+    if isinstance(legacy, Mapping):
+        candidate = legacy.get(map_key)
+        if isinstance(candidate, dict):
+            ident = id(candidate)
+            if ident not in seen:
+                seen.add(ident)
+                yield candidate
+
+
 def log_skipped_nodes(
     platform_name: str,
     nodes_by_type: Mapping[str, Iterable[Node] | None],
@@ -323,11 +376,14 @@ class HeaterNodeBase(CoordinatorEntity):
         self._dev_id = dev_id
         self._addr = normalize_node_addr(addr)
         self._attr_name = name
-        resolved_type = normalize_node_type(
-            node_type,
-            default="htr",
-            use_default_when_falsey=True,
-        ) or "htr"
+        resolved_type = (
+            normalize_node_type(
+                node_type,
+                default="htr",
+                use_default_when_falsey=True,
+            )
+            or "htr"
+        )
         self._node_type = resolved_type
         self._attr_unique_id = (
             unique_id or f"{DOMAIN}:{dev_id}:{resolved_type}:{self._addr}"

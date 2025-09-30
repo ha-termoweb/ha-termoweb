@@ -122,9 +122,7 @@ def test_prepare_heater_platform_data_skips_blank_types(
 def test_prepare_heater_platform_data_passes_inventory_to_name_map(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    entry_data = {
-        "nodes": {"nodes": [{"type": "htr", "addr": "9", "name": "Heater"}]}
-    }
+    entry_data = {"nodes": {"nodes": [{"type": "htr", "addr": "9", "name": "Heater"}]}}
     expected_inventory = build_node_inventory(entry_data["nodes"])
 
     def fake_ensure(record: dict[str, Any], *, nodes: Any | None = None) -> list[Any]:
@@ -157,12 +155,12 @@ def test_build_heater_name_map_handles_invalid_entries() -> None:
         "nodes": [
             123,
             {"type": "HTR", "addr": None, "name": "Ignored"},
-        {"type": "foo", "addr": "B", "name": "Skip"},
-        {"type": "htr", "addr": 5, "name": "  "},
-        {"type": "htr", "addr": "6", "name": None},
-        {"type": "htr", "addr": " None ", "name": "Skip None"},
-    ]
-}
+            {"type": "foo", "addr": "B", "name": "Skip"},
+            {"type": "htr", "addr": 5, "name": "  "},
+            {"type": "htr", "addr": "6", "name": None},
+            {"type": "htr", "addr": " None ", "name": "Skip None"},
+        ]
+    }
 
     result = build_heater_name_map(nodes, lambda addr: f"Heater {addr}")
 
@@ -252,7 +250,9 @@ def test_iter_heater_nodes_filters_addresses() -> None:
         iter_heater_nodes(nodes_by_type, fake_resolve_acm, node_types=["acm", "thm"])
     )
 
-    assert [(node_type, addr) for node_type, _node, addr, _ in only_acm] == [("acm", "2")]
+    assert [(node_type, addr) for node_type, _node, addr, _ in only_acm] == [
+        ("acm", "2")
+    ]
     assert resolved_acm == [("acm", "2")]
 
     mapping_nodes = {
@@ -285,10 +285,54 @@ def test_iter_heater_nodes_filters_addresses() -> None:
     blank_nodes: dict[str, list[SimpleNamespace] | None] = {"htr": None, "acm": []}
     assert list(iter_heater_nodes(blank_nodes, fake_resolve)) == []
 
-    assert (
-        list(iter_heater_nodes(nodes_by_type, fake_resolve, node_types=["", "acm"]))
-        == [("acm", nodes_by_type["acm"][0], "2", "acm-2")]
+    assert list(
+        iter_heater_nodes(nodes_by_type, fake_resolve, node_types=["", "acm"])
+    ) == [("acm", nodes_by_type["acm"][0], "2", "acm-2")]
+
+
+def test_iter_heater_maps_deduplicates_sections() -> None:
+    htr_section = {"settings": {"1": {"mode": "auto"}}}
+    acm_section = {"settings": {"2": {"mode": "charge"}}}
+    cache = {
+        "nodes_by_type": {
+            "htr": htr_section,
+            "acm": acm_section,
+        },
+        "htr": htr_section,
+    }
+
+    results = list(
+        heater_module.iter_heater_maps(
+            cache,
+            map_key="settings",
+            node_types=["", "htr", "acm", "htr"],
+        )
     )
+
+    assert len(results) == 2
+    assert results[0] is htr_section["settings"]
+    assert results[1] is acm_section["settings"]
+
+
+def test_iter_heater_maps_accepts_string_node_type() -> None:
+    cache = {"nodes_by_type": {"htr": {"settings": {"1": {"mode": "auto"}}}}}
+
+    results = list(
+        heater_module.iter_heater_maps(
+            cache,
+            map_key="settings",
+            node_types="htr",
+        )
+    )
+
+    assert len(results) == 1
+    assert results[0] == {"1": {"mode": "auto"}}
+
+
+def test_iter_heater_maps_requires_truthy_key() -> None:
+    cache = {"nodes_by_type": {"htr": {"settings": {"1": {"mode": "auto"}}}}}
+
+    assert list(heater_module.iter_heater_maps(cache, map_key="")) == []
 
 
 @pytest.mark.parametrize(

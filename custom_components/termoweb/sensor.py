@@ -21,11 +21,12 @@ from .coordinator import EnergyStateCoordinator
 from .heater import (
     DispatcherSubscriptionHelper,
     HeaterNodeBase,
+    iter_heater_maps,
     iter_heater_nodes,
     log_skipped_nodes,
     prepare_heater_platform_data,
 )
-from .nodes import HEATER_NODE_TYPES, build_heater_energy_unique_id
+from .nodes import build_heater_energy_unique_id
 from .utils import build_gateway_device_info, float_or_none
 
 _WH_TO_KWH = 1 / 1000.0
@@ -400,26 +401,10 @@ class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self) -> float | None:
         """Return the summed energy usage across all heaters."""
-        d = (self.coordinator.data or {}).get(self._dev_id, {})
-        sections: list[dict[str, Any]] = []
-        seen: set[int] = set()
-        nodes_by_type = d.get("nodes_by_type")
-        if isinstance(nodes_by_type, dict):
-            for node_type in HEATER_NODE_TYPES:
-                section = nodes_by_type.get(node_type)
-                if not isinstance(section, dict):
-                    continue
-                energy_map = section.get("energy")
-                if isinstance(energy_map, dict):
-                    sections.append(energy_map)
-                    seen.add(id(energy_map))
-        legacy = (d.get("htr") or {}).get("energy")
-        if isinstance(legacy, dict) and id(legacy) not in seen:
-            sections.append(legacy)
-
+        data = (self.coordinator.data or {}).get(self._dev_id)
         total = 0.0
         found = False
-        for energy_map in sections:
+        for energy_map in iter_heater_maps(data, map_key="energy"):
             for val in energy_map.values():
                 normalised = _normalise_energy_value(self.coordinator, val)
                 if normalised is None:
