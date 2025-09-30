@@ -83,6 +83,11 @@ def _make_client(
                 return self._cancelled
 
             def __await__(self):  # type: ignore[no-untyped-def]
+                if self._cancelled:
+                    async def _noop() -> None:
+                        return None
+
+                    return _noop().__await__()
                 return self._coro.__await__()
 
         def _create_task(coro: Any, **kwargs: Any) -> _DummyTask:
@@ -861,6 +866,88 @@ def test_schedule_and_cancel_idle_restart(monkeypatch: pytest.MonkeyPatch) -> No
 def test_handle_handshake_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _make_client(monkeypatch)
     client._handle_handshake("not a dict")
+
+
+def test_handle_handshake_extracts_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _make_client(monkeypatch)
+    refresh_loop = AsyncMock()
+    monkeypatch.setattr(client, "_subscription_refresh_loop", refresh_loop)
+    monkeypatch.setattr(module.time, "time", lambda: 1000.0)
+
+    payload = {"lease": {"timeout": "450"}}
+    client._handle_handshake(payload)
+
+    assert client._subscription_ttl == pytest.approx(450.0)
+    assert client._payload_idle_window == pytest.approx(675.0)
+    assert client._subscription_refresh_due == pytest.approx(1450.0)
+    assert client._subscription_refresh_task is not None
+    refresh_loop.assert_called_once()
+
+
+def test_handle_handshake_uses_default_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _make_client(monkeypatch)
+    refresh_loop = AsyncMock()
+    monkeypatch.setattr(client, "_subscription_refresh_loop", refresh_loop)
+    monkeypatch.setattr(module.time, "time", lambda: 2000.0)
+
+    client._handle_handshake({"message": "no ttl here"})
+
+    assert client._subscription_ttl == pytest.approx(module._DEFAULT_SUBSCRIPTION_TTL)
+    assert client._subscription_refresh_due == pytest.approx(
+        2000.0 + module._DEFAULT_SUBSCRIPTION_TTL
+    )
+    assert client._payload_idle_window >= module._DEFAULT_SUBSCRIPTION_TTL
+    refresh_loop.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_subscription_refresh_loop_schedules_and_refreshes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    client._sio.connected = True
+    client._subscription_ttl = 200.0
+    client._closing = False
+
+    current = 0.0
+
+    async def fake_sleep(delay: float) -> None:
+        nonlocal current
+        current += delay
+
+    def fake_time() -> float:
+        return current
+
+    sleep_calls: list[float] = []
+
+    async def tracking_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+        await fake_sleep(delay)
+
+    monkeypatch.setattr(module.asyncio, "sleep", tracking_sleep)
+    monkeypatch.setattr(module.time, "time", fake_time)
+    monkeypatch.setattr(module.random, "uniform", lambda *_: 0.9)
+
+    client._sio.emit = AsyncMock()
+    client._subscribe_heater_samples = AsyncMock()
+    refresh_reasons: list[str] = []
+    original_refresh = client._refresh_subscription
+
+    async def capture_refresh(*, reason: str) -> None:
+        refresh_reasons.append(reason)
+        await original_refresh(reason=reason)
+        client._closing = True
+
+    monkeypatch.setattr(client, "_refresh_subscription", capture_refresh)
+
+    await client._subscription_refresh_loop()
+
+    assert refresh_reasons == ["periodic renewal"]
+    assert sleep_calls and sleep_calls[0] == pytest.approx(144.0, rel=0.01)
+    assert client._subscription_refresh_last_attempt == pytest.approx(current)
+    assert client._subscription_refresh_last_success == pytest.approx(current)
+    assert client._subscription_refresh_failed is False
+    client._closing = False
 
 
 def test_apply_heater_addresses_inventory_and_empty(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -39,6 +39,9 @@ _LOGGER = logging.getLogger(__name__)
 build_node_inventory = _build_node_inventory  # re-exported for tests
 
 
+_DEFAULT_SUBSCRIPTION_TTL = 300.0
+
+
 @dataclass
 class WSStats:
     """Track websocket activity statistics."""
@@ -145,6 +148,15 @@ class WebSocketClient:
         self._idle_restart_pending = False
         self._idle_monitor_task: asyncio.Task | None = None
 
+        self._subscription_ttl: float = _DEFAULT_SUBSCRIPTION_TTL
+        self._subscription_refresh_task: asyncio.Task | None = None
+        self._subscription_refresh_lock = asyncio.Lock()
+        self._subscription_refresh_due: float | None = None
+        self._subscription_refresh_last_attempt: float = 0.0
+        self._subscription_refresh_last_success: float | None = None
+        self._subscription_refresh_failed = False
+        self._handshake_logged = False
+
         self._ws_state: dict[str, Any] | None = None
         self._ws_state_bucket()
 
@@ -168,6 +180,9 @@ class WebSocketClient:
         _LOGGER.debug("WS %s: start requested", self.dev_id)
         self._closing = False
         self._stop_event = asyncio.Event()
+        self._handshake_logged = False
+        self._subscription_refresh_failed = False
+        self._subscription_refresh_due = None
         self._task = self._loop.create_task(
             self._runner(), name=f"{DOMAIN}-ws-{self.dev_id}"
         )
@@ -189,6 +204,9 @@ class WebSocketClient:
             with suppress(asyncio.CancelledError):
                 await self._idle_monitor_task
             self._idle_monitor_task = None
+        await self._cancel_subscription_refresh()
+        self._subscription_refresh_failed = False
+        self._subscription_refresh_due = None
         await self._disconnect(reason="client stop")
         if self._task:
             self._task.cancel()
@@ -330,6 +348,8 @@ class WebSocketClient:
         self._last_event_at = now
         self._stats.frames_total = 0
         self._stats.events_total = 0
+        self._handshake_logged = False
+        self._subscription_refresh_failed = False
         self._update_status("connected")
         if self._idle_monitor_task is None or self._idle_monitor_task.done():
             self._idle_monitor_task = self._loop.create_task(self._idle_monitor())
@@ -347,6 +367,10 @@ class WebSocketClient:
             with suppress(asyncio.CancelledError):
                 await self._idle_monitor_task
             self._idle_monitor_task = None
+        await self._cancel_subscription_refresh()
+        self._subscription_refresh_failed = False
+        self._subscription_refresh_due = None
+        self._handshake_logged = False
         self._disconnected.set()
 
     async def _on_reconnect(self) -> None:
@@ -386,6 +410,9 @@ class WebSocketClient:
     async def _on_dev_handshake(self, data: Any) -> None:
         """Handle the ``dev_handshake`` payload."""
         self._stats.frames_total += 1
+        if not self._handshake_logged and _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug("WS %s: dev_handshake payload: %s", self.dev_id, data)
+            self._handshake_logged = True
         self._handle_handshake(data)
 
     async def _on_dev_data(self, data: Any) -> None:
@@ -412,10 +439,160 @@ class WebSocketClient:
                 continue
             idle_for = time.time() - last_event
             if idle_for >= self._payload_idle_window:
-                self._schedule_idle_restart(
-                    idle_for=idle_for, source="idle monitor"
+                try:
+                    await self._refresh_subscription(reason="idle monitor")
+                except asyncio.CancelledError:  # pragma: no cover - task lifecycle
+                    raise
+                except Exception:  # noqa: BLE001
+                    self._schedule_idle_restart(
+                        idle_for=idle_for, source="idle monitor refresh failed"
+                    )
+                    break
+                continue
+            if self._subscription_refresh_failed:
+                # Retry quickly if the last scheduled renewal failed.
+                try:
+                    await self._refresh_subscription(reason="idle monitor retry")
+                except asyncio.CancelledError:  # pragma: no cover - task lifecycle
+                    raise
+                except Exception:  # noqa: BLE001
+                    self._schedule_idle_restart(
+                        idle_for=idle_for, source="idle monitor retry failed"
+                    )
+                    break
+
+    def _restart_subscription_refresh(self) -> None:
+        """Restart the background lease refresh task."""
+
+        task = self._subscription_refresh_task
+        if task and not task.done():
+            task.cancel()
+        if self._closing or self._subscription_ttl <= 0:
+            self._subscription_refresh_task = None
+            return
+        self._subscription_refresh_task = self._loop.create_task(
+            self._subscription_refresh_loop(),
+            name=f"{DOMAIN}-ws-refresh-{self.dev_id}",
+        )
+
+    async def _cancel_subscription_refresh(self) -> None:
+        """Cancel the subscription refresh task if it is running."""
+
+        task = self._subscription_refresh_task
+        if task and not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+        self._subscription_refresh_task = None
+
+    async def _subscription_refresh_loop(self) -> None:
+        """Renew the server-side subscription before the TTL expires."""
+
+        try:
+            while not self._closing:
+                ttl = max(self._subscription_ttl, 60.0)
+                lead = min(max(ttl * 0.2, 30.0), ttl / 2)
+                wait_for = max(ttl - lead, ttl * 0.5)
+                wait_for *= random.uniform(0.85, 0.95)
+                wait_for = max(wait_for, 30.0)
+                self._subscription_refresh_due = time.time() + wait_for
+                await asyncio.sleep(wait_for)
+                if self._closing:
+                    break
+                if not self._sio.connected:
+                    continue
+                try:
+                    await self._refresh_subscription(reason="periodic renewal")
+                except asyncio.CancelledError:
+                    raise
+                except Exception:  # noqa: BLE001
+                    self._subscription_refresh_failed = True
+                    _LOGGER.warning(
+                        "WS %s: subscription refresh failed; monitoring for idle",
+                        self.dev_id,
+                        exc_info=True,
+                    )
+                    await asyncio.sleep(min(60.0, ttl / 2))
+        finally:
+            self._subscription_refresh_due = None
+
+    async def _refresh_subscription(self, *, reason: str) -> None:
+        """Re-request device data to renew the websocket lease."""
+
+        async with self._subscription_refresh_lock:
+            if not self._sio.connected:
+                raise RuntimeError("websocket not connected")
+            now = time.time()
+            self._subscription_refresh_last_attempt = now
+            if _LOGGER.isEnabledFor(logging.INFO):
+                _LOGGER.info(
+                    "WS %s: refreshing websocket lease (%s)",
+                    self.dev_id,
+                    reason,
                 )
-                break
+            await self._sio.emit("dev_data", namespace=WS_NAMESPACE)
+            await self._subscribe_heater_samples()
+            self._subscription_refresh_failed = False
+            self._subscription_refresh_last_success = time.time()
+            self._subscription_refresh_due = (
+                self._subscription_refresh_last_success + self._subscription_ttl
+            )
+            _LOGGER.info(
+                "WS %s: websocket lease refreshed; next in ~%.0fs",
+                self.dev_id,
+                self._subscription_ttl,
+            )
+
+    def _extract_subscription_ttl(
+        self, payload: Mapping[str, Any]
+    ) -> tuple[float, str] | None:
+        """Extract the subscription TTL in seconds from the handshake payload."""
+
+        candidates: list[tuple[float, str]] = []
+
+        def _walk(node: Any, path: str) -> None:
+            if isinstance(node, Mapping):
+                for key, value in node.items():
+                    key_str = str(key)
+                    key_lower = key_str.lower()
+                    next_path = f"{path}.{key_str}" if path else key_str
+                    if any(
+                        token in key_lower
+                        for token in ("ttl", "timeout", "lease", "expire")
+                    ):
+                        seconds = self._coerce_seconds(value, key_lower)
+                        if seconds is not None and 15.0 <= seconds <= 21600.0:
+                            candidates.append((seconds, next_path))
+                    if isinstance(value, (Mapping, list, tuple)):
+                        _walk(value, next_path)
+            elif isinstance(node, (list, tuple)):
+                for idx, item in enumerate(node):
+                    _walk(item, f"{path}[{idx}]")
+
+        _walk(payload, "")
+        if not candidates:
+            return None
+        # Prefer the smallest positive TTL to refresh conservatively.
+        ttl, path = min(candidates, key=lambda item: item[0])
+        return ttl, path
+
+    @staticmethod
+    def _coerce_seconds(value: Any, key: str) -> float | None:
+        """Convert ``value`` to seconds based on the associated key."""
+
+        raw: float
+        if isinstance(value, (int, float)):
+            raw = float(value)
+        elif isinstance(value, str):
+            try:
+                raw = float(value.strip())
+            except ValueError:
+                return None
+        else:
+            return None
+        if "ms" in key or "milli" in key or (raw > 86400 and "hour" not in key and "day" not in key):
+            raw /= 1000.0
+        return raw
 
     # ------------------------------------------------------------------
     # Payload handlers
@@ -424,6 +601,33 @@ class WebSocketClient:
         """Process the initial handshake payload from the server."""
         if isinstance(data, dict):
             self._handshake_payload = deepcopy(data)
+            ttl_info = self._extract_subscription_ttl(data)
+            if ttl_info is None:
+                ttl = _DEFAULT_SUBSCRIPTION_TTL
+                source = "default"
+            else:
+                ttl, source = ttl_info
+            self._subscription_ttl = ttl
+            idle_window = max(ttl * 1.5, ttl + 90.0)
+            self._payload_idle_window = idle_window
+            now = time.time()
+            self._subscription_refresh_due = now + ttl
+            self._subscription_refresh_failed = False
+            self._subscription_refresh_last_success = None
+            self._restart_subscription_refresh()
+            if source == "default":
+                _LOGGER.info(
+                    "WS %s: handshake did not expose lease info; using %.0fs TTL",
+                    self.dev_id,
+                    ttl,
+                )
+            else:
+                _LOGGER.info(
+                    "WS %s: handshake lease TTL %.0fs (source=%s)",
+                    self.dev_id,
+                    ttl,
+                    source,
+                )
             self._update_status("connected")
         else:
             _LOGGER.debug("WS %s: invalid handshake payload", self.dev_id)
