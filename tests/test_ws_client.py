@@ -4,7 +4,7 @@ import time
 from contextlib import suppress
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
@@ -631,6 +631,20 @@ async def test_on_connect_and_disconnect_flow(monkeypatch: pytest.MonkeyPatch) -
     client._idle_monitor_task = asyncio.create_task(asyncio.sleep(0))
     await asyncio.sleep(0)
     await client._on_connect()
+    await client._on_disconnect()
+
+
+@pytest.mark.asyncio
+async def test_on_connect_requests_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure the websocket client requests the initial device snapshot."""
+
+    client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    client._sio.emit = AsyncMock()
+    await client._on_connect()
+    assert client._sio.emit.await_args_list == [
+        call("join", namespace=module.WS_NAMESPACE),
+        call("dev_data", namespace=module.WS_NAMESPACE),
+    ]
     await client._on_disconnect()
 
 

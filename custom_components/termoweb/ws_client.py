@@ -329,6 +329,7 @@ class WebSocketClient:
             self._idle_monitor_task = self._loop.create_task(self._idle_monitor())
         try:
             await self._sio.emit("join", namespace=WS_NAMESPACE)
+            await self._sio.emit("dev_data", namespace=WS_NAMESPACE)
         except Exception:  # noqa: BLE001
             _LOGGER.debug("WS %s: namespace join failed", self.dev_id, exc_info=True)
 
