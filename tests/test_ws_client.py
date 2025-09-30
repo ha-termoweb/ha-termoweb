@@ -122,8 +122,14 @@ def _make_ducaheat_client(
     """Return a Ducaheat websocket client configured for tests."""
 
     if hass_loop is None:
+        def _create_task(coro: Any, **_: Any) -> Any:
+            closer = getattr(coro, "close", None)
+            if callable(closer):
+                closer()
+            return SimpleNamespace(done=lambda: True)
+
         hass_loop = SimpleNamespace(
-            create_task=lambda coro, **_: SimpleNamespace(done=lambda: True),
+            create_task=_create_task,
             call_soon_threadsafe=lambda cb, *args: cb(*args),
         )
     hass = SimpleNamespace(loop=hass_loop, data={module.DOMAIN: {"entry": {}}})
@@ -216,8 +222,14 @@ def _make_legacy_client(
     """Return a TermoWeb legacy websocket client with patched dependencies."""
 
     if hass_loop is None:
+        def _create_task(coro: Any, **_: Any) -> Any:
+            closer = getattr(coro, "close", None)
+            if callable(closer):
+                closer()
+            return SimpleNamespace(done=lambda: True)
+
         hass_loop = SimpleNamespace(
-            create_task=lambda coro, **_: SimpleNamespace(done=lambda: True),
+            create_task=_create_task,
             call_soon_threadsafe=lambda cb, *args: cb(*args),
         )
     hass = SimpleNamespace(loop=hass_loop, data={module.DOMAIN: {"entry": {}}})
@@ -347,6 +359,7 @@ def test_legacy_handle_event_dispatches_and_logs(
     """Ensure the legacy client publishes updates and logs affected nodes."""
 
     client = _make_legacy_client(monkeypatch)
+    monkeypatch.setattr(client, "_restart_subscription_refresh", MagicMock())
     dispatcher: MagicMock = client._dispatcher_mock  # type: ignore[attr-defined]
     monkeypatch.setattr(
         module,
@@ -399,6 +412,113 @@ def test_legacy_handle_event_dispatches_and_logs(
         for payload in payloads
     )
     assert "legacy update for htr/1" in caplog.text
+
+
+def test_legacy_event_configures_subscription(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify the legacy client extracts TTL metadata from data payloads."""
+
+    client = _make_legacy_client(monkeypatch)
+    refresh_loop = AsyncMock()
+    monkeypatch.setattr(client, "_subscription_refresh_loop", refresh_loop)
+    created: list[dict[str, Any]] = []
+
+    def capture_task(coro: Any, **kwargs: Any) -> Any:
+        created.append({"coro": coro, "kwargs": kwargs})
+        closer = getattr(coro, "close", None)
+        if callable(closer):
+            closer()
+        return SimpleNamespace(done=lambda: True)
+
+    client._loop.create_task = capture_task  # type: ignore[assignment]
+    monkeypatch.setattr(module.time, "time", lambda: 100.0)
+
+    event = {
+        "name": "data",
+        "args": [[{"path": "/mgr/session", "body": {"lease": {"ttl": 250}}}]],
+    }
+    client._handle_event(event)
+
+    assert client._subscription_ttl == pytest.approx(250.0)
+    assert client._payload_idle_window == pytest.approx(375.0)
+    assert client._subscription_refresh_due == pytest.approx(350.0)
+    assert client._legacy_subscription_configured is True
+    assert client._subscription_refresh_task is not None
+    assert refresh_loop.call_count == 1
+    assert created
+
+
+def test_legacy_event_updates_ttl_after_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure default TTL is used until a payload provides an explicit value."""
+
+    client = _make_legacy_client(monkeypatch)
+    refresh_loop = AsyncMock()
+    monkeypatch.setattr(client, "_subscription_refresh_loop", refresh_loop)
+    tasks: list[Any] = []
+
+    def capture_task(coro: Any, **kwargs: Any) -> Any:
+        tasks.append((coro, kwargs))
+        closer = getattr(coro, "close", None)
+        if callable(closer):
+            closer()
+        return SimpleNamespace(done=lambda: True)
+
+    client._loop.create_task = capture_task  # type: ignore[assignment]
+
+    monkeypatch.setattr(module.time, "time", lambda: 200.0)
+    client._handle_event({"name": "data", "args": [[{"path": "/mgr/session", "body": {}}]]})
+    assert client._subscription_ttl == pytest.approx(module._DEFAULT_SUBSCRIPTION_TTL)
+    assert client._legacy_subscription_configured is False
+    assert len(tasks) == 1
+
+    monkeypatch.setattr(module.time, "time", lambda: 400.0)
+    client._handle_event(
+        {
+            "name": "data",
+            "args": [[{"path": "/mgr/session", "body": {"lease": {"timeout": "150"}}}]],
+        }
+    )
+    assert client._subscription_ttl == pytest.approx(150.0)
+    assert client._legacy_subscription_configured is True
+    assert len(tasks) == 2
+    assert refresh_loop.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_legacy_refresh_subscription_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Check the legacy lease renewal updates bookkeeping on success."""
+
+    client = _make_legacy_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    client._ws = SimpleNamespace(closed=False)
+    client._subscription_ttl = 120.0
+    client._send_snapshot_request = AsyncMock()
+    client._subscribe_htr_samples = AsyncMock()
+    monkeypatch.setattr(module.time, "time", lambda: 1000.0)
+
+    await client._refresh_subscription(reason="periodic test")
+
+    assert client._subscription_refresh_failed is False
+    assert client._subscription_refresh_last_success == pytest.approx(1000.0)
+    assert client._subscription_refresh_due == pytest.approx(1120.0)
+
+
+@pytest.mark.asyncio
+async def test_legacy_refresh_subscription_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure legacy lease renewal failures schedule a restart."""
+
+    client = _make_legacy_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    client._ws = SimpleNamespace(closed=False)
+    client._subscription_ttl = 180.0
+    client._payload_idle_window = 540.0
+    client._send_snapshot_request = AsyncMock(side_effect=RuntimeError("boom"))
+    client._subscribe_htr_samples = AsyncMock()
+    monkeypatch.setattr(module.time, "time", lambda: 500.0)
+
+    with pytest.raises(RuntimeError):
+        await client._refresh_subscription(reason="failure test")
+
+    assert client._subscription_refresh_failed is True
+    assert client._idle_restart_pending is True
+    assert client._subscription_refresh_last_attempt == pytest.approx(500.0)
 
 
 @pytest.mark.asyncio
