@@ -103,6 +103,35 @@ def _make_client(
     return client
 
 
+def _make_ducaheat_client(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    hass_loop: Any | None = None,
+) -> module.DucaheatWSClient:
+    """Return a Ducaheat websocket client configured for tests."""
+
+    if hass_loop is None:
+        hass_loop = SimpleNamespace(
+            create_task=lambda coro, **_: SimpleNamespace(done=lambda: True),
+            call_soon_threadsafe=lambda cb, *args: cb(*args),
+        )
+    hass = SimpleNamespace(loop=hass_loop, data={module.DOMAIN: {"entry": {}}})
+    coordinator = SimpleNamespace(data={}, update_nodes=MagicMock())
+    rest_client = DummyREST()
+    dispatcher_mock = MagicMock()
+    monkeypatch.setattr(module, "async_dispatcher_send", dispatcher_mock)
+    client = module.DucaheatWSClient(
+        hass,
+        entry_id="entry",
+        dev_id="device",
+        api_client=rest_client,
+        coordinator=coordinator,
+        session=SimpleNamespace(),
+    )
+    client._dispatcher_mock = dispatcher_mock  # type: ignore[attr-defined]
+    return client
+
+
 def test_handshake_error_records_context() -> None:
     """Ensure the custom handshake exception preserves response metadata."""
 
@@ -111,6 +140,36 @@ def test_handshake_error_records_context() -> None:
     assert err.url == "https://example"
     assert err.body_snippet == "unauthorized"
     assert "handshake failed" in str(err)
+
+
+@pytest.mark.asyncio
+async def test_error_handlers_log_payloads(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify socket error callbacks emit raw payloads at debug level."""
+
+    client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    caplog.set_level(logging.DEBUG)
+
+    connect_error = client._sio.events[("connect_error", None)]
+    error_handler = client._sio.events[("error", None)]
+    reconnect_failed = client._sio.events[("reconnect_failed", None)]
+    ns_disconnect = client._sio.events[("disconnect", module.WS_NAMESPACE)]
+
+    await connect_error({"detail": "bad token"})
+    assert "connect_error payload: {'detail': 'bad token'}" in caplog.text
+
+    caplog.clear()
+    await error_handler("boom")
+    assert "error event payload: boom" in caplog.text
+
+    caplog.clear()
+    await reconnect_failed("server down")
+    assert "reconnect_failed details: server down" in caplog.text
+
+    caplog.clear()
+    await ns_disconnect("transport closed")
+    assert f"namespace disconnect ({module.WS_NAMESPACE}): transport closed" in caplog.text
 
 
 def test_ws_state_bucket_initialises_missing_data(
@@ -404,6 +463,40 @@ def test_apply_nodes_payload_logs_changed_addresses(
     payload = {"nodes": {"htr": {"settings": {"1": {"temp": 22}}}}}
     client._apply_nodes_payload(payload, merge=True, event="update")
     assert "update event for" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_update_logging_is_condensed(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Ensure Ducaheat overrides emit condensed address summaries."""
+
+    client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    client._coordinator.data = {"device": {"nodes_by_type": {}}}
+    caplog.clear()
+    caplog.set_level(logging.DEBUG)
+
+    payload = {"nodes": {"htr": {"settings": {"1": {"temp": 23}}}}}
+    await client._on_update(payload)
+
+    ducaheat_logs = [
+        message for message in caplog.messages if "(ducaheat): update" in message
+    ]
+    assert ducaheat_logs and "htr/1" in ducaheat_logs[0]
+    assert "temp" not in ducaheat_logs[0]
+
+
+def test_ducaheat_summarise_addresses_handles_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure the address summary gracefully handles missing nodes."""
+
+    client = _make_ducaheat_client(monkeypatch)
+    assert client._summarise_addresses({}) == "no node addresses"
+    assert (
+        client._summarise_addresses({"nodes": {"htr": {"settings": {}}}})
+        == "no node addresses"
+    )
 
 
 @pytest.mark.asyncio
