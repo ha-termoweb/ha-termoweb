@@ -111,6 +111,12 @@ class WebSocketClient:
         self._sio.on("connect", handler=self._on_connect)
         self._sio.on("disconnect", handler=self._on_disconnect)
         self._sio.on("reconnect", handler=self._on_reconnect)
+        self._sio.on("connect_error", handler=self._on_connect_error)
+        self._sio.on("error", handler=self._on_error)
+        self._sio.on("reconnect_failed", handler=self._on_reconnect_failed)
+        self._sio.on(
+            "disconnect", namespace=WS_NAMESPACE, handler=self._on_namespace_disconnect
+        )
         self._sio.on(
             "dev_handshake", namespace=WS_NAMESPACE, handler=self._on_dev_handshake
         )
@@ -346,6 +352,35 @@ class WebSocketClient:
     async def _on_reconnect(self) -> None:
         """Handle socket reconnection attempts."""
         _LOGGER.debug("WS %s: reconnect event", self.dev_id)
+
+    async def _on_connect_error(self, data: Any) -> None:
+        """Log ``connect_error`` events with their payload."""
+
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug("WS %s: connect_error payload: %s", self.dev_id, data)
+
+    async def _on_error(self, data: Any) -> None:
+        """Log socket.io ``error`` events with full details."""
+
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug("WS %s: error event payload: %s", self.dev_id, data)
+
+    async def _on_reconnect_failed(self, data: Any | None = None) -> None:
+        """Log ``reconnect_failed`` events with the reported context."""
+
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug("WS %s: reconnect_failed details: %s", self.dev_id, data)
+
+    async def _on_namespace_disconnect(self, reason: Any | None = None) -> None:
+        """Log namespace-level disconnect callbacks with their reason."""
+
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug(
+                "WS %s: namespace disconnect (%s): %s",
+                self.dev_id,
+                WS_NAMESPACE,
+                reason,
+            )
 
     async def _on_dev_handshake(self, data: Any) -> None:
         """Handle the ``dev_handshake`` payload."""
@@ -1704,6 +1739,17 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
 class DucaheatWSClient(WebSocketClient):
     """Verbose websocket client variant with payload debug logging."""
 
+    def _summarise_addresses(self, data: Any) -> str:
+        """Return a condensed summary of node addresses in ``data``."""
+
+        nodes = self._extract_nodes(data)
+        if not nodes:
+            return "no node addresses"
+        addresses = self._collect_update_addresses(nodes)
+        if not addresses:
+            return "no node addresses"
+        return ", ".join(f"{node_type}/{addr}" for node_type, addr in addresses)
+
     async def _on_connect(self) -> None:
         """Log connect events before delegating to the base implementation."""
         if _LOGGER.isEnabledFor(logging.DEBUG):
@@ -1723,15 +1769,21 @@ class DucaheatWSClient(WebSocketClient):
         await super()._on_dev_handshake(data)
 
     async def _on_dev_data(self, data: Any) -> None:
-        """Log initial dev_data snapshots with raw payload details."""
+        """Log initial dev_data snapshots with condensed address details."""
         if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS %s (ducaheat): dev_data payload: %s", self.dev_id, data)
+            summary = self._summarise_addresses(data)
+            _LOGGER.debug(
+                "WS %s (ducaheat): dev_data addresses: %s", self.dev_id, summary
+            )
         await super()._on_dev_data(data)
 
     async def _on_update(self, data: Any) -> None:
-        """Log incremental update payloads before applying changes."""
+        """Log incremental update payloads with condensed address details."""
         if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS %s (ducaheat): update payload: %s", self.dev_id, data)
+            summary = self._summarise_addresses(data)
+            _LOGGER.debug(
+                "WS %s (ducaheat): update addresses: %s", self.dev_id, summary
+            )
         await super()._on_update(data)
 
 
