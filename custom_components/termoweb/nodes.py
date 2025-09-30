@@ -81,6 +81,33 @@ def normalize_node_addr(
 
 HEATER_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm"})
 
+_NODE_SECTION_IGNORE_KEYS = frozenset(
+    {"dev_id", "name", "raw", "connected", "nodes", "nodes_by_type"}
+)
+
+
+def _existing_nodes_map(source: Mapping[str, Any] | None) -> dict[str, dict[str, Any]]:
+    """Return a mapping of node type sections extracted from ``source``."""
+
+    if not isinstance(source, Mapping):
+        return {}
+
+    sections: dict[str, dict[str, Any]] = {}
+
+    raw_existing = source.get("nodes_by_type")
+    if isinstance(raw_existing, Mapping):
+        for node_type, section in raw_existing.items():
+            if isinstance(section, Mapping):
+                sections[node_type] = dict(section)
+
+    for key, value in source.items():
+        if key in _NODE_SECTION_IGNORE_KEYS:
+            continue
+        if isinstance(value, Mapping):
+            sections.setdefault(key, dict(value))
+
+    return sections
+
 
 class Node:
     """Base representation of a TermoWeb node."""

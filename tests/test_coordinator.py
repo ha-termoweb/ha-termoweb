@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Mapping
 from unittest.mock import AsyncMock
 
 import pytest
@@ -159,7 +159,9 @@ def test_should_defer_pending_setting_branches(
     assert coordinator._should_defer_pending_setting("htr", "1", payload) is True
 
 @pytest.mark.asyncio
-async def test_refresh_skips_pending_settings_merge() -> None:
+async def test_refresh_skips_pending_settings_merge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Heater refresh should defer merging stale payloads while pending."""
 
     hass = HomeAssistant()
@@ -196,6 +198,15 @@ async def test_refresh_skips_pending_settings_merge() -> None:
     }
     coordinator.data = initial
 
+    calls: list[Mapping[str, Any]] = []
+    original_helper = coord_module._existing_nodes_map
+
+    def recording_helper(source: Mapping[str, Any] | None) -> dict[str, Any]:
+        calls.append(source or {})
+        return original_helper(source)
+
+    monkeypatch.setattr(coord_module, "_existing_nodes_map", recording_helper)
+
     client.get_node_settings = AsyncMock(return_value={"mode": "auto", "stemp": "20.0"})
     coordinator.register_pending_setting(
         "htr", "1", mode="manual", stemp=21.0, ttl=60.0
@@ -206,6 +217,7 @@ async def test_refresh_skips_pending_settings_merge() -> None:
     settings = coordinator.data["dev"]["nodes_by_type"]["htr"]["settings"]["1"]
     assert settings == {"mode": "manual", "stemp": "21.0"}
     assert ("htr", "1") in coordinator._pending_settings
+    assert not calls
 
     client.get_node_settings.return_value = {"mode": "manual", "stemp": "21.0"}
 
@@ -213,10 +225,14 @@ async def test_refresh_skips_pending_settings_merge() -> None:
 
     assert ("htr", "1") not in coordinator._pending_settings
     assert client.get_node_settings.await_count == 2
+    assert calls
+    assert calls[0]["htr"]["settings"]["1"]["mode"] == "manual"
 
 
 @pytest.mark.asyncio
-async def test_poll_skips_pending_settings_merge() -> None:
+async def test_poll_skips_pending_settings_merge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Polling should defer merges until pending settings match."""
 
     hass = HomeAssistant()
@@ -253,6 +269,15 @@ async def test_poll_skips_pending_settings_merge() -> None:
     }
     coordinator.data = initial
 
+    calls: list[Mapping[str, Any]] = []
+    original_helper = coord_module._existing_nodes_map
+
+    def recording_helper(source: Mapping[str, Any] | None) -> dict[str, Any]:
+        calls.append(source or {})
+        return original_helper(source)
+
+    monkeypatch.setattr(coord_module, "_existing_nodes_map", recording_helper)
+
     client.get_node_settings = AsyncMock(return_value={"mode": "auto", "stemp": "20.0"})
     coordinator.register_pending_setting(
         "htr", "1", mode="manual", stemp=21.0, ttl=60.0
@@ -263,6 +288,8 @@ async def test_poll_skips_pending_settings_merge() -> None:
     settings = result["dev"]["nodes_by_type"]["htr"]["settings"]["1"]
     assert settings == {"mode": "manual", "stemp": "21.0"}
     assert ("htr", "1") in coordinator._pending_settings
+    assert calls
+    assert calls[0] is initial["dev"]
 
     coordinator.data = result
     client.get_node_settings.return_value = {"mode": "manual", "stemp": "21.0"}
