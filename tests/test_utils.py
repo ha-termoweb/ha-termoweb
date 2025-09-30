@@ -13,6 +13,7 @@ from custom_components.termoweb.nodes import (
     build_heater_energy_unique_id,
     build_node_inventory,
     ensure_node_inventory,
+    extract_heater_addrs,
     normalize_heater_addresses,
     normalize_node_addr,
     normalize_node_type,
@@ -21,7 +22,6 @@ from custom_components.termoweb.nodes import (
 from custom_components.termoweb.utils import (
     _entry_gateway_record,
     build_gateway_device_info,
-    extract_heater_addrs,
     float_or_none,
 )
 
