@@ -840,6 +840,11 @@ class WebSocketClient:
             "nodes": deepcopy(snapshot.get("nodes")),
             "nodes_by_type": deepcopy(snapshot.get("nodes_by_type", {})),
         }
+        payload_copy.setdefault(
+            "addr_map", {node_type: list(addrs) for node_type, addrs in addr_map.items()}
+        )
+        if unknown_types:
+            payload_copy.setdefault("unknown_types", sorted(unknown_types))
 
         def _send() -> None:
             """Fire the dispatcher signal with the latest node payload."""
@@ -1139,6 +1144,8 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._loop = getattr(hass, "loop", None) or asyncio.get_event_loop()
         self._task: asyncio.Task | None = None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
+        self._disconnected = asyncio.Event()
+        self._disconnected.set()
 
         self._closing = False
         self._connected_since: float | None = None
@@ -1155,6 +1162,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._stats = WSStats()
         self._status: str = "stopped"
         self._stop_event = asyncio.Event()
+        self._handshake_logged = False
         self._last_event_at: float | None = None
 
         self._handshake_payload: dict[str, Any] | None = None
@@ -1164,6 +1172,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._payload_idle_window: float = 3600.0
         self._idle_restart_task: asyncio.Task | None = None
         self._idle_restart_pending = False
+        self._idle_monitor_task: asyncio.Task | None = None
 
         self._init_subscription_state()
         self._legacy_subscription_configured = False
@@ -1174,63 +1183,17 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
     # ------------------------------------------------------------------
     # Public control
     # ------------------------------------------------------------------
-    def start(self) -> asyncio.Task:
-        """Start the websocket client background task."""
-
-        if self._task and not self._task.done():
-            return self._task
-        _LOGGER.debug("WS %s: start requested", self.dev_id)
-        self._closing = False
-        self._stop_event = asyncio.Event()
-        self._subscription_refresh_failed = False
-        self._subscription_refresh_due = None
-        self._legacy_subscription_configured = False
-        self._task = self._loop.create_task(
-            self._runner(), name=f"{DOMAIN}-ws09-{self.dev_id}"
-        )
-        return self._task
-
     async def stop(self) -> None:
-        """Cancel tasks and close websocket sessions."""
+        """Cancel tasks, close websocket sessions and reset legacy state."""
 
-        _LOGGER.debug("WS %s: stop requested", self.dev_id)
         self._closing = True
-        self._stop_event.set()
         if self._hb_task:
             self._hb_task.cancel()
             with suppress(asyncio.CancelledError):
                 await self._hb_task
             self._hb_task = None
-        if self._idle_restart_task:
-            self._idle_restart_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._idle_restart_task
-            self._idle_restart_task = None
-        self._idle_restart_pending = False
-        await self._cancel_subscription_refresh()
-        self._subscription_refresh_failed = False
-        self._subscription_refresh_due = None
         self._legacy_subscription_configured = False
-        await self._disconnect(reason="client stop")
-        if self._task:
-            self._task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._task
-            self._task = None
-        self._update_status("stopped")
-
-    def is_running(self) -> bool:
-        """Return True if the websocket client task is active."""
-
-        return bool(self._task and not self._task.done())
-
-    async def ws_url(self) -> str:
-        """Return the websocket URL using the API client's token helper."""
-
-        token = await self._get_token()
-        socket_base = self._socket_base()
-        endpoint = self._socket_endpoint()
-        return f"{socket_base}/{endpoint}?token={token}&dev_id={self.dev_id}"
+        await super().stop()
 
     # ------------------------------------------------------------------
     # Core loop and protocol dispatch
@@ -1815,307 +1778,8 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
 
         return "api/v2/socket_io"
 
-    # ------------------------------------------------------------------
-    # Shared helpers (duplicated from the async client)
-    # ------------------------------------------------------------------
-    def _ws_state_bucket(self) -> dict[str, Any]:
-        """Return the websocket state bucket for this device."""
 
-        if self._ws_state is None:
-            if not hasattr(self.hass, "data") or self.hass.data is None:  # type: ignore[attr-defined]
-                setattr(self.hass, "data", {})  # type: ignore[attr-defined]
-            domain_bucket = self.hass.data.setdefault(DOMAIN, {})  # type: ignore[attr-defined]
-            entry_bucket = domain_bucket.setdefault(self.entry_id, {})
-            ws_state = entry_bucket.setdefault("ws_state", {})
-            self._ws_state = ws_state.setdefault(self.dev_id, {})
-        return self._ws_state
 
-    def _update_status(self, status: str) -> None:
-        """Publish the websocket status to Home Assistant listeners."""
-
-        if status == self._status and status not in {"healthy", "connected"}:
-            return
-        self._status = status
-        now = time.time()
-        state = self._ws_state_bucket()
-        last_event = self._stats.last_event_ts or self._last_event_at
-        state["status"] = status
-        state["last_event_at"] = last_event or None
-        state["healthy_since"] = self._healthy_since
-        state["healthy_minutes"] = (
-            int((now - self._healthy_since) / 60) if self._healthy_since else 0
-        )
-        state["frames_total"] = self._stats.frames_total
-        state["events_total"] = self._stats.events_total
-        async_dispatcher_send(
-            self.hass,
-            signal_ws_status(self.entry_id),
-            {"dev_id": self.dev_id, "status": status},
-        )
-
-    def _mark_event(
-        self, *, paths: list[str] | None, count_event: bool = False
-    ) -> None:
-        """Record receipt of a websocket event batch for health tracking."""
-
-        now = time.time()
-        self._cancel_idle_restart()
-        self._stats.last_event_ts = now
-        self._last_event_at = now
-        if paths:
-            self._stats.events_total += 1
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                uniq: list[str] = []
-                for path in paths:
-                    if path not in uniq:
-                        uniq.append(path)
-                    if len(uniq) >= 5:
-                        break
-                self._stats.last_paths = uniq
-        elif count_event:
-            self._stats.events_total += 1
-        state: dict[str, Any] = self._ws_state_bucket()
-        state["last_event_at"] = now
-        state["frames_total"] = self._stats.frames_total
-        state["events_total"] = self._stats.events_total
-        if self._healthy_since is None:
-            self._healthy_since = now
-            self._update_status("healthy")
-
-    def _schedule_idle_restart(self, *, idle_for: float, source: str) -> None:
-        """Log idle payload detection and close the websocket for restart."""
-
-        if self._closing or self._idle_restart_pending:
-            return
-        self._idle_restart_pending = True
-        _LOGGER.warning(
-            "WS %s: no payloads for %.0f s (%s heartbeat); restarting",
-            self.dev_id,
-            idle_for,
-            source,
-        )
-
-        async def _restart() -> None:
-            try:
-                await self._disconnect(reason="idle restart")
-            finally:
-                self._idle_restart_pending = False
-                self._idle_restart_task = None
-
-        self._idle_restart_task = self._loop.create_task(_restart())
-
-    def _cancel_idle_restart(self) -> None:
-        """Cancel any scheduled idle restart due to new payload activity."""
-
-        task = self._idle_restart_task
-        if task and not task.done():
-            task.cancel()
-        self._idle_restart_task = None
-        self._idle_restart_pending = False
-
-    async def _get_token(self) -> str:
-        """Reuse the REST client token for websocket authentication."""
-
-        headers = await self._client._authed_headers()  # noqa: SLF001
-        auth_header = (
-            headers.get("Authorization") if isinstance(headers, dict) else None
-        )
-        if not auth_header:
-            raise RuntimeError("authorization token missing")
-        return auth_header.split(" ", 1)[1]
-
-    async def _force_refresh_token(self) -> None:
-        """Force the REST client to fetch a fresh access token."""
-
-        with suppress(AttributeError, RuntimeError):
-            self._client._access_token = None  # type: ignore[attr-defined]  # noqa: SLF001
-        await self._client._ensure_token()  # noqa: SLF001
-
-    def _api_base(self) -> str:
-        """Return the base REST API URL used for websocket routes."""
-
-        base = getattr(self._client, "api_base", None)
-        if isinstance(base, str) and base:
-            return base.rstrip("/")
-        return API_BASE
-
-    def _dispatch_nodes(self, payload: dict[str, Any]) -> dict[str, list[str]]:
-        """Publish node updates and return the address map by node type."""
-
-        if not isinstance(payload, dict):  # pragma: no cover - defensive
-            return {}
-
-        is_snapshot = isinstance(payload.get("nodes_by_type"), dict)
-        raw_nodes: Any
-        snapshot: dict[str, Any]
-
-        if is_snapshot:
-            snapshot = payload
-            raw_nodes = snapshot.get("nodes")
-        else:
-            raw_nodes = payload
-            snapshot = {"nodes": deepcopy(raw_nodes), "nodes_by_type": {}}
-
-        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-        record_map: Mapping[str, Any]
-        if isinstance(record, Mapping):
-            record_map = record
-        else:
-            record_map = {}  # pragma: no cover - defensive default
-
-        inventory = ensure_node_inventory(record_map, nodes=raw_nodes)
-
-        addr_map, unknown_types = addresses_by_node_type(
-            inventory, known_types=NODE_CLASS_BY_TYPE
-        )
-        if unknown_types:  # pragma: no cover - diagnostic branch
-            _LOGGER.debug(
-                "WS %s: unknown node types in inventory: %s",
-                self.dev_id,
-                ", ".join(sorted(unknown_types)),
-            )
-
-        if not is_snapshot:
-            nodes_by_type = {
-                node_type: {"addrs": list(addrs)}
-                for node_type, addrs in addr_map.items()
-            }
-            snapshot["nodes_by_type"] = nodes_by_type
-            if "htr" in nodes_by_type:
-                snapshot.setdefault("htr", nodes_by_type["htr"])
-
-        if raw_nodes is None:  # pragma: no cover - defensive default
-            raw_nodes = {}
-
-        if hasattr(self._coordinator, "update_nodes"):
-            self._coordinator.update_nodes(raw_nodes, inventory)
-
-        if isinstance(record, dict):
-            record["nodes"] = raw_nodes
-            record["node_inventory"] = inventory
-
-        self._apply_heater_addresses(addr_map, inventory=None)
-
-        payload_copy = {
-            "dev_id": self.dev_id,
-            "node_type": None,
-            "nodes": deepcopy(snapshot.get("nodes")),
-            "nodes_by_type": deepcopy(snapshot.get("nodes_by_type", {})),
-        }
-        payload_copy.setdefault(
-            "addr_map", {node_type: list(addrs) for node_type, addrs in addr_map.items()}
-        )
-        payload_copy.setdefault("unknown_types", sorted(unknown_types))
-
-        def _send() -> None:
-            async_dispatcher_send(
-                self.hass,
-                signal_ws_data(self.entry_id),
-                payload_copy,
-            )
-
-        loop = getattr(self.hass, "loop", None)
-        call_soon = getattr(loop, "call_soon_threadsafe", None)
-        if callable(call_soon):
-            call_soon(_send)
-        else:  # pragma: no cover - legacy hass loop stub
-            _send()
-
-        return {node_type: list(addrs) for node_type, addrs in addr_map.items()}
-
-    def _build_nodes_snapshot(self, nodes: dict[str, Any]) -> dict[str, Any]:
-        """Normalise the nodes payload for consumers."""
-
-        nodes_copy = deepcopy(nodes)
-        nodes_by_type: dict[str, Any] = {
-            node_type: payload
-            for node_type, payload in nodes_copy.items()
-            if isinstance(payload, dict)
-        }
-        snapshot: dict[str, Any] = {
-            "nodes": nodes_copy,
-            "nodes_by_type": nodes_by_type,
-        }
-        snapshot.update(nodes_by_type)
-        if "htr" in nodes_by_type:
-            snapshot.setdefault("htr", nodes_by_type["htr"])
-        return snapshot
-
-    def _apply_heater_addresses(
-        self,
-        addr_map: Mapping[Any, Iterable[Any]] | Iterable[Any] | None,
-        *,
-        inventory: list[Any] | None = None,
-    ) -> dict[str, list[str]]:
-        """Update entry and coordinator state with heater address data."""
-
-        normalized_map, _compat_aliases = normalize_heater_addresses(addr_map)
-        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-        if isinstance(record, dict):
-            if inventory is not None:
-                record["node_inventory"] = inventory
-            energy_coordinator = record.get("energy_coordinator")
-            if hasattr(energy_coordinator, "update_addresses"):
-                energy_coordinator.update_addresses(normalized_map)
-
-        coordinator_data = getattr(self._coordinator, "data", None)
-        if isinstance(coordinator_data, dict):
-            dev_map = coordinator_data.get(self.dev_id)
-            if isinstance(dev_map, dict):
-                nodes_by_type: dict[str, Any] = dev_map.setdefault("nodes_by_type", {})
-                for node_type, addrs in normalized_map.items():
-                    if not addrs and node_type != "htr":
-                        continue
-                    bucket = self._ensure_type_bucket(
-                        dev_map, nodes_by_type, node_type
-                    )
-                    if addrs:
-                        bucket["addrs"] = list(addrs)
-                updated = dict(coordinator_data)
-                updated[self.dev_id] = dev_map
-                self._coordinator.data = updated  # type: ignore[attr-defined]
-
-        return normalized_map
-
-    def _ensure_type_bucket(
-        self,
-        dev_map: dict[str, Any],
-        nodes_by_type: dict[str, Any],
-        node_type: str,
-    ) -> dict[str, Any]:
-        """Return the node bucket for ``node_type`` with default sections."""
-
-        bucket = nodes_by_type.get(node_type)
-        if bucket is None:
-            bucket = {
-                "addrs": [],
-                "settings": {},
-                "advanced": {},
-                "samples": {},
-            }
-            nodes_by_type[node_type] = bucket
-        else:
-            bucket.setdefault("addrs", [])
-            bucket.setdefault("settings", {})
-            bucket.setdefault("advanced", {})
-            bucket.setdefault("samples", {})
-        if node_type == "htr":
-            dev_map["htr"] = bucket
-        return bucket
-
-    @staticmethod
-    def _merge_nodes(target: dict[str, Any], source: dict[str, Any]) -> None:
-        """Deep-merge incremental node updates into the stored snapshot."""
-
-        for key, value in source.items():
-            if isinstance(value, dict):
-                existing = target.get(key)
-                if isinstance(existing, dict):
-                    TermoWebWSClient._merge_nodes(existing, value)
-                else:
-                    target[key] = deepcopy(value)
-            else:
-                target[key] = value
 
 
 class DucaheatWSClient(WebSocketClient):

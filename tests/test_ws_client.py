@@ -704,11 +704,16 @@ async def test_idle_monitor_triggers_restart(monkeypatch: pytest.MonkeyPatch) ->
         triggered.append((idle_for, source))
 
     client._schedule_idle_restart = fake_schedule  # type: ignore[assignment]
+    monkeypatch.setattr(
+        client,
+        "_refresh_subscription",
+        AsyncMock(side_effect=RuntimeError("refresh boom")),
+    )
     monkeypatch.setattr(module.asyncio, "sleep", AsyncMock(return_value=None))
     monkeypatch.setattr(client, "_disconnect", AsyncMock())
 
     await client._idle_monitor()
-    assert triggered and triggered[0][1] == "idle monitor"
+    assert triggered and triggered[0][1] == "idle monitor refresh failed"
     await asyncio.sleep(0)
     client._cancel_idle_restart()
     assert client._idle_restart_pending is False
@@ -1267,16 +1272,18 @@ async def test_sample_subscription_uses_coordinator_fallback(
     entry = client.hass.data[module.DOMAIN]["entry"]
     client._coordinator._addrs = lambda: ["4"]  # type: ignore[attr-defined]
 
-    monkeypatch.setattr(
-        module,
-        "ensure_node_inventory",
-        MagicMock(return_value=[SimpleNamespace(type="acm", addr="2")]),
-    )
-    monkeypatch.setattr(
-        module,
-        "addresses_by_node_type",
-        MagicMock(return_value=({"acm": ["2"]}, set())),
-    )
+    def fake_collect(record: Any, *, coordinator: Any | None = None) -> Any:
+        assert record is entry
+        assert coordinator is client._coordinator
+        fallback = coordinator._addrs() if coordinator else []  # type: ignore[attr-defined]
+        assert fallback == ["4"]
+        return (
+            [SimpleNamespace(type="acm", addr="2")],
+            {"htr": list(fallback), "acm": ["2"]},
+            {},
+        )
+
+    monkeypatch.setattr(module, "collect_heater_sample_addresses", fake_collect)
     emit_mock = AsyncMock()
     client._sio.emit = emit_mock
 
@@ -1313,16 +1320,19 @@ async def test_sample_subscription_handles_fallback_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
-    monkeypatch.setattr(
-        module,
-        "ensure_node_inventory",
-        MagicMock(return_value=[SimpleNamespace(type="acm", addr="1")]),
-    )
-    monkeypatch.setattr(
-        module,
-        "addresses_by_node_type",
-        MagicMock(return_value=({"acm": ["1"]}, set())),
-    )
+    def fake_collect(record: Any, *, coordinator: Any | None = None) -> Any:
+        assert coordinator is client._coordinator
+        try:
+            coordinator._addrs()  # type: ignore[attr-defined]
+        except TypeError:
+            pass
+        return (
+            [SimpleNamespace(type="acm", addr="1")],
+            {"acm": ["1"]},
+            {},
+        )
+
+    monkeypatch.setattr(module, "collect_heater_sample_addresses", fake_collect)
 
     def bad_addrs() -> None:
         raise TypeError
