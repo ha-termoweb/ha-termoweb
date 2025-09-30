@@ -36,7 +36,8 @@ The end user of this integration is a non-technical person who has a home automa
 - Use defensive programming - anticipate errors, invalid user input, protocol failures, connection problems. Handle and report errors.
 - Log entry and exit of major functions or actions as INFO, log protocol calls and responses as DEBUG, log errors as ERROR. 
 - Lint and reformat with ruff before committing.
-- Run tests with `pytest --cov=custom_components.termoweb --cov-report=term-missing` and make sure they pass before committing, with 100% coverage.
+- Run tests with `timeout 30s pytest --cov=custom_components.termoweb --cov-report=term-missing` (or the equivalent cross-platform command) and make sure they pass before committing, with 100% coverage, so the suite self-terminates after 30 seconds.
+- When documenting work after a timed run, capture the partial log and note that a timeout counts as a test failure requiring investigation; developers may run focused, no-coverage subsets during debugging before rerunning the full timed command.
 - pytest with coverage take no more than 30 seconds to complete for the entire codebase. If tests take longer, assume there is an async wait problem and interrupt. Do not wait longer than 30 seconds. 
 - All tests must be meaningful. No cheating, no softball easy-to-pass tests. Test actual edge cases, exception handling, incorrect inputs.
 - Focus testing on interfaces between components, and error handling.
