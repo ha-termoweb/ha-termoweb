@@ -30,6 +30,7 @@ from .nodes import (
     build_node_inventory as _build_node_inventory,
     collect_heater_sample_addresses,
     ensure_node_inventory,
+    heater_sample_subscription_targets,
     normalize_heater_addresses,
     normalize_node_addr,
 )
@@ -935,34 +936,30 @@ class WebSocketClient:
 
         return normalized_map
 
+    def _heater_sample_subscription_targets(self) -> list[tuple[str, str]]:
+        """Return ordered ``(node_type, addr)`` heater sample subscriptions."""
+
+        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
+        inventory, normalized_map, _ = collect_heater_sample_addresses(
+            record,
+            coordinator=self._coordinator,
+        )
+        normalized_map = self._apply_heater_addresses(
+            normalized_map,
+            inventory=inventory or None,
+        )
+        return heater_sample_subscription_targets(normalized_map)
+
     async def _subscribe_heater_samples(self) -> None:
         """Subscribe to heater and accumulator sample updates."""
 
         try:
-            record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-            inventory, normalized_map, _ = collect_heater_sample_addresses(
-                record,
-                coordinator=self._coordinator,
-            )
-            normalized_map = self._apply_heater_addresses(
-                normalized_map,
-                inventory=inventory or None,
-            )
-            if not any(normalized_map.values()):
-                return
-
-            other_types = sorted(
-                node_type for node_type in normalized_map if node_type != "htr"
-            )
-            order = ["htr", *other_types]
-            for node_type in order:
-                addrs = normalized_map.get(node_type) or []
-                for addr in addrs:
-                    await self._sio.emit(
-                        "subscribe",
-                        f"/{node_type}/{addr}/samples",
-                        namespace=WS_NAMESPACE,
-                    )
+            for node_type, addr in self._heater_sample_subscription_targets():
+                await self._sio.emit(
+                    "subscribe",
+                    f"/{node_type}/{addr}/samples",
+                    namespace=WS_NAMESPACE,
+                )
         except asyncio.CancelledError:  # pragma: no cover - task lifecycle
             raise
         except Exception:  # noqa: BLE001 - defensive logging
@@ -1371,31 +1368,17 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
     async def _subscribe_htr_samples(self) -> None:
         """Subscribe to heater sample updates."""
 
-        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-        inventory, normalized_map, _ = collect_heater_sample_addresses(
-            record,
-            coordinator=self._coordinator,
-        )
-        normalized_map = self._apply_heater_addresses(
-            normalized_map,
-            inventory=inventory or None,
-        )
-        if not any(normalized_map.values()):
+        targets = self._heater_sample_subscription_targets()
+        if not targets:
             return
-        other_types = sorted(
-            node_type for node_type in normalized_map if node_type != "htr"
-        )
-        order = ["htr", *other_types]
-        for node_type in order:
-            addrs = normalized_map.get(node_type) or []
-            for addr in addrs:
-                payload = {
-                    "name": "subscribe",
-                    "args": [f"/{node_type}/{addr}/samples"],
-                }
-                await self._send_text(
-                    f"5::{WS_NAMESPACE}:{json.dumps(payload, separators=(',', ':'))}"
-                )
+        for node_type, addr in targets:
+            payload = {
+                "name": "subscribe",
+                "args": [f"/{node_type}/{addr}/samples"],
+            }
+            await self._send_text(
+                f"5::{WS_NAMESPACE}:{json.dumps(payload, separators=(',', ':'))}"
+            )
 
     async def _heartbeat_loop(self) -> None:
         """Send periodic heartbeat frames to keep the connection alive."""

@@ -584,3 +584,21 @@ def collect_heater_sample_addresses(
     normalized_map, compat = normalize_heater_addresses(addr_map)
 
     return list(inventory), normalized_map, compat
+
+
+def heater_sample_subscription_targets(
+    addrs: Mapping[Any, Iterable[Any]] | Iterable[Any] | None,
+) -> list[tuple[str, str]]:
+    """Return canonical heater sample subscription target pairs."""
+
+    normalized_map, _ = normalize_heater_addresses(addrs)
+    if not any(normalized_map.values()):
+        return []
+
+    other_types = sorted(node_type for node_type in normalized_map if node_type != "htr")
+    order = ["htr", *other_types]
+    return [
+        (node_type, addr)
+        for node_type in order
+        for addr in normalized_map.get(node_type, []) or []
+    ]

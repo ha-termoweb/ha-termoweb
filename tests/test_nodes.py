@@ -15,6 +15,7 @@ from custom_components.termoweb.nodes import (
     PowerMonitorNode,
     ThermostatNode,
     build_node_inventory,
+    heater_sample_subscription_targets,
     normalize_node_addr,
     normalize_node_type,
 )
@@ -222,3 +223,14 @@ def test_ensure_node_inventory_sets_empty_cache() -> None:
     result = nodes_module.ensure_node_inventory(record)
     assert result == []
     assert record["node_inventory"] == []
+
+
+def test_heater_sample_subscription_targets_orders_types() -> None:
+    targets = heater_sample_subscription_targets({"acm": ["2"], "htr": ["1", "3"]})
+
+    assert targets == [("htr", "1"), ("htr", "3"), ("acm", "2")]
+
+
+def test_heater_sample_subscription_targets_handles_empty() -> None:
+    assert heater_sample_subscription_targets({}) == []
+    assert heater_sample_subscription_targets(None) == []
