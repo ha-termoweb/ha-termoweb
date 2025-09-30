@@ -1,2 +1,0 @@
-- name: Python Test Action
-  uses: rcmdnk/python-action@v3.0.3
