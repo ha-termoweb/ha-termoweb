@@ -1648,6 +1648,38 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 now=time.time(),
             )
 
+    async def _subscription_refresh_loop(self) -> None:
+        """Renew the legacy websocket lease before the TTL expires."""
+
+        try:
+            while not self._closing:
+                ttl = max(self._subscription_ttl, 60.0)
+                lead = min(max(ttl * 0.2, 30.0), ttl / 2)
+                wait_for = max(ttl - lead, ttl * 0.5)
+                wait_for *= random.uniform(0.85, 0.95)
+                wait_for = max(wait_for, 30.0)
+                self._subscription_refresh_due = time.time() + wait_for
+                await asyncio.sleep(wait_for)
+                if self._closing:
+                    break
+                ws = self._ws
+                if ws is None or getattr(ws, "closed", False):
+                    continue
+                try:
+                    await self._refresh_subscription(reason="periodic renewal")
+                except asyncio.CancelledError:  # pragma: no cover - task lifecycle
+                    raise
+                except Exception:  # noqa: BLE001
+                    self._subscription_refresh_failed = True
+                    _LOGGER.warning(
+                        "WS %s: subscription refresh failed; monitoring for idle",
+                        self.dev_id,
+                        exc_info=True,
+                    )
+                    await asyncio.sleep(min(60.0, ttl / 2))
+        finally:
+            self._subscription_refresh_due = None
+
     async def _refresh_subscription(self, *, reason: str) -> None:
         """Renew the legacy websocket lease by replaying subscription calls."""
 
