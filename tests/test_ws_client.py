@@ -546,6 +546,86 @@ async def test_legacy_refresh_subscription_failure(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
+async def test_legacy_subscription_refresh_loop_uses_ws_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure the legacy refresh loop relies on the raw websocket state."""
+
+    client = _make_legacy_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    client._subscription_ttl = 240.0
+    client._ws = SimpleNamespace(closed=False)
+    client._closing = False
+
+    current = 0.0
+
+    async def fake_sleep(delay: float) -> None:
+        nonlocal current
+        current += delay
+
+    def fake_time() -> float:
+        return current
+
+    sleep_calls: list[float] = []
+
+    async def tracking_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+        await fake_sleep(delay)
+
+    monkeypatch.setattr(module.asyncio, "sleep", tracking_sleep)
+    monkeypatch.setattr(module.time, "time", fake_time)
+    monkeypatch.setattr(module.random, "uniform", lambda *_: 0.9)
+
+    refresh_reasons: list[str] = []
+
+    async def capture_refresh(*, reason: str) -> None:
+        refresh_reasons.append(reason)
+        client._closing = True
+
+    monkeypatch.setattr(client, "_refresh_subscription", capture_refresh)
+
+    await client._subscription_refresh_loop()
+
+    assert refresh_reasons == ["periodic renewal"]
+    assert sleep_calls and sleep_calls[0] == pytest.approx(172.8, rel=0.01)
+    assert client._subscription_refresh_due is None
+
+
+@pytest.mark.asyncio
+async def test_legacy_subscription_refresh_loop_skips_when_ws_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify the legacy refresh loop avoids renewals when the socket is shut."""
+
+    client = _make_legacy_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    client._subscription_ttl = 180.0
+    client._ws = SimpleNamespace(closed=True)
+    client._closing = False
+
+    iteration = 0
+
+    async def fake_sleep(delay: float) -> None:
+        nonlocal iteration
+        iteration += 1
+        if iteration >= 2:
+            client._closing = True
+
+    def fake_time() -> float:
+        return float(iteration) * 10.0
+
+    monkeypatch.setattr(module.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(module.time, "time", fake_time)
+    monkeypatch.setattr(module.random, "uniform", lambda *_: 0.9)
+
+    refresh_mock = AsyncMock()
+    monkeypatch.setattr(client, "_refresh_subscription", refresh_mock)
+
+    await client._subscription_refresh_loop()
+
+    refresh_mock.assert_not_called()
+    assert client._subscription_refresh_due is None
+
+
+@pytest.mark.asyncio
 async def test_ws_url_adds_suffix_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     rest = DummyREST(base="https://api.otherhost.com")
     client = _make_client(monkeypatch, rest=rest, hass_loop=asyncio.get_event_loop())
