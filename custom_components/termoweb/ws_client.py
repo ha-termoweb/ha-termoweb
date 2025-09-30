@@ -1781,15 +1781,6 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         path = parsed.path.rstrip("/")
         return urlunsplit((scheme, netloc, path or "", "", ""))
 
-    def _socket_endpoint(self) -> str:
-        """Return the websocket endpoint path."""
-
-        return "api/v2/socket_io"
-
-
-
-
-
 class DucaheatWSClient(WebSocketClient):
     """Verbose websocket client variant with payload debug logging."""
 
