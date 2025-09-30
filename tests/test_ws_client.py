@@ -1319,6 +1319,28 @@ async def test_sample_subscription_uses_coordinator_fallback(
     ]
 
 
+def test_heater_sample_subscription_targets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure the helper returns ordered subscription targets."""
+
+    client = _make_client(monkeypatch)
+    entry = client.hass.data[module.DOMAIN]["entry"]
+
+    def fake_collect(record: Mapping[str, Any], *, coordinator: Any | None = None) -> Any:
+        assert record is entry
+        assert coordinator is client._coordinator
+        return (
+            [SimpleNamespace(type="htr", addr="ignored")],
+            {"acm": ["2"], "htr": ["1", "3"]},
+            {},
+        )
+
+    monkeypatch.setattr(module, "collect_heater_sample_addresses", fake_collect)
+
+    targets = client._heater_sample_subscription_targets()
+
+    assert targets == [("htr", "1"), ("htr", "3"), ("acm", "2")]
+
+
 @pytest.mark.asyncio
 async def test_sample_subscription_logs_helper_errors(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
