@@ -433,6 +433,11 @@ class WebSocketClient:
                 continue
             idle_for = time.time() - last_event
             if idle_for >= self._payload_idle_window:
+                _LOGGER.info(
+                    "WS %s: idle for %.0fs; refreshing websocket lease",
+                    self.dev_id,
+                    idle_for,
+                )
                 try:
                     await self._refresh_subscription(reason="idle monitor")
                 except asyncio.CancelledError:  # pragma: no cover - task lifecycle
@@ -445,6 +450,11 @@ class WebSocketClient:
                 continue
             if self._subscription_refresh_failed:
                 # Retry quickly if the last scheduled renewal failed.
+                _LOGGER.info(
+                    "WS %s: retrying websocket lease after failure; idle for %.0fs",
+                    self.dev_id,
+                    idle_for,
+                )
                 try:
                     await self._refresh_subscription(reason="idle monitor retry")
                 except asyncio.CancelledError:  # pragma: no cover - task lifecycle
@@ -1748,8 +1758,6 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._stats.last_event_ts = now
         self._last_event_at = now
         self._cancel_idle_restart()
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS %s: heartbeat from %s", self.dev_id, source)
 
     async def _run_heartbeat(
         self, interval: float, send: Callable[[], Awaitable[Any]]
