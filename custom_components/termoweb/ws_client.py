@@ -24,11 +24,10 @@ import socketio
 
 from .api import RESTClient
 from .const import API_BASE, DOMAIN, WS_NAMESPACE, signal_ws_data, signal_ws_status
-from .heater import prepare_heater_platform_data
 from .nodes import (
-    HEATER_NODE_TYPES,
     NODE_CLASS_BY_TYPE,
     addresses_by_node_type,
+    collect_heater_sample_addresses,
     build_node_inventory as _build_node_inventory,
     ensure_node_inventory,
     normalize_heater_addresses,
@@ -855,38 +854,13 @@ class WebSocketClient:
 
         try:
             record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-            entry_data = record if isinstance(record, dict) else {}
-            inventory, _nodes_by_type, addrs_by_type, _ = prepare_heater_platform_data(
-                entry_data,
-                default_name_simple=lambda addr: f"Heater {addr}",
+            inventory, normalized_map, _ = collect_heater_sample_addresses(
+                record,
+                coordinator=self._coordinator,
             )
-
-            addr_map: dict[str, list[str]] = {
-                node_type: [
-                    addr_str
-                    for addr in addresses
-                    if (addr_str := str(addr).strip())
-                ]
-                for node_type, addresses in addrs_by_type.items()
-                if node_type in HEATER_NODE_TYPES and addresses
-            }
-
-            if not addr_map.get("htr") and hasattr(self._coordinator, "_addrs"):
-                try:
-                    fallback = list(self._coordinator._addrs())  # noqa: SLF001
-                except (AttributeError, TypeError, ValueError):
-                    fallback = []
-                if fallback:
-                    addr_map["htr"] = [
-                        addr_str
-                        for addr in fallback
-                        if (addr_str := str(addr).strip())
-                    ]
-
-            normalized_map, _ = normalize_heater_addresses(addr_map)
-            inventory_or_none = inventory or None
             normalized_map = self._apply_heater_addresses(
-                normalized_map, inventory=inventory_or_none
+                normalized_map,
+                inventory=inventory or None,
             )
             if not any(normalized_map.values()):
                 return
@@ -1339,36 +1313,14 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
     async def _subscribe_htr_samples(self) -> None:
         """Subscribe to heater sample updates."""
 
-        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id, {})
-        inventory, _, addrs_by_type, _ = (
-            prepare_heater_platform_data(
-                record,
-                default_name_simple=lambda addr: f"Heater {addr}",
-            )
+        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
+        inventory, normalized_map, _ = collect_heater_sample_addresses(
+            record,
+            coordinator=self._coordinator,
         )
-
-        addr_map: dict[str, list[str]] = {
-            node_type: [
-                addr_str
-                for addr in addresses
-                if (addr_str := str(addr).strip())
-            ]
-            for node_type, addresses in addrs_by_type.items()
-            if node_type in HEATER_NODE_TYPES and addresses
-        }
-
-        if not addr_map.get("htr") and hasattr(self._coordinator, "_addrs"):
-            try:
-                fallback = list(self._coordinator._addrs())  # noqa: SLF001
-            except (AttributeError, TypeError, ValueError):
-                fallback = []
-            if fallback:
-                addr_map["htr"] = [
-                    str(addr).strip() for addr in fallback if str(addr).strip()
-                ]
-        inventory_or_none = inventory or None
         normalized_map = self._apply_heater_addresses(
-            addr_map, inventory=inventory_or_none
+            normalized_map,
+            inventory=inventory or None,
         )
         if not any(normalized_map.values()):
             return

@@ -534,3 +534,53 @@ def normalize_heater_addresses(
     compat_aliases["htr"] = "htr"
 
     return cleaned_map, compat_aliases
+
+
+def collect_heater_sample_addresses(
+    record: Mapping[str, Any] | None,
+    *,
+    coordinator: Any | None = None,
+) -> tuple[list[Node], dict[str, list[str]], dict[str, str]]:
+    """Return inventory and canonical heater sample subscription addresses."""
+
+    nodes_payload: Any | None = None
+    cache_record: MutableMapping[str, Any] | None = None
+
+    if isinstance(record, MutableMapping):
+        cache_record = record
+        nodes_payload = record.get("nodes")
+    elif isinstance(record, Mapping):
+        nodes_payload = record.get("nodes")
+
+    inventory = ensure_node_inventory(cache_record or {}, nodes=nodes_payload)
+
+    raw_map, _ = addresses_by_node_type(
+        inventory,
+        known_types=HEATER_NODE_TYPES,
+    )
+    addr_map: dict[str, list[str]] = {
+        node_type: list(addresses)
+        for node_type, addresses in raw_map.items()
+        if node_type in HEATER_NODE_TYPES and addresses
+    }
+
+    if not addr_map.get("htr") and coordinator is not None:
+        fallback: Iterable[Any] | None = None
+        if hasattr(coordinator, "_addrs"):
+            try:
+                fallback = coordinator._addrs()  # type: ignore[attr-defined]
+            except Exception:  # pragma: no cover - defensive
+                fallback = None
+        if fallback:
+            normalised: list[str] = []
+            for candidate in fallback:
+                addr = normalize_node_addr(candidate)
+                if not addr:
+                    continue
+                normalised.append(addr)
+            if normalised:
+                addr_map["htr"] = normalised
+
+    normalized_map, compat = normalize_heater_addresses(addr_map)
+
+    return list(inventory), normalized_map, compat
