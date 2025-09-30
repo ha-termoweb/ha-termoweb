@@ -495,6 +495,63 @@ def test_async_write_settings_without_client_returns_false() -> None:
     asyncio.run(_run())
 
 
+def test_commit_write_runs_optimistic_and_fallback() -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry_id = "entry"
+        dev_id = "dev"
+        addr = "1"
+        record = {"htr": {"settings": {addr: {}}, "addrs": [addr]}, "nodes": {}}
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            record,
+            client=AsyncMock(),
+        )
+
+        heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
+
+        async_write = AsyncMock(return_value=True)
+        optimistic = MagicMock()
+        fallback = MagicMock()
+        apply_fn = MagicMock()
+
+        heater._async_write_settings = async_write
+        heater._optimistic_update = optimistic
+        heater._schedule_refresh_fallback = fallback
+
+        await heater._commit_write(
+            log_context="Test write",
+            write_kwargs={"prog": [0, 1, 2]},
+            apply_fn=apply_fn,
+            success_details={"detail": "value"},
+        )
+
+        async_write.assert_awaited_once_with(log_context="Test write", prog=[0, 1, 2])
+        optimistic.assert_called_once_with(apply_fn)
+        fallback.assert_called_once()
+
+        async_write.reset_mock()
+        optimistic.reset_mock()
+        fallback.reset_mock()
+        async_write.return_value = False
+
+        await heater._commit_write(
+            log_context="Test write",
+            write_kwargs={"ptemp": [1.0, 2.0, 3.0]},
+            apply_fn=apply_fn,
+        )
+
+        async_write.assert_awaited_once_with(
+            log_context="Test write", ptemp=[1.0, 2.0, 3.0]
+        )
+        optimistic.assert_not_called()
+        fallback.assert_not_called()
+
+    asyncio.run(_run())
+
+
 def test_async_setup_entry_rebuilds_inventory_when_missing() -> None:
     async def _run() -> None:
         _reset_environment()

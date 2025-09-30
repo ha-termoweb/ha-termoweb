@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 import logging
 from typing import Any
 
@@ -431,6 +431,40 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         return attrs
 
     # -------------------- Entity services: schedule & preset temps --------------------
+    async def _commit_write(
+        self,
+        *,
+        log_context: str,
+        write_kwargs: Mapping[str, Any],
+        apply_fn: Callable[[dict[str, Any]], None],
+        success_details: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Submit a heater write, update cached state, and schedule fallback."""
+        success = await self._async_write_settings(
+            log_context=log_context,
+            **dict(write_kwargs),
+        )
+        if not success:
+            return
+
+        detail_suffix = ""
+        if success_details:
+            parts = [f"{key}={value}" for key, value in success_details.items()]
+            if parts:
+                detail_suffix = f" ({', '.join(parts)})"
+
+        _LOGGER.debug(
+            "%s OK dev=%s type=%s addr=%s%s",
+            log_context,
+            self._dev_id,
+            self._node_type,
+            self._addr,
+            detail_suffix,
+        )
+
+        self._optimistic_update(apply_fn)
+        self._schedule_refresh_fallback()
+
     async def async_set_schedule(self, prog: list[int]) -> None:
         """Write the 7x24 tri-state program to the device."""
         # Validate defensively even though the schema should catch most issues
@@ -451,28 +485,15 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             )
             return
 
-        success = await self._async_write_settings(
-            log_context="Schedule write",
-            prog=prog2,
-        )
-        if not success:
-            return
-
-        _LOGGER.debug(
-            "Schedule write OK dev=%s type=%s addr=%s (prog_len=%d)",
-            self._dev_id,
-            self._node_type,
-            self._addr,
-            len(prog2),
-        )
-
         def _apply(cur: dict[str, Any]) -> None:
             cur["prog"] = list(prog2)
 
-        self._optimistic_update(_apply)
-
-        # Expect WS echo; schedule refresh if it doesn't arrive soon.
-        self._schedule_refresh_fallback()
+        await self._commit_write(
+            log_context="Schedule write",
+            write_kwargs={"prog": prog2},
+            apply_fn=_apply,
+            success_details={"prog_len": len(prog2)},
+        )
 
     async def async_set_preset_temperatures(self, **kwargs) -> None:
         """Write the cold/night/day preset temperatures."""
@@ -507,28 +528,15 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             )
             return
 
-        success = await self._async_write_settings(
-            log_context="Preset write",
-            ptemp=p2,
-        )
-        if not success:
-            return
-
-        _LOGGER.debug(
-            "Preset write OK dev=%s type=%s addr=%s ptemp=%s",
-            self._dev_id,
-            self._node_type,
-            self._addr,
-            p2,
-        )
-
         def _apply(cur: dict[str, Any]) -> None:
             cur["ptemp"] = [f"{t:.1f}" if isinstance(t, float) else t for t in p2]
 
-        self._optimistic_update(_apply)
-
-        # Expect WS echo; schedule refresh if it doesn't arrive soon.
-        self._schedule_refresh_fallback()
+        await self._commit_write(
+            log_context="Preset write",
+            write_kwargs={"ptemp": p2},
+            apply_fn=_apply,
+            success_details={"ptemp": p2},
+        )
 
     # -------------------- Existing write path (mode/setpoint) --------------------
     async def async_set_temperature(self, **kwargs: Any) -> None:
