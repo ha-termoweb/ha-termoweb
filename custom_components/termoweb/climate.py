@@ -20,6 +20,7 @@ import voluptuous as vol
 from .const import DOMAIN
 from .heater import (
     HeaterNodeBase,
+    iter_heater_maps,
     iter_heater_nodes,
     log_skipped_nodes,
     prepare_heater_platform_data,
@@ -215,28 +216,14 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
     def _settings_maps(self) -> list[dict[str, Any]]:
         """Return all cached settings maps referencing this node."""
-        data = (self.coordinator.data or {}).get(self._dev_id, {})
-        maps: list[dict[str, Any]] = []
-        seen: set[int] = set()
-
-        if isinstance(data, dict):
-            by_type = data.get("nodes_by_type")
-            if isinstance(by_type, dict):
-                section = by_type.get(self._node_type)
-                if isinstance(section, dict):
-                    settings_map = section.get("settings")
-                    if isinstance(settings_map, dict) and id(settings_map) not in seen:
-                        maps.append(settings_map)
-                        seen.add(id(settings_map))
-
-            legacy = data.get("htr")
-            if isinstance(legacy, dict):
-                settings_map = legacy.get("settings")
-                if isinstance(settings_map, dict) and id(settings_map) not in seen:
-                    maps.append(settings_map)
-                    seen.add(id(settings_map))
-
-        return maps
+        data = (self.coordinator.data or {}).get(self._dev_id)
+        return list(
+            iter_heater_maps(
+                data,
+                map_key="settings",
+                node_types=[self._node_type],
+            )
+        )
 
     def _optimistic_update(self, mutator: Callable[[dict[str, Any]], None]) -> None:
         """Apply ``mutator`` to cached settings and refresh state if changed."""
