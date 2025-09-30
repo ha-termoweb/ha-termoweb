@@ -1528,6 +1528,49 @@ def test_handle_handshake_extracts_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
     refresh_loop.assert_called_once()
 
 
+def test_handle_handshake_logs_lease_scalars(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    client = _make_client(monkeypatch)
+    refresh_loop = AsyncMock()
+    monkeypatch.setattr(client, "_subscription_refresh_loop", refresh_loop)
+    monkeypatch.setattr(module.time, "time", lambda: 300.0)
+    caplog.set_level(logging.DEBUG, logger=module._LOGGER.name)
+
+    payload = {
+        "lease": {
+            "ttl": 450,
+            "leaseMs": "450000",
+            "token": "secret-should-not-log",
+            "leaseFlag": True,
+            "leaseLabel": "   ",
+            "leaseCode": "invalid",
+        },
+        "meta": {"timeout": 120},
+        "segments": [
+            {"leaseTtl": "42"},
+            {"timeout": "75"},
+        ],
+    }
+
+    client._handle_handshake(payload)
+
+    log_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno == logging.DEBUG
+        and "handshake lease hints" in record.getMessage()
+    ]
+    assert log_messages, "expected handshake lease hint log entry"
+    message = log_messages[-1]
+    assert "lease.ttl=450" in message
+    assert "lease.leaseMs=450000" in message
+    assert "meta.timeout=120" in message
+    assert "segments[0].leaseTtl=42" in message
+    assert "segments[1].timeout=75" in message
+    assert "secret-should-not-log" not in message
+
+
 def test_handle_handshake_uses_default_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _make_client(monkeypatch)
     refresh_loop = AsyncMock()

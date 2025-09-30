@@ -653,6 +653,47 @@ class WebSocketClient:
         """Process the initial handshake payload from the server."""
         if isinstance(data, dict):
             self._handshake_payload = deepcopy(data)
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                lease_scalars: list[str] = []
+                lease_tokens = ("ttl", "timeout", "lease", "expire")
+
+                def _format_scalar(value: Any) -> str | None:
+                    if isinstance(value, bool):
+                        return None
+                    if isinstance(value, (int, float)):
+                        return format(value, "g")
+                    if isinstance(value, str):
+                        candidate = value.strip()
+                        if not candidate:
+                            return None
+                        try:
+                            float(candidate)
+                        except ValueError:
+                            return None
+                        return candidate
+                    return None
+
+                def _collect_scalars(node: Any, path: str) -> None:
+                    if isinstance(node, Mapping):
+                        for key, value in node.items():
+                            key_str = str(key)
+                            key_lower = key_str.lower()
+                            next_path = f"{path}.{key_str}" if path else key_str
+                            if any(token in key_lower for token in lease_tokens):
+                                formatted = _format_scalar(value)
+                                if formatted is not None:
+                                    lease_scalars.append(f"{next_path}={formatted}")
+                            if isinstance(value, (Mapping, list, tuple)):
+                                _collect_scalars(value, next_path)
+                    elif isinstance(node, (list, tuple)):
+                        for idx, item in enumerate(node):
+                            _collect_scalars(item, f"{path}[{idx}]")
+
+                _collect_scalars(data, "")
+                summary = ", ".join(lease_scalars) if lease_scalars else "none"
+                _LOGGER.debug(
+                    "WS %s: handshake lease hints: %s", self.dev_id, summary
+                )
             ttl_info = self._extract_subscription_ttl(data)
             ttl: float
             source: str
