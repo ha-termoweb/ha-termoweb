@@ -103,6 +103,70 @@ def _make_client(
     return client
 
 
+def test_handshake_error_records_context() -> None:
+    """Ensure the custom handshake exception preserves response metadata."""
+
+    err = module.HandshakeError(401, "https://example", "unauthorized")
+    assert err.status == 401
+    assert err.url == "https://example"
+    assert err.body_snippet == "unauthorized"
+    assert "handshake failed" in str(err)
+
+
+def test_ws_state_bucket_initialises_missing_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify hass.data is created when absent."""
+
+    hass_loop = SimpleNamespace(
+        create_task=lambda coro, **_: SimpleNamespace(done=lambda: True),
+        call_soon_threadsafe=lambda cb, *args: cb(*args),
+    )
+    hass = SimpleNamespace(loop=hass_loop)
+    coordinator = SimpleNamespace(data={}, update_nodes=MagicMock())
+    dispatcher = MagicMock()
+    monkeypatch.setattr(module, "async_dispatcher_send", dispatcher)
+    client = module.WebSocketClient(
+        hass,
+        entry_id="entry",
+        dev_id="device",
+        api_client=DummyREST(),
+        coordinator=coordinator,
+    )
+    bucket = client._ws_state_bucket()
+    assert module.DOMAIN in hass.data  # type: ignore[attr-defined]
+    assert hass.data[module.DOMAIN]["entry"]["ws_state"]["device"] is bucket  # type: ignore[index]
+
+
+def _make_legacy_client(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    hass_loop: Any | None = None,
+) -> module.TermoWebWSClient:
+    """Return a TermoWeb legacy websocket client with patched dependencies."""
+
+    if hass_loop is None:
+        hass_loop = SimpleNamespace(
+            create_task=lambda coro, **_: SimpleNamespace(done=lambda: True),
+            call_soon_threadsafe=lambda cb, *args: cb(*args),
+        )
+    hass = SimpleNamespace(loop=hass_loop, data={module.DOMAIN: {"entry": {}}})
+    coordinator = SimpleNamespace(data={}, update_nodes=MagicMock())
+    rest_client = DummyREST()
+    dispatcher_mock = MagicMock()
+    monkeypatch.setattr(module, "async_dispatcher_send", dispatcher_mock)
+    client = module.TermoWebWSClient(
+        hass,
+        entry_id="entry",
+        dev_id="device",
+        api_client=rest_client,
+        coordinator=coordinator,
+        session=SimpleNamespace(),
+    )
+    client._dispatcher_mock = dispatcher_mock  # type: ignore[attr-defined]
+    return client
+
+
 def test_http_wrapping_handles_missing_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
     """Ensure http assignments tolerate attribute errors and reuse existing sessions."""
 
@@ -196,6 +260,66 @@ def test_is_running_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     assert client.is_running()
     client._task = SimpleNamespace(done=lambda: True)
     assert not client.is_running()
+
+
+def test_legacy_handle_event_dispatches_and_logs(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Ensure the legacy client publishes updates and logs affected nodes."""
+
+    client = _make_legacy_client(monkeypatch)
+    dispatcher: MagicMock = client._dispatcher_mock  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        module,
+        "ensure_node_inventory",
+        MagicMock(return_value=[SimpleNamespace(type="htr", addr="1")]),
+    )
+    monkeypatch.setattr(
+        module,
+        "addresses_by_node_type",
+        MagicMock(return_value=({"htr": ["1"]}, set())),
+    )
+    monkeypatch.setattr(
+        module,
+        "normalize_heater_addresses",
+        MagicMock(return_value=({"htr": ["1"]}, {})),
+    )
+    caplog.set_level(logging.DEBUG)
+
+    snapshot_event = {
+        "name": "data",
+        "args": [
+            [
+                {
+                    "path": "/mgr/nodes",
+                    "body": {"htr": {"settings": {"1": {"mode": "eco"}}}},
+                }
+            ]
+        ],
+    }
+    client._handle_event(snapshot_event)
+    assert client._coordinator.update_nodes.called
+    assert "nodes" in client._nodes  # type: ignore[attr-defined]
+    payloads = [call.args[2] for call in dispatcher.mock_calls if len(call.args) >= 3]
+    assert any(
+        isinstance(payload, dict) and payload.get("kind") == "nodes"
+        for payload in payloads
+    )
+
+    dispatcher.reset_mock()
+    update_event = {
+        "name": "data",
+        "args": [[{"path": "/htr/1/settings", "body": {"mode": "comfort"}}]],
+    }
+    client._handle_event(update_event)
+    payloads = [call.args[2] for call in dispatcher.mock_calls if len(call.args) >= 3]
+    assert any(
+        isinstance(payload, dict)
+        and payload.get("kind") == "htr_settings"
+        and payload.get("addr") == "1"
+        for payload in payloads
+    )
+    assert "legacy update for htr/1" in caplog.text
 
 
 @pytest.mark.asyncio

@@ -763,7 +763,7 @@ class WebSocketClient:
 # ----------------------------------------------------------------------
 
 
-class TermoWebWSClient(WebSocketClient):
+class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network client
     """Legacy Socket.IO 0.9 websocket client for TermoWeb."""
 
     def __init__(
@@ -1133,6 +1133,7 @@ class TermoWebWSClient(WebSocketClient):
             return
         paths: list[str] = []
         updated_nodes = False
+        updated_addrs: list[tuple[str, str]] = []
         sample_addrs: list[tuple[str, str]] = []
 
         def _extract_type_addr(path: str) -> tuple[str | None, str | None]:
@@ -1140,45 +1141,182 @@ class TermoWebWSClient(WebSocketClient):
 
             if not path:
                 return None, None
-            path = path.strip("/")
-            if not path:
-                return None, None
-            parts = path.split("/")
-            if len(parts) < 2:
-                return None, None
-            return parts[0], parts[1]
+            parts = [segment for segment in path.split("/") if segment]
+            for idx in range(len(parts) - 2):
+                node_type = parts[idx]
+                addr = parts[idx + 1]
+                leaf = parts[idx + 2]
+                if leaf in {"settings", "samples", "advanced_setup"}:
+                    return node_type, addr
+            return None, None
 
         for item in batch:
             if not isinstance(item, Mapping):
                 continue
-            path = str(item.get("path") or "")
-            if not path:
+            path = item.get("path")
+            body = item.get("body")
+            if not isinstance(path, str):
                 continue
             paths.append(path)
-            body = item.get("body")
-            if not isinstance(body, Mapping):
+            dev_map: dict[str, Any] = (self._coordinator.data or {}).get(
+                self.dev_id
+            ) or {}
+            if not dev_map:
+                htr_bucket: dict[str, Any] = {
+                    "addrs": [],
+                    "settings": {},
+                    "advanced": {},
+                    "samples": {},
+                }
+                dev_map = {
+                    "dev_id": self.dev_id,
+                    "name": f"Device {self.dev_id}",
+                    "raw": {},
+                    "connected": True,
+                    "nodes": None,
+                    "nodes_by_type": {"htr": htr_bucket},
+                    "htr": htr_bucket,
+                }
+                cur = dict(self._coordinator.data or {})
+                cur[self.dev_id] = dev_map
+                self._coordinator.data = cur  # type: ignore[attr-defined]
+            nodes_by_type: dict[str, Any] = dev_map.setdefault("nodes_by_type", {})
+            if path.endswith("/mgr/nodes"):
+                if isinstance(body, dict):
+                    dev_map["nodes"] = body
+                    self._nodes_raw = deepcopy(body)
+                    self._nodes = self._build_nodes_snapshot(self._nodes_raw)
+                    type_to_addrs = self._dispatch_nodes(body)
+                    for node_type, addrs in type_to_addrs.items():
+                        bucket = self._ensure_type_bucket(
+                            dev_map, nodes_by_type, node_type
+                        )
+                        bucket["addrs"] = list(addrs)
+                    updated_nodes = True
                 continue
             node_type, addr = _extract_type_addr(path)
-            if not node_type or not addr:
-                continue
-            nodes = self._nodes_raw.setdefault(node_type, {})
-            sections = nodes.setdefault("settings", {})
-            if path.endswith("/advanced_setup"):
-                sections = nodes.setdefault("advanced", {})
-            elif path.endswith("/samples"):
-                sections = nodes.setdefault("samples", {})
-                sample_addrs.append((node_type, addr))
-            if isinstance(sections, dict):
-                sections[addr] = deepcopy(body)
-                updated_nodes = True
+            if node_type and addr and node_type != "mgr":
+                section = self._legacy_section_for_path(path)
+                if section:
+                    if section in {"settings", "advanced"} and not isinstance(
+                        body, Mapping
+                    ):
+                        continue
+                    if self._update_legacy_section(
+                        node_type=node_type,
+                        addr=addr,
+                        section=section,
+                        body=body,
+                        dev_map=dev_map,
+                        nodes_by_type=nodes_by_type,
+                    ):
+                        if section == "samples":
+                            sample_addrs.append((node_type, addr))
+                        elif section == "settings":
+                            updated_addrs.append((node_type, addr))
+                        updated_nodes = True
+                    continue
+            raw = dev_map.setdefault("raw", {})
+            key = path.strip("/").replace("/", "_")
+            raw[key] = body
 
         if updated_nodes:
             self._nodes = self._build_nodes_snapshot(self._nodes_raw)
-            self._dispatch_nodes(self._nodes)
-        if sample_addrs:
-            self._mark_event(paths=paths, count_event=False)
+        self._mark_event(paths=paths)
+        payload_base = {
+            "dev_id": self.dev_id,
+            "ts": self._stats.last_event_ts,
+            "node_type": None,
+        }
+        if updated_nodes:
+            async_dispatcher_send(
+                self.hass,
+                signal_ws_data(self.entry_id),
+                {**payload_base, "addr": None, "kind": "nodes"},
+            )
+        for node_type, addr in set(updated_addrs):
+            async_dispatcher_send(
+                self.hass,
+                signal_ws_data(self.entry_id),
+                {
+                    **payload_base,
+                    "addr": addr,
+                    "kind": f"{node_type}_settings",
+                    "node_type": node_type,
+                },
+            )
+        for node_type, addr in set(sample_addrs):
+            async_dispatcher_send(
+                self.hass,
+                signal_ws_data(self.entry_id),
+                {
+                    **payload_base,
+                    "addr": addr,
+                    "kind": f"{node_type}_samples",
+                    "node_type": node_type,
+                },
+            )
+        self._log_legacy_update(
+            updated_nodes=updated_nodes,
+            updated_addrs=updated_addrs,
+            sample_addrs=sample_addrs,
+        )
+
+    def _update_legacy_section(
+        self,
+        *,
+        node_type: str,
+        addr: str,
+        section: str,
+        body: Any,
+        dev_map: dict[str, Any],
+        nodes_by_type: dict[str, Any],
+    ) -> bool:
+        """Store legacy section updates and mirror them in raw state."""
+
+        bucket = self._ensure_type_bucket(dev_map, nodes_by_type, node_type)
+        section_map: dict[str, Any] = bucket.setdefault(section, {})
+        if not isinstance(section_map, dict):
+            return False
+        value: Any = dict(body) if isinstance(body, Mapping) else body
+        section_map[addr] = value
+        raw_bucket = self._nodes_raw.setdefault(node_type, {})
+        raw_section = raw_bucket.setdefault(section, {})
+        if isinstance(raw_section, dict):
+            raw_section[addr] = deepcopy(body)
+        return True
+
+    @staticmethod
+    def _legacy_section_for_path(path: str) -> str | None:
+        """Return the legacy section identifier for ``path`` if supported."""
+
+        if path.endswith("/settings"):
+            return "settings"
+        if path.endswith("/advanced_setup"):
+            return "advanced"
+        if path.endswith("/samples"):
+            return "samples"
+        return None
+
+    def _log_legacy_update(
+        self,
+        *,
+        updated_nodes: bool,
+        updated_addrs: Iterable[tuple[str, str]],
+        sample_addrs: Iterable[tuple[str, str]],
+    ) -> None:
+        """Emit debug logging for the legacy websocket update batch."""
+
+        if not _LOGGER.isEnabledFor(logging.DEBUG):
+            return
+        addr_pairs = {f"{node_type}/{addr}" for node_type, addr in updated_addrs}
+        addr_pairs.update(f"{node_type}/{addr}" for node_type, addr in sample_addrs)
+        if addr_pairs:
+            _LOGGER.debug(
+                "WS %s: legacy update for %s", self.dev_id, ", ".join(sorted(addr_pairs))
+            )
         elif updated_nodes:
-            self._mark_event(paths=paths, count_event=True)
+            _LOGGER.debug("WS %s: legacy nodes refresh", self.dev_id)
 
     async def _send_text(self, data: str) -> None:
         """Send a websocket text frame."""
@@ -1419,8 +1557,36 @@ class TermoWebWSClient(WebSocketClient):
                 ", ".join(sorted(unknown_types)),
             )
 
-        payload_copy = deepcopy(snapshot)
-        payload_copy.setdefault("addr_map", addr_map)
+        if not is_snapshot:
+            nodes_by_type = {
+                node_type: {"addrs": list(addrs)}
+                for node_type, addrs in addr_map.items()
+            }
+            snapshot["nodes_by_type"] = nodes_by_type
+            if "htr" in nodes_by_type:
+                snapshot.setdefault("htr", nodes_by_type["htr"])
+
+        if raw_nodes is None:  # pragma: no cover - defensive default
+            raw_nodes = {}
+
+        if hasattr(self._coordinator, "update_nodes"):
+            self._coordinator.update_nodes(raw_nodes, inventory)
+
+        if isinstance(record, dict):
+            record["nodes"] = raw_nodes
+            record["node_inventory"] = inventory
+
+        self._apply_heater_addresses(addr_map, inventory=None)
+
+        payload_copy = {
+            "dev_id": self.dev_id,
+            "node_type": None,
+            "nodes": deepcopy(snapshot.get("nodes")),
+            "nodes_by_type": deepcopy(snapshot.get("nodes_by_type", {})),
+        }
+        payload_copy.setdefault(
+            "addr_map", {node_type: list(addrs) for node_type, addrs in addr_map.items()}
+        )
         payload_copy.setdefault("unknown_types", sorted(unknown_types))
 
         def _send() -> None:
