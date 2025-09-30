@@ -18,6 +18,7 @@ from custom_components.termoweb.nodes import (
     heater_sample_subscription_targets,
     normalize_node_addr,
     normalize_node_type,
+    _existing_nodes_map,
 )
 
 
@@ -99,6 +100,31 @@ def test_node_as_dict() -> None:
         "addr": "5",
         "type": "htr",
     }
+
+
+def test_existing_nodes_map_collects_sections() -> None:
+    nodes = {
+        "nodes_by_type": {
+            "htr": {"addrs": ["1"], "settings": {"1": {"mode": "auto"}}},
+            "thm": {"addrs": [], "settings": {}},
+        },
+        "htr": {"addrs": ["1"], "settings": {"1": {"mode": "auto"}}},
+        "thm": {"addrs": [], "settings": {}},
+        "dev_id": "dev",
+        "connected": True,
+    }
+
+    sections = _existing_nodes_map(nodes)
+
+    assert sections == {
+        "htr": {"addrs": ["1"], "settings": {"1": {"mode": "auto"}}},
+        "thm": {"addrs": [], "settings": {}},
+    }
+
+
+def test_existing_nodes_map_handles_non_mapping_input() -> None:
+    assert _existing_nodes_map(None) == {}
+    assert _existing_nodes_map({"nodes_by_type": []}) == {}
 
 
 def test_build_node_inventory_handles_mixed_types(caplog: pytest.LogCaptureFixture) -> None:

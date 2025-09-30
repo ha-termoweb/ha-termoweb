@@ -17,6 +17,7 @@ from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
 from .nodes import (
     Node,
+    _existing_nodes_map,
     build_heater_address_map,
     build_node_inventory,
     normalize_heater_addresses,
@@ -551,23 +552,7 @@ class StateCoordinator(
                 success = True
                 return
 
-            existing_nodes = {}
-            raw_existing = dev_data.get("nodes_by_type")
-            if isinstance(raw_existing, dict):
-                existing_nodes.update(raw_existing)
-
-            for key, value in dev_data.items():
-                if key in {
-                    "dev_id",
-                    "name",
-                    "raw",
-                    "connected",
-                    "nodes",
-                    "nodes_by_type",
-                }:
-                    continue
-                if isinstance(value, dict):
-                    existing_nodes.setdefault(key, value)
+            existing_nodes = _existing_nodes_map(dev_data)
 
             cache_map = dict(self._nodes_by_type)
             self._register_node_address(node_type, addr)
@@ -707,23 +692,7 @@ class StateCoordinator(
 
             addr_map = dict(self._nodes_by_type)
 
-            existing_nodes: dict[str, Any] = {}
-            raw_nodes = prev_dev.get("nodes_by_type")
-            if isinstance(raw_nodes, dict):
-                existing_nodes.update(raw_nodes)
-
-            for key, value in prev_dev.items():
-                if key in {
-                    "dev_id",
-                    "name",
-                    "raw",
-                    "connected",
-                    "nodes",
-                    "nodes_by_type",
-                }:
-                    continue
-                if isinstance(value, dict):
-                    existing_nodes.setdefault(key, value)
+            existing_nodes = _existing_nodes_map(prev_dev)
 
             nodes_by_type = self._merge_nodes_by_type(
                 addr_map,
