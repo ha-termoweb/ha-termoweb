@@ -72,7 +72,7 @@ _get_last_statistics_compat = energy_module._get_last_statistics_compat
 _clear_statistics_compat = energy_module._clear_statistics_compat
 
 # Re-export legacy WS client for backward compatibility (tests may patch it).
-from .ws_client import WebSocketClient as WebSocket09Client  # noqa: F401
+from .ws_client import WebSocket09Client  # noqa: F401
 
 _LOGGER = logging.getLogger(__name__)
 
