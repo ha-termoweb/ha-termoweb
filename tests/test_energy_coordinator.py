@@ -1026,6 +1026,60 @@ def test_update_interval_constant() -> None:
     assert coord.update_interval == HTR_ENERGY_UPDATE_INTERVAL
 
 
+def test_ws_samples_update_defers_polling(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_node_samples = AsyncMock(
+            return_value=[{"t": 0.0, "counter": 1000.0}]
+        )
+
+        hass = HomeAssistant()
+        coord = EnergyStateCoordinator(hass, client, "dev", {"htr": ["A"]})
+
+        fake_time = 0.0
+
+        def _fake_time() -> float:
+            return fake_time
+
+        monkeypatch.setattr(coord_module.time, "time", _fake_time)
+        monkeypatch.setattr(coord_module.time, "monotonic", _fake_time)
+
+        await coord.async_refresh()
+
+        data = coord.data["dev"]["htr"]
+        assert data["energy"]["A"] == pytest.approx(1.0)
+        assert "A" not in data["power"]
+
+        client.get_node_samples.reset_mock()
+        client.get_node_samples.return_value = [{"t": 7200.0, "counter": 3000.0}]
+
+        fake_time = 3600.0
+        coord.handle_ws_samples(
+            "dev",
+            {"htr": {" A ": {"samples": [{"t": 3600.0, "counter": 2000.0}]}}},
+            lease_seconds=300.0,
+        )
+
+        updated = coord.data["dev"]["htr"]
+        assert updated["energy"]["A"] == pytest.approx(2.0)
+        assert updated["power"]["A"] == pytest.approx(1000.0)
+        last_t, last_kwh = coord._last[("htr", "A")]
+        assert last_t == pytest.approx(3600.0)
+        assert last_kwh == pytest.approx(2.0)
+        assert coord.update_interval == timedelta(seconds=375)
+
+        fake_time = 3800.0
+        await coord.async_refresh()
+        assert client.get_node_samples.await_count == 0
+
+        fake_time = 3976.0
+        await coord.async_refresh()
+        assert client.get_node_samples.await_count == 1
+        assert coord.update_interval == HTR_ENERGY_UPDATE_INTERVAL
+
+    asyncio.run(_run())
+
+
 def test_heater_energy_samples_empty_on_api_error() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
