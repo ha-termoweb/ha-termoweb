@@ -729,6 +729,7 @@ class WebSocketClient:
                 summary = ", ".join(lease_scalars) if lease_scalars else "none"
                 _LOGGER.debug("WS %s: handshake lease hints: %s", self.dev_id, summary)
             ttl_info = self._extract_subscription_ttl(payload_map)
+
             ttl: float
             source: str
             if ttl_info is None:
