@@ -78,6 +78,7 @@ class WebSocketClient:
         session: aiohttp.ClientSession | None = None,
         handshake_fail_threshold: int = 5,  # legacy compatibility
         protocol: str | None = None,
+        namespace: str = WS_NAMESPACE,
     ) -> None:
         """Initialise the websocket client container."""
         self.hass = hass
@@ -89,6 +90,7 @@ class WebSocketClient:
         self._protocol_hint = protocol
         self._loop = getattr(hass, "loop", None) or asyncio.get_event_loop()
         self._task: asyncio.Task | None = None
+        self._namespace = namespace or WS_NAMESPACE
 
         self._sio = socketio.AsyncClient(
             reconnection=False,
@@ -118,13 +120,17 @@ class WebSocketClient:
         self._sio.on("error", handler=self._on_error)
         self._sio.on("reconnect_failed", handler=self._on_reconnect_failed)
         self._sio.on(
-            "disconnect", namespace=WS_NAMESPACE, handler=self._on_namespace_disconnect
+            "disconnect",
+            namespace=self._namespace,
+            handler=self._on_namespace_disconnect,
         )
         self._sio.on(
-            "dev_handshake", namespace=WS_NAMESPACE, handler=self._on_dev_handshake
+            "dev_handshake",
+            namespace=self._namespace,
+            handler=self._on_dev_handshake,
         )
-        self._sio.on("dev_data", namespace=WS_NAMESPACE, handler=self._on_dev_data)
-        self._sio.on("update", namespace=WS_NAMESPACE, handler=self._on_update)
+        self._sio.on("dev_data", namespace=self._namespace, handler=self._on_dev_data)
+        self._sio.on("update", namespace=self._namespace, handler=self._on_update)
 
         self._closing = False
         self._status: str = "stopped"
@@ -276,7 +282,7 @@ class WebSocketClient:
         await self._sio.connect(
             url,
             transports=["websocket"],
-            namespaces=[WS_NAMESPACE],
+            namespaces=[self._namespace],
             socketio_path=engineio_path,
             wait=True,
             wait_timeout=15,
@@ -356,8 +362,8 @@ class WebSocketClient:
         if self._idle_monitor_task is None or self._idle_monitor_task.done():
             self._idle_monitor_task = self._loop.create_task(self._idle_monitor())
         try:
-            await self._sio.emit("join", namespace=WS_NAMESPACE)
-            await self._sio.emit("dev_data", namespace=WS_NAMESPACE)
+            await self._sio.emit("join", namespace=self._namespace)
+            await self._sio.emit("dev_data", namespace=self._namespace)
         except Exception:  # noqa: BLE001
             _LOGGER.debug("WS %s: namespace join failed", self.dev_id, exc_info=True)
 
@@ -403,7 +409,7 @@ class WebSocketClient:
             _LOGGER.debug(
                 "WS %s: namespace disconnect (%s): %s",
                 self.dev_id,
-                WS_NAMESPACE,
+                self._namespace,
                 reason,
             )
 
@@ -485,7 +491,7 @@ class WebSocketClient:
                     self.dev_id,
                     reason,
                 )
-            await self._sio.emit("dev_data", namespace=WS_NAMESPACE)
+            await self._sio.emit("dev_data", namespace=self._namespace)
             await self._subscribe_heater_samples()
             self._subscription_refresh_failed = False
             self._subscription_refresh_last_success = time.time()
@@ -809,7 +815,7 @@ class WebSocketClient:
                 await self._sio.emit(
                     "subscribe",
                     f"/{node_type}/{addr}/samples",
-                    namespace=WS_NAMESPACE,
+                    namespace=self._namespace,
                 )
         except asyncio.CancelledError:  # pragma: no cover - task lifecycle
             raise
@@ -1001,6 +1007,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._protocol_hint = protocol
         self._loop = getattr(hass, "loop", None) or asyncio.get_event_loop()
         self._task: asyncio.Task | None = None
+        self._namespace = WS_NAMESPACE
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._disconnected = asyncio.Event()
         self._disconnected.set()
@@ -1303,14 +1310,14 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
     async def _join_namespace(self) -> None:
         """Join the API namespace after the websocket connects."""
 
-        await self._send_text(f"1::{WS_NAMESPACE}")
+        await self._send_text(f"1::{self._namespace}")
 
     async def _send_snapshot_request(self) -> None:
         """Request the initial device snapshot."""
 
         payload = {"name": "dev_data", "args": []}
         await self._send_text(
-            f"5::{WS_NAMESPACE}:{json.dumps(payload, separators=(',', ':'))}"
+            f"5::{self._namespace}:{json.dumps(payload, separators=(',', ':'))}"
         )
 
     async def _subscribe_session_metadata(self) -> None:
@@ -1318,7 +1325,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
 
         payload = {"name": "subscribe", "args": ["/mgr/session"]}
         await self._send_text(
-            f"5::{WS_NAMESPACE}:{json.dumps(payload, separators=(',', ':'))}"
+            f"5::{self._namespace}:{json.dumps(payload, separators=(',', ':'))}"
         )
 
     async def _subscribe_htr_samples(self) -> None:
@@ -1333,7 +1340,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 "args": [f"/{node_type}/{addr}/samples"],
             }
             await self._send_text(
-                f"5::{WS_NAMESPACE}:{json.dumps(payload, separators=(',', ':'))}"
+                f"5::{self._namespace}:{json.dumps(payload, separators=(',', ':'))}"
             )
 
     async def _heartbeat_loop(self) -> None:
@@ -1358,11 +1365,13 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             if data.startswith("2::"):
                 self._record_heartbeat(source="socketio09")
                 continue
-            if data.startswith(f"1::{WS_NAMESPACE}"):
+            if data.startswith(f"1::{self._namespace}"):
                 continue
-            if data.startswith(f"5::{WS_NAMESPACE}:"):
+            if data.startswith(f"5::{self._namespace}:"):
                 try:
-                    payload = json.loads(data.split(f"5::{WS_NAMESPACE}:", 1)[1])
+                    payload = json.loads(
+                        data.split(f"5::{self._namespace}:", 1)[1]
+                    )
                 except Exception:  # noqa: BLE001
                     continue
                 self._handle_event(payload)

@@ -146,6 +146,7 @@ def _make_ducaheat_client(
     monkeypatch: pytest.MonkeyPatch,
     *,
     hass_loop: Any | None = None,
+    namespace: str = "/",
 ) -> module.DucaheatWSClient:
     """Return a Ducaheat websocket client configured for tests."""
 
@@ -173,9 +174,26 @@ def _make_ducaheat_client(
         api_client=rest_client,
         coordinator=coordinator,
         session=SimpleNamespace(),
+        namespace=namespace,
     )
     client._dispatcher_mock = dispatcher_mock  # type: ignore[attr-defined]
     return client
+
+
+def test_websocket_client_default_namespace(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure the base client defaults to the legacy namespace."""
+
+    client = _make_client(monkeypatch)
+    assert client._namespace == module.WS_NAMESPACE
+
+
+def test_ducaheat_client_uses_root_namespace(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify the Ducaheat client overrides the namespace to '/' by default."""
+
+    client = _make_ducaheat_client(monkeypatch)
+    assert client._namespace == "/"
+    assert ("dev_data", "/") in client._sio.events
+    assert ("disconnect", "/") in client._sio.events
 
 
 def test_handshake_error_records_context() -> None:
@@ -1436,6 +1454,7 @@ async def test_ducaheat_client_extended_logging(
         dev_id="device",
         api_client=DummyREST(),
         coordinator=SimpleNamespace(data={}, update_nodes=MagicMock()),
+        namespace="/",
     )
     client._sio.emit = AsyncMock()
     await client._on_connect()
@@ -1443,6 +1462,40 @@ async def test_ducaheat_client_extended_logging(
     await client._on_dev_handshake({})
     await client._on_dev_data({"nodes": {}})
     await client._on_update({"nodes": {}})
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_connect_uses_root_namespace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure connect emits the default namespace for Ducaheat."""
+
+    client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    monkeypatch.setattr(
+        client, "_build_engineio_target", AsyncMock(return_value=("https://ws", "io"))
+    )
+
+    await client._connect_once()
+
+    assert client._sio.connect_args[1]["namespaces"] == ["/"]
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_on_connect_emits_root_namespace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Validate connect handler joins the '/' namespace."""
+
+    client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    emit_mock = AsyncMock()
+    client._sio.emit = emit_mock
+
+    await client._on_connect()
+
+    assert emit_mock.await_args_list == [
+        call("join", namespace="/"),
+        call("dev_data", namespace="/"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -1654,6 +1707,7 @@ async def test_ducaheat_client_delegates(monkeypatch: pytest.MonkeyPatch) -> Non
         dev_id="device",
         api_client=DummyREST(),
         coordinator=SimpleNamespace(data={}, update_nodes=MagicMock()),
+        namespace="/",
     )
     await client._on_dev_handshake({})
     await client._on_dev_data({"nodes": {}})
@@ -1671,6 +1725,7 @@ async def test_ducaheat_debug_logging(
         dev_id="device",
         api_client=DummyREST(),
         coordinator=SimpleNamespace(data={}, update_nodes=MagicMock()),
+        namespace="/",
     )
     await client._on_connect()
     await client._on_disconnect()
@@ -1678,3 +1733,22 @@ async def test_ducaheat_debug_logging(
     await client._on_dev_data({"nodes": {}})
     await client._on_update({"nodes": {}})
     assert caplog.text.count("ducaheat") >= 4
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_handles_root_namespace_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure updates arriving on '/' still trigger handlers."""
+
+    client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    monkeypatch.setattr(
+        module,
+        "collect_heater_sample_addresses",
+        lambda *a, **k: ([], {}, {}),
+    )
+    handler = client._sio.events[("dev_data", "/")]
+
+    await handler({"nodes": {}})
+
+    assert client._stats.frames_total == 1
