@@ -1,4 +1,5 @@
 import asyncio
+from copy import deepcopy
 import logging
 import time
 from contextlib import suppress
@@ -765,6 +766,55 @@ async def test_ducaheat_update_logging_is_condensed(
     ]
     assert ducaheat_logs and "htr/1" in ducaheat_logs[0]
     assert "temp" not in ducaheat_logs[0]
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_translates_path_updates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Translate Ducaheat ``{"path": ..., "body": ...}`` updates into nodes."""
+
+    client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    client._nodes_raw = {"htr": {"status": {"1": {"mode": "eco"}}}}
+    client._nodes = client._build_nodes_snapshot(client._nodes_raw)
+    client._coordinator.data = {
+        "device": {
+            "nodes": deepcopy(client._nodes_raw),
+            "nodes_by_type": {"htr": {"addrs": ["1"]}},
+        }
+    }
+    client._coordinator.update_nodes.reset_mock()
+    client._dispatcher_mock.reset_mock()
+
+    payload = {
+        "path": "/api/v2/devs/device/htr/1/status",
+        "body": {"mode": "comfort"},
+    }
+
+    await client._on_update(payload)
+    await asyncio.sleep(0)
+
+    assert client._nodes_raw["htr"]["status"]["1"]["mode"] == "comfort"
+
+    assert client._coordinator.update_nodes.call_count == 1
+    raw_nodes = client._coordinator.update_nodes.call_args[0][0]
+    assert raw_nodes["htr"]["status"]["1"]["mode"] == "comfort"
+
+    dispatched_payloads = [
+        call.args[2]
+        for call in client._dispatcher_mock.mock_calls
+        if len(call.args) >= 3
+    ]
+    assert any(
+        isinstance(payload, Mapping)
+        and payload.get("nodes", {})
+        .get("htr", {})
+        .get("status", {})
+        .get("1", {})
+        .get("mode")
+        == "comfort"
+        for payload in dispatched_payloads
+    )
 
 
 def test_ducaheat_summarise_addresses_handles_empty(

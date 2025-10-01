@@ -35,6 +35,7 @@ from .nodes import (
     heater_sample_subscription_targets,
     normalize_heater_addresses,
     normalize_node_addr,
+    normalize_node_type,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -525,6 +526,8 @@ class WebSocketClient:
         """Update cached nodes from the websocket payload and notify listeners."""
         nodes = self._extract_nodes(payload)
         if nodes is None:
+            nodes = self._translate_path_update(payload)
+        if nodes is None:
             _LOGGER.debug("WS %s: %s without nodes", self.dev_id, event)
             return
         normaliser = getattr(self._client, "normalise_ws_nodes", None)
@@ -579,6 +582,74 @@ class WebSocketClient:
         if sample_updates:
             self._forward_sample_updates(sample_updates)
         self._mark_event(paths=None, count_event=True)
+
+    def _translate_path_update(self, payload: Any) -> dict[str, Any] | None:
+        """Translate Ducaheat ``{"path": ..., "body": ...}`` frames into nodes."""
+
+        if not isinstance(payload, Mapping):
+            return None
+        if "nodes" in payload:
+            return None
+        path = payload.get("path")
+        body = payload.get("body")
+        if not isinstance(path, str) or body is None:
+            return None
+
+        path = path.split("?", 1)[0]
+        segments = [segment for segment in path.split("/") if segment]
+        if not segments:
+            return None
+
+        try:
+            devs_idx = segments.index("devs")
+        except ValueError:
+            devs_idx = -1
+
+        if devs_idx >= 0:
+            relevant = segments[devs_idx + 1 :]
+        else:
+            relevant = segments
+
+        if len(relevant) < 3:
+            return None
+
+        node_type = normalize_node_type(relevant[1])
+        addr = normalize_node_addr(relevant[2])
+        if not node_type or not addr:
+            return None
+
+        section = relevant[3] if len(relevant) >= 4 else None
+        remainder = relevant[4:] if len(relevant) >= 5 else []
+
+        target_section, nested_key = self._resolve_update_section(section)
+        if target_section is None:
+            return None
+
+        payload_body: Any = body
+        for segment in reversed(remainder):
+            payload_body = {segment: payload_body}
+        if nested_key:
+            payload_body = {nested_key: payload_body}
+
+        return {node_type: {target_section: {addr: payload_body}}}
+
+    @staticmethod
+    def _resolve_update_section(
+        section: str | None,
+    ) -> tuple[str | None, str | None]:
+        """Map a websocket path segment onto the node bucket name."""
+
+        if not section:
+            return None, None
+
+        lowered = section.lower()
+        if lowered in {"status", "samples", "settings", "advanced"}:
+            return lowered, None
+        if lowered in {"advanced_setup"}:
+            return "advanced", "advanced_setup"
+        if lowered in {"setup", "prog", "prog_temps", "capabilities"}:
+            return "settings", lowered
+        return "settings", lowered
 
     def _forward_sample_updates(self, updates: Mapping[str, Mapping[str, Any]]) -> None:
         """Relay websocket heater sample updates to the energy coordinator."""
