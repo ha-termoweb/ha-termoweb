@@ -64,6 +64,7 @@ def test_ducaheat_backend_creates_ws_client() -> None:
     assert ws_client.dev_id == "dev"
     assert ws_client.entry_id == "entry"
     assert ws_client._protocol_hint == "engineio2"
+    assert ws_client._namespace == "/"
 
 
 def test_dummy_client_get_node_settings_accepts_acm() -> None:

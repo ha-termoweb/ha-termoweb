@@ -519,6 +519,7 @@ class DucaheatBackend(Backend):
             api_client=self.client,
             coordinator=coordinator,
             protocol="engineio2",
+            namespace="/",
         )
 
 
