@@ -24,6 +24,7 @@ import socketio
 
 from .api import RESTClient
 from .const import API_BASE, DOMAIN, WS_NAMESPACE, signal_ws_data, signal_ws_status
+from .installation import InstallationSnapshot, ensure_snapshot
 from .nodes import (
     NODE_CLASS_BY_TYPE,
     addresses_by_node_type,
@@ -635,13 +636,20 @@ class WebSocketClient:
             snapshot = {"nodes": deepcopy(raw_nodes), "nodes_by_type": {}}
 
         record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-        record_map: Mapping[str, Any]
-        if isinstance(record, Mapping):
-            record_map = record
+        snapshot_obj = ensure_snapshot(record)
+        if isinstance(snapshot_obj, InstallationSnapshot):
+            snapshot_obj.update_nodes(raw_nodes)
+            inventory = snapshot_obj.inventory
+            if isinstance(record, dict):
+                record["node_inventory"] = list(inventory)
         else:
-            record_map = {}  # pragma: no cover - defensive default
+            record_map: Mapping[str, Any]
+            if isinstance(record, Mapping):
+                record_map = record
+            else:
+                record_map = {}  # pragma: no cover - defensive default
 
-        inventory = ensure_node_inventory(record_map, nodes=raw_nodes)
+            inventory = ensure_node_inventory(record_map, nodes=raw_nodes)
 
         addr_map, unknown_types = addresses_by_node_type(
             inventory, known_types=NODE_CLASS_BY_TYPE
@@ -668,7 +676,7 @@ class WebSocketClient:
         if hasattr(self._coordinator, "update_nodes"):
             self._coordinator.update_nodes(raw_nodes, inventory)
 
-        if isinstance(record, dict):
+        if isinstance(record, dict) and snapshot_obj is None:
             record["nodes"] = raw_nodes
             record["node_inventory"] = inventory
 
@@ -740,10 +748,24 @@ class WebSocketClient:
 
         normalized_map, _compat_aliases = normalize_heater_addresses(addr_map)
         record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-        if isinstance(record, dict):
+        snapshot_obj = ensure_snapshot(record)
+        if isinstance(snapshot_obj, InstallationSnapshot) and inventory is not None:
+            snapshot_obj.update_nodes(snapshot_obj.raw_nodes, node_inventory=inventory)
+            if isinstance(record, dict):
+                record["node_inventory"] = list(snapshot_obj.inventory)
+
+        if isinstance(record, dict) and snapshot_obj is None:
             if inventory is not None:
                 record["node_inventory"] = inventory
             energy_coordinator = record.get("energy_coordinator")
+            if hasattr(energy_coordinator, "update_addresses"):
+                energy_coordinator.update_addresses(normalized_map)
+        else:
+            energy_coordinator = (
+                record.get("energy_coordinator")
+                if isinstance(record, Mapping)
+                else None
+            )
             if hasattr(energy_coordinator, "update_addresses"):
                 energy_coordinator.update_addresses(normalized_map)
 

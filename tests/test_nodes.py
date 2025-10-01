@@ -8,7 +8,9 @@ from typing import Any
 
 import pytest
 
+import custom_components.termoweb.installation as installation_module
 import custom_components.termoweb.nodes as nodes_module
+from custom_components.termoweb.installation import InstallationSnapshot
 from custom_components.termoweb.nodes import (
     AccumulatorNode,
     HeaterNode,
@@ -256,6 +258,37 @@ def test_collect_heater_sample_addresses_fallbacks() -> None:
         coordinator=DummyCoordinator(),
     )
     assert proxy_map == {"htr": ["2", "01"]}
+
+
+def test_collect_heater_sample_addresses_uses_snapshot_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
+    call_count = 0
+
+    def fake_build(nodes: Any) -> list[Any]:
+        nonlocal call_count
+        call_count += 1
+        return build_node_inventory(raw_nodes)
+
+    monkeypatch.setattr(installation_module, "build_node_inventory", fake_build)
+
+    snapshot = InstallationSnapshot(dev_id="dev", raw_nodes=raw_nodes)
+    record = {"snapshot": snapshot}
+
+    _, first_map, _ = nodes_module.collect_heater_sample_addresses(record)
+    _, second_map, _ = nodes_module.collect_heater_sample_addresses(record)
+
+    assert call_count <= 1
+    expected_inventory = [
+        (node.type, node.addr) for node in build_node_inventory(raw_nodes)
+    ]
+    actual_inventory = [(node.type, node.addr) for node in snapshot.inventory]
+    assert actual_inventory == expected_inventory
+    cached_map_one, _ = snapshot.heater_sample_address_map
+    cached_map_two, _ = snapshot.heater_sample_address_map
+    assert first_map == second_map
+    assert cached_map_one == cached_map_two
 
 
 def test_heater_sample_subscription_targets_orders_types() -> None:

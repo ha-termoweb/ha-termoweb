@@ -43,6 +43,7 @@ from .energy import (
     default_samples_rate_limit_state,
     reset_samples_rate_limit_state,
 )
+from .installation import InstallationSnapshot
 from .nodes import (
     HEATER_NODE_TYPES as _HEATER_NODE_TYPES,
     build_heater_address_map as _build_heater_address_map,
@@ -168,6 +169,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ).strip()
     nodes = await client.get_nodes(dev_id)
     node_inventory = build_node_inventory(nodes)
+    snapshot = InstallationSnapshot(
+        dev_id=dev_id,
+        raw_nodes=nodes,
+        node_inventory=node_inventory,
+    )
 
     if node_inventory:
         type_counts = Counter(node.type for node in node_inventory)
@@ -193,8 +199,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "client": backend.client,
         "coordinator": coordinator,
         "dev_id": dev_id,
-        "nodes": nodes,
-        "node_inventory": node_inventory,
+        "snapshot": snapshot,
+        "node_inventory": list(snapshot.inventory),
         "config_entry": entry,
         "base_poll_interval": max(base_interval, MIN_POLL_INTERVAL),
         "stretched": False,

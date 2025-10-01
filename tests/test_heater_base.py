@@ -12,6 +12,8 @@ from conftest import _install_stubs, make_ws_payload
 _install_stubs()
 
 from custom_components.termoweb import heater as heater_module
+from custom_components.termoweb import installation as installation_module
+from custom_components.termoweb.installation import InstallationSnapshot
 from custom_components.termoweb.nodes import (
     HeaterNode,
     build_heater_address_map,
@@ -30,18 +32,23 @@ def _make_heater(coordinator: SimpleNamespace) -> HeaterNodeBase:
 
 
 def test_prepare_heater_platform_data_groups_nodes() -> None:
-    entry_data = {
-        "nodes": {
-            "nodes": [
-                {"type": "HTR", "addr": "1", "name": " Lounge "},
-                {"type": "acm", "addr": "2"},
-                {"type": "thm", "addr": "3"},
-                {"type": "htr", "addr": "4"},
-                {"type": "HTR", "addr": "4"},
-                {"type": "ACM", "addr": "2"},
-            ]
-        }
+    raw_nodes = {
+        "nodes": [
+            {"type": "HTR", "addr": "1", "name": " Lounge "},
+            {"type": "acm", "addr": "2"},
+            {"type": "thm", "addr": "3"},
+            {"type": "htr", "addr": "4"},
+            {"type": "HTR", "addr": "4"},
+            {"type": "ACM", "addr": "2"},
+        ]
     }
+    inventory = build_node_inventory(raw_nodes)
+    snapshot = InstallationSnapshot(
+        dev_id="dev",
+        raw_nodes=raw_nodes,
+        node_inventory=inventory,
+    )
+    entry_data = {"snapshot": snapshot}
 
     inventory, nodes_by_type, addrs_by_type, resolve_name = (
         prepare_heater_platform_data(
@@ -50,7 +57,7 @@ def test_prepare_heater_platform_data_groups_nodes() -> None:
         )
     )
 
-    assert entry_data["node_inventory"] == inventory
+    assert inventory is snapshot.inventory
     htr_nodes = nodes_by_type.get("htr", [])
     assert [node.addr for node in htr_nodes] == ["1", "4", "4"]
     assert all(hasattr(node, "addr") for node in htr_nodes)
@@ -122,8 +129,8 @@ def test_prepare_heater_platform_data_skips_blank_types(
 def test_prepare_heater_platform_data_passes_inventory_to_name_map(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    entry_data = {"nodes": {"nodes": [{"type": "htr", "addr": "9", "name": "Heater"}]}}
-    expected_inventory = build_node_inventory(entry_data["nodes"])
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "9", "name": "Heater"}]}
+    expected_inventory = build_node_inventory(raw_nodes)
 
     def fake_ensure(record: dict[str, Any], *, nodes: Any | None = None) -> list[Any]:
         return list(expected_inventory)
@@ -139,8 +146,9 @@ def test_prepare_heater_platform_data_passes_inventory_to_name_map(
     monkeypatch.setattr(heater_module, "ensure_node_inventory", fake_ensure)
     monkeypatch.setattr(heater_module, "build_heater_name_map", fake_name_map)
 
+    snapshot = InstallationSnapshot(dev_id="dev", raw_nodes=raw_nodes, node_inventory=expected_inventory)
     inventory, *_ = prepare_heater_platform_data(
-        entry_data,
+        {"snapshot": snapshot},
         default_name_simple=lambda addr: f"Heater {addr}",
     )
 
@@ -183,20 +191,51 @@ def test_build_heater_name_map_accepts_iterables_of_dicts() -> None:
 
 
 def test_prepare_heater_platform_data_resolves_normalized_inputs() -> None:
-    entry_data = {
-        "nodes": {
-            "nodes": [
-                {"type": " hTr ", "addr": " 8 ", "name": "Hall"},
-            ]
-        }
+    raw_nodes = {
+        "nodes": [
+            {"type": " hTr ", "addr": " 8 ", "name": "Hall"},
+        ]
     }
+    snapshot = InstallationSnapshot(
+        dev_id="dev",
+        raw_nodes=raw_nodes,
+        node_inventory=build_node_inventory(raw_nodes),
+    )
 
     _, _, _, resolve_name = prepare_heater_platform_data(
-        entry_data,
+        {"snapshot": snapshot},
         default_name_simple=lambda addr: f"Heater {addr}",
     )
 
     assert resolve_name(" HTR ", " 8 ") == "Hall"
+
+
+def test_prepare_heater_platform_data_uses_snapshot_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
+    call_count = 0
+
+    def fake_build(nodes: Any) -> list[Any]:
+        nonlocal call_count
+        call_count += 1
+        return build_node_inventory(raw_nodes)
+
+    monkeypatch.setattr(installation_module, "build_node_inventory", fake_build)
+
+    snapshot = InstallationSnapshot(dev_id="dev", raw_nodes=raw_nodes)
+    entry_data = {"snapshot": snapshot}
+
+    prepare_heater_platform_data(
+        entry_data,
+        default_name_simple=lambda addr: f"Heater {addr}",
+    )
+    prepare_heater_platform_data(
+        entry_data,
+        default_name_simple=lambda addr: f"Heater {addr}",
+    )
+
+    assert call_count == 1
 
 
 def test_log_skipped_nodes_defaults_platform_name(

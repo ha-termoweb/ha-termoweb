@@ -544,28 +544,37 @@ def collect_heater_sample_addresses(
 ) -> tuple[list[Node], dict[str, list[str]], dict[str, str]]:
     """Return inventory and canonical heater sample subscription addresses."""
 
-    nodes_payload: Any | None = None
-    cache_record: MutableMapping[str, Any] | None = None
+    from .installation import InstallationSnapshot, ensure_snapshot  # noqa: PLC0415
 
-    if isinstance(record, MutableMapping):
-        cache_record = record
-        nodes_payload = record.get("nodes")
-    elif isinstance(record, Mapping):
-        nodes_payload = record.get("nodes")
+    snapshot = ensure_snapshot(record)
+    if isinstance(snapshot, InstallationSnapshot):
+        inventory = snapshot.inventory
+        normalized_map, compat = snapshot.heater_sample_address_map
+    else:
+        nodes_payload: Any | None = None
+        cache_record: MutableMapping[str, Any] | None = None
 
-    inventory = ensure_node_inventory(cache_record or {}, nodes=nodes_payload)
+        if isinstance(record, MutableMapping):
+            cache_record = record
+            nodes_payload = record.get("nodes")
+        elif isinstance(record, Mapping):
+            nodes_payload = record.get("nodes")
 
-    raw_map, _ = addresses_by_node_type(
-        inventory,
-        known_types=HEATER_NODE_TYPES,
-    )
-    addr_map: dict[str, list[str]] = {
-        node_type: list(addresses)
-        for node_type, addresses in raw_map.items()
-        if node_type in HEATER_NODE_TYPES and addresses
-    }
+        inventory = ensure_node_inventory(cache_record or {}, nodes=nodes_payload)
 
-    if not addr_map.get("htr") and coordinator is not None:
+        raw_map, _ = addresses_by_node_type(
+            inventory,
+            known_types=HEATER_NODE_TYPES,
+        )
+        addr_map: dict[str, list[str]] = {
+            node_type: list(addresses)
+            for node_type, addresses in raw_map.items()
+            if node_type in HEATER_NODE_TYPES and addresses
+        }
+
+        normalized_map, compat = normalize_heater_addresses(addr_map)
+
+    if (not normalized_map.get("htr")) and coordinator is not None:
         fallback: Iterable[Any] | None = None
         if hasattr(coordinator, "_addrs"):
             try:
@@ -573,16 +582,17 @@ def collect_heater_sample_addresses(
             except Exception:  # pragma: no cover - defensive
                 fallback = None
         if fallback:
-            normalised: list[str] = []
+            normalised: list[str] = list(normalized_map.get("htr", []))
+            seen = set(normalised)
             for candidate in fallback:
                 addr = normalize_node_addr(candidate)
-                if not addr:
+                if not addr or addr in seen:
                     continue
+                seen.add(addr)
                 normalised.append(addr)
             if normalised:
-                addr_map["htr"] = normalised
-
-    normalized_map, compat = normalize_heater_addresses(addr_map)
+                normalized_map = dict(normalized_map)
+                normalized_map["htr"] = normalised
 
     return list(inventory), normalized_map, compat
 
