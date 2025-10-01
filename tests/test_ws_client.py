@@ -465,6 +465,7 @@ def test_legacy_event_configures_subscription(monkeypatch: pytest.MonkeyPatch) -
     client._handle_event(event)
 
     assert client._subscription_ttl == pytest.approx(250.0)
+    assert client._subscription_ttl != module._DEFAULT_SUBSCRIPTION_TTL
     assert client._payload_idle_window == pytest.approx(375.0)
     assert client._subscription_refresh_due == pytest.approx(350.0)
     assert client._legacy_subscription_configured is True
@@ -522,8 +523,20 @@ async def test_legacy_refresh_subscription_success(
     client = _make_legacy_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     client._ws = SimpleNamespace(closed=False)
     client._subscription_ttl = 120.0
-    client._send_snapshot_request = AsyncMock()
-    client._subscribe_htr_samples = AsyncMock()
+    call_recorder = MagicMock()
+
+    async def snapshot() -> None:
+        call_recorder("snapshot")
+
+    async def session() -> None:
+        call_recorder("session")
+
+    async def samples() -> None:
+        call_recorder("samples")
+
+    client._send_snapshot_request = AsyncMock(side_effect=snapshot)
+    client._subscribe_session_metadata = AsyncMock(side_effect=session)
+    client._subscribe_htr_samples = AsyncMock(side_effect=samples)
     monkeypatch.setattr(module.time, "time", lambda: 1000.0)
 
     await client._refresh_subscription(reason="periodic test")
@@ -531,6 +544,63 @@ async def test_legacy_refresh_subscription_success(
     assert client._subscription_refresh_failed is False
     assert client._subscription_refresh_last_success == pytest.approx(1000.0)
     assert client._subscription_refresh_due == pytest.approx(1120.0)
+    assert call_recorder.mock_calls == [
+        call("snapshot"),
+        call("session"),
+        call("samples"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_legacy_socketio_setup_subscribes_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure legacy startup subscribes to session metadata before devices."""
+
+    client = _make_legacy_client(monkeypatch)
+    client._handshake = AsyncMock(return_value=("sid", 100))
+    client._connect_ws = AsyncMock()
+    client._join_namespace = AsyncMock()
+    client._heartbeat_loop = AsyncMock()
+    call_recorder = MagicMock()
+
+    async def snapshot() -> None:
+        call_recorder("snapshot")
+
+    async def session() -> None:
+        call_recorder("session")
+
+    async def samples() -> None:
+        call_recorder("samples")
+
+    async def read_loop() -> None:
+        call_recorder("read")
+        client._closing = True
+
+    client._send_snapshot_request = AsyncMock(side_effect=snapshot)
+    client._subscribe_session_metadata = AsyncMock(side_effect=session)
+    client._subscribe_htr_samples = AsyncMock(side_effect=samples)
+    client._read_loop = AsyncMock(side_effect=read_loop)
+
+    def create_task(coro: Any, **_: Any) -> Any:
+        closer = getattr(coro, "close", None)
+        if callable(closer):
+            closer()
+        return SimpleNamespace(cancel=lambda: None, done=lambda: True)
+
+    client._loop.create_task = create_task  # type: ignore[assignment]
+
+    await client._run_socketio_09()
+
+    assert client._send_snapshot_request.await_count == 1
+    assert client._subscribe_session_metadata.await_count == 1
+    assert client._subscribe_htr_samples.await_count == 1
+    assert call_recorder.mock_calls == [
+        call("snapshot"),
+        call("session"),
+        call("samples"),
+        call("read"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -544,6 +614,7 @@ async def test_legacy_refresh_subscription_failure(
     client._subscription_ttl = 180.0
     client._payload_idle_window = 540.0
     client._send_snapshot_request = AsyncMock(side_effect=RuntimeError("boom"))
+    client._subscribe_session_metadata = AsyncMock()
     client._subscribe_htr_samples = AsyncMock()
     monkeypatch.setattr(module.time, "time", lambda: 500.0)
 
@@ -553,6 +624,7 @@ async def test_legacy_refresh_subscription_failure(
     assert client._subscription_refresh_failed is True
     assert client._idle_restart_pending is True
     assert client._subscription_refresh_last_attempt == pytest.approx(500.0)
+    assert client._subscribe_session_metadata.await_count == 0
 
 
 @pytest.mark.asyncio
@@ -2038,6 +2110,23 @@ async def test_legacy_sample_subscription_uses_helper(
         f'5::{module.WS_NAMESPACE}:{{"name":"subscribe","args":["/acm/8/samples"]}}',
     ]
     assert [call.args[0] for call in send_mock.await_args_list] == expected_payloads
+
+
+@pytest.mark.asyncio
+async def test_legacy_session_subscription_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure the legacy session subscription uses the expected frame."""
+
+    client = _make_legacy_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    send_mock = AsyncMock()
+    client._send_text = send_mock  # type: ignore[assignment]
+
+    await client._subscribe_session_metadata()
+
+    send_mock.assert_awaited_once_with(
+        f'5::{module.WS_NAMESPACE}:{{"name":"subscribe","args":["/mgr/session"]}}'
+    )
 
 
 @pytest.mark.asyncio

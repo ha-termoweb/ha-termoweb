@@ -1289,6 +1289,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 _LOGGER.debug("WS %s: websocket connection established", self.dev_id)
                 await self._join_namespace()
                 await self._send_snapshot_request()
+                await self._subscribe_session_metadata()
                 await self._subscribe_htr_samples()
                 self._connected_since = time.time()
                 self._healthy_since = None
@@ -1414,6 +1415,14 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         """Request the initial device snapshot."""
 
         payload = {"name": "dev_data", "args": []}
+        await self._send_text(
+            f"5::{WS_NAMESPACE}:{json.dumps(payload, separators=(',', ':'))}"
+        )
+
+    async def _subscribe_session_metadata(self) -> None:
+        """Subscribe to legacy session metadata updates."""
+
+        payload = {"name": "subscribe", "args": ["/mgr/session"]}
         await self._send_text(
             f"5::{WS_NAMESPACE}:{json.dumps(payload, separators=(',', ':'))}"
         )
@@ -1754,6 +1763,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             )
             try:
                 await self._send_snapshot_request()
+                await self._subscribe_session_metadata()
                 await self._subscribe_htr_samples()
             except asyncio.CancelledError:  # pragma: no cover - task lifecycle
                 raise
