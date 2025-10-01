@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import time
 from contextlib import suppress
@@ -38,9 +39,7 @@ def patch_async_client(monkeypatch: pytest.MonkeyPatch) -> None:
                 http=None,
             )
 
-        def on(
-            self, event: str, *, handler: Any, namespace: str | None = None
-        ) -> None:
+        def on(self, event: str, *, handler: Any, namespace: str | None = None) -> None:
             self.events[(event, namespace)] = handler
 
         async def connect(self, *args: Any, **kwargs: Any) -> None:
@@ -71,6 +70,7 @@ def _make_client(
     """Helper to instantiate a websocket client with test doubles."""
 
     if hass_loop is None:
+
         class _DummyTask:
             def __init__(self, coro: Any) -> None:
                 self._coro = coro
@@ -104,6 +104,7 @@ def _make_client(
 
             def __await__(self):  # type: ignore[no-untyped-def]
                 if self._cancelled or self._completed:
+
                     async def _noop() -> None:
                         return None
 
@@ -146,6 +147,7 @@ def _make_ducaheat_client(
     """Return a Ducaheat websocket client configured for tests."""
 
     if hass_loop is None:
+
         def _create_task(coro: Any, **_: Any) -> Any:
             closer = getattr(coro, "close", None)
             if callable(closer):
@@ -210,7 +212,9 @@ async def test_error_handlers_log_payloads(
 
     caplog.clear()
     await ns_disconnect("transport closed")
-    assert f"namespace disconnect ({module.WS_NAMESPACE}): transport closed" in caplog.text
+    assert (
+        f"namespace disconnect ({module.WS_NAMESPACE}): transport closed" in caplog.text
+    )
 
 
 def test_ws_state_bucket_initialises_missing_data(
@@ -246,6 +250,7 @@ def _make_legacy_client(
     """Return a TermoWeb legacy websocket client with patched dependencies."""
 
     if hass_loop is None:
+
         def _create_task(coro: Any, **_: Any) -> Any:
             closer = getattr(coro, "close", None)
             if callable(closer):
@@ -273,7 +278,9 @@ def _make_legacy_client(
     return client
 
 
-def test_http_wrapping_handles_missing_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_http_wrapping_handles_missing_attributes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Ensure http assignments tolerate attribute errors and reuse existing sessions."""
 
     class AltAsyncClient:
@@ -299,9 +306,7 @@ def test_http_wrapping_handles_missing_attributes(monkeypatch: pytest.MonkeyPatc
                 raise AttributeError("http not writable")
             object.__setattr__(self, name, value)
 
-        def on(
-            self, event: str, *, handler: Any, namespace: str | None = None
-        ) -> None:
+        def on(self, event: str, *, handler: Any, namespace: str | None = None) -> None:
             self.events[(event, namespace)] = handler
 
         async def connect(self, *args: Any, **kwargs: Any) -> None:
@@ -332,15 +337,11 @@ async def test_ws_url_and_engineio_target(monkeypatch: pytest.MonkeyPatch) -> No
 
     ws_url = await client.ws_url()
     assert (
-        ws_url
-        == "https://api.example.com/api/v2/socket_io?token=token&dev_id=device"
+        ws_url == "https://api.example.com/api/v2/socket_io?token=token&dev_id=device"
     )
 
     base, path = await client._build_engineio_target()
-    assert (
-        base
-        == "https://api.example.com/api/v2/socket_io?token=token&dev_id=device"
-    )
+    assert base == "https://api.example.com/api/v2/socket_io?token=token&dev_id=device"
     assert path == "api/v2/socket_io"
 
 
@@ -359,7 +360,9 @@ async def test_wrap_background_task_runs_coroutine(
     assert captured == ["ok"]
 
 
-def test_wrap_background_task_with_sync_function(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wrap_background_task_with_sync_function(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     loop = asyncio.new_event_loop()
     client = _make_client(monkeypatch, hass_loop=loop)
     task = client._wrap_background_task(lambda: "value")
@@ -471,7 +474,9 @@ def test_legacy_event_configures_subscription(monkeypatch: pytest.MonkeyPatch) -
     assert created
 
 
-def test_legacy_event_updates_ttl_after_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_legacy_event_updates_ttl_after_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Ensure default TTL is used until a payload provides an explicit value."""
 
     client = _make_legacy_client(monkeypatch)
@@ -489,7 +494,9 @@ def test_legacy_event_updates_ttl_after_default(monkeypatch: pytest.MonkeyPatch)
     client._loop.create_task = capture_task  # type: ignore[assignment]
 
     monkeypatch.setattr(module.time, "time", lambda: 200.0)
-    client._handle_event({"name": "data", "args": [[{"path": "/mgr/session", "body": {}}]]})
+    client._handle_event(
+        {"name": "data", "args": [[{"path": "/mgr/session", "body": {}}]]}
+    )
     assert client._subscription_ttl == pytest.approx(module._DEFAULT_SUBSCRIPTION_TTL)
     assert client._legacy_subscription_configured is False
     assert len(tasks) == 1
@@ -508,7 +515,9 @@ def test_legacy_event_updates_ttl_after_default(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.asyncio
-async def test_legacy_refresh_subscription_success(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_legacy_refresh_subscription_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Check the legacy lease renewal updates bookkeeping on success."""
 
     client = _make_legacy_client(monkeypatch, hass_loop=asyncio.get_event_loop())
@@ -526,7 +535,9 @@ async def test_legacy_refresh_subscription_success(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
-async def test_legacy_refresh_subscription_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_legacy_refresh_subscription_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Ensure legacy lease renewal failures schedule a restart."""
 
     client = _make_legacy_client(monkeypatch, hass_loop=asyncio.get_event_loop())
@@ -639,7 +650,9 @@ async def test_ws_url_adds_suffix_when_missing(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.asyncio
-async def test_apply_nodes_payload_updates_state(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_apply_nodes_payload_updates_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     hass_loop = asyncio.get_event_loop()
     client = _make_client(monkeypatch, hass_loop=hass_loop)
     client._coordinator.data = {"device": {"nodes_by_type": {}}}
@@ -750,7 +763,9 @@ def test_ducaheat_summarise_addresses_handles_empty(
 
 
 @pytest.mark.asyncio
-async def test_runner_handles_error_and_reconnect(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_runner_handles_error_and_reconnect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     statuses: list[str] = []
     monkeypatch.setattr(client, "_update_status", statuses.append)
@@ -830,7 +845,9 @@ async def test_idle_monitor_triggers_restart(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.asyncio
-async def test_idle_monitor_exits_when_disconnected(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_idle_monitor_exits_when_disconnected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     client._sio.connected = False
     client._disconnected.set()
@@ -859,7 +876,9 @@ async def test_idle_monitor_handles_transient_disconnect(
 
 
 @pytest.mark.asyncio
-async def test_idle_monitor_skips_when_no_last_event(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_idle_monitor_skips_when_no_last_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     client._sio.connected = True
     client._last_event_at = None
@@ -873,7 +892,9 @@ async def test_idle_monitor_skips_when_no_last_event(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
-async def test_idle_monitor_retries_failed_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_idle_monitor_retries_failed_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Retry idle refreshes when the previous renewal failed."""
 
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
@@ -948,7 +969,9 @@ def test_start_and_stop_cancel_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
     loop.close()
 
 
-def test_restart_subscription_refresh_replaces_task(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_restart_subscription_refresh_replaces_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Ensure restarting the lease task cancels the previous instance."""
 
     client = _make_client(monkeypatch)
@@ -997,7 +1020,9 @@ def test_restart_subscription_refresh_replaces_task(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
-async def test_cancel_subscription_refresh_waits(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_cancel_subscription_refresh_waits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Cancel the refresh task and await its termination."""
 
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
@@ -1104,6 +1129,7 @@ async def test_subscription_refresh_loop_propagates_cancel(
     with pytest.raises(asyncio.CancelledError):
         await client._subscription_refresh_loop()
 
+
 @pytest.mark.asyncio
 async def test_refresh_subscription_requires_connection(
     monkeypatch: pytest.MonkeyPatch,
@@ -1143,7 +1169,9 @@ async def test_refresh_subscription_updates_metadata(
     monkeypatch.setattr(module._LOGGER, "isEnabledFor", lambda level: True)
 
     info_calls: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(module._LOGGER, "info", lambda *args, **kwargs: info_calls.append(args))
+    monkeypatch.setattr(
+        module._LOGGER, "info", lambda *args, **kwargs: info_calls.append(args)
+    )
 
     await client._refresh_subscription(reason="unit")
 
@@ -1151,11 +1179,10 @@ async def test_refresh_subscription_updates_metadata(
     assert subscribe_mock.await_count == 1
     assert client._subscription_refresh_failed is False
     assert client._subscription_refresh_last_success == pytest.approx(1000.0)
-    assert client._subscription_refresh_due == pytest.approx(1000.0 + client._subscription_ttl)
-    assert any(
-        "unit" in " ".join(str(part) for part in call)
-        for call in info_calls
+    assert client._subscription_refresh_due == pytest.approx(
+        1000.0 + client._subscription_ttl
     )
+    assert any("unit" in " ".join(str(part) for part in call) for call in info_calls)
 
 
 def test_apply_subscription_ttl_updates_state(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1164,10 +1191,14 @@ def test_apply_subscription_ttl_updates_state(monkeypatch: pytest.MonkeyPatch) -
     client = _make_client(monkeypatch)
 
     restarts: list[str] = []
-    monkeypatch.setattr(client, "_restart_subscription_refresh", lambda: restarts.append("restart"))
+    monkeypatch.setattr(
+        client, "_restart_subscription_refresh", lambda: restarts.append("restart")
+    )
 
     info_calls: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(module._LOGGER, "info", lambda *args, **kwargs: info_calls.append(args))
+    monkeypatch.setattr(
+        module._LOGGER, "info", lambda *args, **kwargs: info_calls.append(args)
+    )
 
     client._apply_subscription_ttl(
         ttl=30,
@@ -1219,10 +1250,14 @@ def test_coerce_seconds_variants() -> None:
     assert module.WebSocketClient._coerce_seconds("90", "ttl") == 90.0
     assert module.WebSocketClient._coerce_seconds("oops", "ttl") is None
     assert module.WebSocketClient._coerce_seconds(90000, "leaseMs") == 90.0
-    assert module.WebSocketClient._coerce_seconds(172800, "lease") == pytest.approx(172.8)
+    assert module.WebSocketClient._coerce_seconds(172800, "lease") == pytest.approx(
+        172.8
+    )
 
 
-def test_forward_sample_updates_handles_missing_targets(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_forward_sample_updates_handles_missing_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Gracefully handle missing coordinator records for sample forwarding."""
 
     client = _make_client(monkeypatch)
@@ -1253,13 +1288,29 @@ def test_dispatch_nodes_records_unknown_types(monkeypatch: pytest.MonkeyPatch) -
     """Include unknown node types in the dispatched payload copy."""
 
     client = _make_client(monkeypatch)
-    record = {"nodes": {"nodes": [{"type": "foo", "addr": "1"}, {"type": "htr", "addr": "A"}]}}
+    record = {
+        "nodes": {"nodes": [{"type": "foo", "addr": "1"}, {"type": "htr", "addr": "A"}]}
+    }
     client.hass.data[module.DOMAIN] = {"entry": record}
     client._dispatcher_mock.reset_mock()
 
     snapshot = {
-        "nodes": {"htr": {"settings": {"A": {}}, "addrs": ["A"], "advanced": {}, "samples": {}}},
-        "nodes_by_type": {"htr": {"addrs": ["A"], "settings": {"A": {}}, "advanced": {}, "samples": {}}},
+        "nodes": {
+            "htr": {
+                "settings": {"A": {}},
+                "addrs": ["A"],
+                "advanced": {},
+                "samples": {},
+            }
+        },
+        "nodes_by_type": {
+            "htr": {
+                "addrs": ["A"],
+                "settings": {"A": {}},
+                "advanced": {},
+                "samples": {},
+            }
+        },
     }
 
     addr_map = client._dispatch_nodes(snapshot)
@@ -1267,6 +1318,7 @@ def test_dispatch_nodes_records_unknown_types(monkeypatch: pytest.MonkeyPatch) -
     payload = client._dispatcher_mock.call_args[0][2]
     assert payload["unknown_types"] == ["foo"]
     assert addr_map["htr"] == ["A"]
+
 
 @pytest.mark.asyncio
 async def test_connect_once_invokes_socket(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1284,7 +1336,9 @@ async def test_connect_once_invokes_socket(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_connect_once_respects_stop_event(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_connect_once_respects_stop_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     client._stop_event = asyncio.Event()
     client._stop_event.set()
@@ -1294,7 +1348,9 @@ async def test_connect_once_respects_stop_event(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.asyncio
-async def test_wait_for_events_handles_disconnect(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_wait_for_events_handles_disconnect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     client._stop_event = asyncio.Event()
     client._disconnected = asyncio.Event()
@@ -1326,7 +1382,9 @@ def test_api_base_default(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_force_refresh_token_resets_access(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_force_refresh_token_resets_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     rest = client._client
     rest._access_token = "abc"  # type: ignore[attr-defined]
@@ -1335,7 +1393,9 @@ async def test_force_refresh_token_resets_access(monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.asyncio
-async def test_build_engineio_target_handles_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_build_engineio_target_handles_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     rest = DummyREST(base="http://")
     client = _make_client(monkeypatch, rest=rest, hass_loop=asyncio.get_event_loop())
     with pytest.raises(RuntimeError):
@@ -1398,7 +1458,9 @@ def test_collect_update_addresses_extracts(monkeypatch: pytest.MonkeyPatch) -> N
     assert addresses == [("aux", "3"), ("htr", "1")]
 
 
-def test_collect_update_addresses_skips_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_collect_update_addresses_skips_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = _make_client(monkeypatch)
     nodes = {"htr": [1, 2], 10: {"settings": {"1": {}}}}
     assert client._collect_update_addresses(nodes) == []
@@ -1426,7 +1488,9 @@ def test_apply_heater_addresses_updates_energy(monkeypatch: pytest.MonkeyPatch) 
         energy_coordinator.updated = mapping
 
     energy_coordinator.update_addresses = update_addresses  # type: ignore[attr-defined]
-    client.hass.data[module.DOMAIN]["entry"] = {"energy_coordinator": energy_coordinator}
+    client.hass.data[module.DOMAIN]["entry"] = {
+        "energy_coordinator": energy_coordinator
+    }
     initial_data = {"device": {"nodes_by_type": {}}}
     client._coordinator.data = initial_data
     result = client._apply_heater_addresses({"htr": [1, 2]})
@@ -1537,6 +1601,12 @@ def test_handle_handshake_logs_lease_scalars(
     monkeypatch.setattr(module.time, "time", lambda: 300.0)
     caplog.set_level(logging.DEBUG, logger=module._LOGGER.name)
 
+    class LeaseSentinel:
+        def __repr__(self) -> str:
+            return "LeaseSentinel"
+
+    long_value = "x" * 130
+
     payload = {
         "lease": {
             "ttl": 450,
@@ -1545,6 +1615,12 @@ def test_handle_handshake_logs_lease_scalars(
             "leaseFlag": True,
             "leaseLabel": "   ",
             "leaseCode": "invalid",
+            "leaseBytes": b"raw-bytes",
+            "leaseNone": None,
+            "leaseObject": LeaseSentinel(),
+            "leaseMultiline": "line1\nline2",
+            "leaseLong": long_value,
+            "leaseEmpty": "",
         },
         "meta": {"timeout": 120},
         "segments": [
@@ -1565,10 +1641,149 @@ def test_handle_handshake_logs_lease_scalars(
     message = log_messages[-1]
     assert "lease.ttl=450" in message
     assert "lease.leaseMs=450000" in message
+    assert "lease.leaseFlag=True" in message
+    assert "lease.leaseLabel=   " in message
+    assert "lease.leaseCode=invalid" in message
+    assert "lease.leaseBytes=raw-bytes" in message
+    assert "lease.leaseNone=None" in message
+    assert "lease.leaseObject=LeaseSentinel" in message
+    assert "lease.leaseMultiline=line1\\nline2" in message
+    assert f"lease.leaseLong={'x' * 119}…" in message
+    assert "lease.leaseEmpty=" in message
     assert "meta.timeout=120" in message
     assert "segments[0].leaseTtl=42" in message
     assert "segments[1].timeout=75" in message
     assert "secret-should-not-log" not in message
+
+
+def test_handle_handshake_logs_raw_lease_strings(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Confirm lease strings are logged without coercion."""
+
+    client = _make_client(monkeypatch)
+    refresh_loop = AsyncMock()
+    monkeypatch.setattr(client, "_subscription_refresh_loop", refresh_loop)
+    monkeypatch.setattr(module.time, "time", lambda: 400.0)
+    caplog.set_level(logging.DEBUG, logger=module._LOGGER.name)
+
+    payload = {"lease": {"ttl": "300", "leaseCode": "PT5M"}}
+
+    client._handle_handshake(payload)
+
+    log_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno == logging.DEBUG
+        and "handshake lease hints" in record.getMessage()
+    ]
+    assert log_messages, "expected handshake lease hint log entry"
+    message = log_messages[-1]
+    assert "lease.ttl=300" in message
+    assert "lease.leaseCode=PT5M" in message
+
+
+def test_handle_handshake_logs_string_payload(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Ensure JSON string handshakes are parsed for logging and TTL extraction."""
+
+    client = _make_client(monkeypatch)
+    refresh_loop = AsyncMock()
+    monkeypatch.setattr(client, "_subscription_refresh_loop", refresh_loop)
+    monkeypatch.setattr(module.time, "time", lambda: 500.0)
+    caplog.set_level(logging.DEBUG, logger=module._LOGGER.name)
+
+    payload_dict = {
+        "lease": {"ttl": "180", "leaseCode": "PT3M"},
+        "meta": {"timeout": "240"},
+    }
+    payload = json.dumps(payload_dict)
+
+    client._handle_handshake(payload)
+
+    log_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno == logging.DEBUG
+        and "handshake lease hints" in record.getMessage()
+    ]
+    assert log_messages, "expected handshake lease hint log entry"
+    message = log_messages[-1]
+    assert "lease.ttl=180" in message
+    assert "lease.leaseCode=PT3M" in message
+    assert "meta.timeout=240" in message
+    assert client._subscription_ttl == pytest.approx(180.0)
+    assert client._subscription_refresh_due == pytest.approx(500.0 + 180.0)
+
+
+def test_handle_handshake_logs_bytes_payload(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Ensure bytes handshakes are decoded for logging."""
+
+    client = _make_client(monkeypatch)
+    refresh_loop = AsyncMock()
+    monkeypatch.setattr(client, "_subscription_refresh_loop", refresh_loop)
+    monkeypatch.setattr(module.time, "time", lambda: 600.0)
+    caplog.set_level(logging.DEBUG, logger=module._LOGGER.name)
+
+    payload_dict = {"lease": {"timeout": "210"}}
+    payload = json.dumps(payload_dict).encode()
+
+    client._handle_handshake(payload)
+
+    log_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno == logging.DEBUG
+        and "handshake lease hints" in record.getMessage()
+    ]
+    assert log_messages, "expected handshake lease hint log entry"
+    message = log_messages[-1]
+    assert "lease.timeout=210" in message
+    assert client._subscription_ttl == pytest.approx(210.0)
+    assert client._subscription_refresh_due == pytest.approx(600.0 + 210.0)
+
+
+def test_handle_handshake_logs_invalid_bytes(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Fallback to invalid logging when byte payloads are not JSON."""
+
+    client = _make_client(monkeypatch)
+    caplog.set_level(logging.DEBUG, logger=module._LOGGER.name)
+
+    client._handle_handshake(b"not-json")
+
+    log_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno == logging.DEBUG
+        and "invalid handshake payload" in record.getMessage()
+    ]
+    assert log_messages, "expected invalid payload log entry"
+    assert log_messages[-1].endswith("(bytes)")
+
+
+def test_handle_handshake_logs_invalid_payload(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Log the payload type when handshake data cannot be parsed."""
+
+    client = _make_client(monkeypatch)
+    caplog.set_level(logging.DEBUG, logger=module._LOGGER.name)
+
+    client._handle_handshake(12345)
+
+    log_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno == logging.DEBUG
+        and "invalid handshake payload" in record.getMessage()
+    ]
+    assert log_messages, "expected invalid payload log entry"
+    assert log_messages[-1].endswith("(int)")
 
 
 def test_handle_handshake_uses_default_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1637,7 +1852,9 @@ async def test_subscription_refresh_loop_schedules_and_refreshes(
     client._closing = False
 
 
-def test_apply_heater_addresses_inventory_and_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_apply_heater_addresses_inventory_and_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = _make_client(monkeypatch)
     client.hass.data[module.DOMAIN]["entry"] = {}
     client._coordinator.data = {"device": {"nodes_by_type": {}}}
@@ -1646,7 +1863,9 @@ def test_apply_heater_addresses_inventory_and_empty(monkeypatch: pytest.MonkeyPa
     assert result == {"htr": []}
 
 
-def test_apply_heater_addresses_skips_empty_non_heater(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_apply_heater_addresses_skips_empty_non_heater(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = _make_client(monkeypatch)
     client.hass.data[module.DOMAIN]["entry"] = {}
     client._coordinator.data = {"device": {"nodes_by_type": {}}}
@@ -1723,7 +1942,9 @@ def test_cancel_idle_restart_with_pending(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.mark.asyncio
-async def test_ducaheat_client_extended_logging(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_ducaheat_client_extended_logging(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = module.DucaheatWSClient(
         SimpleNamespace(loop=asyncio.get_event_loop(), data={}),
         entry_id="entry",
@@ -1825,7 +2046,9 @@ def test_heater_sample_subscription_targets(monkeypatch: pytest.MonkeyPatch) -> 
     client = _make_client(monkeypatch)
     entry = client.hass.data[module.DOMAIN]["entry"]
 
-    def fake_collect(record: Mapping[str, Any], *, coordinator: Any | None = None) -> Any:
+    def fake_collect(
+        record: Mapping[str, Any], *, coordinator: Any | None = None
+    ) -> Any:
         assert record is entry
         assert coordinator is client._coordinator
         return (
@@ -1866,6 +2089,7 @@ async def test_sample_subscription_handles_fallback_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+
     def fake_collect(record: Any, *, coordinator: Any | None = None) -> Any:
         assert coordinator is client._coordinator
         try:
@@ -1952,5 +2176,3 @@ async def test_ducaheat_debug_logging(
     await client._on_dev_data({"nodes": {}})
     await client._on_update({"nodes": {}})
     assert caplog.text.count("ducaheat") >= 4
-
-

@@ -14,7 +14,7 @@ import logging
 import random
 import time
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import aiohttp
@@ -158,10 +158,13 @@ class WebSocketClient:
     # ------------------------------------------------------------------
     # Public control
     # ------------------------------------------------------------------
-    def _wrap_background_task(self, target: Any, *args: Any, **kwargs: Any) -> asyncio.Task:
+    def _wrap_background_task(
+        self, target: Any, *args: Any, **kwargs: Any
+    ) -> asyncio.Task:
         """Schedule socket.io background tasks on the HA loop."""
         coro = target(*args, **kwargs)
         if not asyncio.iscoroutine(coro):
+
             async def _runner() -> Any:
                 return coro
 
@@ -254,7 +257,9 @@ class WebSocketClient:
                 delay = self._backoff_seq[
                     min(self._backoff_idx, len(self._backoff_seq) - 1)
                 ]
-                self._backoff_idx = min(self._backoff_idx + 1, len(self._backoff_seq) - 1)
+                self._backoff_idx = min(
+                    self._backoff_idx + 1, len(self._backoff_seq) - 1
+                )
                 await asyncio.sleep(delay * random.uniform(0.8, 1.2))
         finally:
             self._update_status("stopped")
@@ -309,7 +314,10 @@ class WebSocketClient:
                 await self._sio.disconnect()
             except Exception:  # noqa: BLE001
                 _LOGGER.debug(
-                    "WS %s: disconnect due to %s failed", self.dev_id, reason, exc_info=True
+                    "WS %s: disconnect due to %s failed",
+                    self.dev_id,
+                    reason,
+                    exc_info=True,
                 )
         self._disconnected.set()
 
@@ -642,7 +650,11 @@ class WebSocketClient:
                 return None
         else:
             return None
-        if "ms" in key or "milli" in key or (raw > 86400 and "hour" not in key and "day" not in key):
+        if (
+            "ms" in key
+            or "milli" in key
+            or (raw > 86400 and "hour" not in key and "day" not in key)
+        ):
             raw /= 1000.0
         return raw
 
@@ -651,27 +663,51 @@ class WebSocketClient:
     # ------------------------------------------------------------------
     def _handle_handshake(self, data: Any) -> None:
         """Process the initial handshake payload from the server."""
-        if isinstance(data, dict):
-            self._handshake_payload = deepcopy(data)
+
+        payload: Any
+        if isinstance(data, Mapping):
+            payload = data
+        elif isinstance(data, bytes):
+            try:
+                payload = json.loads(data.decode("utf-8", "replace"))
+            except ValueError:
+                payload = None
+        elif isinstance(data, str):
+            try:
+                payload = json.loads(data)
+            except ValueError:
+                payload = None
+        else:
+            payload = None
+
+        if isinstance(payload, Mapping):
+            payload_map = cast(Mapping[str, Any], payload)
+            self._handshake_payload = deepcopy(payload_map)
             if _LOGGER.isEnabledFor(logging.DEBUG):
                 lease_scalars: list[str] = []
                 lease_tokens = ("ttl", "timeout", "lease", "expire")
 
-                def _format_scalar(value: Any) -> str | None:
-                    if isinstance(value, bool):
+                def _summarise_value(value: Any) -> str | None:
+                    if isinstance(value, (Mapping, list, tuple)):
                         return None
-                    if isinstance(value, (int, float)):
-                        return format(value, "g")
-                    if isinstance(value, str):
-                        candidate = value.strip()
-                        if not candidate:
-                            return None
-                        try:
-                            float(candidate)
-                        except ValueError:
-                            return None
-                        return candidate
-                    return None
+                    raw: str
+                    if isinstance(value, bytes):
+                        raw = value.decode("utf-8", "replace")
+                    elif isinstance(value, str):
+                        raw = value
+                    elif isinstance(value, (bool, int, float)):
+                        raw = str(value)
+                    elif value is None:
+                        raw = "None"
+                    else:
+                        raw = repr(value)
+                    if not raw:
+                        return raw
+                    safe = raw.replace("\n", "\\n")
+                    max_len = 120
+                    if len(safe) > max_len:
+                        safe = f"{safe[: max_len - 1]}…"
+                    return safe
 
                 def _collect_scalars(node: Any, path: str) -> None:
                     if isinstance(node, Mapping):
@@ -680,7 +716,7 @@ class WebSocketClient:
                             key_lower = key_str.lower()
                             next_path = f"{path}.{key_str}" if path else key_str
                             if any(token in key_lower for token in lease_tokens):
-                                formatted = _format_scalar(value)
+                                formatted = _summarise_value(value)
                                 if formatted is not None:
                                     lease_scalars.append(f"{next_path}={formatted}")
                             if isinstance(value, (Mapping, list, tuple)):
@@ -689,12 +725,10 @@ class WebSocketClient:
                         for idx, item in enumerate(node):
                             _collect_scalars(item, f"{path}[{idx}]")
 
-                _collect_scalars(data, "")
+                _collect_scalars(payload_map, "")
                 summary = ", ".join(lease_scalars) if lease_scalars else "none"
-                _LOGGER.debug(
-                    "WS %s: handshake lease hints: %s", self.dev_id, summary
-                )
-            ttl_info = self._extract_subscription_ttl(data)
+                _LOGGER.debug("WS %s: handshake lease hints: %s", self.dev_id, summary)
+            ttl_info = self._extract_subscription_ttl(payload_map)
             ttl: float
             source: str
             if ttl_info is None:
@@ -711,7 +745,11 @@ class WebSocketClient:
             )
             self._update_status("connected")
         else:
-            _LOGGER.debug("WS %s: invalid handshake payload", self.dev_id)
+            _LOGGER.debug(
+                "WS %s: invalid handshake payload (%s)",
+                self.dev_id,
+                type(data).__name__,
+            )
 
     def _handle_dev_data(self, data: Any) -> None:
         """Handle the first full snapshot of nodes from the websocket."""
@@ -742,9 +780,7 @@ class WebSocketClient:
                     _LOGGER.debug(
                         "WS %s: update event for %s",
                         self.dev_id,
-                        ", ".join(
-                            f"{node_type}/{addr}" for node_type, addr in changed
-                        ),
+                        ", ".join(f"{node_type}/{addr}" for node_type, addr in changed),
                     )
                 else:
                     _LOGGER.debug(
@@ -782,9 +818,7 @@ class WebSocketClient:
             self._forward_sample_updates(sample_updates)
         self._mark_event(paths=None, count_event=True)
 
-    def _forward_sample_updates(
-        self, updates: Mapping[str, Mapping[str, Any]]
-    ) -> None:
+    def _forward_sample_updates(self, updates: Mapping[str, Mapping[str, Any]]) -> None:
         """Relay websocket heater sample updates to the energy coordinator."""
 
         record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
@@ -868,7 +902,8 @@ class WebSocketClient:
 
         if not is_snapshot:  # pragma: no cover - legacy branch
             nodes_by_type = {
-                node_type: {"addrs": list(addrs)} for node_type, addrs in addr_map.items()
+                node_type: {"addrs": list(addrs)}
+                for node_type, addrs in addr_map.items()
             }
             snapshot["nodes_by_type"] = nodes_by_type
             if "htr" in nodes_by_type:
@@ -893,7 +928,8 @@ class WebSocketClient:
             "nodes_by_type": deepcopy(snapshot.get("nodes_by_type", {})),
         }
         payload_copy.setdefault(
-            "addr_map", {node_type: list(addrs) for node_type, addrs in addr_map.items()}
+            "addr_map",
+            {node_type: list(addrs) for node_type, addrs in addr_map.items()},
         )
         if unknown_types:
             payload_copy.setdefault("unknown_types", sorted(unknown_types))
@@ -966,9 +1002,7 @@ class WebSocketClient:
                 for node_type, addrs in normalized_map.items():
                     if not addrs and node_type != "htr":
                         continue
-                    bucket = self._ensure_type_bucket(
-                        dev_map, nodes_by_type, node_type
-                    )
+                    bucket = self._ensure_type_bucket(dev_map, nodes_by_type, node_type)
                     if addrs:
                         bucket["addrs"] = list(addrs)
                 updated = dict(coordinator_data)
@@ -1650,7 +1684,9 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         addr_pairs.update(f"{node_type}/{addr}" for node_type, addr in sample_addrs)
         if addr_pairs:
             _LOGGER.debug(
-                "WS %s: legacy update for %s", self.dev_id, ", ".join(sorted(addr_pairs))
+                "WS %s: legacy update for %s",
+                self.dev_id,
+                ", ".join(sorted(addr_pairs)),
             )
         elif updated_nodes:
             _LOGGER.debug("WS %s: legacy nodes refresh", self.dev_id)
@@ -1680,7 +1716,10 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             )
             self._legacy_subscription_configured = True
             return
-        if self._subscription_refresh_task is None and self._subscription_refresh_due is None:
+        if (
+            self._subscription_refresh_task is None
+            and self._subscription_refresh_due is None
+        ):
             self._apply_subscription_ttl(
                 ttl=_DEFAULT_SUBSCRIPTION_TTL,
                 source="default",
@@ -1836,6 +1875,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         netloc = parsed.netloc or parsed.path
         path = parsed.path.rstrip("/")
         return urlunsplit((scheme, netloc, path or "", "", ""))
+
 
 class DucaheatWSClient(WebSocketClient):
     """Verbose websocket client variant with payload debug logging."""
