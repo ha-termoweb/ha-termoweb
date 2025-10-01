@@ -1021,6 +1021,8 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._stop_event = asyncio.Event()
         self._handshake_logged = False
         self._last_event_at: float | None = None
+        self._last_payload_at: float | None = None
+        self._last_heartbeat_at: float | None = None
 
         self._handshake_payload: dict[str, Any] | None = None
         self._nodes: dict[str, Any] = {}
@@ -1433,6 +1435,14 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             sample_addrs=sample_addrs,
         )
 
+    def _mark_event(
+        self, *, paths: list[str] | None, count_event: bool = False
+    ) -> None:
+        """Record payload batches and update the payload timestamp."""
+
+        super()._mark_event(paths=paths, count_event=count_event)
+        self._last_payload_at = self._stats.last_event_ts or self._last_event_at
+
     def _update_legacy_section(
         self,
         *,
@@ -1573,10 +1583,51 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
     def _record_heartbeat(self, *, source: str) -> None:
         """Record receipt of a heartbeat frame."""
 
+        _ = source
         now = time.time()
         self._stats.last_event_ts = now
         self._last_event_at = now
-        self._cancel_idle_restart()
+        self._last_heartbeat_at = now
+
+    async def _idle_monitor(self) -> None:
+        """Monitor payload idleness and restart stale websocket sessions."""
+
+        while not self._closing:
+            await asyncio.sleep(60)
+            ws = self._ws
+            if ws is None or getattr(ws, "closed", True):
+                if self._disconnected.is_set():
+                    break
+                continue
+            last_payload = self._last_payload_at
+            now = time.time()
+            idle_for: float | None = None
+            if last_payload:
+                idle_for = now - last_payload
+                if idle_for >= self._payload_idle_window:
+                    _LOGGER.info(
+                        "WS %s: no payloads for %.0f s; scheduling websocket restart",
+                        self.dev_id,
+                        idle_for,
+                    )
+                    self._schedule_idle_restart(
+                        idle_for=idle_for, source="idle monitor payload timeout"
+                    )
+                    break
+            if self._subscription_refresh_failed:
+                try:
+                    await self._refresh_subscription(reason="idle monitor retry")
+                except asyncio.CancelledError:  # pragma: no cover - task lifecycle
+                    raise
+                except Exception:  # noqa: BLE001
+                    fallback_idle = (
+                        idle_for if idle_for is not None else self._payload_idle_window
+                    )
+                    self._schedule_idle_restart(
+                        idle_for=fallback_idle,
+                        source="idle monitor retry failed",
+                    )
+                    break
 
     async def _run_heartbeat(
         self, interval: float, send: Callable[[], Awaitable[Any]]

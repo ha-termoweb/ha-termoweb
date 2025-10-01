@@ -464,6 +464,133 @@ def test_legacy_handle_event_dispatches_and_logs(
     assert "legacy update for htr/1" in caplog.text
 
 
+def test_legacy_mark_event_tracks_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Update the payload timestamp when legacy batches arrive."""
+
+    client = _make_legacy_client(monkeypatch)
+    monkeypatch.setattr(module.time, "time", lambda: 1000.0)
+
+    client._last_payload_at = None
+    client._mark_event(paths=None, count_event=True)
+
+    assert client._last_payload_at == pytest.approx(1000.0)
+
+
+def test_legacy_heartbeat_does_not_cancel_restart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Record heartbeat activity without clearing idle restart state."""
+
+    client = _make_legacy_client(monkeypatch)
+    client._idle_restart_pending = True
+    client._last_payload_at = 900.0
+    monkeypatch.setattr(module.time, "time", lambda: 1200.0)
+
+    client._record_heartbeat(source="socketio09")
+
+    assert client._idle_restart_pending is True
+    assert client._last_payload_at == pytest.approx(900.0)
+    assert client._last_heartbeat_at == pytest.approx(1200.0)
+
+
+@pytest.mark.asyncio
+async def test_legacy_idle_monitor_schedules_restart_after_idle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Schedule a websocket restart when payloads stop despite heartbeats."""
+
+    client = _make_legacy_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    client._ws = SimpleNamespace(closed=False)
+    client._disconnected.clear()
+    client._payload_idle_window = 10
+    client._last_payload_at = 900.0
+
+    monkeypatch.setattr(module.time, "time", lambda: 920.0)
+    monkeypatch.setattr(module.asyncio, "sleep", AsyncMock(return_value=None))
+
+    triggered: list[tuple[float, str]] = []
+
+    def fake_schedule(*, idle_for: float, source: str) -> None:
+        triggered.append((idle_for, source))
+
+    client._schedule_idle_restart = fake_schedule  # type: ignore[assignment]
+
+    client._record_heartbeat(source="socketio09")
+    await client._idle_monitor()
+
+    assert triggered
+    idle_for, source = triggered[0]
+    assert source == "idle monitor payload timeout"
+    assert idle_for == pytest.approx(20.0)
+
+
+@pytest.mark.asyncio
+async def test_legacy_idle_monitor_reset_by_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fresh payloads reset the idle timer and avoid restarts."""
+
+    client = _make_legacy_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    client._ws = SimpleNamespace(closed=False)
+    client._disconnected.clear()
+    client._payload_idle_window = 30
+
+    times: list[float] = [900.0, 905.0]
+
+    def fake_time() -> float:
+        return times.pop(0) if times else 905.0
+
+    monkeypatch.setattr(module.time, "time", fake_time)
+
+    async def fake_sleep(_: float) -> None:
+        client._closing = True
+
+    monkeypatch.setattr(module.asyncio, "sleep", fake_sleep)
+
+    triggered: list[tuple[float, str]] = []
+
+    def fake_schedule(*, idle_for: float, source: str) -> None:
+        triggered.append((idle_for, source))
+
+    client._schedule_idle_restart = fake_schedule  # type: ignore[assignment]
+
+    client._mark_event(paths=None, count_event=True)
+    await client._idle_monitor()
+
+    assert triggered == []
+
+
+@pytest.mark.asyncio
+async def test_legacy_idle_monitor_retries_failed_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retry failed subscription refreshes before scheduling restarts."""
+
+    client = _make_legacy_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    client._ws = SimpleNamespace(closed=False)
+    client._disconnected.clear()
+    client._payload_idle_window = 100
+    client._last_payload_at = 1000.0
+    client._subscription_refresh_failed = True
+
+    refresh = AsyncMock(side_effect=RuntimeError("refresh boom"))
+    monkeypatch.setattr(client, "_refresh_subscription", refresh)
+    monkeypatch.setattr(module.asyncio, "sleep", AsyncMock(return_value=None))
+    monkeypatch.setattr(module.time, "time", lambda: 1010.0)
+
+    triggered: list[tuple[float, str]] = []
+
+    def fake_schedule(*, idle_for: float, source: str) -> None:
+        triggered.append((idle_for, source))
+
+    client._schedule_idle_restart = fake_schedule  # type: ignore[assignment]
+
+    await client._idle_monitor()
+
+    assert refresh.await_count == 1
+    assert triggered == [(10.0, "idle monitor retry failed")]
+
+
 def test_apply_nodes_payload_handles_missing(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
