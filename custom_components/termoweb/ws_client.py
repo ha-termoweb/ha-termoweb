@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mappin
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass
-from functools import partial
+from functools import partial, wraps
 import json
 import logging
 import random
@@ -16,6 +16,7 @@ import time
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit
+import weakref
 
 import aiohttp
 from homeassistant.core import HomeAssistant
@@ -1039,9 +1040,86 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._ws_state: dict[str, Any] | None = None
         self._ws_state_bucket()
 
+        self._write_hook_installed = False
+        self._write_hook_original: Callable[..., Awaitable[Any]] | None = None
+        self._install_write_hook()
+
     # ------------------------------------------------------------------
     # Public control
     # ------------------------------------------------------------------
+    def _install_write_hook(self) -> None:
+        """Wrap REST writes so we can observe successful node updates."""
+
+        if self._write_hook_installed:
+            return
+        client = self._client
+        original = getattr(client, "set_node_settings", None)
+        if not callable(original):
+            self._write_hook_installed = True
+            return
+
+        watchers: dict[str, weakref.WeakSet[TermoWebWSClient]]
+        watchers = getattr(client, "_tw_ws_write_watchers", None)
+        if watchers is None:
+            watchers = {}
+            setattr(client, "_tw_ws_write_watchers", watchers)
+
+        dev_watchers = watchers.get(self.dev_id)
+        if dev_watchers is None:
+            dev_watchers = weakref.WeakSet()
+            watchers[self.dev_id] = dev_watchers
+        dev_watchers.add(self)
+
+        if not hasattr(client, "_tw_ws_write_wrapper"):
+
+            @wraps(original)
+            async def _wrapped_set_node_settings(*args: Any, **kwargs: Any) -> Any:
+                result = await original(*args, **kwargs)
+                dev_id_arg = kwargs.get("dev_id") if "dev_id" in kwargs else None
+                if dev_id_arg is None and args:
+                    dev_id_arg = args[0]
+                if isinstance(dev_id_arg, str):
+                    hooks = getattr(client, "_tw_ws_write_watchers", {})
+                    watchers_for_dev = hooks.get(dev_id_arg)
+                    if watchers_for_dev:
+                        for ws_client in list(watchers_for_dev):
+                            maybe = getattr(ws_client, "maybe_restart_after_write", None)
+                            if maybe is None or not callable(maybe):
+                                continue
+                            try:
+                                await maybe()
+                            except asyncio.CancelledError:  # pragma: no cover - passthrough
+                                raise
+                            except Exception:  # noqa: BLE001 - defensive logging
+                                _LOGGER.debug(
+                                    "WS %s: maybe_restart_after_write failed", ws_client.dev_id, exc_info=True
+                                )
+                        if not watchers_for_dev:
+                            hooks.pop(dev_id_arg, None)
+                return result
+
+            setattr(client, "set_node_settings", _wrapped_set_node_settings)
+            setattr(client, "_tw_ws_write_wrapper", _wrapped_set_node_settings)
+            setattr(client, "_tw_ws_write_original", original)
+
+        self._write_hook_original = getattr(client, "_tw_ws_write_original", original)
+        self._write_hook_installed = True
+
+    async def maybe_restart_after_write(self) -> None:
+        """Restart the websocket if writes follow long periods of inactivity."""
+
+        last_event = self._stats.last_event_ts or self._last_event_at
+        if not last_event:
+            return
+        idle_for = time.time() - last_event
+        if idle_for < 600:
+            return
+        if _LOGGER.isEnabledFor(logging.INFO):
+            _LOGGER.info(
+                "WS %s: write acknowledged after %.0f s without payloads; restarting", self.dev_id, idle_for
+            )
+        self._schedule_idle_restart(idle_for=idle_for, source="write notification")
+
     async def stop(self) -> None:
         """Cancel tasks, close websocket sessions and reset legacy state."""
 

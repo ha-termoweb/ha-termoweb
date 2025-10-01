@@ -19,9 +19,13 @@ class DummyREST:
         self._session = SimpleNamespace()
         self._headers = {"Authorization": "Bearer token"}
         self._ensure_token = AsyncMock()
+        self._set_node_settings = AsyncMock(return_value={"status": "ok"})
 
     async def _authed_headers(self) -> dict[str, str]:
         return self._headers
+
+    async def set_node_settings(self, *args: Any, **kwargs: Any) -> Any:
+        return await self._set_node_settings(*args, **kwargs)
 
 
 @pytest.fixture(autouse=True)
@@ -275,6 +279,66 @@ def _make_legacy_client(
     )
     client._dispatcher_mock = dispatcher_mock  # type: ignore[attr-defined]
     return client
+
+
+@pytest.mark.asyncio
+async def test_legacy_write_restart_after_idle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Schedule an immediate restart when a write follows long inactivity."""
+
+    client = _make_legacy_client(monkeypatch)
+    rest_client = client._client
+    now = module.time.time()
+    client._stats.last_event_ts = now - 700
+    client._idle_restart_pending = False
+    client._idle_restart_task = None
+
+    await rest_client.set_node_settings("device", {"addr": 1})
+
+    assert rest_client._set_node_settings.await_count == 1
+    assert client._idle_restart_pending is True
+    assert client._idle_restart_task is not None
+
+
+@pytest.mark.asyncio
+async def test_legacy_write_recent_payload_skips_restart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Avoid restarting when payloads have been received recently."""
+
+    client = _make_legacy_client(monkeypatch)
+    rest_client = client._client
+    now = module.time.time()
+    client._stats.last_event_ts = now - 120
+    client._idle_restart_pending = False
+    client._idle_restart_task = None
+
+    await rest_client.set_node_settings("device", {"addr": 2})
+
+    assert rest_client._set_node_settings.await_count == 1
+    assert client._idle_restart_pending is False
+    assert client._idle_restart_task is None
+
+
+@pytest.mark.asyncio
+async def test_legacy_write_other_device_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ignore writes for other devices when monitoring restart triggers."""
+
+    client = _make_legacy_client(monkeypatch)
+    rest_client = client._client
+    now = module.time.time()
+    client._stats.last_event_ts = now - 700
+    client._idle_restart_pending = False
+    client._idle_restart_task = None
+
+    await rest_client.set_node_settings("other", {"addr": 3})
+
+    assert rest_client._set_node_settings.await_count == 1
+    assert client._idle_restart_pending is False
+    assert client._idle_restart_task is None
 
 
 def test_http_wrapping_handles_missing_attributes(
