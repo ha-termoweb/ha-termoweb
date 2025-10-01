@@ -345,6 +345,31 @@ async def test_ws_url_and_engineio_target(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.mark.asyncio
+async def test_ws_url_appends_missing_api_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure websocket targets append the API version path when absent."""
+
+    rest = DummyREST(base="https://api.example.com")
+    client = _make_client(
+        monkeypatch,
+        hass_loop=asyncio.get_event_loop(),
+        rest=rest,
+    )
+
+    ws_url = await client.ws_url()
+    assert ws_url.startswith(
+        "https://api.example.com/api/v2/socket_io?token=token&dev_id=device"
+    )
+
+    base, path = await client._build_engineio_target()
+    assert base.startswith(
+        "https://api.example.com/api/v2/socket_io?token=token&dev_id=device"
+    )
+    assert path == "api/v2/socket_io"
+
+
+@pytest.mark.asyncio
 async def test_wrap_background_task_runs_coroutine(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -385,7 +410,6 @@ def test_legacy_handle_event_dispatches_and_logs(
     """Ensure the legacy client publishes updates and logs affected nodes."""
 
     client = _make_legacy_client(monkeypatch)
-    monkeypatch.setattr(client, "_restart_subscription_refresh", MagicMock())
     dispatcher: MagicMock = client._dispatcher_mock  # type: ignore[attr-defined]
     monkeypatch.setattr(
         module,
@@ -440,316 +464,6 @@ def test_legacy_handle_event_dispatches_and_logs(
     assert "legacy update for htr/1" in caplog.text
 
 
-def test_legacy_event_configures_subscription(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify the legacy client extracts TTL metadata from data payloads."""
-
-    client = _make_legacy_client(monkeypatch)
-    refresh_loop = AsyncMock()
-    monkeypatch.setattr(client, "_subscription_refresh_loop", refresh_loop)
-    created: list[dict[str, Any]] = []
-
-    def capture_task(coro: Any, **kwargs: Any) -> Any:
-        created.append({"coro": coro, "kwargs": kwargs})
-        closer = getattr(coro, "close", None)
-        if callable(closer):
-            closer()
-        return SimpleNamespace(done=lambda: True)
-
-    client._loop.create_task = capture_task  # type: ignore[assignment]
-    monkeypatch.setattr(module.time, "time", lambda: 100.0)
-
-    event = {
-        "name": "data",
-        "args": [[{"path": "/mgr/session", "body": {"lease": {"ttl": 250}}}]],
-    }
-    client._handle_event(event)
-
-    assert client._subscription_ttl == pytest.approx(250.0)
-    assert client._subscription_ttl != module._DEFAULT_SUBSCRIPTION_TTL
-    assert client._payload_idle_window == pytest.approx(375.0)
-    assert client._subscription_refresh_due == pytest.approx(350.0)
-    assert client._legacy_subscription_configured is True
-    assert client._subscription_refresh_task is not None
-    assert refresh_loop.call_count == 1
-    assert created
-
-
-def test_legacy_event_updates_ttl_after_default(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Ensure default TTL is used until a payload provides an explicit value."""
-
-    client = _make_legacy_client(monkeypatch)
-    refresh_loop = AsyncMock()
-    monkeypatch.setattr(client, "_subscription_refresh_loop", refresh_loop)
-    tasks: list[Any] = []
-
-    def capture_task(coro: Any, **kwargs: Any) -> Any:
-        tasks.append((coro, kwargs))
-        closer = getattr(coro, "close", None)
-        if callable(closer):
-            closer()
-        return SimpleNamespace(done=lambda: True)
-
-    client._loop.create_task = capture_task  # type: ignore[assignment]
-
-    monkeypatch.setattr(module.time, "time", lambda: 200.0)
-    client._handle_event(
-        {"name": "data", "args": [[{"path": "/mgr/session", "body": {}}]]}
-    )
-    assert client._subscription_ttl == pytest.approx(module._DEFAULT_SUBSCRIPTION_TTL)
-    assert client._legacy_subscription_configured is False
-    assert len(tasks) == 1
-
-    monkeypatch.setattr(module.time, "time", lambda: 400.0)
-    client._handle_event(
-        {
-            "name": "data",
-            "args": [[{"path": "/mgr/session", "body": {"lease": {"timeout": "150"}}}]],
-        }
-    )
-    assert client._subscription_ttl == pytest.approx(150.0)
-    assert client._legacy_subscription_configured is True
-    assert len(tasks) == 2
-    assert refresh_loop.call_count == 2
-
-
-@pytest.mark.asyncio
-async def test_legacy_refresh_subscription_success(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Check the legacy lease renewal updates bookkeeping on success."""
-
-    client = _make_legacy_client(monkeypatch, hass_loop=asyncio.get_event_loop())
-    client._ws = SimpleNamespace(closed=False)
-    client._subscription_ttl = 120.0
-    call_recorder = MagicMock()
-
-    async def snapshot() -> None:
-        call_recorder("snapshot")
-
-    async def session() -> None:
-        call_recorder("session")
-
-    async def samples() -> None:
-        call_recorder("samples")
-
-    client._send_snapshot_request = AsyncMock(side_effect=snapshot)
-    client._subscribe_session_metadata = AsyncMock(side_effect=session)
-    client._subscribe_htr_samples = AsyncMock(side_effect=samples)
-    monkeypatch.setattr(module.time, "time", lambda: 1000.0)
-
-    await client._refresh_subscription(reason="periodic test")
-
-    assert client._subscription_refresh_failed is False
-    assert client._subscription_refresh_last_success == pytest.approx(1000.0)
-    assert client._subscription_refresh_due == pytest.approx(1120.0)
-    assert call_recorder.mock_calls == [
-        call("snapshot"),
-        call("session"),
-        call("samples"),
-    ]
-
-
-@pytest.mark.asyncio
-async def test_legacy_socketio_setup_subscribes_session(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Ensure legacy startup subscribes to session metadata before devices."""
-
-    client = _make_legacy_client(monkeypatch)
-    client._handshake = AsyncMock(return_value=("sid", 100))
-    client._connect_ws = AsyncMock()
-    client._join_namespace = AsyncMock()
-    client._heartbeat_loop = AsyncMock()
-    call_recorder = MagicMock()
-
-    async def snapshot() -> None:
-        call_recorder("snapshot")
-
-    async def session() -> None:
-        call_recorder("session")
-
-    async def samples() -> None:
-        call_recorder("samples")
-
-    async def read_loop() -> None:
-        call_recorder("read")
-        client._closing = True
-
-    client._send_snapshot_request = AsyncMock(side_effect=snapshot)
-    client._subscribe_session_metadata = AsyncMock(side_effect=session)
-    client._subscribe_htr_samples = AsyncMock(side_effect=samples)
-    client._read_loop = AsyncMock(side_effect=read_loop)
-
-    def create_task(coro: Any, **_: Any) -> Any:
-        closer = getattr(coro, "close", None)
-        if callable(closer):
-            closer()
-        return SimpleNamespace(cancel=lambda: None, done=lambda: True)
-
-    client._loop.create_task = create_task  # type: ignore[assignment]
-
-    await client._run_socketio_09()
-
-    assert client._send_snapshot_request.await_count == 1
-    assert client._subscribe_session_metadata.await_count == 1
-    assert client._subscribe_htr_samples.await_count == 1
-    assert call_recorder.mock_calls == [
-        call("snapshot"),
-        call("session"),
-        call("samples"),
-        call("read"),
-    ]
-
-
-@pytest.mark.asyncio
-async def test_legacy_refresh_subscription_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Ensure legacy lease renewal failures schedule a restart."""
-
-    client = _make_legacy_client(monkeypatch, hass_loop=asyncio.get_event_loop())
-    client._ws = SimpleNamespace(closed=False)
-    client._subscription_ttl = 180.0
-    client._payload_idle_window = 540.0
-    client._send_snapshot_request = AsyncMock(side_effect=RuntimeError("boom"))
-    client._subscribe_session_metadata = AsyncMock()
-    client._subscribe_htr_samples = AsyncMock()
-    monkeypatch.setattr(module.time, "time", lambda: 500.0)
-
-    with pytest.raises(RuntimeError):
-        await client._refresh_subscription(reason="failure test")
-
-    assert client._subscription_refresh_failed is True
-    assert client._idle_restart_pending is True
-    assert client._subscription_refresh_last_attempt == pytest.approx(500.0)
-    assert client._subscribe_session_metadata.await_count == 0
-
-
-@pytest.mark.asyncio
-async def test_legacy_subscription_refresh_loop_uses_ws_connection(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Ensure the legacy refresh loop relies on the raw websocket state."""
-
-    client = _make_legacy_client(monkeypatch, hass_loop=asyncio.get_event_loop())
-    client._subscription_ttl = 240.0
-    client._ws = SimpleNamespace(closed=False)
-    client._closing = False
-
-    current = 0.0
-
-    async def fake_sleep(delay: float) -> None:
-        nonlocal current
-        current += delay
-
-    def fake_time() -> float:
-        return current
-
-    sleep_calls: list[float] = []
-
-    async def tracking_sleep(delay: float) -> None:
-        sleep_calls.append(delay)
-        await fake_sleep(delay)
-
-    monkeypatch.setattr(module.asyncio, "sleep", tracking_sleep)
-    monkeypatch.setattr(module.time, "time", fake_time)
-    monkeypatch.setattr(module.random, "uniform", lambda *_: 0.9)
-
-    refresh_reasons: list[str] = []
-
-    async def capture_refresh(*, reason: str) -> None:
-        refresh_reasons.append(reason)
-        client._closing = True
-
-    monkeypatch.setattr(client, "_refresh_subscription", capture_refresh)
-
-    await client._subscription_refresh_loop()
-
-    assert refresh_reasons == ["periodic renewal"]
-    assert sleep_calls and sleep_calls[0] == pytest.approx(172.8, rel=0.01)
-    assert client._subscription_refresh_due is None
-
-
-@pytest.mark.asyncio
-async def test_legacy_subscription_refresh_loop_skips_when_ws_closed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Verify the legacy refresh loop avoids renewals when the socket is shut."""
-
-    client = _make_legacy_client(monkeypatch, hass_loop=asyncio.get_event_loop())
-    client._subscription_ttl = 180.0
-    client._ws = SimpleNamespace(closed=True)
-    client._closing = False
-
-    iteration = 0
-
-    async def fake_sleep(delay: float) -> None:
-        nonlocal iteration
-        iteration += 1
-        if iteration >= 2:
-            client._closing = True
-
-    def fake_time() -> float:
-        return float(iteration) * 10.0
-
-    monkeypatch.setattr(module.asyncio, "sleep", fake_sleep)
-    monkeypatch.setattr(module.time, "time", fake_time)
-    monkeypatch.setattr(module.random, "uniform", lambda *_: 0.9)
-
-    refresh_mock = AsyncMock()
-    monkeypatch.setattr(client, "_refresh_subscription", refresh_mock)
-
-    await client._subscription_refresh_loop()
-
-    refresh_mock.assert_not_called()
-    assert client._subscription_refresh_due is None
-
-
-@pytest.mark.asyncio
-async def test_ws_url_adds_suffix_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    rest = DummyREST(base="https://api.otherhost.com")
-    client = _make_client(monkeypatch, rest=rest, hass_loop=asyncio.get_event_loop())
-    ws_url = await client.ws_url()
-    assert ws_url.startswith("https://api.otherhost.com/api/v2/socket_io")
-    base, path = await client._build_engineio_target()
-    assert path == "api/v2/socket_io"
-    assert base.startswith(
-        "https://api.otherhost.com/api/v2/socket_io?token=token&dev_id=device"
-    )
-
-
-@pytest.mark.asyncio
-async def test_apply_nodes_payload_updates_state(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    hass_loop = asyncio.get_event_loop()
-    client = _make_client(monkeypatch, hass_loop=hass_loop)
-    client._coordinator.data = {"device": {"nodes_by_type": {}}}
-
-    nodes_initial = {"nodes": {"htr": {"settings": {"1": {"temp": 20}}}}}
-    client._handle_dev_data(nodes_initial)
-    assert client._nodes["nodes"]["htr"]["settings"]["1"]["temp"] == 20
-    assert client._stats.events_total == 1
-
-    nodes_update = {"nodes": {"htr": {"settings": {"1": {"temp": 21}}}}}
-    client._handle_update(nodes_update)
-    assert client._nodes["nodes"]["htr"]["settings"]["1"]["temp"] == 21
-    assert client._stats.events_total == 2
-
-    hass_state = client.hass.data[module.DOMAIN]["entry"]
-    assert hass_state["nodes"]["htr"]["settings"]["1"]["temp"] == 21
-    client._coordinator.update_nodes.assert_called()
-    assert client._dispatcher_mock.called
-
-    client._apply_nodes_payload(
-        {"nodes": {1: {}, "htr": {"samples": {" ": {"t": 0, "counter": 0}}}}},
-        merge=True,
-        event="update",
-    )
-
-
 def test_apply_nodes_payload_handles_missing(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -797,6 +511,30 @@ def test_apply_nodes_payload_logs_changed_addresses(
     payload = {"nodes": {"htr": {"settings": {"1": {"temp": 22}}}}}
     client._apply_nodes_payload(payload, merge=True, event="update")
     assert "update event for" in caplog.text
+
+
+def test_apply_nodes_payload_skips_invalid_samples(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ignore invalid node types and sample addresses when forwarding updates."""
+
+    client = _make_client(monkeypatch)
+    forward = MagicMock()
+    client._forward_sample_updates = forward  # type: ignore[assignment]
+
+    payload = {
+        "nodes": {
+            5: {"samples": {"2": {"temp": 19}}},
+            "htr": {"samples": {"": {"temp": 20}, "1": {"temp": 21}}},
+        }
+    }
+
+    client._apply_nodes_payload(payload, merge=False, event="dev_data")
+
+    forward.assert_called_once()
+    updates = forward.call_args[0][0]
+    assert "htr" in updates
+    assert updates["htr"] == {"1": {"temp": 21}}
 
 
 @pytest.mark.asyncio
@@ -966,7 +704,7 @@ async def test_idle_monitor_skips_when_no_last_event(
 async def test_idle_monitor_retries_failed_refresh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Retry idle refreshes when the previous renewal failed."""
+    """Retry idle refreshes when the previous keep-alive failed."""
 
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     client._sio.connected = True
@@ -994,7 +732,7 @@ async def test_idle_monitor_retries_failed_refresh(
 
 @pytest.mark.asyncio
 async def test_idle_monitor_refresh_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Refresh idle websocket lease without scheduling a restart."""
+    """Refresh idle websocket session without scheduling a restart."""
 
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     client._sio.connected = True
@@ -1040,172 +778,11 @@ def test_start_and_stop_cancel_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
     loop.close()
 
 
-def test_restart_subscription_refresh_replaces_task(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Ensure restarting the lease task cancels the previous instance."""
-
-    client = _make_client(monkeypatch)
-
-    class DummyTask:
-        def __init__(self, *, done: bool = False) -> None:
-            self._done = done
-            self.cancelled = False
-
-        def cancel(self) -> None:
-            self.cancelled = True
-
-        def done(self) -> bool:
-            return self._done
-
-    existing = DummyTask()
-    client._subscription_refresh_task = existing  # type: ignore[attr-defined]
-    client._subscription_ttl = 120.0
-    client._closing = False
-
-    created: list[str] = []
-
-    def fake_create_task(coro: Any, *, name: str) -> DummyTask:
-        created.append(name)
-        closer = getattr(coro, "close", None)
-        if callable(closer):
-            closer()
-        return DummyTask()
-
-    client._loop.create_task = fake_create_task  # type: ignore[assignment]
-    client._restart_subscription_refresh()
-
-    assert existing.cancelled is True
-    assert created == [f"{module.DOMAIN}-ws-refresh-{client.dev_id}"]
-
-    client._subscription_refresh_task = DummyTask()
-    client._closing = True
-    client._restart_subscription_refresh()
-    assert client._subscription_refresh_task is None
-
-    client._closing = False
-    client._subscription_ttl = 0.0
-    client._subscription_refresh_task = DummyTask()
-    client._restart_subscription_refresh()
-    assert client._subscription_refresh_task is None
-
-
-@pytest.mark.asyncio
-async def test_cancel_subscription_refresh_waits(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Cancel the refresh task and await its termination."""
-
-    client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
-    task: asyncio.Future[None] = asyncio.Future()
-    client._subscription_refresh_task = task  # type: ignore[attr-defined]
-
-    await client._cancel_subscription_refresh()
-
-    assert task.cancelled()
-    assert client._subscription_refresh_task is None
-
-
-@pytest.mark.asyncio
-async def test_subscription_refresh_loop_handles_disconnect_and_errors(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Ensure the refresh loop adapts to connection loss and renewal errors."""
-
-    client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
-    client._subscription_ttl = 120.0
-    client._closing = False
-    client._sio.connected = False
-
-    clock = 0.0
-
-    def fake_time() -> float:
-        return clock
-
-    monkeypatch.setattr(module.time, "time", fake_time)
-    monkeypatch.setattr(module.random, "uniform", lambda *_: 1.0)
-
-    iteration = 0
-    sleeps: list[float] = []
-
-    async def fake_sleep(delay: float) -> None:
-        nonlocal iteration, clock
-        iteration += 1
-        sleeps.append(delay)
-        clock += delay
-        if iteration == 2:
-            client._sio.connected = True
-        elif iteration == 3:
-            client._closing = True
-
-    monkeypatch.setattr(module.asyncio, "sleep", fake_sleep)
-
-    async def failing_refresh(*, reason: str) -> None:
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(client, "_refresh_subscription", failing_refresh)
-
-    await client._subscription_refresh_loop()
-
-    assert iteration >= 3
-    assert client._subscription_refresh_failed is True
-    assert client._subscription_refresh_due is None
-    assert sleeps[2] == pytest.approx(min(60.0, client._subscription_ttl / 2))
-
-
-@pytest.mark.asyncio
-async def test_subscription_refresh_loop_checks_closing_flag(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Break out of the loop when ``_closing`` is set during a sleep."""
-
-    client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
-    client._subscription_ttl = 120.0
-    client._closing = False
-    client._sio.connected = True
-
-    async def fake_sleep(delay: float) -> None:
-        client._closing = True
-
-    monkeypatch.setattr(module.asyncio, "sleep", fake_sleep)
-    monkeypatch.setattr(module.time, "time", lambda: 0.0)
-    monkeypatch.setattr(module.random, "uniform", lambda *_: 1.0)
-    monkeypatch.setattr(client, "_refresh_subscription", AsyncMock())
-
-    await client._subscription_refresh_loop()
-
-    assert client._subscription_refresh_due is None
-
-
-@pytest.mark.asyncio
-async def test_subscription_refresh_loop_propagates_cancel(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Ensure cancellation during refresh bubbles out of the loop."""
-
-    client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
-    client._subscription_ttl = 120.0
-    client._closing = False
-    client._sio.connected = True
-
-    monkeypatch.setattr(module.asyncio, "sleep", AsyncMock(return_value=None))
-    monkeypatch.setattr(module.time, "time", lambda: 0.0)
-    monkeypatch.setattr(module.random, "uniform", lambda *_: 1.0)
-    monkeypatch.setattr(
-        client,
-        "_refresh_subscription",
-        AsyncMock(side_effect=asyncio.CancelledError),
-    )
-
-    with pytest.raises(asyncio.CancelledError):
-        await client._subscription_refresh_loop()
-
-
 @pytest.mark.asyncio
 async def test_refresh_subscription_requires_connection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Fail lease refresh when the websocket is disconnected."""
+    """Fail keep-alive refresh when the websocket is disconnected."""
 
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     client._sio.connected = False
@@ -1218,7 +795,7 @@ async def test_refresh_subscription_requires_connection(
 async def test_refresh_subscription_updates_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Successful lease renewal updates bookkeeping fields."""
+    """Successful keep-alive refresh updates bookkeeping fields."""
 
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     client._sio.connected = True
@@ -1250,80 +827,7 @@ async def test_refresh_subscription_updates_metadata(
     assert subscribe_mock.await_count == 1
     assert client._subscription_refresh_failed is False
     assert client._subscription_refresh_last_success == pytest.approx(1000.0)
-    assert client._subscription_refresh_due == pytest.approx(
-        1000.0 + client._subscription_ttl
-    )
     assert any("unit" in " ".join(str(part) for part in call) for call in info_calls)
-
-
-def test_apply_subscription_ttl_updates_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Applying TTL metadata updates idle windows and logs source details."""
-
-    client = _make_client(monkeypatch)
-
-    restarts: list[str] = []
-    monkeypatch.setattr(
-        client, "_restart_subscription_refresh", lambda: restarts.append("restart")
-    )
-
-    info_calls: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(
-        module._LOGGER, "info", lambda *args, **kwargs: info_calls.append(args)
-    )
-
-    client._apply_subscription_ttl(
-        ttl=30,
-        source="default",
-        context="handshake",
-        missing_hint="missing lease",
-        now=100.0,
-    )
-
-    assert client._subscription_ttl == 30.0
-    assert client._payload_idle_window == pytest.approx(120.0)
-    assert client._subscription_refresh_due == pytest.approx(130.0)
-    assert restarts == ["restart"]
-    assert any("missing lease" in str(call) for call in info_calls)
-
-    info_calls.clear()
-
-    client._apply_subscription_ttl(
-        ttl=200,
-        source="handshake",
-        context="ws",
-        missing_hint="unused",
-        now=200.0,
-    )
-
-    assert any("ws" in str(call) for call in info_calls)
-
-
-def test_extract_subscription_ttl_walks_nested(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Extract TTL values from nested dictionaries and sequences."""
-
-    client = _make_client(monkeypatch)
-
-    payload = {
-        "meta": [{"leaseMs": "90000"}],
-        "details": {"inner": {"lease": 45}},
-        "bad": {"timeout": "oops"},
-    }
-
-    result = client._extract_subscription_ttl(payload)
-    assert result == (45.0, "details.inner.lease")
-
-    assert client._extract_subscription_ttl({"no": "ttl"}) is None
-
-
-def test_coerce_seconds_variants() -> None:
-    """Cover the time coercion helper for different unit formats."""
-
-    assert module.WebSocketClient._coerce_seconds("90", "ttl") == 90.0
-    assert module.WebSocketClient._coerce_seconds("oops", "ttl") is None
-    assert module.WebSocketClient._coerce_seconds(90000, "leaseMs") == 90.0
-    assert module.WebSocketClient._coerce_seconds(172800, "lease") == pytest.approx(
-        172.8
-    )
 
 
 def test_forward_sample_updates_handles_missing_targets(
@@ -1346,13 +850,12 @@ def test_forward_sample_updates_handles_missing_targets(
             calls.append((args, kwargs))
 
     client.hass.data = {module.DOMAIN: {"entry": {"energy_coordinator": Handler()}}}
-    client._subscription_ttl = 123.0
     client._forward_sample_updates({"htr": {"1": {"samples": []}}})
 
     assert calls
     args, kwargs = calls[0]
     assert args[0] == "device"
-    assert kwargs["lease_seconds"] == pytest.approx(123.0)
+    assert kwargs == {}
 
 
 def test_dispatch_nodes_records_unknown_types(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1574,19 +1077,16 @@ def test_apply_nodes_payload_forwards_samples(monkeypatch: pytest.MonkeyPatch) -
     """Sample updates should be forwarded to the energy coordinator."""
 
     client = _make_client(monkeypatch)
-    calls: list[tuple[str, Mapping[str, Mapping[str, Any]], float | None]] = []
+    calls: list[tuple[str, Mapping[str, Mapping[str, Any]]]] = []
 
     def handle_ws_samples(
         dev_id: str,
         updates: Mapping[str, Mapping[str, Any]],
-        *,
-        lease_seconds: float | None = None,
     ) -> None:
-        calls.append((dev_id, updates, lease_seconds))
+        calls.append((dev_id, updates))
 
     energy_coordinator = SimpleNamespace(handle_ws_samples=handle_ws_samples)
     client.hass.data[module.DOMAIN]["entry"]["energy_coordinator"] = energy_coordinator
-    client._subscription_ttl = 123.0
 
     payload = {
         "nodes": {
@@ -1601,9 +1101,8 @@ def test_apply_nodes_payload_forwards_samples(monkeypatch: pytest.MonkeyPatch) -
     client._apply_nodes_payload(payload, merge=False, event="dev_data")
 
     assert calls
-    dev_id, updates, lease = calls[0]
+    dev_id, updates = calls[0]
     assert dev_id == "device"
-    assert lease == pytest.approx(123.0)
     assert "htr" in updates
     assert updates["htr"] == {"1": [{"t": 10.0, "counter": 1000}]}
 
@@ -1645,179 +1144,6 @@ def test_schedule_and_cancel_idle_restart(monkeypatch: pytest.MonkeyPatch) -> No
 def test_handle_handshake_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _make_client(monkeypatch)
     client._handle_handshake("not a dict")
-
-
-def test_handle_handshake_extracts_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _make_client(monkeypatch)
-    refresh_loop = AsyncMock()
-    monkeypatch.setattr(client, "_subscription_refresh_loop", refresh_loop)
-    monkeypatch.setattr(module.time, "time", lambda: 1000.0)
-
-    payload = {"lease": {"timeout": "450"}}
-    client._handle_handshake(payload)
-
-    assert client._subscription_ttl == pytest.approx(450.0)
-    assert client._payload_idle_window == pytest.approx(675.0)
-    assert client._subscription_refresh_due == pytest.approx(1450.0)
-    assert client._subscription_refresh_task is not None
-    refresh_loop.assert_called_once()
-
-
-def test_handle_handshake_logs_lease_scalars(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    client = _make_client(monkeypatch)
-    refresh_loop = AsyncMock()
-    monkeypatch.setattr(client, "_subscription_refresh_loop", refresh_loop)
-    monkeypatch.setattr(module.time, "time", lambda: 300.0)
-    caplog.set_level(logging.DEBUG, logger=module._LOGGER.name)
-
-    class LeaseSentinel:
-        def __repr__(self) -> str:
-            return "LeaseSentinel"
-
-    long_value = "x" * 130
-
-    payload = {
-        "lease": {
-            "ttl": 450,
-            "leaseMs": "450000",
-            "token": "secret-should-not-log",
-            "leaseFlag": True,
-            "leaseLabel": "   ",
-            "leaseCode": "invalid",
-            "leaseBytes": b"raw-bytes",
-            "leaseNone": None,
-            "leaseObject": LeaseSentinel(),
-            "leaseMultiline": "line1\nline2",
-            "leaseLong": long_value,
-            "leaseEmpty": "",
-        },
-        "meta": {"timeout": 120},
-        "segments": [
-            {"leaseTtl": "42"},
-            {"timeout": "75"},
-        ],
-    }
-
-    client._handle_handshake(payload)
-
-    log_messages = [
-        record.getMessage()
-        for record in caplog.records
-        if record.levelno == logging.DEBUG
-        and "handshake lease hints" in record.getMessage()
-    ]
-    assert log_messages, "expected handshake lease hint log entry"
-    message = log_messages[-1]
-    assert "lease.ttl=450" in message
-    assert "lease.leaseMs=450000" in message
-    assert "lease.leaseFlag=True" in message
-    assert "lease.leaseLabel=   " in message
-    assert "lease.leaseCode=invalid" in message
-    assert "lease.leaseBytes=raw-bytes" in message
-    assert "lease.leaseNone=None" in message
-    assert "lease.leaseObject=LeaseSentinel" in message
-    assert "lease.leaseMultiline=line1\\nline2" in message
-    assert f"lease.leaseLong={'x' * 119}…" in message
-    assert "lease.leaseEmpty=" in message
-    assert "meta.timeout=120" in message
-    assert "segments[0].leaseTtl=42" in message
-    assert "segments[1].timeout=75" in message
-    assert "secret-should-not-log" not in message
-
-
-def test_handle_handshake_logs_raw_lease_strings(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Confirm lease strings are logged without coercion."""
-
-    client = _make_client(monkeypatch)
-    refresh_loop = AsyncMock()
-    monkeypatch.setattr(client, "_subscription_refresh_loop", refresh_loop)
-    monkeypatch.setattr(module.time, "time", lambda: 400.0)
-    caplog.set_level(logging.DEBUG, logger=module._LOGGER.name)
-
-    payload = {"lease": {"ttl": "300", "leaseCode": "PT5M"}}
-
-    client._handle_handshake(payload)
-
-    log_messages = [
-        record.getMessage()
-        for record in caplog.records
-        if record.levelno == logging.DEBUG
-        and "handshake lease hints" in record.getMessage()
-    ]
-    assert log_messages, "expected handshake lease hint log entry"
-    message = log_messages[-1]
-    assert "lease.ttl=300" in message
-    assert "lease.leaseCode=PT5M" in message
-
-
-def test_handle_handshake_uses_default_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _make_client(monkeypatch)
-    refresh_loop = AsyncMock()
-    monkeypatch.setattr(client, "_subscription_refresh_loop", refresh_loop)
-    monkeypatch.setattr(module.time, "time", lambda: 2000.0)
-
-    client._handle_handshake({"message": "no ttl here"})
-
-    assert client._subscription_ttl == pytest.approx(module._DEFAULT_SUBSCRIPTION_TTL)
-    assert client._subscription_refresh_due == pytest.approx(
-        2000.0 + module._DEFAULT_SUBSCRIPTION_TTL
-    )
-    assert client._payload_idle_window >= module._DEFAULT_SUBSCRIPTION_TTL
-    refresh_loop.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_subscription_refresh_loop_schedules_and_refreshes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
-    client._sio.connected = True
-    client._subscription_ttl = 200.0
-    client._closing = False
-
-    current = 0.0
-
-    async def fake_sleep(delay: float) -> None:
-        nonlocal current
-        current += delay
-
-    def fake_time() -> float:
-        return current
-
-    sleep_calls: list[float] = []
-
-    async def tracking_sleep(delay: float) -> None:
-        sleep_calls.append(delay)
-        await fake_sleep(delay)
-
-    monkeypatch.setattr(module.asyncio, "sleep", tracking_sleep)
-    monkeypatch.setattr(module.time, "time", fake_time)
-    monkeypatch.setattr(module.random, "uniform", lambda *_: 0.9)
-
-    client._sio.emit = AsyncMock()
-    client._subscribe_heater_samples = AsyncMock()
-    refresh_reasons: list[str] = []
-    original_refresh = client._refresh_subscription
-
-    async def capture_refresh(*, reason: str) -> None:
-        refresh_reasons.append(reason)
-        await original_refresh(reason=reason)
-        client._closing = True
-
-    monkeypatch.setattr(client, "_refresh_subscription", capture_refresh)
-
-    await client._subscription_refresh_loop()
-
-    assert refresh_reasons == ["periodic renewal"]
-    assert sleep_calls and sleep_calls[0] == pytest.approx(144.0, rel=0.01)
-    assert client._subscription_refresh_last_attempt == pytest.approx(current)
-    assert client._subscription_refresh_last_success == pytest.approx(current)
-    assert client._subscription_refresh_failed is False
-    client._closing = False
 
 
 def test_apply_heater_addresses_inventory_and_empty(
