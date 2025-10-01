@@ -1294,6 +1294,16 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 self._connected_since = time.time()
                 self._healthy_since = None
                 self._update_status("connected")
+                if (
+                    self._idle_monitor_task is None
+                    or self._idle_monitor_task.done()
+                ):
+                    _LOGGER.debug(
+                        "WS %s: starting legacy idle monitor", self.dev_id
+                    )
+                    self._idle_monitor_task = self._loop.create_task(
+                        self._idle_monitor()
+                    )
                 self._hb_task = self._loop.create_task(self._heartbeat_loop())
                 await self._read_loop()
             except asyncio.CancelledError:
@@ -1338,6 +1348,15 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 if self._hb_task:
                     self._hb_task.cancel()
                     self._hb_task = None
+                if self._idle_monitor_task:
+                    _LOGGER.debug(
+                        "WS %s: stopping legacy idle monitor", self.dev_id
+                    )
+                    self._idle_monitor_task.cancel()
+                    if hasattr(self._idle_monitor_task, "__await__"):
+                        with suppress(asyncio.CancelledError):
+                            await self._idle_monitor_task
+                    self._idle_monitor_task = None
                 await self._cancel_subscription_refresh()
                 self._subscription_refresh_failed = False
                 self._subscription_refresh_due = None
