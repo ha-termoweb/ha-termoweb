@@ -18,6 +18,7 @@ from homeassistant.helpers import entity_registry as er
 
 from .api import RESTClient
 from .const import DOMAIN
+from .installation import ensure_snapshot
 from .nodes import (
     build_heater_address_map,
     build_heater_energy_unique_id,
@@ -911,10 +912,22 @@ async def async_register_import_energy_history_service(
                 )
         else:
             for rec in hass.data.get(DOMAIN, {}).values():
+                if not isinstance(rec, Mapping):
+                    continue
                 ent: ConfigEntry | None = rec.get("config_entry")
                 if not ent:
                     continue
-                inventory: Iterable[Any] = rec.get("node_inventory") or []
+                snapshot = ensure_snapshot(rec)
+                if snapshot is not None:
+                    override = rec.get("node_inventory")
+                    if override is not None:
+                        inventory = list(override)
+                        snapshot.update_nodes(snapshot.raw_nodes, node_inventory=inventory)
+                    else:
+                        inventory = snapshot.inventory
+                        rec["node_inventory"] = list(inventory)
+                else:
+                    inventory = rec.get("node_inventory") or []
                 by_type, _ = build_map(inventory)
                 tasks.append(
                     import_fn(

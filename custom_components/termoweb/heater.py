@@ -14,6 +14,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_data
+from .installation import InstallationSnapshot, ensure_snapshot
 from .nodes import (
     HEATER_NODE_TYPES,
     Node,
@@ -286,28 +287,43 @@ def prepare_heater_platform_data(
 ]:
     """Return node metadata and name resolution helpers for a config entry."""
 
-    nodes = entry_data.get("nodes")
-    inventory = ensure_node_inventory(entry_data, nodes=nodes)
+    snapshot = ensure_snapshot(entry_data)
+    if isinstance(snapshot, InstallationSnapshot):
+        inventory = snapshot.inventory
+        nodes_by_type_raw = snapshot.nodes_by_type
+        nodes_by_type = {
+            node_type: list(nodes) for node_type, nodes in nodes_by_type_raw.items()
+        }
+        explicit_names = snapshot.explicit_heater_names
+        type_to_addresses, _reverse_lookup = snapshot.heater_address_map
+        addrs_by_type = {
+            node_type: list(type_to_addresses.get(node_type, []))
+            for node_type in HEATER_NODE_TYPES
+        }
+        name_map = snapshot.heater_name_map(default_name_simple)
+    else:
+        nodes = entry_data.get("nodes")
+        inventory = ensure_node_inventory(entry_data, nodes=nodes)
 
-    nodes_by_type: dict[str, list[Node]] = defaultdict(list)
-    explicit_names: set[tuple[str, str]] = set()
-    for node in inventory:
-        node_type = normalize_node_type(getattr(node, "type", ""))
-        if not node_type:
-            continue
-        nodes_by_type[node_type].append(node)
-        addr = normalize_node_addr(getattr(node, "addr", ""))
-        if addr and getattr(node, "name", "").strip():
-            explicit_names.add((node_type, addr))
+        nodes_by_type = defaultdict(list)
+        explicit_names = set()
+        for node in inventory:
+            node_type = normalize_node_type(getattr(node, "type", ""))
+            if not node_type:
+                continue
+            nodes_by_type[node_type].append(node)
+            addr = normalize_node_addr(getattr(node, "addr", ""))
+            if addr and getattr(node, "name", "").strip():
+                explicit_names.add((node_type, addr))
 
-    type_to_addresses, _reverse_lookup = build_heater_address_map(inventory)
+        type_to_addresses, _reverse_lookup = build_heater_address_map(inventory)
 
-    addrs_by_type: dict[str, list[str]] = {
-        node_type: list(type_to_addresses.get(node_type, []))
-        for node_type in HEATER_NODE_TYPES
-    }
+        addrs_by_type = {
+            node_type: list(type_to_addresses.get(node_type, []))
+            for node_type in HEATER_NODE_TYPES
+        }
 
-    name_map = build_heater_name_map(inventory, default_name_simple)
+        name_map = build_heater_name_map(inventory, default_name_simple)
     names_by_type: dict[str, dict[str, str]] = name_map.get("by_type", {})
     legacy_names: dict[str, str] = name_map.get("htr", {})
 
