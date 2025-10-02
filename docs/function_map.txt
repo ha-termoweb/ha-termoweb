@@ -186,6 +186,8 @@ custom_components/termoweb/climate.py :: HeaterClimateEntity.icon
     Return an icon reflecting the heater state.
 custom_components/termoweb/climate.py :: HeaterClimateEntity.extra_state_attributes
     Return additional metadata about the heater.
+custom_components/termoweb/climate.py :: HeaterClimateEntity._commit_write
+    Submit a heater write, update cached state, and schedule fallback.
 custom_components/termoweb/climate.py :: HeaterClimateEntity.async_set_schedule
     Write the 7x24 tri-state program to the device.
 custom_components/termoweb/climate.py :: HeaterClimateEntity.async_set_preset_temperatures
@@ -270,6 +272,8 @@ custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.__init__
     Initialize the heater energy coordinator.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.update_addresses
     Replace the tracked heater addresses with ``addrs``.
+custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._process_energy_sample
+    Update cached energy and derived power for ``addr``.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._async_update_data
     Fetch recent heater energy samples and derive totals and power.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._should_skip_poll
@@ -372,12 +376,48 @@ custom_components/termoweb/heater.py :: HeaterNodeBase._units
     Return the configured temperature units for this heater.
 custom_components/termoweb/heater.py :: HeaterNodeBase.device_info
     Expose Home Assistant device metadata for the heater.
+custom_components/termoweb/installation.py :: InstallationSnapshot.__init__
+    Initialise the snapshot with backend payload metadata.
+custom_components/termoweb/installation.py :: InstallationSnapshot.dev_id
+    Return the backend device identifier for the snapshot.
+custom_components/termoweb/installation.py :: InstallationSnapshot.raw_nodes
+    Return the raw nodes payload associated with the snapshot.
+custom_components/termoweb/installation.py :: InstallationSnapshot.update_nodes
+    Update cached payload data and invalidate derived caches.
+custom_components/termoweb/installation.py :: InstallationSnapshot._invalidate_caches
+    Reset derived cache state so it can be lazily recomputed.
+custom_components/termoweb/installation.py :: InstallationSnapshot._ensure_inventory
+    Return the cached node inventory, rebuilding if required.
+custom_components/termoweb/installation.py :: InstallationSnapshot.inventory
+    Expose the normalised node inventory for the installation.
+custom_components/termoweb/installation.py :: InstallationSnapshot._ensure_nodes_by_type
+    Populate caches describing heater nodes by type.
+custom_components/termoweb/installation.py :: InstallationSnapshot.nodes_by_type
+    Return a mapping of node type to ``Node`` instances.
+custom_components/termoweb/installation.py :: InstallationSnapshot.explicit_heater_names
+    Return node type/address pairs with explicit names.
+custom_components/termoweb/installation.py :: InstallationSnapshot._ensure_address_maps
+    Populate cached heater address maps from the inventory.
+custom_components/termoweb/installation.py :: InstallationSnapshot.heater_address_map
+    Return forward and reverse heater address maps.
+custom_components/termoweb/installation.py :: InstallationSnapshot._ensure_sample_addresses
+    Calculate canonical heater sample address data.
+custom_components/termoweb/installation.py :: InstallationSnapshot.heater_sample_address_map
+    Return normalised heater addresses suitable for samples.
+custom_components/termoweb/installation.py :: InstallationSnapshot.heater_sample_targets
+    Return ordered ``(node_type, addr)`` sample subscription targets.
+custom_components/termoweb/installation.py :: InstallationSnapshot.heater_name_map
+    Return cached heater name mapping for ``default_factory``.
+custom_components/termoweb/installation.py :: ensure_snapshot
+    Return the installation snapshot stored in ``record`` when present.
 custom_components/termoweb/nodes.py :: _normalize_node_identifier
     Return ``value`` as a normalised node identifier string.
 custom_components/termoweb/nodes.py :: normalize_node_type
     Return ``value`` as a normalised node type string.
 custom_components/termoweb/nodes.py :: normalize_node_addr
     Return ``value`` as a normalised node address string.
+custom_components/termoweb/nodes.py :: _existing_nodes_map
+    Return a mapping of node type sections extracted from ``source``.
 custom_components/termoweb/nodes.py :: Node.__init__
     Initialise a node with normalised metadata.
 custom_components/termoweb/nodes.py :: Node.name
@@ -524,22 +564,8 @@ custom_components/termoweb/ws_client.py :: WebSocketClient._on_update
     Handle the ``update`` payload.
 custom_components/termoweb/ws_client.py :: WebSocketClient._idle_monitor
     Monitor idle websocket periods and trigger restarts.
-custom_components/termoweb/ws_client.py :: WebSocketClient._restart_subscription_refresh
-    Restart the background lease refresh task.
-custom_components/termoweb/ws_client.py :: WebSocketClient._cancel_subscription_refresh
-    Cancel the subscription refresh task if it is running.
-custom_components/termoweb/ws_client.py :: WebSocketClient._subscription_refresh_loop
-    Renew the server-side subscription before the TTL expires.
 custom_components/termoweb/ws_client.py :: WebSocketClient._refresh_subscription
-    Re-request device data to renew the websocket lease.
-custom_components/termoweb/ws_client.py :: WebSocketClient._init_subscription_state
-    Initialise subscription lease tracking attributes.
-custom_components/termoweb/ws_client.py :: WebSocketClient._apply_subscription_ttl
-    Store subscription TTL metadata and schedule refreshes.
-custom_components/termoweb/ws_client.py :: WebSocketClient._extract_subscription_ttl
-    Extract the subscription TTL in seconds from the handshake payload.
-custom_components/termoweb/ws_client.py :: WebSocketClient._coerce_seconds
-    Convert ``value`` to seconds based on the associated key.
+    Re-request device data to keep the websocket session active.
 custom_components/termoweb/ws_client.py :: WebSocketClient._handle_handshake
     Process the initial handshake payload from the server.
 custom_components/termoweb/ws_client.py :: WebSocketClient._handle_dev_data
@@ -548,10 +574,16 @@ custom_components/termoweb/ws_client.py :: WebSocketClient._handle_update
     Merge incremental node updates from the websocket feed.
 custom_components/termoweb/ws_client.py :: WebSocketClient._apply_nodes_payload
     Update cached nodes from the websocket payload and notify listeners.
+custom_components/termoweb/ws_client.py :: WebSocketClient._translate_path_update
+    Translate Ducaheat ``{"path": ..., "body": ...}`` frames into nodes.
+custom_components/termoweb/ws_client.py :: WebSocketClient._resolve_update_section
+    Map a websocket path segment onto the node bucket name.
 custom_components/termoweb/ws_client.py :: WebSocketClient._forward_sample_updates
     Relay websocket heater sample updates to the energy coordinator.
 custom_components/termoweb/ws_client.py :: WebSocketClient._extract_nodes
     Extract the nodes dictionary from a websocket payload.
+custom_components/termoweb/ws_client.py :: WebSocketClient._translate_nodes_list
+    Convert list-based node payloads into the nested mapping schema.
 custom_components/termoweb/ws_client.py :: WebSocketClient._collect_update_addresses
     Return a sorted list of ``(node_type, addr)`` pairs in ``nodes``.
 custom_components/termoweb/ws_client.py :: WebSocketClient._dispatch_nodes
@@ -588,6 +620,10 @@ custom_components/termoweb/ws_client.py :: WebSocketClient._api_base
     Return the base REST API URL used for websocket routes.
 custom_components/termoweb/ws_client.py :: TermoWebWSClient.__init__
     Initialise the legacy websocket client container.
+custom_components/termoweb/ws_client.py :: TermoWebWSClient._install_write_hook
+    Wrap REST writes so we can observe successful node updates.
+custom_components/termoweb/ws_client.py :: TermoWebWSClient.maybe_restart_after_write
+    Restart the websocket if writes follow long periods of inactivity.
 custom_components/termoweb/ws_client.py :: TermoWebWSClient.stop
     Cancel tasks, close websocket sessions and reset legacy state.
 custom_components/termoweb/ws_client.py :: TermoWebWSClient._runner
@@ -602,6 +638,8 @@ custom_components/termoweb/ws_client.py :: TermoWebWSClient._join_namespace
     Join the API namespace after the websocket connects.
 custom_components/termoweb/ws_client.py :: TermoWebWSClient._send_snapshot_request
     Request the initial device snapshot.
+custom_components/termoweb/ws_client.py :: TermoWebWSClient._subscribe_session_metadata
+    Subscribe to legacy session metadata updates.
 custom_components/termoweb/ws_client.py :: TermoWebWSClient._subscribe_htr_samples
     Subscribe to heater sample updates.
 custom_components/termoweb/ws_client.py :: TermoWebWSClient._heartbeat_loop
@@ -612,18 +650,16 @@ custom_components/termoweb/ws_client.py :: TermoWebWSClient._handle_event
     Process a Socket.IO 0.9 event payload.
 custom_components/termoweb/ws_client.py :: TermoWebWSClient._handle_event._extract_type_addr
     Extract the node type and address from a websocket path.
+custom_components/termoweb/ws_client.py :: TermoWebWSClient._mark_event
+    Record payload batches and update the payload timestamp.
 custom_components/termoweb/ws_client.py :: TermoWebWSClient._update_legacy_section
     Store legacy section updates and mirror them in raw state.
 custom_components/termoweb/ws_client.py :: TermoWebWSClient._legacy_section_for_path
     Return the legacy section identifier for ``path`` if supported.
 custom_components/termoweb/ws_client.py :: TermoWebWSClient._log_legacy_update
     Emit debug logging for the legacy websocket update batch.
-custom_components/termoweb/ws_client.py :: TermoWebWSClient._maybe_configure_legacy_subscription
-    Inspect event payloads for TTL metadata and schedule refreshes.
-custom_components/termoweb/ws_client.py :: TermoWebWSClient._subscription_refresh_loop
-    Renew the legacy websocket lease before the TTL expires.
 custom_components/termoweb/ws_client.py :: TermoWebWSClient._refresh_subscription
-    Renew the legacy websocket lease by replaying subscription calls.
+    Replay subscription calls to keep the legacy websocket active.
 custom_components/termoweb/ws_client.py :: TermoWebWSClient._send_text
     Send a websocket text frame.
 custom_components/termoweb/ws_client.py :: TermoWebWSClient._disconnect
@@ -632,6 +668,8 @@ custom_components/termoweb/ws_client.py :: TermoWebWSClient._ws_payload_stream
     Yield websocket payload strings.
 custom_components/termoweb/ws_client.py :: TermoWebWSClient._record_heartbeat
     Record receipt of a heartbeat frame.
+custom_components/termoweb/ws_client.py :: TermoWebWSClient._idle_monitor
+    Monitor payload idleness and restart stale websocket sessions.
 custom_components/termoweb/ws_client.py :: TermoWebWSClient._run_heartbeat
     Send periodic heartbeats until cancelled.
 custom_components/termoweb/ws_client.py :: TermoWebWSClient._socket_base
