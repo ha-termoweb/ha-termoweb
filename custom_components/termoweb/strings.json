@@ -2,8 +2,8 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect to Tevolve heaters",
-        "description": "Choose your heater brand and enter your account credentials.",
+        "title": "Connect to TermoWeb family heaters",
+        "description": "Choose your TermoWeb or Ducaheat brand and enter your account credentials.",
         "data": {
           "brand": "Brand",
           "username": "Email",
