@@ -84,14 +84,14 @@ We do not yet have integration with heaters using the Tevolve-app, but it looks 
 
 ## Set up the integration
 ha-termoweb/ha-termoweb
-1) In Home Assistant go to **Settings → Devices & Services → Add Integration** and search **TermoWeb**,  
-   or click:  
+1) In Home Assistant go to **Settings → Devices & Services → Add Integration** and search **TermoWeb**,
+   or click:
    [![Open your Home Assistant instance and start setting up the integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=termoweb)
-2) Enter the **TermoWeb login** (email & password).  
-3) **Portal address**:  
-   - If the website used is **`https://control.termoweb.net`**, enter that.  
-   - Some systems use **`https://control2.termoweb.net`** — use whichever site is used today.  
-4) Complete the wizard. Heaters will appear under **Devices**; add them to dashboards or use them in automations.
+2) Choose your **Brand**. This picks the correct backend automatically, so you do **not** need to enter a portal URL manually.
+3) Enter the account **Email** used for the TermoWeb / Ducaheat / Tevolve app.
+4) Enter the account **Password**.
+5) Adjust the **Poll interval** if you want to change how often Home Assistant refreshes data from the cloud (default is fine for most users).
+6) Complete the wizard. Heaters will appear under **Devices**; add them to dashboards or use them in automations.
 
 ## Debugging
 
