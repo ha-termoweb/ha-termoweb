@@ -817,6 +817,71 @@ async def test_ducaheat_translates_path_updates(
     )
 
 
+@pytest.mark.asyncio
+async def test_ducaheat_dev_data_node_list_translated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Translate list-based dev_data snapshots into node dictionaries."""
+
+    client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    client._coordinator.update_nodes.reset_mock()
+    client._dispatcher_mock.reset_mock()
+
+    payload = {
+        "nodes": [
+            {
+                "type": "HTR",
+                "addr": 2,
+                "status": {"mode": "eco"},
+                "setup": {"name": "Heater"},
+                "prog": {"weekday": []},
+                "prog_temps": {"comfort": 21},
+                "advanced_setup": {"boost": False},
+            },
+            {
+                "type": "pmo",
+                "addr": "A1",
+                "status": {"power": 123},
+                "settings": {"tariff": "base"},
+                "name": "Monitor",
+            },
+        ]
+    }
+
+    await client._on_dev_data(payload)
+    await asyncio.sleep(0)
+
+    assert client._nodes_raw["htr"]["status"]["2"]["mode"] == "eco"
+    assert client._nodes_raw["htr"]["settings"]["2"]["setup"]["name"] == "Heater"
+    assert client._nodes_raw["htr"]["settings"]["2"]["prog_temps"]["comfort"] == 21
+    assert (
+        client._nodes_raw["htr"]["advanced"]["2"]["advanced_setup"]["boost"] is False
+    )
+    assert client._nodes_raw["pmo"]["status"]["A1"]["power"] == 123
+    assert client._nodes_raw["pmo"]["settings"]["A1"]["name"] == "Monitor"
+
+    assert client._coordinator.update_nodes.call_count == 1
+    raw_nodes = client._coordinator.update_nodes.call_args[0][0]
+    assert raw_nodes["htr"]["settings"]["2"]["prog"]["weekday"] == []
+
+    dispatched_payloads = [
+        call.args[2]
+        for call in client._dispatcher_mock.mock_calls
+        if len(call.args) >= 3
+    ]
+    assert dispatched_payloads
+    assert any(
+        isinstance(data, Mapping)
+        and data.get("nodes", {})
+        .get("htr", {})
+        .get("status", {})
+        .get("2", {})
+        .get("mode")
+        == "eco"
+        for data in dispatched_payloads
+    )
+
+
 def test_ducaheat_summarise_addresses_handles_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -678,7 +678,50 @@ class WebSocketClient:
         nodes = data.get("nodes")
         if isinstance(nodes, dict):
             return nodes
+        if isinstance(nodes, list):
+            mapped = self._translate_nodes_list(nodes)
+            data["nodes"] = mapped
+            return mapped
         return None
+
+    def _translate_nodes_list(
+        self, nodes: Iterable[Any]
+    ) -> dict[str, dict[str, dict[str, Any]]]:
+        """Convert list-based node payloads into the nested mapping schema."""
+
+        translated: dict[str, dict[str, dict[str, Any]]] = {}
+        for entry in nodes:
+            if not isinstance(entry, Mapping):
+                continue
+            node_type = normalize_node_type(entry.get("type"))
+            addr = normalize_node_addr(entry.get("addr"))
+            if not node_type or not addr:
+                continue
+            node_bucket = translated.setdefault(node_type, {})
+            added = False
+            for key, value in entry.items():
+                if key in {"type", "addr"}:
+                    continue
+                if not isinstance(key, str):
+                    continue
+                section, nested_key = self._resolve_update_section(key)
+                if section is None:
+                    continue
+                section_bucket = node_bucket.setdefault(section, {})
+                if nested_key:
+                    existing = section_bucket.get(addr)
+                    if isinstance(existing, Mapping):
+                        merged = dict(existing)
+                    else:
+                        merged = {}
+                    merged[nested_key] = deepcopy(value)
+                    section_bucket[addr] = merged
+                else:
+                    section_bucket[addr] = deepcopy(value)
+                added = True
+            if not added and not node_bucket:
+                translated.pop(node_type, None)
+        return translated
 
     @staticmethod
     def _collect_update_addresses(nodes: Mapping[str, Any]) -> list[tuple[str, str]]:
