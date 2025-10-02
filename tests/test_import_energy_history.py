@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from custom_components.termoweb import nodes as nodes_module
+from custom_components.termoweb.installation import InstallationSnapshot
 
 from conftest import _install_stubs
 
@@ -377,7 +378,7 @@ def test_store_statistics_external_fallback(monkeypatch: pytest.MonkeyPatch) -> 
             _delete_stats,
             _ConfigEntry,
             HomeAssistant,
-            _ent_reg,
+            ent_reg,
         ) = await _load_module(monkeypatch)
 
         hass = HomeAssistant()
@@ -424,7 +425,7 @@ def test_async_import_energy_history_missing_record(
             _delete_stats,
             ConfigEntry,
             HomeAssistant,
-            _ent_reg,
+            ent_reg,
         ) = await _load_module(monkeypatch)
 
         hass = HomeAssistant()
@@ -465,7 +466,7 @@ def test_integration_dependency_cache_reused(monkeypatch: pytest.MonkeyPatch) ->
             _delete_stats,
             ConfigEntry,
             HomeAssistant,
-            _ent_reg,
+            ent_reg,
         ) = await _load_module(monkeypatch)
 
         energy_mod = importlib.import_module("custom_components.termoweb.energy")
@@ -521,7 +522,7 @@ def test_async_import_energy_history_rebuilds_missing_inventory(
             _delete_stats,
             ConfigEntry,
             HomeAssistant,
-            _ent_reg,
+            ent_reg,
         ) = await _load_module(monkeypatch)
 
         hass = HomeAssistant()
@@ -566,7 +567,7 @@ def test_async_import_energy_history_already_imported(
             _delete_stats,
             ConfigEntry,
             HomeAssistant,
-            _ent_reg,
+            ent_reg,
         ) = await _load_module(monkeypatch)
 
         hass = HomeAssistant()
@@ -621,7 +622,7 @@ def test_async_import_energy_history_waits_between_queries(
             _delete_stats,
             ConfigEntry,
             HomeAssistant,
-            _ent_reg,
+            ent_reg,
         ) = await _load_module(monkeypatch)
 
         hass = HomeAssistant()
@@ -1706,7 +1707,7 @@ def test_import_energy_history_ignores_unavailable_requested_nodes(
             _delete_stats,
             ConfigEntry,
             HomeAssistant,
-            _ent_reg,
+            ent_reg,
         ) = await _load_module(monkeypatch)
 
         hass = HomeAssistant()
@@ -1846,7 +1847,7 @@ def test_energy_polling_matches_import(monkeypatch: pytest.MonkeyPatch) -> None:
             _delete_stats,
             _ConfigEntry,
             HomeAssistant,
-            _ent_reg,
+            ent_reg,
         ) = await _load_module(monkeypatch, load_coordinator=True)
 
         coord_mod = importlib.import_module("custom_components.termoweb.coordinator")
@@ -2271,6 +2272,180 @@ def test_service_filters_invalid_entities(monkeypatch: pytest.MonkeyPatch) -> No
     asyncio.run(_run())
 
 
+def test_service_uses_snapshot_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        (
+            mod,
+            const,
+            _import_stats,
+            _update_meta,
+            _last_stats,
+            _get_period,
+            _delete_stats,
+            ConfigEntry,
+            HomeAssistant,
+            ent_reg,
+        ) = await _load_module(monkeypatch)
+
+        hass = HomeAssistant()
+        hass.data = {const.DOMAIN: {}}
+
+        tasks: list[asyncio.Task] = []
+
+        def async_create_task(coro):
+            task = asyncio.create_task(coro)
+            tasks.append(task)
+            return task
+
+        hass.async_create_task = async_create_task
+        hass.is_running = True
+        hass.bus = types.SimpleNamespace(async_listen_once=lambda event, cb: None)
+
+        class Services:
+            def __init__(self) -> None:
+                self._svcs: dict[str, dict[str, object]] = {}
+
+            def has_service(self, domain, service):
+                return service in self._svcs.get(domain, {})
+
+            def async_register(self, domain, service, func):
+                self._svcs.setdefault(domain, {})[service] = func
+
+            def get(self, domain, service):
+                return self._svcs[domain][service]
+
+        hass.services = Services()
+
+        entry = ConfigEntry(
+            "entry-1",
+            data={"username": "u", "password": "p"},
+            options={mod.OPTION_ENERGY_HISTORY_IMPORTED: True},
+        )
+
+        entries = {entry.entry_id: entry}
+
+        hass.config_entries = types.SimpleNamespace(
+            async_update_entry=lambda e, *, options: e.options.update(options),
+            async_forward_entry_setups=AsyncMock(return_value=None),
+            async_get_entry=lambda entry_id: entries.get(entry_id),
+        )
+
+        import_mock = AsyncMock()
+        monkeypatch.setattr(mod, "_async_import_energy_history", import_mock)
+
+        assert await mod.async_setup_entry(hass, entry) is True
+
+        rec = hass.data[const.DOMAIN][entry.entry_id]
+        rec.pop("node_inventory", None)
+        rec["snapshot"] = InstallationSnapshot(
+            dev_id="dev",
+            raw_nodes={"nodes": [{"type": "htr", "addr": "A"}]},
+        )
+
+        hass.data[const.DOMAIN]["other"] = object()
+
+        service = hass.services.get(const.DOMAIN, "import_energy_history")
+
+        await service(types.SimpleNamespace(data={"max_history_retrieval": 3}))
+
+        import_mock.assert_awaited_once()
+        args, kwargs = import_mock.await_args
+        assert args[0] is hass
+        assert args[1] is entry
+        assert args[2] == {"htr": ["A"]}
+        assert kwargs == {"reset_progress": False, "max_days": 3}
+
+        if tasks:
+            await asyncio.gather(*tasks)
+
+    asyncio.run(_run())
+
+
+def test_service_uses_cached_inventory_without_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        (
+            mod,
+            const,
+            _import_stats,
+            _update_meta,
+            _last_stats,
+            _get_period,
+            _delete_stats,
+            ConfigEntry,
+            HomeAssistant,
+            ent_reg,
+        ) = await _load_module(monkeypatch)
+
+        hass = HomeAssistant()
+        hass.data = {const.DOMAIN: {}}
+
+        tasks: list[asyncio.Task] = []
+
+        def async_create_task(coro):
+            task = asyncio.create_task(coro)
+            tasks.append(task)
+            return task
+
+        hass.async_create_task = async_create_task
+        hass.is_running = True
+        hass.bus = types.SimpleNamespace(async_listen_once=lambda event, cb: None)
+
+        class Services:
+            def __init__(self) -> None:
+                self._svcs: dict[str, dict[str, object]] = {}
+
+            def has_service(self, domain, service):
+                return service in self._svcs.get(domain, {})
+
+            def async_register(self, domain, service, func):
+                self._svcs.setdefault(domain, {})[service] = func
+
+            def get(self, domain, service):
+                return self._svcs[domain][service]
+
+        hass.services = Services()
+
+        entry = ConfigEntry(
+            "entry-2",
+            data={"username": "user", "password": "pass"},
+            options={mod.OPTION_ENERGY_HISTORY_IMPORTED: True},
+        )
+
+        entries = {entry.entry_id: entry}
+
+        hass.config_entries = types.SimpleNamespace(
+            async_update_entry=lambda e, *, options: e.options.update(options),
+            async_forward_entry_setups=AsyncMock(return_value=None),
+            async_get_entry=lambda entry_id: entries.get(entry_id),
+        )
+
+        import_mock = AsyncMock()
+        monkeypatch.setattr(mod, "_async_import_energy_history", import_mock)
+
+        assert await mod.async_setup_entry(hass, entry) is True
+
+        rec = hass.data[const.DOMAIN][entry.entry_id]
+        rec.pop("snapshot", None)
+        rec["node_inventory"] = _inventory_for(mod, {"htr": ["A"]})
+
+        service = hass.services.get(const.DOMAIN, "import_energy_history")
+
+        await service(types.SimpleNamespace(data={}))
+
+        import_mock.assert_awaited_once()
+        args, kwargs = import_mock.await_args
+        assert args[2] == {"htr": ["A"]}
+        assert kwargs["reset_progress"] is False
+        assert kwargs["max_days"] in (None, mod.DEFAULT_MAX_HISTORY_DAYS)
+
+        if tasks:
+            await asyncio.gather(*tasks)
+
+    asyncio.run(_run())
+
+
 def test_refresh_fallback_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         (
@@ -2283,7 +2458,7 @@ def test_refresh_fallback_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
             _delete_stats,
             ConfigEntry,
             HomeAssistant,
-            _ent_reg,
+            ent_reg,
         ) = await _load_module(monkeypatch)
 
         climate_mod = importlib.import_module("custom_components.termoweb.climate")
@@ -2316,7 +2491,7 @@ def test_async_unload_entry_cleans_up(monkeypatch: pytest.MonkeyPatch) -> None:
             _delete_stats,
             ConfigEntry,
             HomeAssistant,
-            _ent_reg,
+            ent_reg,
         ) = await _load_module(monkeypatch)
 
         hass = HomeAssistant()

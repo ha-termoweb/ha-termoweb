@@ -10,7 +10,6 @@ import pytest
 
 import custom_components.termoweb.installation as installation_module
 import custom_components.termoweb.nodes as nodes_module
-from custom_components.termoweb.installation import InstallationSnapshot
 from custom_components.termoweb.nodes import (
     AccumulatorNode,
     HeaterNode,
@@ -273,7 +272,10 @@ def test_collect_heater_sample_addresses_uses_snapshot_cache(
 
     monkeypatch.setattr(installation_module, "build_node_inventory", fake_build)
 
-    snapshot = InstallationSnapshot(dev_id="dev", raw_nodes=raw_nodes)
+    snapshot = installation_module.InstallationSnapshot(
+        dev_id="dev",
+        raw_nodes=raw_nodes,
+    )
     record = {"snapshot": snapshot}
 
     _, first_map, _ = nodes_module.collect_heater_sample_addresses(record)
@@ -289,6 +291,55 @@ def test_collect_heater_sample_addresses_uses_snapshot_cache(
     cached_map_two, _ = snapshot.heater_sample_address_map
     assert first_map == second_map
     assert cached_map_one == cached_map_two
+
+
+def test_collect_heater_sample_addresses_prefers_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Collect heater sample addresses directly from a stored snapshot."""
+
+    import importlib
+
+    installation = importlib.import_module("custom_components.termoweb.installation")
+    nodes = importlib.import_module("custom_components.termoweb.nodes")
+
+    base_cls = installation.InstallationSnapshot
+    call_order: list[str] = []
+
+    class TrackingSnapshot(base_cls):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+
+        @property
+        def inventory(self) -> list[Any]:
+            call_order.append("inventory")
+            return super().inventory
+
+        @property
+        def heater_sample_address_map(self) -> tuple[dict[str, list[str]], dict[str, str]]:
+            call_order.append("sample_map")
+            return super().heater_sample_address_map
+
+    monkeypatch.setattr(installation, "InstallationSnapshot", TrackingSnapshot)
+
+    snapshot = installation.InstallationSnapshot(
+        dev_id="dev",
+        raw_nodes={"nodes": [{"type": "htr", "addr": "1"}]},
+    )
+    record = {"snapshot": snapshot}
+
+    assert installation.ensure_snapshot(record) is snapshot
+
+    inventory, addr_map, compat = nodes.collect_heater_sample_addresses(record)
+    recorded_calls = list(call_order)
+
+    expected_inventory = [(node.type, node.addr) for node in snapshot.inventory]
+    expected_map, expected_compat = snapshot.heater_sample_address_map
+
+    assert [(node.type, node.addr) for node in inventory] == expected_inventory
+    assert addr_map == expected_map
+    assert compat == expected_compat
+    assert recorded_calls == ["inventory", "sample_map"]
 
 
 def test_heater_sample_subscription_targets_orders_types() -> None:

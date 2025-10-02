@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, call
 import pytest
 
 import custom_components.termoweb.ws_client as module
+from custom_components.termoweb.installation import InstallationSnapshot
 
 
 class DummyREST:
@@ -195,6 +196,63 @@ def test_ducaheat_client_uses_root_namespace(monkeypatch: pytest.MonkeyPatch) ->
     assert client._namespace == "/"
     assert ("dev_data", "/") in client._sio.events
     assert ("disconnect", "/") in client._sio.events
+
+
+def test_translate_path_update_parses_segments(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Translate Ducaheat style path payloads into node updates."""
+
+    client = _make_ducaheat_client(monkeypatch)
+
+    assert client._translate_path_update(None) is None
+    assert client._translate_path_update({"nodes": {}}) is None
+
+    sample_payload = {
+        "path": "/devs/dev/htr/001/samples",
+        "body": {"energy": 1},
+    }
+    translated = client._translate_path_update(sample_payload)
+    assert translated == {"htr": {"samples": {"001": {"energy": 1}}}}
+
+    nested_payload = {
+        "path": "/htr/001/setup/limits/max",
+        "body": {"value": 10},
+    }
+    translated_nested = client._translate_path_update(nested_payload)
+    assert translated_nested == {
+        "001": {"settings": {"setup": {"limits": {"max": {"value": 10}}}}}
+    }
+
+
+def test_translate_path_update_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Handle malformed path payloads in the translator."""
+
+    client = _make_ducaheat_client(monkeypatch)
+
+    assert client._translate_path_update({"path": "", "body": {}}) is None
+    assert client._translate_path_update({"path": "/foo", "body": {}}) is None
+    assert (
+        client._translate_path_update({"path": "/devs/dev/ /001/status", "body": {}})
+        is None
+    )
+    assert (
+        client._translate_path_update({"path": "/devs/dev/unknown/001", "body": {}})
+        is None
+    )
+    assert (
+        client._translate_path_update({"path": "/devs/dev/htr/001", "body": {}})
+        is None
+    )
+    assert (
+        client._translate_path_update({"path": "/devs/dev/htr/ /status", "body": {}})
+        is None
+    )
+
+    assert client._resolve_update_section(None) == (None, None)
+    assert client._resolve_update_section("advanced_setup") == (
+        "advanced",
+        "advanced_setup",
+    )
+    assert client._resolve_update_section("setup") == ("settings", "setup")
 
 
 def test_handshake_error_records_context() -> None:
@@ -1450,6 +1508,61 @@ def test_dispatch_nodes_handles_raw_payload(monkeypatch: pytest.MonkeyPatch) -> 
     assert "nodes" in record
     assert isinstance(client._coordinator.data, dict)
     assert updates and isinstance(updates[0], dict)
+
+
+def test_dispatch_nodes_updates_snapshot_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Snapshot records should be updated when new nodes payloads arrive."""
+
+    client = _make_client(monkeypatch)
+    base_nodes = {"nodes": [{"type": "htr", "addr": "1", "name": "Heater"}]}
+    snapshot = InstallationSnapshot(dev_id="device", raw_nodes=base_nodes)
+    energy_coordinator = SimpleNamespace(update_addresses=MagicMock())
+    record = {"snapshot": snapshot, "energy_coordinator": energy_coordinator}
+    client.hass.data = {module.DOMAIN: {client.entry_id: record}}
+    client._coordinator.update_nodes = MagicMock()
+    client._coordinator.data = {client.dev_id: {}}
+
+    payload = {
+        "nodes": base_nodes,
+        "nodes_by_type": {"htr": {"addrs": ["1"], "settings": {"1": {}}, "advanced": {}, "samples": {}}},
+    }
+
+    addr_map = client._dispatch_nodes(payload)
+
+    assert addr_map["htr"] == ["1"]
+    assert "node_inventory" in record
+    assert energy_coordinator.update_addresses.call_count == 1
+    client._coordinator.update_nodes.assert_called_once()
+
+
+def test_heater_sample_subscription_targets_with_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Derive heater sample subscriptions from snapshot-backed records."""
+
+    client = _make_client(monkeypatch)
+    nodes_payload = {"nodes": [{"type": "htr", "addr": "1"}, {"type": "acm", "addr": "2"}]}
+    snapshot = InstallationSnapshot(dev_id="device", raw_nodes=nodes_payload)
+    energy_coordinator = SimpleNamespace(update_addresses=MagicMock())
+    record = {"snapshot": snapshot, "energy_coordinator": energy_coordinator}
+    client.hass.data = {module.DOMAIN: {client.entry_id: record}}
+    client._coordinator.data = {client.dev_id: {}}
+
+    inventory = list(snapshot.inventory)
+
+    def fake_collect(record_data, *, coordinator=None):
+        return inventory, {"htr": ["1"], "acm": ["2"]}, {"htr": "htr"}
+
+    monkeypatch.setattr(module, "collect_heater_sample_addresses", fake_collect)
+
+    targets = client._heater_sample_subscription_targets()
+
+    assert targets
+    assert record["node_inventory"]
+    energy_coordinator.update_addresses.assert_called_once()
+    coordinator_data = client._coordinator.data[client.dev_id]
+    assert "nodes_by_type" in coordinator_data
+    assert coordinator_data["nodes_by_type"]["htr"]["addrs"]
 
 
 def test_schedule_and_cancel_idle_restart(monkeypatch: pytest.MonkeyPatch) -> None:
