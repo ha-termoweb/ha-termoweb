@@ -2,19 +2,19 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect to Tevolve heaters",
-        "description": "Version: {version}\n\nChoose your heater brand and enter your account credentials",
+        "title": "Connect to TermoWeb family heaters",
+        "description": "Version: {version}\n\nChoose your TermoWeb or Ducaheat brand and enter your account credentials.",
         "data": {
           "brand": "Brand",
           "username": "Email",
           "password": "Password",
-          "poll_interval": "Polling interval (seconds)"
+          "poll_interval": "Base poll interval (seconds)"
         }
       }
     },
     "error": {
       "invalid_auth": "Invalid username or password (or client key).",
-      "cannot_connect": "Cannot connect to Termoweb — network/DNS/SSL error.",
+      "cannot_connect": "Cannot connect to TermoWeb — network/DNS/SSL error.",
       "rate_limited": "Temporarily rate-limited by API. Try again later.",
       "unknown": "Unknown error"
     }
@@ -22,10 +22,10 @@
   "options": {
     "step": {
       "edit": {
-        "title": "Termoweb Options",
+        "title": "TermoWeb Options",
         "description": "Version: {version}",
         "data": {
-          "poll_interval": "Polling interval (seconds)"
+          "poll_interval": "Base poll interval (seconds)"
         }
       }
     }
