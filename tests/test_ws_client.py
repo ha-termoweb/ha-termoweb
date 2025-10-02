@@ -940,6 +940,38 @@ async def test_ducaheat_dev_data_node_list_translated(
     )
 
 
+def test_translate_nodes_list_skips_invalid_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure non-mapping and incomplete node entries are ignored."""
+
+    client = _make_ducaheat_client(monkeypatch)
+    result = client._translate_nodes_list(
+        [
+            None,
+            {"type": "htr", "addr": " ", "status": {"mode": "eco"}},
+        ]
+    )
+
+    assert result == {}
+
+
+def test_translate_nodes_list_handles_invalid_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Drop entries with unsupported key formats or sections."""
+
+    client = _make_ducaheat_client(monkeypatch)
+    result = client._translate_nodes_list(
+        [
+            {"type": "htr", "addr": 1, 5: {"mode": "eco"}},
+            {"type": "htr", "addr": "1", "": {"mode": "eco"}},
+        ]
+    )
+
+    assert result == {}
+
+
 def test_ducaheat_summarise_addresses_handles_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
