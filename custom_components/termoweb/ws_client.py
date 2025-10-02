@@ -1856,6 +1856,23 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
 class DucaheatWSClient(WebSocketClient):
     """Verbose websocket client variant with payload debug logging."""
 
+    async def _connect_once(self) -> None:
+        """Open the Socket.IO connection using the simple Ducaheat contract."""
+
+        if self._stop_event.is_set():
+            return
+
+        token = await self._get_token()
+        base = self._api_base().rstrip("/")
+        socket_path = f"{base}/api/v2/socket_io"
+        params = urlencode({"token": token, "dev_id": self.dev_id})
+        url = f"{socket_path}?{params}"
+        _LOGGER.debug("WS %s (ducaheat): connecting to %s", self.dev_id, url)
+
+        self._disconnected.clear()
+        self._backoff_idx = 0
+        await self._sio.connect(url, transports=["websocket"])
+
     def _summarise_addresses(self, data: Any) -> str:
         """Return a condensed summary of node addresses in ``data``."""
 

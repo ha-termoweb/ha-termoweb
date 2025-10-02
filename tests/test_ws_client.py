@@ -1725,19 +1725,41 @@ async def test_ducaheat_client_extended_logging(
 
 
 @pytest.mark.asyncio
-async def test_ducaheat_connect_uses_root_namespace(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Ensure connect emits the default namespace for Ducaheat."""
+async def test_ducaheat_connect_matches_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure the Ducaheat client connects with the minimal reference contract."""
 
     client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
-    monkeypatch.setattr(
-        client, "_build_engineio_target", AsyncMock(return_value=("https://ws", "io"))
-    )
+    client._stop_event = asyncio.Event()
+    monkeypatch.setattr(client, "_get_token", AsyncMock(return_value="abc"))
+    monkeypatch.setattr(client, "_api_base", lambda: "https://api-tevolve.termoweb.net")
+    connect_mock = AsyncMock()
+    client._sio.connect = connect_mock
 
     await client._connect_once()
 
-    assert client._sio.connect_args[1]["namespaces"] == ["/"]
+    connect_mock.assert_awaited_once_with(
+        "https://api-tevolve.termoweb.net/api/v2/socket_io?token=abc&dev_id=device",
+        transports=["websocket"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_connect_honours_stop_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure the Ducaheat client aborts when stop was requested."""
+
+    client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    client._stop_event = asyncio.Event()
+    client._stop_event.set()
+    token_mock = AsyncMock()
+    monkeypatch.setattr(client, "_get_token", token_mock)
+    client._sio.connect = AsyncMock()
+
+    await client._connect_once()
+
+    token_mock.assert_not_awaited()
+    client._sio.connect.assert_not_called()
 
 
 @pytest.mark.asyncio
