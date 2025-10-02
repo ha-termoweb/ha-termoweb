@@ -1,164 +1,204 @@
 # HA-TermoWeb Architecture Overview
 
-The TermoWeb integration bridges Home Assistant to the vendor cloud. All reads and writes happen against the backend REST and Socket.IO APIs; the integration never talks directly to the household gateway hardware. Instead, the vendor backend supervises the gateway—an opaque, manufacturer-supplied appliance that relays commands and telemetry between the cloud and the field nodes such as electric heaters (`htr`), heat-accumulating storage units (`acm`), power monitors (`pmo`), and thermostats (`thm`). The diagram and notes below summarise how credentials, polling, push updates, and energy history all flow through the integration.
+The TermoWeb integration links Home Assistant to both the TermoWeb and Ducaheat
+deployments of the vendor cloud. Authentication, device discovery and write
+operations flow through brand-specific REST clients, while push updates and
+connection health are maintained through websocket clients that the backend
+constructs for each gateway. Home Assistant maintains per-installation caches of
+nodes, coordinates REST polling, merges websocket deltas, and exposes entity
+state and energy statistics to the rest of the platform.【F:custom_components/termoweb/__init__.py†L140-L233】【F:custom_components/termoweb/ws_client.py†L760-L833】【F:custom_components/termoweb/energy.py†L421-L512】
 
-## Component responsibilities
+## Key components
 
-- **Config flow** – collects the user’s credentials/brand, instantiates a `RESTClient`, and verifies the account by calling `list_devices` before creating the config entry.【F:custom_components/termoweb/config_flow.py†L61-L132】
-- **Config entry setup** – recreates the shared `RESTClient`, fetches the primary gateway and heater inventory, builds the `StateCoordinator`, wires up WebSocket clients, registers entities, and exposes the `import_energy_history` service.【F:custom_components/termoweb/__init__.py†L453-L670】
-- **REST client** – `RESTClient` performs authenticated HTTP requests to enumerate devices, read heater settings, and push schedule/temperature updates back to the cloud API.【F:custom_components/termoweb/api.py†L269-L360】
-- **Polling coordinator** – `StateCoordinator` periodically refreshes node state via the REST client and maintains cached per-device data that HA platforms consume.【F:custom_components/termoweb/coordinator.py†L22-L211】
-- **Entities** – climate/sensor/binary-sensor/button entities subscribe to coordinator data and the dispatcher, then send writes through the shared REST client (e.g., updating schedules or presets) for the supported node types.【F:custom_components/termoweb/heater.py†L61-L136】【F:custom_components/termoweb/climate.py†L245-L420】
-- **WebSocket client** – `WebSocketClient` automatically detects whether the account requires the legacy Socket.IO 0.9 handshake or the newer Engine.IO/WebSocket upgrade, manages reconnection/heartbeat loops for both protocols, merges push events into coordinator caches, and dispatches connection health/status signals for entities and setup logic.【F:custom_components/termoweb/ws_client.py†L57-L449】
-- **Energy history importer** – the `import_energy_history` service gathers hourly energy counters via REST, rate-limits calls, and writes the resulting statistics into Home Assistant’s recorder database.【F:custom_components/termoweb/__init__.py†L160-L670】
-- **TermoWeb cloud & hardware** – the documented API provides REST endpoints for device metadata, heater settings, and energy samples alongside a Socket.IO push channel. The backend owns communication with each household gateway and the attached heaters; the integration only observes and commands these devices through the cloud API.【F:docs/termoweb_api.md†L1-L176】
+- **Config flow** – collects credentials, preferred brand and polling interval,
+  instantiates a REST client for validation, and blocks entry creation until the
+  remote account responds to a `list_devices` probe.【F:custom_components/termoweb/config_flow.py†L41-L177】
+- **Config entry setup** – rebuilds the REST client, selects the appropriate
+  backend implementation, snapshots the gateway and node inventory, prepares the
+  `StateCoordinator`, and starts websocket clients before forwarding platforms
+  and registering the energy import service.【F:custom_components/termoweb/__init__.py†L140-L233】
+- **Backend abstractions** – the `Backend` interface exposes a shared HTTP
+  client and a `create_ws_client` factory. `TermoWebBackend` reuses the unified
+  websocket client, whereas `DucaheatBackend` injects an Engine.IO-compatible
+  variant alongside the `DucaheatRESTClient` adapter that reshapes segmented API
+  endpoints and websocket payloads.【F:custom_components/termoweb/backend/base.py†L11-L98】【F:custom_components/termoweb/backend/termoweb.py†L14-L69】【F:custom_components/termoweb/backend/ducaheat.py†L19-L190】【F:custom_components/termoweb/backend/ducaheat.py†L503-L529】
+- **Node & installation helpers** – `nodes.py` normalises node identifiers and
+  constructs `Node`/`HeaterNode` instances from raw payloads, while
+  `InstallationSnapshot` caches derived metadata such as heater address maps,
+  websocket subscription targets and canonicalised naming for reuse across
+  coordinators, websocket handlers and services.【F:custom_components/termoweb/nodes.py†L112-L325】【F:custom_components/termoweb/installation.py†L20-L195】
+- **Data coordinators** – `StateCoordinator` polls heater settings, maintains
+  node caches and stretches polling intervals when websocket health is good,
+  while `EnergyStateCoordinator` tracks address subscriptions, derives power
+  deltas from hourly counters and suppresses REST polling when fresh websocket
+  samples arrive.【F:custom_components/termoweb/coordinator.py†L93-L745】
+- **Entity platforms** – `HeaterNodeBase` wires coordinator caches and
+  dispatcher callbacks into climate and sensor entities; climate, temperature,
+  energy and power entities extend this base to expose heater control and
+  telemetry. Installation-wide aggregation, gateway connectivity monitoring and
+  refresh buttons round out the platform coverage.【F:custom_components/termoweb/heater.py†L374-L520】【F:custom_components/termoweb/climate.py†L134-L220】【F:custom_components/termoweb/sensor.py†L156-L337】【F:custom_components/termoweb/sensor.py†L345-L421】【F:custom_components/termoweb/binary_sensor.py†L21-L99】【F:custom_components/termoweb/button.py†L21-L67】
+- **Websocket layer** – `WebSocketClient` negotiates the correct Socket.IO or
+  Engine.IO handshake, keeps per-device health metrics, updates coordinator
+  caches, and broadcasts dispatcher signals. `DucaheatWSClient` layers brand-
+  specific logging atop the shared implementation.【F:custom_components/termoweb/ws_client.py†L40-L104】【F:custom_components/termoweb/ws_client.py†L760-L833】【F:custom_components/termoweb/ws_client.py†L1580-L1637】【F:custom_components/termoweb/ws_client.py†L1856-L1896】
+- **Energy services** – the energy helper enforces a shared rate limiter for
+  historical sample queries, performs targeted imports based on entity
+  selection, and registers the `import_energy_history` service only once per
+  Home Assistant instance.【F:custom_components/termoweb/energy.py†L150-L177】【F:custom_components/termoweb/energy.py†L421-L512】【F:custom_components/termoweb/energy.py†L841-L919】
 
-## Integration diagram
+## Runtime data flow
 
 ```mermaid
 flowchart LR
     User[[Home Assistant UI]]
 
     subgraph HA[Home Assistant · TermoWeb Integration]
-        CF["Config Flow\n(validate account)"]
+        CF["Config Flow\n(validate credentials)"]
         Setup["Config Entry Setup\n(async_setup_entry)"]
-        Client["RESTClient\n(REST helper)"]
-        Coord["StateCoordinator\n(polling cache)"]
-        Entities["Platforms & Entities\n(climate / sensor / binary_sensor / button)"]
-    WS["WebSocketClient\n(WS protocol detector)"]
+        BackendFactory["Backend & RESTClient\n(brand aware)"]
+        Snapshot["InstallationSnapshot\n(node cache)"]
+        Coord["StateCoordinator\n(REST polling)"]
+        EnergyCoord["EnergyStateCoordinator\n(energy polling)"]
+        Entities["Entity Platforms\n(climate / sensor / binary_sensor / button)"]
+        WS["WebSocketClient / DucaheatWSClient\n(push updates)"]
         Service[import_energy_history Service]
         Recorder[HA Recorder / Statistics]
     end
 
-    subgraph Cloud[TermoWeb Cloud]
+    subgraph Cloud[TermoWeb / Ducaheat Cloud]
         REST[REST API]
-        Socket[Socket.IO Push]
+        Socket[Socket.IO / Engine.IO]
     end
 
     subgraph Field[Home Gateway & Nodes]
         Gateway[TermoWeb Gateway]
-        Htr["Heater Nodes (htr)"]
-        Acm["Accumulator Nodes (acm)"]
-        Pmo["Power Monitor Nodes (pmo)"]
-        Thm["Thermostat Nodes (thm)"]
+        Htr["Heater Nodes (htr / acm)"]
+        Pmo[Other Nodes]
     end
 
     User --> CF
-    CF --> Client
+    CF --> BackendFactory
     CF --> Setup
-    Setup --> Client
+    Setup --> BackendFactory
+    Setup --> Snapshot
     Setup --> Coord
     Setup --> WS
     Setup --> Entities
     Setup --> Service
 
-    Coord --> Client
-    Client --> REST
-    REST --> Client
-    Entities --> Coord
-    Entities --> Client
+    BackendFactory --> REST
+    Coord --> REST
+    REST --> Coord
     WS --> Socket
     Socket --> WS
     WS --> Coord
     WS --> Entities
 
-    Service --> Client
+    Snapshot --> Coord
+    Snapshot --> EnergyCoord
+    EnergyCoord --> REST
+    REST --> EnergyCoord
+
+    Entities --> Coord
+    Entities --> EnergyCoord
+    Service --> BackendFactory
     Service --> Recorder
 
     REST --> Gateway
     Socket --> Gateway
     Gateway --> Htr
-    Gateway --> Acm
     Gateway --> Pmo
-    Gateway --> Thm
 ```
-
-The flow shows how configuration and runtime components share the authenticated REST client, how polling and push updates keep entity state fresh, and how energy statistics are imported for the Recorder. The TermoWeb cloud in turn brokers communication with the household gateway that relays commands and telemetry for the attached heaters, accumulators, power monitors, and thermostats.【F:custom_components/termoweb/__init__.py†L453-L670】【F:custom_components/termoweb/ws_client.py†L57-L449】【F:docs/termoweb_api.md†L1-L176】
-
 
 ## Python class hierarchy
 
-- **Client layer**
-  - **RESTClient** – asynchronous REST wrapper that manages authentication, device discovery, heater settings, and sample retrieval for downstream coordinators and entities.【F:custom_components/termoweb/api.py†L48-L299】
+- **Backend & HTTP layer**
+  - `RESTClient` provides authenticated REST helpers shared by both brands, with
+    `DucaheatRESTClient` overriding segmented endpoints.【F:custom_components/termoweb/api.py†L37-L144】【F:custom_components/termoweb/backend/ducaheat.py†L19-L190】
+  - `Backend` defines the interface Home Assistant uses to request websocket
+    clients, implemented by `TermoWebBackend` and `DucaheatBackend`.【F:custom_components/termoweb/backend/base.py†L69-L98】【F:custom_components/termoweb/backend/termoweb.py†L14-L69】【F:custom_components/termoweb/backend/ducaheat.py†L503-L523】
 - **Config flows**
-  - **TermoWebConfigFlow** (`ConfigFlow`) – drives initial setup and reconfiguration, validating credentials through the shared client before creating entries.【F:custom_components/termoweb/config_flow.py†L77-L215】
-  - **TermoWebOptionsFlow** (`OptionsFlow`) – exposes a lightweight options form that updates the polling interval on an existing entry.【F:custom_components/termoweb/config_flow.py†L218-L243】
+  - `TermoWebConfigFlow` and `TermoWebOptionsFlow` handle initial setup and
+    reconfiguration while reusing the shared login workflow.【F:custom_components/termoweb/config_flow.py†L71-L243】
+- **Installation & node modelling**
+  - `Node`, `HeaterNode`, `AccumulatorNode` and helpers build canonical node
+    inventories. `InstallationSnapshot` caches derived structures (address maps,
+    subscription targets, explicit names).【F:custom_components/termoweb/nodes.py†L112-L325】【F:custom_components/termoweb/installation.py†L20-L195】
 - **Coordinators**
-  - **StateCoordinator** (`DataUpdateCoordinator`) – polls heater metadata/settings for a gateway and caches it for all entity platforms.【F:custom_components/termoweb/coordinator.py†L22-L211】
-  - **EnergyStateCoordinator** (`DataUpdateCoordinator`) – fetches heater energy and power samples, normalising counters for consumption sensors.【F:custom_components/termoweb/coordinator.py†L213-L304】
-- **CoordinatorEntity derivatives**
-  - **HeaterNodeBase** – common base for all heater-scoped entities, wiring coordinator data, websocket listeners, and device metadata.【F:custom_components/termoweb/heater.py†L61-L199】
-    - **HeaterClimateEntity** (`ClimateEntity`) – exposes HVAC controls, schedule writes, and preset services for a single heater node.【F:custom_components/termoweb/climate.py†L112-L352】
-    - **HeaterTemperatureSensor** (`SensorEntity`) – reports measured temperatures from a heater’s cached settings.【F:custom_components/termoweb/sensor.py†L164-L204】
-    - **HeaterEnergyBase** (`SensorEntity`) – abstract base for heater power/energy metrics backed by the energy coordinator.【F:custom_components/termoweb/sensor.py†L206-L258】
-      - **HeaterEnergyTotalSensor** – normalises cumulative energy readings to kWh for each heater.【F:custom_components/termoweb/sensor.py†L260-L269】
-      - **HeaterPowerSensor** – provides instantaneous power estimates derived from energy deltas.【F:custom_components/termoweb/sensor.py†L272-L278】
-  - **GatewayOnlineBinarySensor** (`BinarySensorEntity`) – publishes gateway connectivity by combining coordinator state with websocket status callbacks.【F:custom_components/termoweb/binary_sensor.py†L27-L95】
-  - **StateRefreshButton** (`ButtonEntity`) – triggers immediate coordinator refreshes for the gateway device.【F:custom_components/termoweb/button.py†L18-L40】
-  - **InstallationTotalEnergySensor** (`SensorEntity`) – aggregates heater energy metrics across the installation using the energy coordinator feed.【F:custom_components/termoweb/sensor.py†L281-L337】
-- **Websocket client**
-  - **WebSocketClient** – unified websocket manager that supports both Socket.IO 0.9 polling/websocket upgrade and Engine.IO v2 websockets while streaming updates into coordinator caches and dispatcher channels.【F:custom_components/termoweb/ws_client.py†L57-L449】
+  - `StateCoordinator` manages REST polling, pending write expectations and
+    websocket-driven poll throttling. `EnergyStateCoordinator` tracks energy
+    counters and power derivations per address.【F:custom_components/termoweb/coordinator.py†L93-L915】
+- **Entity mixins & platforms**
+  - `HeaterNodeBase` underpins climate and sensor entities, while
+    `HeaterClimateEntity`, `HeaterTemperatureSensor`, `HeaterEnergyTotalSensor`,
+    `HeaterPowerSensor`, `InstallationTotalEnergySensor`,
+    `GatewayOnlineBinarySensor`, and `StateRefreshButton` expose heater control,
+    telemetry and maintenance helpers to Home Assistant.【F:custom_components/termoweb/heater.py†L374-L520】【F:custom_components/termoweb/climate.py†L134-L220】【F:custom_components/termoweb/sensor.py†L156-L421】【F:custom_components/termoweb/binary_sensor.py†L21-L99】【F:custom_components/termoweb/button.py†L21-L67】
+- **Websocket clients**
+  - `WebSocketClient` encapsulates connection management, dispatcher integration
+    and health tracking; `DucaheatWSClient` extends it with brand-specific
+    diagnostics.【F:custom_components/termoweb/ws_client.py†L40-L104】【F:custom_components/termoweb/ws_client.py†L760-L833】【F:custom_components/termoweb/ws_client.py†L1856-L1896】
+- **Energy import services**
+  - Helper functions manage rate limiting, targeted imports and the public
+    `import_energy_history` service for historical statistics.【F:custom_components/termoweb/energy.py†L150-L177】【F:custom_components/termoweb/energy.py†L421-L919】
 
 ### Class relationships diagram
 
 ```mermaid
 classDiagram
-    %% Core Home Assistant base classes
-    class ConfigFlow
-    class OptionsFlow
-    class DataUpdateCoordinator
-    class CoordinatorEntity
-    class ClimateEntity
-    class SensorEntity
-    class BinarySensorEntity
-    class ButtonEntity
-
-    %% Integration classes
+    class Backend
+    class TermoWebBackend
+    class DucaheatBackend
     class RESTClient
+    class DucaheatRESTClient
     class WebSocketClient
+    class DucaheatWSClient
     class TermoWebConfigFlow
     class TermoWebOptionsFlow
+    class InstallationSnapshot
+    class Node
+    class HeaterNode
+    class AccumulatorNode
     class StateCoordinator
     class EnergyStateCoordinator
     class HeaterNodeBase
     class HeaterClimateEntity
     class HeaterTemperatureSensor
-    class HeaterEnergyBase
     class HeaterEnergyTotalSensor
     class HeaterPowerSensor
     class InstallationTotalEnergySensor
     class GatewayOnlineBinarySensor
     class StateRefreshButton
 
-    %% Inheritance
+    Backend <|-- TermoWebBackend
+    Backend <|-- DucaheatBackend
+    RESTClient <|-- DucaheatRESTClient
+    WebSocketClient <|-- DucaheatWSClient
     TermoWebConfigFlow --|> ConfigFlow
     TermoWebOptionsFlow --|> OptionsFlow
+    HeaterNode <|-- AccumulatorNode
+    Node <|-- HeaterNode
+    HeaterNode <|-- HeaterNodeBase
+    HeaterNodeBase <|-- HeaterClimateEntity
+    HeaterNodeBase <|-- HeaterTemperatureSensor
+    HeaterNodeBase <|-- HeaterEnergyTotalSensor
+    HeaterNodeBase <|-- HeaterPowerSensor
+    CoordinatorEntity <|-- HeaterNodeBase
+    CoordinatorEntity <|-- InstallationTotalEnergySensor
+    CoordinatorEntity <|-- GatewayOnlineBinarySensor
+    CoordinatorEntity <|-- StateRefreshButton
     StateCoordinator --|> DataUpdateCoordinator
     EnergyStateCoordinator --|> DataUpdateCoordinator
-    HeaterNodeBase --|> CoordinatorEntity
-    HeaterClimateEntity --|> HeaterNodeBase
-    HeaterClimateEntity --|> ClimateEntity
-    HeaterTemperatureSensor --|> HeaterNodeBase
-    HeaterTemperatureSensor --|> SensorEntity
-    HeaterEnergyBase --|> HeaterNodeBase
-    HeaterEnergyBase --|> SensorEntity
-    HeaterEnergyTotalSensor --|> HeaterEnergyBase
-    HeaterPowerSensor --|> HeaterEnergyBase
-    InstallationTotalEnergySensor --|> CoordinatorEntity
-    InstallationTotalEnergySensor --|> SensorEntity
-    GatewayOnlineBinarySensor --|> CoordinatorEntity
-    GatewayOnlineBinarySensor --|> BinarySensorEntity
-    StateRefreshButton --|> CoordinatorEntity
-    StateRefreshButton --|> ButtonEntity
 
-    %% Usage relationships
     TermoWebConfigFlow --> RESTClient : validates
-    TermoWebOptionsFlow --> StateCoordinator : adjusts interval
-    StateCoordinator --> RESTClient : polls
-    EnergyStateCoordinator --> RESTClient : fetches energy
+    TermoWebOptionsFlow --> StateCoordinator : updates poll interval
+    StateCoordinator --> RESTClient : polls nodes
+    StateCoordinator --> Backend : starts websocket clients
+    EnergyStateCoordinator --> RESTClient : fetches samples
     WebSocketClient --> StateCoordinator : pushes updates
+    InstallationSnapshot --> StateCoordinator : supplies caches
     HeaterNodeBase --> StateCoordinator : consumes data
-    HeaterEnergyBase --> EnergyStateCoordinator : reads samples
-    GatewayOnlineBinarySensor --> StateCoordinator : monitors status
-    StateRefreshButton --> StateCoordinator : requests refresh
+    HeaterEnergyTotalSensor --> EnergyStateCoordinator : reads energy
+    GatewayOnlineBinarySensor --> StateCoordinator : monitors connectivity
+    StateRefreshButton --> StateCoordinator : triggers refresh
 ```
