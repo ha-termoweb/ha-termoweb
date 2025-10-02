@@ -204,7 +204,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "config_entry": entry,
         "base_poll_interval": max(base_interval, MIN_POLL_INTERVAL),
         "stretched": False,
-        "backend": backend,
         "ws_tasks": {},  # dev_id -> asyncio.Task
         "ws_clients": {},  # dev_id -> WS clients
         "ws_state": {},  # dev_id -> status attrs
