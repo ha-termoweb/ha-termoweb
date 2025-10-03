@@ -1690,16 +1690,19 @@ async def test_on_connect_and_disconnect_flow(monkeypatch: pytest.MonkeyPatch) -
     client._idle_monitor_task = asyncio.create_task(asyncio.sleep(0))
     await asyncio.sleep(0)
     await client._on_connect()
+    client._sio.emit.assert_not_awaited()
     await client._on_disconnect()
 
 
 @pytest.mark.asyncio
-async def test_on_connect_requests_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_on_namespace_connect_requests_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Ensure the websocket client requests the initial device snapshot."""
 
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     client._sio.emit = AsyncMock()
-    await client._on_connect()
+    await client._on_namespace_connect()
     expected = [call("dev_data", namespace=client._namespace)]
     if client._namespace != "/":
         expected.insert(0, call("join", namespace=client._namespace))
@@ -1734,10 +1737,13 @@ async def test_on_connect_debug_catch_all(monkeypatch: pytest.MonkeyPatch, caplo
 
 
 @pytest.mark.asyncio
-async def test_on_connect_emits_join_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_on_namespace_connect_emits_join_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     client._sio.emit = AsyncMock(side_effect=RuntimeError("boom"))
     await client._on_connect()
+    await client._on_namespace_connect()
     assert client._idle_monitor_task is not None
     client._idle_monitor_task.cancel()
     with suppress(asyncio.CancelledError):
@@ -2035,6 +2041,7 @@ async def test_ducaheat_client_extended_logging(
     )
     client._sio.emit = AsyncMock()
     await client._on_connect()
+    client._sio.emit.assert_not_awaited()
     await client._on_disconnect()
     await client._on_dev_handshake({})
     await client._on_dev_data({"nodes": {}})
@@ -2219,7 +2226,7 @@ def test_ducaheat_connect_response_skips_repeat(
 
 
 @pytest.mark.asyncio
-async def test_ducaheat_on_connect_emits_namespace(
+async def test_ducaheat_on_namespace_connect_emits_namespace(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Validate connect handler joins and requests data on the API namespace."""
@@ -2228,7 +2235,7 @@ async def test_ducaheat_on_connect_emits_namespace(
     emit_mock = AsyncMock()
     client._sio.emit = emit_mock
 
-    await client._on_connect()
+    await client._on_namespace_connect()
 
     assert emit_mock.await_args_list == [
         call("join", namespace=module.WS_NAMESPACE),
