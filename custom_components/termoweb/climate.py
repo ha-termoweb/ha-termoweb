@@ -240,8 +240,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             raise
         except Exception as err:  # pragma: no cover - defensive
             _LOGGER.debug(
-                "Optimistic update failed dev=%s type=%s addr=%s: %s",
-                self._dev_id,
+                "Optimistic update failed type=%s addr=%s: %s",
                 self._node_type,
                 self._addr,
                 err,
@@ -260,9 +259,8 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         client = self._client()
         if client is None:
             _LOGGER.error(
-                "%s failed dev=%s type=%s addr=%s: client unavailable",
+                "%s failed type=%s addr=%s: client unavailable",
                 log_context,
-                self._dev_id,
                 self._node_type,
                 self._addr,
             )
@@ -285,9 +283,8 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 getattr(err, "body", None) or getattr(err, "message", None) or str(err)
             )
             _LOGGER.error(
-                "%s failed dev=%s type=%s addr=%s: status=%s body=%s",
+                "%s failed type=%s addr=%s: status=%s body=%s",
                 log_context,
-                self._dev_id,
                 self._node_type,
                 self._addr,
                 status,
@@ -441,9 +438,8 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 detail_suffix = f" ({', '.join(parts)})"
 
         _LOGGER.debug(
-            "%s OK dev=%s type=%s addr=%s%s",
+            "%s OK type=%s addr=%s%s",
             log_context,
-            self._dev_id,
             self._node_type,
             self._addr,
             detail_suffix,
@@ -457,7 +453,9 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         # Validate defensively even though the schema should catch most issues
         if not isinstance(prog, list) or len(prog) != 168:
             _LOGGER.error(
-                "Invalid prog length for dev=%s addr=%s", self._dev_id, self._addr
+                "Invalid prog length for type=%s addr=%s",
+                self._node_type,
+                self._addr,
             )
             return
         try:
@@ -468,7 +466,10 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             raise
         except Exception as e:
             _LOGGER.error(
-                "Invalid prog for dev=%s addr=%s: %s", self._dev_id, self._addr, e
+                "Invalid prog for type=%s addr=%s: %s",
+                self._node_type,
+                self._addr,
+                e,
             )
             return
 
@@ -499,7 +500,9 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
         if not isinstance(p, list) or len(p) != 3:
             _LOGGER.error(
-                "Invalid ptemp length for dev=%s addr=%s", self._dev_id, self._addr
+                "Invalid ptemp length for type=%s addr=%s",
+                self._node_type,
+                self._addr,
             )
             return
         try:
@@ -508,8 +511,8 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             raise
         except Exception as e:
             _LOGGER.error(
-                "Invalid ptemp values for dev=%s addr=%s: %s",
-                self._dev_id,
+                "Invalid ptemp values for type=%s addr=%s: %s",
+                self._node_type,
                 self._addr,
                 e,
             )
@@ -541,8 +544,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             HVACMode.HEAT
         )  # required by backend for setpoint acceptance
         _LOGGER.info(
-            "Queue write: dev=%s addr=%s stemp=%.1f mode=%s (batching %.1fs)",
-            self._dev_id,
+            "Queue write: addr=%s stemp=%.1f mode=%s (batching %.1fs)",
             self._addr,
             t,
             HVACMode.HEAT,
@@ -555,8 +557,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         if hvac_mode == HVACMode.OFF:
             self._pending_mode = HVACMode.OFF
             _LOGGER.info(
-                "Queue write: dev=%s addr=%s mode=%s (batching %.1fs)",
-                self._dev_id,
+                "Queue write: addr=%s mode=%s (batching %.1fs)",
                 self._addr,
                 HVACMode.OFF,
                 _WRITE_DEBOUNCE,
@@ -567,8 +568,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         if hvac_mode == HVACMode.AUTO:
             self._pending_mode = HVACMode.AUTO
             _LOGGER.info(
-                "Queue write: dev=%s addr=%s mode=%s (batching %.1fs)",
-                self._dev_id,
+                "Queue write: addr=%s mode=%s (batching %.1fs)",
                 self._addr,
                 HVACMode.AUTO,
                 _WRITE_DEBOUNCE,
@@ -583,8 +583,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 if cur is not None:
                     self._pending_stemp = float(cur)
             _LOGGER.info(
-                "Queue write: dev=%s addr=%s mode=%s stemp=%s (batching %.1fs)",
-                self._dev_id,
+                "Queue write: addr=%s mode=%s stemp=%s (batching %.1fs)",
                 self._addr,
                 HVACMode.HEAT,
                 self._pending_stemp,
@@ -633,9 +632,8 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 HVACMode.HEAT: "manual",
             }.get(mode, str(mode))
         _LOGGER.info(
-            "POST %s settings dev=%s addr=%s mode=%s stemp=%s",
+            "POST %s settings addr=%s mode=%s stemp=%s",
             self._node_type,
-            self._dev_id,
             self._addr,
             mode_api,
             stemp,
@@ -660,8 +658,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 )
             except Exception as err:  # pragma: no cover - defensive
                 _LOGGER.debug(
-                    "Failed to register pending settings dev=%s type=%s addr=%s: %s",
-                    self._dev_id,
+                    "Failed to register pending settings type=%s addr=%s: %s",
                     self._node_type,
                     self._addr,
                     err,
@@ -685,8 +682,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
         self._optimistic_update(_apply)
         _LOGGER.debug(
-            "Optimistic mode/stemp applied dev=%s type=%s addr=%s mode=%s stemp=%s",
-            self._dev_id,
+            "Optimistic mode/stemp applied type=%s addr=%s mode=%s stemp=%s",
             self._node_type,
             self._addr,
             mode_api,
@@ -712,8 +708,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 status = str(ws_state.get("status") or "").lower()
                 if status in {"connected", "healthy"}:
                     _LOGGER.debug(
-                        "Skipping refresh fallback dev=%s addr=%s ws_status=%s",
-                        self._dev_id,
+                        "Skipping refresh fallback addr=%s ws_status=%s",
                         self._addr,
                         status,
                     )
@@ -730,8 +725,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 if is_stopping or not is_running:
                     reason = "stopping" if is_stopping else "not running"
                     _LOGGER.debug(
-                        "Skipping refresh fallback dev=%s addr=%s: hass %s",
-                        self._dev_id,
+                        "Skipping refresh fallback addr=%s: hass %s",
                         self._addr,
                         reason,
                     )
@@ -747,8 +741,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 raise
             except Exception as e:
                 _LOGGER.error(
-                    "Refresh fallback failed dev=%s addr=%s: %s",
-                    self._dev_id,
+                    "Refresh fallback failed addr=%s: %s",
                     self._addr,
                     str(e),
                 )

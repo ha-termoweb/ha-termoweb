@@ -1130,7 +1130,7 @@ def test_heater_write_paths_and_errors(
         bad_prog[5] = 7
         await heater.async_set_schedule(bad_prog)
         assert client.set_htr_settings.await_count == 0
-        assert "Invalid prog for dev" in caplog.text
+        assert "Invalid prog for type" in caplog.text
         assert not fallback_waiters
 
         # -------------------- async_set_schedule (API error) ----------------

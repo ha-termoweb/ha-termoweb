@@ -139,8 +139,7 @@ class StateCoordinator(
                 inventory = build_node_inventory(nodes)
             except ValueError as err:  # pragma: no cover - defensive
                 _LOGGER.debug(
-                    "Failed to build node inventory for %s: %s",
-                    self._dev_id,
+                    "Failed to build node inventory: %s",
                     err,
                     exc_info=err,
                 )
@@ -281,8 +280,7 @@ class StateCoordinator(
             expires_at=expires_at,
         )
         _LOGGER.debug(
-            "Registered pending settings dev=%s type=%s addr=%s mode=%s stemp=%s ttl=%.1f",
-            self._dev_id,
+            "Registered pending settings type=%s addr=%s mode=%s stemp=%s ttl=%.1f",
             key[0],
             key[1],
             normalized_mode,
@@ -308,9 +306,7 @@ class StateCoordinator(
 
         now = time.time()
         if entry.expires_at <= now:
-            _LOGGER.debug(
-                "Pending settings expired dev=%s type=%s addr=%s", self._dev_id, *key
-            )
+            _LOGGER.debug("Pending settings expired type=%s addr=%s", *key)
             self._pending_settings.pop(key, None)
             return False
 
@@ -318,8 +314,7 @@ class StateCoordinator(
         stemp_expected = entry.stemp
         if payload is None:
             _LOGGER.debug(
-                "Deferring merge due to pending settings dev=%s type=%s addr=%s payload=None",
-                self._dev_id,
+                "Deferring merge due to pending settings type=%s addr=%s payload=None",
                 key[0],
                 key[1],
             )
@@ -339,15 +334,12 @@ class StateCoordinator(
                 )
 
         if mode_matches and stemp_matches:
-            _LOGGER.debug(
-                "Pending settings satisfied dev=%s type=%s addr=%s", self._dev_id, *key
-            )
+            _LOGGER.debug("Pending settings satisfied type=%s addr=%s", *key)
             self._pending_settings.pop(key, None)
             return False
 
         _LOGGER.debug(
-            "Deferring merge due to pending settings dev=%s type=%s addr=%s expected_mode=%s expected_stemp=%s payload_mode=%s payload_stemp=%s",
-            self._dev_id,
+            "Deferring merge due to pending settings type=%s addr=%s expected_mode=%s expected_stemp=%s payload_mode=%s payload_stemp=%s",
             key[0],
             key[1],
             mode_expected,
@@ -481,8 +473,7 @@ class StateCoordinator(
             addr = normalize_node_addr(node, use_default_when_falsey=True)
 
         _LOGGER.info(
-            "Refreshing heater settings for device %s node_type=%s addr=%s",
-            dev_id,
+            "Refreshing heater settings node_type=%s addr=%s",
             node_type or "<auto>",
             addr,
         )
@@ -492,8 +483,7 @@ class StateCoordinator(
             self._prune_pending_settings()
             if not addr:
                 _LOGGER.error(
-                    "Cannot refresh heater settings without an address for device %s",
-                    dev_id,
+                    "Cannot refresh heater settings without an address",
                 )
                 return
 
@@ -512,8 +502,7 @@ class StateCoordinator(
 
             if not isinstance(payload, dict):
                 _LOGGER.debug(
-                    "Ignoring unexpected heater settings payload for device %s %s %s: %s",
-                    dev_id,
+                    "Ignoring unexpected heater settings payload for node_type=%s addr=%s: %s",
                     resolved_type,
                     addr,
                     payload,
@@ -544,8 +533,7 @@ class StateCoordinator(
 
             if self._should_defer_pending_setting(node_type, addr, payload):
                 _LOGGER.debug(
-                    "Skipping heater refresh merge for pending settings dev=%s type=%s addr=%s",
-                    dev_id,
+                    "Skipping heater refresh merge for pending settings type=%s addr=%s",
                     node_type,
                     addr,
                 )
@@ -588,16 +576,14 @@ class StateCoordinator(
 
         except TimeoutError as err:
             _LOGGER.error(
-                "Timeout refreshing heater settings for device %s %s %s",
-                dev_id,
+                "Timeout refreshing heater settings for node_type=%s addr=%s",
                 node_type or resolved_type,
                 addr,
                 exc_info=err,
             )
         except (ClientError, BackendRateLimitError, BackendAuthError) as err:
             _LOGGER.error(
-                "Failed to refresh heater settings for device %s %s %s: %s",
-                dev_id,
+                "Failed to refresh heater settings for node_type=%s addr=%s: %s",
                 node_type or resolved_type,
                 addr,
                 err,
@@ -605,8 +591,7 @@ class StateCoordinator(
             )
         finally:
             _LOGGER.info(
-                "Finished heater settings refresh for device %s %s %s (success=%s)",
-                dev_id,
+                "Finished heater settings refresh for node_type=%s addr=%s (success=%s)",
                 node_type or resolved_type,
                 addr,
                 success,
@@ -674,8 +659,7 @@ class StateCoordinator(
                     if isinstance(js, dict):
                         if self._should_defer_pending_setting(node_type, addr, js):
                             _LOGGER.debug(
-                                "Deferring poll merge for pending settings dev=%s type=%s addr=%s",
-                                dev_id,
+                                "Deferring poll merge for pending settings type=%s addr=%s",
                                 node_type,
                                 addr,
                             )
@@ -852,10 +836,7 @@ class EnergyStateCoordinator(
             existing = self.data or {}
             if not isinstance(existing, dict):
                 return {}
-            _LOGGER.debug(
-                "WS %s: energy poll skipped (fresh websocket samples)",
-                self._dev_id,
-            )
+            _LOGGER.debug("Energy poll skipped (fresh websocket samples)")
             return dict(existing)
         dev_id = self._dev_id
         try:
@@ -875,8 +856,7 @@ class EnergyStateCoordinator(
 
                     if not samples:
                         _LOGGER.debug(
-                            "No energy samples for device %s node %s:%s",
-                            dev_id,
+                            "No energy samples for node_type=%s addr=%s",
                             node_type,
                             addr,
                         )
@@ -887,8 +867,7 @@ class EnergyStateCoordinator(
                     t = float_or_none(last.get("t"))
                     if counter is None or t is None:
                         _LOGGER.debug(
-                            "Latest sample missing 't' or 'counter' for device %s node %s:%s",
-                            dev_id,
+                            "Latest sample missing 't' or 'counter' for node_type=%s addr=%s",
                             node_type,
                             addr,
                         )
