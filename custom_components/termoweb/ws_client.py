@@ -237,12 +237,14 @@ class WebSocketClient:
         self._update_status("starting")
         try:
             while not self._closing:
+                error: Exception | None = None
                 try:
                     await self._connect_once()
                     await self._wait_for_events()
                 except asyncio.CancelledError:
                     raise
                 except Exception as err:  # noqa: BLE001
+                    error = err
                     _LOGGER.info(
                         "WS: connection error (%s: %s); will retry",
                         type(err).__name__,
@@ -253,6 +255,7 @@ class WebSocketClient:
                     await self._disconnect(reason="loop cleanup")
                     if not self._closing:
                         self._update_status("disconnected")
+                        await self._handle_connection_lost(error)
                 if self._closing:
                     break
                 delay = self._backoff_seq[
@@ -264,6 +267,17 @@ class WebSocketClient:
                 await asyncio.sleep(delay * random.uniform(0.8, 1.2))
         finally:
             self._update_status("stopped")
+
+    async def _handle_connection_lost(self, error: Exception | None) -> None:
+        """Record connection loss metadata before the next restart."""
+
+        state = self._ws_state_bucket()
+        restart_count = int(state.get("restart_count") or 0) + 1
+        state["restart_count"] = restart_count
+        state["last_disconnect_at"] = time.time()
+        state["last_disconnect_error"] = (
+            f"{type(error).__name__}: {error}" if error else None
+        )
 
     async def _connect_once(self) -> None:
         """Open the Socket.IO connection."""
@@ -1795,6 +1809,9 @@ class DucaheatWSClient(WebSocketClient):
             namespace=namespace,
         )
         self._connect_response_logged = False
+        self._fallback_last_refresh: float = 0.0
+        self._fallback_min_interval: float = 30.0
+        self._restart_count: int = 0
 
     async def _connect_once(self) -> None:
         """Open the Socket.IO connection using the simple Ducaheat contract."""
@@ -1999,6 +2016,49 @@ class DucaheatWSClient(WebSocketClient):
                 "WS (ducaheat): update payload: %s", json.dumps(data, default=str)
             )
         await super()._on_update(data)
+
+    def _mark_event(
+        self, *, paths: list[str] | None, count_event: bool = False
+    ) -> None:
+        """Reset fallback counters when fresh payloads arrive."""
+
+        super()._mark_event(paths=paths, count_event=count_event)
+        self._restart_count = 0
+
+    async def _handle_connection_lost(self, error: Exception | None) -> None:
+        """Trigger REST fallback refreshes when the websocket drops."""
+
+        await super()._handle_connection_lost(error)
+        self._restart_count += 1
+        now = time.time()
+        last_payload = self._stats.last_event_ts or self._last_event_at
+        if last_payload and now - last_payload < self._fallback_min_interval:
+            return
+        if self._restart_count <= 1:
+            return
+        if now - self._fallback_last_refresh < self._fallback_min_interval:
+            return
+        self._fallback_last_refresh = now
+        state = self._ws_state_bucket()
+        state["last_fallback_at"] = now
+        state["last_fallback_error"] = (
+            f"{type(error).__name__}: {error}" if error else None
+        )
+        self._update_status("fallback")
+        refresh_cb = getattr(self._coordinator, "async_request_refresh", None)
+        if not callable(refresh_cb):
+            return
+        try:
+            result = refresh_cb()
+        except TypeError:
+            self._loop.call_soon_threadsafe(refresh_cb)
+            return
+        if not asyncio.iscoroutine(result):
+            return
+        try:
+            await result
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("WS (ducaheat): fallback refresh failed", exc_info=True)
 
 
 __all__ = [
