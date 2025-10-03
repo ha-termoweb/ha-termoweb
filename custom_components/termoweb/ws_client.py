@@ -158,6 +158,7 @@ class WebSocketClient:
         self._subscription_refresh_last_attempt: float = 0.0
         self._subscription_refresh_last_success: float | None = None
         self._handshake_logged = False
+        self._debug_catch_all_registered = False
 
         self._ws_state: dict[str, Any] | None = None
         self._ws_state_bucket()
@@ -349,11 +350,37 @@ class WebSocketClient:
         self._update_status("connected")
         if self._idle_monitor_task is None or self._idle_monitor_task.done():
             self._idle_monitor_task = self._loop.create_task(self._idle_monitor())
+        self._register_debug_catch_all()
         try:
-            await self._sio.emit("join", namespace=self._namespace)
+            if self._namespace != "/":
+                await self._sio.emit("join", namespace=self._namespace)
             await self._sio.emit("dev_data", namespace=self._namespace)
         except Exception:  # noqa: BLE001
             _LOGGER.debug("WS: namespace join failed", exc_info=True)
+
+    def _register_debug_catch_all(self) -> None:
+        """Register a catch-all listener to trace websocket traffic when debugging."""
+
+        if self._debug_catch_all_registered:
+            return
+        if not _LOGGER.isEnabledFor(logging.DEBUG):
+            return
+
+        async def _log_catch_all(event: str, *args: Any, **kwargs: Any) -> None:
+            """Emit DEBUG logs for all websocket events received."""
+
+            if not _LOGGER.isEnabledFor(logging.DEBUG):
+                return
+            _LOGGER.debug(
+                "WS: catch-all (%s) event=%s args=%s kwargs=%s",
+                self._namespace,
+                event,
+                args,
+                kwargs,
+            )
+
+        self._sio.on("*", handler=_log_catch_all, namespace=self._namespace)
+        self._debug_catch_all_registered = True
 
     async def _on_disconnect(self) -> None:
         """Handle socket disconnection."""
