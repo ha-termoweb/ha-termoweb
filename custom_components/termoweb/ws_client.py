@@ -142,6 +142,7 @@ class WebSocketClient:
         self._connected_since: float | None = None
         self._healthy_since: float | None = None
         self._last_event_at: float | None = None
+        self._last_payload_at: float | None = None
         self._stats = WSStats()
 
         self._handshake_payload: dict[str, Any] | None = None
@@ -161,7 +162,9 @@ class WebSocketClient:
         self._debug_catch_all_registered = False
 
         self._ws_state: dict[str, Any] | None = None
-        self._ws_state_bucket()
+        state = self._ws_state_bucket()
+        state.setdefault("last_payload_at", None)
+        state.setdefault("idle_restart_pending", False)
 
     # ------------------------------------------------------------------
     # Public control
@@ -990,6 +993,7 @@ class WebSocketClient:
         self._cancel_idle_restart()
         self._stats.last_event_ts = now
         self._last_event_at = now
+        self._last_payload_at = now
         if paths:
             self._stats.events_total += 1
             if _LOGGER.isEnabledFor(logging.DEBUG):
@@ -1004,6 +1008,7 @@ class WebSocketClient:
             self._stats.events_total += 1
         state: dict[str, Any] = self._ws_state_bucket()
         state["last_event_at"] = now
+        state["last_payload_at"] = self._last_payload_at
         state["frames_total"] = self._stats.frames_total
         state["events_total"] = self._stats.events_total
         if self._healthy_since is None:
@@ -1016,6 +1021,7 @@ class WebSocketClient:
         if self._closing or self._idle_restart_pending:
             return
         self._idle_restart_pending = True
+        self._ws_state_bucket()["idle_restart_pending"] = True
         _LOGGER.warning(
             "WS: no payloads for %.0f s (%s heartbeat); restarting", idle_for, source
         )
@@ -1026,6 +1032,7 @@ class WebSocketClient:
             finally:
                 self._idle_restart_pending = False
                 self._idle_restart_task = None
+                self._ws_state_bucket()["idle_restart_pending"] = False
 
         self._idle_restart_task = self._loop.create_task(_restart())
 
@@ -1037,6 +1044,7 @@ class WebSocketClient:
             task.cancel()
         self._idle_restart_task = None
         self._idle_restart_pending = False
+        self._ws_state_bucket()["idle_restart_pending"] = False
 
     async def _get_token(self) -> str:
         """Reuse the REST client token for websocket authentication."""
@@ -1135,7 +1143,9 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._subscription_refresh_last_success: float | None = None
 
         self._ws_state: dict[str, Any] | None = None
-        self._ws_state_bucket()
+        state = self._ws_state_bucket()
+        state.setdefault("last_payload_at", None)
+        state.setdefault("idle_restart_pending", False)
 
         self._write_hook_installed = False
         self._write_hook_original: Callable[..., Awaitable[Any]] | None = None
@@ -1211,11 +1221,13 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
     async def maybe_restart_after_write(self) -> None:
         """Restart the websocket if writes follow long periods of inactivity."""
 
-        last_event = self._stats.last_event_ts or self._last_event_at
-        if not last_event:
+        last_payload = self._last_payload_at
+        if last_payload is None:
+            last_payload = self._stats.last_event_ts or self._last_event_at
+        if not last_payload:
             return
-        idle_for = time.time() - last_event
-        if idle_for < 600:
+        idle_for = time.time() - last_payload
+        if idle_for < self._payload_idle_window:
             return
         if _LOGGER.isEnabledFor(logging.INFO):
             _LOGGER.info(
@@ -1598,6 +1610,8 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
 
         super()._mark_event(paths=paths, count_event=count_event)
         self._last_payload_at = self._stats.last_event_ts or self._last_event_at
+        state = self._ws_state_bucket()
+        state["last_payload_at"] = self._last_payload_at
 
     def _update_legacy_section(
         self,
