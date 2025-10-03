@@ -1409,10 +1409,36 @@ async def test_on_connect_requests_snapshot(monkeypatch: pytest.MonkeyPatch) -> 
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     client._sio.emit = AsyncMock()
     await client._on_connect()
-    assert client._sio.emit.await_args_list == [
-        call("join", namespace=module.WS_NAMESPACE),
-        call("dev_data", namespace=module.WS_NAMESPACE),
-    ]
+    expected = [call("dev_data", namespace=client._namespace)]
+    if client._namespace != "/":
+        expected.insert(0, call("join", namespace=client._namespace))
+    assert client._sio.emit.await_args_list == expected
+    await client._on_disconnect()
+
+
+@pytest.mark.asyncio
+async def test_on_connect_debug_catch_all(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """Verify that catch-all logging is registered only in DEBUG mode."""
+
+    client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    client._sio.emit = AsyncMock()
+    caplog.set_level(logging.DEBUG, logger=module.__name__)
+
+    await client._on_connect()
+
+    catch_all = client._sio.events.get(("*", client._namespace))
+    assert catch_all is not None
+
+    await catch_all("dev_handshake", {"ok": True})
+    assert "catch-all" in caplog.text
+
+    caplog.clear()
+    caplog.set_level(logging.INFO, logger=module.__name__)
+    await catch_all("dev_data", {"another": True})
+    assert "catch-all" not in caplog.text
+
+    client._register_debug_catch_all()
+
     await client._on_disconnect()
 
 
@@ -1914,10 +1940,7 @@ async def test_ducaheat_on_connect_emits_root_namespace(
 
     await client._on_connect()
 
-    assert emit_mock.await_args_list == [
-        call("join", namespace="/"),
-        call("dev_data", namespace="/"),
-    ]
+    assert emit_mock.await_args_list == [call("dev_data", namespace="/")]
 
 
 @pytest.mark.asyncio
