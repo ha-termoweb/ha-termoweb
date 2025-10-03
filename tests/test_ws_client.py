@@ -368,6 +368,8 @@ async def test_legacy_write_restart_after_idle(
     client = _make_legacy_client(monkeypatch)
     rest_client = client._client
     now = module.time.time()
+    client._payload_idle_window = 600.0
+    client._last_payload_at = now - 700
     client._stats.last_event_ts = now - 700
     client._idle_restart_pending = False
     client._idle_restart_task = None
@@ -388,6 +390,8 @@ async def test_legacy_write_recent_payload_skips_restart(
     client = _make_legacy_client(monkeypatch)
     rest_client = client._client
     now = module.time.time()
+    client._payload_idle_window = 600.0
+    client._last_payload_at = now - 120
     client._stats.last_event_ts = now - 120
     client._idle_restart_pending = False
     client._idle_restart_task = None
@@ -616,6 +620,10 @@ def test_legacy_mark_event_tracks_payload(monkeypatch: pytest.MonkeyPatch) -> No
     client._mark_event(paths=None, count_event=True)
 
     assert client._last_payload_at == pytest.approx(1000.0)
+    assert (
+        client._ws_state_bucket()["last_payload_at"]
+        == pytest.approx(1000.0)
+    )
 
 
 def test_legacy_heartbeat_does_not_cancel_restart(
@@ -633,6 +641,67 @@ def test_legacy_heartbeat_does_not_cancel_restart(
     assert client._idle_restart_pending is True
     assert client._last_payload_at == pytest.approx(900.0)
     assert client._last_heartbeat_at == pytest.approx(1200.0)
+
+
+@pytest.mark.asyncio
+async def test_maybe_restart_after_write_ignores_heartbeat_activity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Schedule a restart when writes follow heartbeat-only activity."""
+
+    client = _make_legacy_client(monkeypatch)
+    client._payload_idle_window = 600.0
+    client._last_payload_at = 1000.0
+
+    timestamps = [1500.0, 1900.0]
+
+    def fake_time() -> float:
+        value = timestamps.pop(0) if timestamps else 1900.0
+        return value
+
+    monkeypatch.setattr(module.time, "time", fake_time)
+
+    client._record_heartbeat(source="socketio09")
+
+    scheduled: list[tuple[float, str]] = []
+
+    def fake_schedule(*, idle_for: float, source: str) -> None:
+        scheduled.append((idle_for, source))
+
+    monkeypatch.setattr(client, "_schedule_idle_restart", fake_schedule)
+
+    await client.maybe_restart_after_write()
+
+    assert scheduled == [(900.0, "write notification")]
+
+
+def test_idle_restart_state_reflected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Expose idle restart state changes through the websocket bucket."""
+
+    captured: dict[str, Any] = {}
+
+    def _create_task(coro: Any, **_: Any) -> Any:
+        captured["coro"] = coro
+        return SimpleNamespace(cancel=lambda: None, done=lambda: False)
+
+    hass_loop = SimpleNamespace(
+        create_task=_create_task,
+        call_soon_threadsafe=lambda cb, *args: cb(*args),
+    )
+    client = _make_legacy_client(monkeypatch, hass_loop=hass_loop)
+
+    state = client._ws_state_bucket()
+    assert state["idle_restart_pending"] is False
+
+    client._schedule_idle_restart(idle_for=30.0, source="test case")
+    assert state["idle_restart_pending"] is True
+
+    client._cancel_idle_restart()
+    assert state["idle_restart_pending"] is False
+
+    coro = captured.get("coro")
+    if coro is not None:
+        coro.close()
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Mapping
 import logging
+import time
 from typing import Any
 
 from homeassistant.components.climate import (
@@ -707,12 +708,22 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             if isinstance(ws_state, dict):
                 status = str(ws_state.get("status") or "").lower()
                 if status in {"connected", "healthy"}:
-                    _LOGGER.debug(
-                        "Skipping refresh fallback addr=%s ws_status=%s",
-                        self._addr,
-                        status,
+                    last_payload_at = ws_state.get("last_payload_at")
+                    idle_restart_pending = bool(
+                        ws_state.get("idle_restart_pending")
                     )
-                    return
+                    recent_payload = False
+                    if isinstance(last_payload_at, (int, float)):
+                        recent_payload = (time.time() - last_payload_at) <= (
+                            _WS_ECHO_FALLBACK_REFRESH
+                        )
+                    if idle_restart_pending or recent_payload:
+                        _LOGGER.debug(
+                            "Skipping refresh fallback addr=%s ws_status=%s",
+                            self._addr,
+                            status,
+                        )
+                        return
 
         async def _fallback() -> None:
             """Force a heater refresh after the fallback delay."""
