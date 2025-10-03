@@ -1,6 +1,7 @@
 import asyncio
 from copy import deepcopy
 import logging
+import logging
 import time
 from contextlib import suppress
 from types import SimpleNamespace
@@ -1760,6 +1761,141 @@ async def test_ducaheat_connect_honours_stop_event(
 
     token_mock.assert_not_awaited()
     client._sio.connect.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_connect_logs_request_details(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Ensure connect attempts emit detailed debug logging."""
+
+    client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    client._stop_event = asyncio.Event()
+    caplog.set_level(logging.DEBUG)
+    connect_mock = AsyncMock()
+    client._sio.connect = connect_mock
+
+    await client._connect_once()
+
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "request headers" in messages
+    assert "connect target base" in messages
+    assert "to***en" in messages
+    connect_mock.assert_awaited_once()
+
+
+def test_ducaheat_connect_response_logging(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify the response logger captures engine.io metadata."""
+
+    client = _make_ducaheat_client(monkeypatch)
+    caplog.set_level(logging.DEBUG)
+    client._connect_response_logged = False
+    client._sio.connection_url = "https://api.example.com/api/v2/socket_io?token=abc"
+    client._sio.connection_headers = {"Authorization": "Bearer secret-token"}
+    client._sio.connection_transports = ["websocket"]
+    client._sio.connection_namespaces = ["/"]
+    response = SimpleNamespace(
+        status=101,
+        headers={"Upgrade": "websocket", "Set-Cookie": "SESSION=abcdef"},
+    )
+    client._sio.eio = SimpleNamespace(
+        sid="sid123",
+        transport="websocket",
+        ws=SimpleNamespace(response=response),
+    )
+
+    client._log_connect_response()
+
+    text = caplog.text
+    assert "sid123" in text
+    assert "websocket response headers" in text
+    assert "Bearer secret-token" not in text
+    assert "Bearer secr" in text
+    assert "SESSION=abcdef" not in text
+
+
+def test_ducaheat_helper_sanitisation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise helper sanitisation branches for coverage."""
+
+    client = _make_ducaheat_client(monkeypatch)
+    assert client._redact_value("") == ""
+    assert client._redact_value("abcd") == "***"
+    assert client._redact_value("abcdef") == "ab***ef"
+    assert client._redact_value("abcdefghijkl") == "abcd...ijkl"
+
+    headers = client._sanitise_headers(
+        {
+            "Authorization": "Bearer secret",
+            "Cookie": "SESSIONID",
+            "X-Bytes": b"value",
+        }
+    )
+    assert "secret" not in headers["Authorization"]
+    assert headers["Cookie"] != "SESSIONID"
+    assert headers["X-Bytes"] == "value"
+
+    params = client._sanitise_params({"token": "secret", "dev_id": "device"})
+    assert params["token"] != "secret"
+    assert params["dev_id"] == "device"
+
+    headers_no_token = client._sanitise_headers({"Authorization": "Bearer"})
+    assert headers_no_token["Authorization"].startswith("Be")
+
+
+def test_ducaheat_connect_response_no_engineio(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Ensure connect response logging tolerates missing engine.io context."""
+
+    client = _make_ducaheat_client(monkeypatch)
+    caplog.set_level(logging.DEBUG)
+    client._connect_response_logged = False
+    client._sio.connection_url = "https://example/ws"
+    client._sio.eio = None
+
+    client._log_connect_response()
+
+    assert "connected URL" in caplog.text
+
+
+def test_ducaheat_connect_response_type_error_headers(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Cover the fallback branch when response headers do not coerce to dict."""
+
+    client = _make_ducaheat_client(monkeypatch)
+    caplog.set_level(logging.DEBUG)
+    client._connect_response_logged = False
+    bad_headers = SimpleNamespace(items=lambda: {"Upgrade": "websocket"})
+    response = SimpleNamespace(status=101, headers=bad_headers)
+    client._sio.eio = SimpleNamespace(
+        sid=None,
+        transport=None,
+        ws=SimpleNamespace(response=response),
+    )
+
+    client._log_connect_response()
+
+    assert "websocket response headers" in caplog.text
+
+
+def test_ducaheat_connect_response_skips_repeat(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Ensure repeated calls do not re-log response details."""
+
+    client = _make_ducaheat_client(monkeypatch)
+    caplog.set_level(logging.DEBUG)
+    client._connect_response_logged = False
+    client._sio.connection_url = "https://example/ws"
+    client._sio.eio = SimpleNamespace(ws=SimpleNamespace(response=None))
+
+    client._log_connect_response()
+    first_count = len(caplog.records)
+    client._log_connect_response()
+    assert len(caplog.records) == first_count
 
 
 @pytest.mark.asyncio

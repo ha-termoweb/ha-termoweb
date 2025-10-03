@@ -1856,22 +1856,196 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
 class DucaheatWSClient(WebSocketClient):
     """Verbose websocket client variant with payload debug logging."""
 
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        *,
+        entry_id: str,
+        dev_id: str,
+        api_client: RESTClient,
+        coordinator: Any,
+        session: aiohttp.ClientSession | None = None,
+        handshake_fail_threshold: int = 5,
+        protocol: str | None = None,
+        namespace: str = "/",
+    ) -> None:
+        """Initialise the websocket client with extended debug logging."""
+
+        super().__init__(
+            hass,
+            entry_id=entry_id,
+            dev_id=dev_id,
+            api_client=api_client,
+            coordinator=coordinator,
+            session=session,
+            handshake_fail_threshold=handshake_fail_threshold,
+            protocol=protocol,
+            namespace=namespace,
+        )
+        self._connect_response_logged = False
+
     async def _connect_once(self) -> None:
         """Open the Socket.IO connection using the simple Ducaheat contract."""
 
         if self._stop_event.is_set():
             return
 
+        self._connect_response_logged = False
         token = await self._get_token()
+        headers = await self._client._authed_headers()  # noqa: SLF001
         base = self._api_base().rstrip("/")
         socket_path = f"{base}/api/v2/socket_io"
-        params = urlencode({"token": token, "dev_id": self.dev_id})
+        query_params = {"token": token, "dev_id": self.dev_id}
+        params = urlencode(query_params)
         url = f"{socket_path}?{params}"
+        self._log_connect_request(
+            base=base,
+            socket_path=socket_path,
+            params=query_params,
+            headers=headers if isinstance(headers, Mapping) else {},
+        )
         _LOGGER.debug("WS %s (ducaheat): connecting to %s", self.dev_id, url)
 
         self._disconnected.clear()
         self._backoff_idx = 0
         await self._sio.connect(url, transports=["websocket"])
+        self._log_connect_response()
+
+    def _redact_value(self, value: str) -> str:
+        """Return a redacted representation of sensitive values."""
+
+        trimmed = value.strip()
+        if not trimmed:
+            return ""
+        if len(trimmed) <= 4:
+            return "***"
+        if len(trimmed) <= 8:
+            return f"{trimmed[:2]}***{trimmed[-2:]}"
+        return f"{trimmed[:4]}...{trimmed[-4:]}"
+
+    def _sanitise_headers(self, headers: Mapping[str, Any]) -> dict[str, Any]:
+        """Redact sensitive header values for logging."""
+
+        sanitised: dict[str, Any] = {}
+        for key, value in headers.items():
+            text: str
+            if isinstance(value, bytes):
+                text = value.decode(errors="ignore")
+            else:
+                text = str(value)
+            if key.lower() == "authorization":
+                prefix, _, token = text.partition(" ")
+                if token:
+                    text = f"{prefix} {self._redact_value(token)}".strip()
+                else:
+                    text = self._redact_value(text)
+            elif key.lower() in {"cookie", "set-cookie"}:
+                text = self._redact_value(text)
+            sanitised[key] = text
+        return sanitised
+
+    def _sanitise_params(self, params: Mapping[str, str]) -> dict[str, str]:
+        """Redact sensitive query parameter values for logging."""
+
+        sanitised: dict[str, str] = {}
+        for key, value in params.items():
+            sanitised[key] = self._redact_value(value) if key == "token" else value
+        return sanitised
+
+    def _log_connect_request(
+        self,
+        *,
+        base: str,
+        socket_path: str,
+        params: Mapping[str, str],
+        headers: Mapping[str, Any],
+    ) -> None:
+        """Log the prepared websocket request metadata."""
+
+        if not _LOGGER.isEnabledFor(logging.DEBUG):
+            return
+        _LOGGER.debug(
+            "WS %s (ducaheat): connect target base=%s path=%s params=%s",
+            self.dev_id,
+            base,
+            socket_path,
+            self._sanitise_params(params),
+        )
+        if headers:
+            _LOGGER.debug(
+                "WS %s (ducaheat): request headers=%s",
+                self.dev_id,
+                self._sanitise_headers(headers),
+            )
+
+    def _log_connect_response(self) -> None:
+        """Log handshake response details when available."""
+
+        if not _LOGGER.isEnabledFor(logging.DEBUG):
+            return
+        if self._connect_response_logged:
+            return
+        self._connect_response_logged = True
+        sio = self._sio
+        url = getattr(sio, "connection_url", None)
+        if url:
+            _LOGGER.debug("WS %s (ducaheat): connected URL=%s", self.dev_id, url)
+        headers = getattr(sio, "connection_headers", None)
+        if isinstance(headers, Mapping) and headers:
+            _LOGGER.debug(
+                "WS %s (ducaheat): connection headers=%s",
+                self.dev_id,
+                self._sanitise_headers(headers),
+            )
+        transports = getattr(sio, "connection_transports", None)
+        if transports:
+            _LOGGER.debug(
+                "WS %s (ducaheat): connection transports=%s",
+                self.dev_id,
+                transports,
+            )
+        namespaces = getattr(sio, "connection_namespaces", None)
+        if namespaces:
+            _LOGGER.debug(
+                "WS %s (ducaheat): connection namespaces=%s",
+                self.dev_id,
+                namespaces,
+            )
+        eio = getattr(sio, "eio", None)
+        if eio is None:
+            return
+        sid = getattr(eio, "sid", None)
+        if sid:
+            _LOGGER.debug("WS %s (ducaheat): engine.io sid=%s", self.dev_id, sid)
+        transport = getattr(eio, "transport", None)
+        if transport:
+            _LOGGER.debug(
+                "WS %s (ducaheat): engine.io transport=%s",
+                self.dev_id,
+                transport,
+            )
+        ws = getattr(eio, "ws", None)
+        response = getattr(ws, "response", None) if ws is not None else None
+        if response is None:
+            return
+        status = getattr(response, "status", None)
+        if status is not None:
+            _LOGGER.debug(
+                "WS %s (ducaheat): websocket handshake status=%s",
+                self.dev_id,
+                status,
+            )
+        resp_headers = getattr(response, "headers", None)
+        if resp_headers:
+            try:
+                header_map = dict(resp_headers)
+            except (TypeError, ValueError):
+                header_map = {"raw": str(resp_headers)}
+            _LOGGER.debug(
+                "WS %s (ducaheat): websocket response headers=%s",
+                self.dev_id,
+                self._sanitise_headers(header_map),
+            )
 
     def _summarise_addresses(self, data: Any) -> str:
         """Return a condensed summary of node addresses in ``data``."""
@@ -1888,18 +2062,25 @@ class DucaheatWSClient(WebSocketClient):
         """Log connect events before delegating to the base implementation."""
         if _LOGGER.isEnabledFor(logging.DEBUG):
             _LOGGER.debug("WS %s (ducaheat): connected", self.dev_id)
+            self._log_connect_response()
         await super()._on_connect()
 
     async def _on_disconnect(self) -> None:
         """Log disconnect events before delegating."""
         if _LOGGER.isEnabledFor(logging.DEBUG):
             _LOGGER.debug("WS %s (ducaheat): disconnected", self.dev_id)
+        self._connect_response_logged = False
         await super()._on_disconnect()
 
     async def _on_dev_handshake(self, data: Any) -> None:
         """Log handshake payloads prior to standard handling."""
         if _LOGGER.isEnabledFor(logging.DEBUG):
             _LOGGER.debug("WS %s (ducaheat): handshake payload: %s", self.dev_id, data)
+            _LOGGER.debug(
+                "WS %s (ducaheat): handshake payload detail: %s",
+                self.dev_id,
+                json.dumps(data, default=str),
+            )
         await super()._on_dev_handshake(data)
 
     async def _on_dev_data(self, data: Any) -> None:
@@ -1909,6 +2090,11 @@ class DucaheatWSClient(WebSocketClient):
             _LOGGER.debug(
                 "WS %s (ducaheat): dev_data addresses: %s", self.dev_id, summary
             )
+            _LOGGER.debug(
+                "WS %s (ducaheat): dev_data payload: %s",
+                self.dev_id,
+                json.dumps(data, default=str),
+            )
         await super()._on_dev_data(data)
 
     async def _on_update(self, data: Any) -> None:
@@ -1917,6 +2103,11 @@ class DucaheatWSClient(WebSocketClient):
             summary = self._summarise_addresses(data)
             _LOGGER.debug(
                 "WS %s (ducaheat): update addresses: %s", self.dev_id, summary
+            )
+            _LOGGER.debug(
+                "WS %s (ducaheat): update payload: %s",
+                self.dev_id,
+                json.dumps(data, default=str),
             )
         await super()._on_update(data)
 
