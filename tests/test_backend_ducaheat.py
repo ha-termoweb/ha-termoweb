@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from custom_components.termoweb.api import RESTClient
 from custom_components.termoweb.backend.ducaheat import DucaheatBackend, DucaheatRESTClient
+from custom_components.termoweb.const import WS_NAMESPACE
 from custom_components.termoweb.ws_client import DucaheatWSClient, WebSocketClient
 
 
@@ -64,7 +65,7 @@ def test_ducaheat_backend_creates_ws_client() -> None:
     assert ws_client.dev_id == "dev"
     assert ws_client.entry_id == "entry"
     assert ws_client._protocol_hint == "engineio2"
-    assert ws_client._namespace == "/"
+    assert ws_client._namespace == WS_NAMESPACE
 
 
 def test_dummy_client_get_node_settings_accepts_acm() -> None:
