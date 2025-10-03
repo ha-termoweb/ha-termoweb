@@ -121,6 +121,9 @@ class WebSocketClient:
         self._sio.on("error", handler=self._on_error)
         self._sio.on("reconnect_failed", handler=self._on_reconnect_failed)
         self._sio.on(
+            "connect", namespace=self._namespace, handler=self._on_namespace_connect
+        )
+        self._sio.on(
             "disconnect",
             namespace=self._namespace,
             handler=self._on_namespace_disconnect,
@@ -368,6 +371,10 @@ class WebSocketClient:
         if self._idle_monitor_task is None or self._idle_monitor_task.done():
             self._idle_monitor_task = self._loop.create_task(self._idle_monitor())
         self._register_debug_catch_all()
+
+    async def _on_namespace_connect(self) -> None:
+        """Join the namespace and request the initial snapshot."""
+
         try:
             if self._namespace != "/":
                 await self._sio.emit("join", namespace=self._namespace)
