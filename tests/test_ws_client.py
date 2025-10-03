@@ -166,7 +166,9 @@ def _make_ducaheat_client(
             call_soon_threadsafe=lambda cb, *args: cb(*args),
         )
     hass = SimpleNamespace(loop=hass_loop, data={module.DOMAIN: {"entry": {}}})
-    coordinator = SimpleNamespace(data={}, update_nodes=MagicMock())
+    coordinator = SimpleNamespace(
+        data={}, update_nodes=MagicMock(), async_request_refresh=AsyncMock()
+    )
     rest_client = DummyREST()
     dispatcher_mock = MagicMock()
     monkeypatch.setattr(module, "async_dispatcher_send", dispatcher_mock)
@@ -1056,6 +1058,172 @@ def test_ducaheat_summarise_addresses_handles_empty(
 
 
 @pytest.mark.asyncio
+async def test_ducaheat_connection_lost_triggers_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Trigger a coordinator refresh once per interval during fallback."""
+
+    client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    client._fallback_min_interval = 5.0
+    coordinator = client._coordinator
+    refresh = coordinator.async_request_refresh
+    current_time = 1_000_000.0
+
+    def fake_time() -> float:
+        return current_time
+
+    monkeypatch.setattr(module.time, "time", fake_time)
+
+    await client._handle_connection_lost(RuntimeError("ws error"))
+    assert refresh.await_count == 0
+    assert client._restart_count == 1
+
+    current_time += client._fallback_min_interval
+    await client._handle_connection_lost(RuntimeError("ws error"))
+    assert refresh.await_count == 1
+    state = client._ws_state_bucket()
+    assert state["status"] == "fallback"
+    assert state["last_fallback_at"] == current_time
+    assert state["last_fallback_error"].startswith("RuntimeError")
+
+    await client._handle_connection_lost(RuntimeError("ws error"))
+    assert refresh.await_count == 1
+
+    current_time += client._fallback_min_interval
+    await client._handle_connection_lost(RuntimeError("ws error"))
+    assert refresh.await_count == 2
+
+    client._mark_event(paths=None, count_event=True)
+    assert client._restart_count == 0
+
+    current_time += client._fallback_min_interval
+    await client._handle_connection_lost(RuntimeError("ws error"))
+    assert refresh.await_count == 2
+
+    current_time += client._fallback_min_interval
+    await client._handle_connection_lost(RuntimeError("ws error"))
+    assert refresh.await_count == 3
+    assert client._ws_state_bucket()["status"] == "fallback"
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_fallback_handles_missing_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Handle coordinators that do not expose a refresh coroutine."""
+
+    hass_loop = SimpleNamespace(
+        create_task=lambda coro, **_: SimpleNamespace(done=lambda: True),
+        call_soon_threadsafe=MagicMock(),
+    )
+    client = _make_ducaheat_client(monkeypatch, hass_loop=hass_loop)
+    client._restart_count = 1
+    client._fallback_last_refresh = 0.0
+    client._fallback_min_interval = 0.0
+    monkeypatch.setattr(module.time, "time", lambda: 1000.0)
+    client._coordinator.async_request_refresh = None
+
+    await client._handle_connection_lost(None)
+
+    state = client._ws_state_bucket()
+    assert state["status"] == "fallback"
+    assert hass_loop.call_soon_threadsafe.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_fallback_type_error_schedules_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Schedule refresh callbacks when synchronous refresh raises TypeError."""
+
+    call_soon = MagicMock()
+
+    hass_loop = SimpleNamespace(
+        create_task=lambda coro, **_: SimpleNamespace(done=lambda: True),
+        call_soon_threadsafe=call_soon,
+    )
+    client = _make_ducaheat_client(monkeypatch, hass_loop=hass_loop)
+    client._restart_count = 1
+    client._fallback_last_refresh = 0.0
+    client._fallback_min_interval = 0.0
+    monkeypatch.setattr(module.time, "time", lambda: 1000.0)
+
+    def raise_type_error() -> None:
+        raise TypeError("bad signature")
+
+    client._coordinator.async_request_refresh = raise_type_error
+
+    await client._handle_connection_lost(None)
+
+    assert call_soon.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_fallback_skips_non_coroutine_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Return early when the refresh callback is synchronous."""
+
+    hass_loop = SimpleNamespace(
+        create_task=lambda coro, **_: SimpleNamespace(done=lambda: True),
+        call_soon_threadsafe=MagicMock(),
+    )
+    client = _make_ducaheat_client(monkeypatch, hass_loop=hass_loop)
+    client._restart_count = 1
+    client._fallback_last_refresh = 0.0
+    client._fallback_min_interval = 0.0
+    monkeypatch.setattr(module.time, "time", lambda: 1000.0)
+    refresh_mock = MagicMock(return_value=None)
+    client._coordinator.async_request_refresh = refresh_mock
+
+    await client._handle_connection_lost(None)
+
+    assert refresh_mock.call_count == 1
+    assert hass_loop.call_soon_threadsafe.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_fallback_logs_refresh_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catch exceptions raised by the refresh coroutine."""
+
+    hass_loop = SimpleNamespace(
+        create_task=lambda coro, **_: SimpleNamespace(done=lambda: True),
+        call_soon_threadsafe=MagicMock(),
+    )
+    client = _make_ducaheat_client(monkeypatch, hass_loop=hass_loop)
+    client._restart_count = 1
+    client._fallback_last_refresh = 0.0
+    client._fallback_min_interval = 0.0
+    monkeypatch.setattr(module.time, "time", lambda: 1000.0)
+    refresh_mock = AsyncMock(side_effect=RuntimeError("refresh failed"))
+    client._coordinator.async_request_refresh = refresh_mock
+
+    await client._handle_connection_lost(None)
+
+    assert refresh_mock.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_fallback_skips_recent_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Skip triggering fallback when payloads arrived moments ago."""
+
+    client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    client._restart_count = 1
+    client._fallback_last_refresh = 0.0
+    client._fallback_min_interval = 10.0
+    current_time = 1_000_000.0
+    client._stats.last_event_ts = current_time - 1
+    monkeypatch.setattr(module.time, "time", lambda: current_time)
+
+    await client._handle_connection_lost(None)
+
+    assert client._fallback_last_refresh == 0.0
+    assert client._coordinator.async_request_refresh.await_count == 0
+
+
+@pytest.mark.asyncio
 async def test_runner_handles_error_and_reconnect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1094,6 +1262,60 @@ async def test_runner_handles_error_and_reconnect(
     ]
     assert statuses[0] == "starting"
     assert statuses[-1] == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_runner_invokes_hook_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure the runner awaits the connection lost hook on errors."""
+
+    client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    captured: list[Exception | None] = []
+
+    async def failing_connect() -> None:
+        raise RuntimeError("boom")
+
+    async def fake_disconnect(*args: Any, **kwargs: Any) -> None:
+        return None
+
+    async def hook(err: Exception | None) -> None:
+        captured.append(err)
+        client._closing = True
+
+    monkeypatch.setattr(client, "_connect_once", failing_connect)
+    monkeypatch.setattr(client, "_wait_for_events", AsyncMock())
+    monkeypatch.setattr(client, "_disconnect", fake_disconnect)
+    monkeypatch.setattr(client, "_handle_connection_lost", hook)
+
+    await client._runner()
+
+    assert len(captured) == 1
+    assert isinstance(captured[0], RuntimeError)
+
+
+@pytest.mark.asyncio
+async def test_runner_invokes_hook_on_clean_disconnect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Invoke the connection lost hook when the loop exits cleanly."""
+
+    client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    captured: list[Exception | None] = []
+
+    async def fake_disconnect(*args: Any, **kwargs: Any) -> None:
+        return None
+
+    async def hook(err: Exception | None) -> None:
+        captured.append(err)
+        client._closing = True
+
+    monkeypatch.setattr(client, "_connect_once", AsyncMock())
+    monkeypatch.setattr(client, "_wait_for_events", AsyncMock())
+    monkeypatch.setattr(client, "_disconnect", fake_disconnect)
+    monkeypatch.setattr(client, "_handle_connection_lost", hook)
+
+    await client._runner()
+
+    assert captured == [None]
 
 
 @pytest.mark.asyncio
