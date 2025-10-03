@@ -1908,7 +1908,15 @@ class DucaheatWSClient(WebSocketClient):
 
         self._disconnected.clear()
         self._backoff_idx = 0
-        await self._sio.connect(url, transports=["websocket"])
+        engineio_path = "socket.io"
+        await self._sio.connect(
+            url,
+            transports=["websocket"],
+            namespaces=[self._namespace],
+            socketio_path=engineio_path,
+            wait=True,
+            wait_timeout=15,
+        )
         self._log_connect_response()
 
     def _redact_value(self, value: str) -> str:
