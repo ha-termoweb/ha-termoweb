@@ -149,7 +149,7 @@ def _make_ducaheat_client(
     monkeypatch: pytest.MonkeyPatch,
     *,
     hass_loop: Any | None = None,
-    namespace: str = "/",
+    namespace: str = module.WS_NAMESPACE,
 ) -> module.DucaheatWSClient:
     """Return a Ducaheat websocket client configured for tests."""
 
@@ -192,13 +192,13 @@ def test_websocket_client_default_namespace(monkeypatch: pytest.MonkeyPatch) -> 
     assert client._namespace == module.WS_NAMESPACE
 
 
-def test_ducaheat_client_uses_root_namespace(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify the Ducaheat client overrides the namespace to '/' by default."""
+def test_ducaheat_client_default_namespace(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify the Ducaheat client uses the API v2 namespace by default."""
 
     client = _make_ducaheat_client(monkeypatch)
-    assert client._namespace == "/"
-    assert ("dev_data", "/") in client._sio.events
-    assert ("disconnect", "/") in client._sio.events
+    assert client._namespace == module.WS_NAMESPACE
+    assert ("dev_data", module.WS_NAMESPACE) in client._sio.events
+    assert ("disconnect", module.WS_NAMESPACE) in client._sio.events
 
 
 def test_translate_path_update_parses_segments(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2032,7 +2032,6 @@ async def test_ducaheat_client_extended_logging(
         dev_id="device",
         api_client=DummyREST(),
         coordinator=SimpleNamespace(data={}, update_nodes=MagicMock()),
-        namespace="/",
     )
     client._sio.emit = AsyncMock()
     await client._on_connect()
@@ -2058,7 +2057,7 @@ async def test_ducaheat_connect_matches_reference(monkeypatch: pytest.MonkeyPatc
     connect_mock.assert_awaited_once_with(
         "https://api-tevolve.termoweb.net/api/v2/socket_io?token=abc&dev_id=device",
         transports=["websocket"],
-        namespaces=["/"],
+        namespaces=[module.WS_NAMESPACE],
         socketio_path="socket.io",
         wait=True,
         wait_timeout=15,
@@ -2220,10 +2219,10 @@ def test_ducaheat_connect_response_skips_repeat(
 
 
 @pytest.mark.asyncio
-async def test_ducaheat_on_connect_emits_root_namespace(
+async def test_ducaheat_on_connect_emits_namespace(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Validate connect handler joins the '/' namespace."""
+    """Validate connect handler joins and requests data on the API namespace."""
 
     client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     emit_mock = AsyncMock()
@@ -2231,7 +2230,10 @@ async def test_ducaheat_on_connect_emits_root_namespace(
 
     await client._on_connect()
 
-    assert emit_mock.await_args_list == [call("dev_data", namespace="/")]
+    assert emit_mock.await_args_list == [
+        call("join", namespace=module.WS_NAMESPACE),
+        call("dev_data", namespace=module.WS_NAMESPACE),
+    ]
 
 
 @pytest.mark.asyncio
@@ -2443,7 +2445,6 @@ async def test_ducaheat_client_delegates(monkeypatch: pytest.MonkeyPatch) -> Non
         dev_id="device",
         api_client=DummyREST(),
         coordinator=SimpleNamespace(data={}, update_nodes=MagicMock()),
-        namespace="/",
     )
     await client._on_dev_handshake({})
     await client._on_dev_data({"nodes": {}})
@@ -2461,7 +2462,6 @@ async def test_ducaheat_debug_logging(
         dev_id="device",
         api_client=DummyREST(),
         coordinator=SimpleNamespace(data={}, update_nodes=MagicMock()),
-        namespace="/",
     )
     await client._on_connect()
     await client._on_disconnect()
@@ -2477,7 +2477,11 @@ async def test_ducaheat_handles_root_namespace_event(
 ) -> None:
     """Ensure updates arriving on '/' still trigger handlers."""
 
-    client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    client = _make_ducaheat_client(
+        monkeypatch,
+        hass_loop=asyncio.get_event_loop(),
+        namespace="/",
+    )
     monkeypatch.setattr(
         module,
         "collect_heater_sample_addresses",

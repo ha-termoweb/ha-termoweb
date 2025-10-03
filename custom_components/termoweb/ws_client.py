@@ -1834,7 +1834,7 @@ class DucaheatWSClient(WebSocketClient):
         session: aiohttp.ClientSession | None = None,
         handshake_fail_threshold: int = 5,
         protocol: str | None = None,
-        namespace: str = "/",
+        namespace: str = WS_NAMESPACE,
     ) -> None:
         """Initialise the websocket client with extended debug logging."""
 
