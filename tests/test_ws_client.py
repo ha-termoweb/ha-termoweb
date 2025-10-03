@@ -1741,6 +1741,10 @@ async def test_ducaheat_connect_matches_reference(monkeypatch: pytest.MonkeyPatc
     connect_mock.assert_awaited_once_with(
         "https://api-tevolve.termoweb.net/api/v2/socket_io?token=abc&dev_id=device",
         transports=["websocket"],
+        namespaces=["/"],
+        socketio_path="socket.io",
+        wait=True,
+        wait_timeout=15,
     )
 
 
