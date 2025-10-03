@@ -549,10 +549,10 @@ async def async_import_energy_history(
         return
 
     if not target_pairs:
-        logger.debug("%s: no heater nodes selected for energy import", dev_id)
+        logger.debug("Energy import: no heater nodes selected for device")
         return
 
-    logger.debug("%s: importing hourly samples down to %s", dev_id, _iso_date(target))
+    logger.debug("Energy import: fetching hourly samples down to %s", _iso_date(target))
 
     async def _rate_limited_fetch(
         node_type: str, addr: str, start: int, stop: int
@@ -588,7 +588,9 @@ async def async_import_energy_history(
     ent_reg: er.EntityRegistry | None = registry_mod.async_get(hass)
     for node_type, addr in target_pairs:
         logger.debug(
-            "%s: importing history for %s %s", dev_id, node_type or "htr", addr
+            "Energy import: importing history for %s %s",
+            node_type or "htr",
+            addr,
         )
         all_samples: list[dict[str, Any]] = []
         start_ts = _progress_value(node_type, addr)
@@ -922,7 +924,9 @@ async def async_register_import_energy_history_service(
                     override = rec.get("node_inventory")
                     if override is not None:
                         inventory = list(override)
-                        snapshot.update_nodes(snapshot.raw_nodes, node_inventory=inventory)
+                        snapshot.update_nodes(
+                            snapshot.raw_nodes, node_inventory=inventory
+                        )
                     else:
                         inventory = snapshot.inventory
                         rec["node_inventory"] = list(inventory)

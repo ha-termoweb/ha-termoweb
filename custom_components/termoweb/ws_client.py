@@ -126,9 +126,7 @@ class WebSocketClient:
             handler=self._on_namespace_disconnect,
         )
         self._sio.on(
-            "dev_handshake",
-            namespace=self._namespace,
-            handler=self._on_dev_handshake,
+            "dev_handshake", namespace=self._namespace, handler=self._on_dev_handshake
         )
         self._sio.on("dev_data", namespace=self._namespace, handler=self._on_dev_data)
         self._sio.on("update", namespace=self._namespace, handler=self._on_update)
@@ -184,7 +182,7 @@ class WebSocketClient:
         """Start the websocket client background task."""
         if self._task and not self._task.done():
             return self._task
-        _LOGGER.debug("WS %s: start requested", self.dev_id)
+        _LOGGER.debug("WS: start requested")
         self._closing = False
         self._stop_event = asyncio.Event()
         self._handshake_logged = False
@@ -196,7 +194,7 @@ class WebSocketClient:
 
     async def stop(self) -> None:
         """Cancel tasks and close websocket sessions."""
-        _LOGGER.debug("WS %s: stop requested", self.dev_id)
+        _LOGGER.debug("WS: stop requested")
         self._closing = True
         self._stop_event.set()
         if self._idle_restart_task:
@@ -246,14 +244,11 @@ class WebSocketClient:
                     raise
                 except Exception as err:  # noqa: BLE001
                     _LOGGER.info(
-                        "WS %s: connection error (%s: %s); will retry",
-                        self.dev_id,
+                        "WS: connection error (%s: %s); will retry",
                         type(err).__name__,
                         err,
                     )
-                    _LOGGER.debug(
-                        "WS %s: connection error details", self.dev_id, exc_info=True
-                    )
+                    _LOGGER.debug("WS: connection error details", exc_info=True)
                 finally:
                     await self._disconnect(reason="loop cleanup")
                     if not self._closing:
@@ -275,9 +270,7 @@ class WebSocketClient:
         if self._stop_event.is_set():
             return
         url, engineio_path = await self._build_engineio_target()
-        _LOGGER.debug(
-            "WS %s: connecting to %s (path=%s)", self.dev_id, url, engineio_path
-        )
+        _LOGGER.debug("WS: connecting to %s (path=%s)", url, engineio_path)
         self._disconnected.clear()
         self._backoff_idx = 0
         await self._sio.connect(
@@ -295,8 +288,7 @@ class WebSocketClient:
         disconnect_task = self._loop.create_task(self._disconnected.wait())
         try:
             done, pending = await asyncio.wait(
-                [stop_task, disconnect_task],
-                return_when=asyncio.FIRST_COMPLETED,
+                [stop_task, disconnect_task], return_when=asyncio.FIRST_COMPLETED
             )
             for task in pending:
                 task.cancel()
@@ -319,12 +311,7 @@ class WebSocketClient:
             try:
                 await self._sio.disconnect()
             except Exception:  # noqa: BLE001
-                _LOGGER.debug(
-                    "WS %s: disconnect due to %s failed",
-                    self.dev_id,
-                    reason,
-                    exc_info=True,
-                )
+                _LOGGER.debug("WS: disconnect due to %s failed", reason, exc_info=True)
         self._disconnected.set()
 
     async def _build_engineio_target(self) -> tuple[str, str]:
@@ -350,7 +337,7 @@ class WebSocketClient:
     # ------------------------------------------------------------------
     async def _on_connect(self) -> None:
         """Handle socket connection establishment."""
-        _LOGGER.debug("WS %s: connected", self.dev_id)
+        _LOGGER.debug("WS: connected")
         now = time.time()
         self._connected_since = now
         self._healthy_since = None
@@ -366,11 +353,11 @@ class WebSocketClient:
             await self._sio.emit("join", namespace=self._namespace)
             await self._sio.emit("dev_data", namespace=self._namespace)
         except Exception:  # noqa: BLE001
-            _LOGGER.debug("WS %s: namespace join failed", self.dev_id, exc_info=True)
+            _LOGGER.debug("WS: namespace join failed", exc_info=True)
 
     async def _on_disconnect(self) -> None:
         """Handle socket disconnection."""
-        _LOGGER.debug("WS %s: disconnected", self.dev_id)
+        _LOGGER.debug("WS: disconnected")
         if self._idle_monitor_task:
             self._idle_monitor_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -382,43 +369,38 @@ class WebSocketClient:
 
     async def _on_reconnect(self) -> None:
         """Handle socket reconnection attempts."""
-        _LOGGER.debug("WS %s: reconnect event", self.dev_id)
+        _LOGGER.debug("WS: reconnect event")
         await self._subscribe_heater_samples()
 
     async def _on_connect_error(self, data: Any) -> None:
         """Log ``connect_error`` events with their payload."""
 
         if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS %s: connect_error payload: %s", self.dev_id, data)
+            _LOGGER.debug("WS: connect_error payload: %s", data)
 
     async def _on_error(self, data: Any) -> None:
         """Log socket.io ``error`` events with full details."""
 
         if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS %s: error event payload: %s", self.dev_id, data)
+            _LOGGER.debug("WS: error event payload: %s", data)
 
     async def _on_reconnect_failed(self, data: Any | None = None) -> None:
         """Log ``reconnect_failed`` events with the reported context."""
 
         if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS %s: reconnect_failed details: %s", self.dev_id, data)
+            _LOGGER.debug("WS: reconnect_failed details: %s", data)
 
     async def _on_namespace_disconnect(self, reason: Any | None = None) -> None:
         """Log namespace-level disconnect callbacks with their reason."""
 
         if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug(
-                "WS %s: namespace disconnect (%s): %s",
-                self.dev_id,
-                self._namespace,
-                reason,
-            )
+            _LOGGER.debug("WS: namespace disconnect (%s): %s", self._namespace, reason)
 
     async def _on_dev_handshake(self, data: Any) -> None:
         """Handle the ``dev_handshake`` payload."""
         self._stats.frames_total += 1
         if not self._handshake_logged and _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS %s: dev_handshake payload: %s", self.dev_id, data)
+            _LOGGER.debug("WS: dev_handshake payload: %s", data)
             self._handshake_logged = True
         self._handle_handshake(data)
 
@@ -446,11 +428,7 @@ class WebSocketClient:
                 continue
             idle_for = time.time() - last_event
             if idle_for >= self._payload_idle_window:
-                _LOGGER.info(
-                    "WS %s: idle for %.0fs; refreshing websocket lease",
-                    self.dev_id,
-                    idle_for,
-                )
+                _LOGGER.info("WS: idle for %.0fs; refreshing websocket lease", idle_for)
                 try:
                     await self._refresh_subscription(reason="idle monitor")
                 except asyncio.CancelledError:  # pragma: no cover - task lifecycle
@@ -464,8 +442,7 @@ class WebSocketClient:
             if self._subscription_refresh_failed:
                 # Retry quickly if the last scheduled renewal failed.
                 _LOGGER.info(
-                    "WS %s: retrying websocket lease after failure; idle for %.0fs",
-                    self.dev_id,
+                    "WS: retrying websocket lease after failure; idle for %.0fs",
                     idle_for,
                 )
                 try:
@@ -487,11 +464,7 @@ class WebSocketClient:
             now = time.time()
             self._subscription_refresh_last_attempt = now
             if _LOGGER.isEnabledFor(logging.INFO):
-                _LOGGER.info(
-                    "WS %s: refreshing websocket lease (%s)",
-                    self.dev_id,
-                    reason,
-                )
+                _LOGGER.info("WS: refreshing websocket lease (%s)", reason)
             await self._sio.emit("dev_data", namespace=self._namespace)
             await self._subscribe_heater_samples()
             self._subscription_refresh_failed = False
@@ -506,13 +479,11 @@ class WebSocketClient:
             self._handshake_payload = deepcopy(data)
             if _LOGGER.isEnabledFor(logging.DEBUG):
                 _LOGGER.debug(
-                    "WS %s: dev_handshake payload keys: %s",
-                    self.dev_id,
-                    ", ".join(sorted(data.keys())),
+                    "WS: dev_handshake payload keys: %s", ", ".join(sorted(data.keys()))
                 )
             self._update_status("connected")
         else:
-            _LOGGER.debug("WS %s: invalid handshake payload", self.dev_id)
+            _LOGGER.debug("WS: invalid handshake payload")
 
     def _handle_dev_data(self, data: Any) -> None:
         """Handle the first full snapshot of nodes from the websocket."""
@@ -528,34 +499,27 @@ class WebSocketClient:
         if nodes is None:
             nodes = self._translate_path_update(payload)
         if nodes is None:
-            _LOGGER.debug("WS %s: %s without nodes", self.dev_id, event)
+            _LOGGER.debug("WS: %s without nodes", event)
             return
         normaliser = getattr(self._client, "normalise_ws_nodes", None)
         if callable(normaliser):
             try:
                 nodes = normaliser(nodes)  # type: ignore[arg-type]
             except Exception:  # noqa: BLE001  # pragma: no cover - defensive logging only
-                _LOGGER.debug(
-                    "WS %s: normalise_ws_nodes failed; using raw payload", self.dev_id
-                )
+                _LOGGER.debug("WS: normalise_ws_nodes failed; using raw payload")
         if _LOGGER.isEnabledFor(logging.DEBUG):
             changed = self._collect_update_addresses(nodes)
             if merge:
                 if changed:
                     _LOGGER.debug(
-                        "WS %s: update event for %s",
-                        self.dev_id,
+                        "WS: update event for %s",
                         ", ".join(f"{node_type}/{addr}" for node_type, addr in changed),
                     )
                 else:
-                    _LOGGER.debug(
-                        "WS %s: update event without address changes", self.dev_id
-                    )
+                    _LOGGER.debug("WS: update event without address changes")
             else:
                 _LOGGER.debug(
-                    "WS %s: dev_data snapshot contains %d node groups",
-                    self.dev_id,
-                    len(nodes),
+                    "WS: dev_data snapshot contains %d node groups", len(nodes)
                 )
         sample_updates: dict[str, dict[str, Any]] = {}
         for node_type, type_payload in nodes.items():
@@ -634,9 +598,7 @@ class WebSocketClient:
         return {node_type: {target_section: {addr: payload_body}}}
 
     @staticmethod
-    def _resolve_update_section(
-        section: str | None,
-    ) -> tuple[str | None, str | None]:
+    def _resolve_update_section(section: str | None) -> tuple[str | None, str | None]:
         """Map a websocket path segment onto the node bucket name."""
 
         if not section:
@@ -667,9 +629,7 @@ class WebSocketClient:
                 {node_type: dict(section) for node_type, section in updates.items()},
             )
         except Exception:  # noqa: BLE001  # pragma: no cover - defensive logging
-            _LOGGER.debug(
-                "WS %s: forwarding heater samples failed", self.dev_id, exc_info=True
-            )
+            _LOGGER.debug("WS: forwarding heater samples failed", exc_info=True)
 
     def _extract_nodes(self, data: Any) -> dict[str, Any] | None:
         """Extract the nodes dictionary from a websocket payload."""
@@ -777,8 +737,7 @@ class WebSocketClient:
         )
         if unknown_types:  # pragma: no cover - diagnostic branch
             _LOGGER.debug(
-                "WS %s: unknown node types in inventory: %s",
-                self.dev_id,
+                "WS: unknown node types in inventory: %s",
                 ", ".join(sorted(unknown_types)),
             )
 
@@ -820,9 +779,7 @@ class WebSocketClient:
             """Fire the dispatcher signal with the latest node payload."""
 
             async_dispatcher_send(
-                self.hass,
-                signal_ws_data(self.entry_id),
-                payload_copy,
+                self.hass, signal_ws_data(self.entry_id), payload_copy
             )
 
         loop = getattr(self.hass, "loop", None)
@@ -835,10 +792,7 @@ class WebSocketClient:
         return {node_type: list(addrs) for node_type, addrs in addr_map.items()}
 
     def _ensure_type_bucket(
-        self,
-        dev_map: dict[str, Any],
-        nodes_by_type: dict[str, Any],
-        node_type: str,
+        self, dev_map: dict[str, Any], nodes_by_type: dict[str, Any], node_type: str
     ) -> dict[str, Any]:
         """Return the node bucket for ``node_type`` with default sections."""
         bucket = nodes_by_type.get(node_type)
@@ -912,12 +866,10 @@ class WebSocketClient:
 
         record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
         inventory, normalized_map, _ = collect_heater_sample_addresses(
-            record,
-            coordinator=self._coordinator,
+            record, coordinator=self._coordinator
         )
         normalized_map = self._apply_heater_addresses(
-            normalized_map,
-            inventory=inventory or None,
+            normalized_map, inventory=inventory or None
         )
         return heater_sample_subscription_targets(normalized_map)
 
@@ -934,9 +886,7 @@ class WebSocketClient:
         except asyncio.CancelledError:  # pragma: no cover - task lifecycle
             raise
         except Exception:  # noqa: BLE001 - defensive logging
-            _LOGGER.debug(
-                "WS %s: sample subscription setup failed", self.dev_id, exc_info=True
-            )
+            _LOGGER.debug("WS: sample subscription setup failed", exc_info=True)
 
     @staticmethod
     def _build_nodes_snapshot(nodes: dict[str, Any]) -> dict[str, Any]:
@@ -1040,10 +990,7 @@ class WebSocketClient:
             return
         self._idle_restart_pending = True
         _LOGGER.warning(
-            "WS %s: no payloads for %.0f s (%s heartbeat); restarting",
-            self.dev_id,
-            idle_for,
-            source,
+            "WS: no payloads for %.0f s (%s heartbeat); restarting", idle_for, source
         )
 
         async def _restart() -> None:
@@ -1206,16 +1153,22 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                     watchers_for_dev = hooks.get(dev_id_arg)
                     if watchers_for_dev:
                         for ws_client in list(watchers_for_dev):
-                            maybe = getattr(ws_client, "maybe_restart_after_write", None)
+                            maybe = getattr(
+                                ws_client, "maybe_restart_after_write", None
+                            )
                             if maybe is None or not callable(maybe):
                                 continue
                             try:
                                 await maybe()
-                            except asyncio.CancelledError:  # pragma: no cover - passthrough
+                            except (
+                                asyncio.CancelledError
+                            ):  # pragma: no cover - passthrough
                                 raise
                             except Exception:  # noqa: BLE001 - defensive logging
                                 _LOGGER.debug(
-                                    "WS %s: maybe_restart_after_write failed", ws_client.dev_id, exc_info=True
+                                    "WS: maybe_restart_after_write failed",
+                                    ws_client.dev_id,
+                                    exc_info=True,
                                 )
                         if not watchers_for_dev:
                             hooks.pop(dev_id_arg, None)
@@ -1239,7 +1192,8 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             return
         if _LOGGER.isEnabledFor(logging.INFO):
             _LOGGER.info(
-                "WS %s: write acknowledged after %.0f s without payloads; restarting", self.dev_id, idle_for
+                "WS: write acknowledged after %.0f s without payloads; restarting",
+                idle_for,
             )
         self._schedule_idle_restart(idle_for=idle_for, source="write notification")
 
@@ -1272,19 +1226,16 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         while not self._closing:
             should_retry = True
             try:
-                _LOGGER.debug("WS %s: initiating Socket.IO 0.9 handshake", self.dev_id)
+                _LOGGER.debug("WS: initiating Socket.IO 0.9 handshake")
                 sid, hb_timeout = await self._handshake()
                 _LOGGER.debug(
-                    "WS %s: handshake succeeded sid=%s hb_timeout=%s",
-                    self.dev_id,
-                    sid,
-                    hb_timeout,
+                    "WS: handshake succeeded sid=%s hb_timeout=%s", sid, hb_timeout
                 )
                 self._hs_fail_count = 0
                 self._hs_fail_start = 0.0
                 self._hb_send_interval = max(5.0, min(30.0, hb_timeout * 0.45))
                 await self._connect_ws(sid)
-                _LOGGER.debug("WS %s: websocket connection established", self.dev_id)
+                _LOGGER.debug("WS: websocket connection established")
                 await self._join_namespace()
                 await self._send_snapshot_request()
                 await self._subscribe_session_metadata()
@@ -1292,13 +1243,8 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 self._connected_since = time.time()
                 self._healthy_since = None
                 self._update_status("connected")
-                if (
-                    self._idle_monitor_task is None
-                    or self._idle_monitor_task.done()
-                ):
-                    _LOGGER.debug(
-                        "WS %s: starting legacy idle monitor", self.dev_id
-                    )
+                if self._idle_monitor_task is None or self._idle_monitor_task.done():
+                    _LOGGER.debug("WS: starting legacy idle monitor")
                     self._idle_monitor_task = self._loop.create_task(
                         self._idle_monitor()
                     )
@@ -1311,45 +1257,31 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 if self._hs_fail_count == 1:
                     self._hs_fail_start = time.time()
                 _LOGGER.info(
-                    "WS %s: connection error (%s: %s); will retry",
-                    self.dev_id,
-                    type(err).__name__,
-                    err,
+                    "WS: connection error (%s: %s); will retry", type(err).__name__, err
                 )
                 if self._hs_fail_count >= self._hs_fail_threshold:
                     elapsed = time.time() - self._hs_fail_start
                     _LOGGER.warning(
-                        "WS %s: handshake failed %d times over %.1f s",
-                        self.dev_id,
+                        "WS: handshake failed %d times over %.1f s",
                         self._hs_fail_count,
                         elapsed,
                     )
                     self._hs_fail_count = 0
                     self._hs_fail_start = 0.0
                 _LOGGER.debug(
-                    "WS %s: handshake error url=%s body=%r",
-                    self.dev_id,
-                    err.url,
-                    err.body_snippet,
+                    "WS: handshake error url=%s body=%r", err.url, err.body_snippet
                 )
             except Exception as err:  # noqa: BLE001
                 _LOGGER.info(
-                    "WS %s: connection error (%s: %s); will retry",
-                    self.dev_id,
-                    type(err).__name__,
-                    err,
+                    "WS: connection error (%s: %s); will retry", type(err).__name__, err
                 )
-                _LOGGER.debug(
-                    "WS %s: connection error details", self.dev_id, exc_info=True
-                )
+                _LOGGER.debug("WS: connection error details", exc_info=True)
             finally:
                 if self._hb_task:
                     self._hb_task.cancel()
                     self._hb_task = None
                 if self._idle_monitor_task:
-                    _LOGGER.debug(
-                        "WS %s: stopping legacy idle monitor", self.dev_id
-                    )
+                    _LOGGER.debug("WS: stopping legacy idle monitor")
                     self._idle_monitor_task.cancel()
                     if hasattr(self._idle_monitor_task, "__await__"):
                         with suppress(asyncio.CancelledError):
@@ -1384,9 +1316,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 ) as resp:
                     body = await resp.text()
                     if resp.status == 401:
-                        _LOGGER.info(
-                            "WS %s: handshake 401; refreshing token", self.dev_id
-                        )
+                        _LOGGER.info("WS: handshake 401; refreshing token")
                         await self._force_refresh_token()
                         raise HandshakeError(resp.status, url, body)
                     if resp.status != 200:
@@ -1413,7 +1343,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             f"{self._socket_base()}/socket.io/1/websocket/{sid}"
             f"?token={token}&dev_id={self.dev_id}"
         )
-        _LOGGER.info("WS %s: connecting to %s", self.dev_id, ws_url)
+        _LOGGER.info("WS: connecting to %s", ws_url)
         self._ws = await self._session.ws_connect(
             ws_url,
             timeout=aiohttp.ClientTimeout(total=15),
@@ -1483,9 +1413,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 continue
             if data.startswith(f"5::{self._namespace}:"):
                 try:
-                    payload = json.loads(
-                        data.split(f"5::{self._namespace}:", 1)[1]
-                    )
+                    payload = json.loads(data.split(f"5::{self._namespace}:", 1)[1])
                 except Exception:  # noqa: BLE001
                     continue
                 self._handle_event(payload)
@@ -1694,13 +1622,9 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         addr_pairs = {f"{node_type}/{addr}" for node_type, addr in updated_addrs}
         addr_pairs.update(f"{node_type}/{addr}" for node_type, addr in sample_addrs)
         if addr_pairs:
-            _LOGGER.debug(
-                "WS %s: legacy update for %s",
-                self.dev_id,
-                ", ".join(sorted(addr_pairs)),
-            )
+            _LOGGER.debug("WS: legacy update for %s", ", ".join(sorted(addr_pairs)))
         elif updated_nodes:
-            _LOGGER.debug("WS %s: legacy nodes refresh", self.dev_id)
+            _LOGGER.debug("WS: legacy nodes refresh")
 
     async def _refresh_subscription(self, *, reason: str) -> None:
         """Replay subscription calls to keep the legacy websocket active."""
@@ -1711,11 +1635,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 raise RuntimeError("websocket not connected")
             now = time.time()
             self._subscription_refresh_last_attempt = now
-            _LOGGER.info(
-                "WS %s: refreshing websocket lease (%s)",
-                self.dev_id,
-                reason,
-            )
+            _LOGGER.info("WS: refreshing websocket lease (%s)", reason)
             try:
                 await self._send_snapshot_request()
                 await self._subscribe_session_metadata()
@@ -1725,15 +1645,13 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             except Exception as err:
                 self._subscription_refresh_failed = True
                 _LOGGER.warning(
-                    "WS %s: legacy lease refresh failed (%s: %s)",
-                    self.dev_id,
+                    "WS: legacy lease refresh failed (%s: %s)",
                     type(err).__name__,
                     err,
                     exc_info=True,
                 )
                 self._schedule_idle_restart(
-                    idle_for=self._payload_idle_window,
-                    source="lease refresh failure",
+                    idle_for=self._payload_idle_window, source="lease refresh failure"
                 )
                 raise
             self._subscription_refresh_failed = False
@@ -1752,16 +1670,12 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         if self._ws:
             with suppress(aiohttp.ClientError, RuntimeError):
                 await self._ws.close(
-                    code=aiohttp.WSCloseCode.GOING_AWAY,
-                    message=reason.encode(),
+                    code=aiohttp.WSCloseCode.GOING_AWAY, message=reason.encode()
                 )
             self._ws = None
 
     async def _ws_payload_stream(
-        self,
-        ws: aiohttp.ClientWebSocketResponse,
-        *,
-        context: str,
+        self, ws: aiohttp.ClientWebSocketResponse, *, context: str
     ) -> AsyncIterator[str]:
         """Yield websocket payload strings."""
 
@@ -1807,8 +1721,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 idle_for = now - last_payload
                 if idle_for >= self._payload_idle_window:
                     _LOGGER.info(
-                        "WS %s: no payloads for %.0f s; scheduling websocket restart",
-                        self.dev_id,
+                        "WS: no payloads for %.0f s; scheduling websocket restart",
                         idle_for,
                     )
                     self._schedule_idle_restart(
@@ -1825,8 +1738,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                         idle_for if idle_for is not None else self._payload_idle_window
                     )
                     self._schedule_idle_restart(
-                        idle_for=fallback_idle,
-                        source="idle monitor retry failed",
+                        idle_for=fallback_idle, source="idle monitor retry failed"
                     )
                     break
 
@@ -1904,7 +1816,7 @@ class DucaheatWSClient(WebSocketClient):
             params=query_params,
             headers=headers if isinstance(headers, Mapping) else {},
         )
-        _LOGGER.debug("WS %s (ducaheat): connecting to %s", self.dev_id, url)
+        _LOGGER.debug("WS (ducaheat): connecting to %s", url)
 
         self._disconnected.clear()
         self._backoff_idx = 0
@@ -1973,17 +1885,14 @@ class DucaheatWSClient(WebSocketClient):
         if not _LOGGER.isEnabledFor(logging.DEBUG):
             return
         _LOGGER.debug(
-            "WS %s (ducaheat): connect target base=%s path=%s params=%s",
-            self.dev_id,
+            "WS (ducaheat): connect target base=%s path=%s params=%s",
             base,
             socket_path,
             self._sanitise_params(params),
         )
         if headers:
             _LOGGER.debug(
-                "WS %s (ducaheat): request headers=%s",
-                self.dev_id,
-                self._sanitise_headers(headers),
+                "WS (ducaheat): request headers=%s", self._sanitise_headers(headers)
             )
 
     def _log_connect_response(self) -> None:
@@ -1997,52 +1906,34 @@ class DucaheatWSClient(WebSocketClient):
         sio = self._sio
         url = getattr(sio, "connection_url", None)
         if url:
-            _LOGGER.debug("WS %s (ducaheat): connected URL=%s", self.dev_id, url)
+            _LOGGER.debug("WS (ducaheat): connected URL=%s", url)
         headers = getattr(sio, "connection_headers", None)
         if isinstance(headers, Mapping) and headers:
             _LOGGER.debug(
-                "WS %s (ducaheat): connection headers=%s",
-                self.dev_id,
-                self._sanitise_headers(headers),
+                "WS (ducaheat): connection headers=%s", self._sanitise_headers(headers)
             )
         transports = getattr(sio, "connection_transports", None)
         if transports:
-            _LOGGER.debug(
-                "WS %s (ducaheat): connection transports=%s",
-                self.dev_id,
-                transports,
-            )
+            _LOGGER.debug("WS (ducaheat): connection transports=%s", transports)
         namespaces = getattr(sio, "connection_namespaces", None)
         if namespaces:
-            _LOGGER.debug(
-                "WS %s (ducaheat): connection namespaces=%s",
-                self.dev_id,
-                namespaces,
-            )
+            _LOGGER.debug("WS (ducaheat): connection namespaces=%s", namespaces)
         eio = getattr(sio, "eio", None)
         if eio is None:
             return
         sid = getattr(eio, "sid", None)
         if sid:
-            _LOGGER.debug("WS %s (ducaheat): engine.io sid=%s", self.dev_id, sid)
+            _LOGGER.debug("WS (ducaheat): engine.io sid=%s", sid)
         transport = getattr(eio, "transport", None)
         if transport:
-            _LOGGER.debug(
-                "WS %s (ducaheat): engine.io transport=%s",
-                self.dev_id,
-                transport,
-            )
+            _LOGGER.debug("WS (ducaheat): engine.io transport=%s", transport)
         ws = getattr(eio, "ws", None)
         response = getattr(ws, "response", None) if ws is not None else None
         if response is None:
             return
         status = getattr(response, "status", None)
         if status is not None:
-            _LOGGER.debug(
-                "WS %s (ducaheat): websocket handshake status=%s",
-                self.dev_id,
-                status,
-            )
+            _LOGGER.debug("WS (ducaheat): websocket handshake status=%s", status)
         resp_headers = getattr(response, "headers", None)
         if resp_headers:
             try:
@@ -2050,8 +1941,7 @@ class DucaheatWSClient(WebSocketClient):
             except (TypeError, ValueError):
                 header_map = {"raw": str(resp_headers)}
             _LOGGER.debug(
-                "WS %s (ducaheat): websocket response headers=%s",
-                self.dev_id,
+                "WS (ducaheat): websocket response headers=%s",
                 self._sanitise_headers(header_map),
             )
 
@@ -2069,24 +1959,23 @@ class DucaheatWSClient(WebSocketClient):
     async def _on_connect(self) -> None:
         """Log connect events before delegating to the base implementation."""
         if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS %s (ducaheat): connected", self.dev_id)
+            _LOGGER.debug("WS (ducaheat): connected")
             self._log_connect_response()
         await super()._on_connect()
 
     async def _on_disconnect(self) -> None:
         """Log disconnect events before delegating."""
         if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS %s (ducaheat): disconnected", self.dev_id)
+            _LOGGER.debug("WS (ducaheat): disconnected")
         self._connect_response_logged = False
         await super()._on_disconnect()
 
     async def _on_dev_handshake(self, data: Any) -> None:
         """Log handshake payloads prior to standard handling."""
         if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS %s (ducaheat): handshake payload: %s", self.dev_id, data)
+            _LOGGER.debug("WS (ducaheat): handshake payload: %s", data)
             _LOGGER.debug(
-                "WS %s (ducaheat): handshake payload detail: %s",
-                self.dev_id,
+                "WS (ducaheat): handshake payload detail: %s",
                 json.dumps(data, default=str),
             )
         await super()._on_dev_handshake(data)
@@ -2095,13 +1984,9 @@ class DucaheatWSClient(WebSocketClient):
         """Log initial dev_data snapshots with condensed address details."""
         if _LOGGER.isEnabledFor(logging.DEBUG):
             summary = self._summarise_addresses(data)
+            _LOGGER.debug("WS (ducaheat): dev_data addresses: %s", summary)
             _LOGGER.debug(
-                "WS %s (ducaheat): dev_data addresses: %s", self.dev_id, summary
-            )
-            _LOGGER.debug(
-                "WS %s (ducaheat): dev_data payload: %s",
-                self.dev_id,
-                json.dumps(data, default=str),
+                "WS (ducaheat): dev_data payload: %s", json.dumps(data, default=str)
             )
         await super()._on_dev_data(data)
 
@@ -2109,13 +1994,9 @@ class DucaheatWSClient(WebSocketClient):
         """Log incremental update payloads with condensed address details."""
         if _LOGGER.isEnabledFor(logging.DEBUG):
             summary = self._summarise_addresses(data)
+            _LOGGER.debug("WS (ducaheat): update addresses: %s", summary)
             _LOGGER.debug(
-                "WS %s (ducaheat): update addresses: %s", self.dev_id, summary
-            )
-            _LOGGER.debug(
-                "WS %s (ducaheat): update payload: %s",
-                self.dev_id,
-                json.dumps(data, default=str),
+                "WS (ducaheat): update payload: %s", json.dumps(data, default=str)
             )
         await super()._on_update(data)
 
