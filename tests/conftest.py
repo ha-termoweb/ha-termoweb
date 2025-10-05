@@ -522,6 +522,19 @@ def _install_stubs() -> None:
             self.options = dict(options or {})
             self.unique_id: str | None = None
             self.title: str = ""
+            self._on_unload: list[Callable[[], None]] = []
+
+        def async_on_unload(self, func: Callable[[], None]) -> Callable[[], None]:
+            self._on_unload.append(func)
+            return func
+
+        def _call_unload_callbacks(self) -> None:
+            while self._on_unload:
+                callback = self._on_unload.pop()
+                try:
+                    callback()
+                except Exception:  # noqa: BLE001 - defensive logging
+                    pass
 
     class _SimpleConfigEntries:
         def __init__(self) -> None:
@@ -563,6 +576,7 @@ def _install_stubs() -> None:
             self, entry: ConfigEntry, platforms: list[str] | tuple[str, ...]
         ) -> bool:
             self.unloaded.append((entry, tuple(platforms)))
+            entry._call_unload_callbacks()
             return True
 
     class _ServiceRegistry:
@@ -587,8 +601,24 @@ def _install_stubs() -> None:
         def __init__(self) -> None:
             self.listeners: list[tuple[str, Callable[[Any], Any]]] = []
 
-        def async_listen_once(self, event: str, callback: Callable[[Any], Any]) -> None:
-            self.listeners.append((event, callback))
+        def async_listen_once(
+            self, event: str, callback: Callable[[Any], Any]
+        ) -> Callable[[], None]:
+            def _remove() -> None:
+                try:
+                    self.listeners.remove((event, wrapped))
+                except ValueError:
+                    pass
+
+            async def wrapped(payload: Any) -> Any:
+                _remove()
+                result = callback(payload)
+                if inspect.isawaitable(result):
+                    return await result
+                return result
+
+            self.listeners.append((event, wrapped))
+            return _remove
 
     class HomeAssistant:
         def __init__(self) -> None:

@@ -1,12 +1,14 @@
+"""Home Assistant entry point for the TermoWeb integration."""
+
 from __future__ import annotations
 
 import asyncio
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Awaitable, Iterable, Mapping, MutableMapping
 from datetime import datetime as _datetime, timedelta
 import logging
 import time as _time
-from typing import Any, Awaitable
+from typing import Any
 
 from aiohttp import ClientError
 from homeassistant.config_entries import ConfigEntry
@@ -18,7 +20,6 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from . import energy as energy_module
 from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend import Backend, DucaheatRESTClient, WsClientProto, create_backend
-
 from .const import (
     BRAND_DUCAHEAT,
     CONF_BRAND,
@@ -53,6 +54,11 @@ from .nodes import (
 )
 from .utils import async_get_integration_version as _async_get_integration_version
 
+try:  # pragma: no cover - fallback for test stubs
+    from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+except ImportError:  # pragma: no cover - tests provide a minimal const module
+    EVENT_HOMEASSISTANT_STOP = "homeassistant_stop"
+
 HEATER_NODE_TYPES = _HEATER_NODE_TYPES
 
 OPTION_ENERGY_HISTORY_IMPORTED = ENERGY_OPTION_ENERGY_HISTORY_IMPORTED
@@ -66,14 +72,16 @@ normalize_heater_addresses = _normalize_heater_addresses
 
 EVENT_HOMEASSISTANT_STARTED = energy_module.EVENT_HOMEASSISTANT_STARTED
 er = energy_module.er
-_iso_date = energy_module._iso_date
-_store_statistics = energy_module._store_statistics
-_statistics_during_period_compat = energy_module._statistics_during_period_compat
-_get_last_statistics_compat = energy_module._get_last_statistics_compat
-_clear_statistics_compat = energy_module._clear_statistics_compat
+_iso_date = energy_module._iso_date  # noqa: SLF001
+_store_statistics = energy_module._store_statistics  # noqa: SLF001
+_statistics_during_period_compat = (
+    energy_module._statistics_during_period_compat  # noqa: SLF001
+)
+_get_last_statistics_compat = energy_module._get_last_statistics_compat  # noqa: SLF001
+_clear_statistics_compat = energy_module._clear_statistics_compat  # noqa: SLF001
 
 # Re-export legacy WS client for backward compatibility (tests may patch it).
-from .ws_client import TermoWebWSClient  # noqa: F401
+from .ws_client import TermoWebWSClient  # noqa: F401,E402
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -213,6 +221,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "brand": brand,
         "debug": debug_enabled,
     }
+
+    async def _async_handle_hass_stop(_event: Any) -> None:
+        """Stop background activity gracefully when Home Assistant stops."""
+
+        await _async_shutdown_entry(data)
+
+    remove_stop_listener = hass.bus.async_listen_once(
+        EVENT_HOMEASSISTANT_STOP, _async_handle_hass_stop
+    )
+    entry.async_on_unload(remove_stop_listener)
 
     async def _start_ws(dev_id: str) -> None:
         """Ensure a websocket client exists and is running for ``dev_id``."""
@@ -369,7 +387,7 @@ async def async_register_ws_debug_probe_service(hass: HomeAssistant) -> None:
             if dev_filter:
                 target_dev_ids: Iterable[str] = [str(dev_filter)]
             else:
-                target_dev_ids = [str(dev) for dev in clients.keys()]
+                target_dev_ids = [str(dev) for dev in clients]
             for dev_id in target_dev_ids:
                 client = clients.get(dev_id)
                 if client is None:
@@ -425,6 +443,59 @@ async def async_register_ws_debug_probe_service(hass: HomeAssistant) -> None:
     )
 
 
+async def _async_shutdown_entry(rec: MutableMapping[str, Any]) -> None:
+    """Cancel websocket tasks and listeners for an integration record."""
+
+    if not isinstance(rec, MutableMapping):
+        return
+
+    if rec.get("_shutdown_complete"):
+        return
+
+    rec["_shutdown_complete"] = True
+
+    ws_tasks = rec.get("ws_tasks")
+    if isinstance(ws_tasks, Mapping):
+        for dev_id, task in list(ws_tasks.items()):
+            cancel = getattr(task, "cancel", None)
+            if callable(cancel):
+                try:
+                    cancel()
+                except Exception:  # pragma: no cover - defensive logging
+                    _LOGGER.exception(
+                        "WS task for %s raised during cancel", dev_id
+                    )
+                    continue
+            if hasattr(task, "__await__"):
+                try:
+                    await task  # type: ignore[func-returns-value]
+                except asyncio.CancelledError:
+                    pass
+                except Exception:  # pragma: no cover - defensive logging
+                    _LOGGER.exception(
+                        "WS task for %s failed to cancel cleanly", dev_id
+                    )
+
+    ws_clients = rec.get("ws_clients")
+    if isinstance(ws_clients, Mapping):
+        for dev_id, client in list(ws_clients.items()):
+            stop = getattr(client, "stop", None)
+            if not callable(stop):
+                continue
+            try:
+                await stop()
+            except Exception:  # pragma: no cover - defensive logging
+                _LOGGER.exception("WS client for %s failed to stop", dev_id)
+
+    unsub = rec.get("unsub_ws_status")
+    if callable(unsub):
+        try:
+            unsub()
+        except Exception:  # pragma: no cover - defensive logging
+            _LOGGER.exception("Failed to unsubscribe websocket status listener")
+        rec["unsub_ws_status"] = None
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry for TermoWeb."""
     domain_data = hass.data.get(DOMAIN)
@@ -432,24 +503,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not rec:
         return True
 
-    # Cancel WS tasks and close clients
-    for dev_id, task in list(rec.get("ws_tasks", {}).items()):
-        try:
-            task.cancel()
-            await task
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            _LOGGER.exception("WS task for %s failed to cancel cleanly", dev_id)
-
-    for dev_id, client in list(rec.get("ws_clients", {}).items()):
-        try:
-            await client.stop()
-        except Exception:
-            _LOGGER.exception("WS client for %s failed to stop", dev_id)
-
-    if "unsub_ws_status" in rec and callable(rec["unsub_ws_status"]):
-        rec["unsub_ws_status"]()
+    await _async_shutdown_entry(rec)
 
     ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 

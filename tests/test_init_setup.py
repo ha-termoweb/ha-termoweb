@@ -372,8 +372,11 @@ def test_async_setup_entry_defers_until_started(
         await _drain_tasks(stub_hass)
         assert not import_mock.await_count
         assert stub_hass.bus.listeners
-        event, callback = stub_hass.bus.listeners[0]
-        assert event == termoweb_init.EVENT_HOMEASSISTANT_STARTED
+        callback = next(
+            cb
+            for event, cb in stub_hass.bus.listeners
+            if event == termoweb_init.EVENT_HOMEASSISTANT_STARTED
+        )
         await callback(None)
         await _drain_tasks(stub_hass)
 
@@ -953,6 +956,46 @@ def test_async_unload_entry_handles_task_and_client_errors(
         assert entry.entry_id not in stub_hass.data.get(termoweb_init.DOMAIN, {})
 
     asyncio.run(_run())
+
+
+def test_async_setup_entry_cleans_up_on_hass_stop(
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class HappyClient(BaseFakeClient):
+        async def list_devices(self) -> list[dict[str, Any]]:
+            return [{"dev_id": "dev-stop"}]
+
+    monkeypatch.setattr(termoweb_init, "RESTClient", HappyClient)
+    entry = ConfigEntry("stop", data={"username": "user", "password": "pw"})
+    stub_hass.config_entries.add(entry)
+
+    async def _run() -> tuple[int, bool, bool]:
+        assert await termoweb_init.async_setup_entry(stub_hass, entry)
+        await _drain_tasks(stub_hass)
+
+        listeners = [
+            cb
+            for event, cb in stub_hass.bus.listeners
+            if event == termoweb_init.EVENT_HOMEASSISTANT_STOP
+        ]
+        assert listeners
+
+        record = termoweb_init._test_helpers.get_record(stub_hass, entry)
+        ws_task = next(iter(record["ws_tasks"].values()))
+        client = next(iter(record["ws_clients"].values()))
+
+        await listeners[0](None)
+
+        return (
+            client.stop_calls,
+            ws_task.cancelled() or ws_task.done(),
+            record.get("_shutdown_complete", False),
+        )
+
+    stop_calls, cancelled, shutdown_flag = asyncio.run(_run())
+    assert stop_calls == 1
+    assert cancelled is True
+    assert shutdown_flag is True
 
 
 def test_async_unload_entry_cleans_up(
