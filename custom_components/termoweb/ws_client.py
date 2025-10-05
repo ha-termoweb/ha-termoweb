@@ -211,6 +211,89 @@ class WebSocketClient:
             headers["Origin"] = origin
         return headers
 
+    def _redact_value(self, value: str) -> str:
+        """Return a redacted representation of sensitive values."""
+
+        trimmed = value.strip()
+        if not trimmed:
+            return ""
+        if len(trimmed) <= 4:
+            return "***"
+        if len(trimmed) <= 8:
+            return f"{trimmed[:2]}***{trimmed[-2:]}"
+        return f"{trimmed[:4]}...{trimmed[-4:]}"
+
+    def _mask_identifier(self, value: str) -> str:
+        """Return a partially masked identifier for log output."""
+
+        trimmed = value.strip()
+        if not trimmed:
+            return ""
+        if len(trimmed) <= 4:
+            return "***"
+        if len(trimmed) <= 8:
+            return f"{trimmed[:2]}...{trimmed[-2:]}"
+        prefix = trimmed[:6]
+        suffix = trimmed[-4:]
+        return f"{prefix}...{suffix}"
+
+    def _sanitise_headers(self, headers: Mapping[str, Any]) -> dict[str, Any]:
+        """Redact sensitive header values for logging."""
+
+        sanitised: dict[str, Any] = {}
+        for key, value in headers.items():
+            text: str
+            if isinstance(value, bytes):
+                text = value.decode(errors="ignore")
+            else:
+                text = str(value)
+            if key.lower() == "authorization":
+                prefix, _, token = text.partition(" ")
+                if token:
+                    text = f"{prefix} {self._redact_value(token)}".strip()
+                else:
+                    text = self._redact_value(text)
+            elif key.lower() in {"cookie", "set-cookie"}:
+                text = self._redact_value(text)
+            sanitised[key] = text
+        return sanitised
+
+    def _sanitise_params(self, params: Mapping[str, str]) -> dict[str, str]:
+        """Redact sensitive query parameter values for logging."""
+
+        sanitised: dict[str, str] = {}
+        for key, value in params.items():
+            if key == "token":
+                sanitised[key] = self._redact_value(str(value))
+            elif key == "dev_id":
+                sanitised[key] = self._mask_identifier(str(value))
+            else:
+                sanitised[key] = value
+        return sanitised
+
+    def _sanitise_url(self, url: str) -> str:
+        """Return a redacted representation of the websocket URL."""
+
+        try:
+            parsed = urlsplit(url)
+        except ValueError:
+            return url
+        query_items = parse_qsl(parsed.query, keep_blank_values=True)
+        sanitised_pairs = [
+            (
+                key,
+                self._redact_value(value)
+                if key == "token"
+                else self._mask_identifier(value)
+                if key == "dev_id"
+                else value,
+            )
+            for key, value in query_items
+        ]
+        sanitised_query = urlencode(sanitised_pairs, doseq=True)
+        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, sanitised_query, parsed.fragment))
+
+
     # ------------------------------------------------------------------
     # Public control
     # ------------------------------------------------------------------
@@ -2061,90 +2144,6 @@ class DucaheatWSClient(WebSocketClient):
         url, _ = await self._build_engineio_target()
         return url
 
-
-    def _redact_value(self, value: str) -> str:
-        """Return a redacted representation of sensitive values."""
-
-        trimmed = value.strip()
-        if not trimmed:
-            return ""
-        if len(trimmed) <= 4:
-            return "***"
-        if len(trimmed) <= 8:
-            return f"{trimmed[:2]}***{trimmed[-2:]}"
-        return f"{trimmed[:4]}...{trimmed[-4:]}"
-
-    def _mask_identifier(self, value: str) -> str:
-        """Return a partially masked identifier for log output."""
-
-        trimmed = value.strip()
-        if not trimmed:
-            return ""
-        if len(trimmed) <= 4:
-            return "***"
-        if len(trimmed) <= 8:
-            return f"{trimmed[:2]}...{trimmed[-2:]}"
-        prefix = trimmed[:6]
-        suffix = trimmed[-4:]
-        return f"{prefix}...{suffix}"
-
-    def _sanitise_headers(self, headers: Mapping[str, Any]) -> dict[str, Any]:
-        """Redact sensitive header values for logging."""
-
-        sanitised: dict[str, Any] = {}
-        for key, value in headers.items():
-            text: str
-            if isinstance(value, bytes):
-                text = value.decode(errors="ignore")
-            else:
-                text = str(value)
-            if key.lower() == "authorization":
-                prefix, _, token = text.partition(" ")
-                if token:
-                    text = f"{prefix} {self._redact_value(token)}".strip()
-                else:
-                    text = self._redact_value(text)
-            elif key.lower() in {"cookie", "set-cookie"}:
-                text = self._redact_value(text)
-            sanitised[key] = text
-        return sanitised
-
-    def _sanitise_params(self, params: Mapping[str, str]) -> dict[str, str]:
-        """Redact sensitive query parameter values for logging."""
-
-        sanitised: dict[str, str] = {}
-        for key, value in params.items():
-            if key == "token":
-                sanitised[key] = self._redact_value(str(value))
-            elif key == "dev_id":
-                sanitised[key] = self._mask_identifier(str(value))
-            else:
-                sanitised[key] = value
-        return sanitised
-
-    def _sanitise_url(self, url: str) -> str:
-        """Return a redacted representation of the websocket URL."""
-
-        try:
-            parsed = urlsplit(url)
-        except ValueError:
-            return url
-        query_items = parse_qsl(parsed.query, keep_blank_values=True)
-        sanitised_pairs = [
-            (
-                key,
-                self._redact_value(value)
-                if key == "token"
-                else self._mask_identifier(value)
-                if key == "dev_id"
-                else value,
-            )
-            for key, value in query_items
-        ]
-        sanitised_query = urlencode(sanitised_pairs, doseq=True)
-        return urlunsplit(
-            (parsed.scheme, parsed.netloc, parsed.path, sanitised_query, parsed.fragment)
-        )
 
     def _log_connect_request(
         self,
