@@ -661,11 +661,17 @@ async def test_ws_url_and_engineio_target(monkeypatch: pytest.MonkeyPatch) -> No
     client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
 
     ws_url = await client.ws_url()
-    assert ws_url == "https://api.example.com/socket.io?token=token&dev_id=device"
+    assert (
+        ws_url
+        == "https://api-tevolve.termoweb.net/api/v2/socket_io?token=token&dev_id=device"
+    )
 
     base, path = await client._build_engineio_target()
-    assert base == "https://api.example.com/socket.io?token=token&dev_id=device"
-    assert path == "socket.io"
+    assert (
+        base
+        == "https://api-tevolve.termoweb.net/api/v2/socket_io?token=token&dev_id=device"
+    )
+    assert path == "api/v2/socket_io"
 
 
 @pytest.mark.asyncio
@@ -683,11 +689,17 @@ async def test_ws_url_appends_missing_api_version(
     )
 
     ws_url = await client.ws_url()
-    assert ws_url == "https://api.example.com/socket.io?token=token&dev_id=device"
+    assert (
+        ws_url
+        == "https://api-tevolve.termoweb.net/api/v2/socket_io?token=token&dev_id=device"
+    )
 
     base, path = await client._build_engineio_target()
-    assert base == "https://api.example.com/socket.io?token=token&dev_id=device"
-    assert path == "socket.io"
+    assert (
+        base
+        == "https://api-tevolve.termoweb.net/api/v2/socket_io?token=token&dev_id=device"
+    )
+    assert path == "api/v2/socket_io"
 
 
 @pytest.mark.asyncio
@@ -775,7 +787,7 @@ def test_ducaheat_socket_base_requires_hostname(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _make_ducaheat_client(monkeypatch)
-    client._api_base = lambda: "http://"
+    monkeypatch.setattr(module, "get_brand_api_base", lambda brand: "http://")
 
     with pytest.raises(RuntimeError, match="invalid API base"):
         client._ducaheat_socket_base()
@@ -2654,7 +2666,12 @@ async def test_ducaheat_connect_matches_reference(
     client._stop_event = asyncio.Event()
     monkeypatch.setattr(client, "_get_token", AsyncMock(return_value="abc"))
     monkeypatch.setattr(
-        client, "_api_base", lambda: "https://api-tevolve.termoweb.net/api/v2"
+        module,
+        "get_brand_api_base",
+        lambda brand: "https://api-tevolve.termoweb.net",
+    )
+    monkeypatch.setattr(
+        module, "get_brand_socketio_path", lambda brand: "api/v2/socket_io"
     )
     connect_mock = AsyncMock()
     client._sio.connect = connect_mock
@@ -2664,12 +2681,12 @@ async def test_ducaheat_connect_matches_reference(
     assert connect_mock.await_count == 1
     args, kwargs = connect_mock.await_args
     assert args == (
-        "https://api-tevolve.termoweb.net/socket.io?token=abc&dev_id=device",
+        "https://api-tevolve.termoweb.net?token=abc&dev_id=device",
     )
     assert kwargs["headers"] == client._brand_headers(origin="https://localhost")
-    assert kwargs["transports"] == ["polling", "websocket"]
+    assert kwargs["transports"] == ["websocket"]
     assert kwargs["namespaces"] == [module.WS_NAMESPACE]
-    assert kwargs["socketio_path"] == "socket.io"
+    assert kwargs["socketio_path"] == "api/v2/socket_io"
     assert kwargs["wait"] is True
     assert kwargs["wait_timeout"] == 15
 
@@ -2681,13 +2698,21 @@ async def test_ducaheat_build_engineio_target(monkeypatch: pytest.MonkeyPatch) -
     client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     monkeypatch.setattr(client, "_get_token", AsyncMock(return_value="TOKEN"))
     monkeypatch.setattr(
-        client, "_api_base", lambda: "https://api-tevolve.termoweb.net/api/v2"
+        module,
+        "get_brand_api_base",
+        lambda brand: "https://api-tevolve.termoweb.net",
+    )
+    monkeypatch.setattr(
+        module, "get_brand_socketio_path", lambda brand: "api/v2/socket_io"
     )
 
     url, path = await client._build_engineio_target()
 
-    assert url == "https://api-tevolve.termoweb.net/socket.io?token=TOKEN&dev_id=device"
-    assert path == "socket.io"
+    assert (
+        url
+        == "https://api-tevolve.termoweb.net/api/v2/socket_io?token=TOKEN&dev_id=device"
+    )
+    assert path == "api/v2/socket_io"
 
 
 @pytest.mark.asyncio
@@ -2726,7 +2751,9 @@ async def test_ducaheat_connect_logs_request_details(
     messages = "\n".join(record.getMessage() for record in caplog.records)
     assert "request headers" in messages
     assert "connect target base" in messages
-    assert "to***en" in messages
+    assert "socketio_path=api/v2/socket_io" in messages
+    assert "token=to***en" in messages
+    assert "dev_id=de...ce" in messages
     connect_mock.assert_awaited_once()
 
 
@@ -2738,7 +2765,9 @@ def test_ducaheat_connect_response_logging(
     client = _make_ducaheat_client(monkeypatch)
     caplog.set_level(logging.DEBUG)
     client._connect_response_logged = False
-    client._sio.connection_url = "https://api.example.com/socket.io?token=abc"
+    client._sio.connection_url = (
+        "https://api.example.com/api/v2/socket_io?token=abc"
+    )
     client._sio.connection_headers = {"Authorization": "Bearer secret-token"}
     client._sio.connection_transports = ["websocket"]
     client._sio.connection_namespaces = [module.WS_NAMESPACE]
