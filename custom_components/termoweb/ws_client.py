@@ -2374,7 +2374,10 @@ class DucaheatWSClient(WebSocketClient):
                 payload = None
         if payload != "ping":
             return
-        self._mark_event(paths=None, count_event=False)
+        now = time.time()
+        self._stats.last_event_ts = now
+        self._last_event_at = now
+        self._last_heartbeat_at = now
         try:
             await self._sio.emit("message", "pong", namespace=self._namespace)
         except Exception:  # noqa: BLE001 - best effort heartbeat ack
