@@ -243,19 +243,21 @@ async def test_ducaheat_connect_uses_brand_headers(
 
 @pytest.mark.asyncio
 async def test_ducaheat_message_ping_ack(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Reply to vendor ping messages with a pong and activity marker."""
+    """Reply to vendor ping messages without resetting payload idleness."""
 
     client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     handler = client._sio.events[("message", client._namespace)]
     emit_mock = AsyncMock()
     client._sio.emit = emit_mock
+    client._last_payload_at = 1000.0
     monkeypatch.setattr(module.time, "time", lambda: 1234.0)
 
     await handler("ping")
 
     emit_mock.assert_awaited_once_with("message", "pong", namespace=client._namespace)
     assert client._stats.last_event_ts == 1234.0
-    assert client._last_payload_at == 1234.0
+    assert client._last_payload_at == pytest.approx(1000.0)
+    assert client._last_heartbeat_at == 1234.0
 
 
 @pytest.mark.asyncio
@@ -949,13 +951,13 @@ async def test_ducaheat_on_message_branches(
 
     await client._on_message(("message", "ping"))
     emit_mock.assert_awaited_with("message", "pong", namespace=client._namespace)
-    mark_event.assert_called_once()
+    mark_event.assert_not_called()
 
     emit_mock.reset_mock()
     mark_event.reset_mock()
     await client._on_message(("ping",))
     emit_mock.assert_awaited_with("message", "pong", namespace=client._namespace)
-    mark_event.assert_called_once()
+    mark_event.assert_not_called()
 
     emit_mock.reset_mock()
     mark_event.reset_mock()
