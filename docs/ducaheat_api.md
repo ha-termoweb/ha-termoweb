@@ -74,65 +74,22 @@ Applies to heater (`htr`) and accumulator (`acm`) nodes. The response is a conso
 
 ## Writes are segmented
 
-Unlike TermoWeb’s `/settings` write, Ducaheat splits writes across multiple endpoints:
+Unlike TermoWeb’s consolidated `/settings` endpoint, Ducaheat exposes discrete resources per write. There is **no**
+`/acm/.../settings` endpoint; the mobile apps persist accumulator state through the endpoints below.
 
-### 1) Status (mode / setpoint / units / boost)
+| Endpoint | Purpose | Example body | Value types / notes |
+| --- | --- | --- | --- |
+| `POST /api/v2/devs/{dev_id}/{node_type}/{addr}/status` | Change operating mode, setpoint, boost flag, and display units. | `{ "mode": "manual", "stemp": "22.0", "units": "C" }`<br>`{ "boost": true }` | Temperatures must be strings with one decimal place (`"22.0"`). Units are uppercase (`"C"` / `"F"`). Boolean toggles (`boost`, etc.) are literal booleans. Returns `201 {}`. |
+| `POST /api/v2/devs/{dev_id}/{node_type}/{addr}/mode` | Explicitly set the operating mode when no setpoint change is required. | `{ "mode": "manual" }` | Use when the app issues a mode-only write. |
+| `POST /api/v2/devs/{dev_id}/{node_type}/{addr}/prog` | Persist the weekly program definition. | *(mirrors GET payload)* | Send the `prog` object echoed by the read call; structure varies by model. |
+| `POST /api/v2/devs/{dev_id}/{node_type}/{addr}/prog_temps` | Update named preset temperatures. | `{ "comfort": "21.0", "eco": "18.0", "antifrost": "7.0" }` | All temperature values are one-decimal strings in uppercase units context. |
+| `POST /api/v2/devs/{dev_id}/{node_type}/{addr}/setup` | Write advanced configuration and feature toggles. | `{ "extra_options": { "boost_time": 60, "boost_temp": "22.0" } }` | Nested objects follow the GET schema; keep temperature values as strings with uppercase units. |
+| `POST /api/v2/devs/{dev_id}/{node_type}/{addr}/lock` | Toggle the child lock. | `{ "lock": true }` | Boolean literal. |
+| `POST /api/v2/devs/{dev_id}/{node_type}/{addr}/select` | Claim ownership prior to issuing writes. | `{ "select": true }` | Some writes require `select: true`; release with `select: false` afterwards. |
 
-**POST** `/api/v2/devs/{dev_id}/{node_type}/{addr}/status`
-
-Body examples:
-```json
-{ "mode": "manual", "stemp": "22.0", "units": "C" }
-```
-```json
-{ "boost": true }
-```
-
-Returns `201 {}`.
-
-> Temperatures are strings with one decimal (e.g., `"22.0"`). `units` is `"C"` or `"F"`.
-
-### 2) Mode only
-
-**POST** `/api/v2/devs/{dev_id}/{node_type}/{addr}/mode`
-Body:
-```json
-{ "mode": "manual" }
-```
-
-### 3) Weekly program
-
-**POST** `/api/v2/devs/{dev_id}/{node_type}/{addr}/prog`
-Payload mirrors the app’s weekly schedule object (structure varies by model). Use the object echoed by the GET call as a template.
-
-### 4) Program temperatures
-
-**POST** `/api/v2/devs/{dev_id}/{node_type}/{addr}/prog_temps`
-```json
-{ "comfort": "21.0", "eco": "18.0", "antifrost": "7.0" }
-```
-
-### 5) Advanced setup / extra options
-
-**POST** `/api/v2/devs/{dev_id}/{node_type}/{addr}/setup`
-```json
-{ "extra_options": { "boost_time": 60, "boost_temp": "22.0" } }
-```
-
-### 6) Lock (child lock)
-
-**POST** `/api/v2/devs/{dev_id}/{node_type}/{addr}/lock`
-```json
-{ "lock": true }
-```
-
-### 7) Select (ownership hint for writes)
-
-**POST** `/api/v2/devs/{dev_id}/{node_type}/{addr}/select`
-```json
-{ "select": true }
-```
-Some write operations may require `select: true` before they take effect; de‑select with `select: false` afterwards.
+> **Temperature formatting:** Every captured request encodes degrees as strings with exactly one decimal place while keeping
+> the `units` field uppercase (`"C"`/`"F"`). Back-end writes fail when the decimal precision or unit casing diverges from the
+> mobile app.
 
 ---
 
