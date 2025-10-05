@@ -501,13 +501,18 @@ async def async_import_energy_history(
     start_of_today = now_dt.replace(hour=0, minute=0, second=0, microsecond=0)
     now_ts = int(start_of_today.timestamp()) - 1
     if max_days is None:
-        max_days = int(
-            entry.options.get(OPTION_MAX_HISTORY_RETRIEVED, DEFAULT_MAX_HISTORY_DAYS)
-        )
+        raw_max_days = entry.options.get(OPTION_MAX_HISTORY_RETRIEVED)
+        try:
+            max_days = int(raw_max_days)
+        except (TypeError, ValueError):
+            max_days = DEFAULT_MAX_HISTORY_DAYS
     target = now_ts - max_days * day
-    progress: dict[str, int] = dict(
-        entry.options.get(OPTION_ENERGY_HISTORY_PROGRESS, {})
-    )
+    raw_progress = entry.options.get(OPTION_ENERGY_HISTORY_PROGRESS)
+    progress: dict[str, int]
+    if isinstance(raw_progress, Mapping):
+        progress = dict(raw_progress)
+    else:
+        progress = {}
 
     def _progress_value(node_type: str, addr: str) -> int:
         raw = progress.get(f"{node_type}:{addr}")

@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any
 from types import SimpleNamespace
 
+import pytest
+
 from custom_components.termoweb.installation import InstallationSnapshot, ensure_snapshot
 from custom_components.termoweb.nodes import (
     build_node_inventory,
@@ -63,6 +65,35 @@ def test_snapshot_sample_targets_and_name_map_caching() -> None:
     assert first_map is second_map
     assert "htr" in first_map
     assert isinstance(first_map["htr"], dict)
+
+
+def test_snapshot_sample_targets_filter_invalid_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sample targets should discard invalid or empty subscription entries."""
+
+    nodes = [
+        {"type": "htr", "addr": "1"},
+        {"type": "acm", "addr": "2"},
+    ]
+    snapshot = _make_snapshot(nodes)
+
+    def _fake_targets(_map):
+        return [
+            None,
+            "bad",
+            ("htr", " 1 "),
+            ("acm", None),
+            ("acm", ""),
+            ["acm", "2 "],
+        ]
+
+    monkeypatch.setattr(
+        "custom_components.termoweb.installation.heater_sample_subscription_targets",
+        _fake_targets,
+    )
+
+    assert snapshot.heater_sample_targets == [("htr", "1"), ("acm", "2")]
 
 
 def test_snapshot_nodes_by_type_skips_unknown() -> None:
