@@ -7,7 +7,7 @@ import logging
 import sys
 from datetime import timedelta
 from types import SimpleNamespace
-from typing import Any, Callable
+from typing import Any, Callable, Coroutine
 
 import pytest
 from unittest.mock import AsyncMock
@@ -17,7 +17,7 @@ from conftest import FakeCoordinator, _install_stubs
 _install_stubs()
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import entity_registry as entity_registry_mod
 
@@ -197,6 +197,108 @@ class StubEntityRegistry:
 
     def async_get(self, entity_id: str) -> StubEntityEntry | None:
         return self._entities.get(entity_id)
+
+
+class _StubServices:
+    def __init__(self) -> None:
+        self._handlers: dict[tuple[str, str], Callable[[ServiceCall], Any]] = {}
+
+    def has_service(self, domain: str, service: str) -> bool:
+        return (domain, service) in self._handlers
+
+    def async_register(
+        self,
+        domain: str,
+        service: str,
+        handler: Callable[[ServiceCall], Any],
+    ) -> None:
+        self._handlers[(domain, service)] = handler
+
+
+@pytest.mark.asyncio
+async def test_ws_debug_probe_service_handles_client_matrix(
+    termoweb_init: Any,
+) -> None:
+    services = _StubServices()
+    hass = SimpleNamespace(
+        services=services,
+        data={},
+        loop=asyncio.get_running_loop(),
+    )
+
+    await termoweb_init.async_register_ws_debug_probe_service(hass)
+    handler = services._handlers[(termoweb_init.DOMAIN, "ws_debug_probe")]
+
+    hass.data[termoweb_init.DOMAIN] = ["invalid"]
+    await handler(ServiceCall({}))
+
+    hass.data[termoweb_init.DOMAIN] = {
+        "other": {"debug": True, "ws_clients": {}},
+    }
+    await handler(ServiceCall({"entry_id": "missing"}))
+
+    class TypeErrorClient:
+        def debug_probe(self, _: str) -> None:
+            return None
+
+    class NonAwaitClient:
+        def debug_probe(self) -> str:
+            return "not-awaitable"
+
+    class AsyncProbeClient:
+        def __init__(self, *, should_fail: bool = False) -> None:
+            self.should_fail = should_fail
+            self.calls = 0
+
+        def debug_probe(self) -> Coroutine[Any, Any, int]:
+            self.calls += 1
+
+            async def _runner() -> int:
+                if self.should_fail:
+                    raise RuntimeError("boom")
+                return self.calls
+
+            return _runner()
+
+    class CancelledProbeClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def debug_probe(self) -> Coroutine[Any, Any, None]:
+            self.calls += 1
+
+            async def _runner() -> None:
+                raise asyncio.CancelledError
+
+            return _runner()
+
+    clients = {
+        "missing": None,
+        "no_probe": object(),
+        "type_error": TypeErrorClient(),
+        "nonawait": NonAwaitClient(),
+        "ok": AsyncProbeClient(),
+        "error": AsyncProbeClient(should_fail=True),
+        "cancel": CancelledProbeClient(),
+    }
+
+    hass.data[termoweb_init.DOMAIN] = {
+        "entry1": {"debug": False, "ws_clients": {}},
+        "entry2": {"debug": True, "ws_clients": clients},
+        "entry3": {"debug": True, "ws_clients": []},
+    }
+
+    await handler(ServiceCall({"entry_id": "entry2", "dev_id": "missing"}))
+
+    with pytest.raises(asyncio.CancelledError):
+        await handler(ServiceCall({}))
+
+    clients["cancel"] = AsyncProbeClient()
+
+    await handler(ServiceCall({}))
+
+    assert clients["ok"].calls == 2
+    assert clients["error"].calls == 2
 
 
 def test_async_setup_entry_happy_path(
