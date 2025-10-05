@@ -16,7 +16,12 @@ from conftest import FakeCoordinator, _install_stubs
 _install_stubs()
 
 from custom_components.termoweb import climate as climate_module
-from custom_components.termoweb.const import BRAND_TERMOWEB, DOMAIN, signal_ws_data
+from custom_components.termoweb.const import (
+    BRAND_DUCAHEAT,
+    BRAND_TERMOWEB,
+    DOMAIN,
+    signal_ws_data,
+)
 from custom_components.termoweb.nodes import HeaterNode, build_node_inventory
 from homeassistant.components.climate import HVACAction, HVACMode
 from homeassistant.const import ATTR_TEMPERATURE
@@ -426,6 +431,7 @@ def test_async_setup_entry_creates_accumulator_entity() -> None:
                     "client": client,
                     "nodes": nodes,
                     "node_inventory": build_node_inventory(nodes),
+                    "brand": BRAND_DUCAHEAT,
                 }
             }
         }
@@ -448,6 +454,15 @@ def test_async_setup_entry_creates_accumulator_entity() -> None:
         assert acc.device_info["model"] == "Accumulator"
 
         prog = [0, 1, 2] * 56
+        await acc.async_set_schedule(list(prog))
+        call = client.set_node_settings.await_args
+        assert call.args == (dev_id, ("acm", "7"))
+        assert call.kwargs["prog"] == list(prog)
+        assert call.kwargs["units"] == "C"
+        client.set_node_settings.reset_mock()
+
+        hass.data[DOMAIN][entry_id]["brand"] = BRAND_TERMOWEB
+
         await acc.async_set_schedule(list(prog))
         call = client.set_node_settings.await_args
         assert call.args == (dev_id, ("acm", "7"))

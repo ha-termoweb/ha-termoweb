@@ -1,6 +1,9 @@
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+from aiohttp import ClientResponseError
+
 from custom_components.termoweb.api import RESTClient
 from custom_components.termoweb.backend.ducaheat import DucaheatBackend, DucaheatRESTClient
 from custom_components.termoweb.const import WS_NAMESPACE
@@ -170,6 +173,88 @@ def test_ducaheat_rest_set_node_settings_routes_non_special(monkeypatch) -> None
             ("pmo", "4"),
             {"mode": "auto", "stemp": 20.5, "prog": None, "ptemp": None, "units": "C"},
         )
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_rest_set_node_settings_acm_mode_heat(monkeypatch) -> None:
+    async def _run() -> None:
+        session = SimpleNamespace()
+        client = DucaheatRESTClient(session, "user", "pass")
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer"}
+
+        calls: list[tuple[str, str, dict[str, object]]] = []
+
+        async def fake_request(method: str, path: str, **kwargs: object):
+            calls.append((method, path, kwargs))
+            return {"status": "ok"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "_request", fake_request)
+
+        await client.set_node_settings("dev", ("acm", "3"), mode="heat")
+
+        assert calls == [
+            (
+                "POST",
+                "/api/v2/devs/dev/acm/3/mode",
+                {"headers": {"Authorization": "Bearer"}, "json": {"mode": "manual"}},
+            )
+        ]
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_rest_set_node_settings_acm_invalid_stemp(monkeypatch) -> None:
+    async def _run() -> None:
+        client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+
+        async def fake_headers() -> dict[str, str]:
+            return {}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        with pytest.raises(ValueError):
+            await client.set_node_settings("dev", ("acm", "3"), stemp="bad", units="C")
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_post_acm_endpoint_rethrows_server_error(monkeypatch) -> None:
+    async def _run() -> None:
+        client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+
+        async def fake_request(method: str, path: str, **kwargs: object):
+            raise ClientResponseError(
+                request_info=None,
+                history=(),
+                status=500,
+                message="server error",
+            )
+
+        monkeypatch.setattr(client, "_request", fake_request)
+
+        with pytest.raises(ClientResponseError):
+            await client._post_acm_endpoint(
+                "/api/v2/devs/dev/acm/3/status", {}, {"mode": "manual"}
+            )
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_rest_set_node_settings_acm_invalid_units(monkeypatch) -> None:
+    async def _run() -> None:
+        client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+
+        async def fake_headers() -> dict[str, str]:
+            return {}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        with pytest.raises(ValueError):
+            await client.set_node_settings("dev", ("acm", "3"), stemp=21.0, units="kelvin")
 
     asyncio.run(_run())
 
