@@ -2216,7 +2216,7 @@ def test_ducaheat_helper_sanitisation(monkeypatch: pytest.MonkeyPatch) -> None:
 
     params = client._sanitise_params({"token": "secret", "dev_id": "device"})
     assert params["token"] != "secret"
-    assert params["dev_id"] == "device"
+    assert params["dev_id"] == "de...ce"
 
     headers_no_token = client._sanitise_headers({"Authorization": "Bearer"})
     assert headers_no_token["Authorization"].startswith("Be")
