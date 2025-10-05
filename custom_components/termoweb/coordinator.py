@@ -119,12 +119,13 @@ class StateCoordinator(
         self._rr_index: dict[str, int] = {}
         self._dev_id = dev_id
         self._device = device or {}
-        self._nodes = nodes or {}
-        self._node_inventory: list[Node] = list(node_inventory or [])
+        self._nodes: dict[str, Any] = {}
+        self._node_inventory: list[Node] = []
         self._nodes_by_type: dict[str, list[str]] = {}
         self._addr_lookup: dict[str, set[str]] = {}
         self._pending_settings: dict[tuple[str, str], PendingSetting] = {}
-        self._refresh_node_cache()
+        self._invalid_nodes_logged = False
+        self.update_nodes(nodes, node_inventory=node_inventory)
 
     def _set_inventory_from_nodes(
         self,
@@ -445,12 +446,23 @@ class StateCoordinator(
 
     def update_nodes(
         self,
-        nodes: dict[str, Any],
+        nodes: Mapping[str, Any] | None,
         node_inventory: list[Node] | None = None,
     ) -> None:
         """Update cached node payload and inventory."""
 
-        self._nodes = nodes or {}
+        if isinstance(nodes, Mapping):
+            self._nodes = dict(nodes)
+            self._invalid_nodes_logged = False
+        else:
+            if not self._invalid_nodes_logged:
+                _LOGGER.debug(
+                    "Ignoring unexpected nodes payload (type=%s): %s",
+                    type(nodes).__name__ if nodes is not None else "NoneType",
+                    nodes,
+                )
+                self._invalid_nodes_logged = True
+            self._nodes = {}
         self._set_inventory_from_nodes(self._nodes, provided=node_inventory)
         self._refresh_node_cache()
 

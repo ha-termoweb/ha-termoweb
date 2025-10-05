@@ -451,6 +451,159 @@ def test_async_setup_entry_no_devices(
         asyncio.run(_run())
 
 
+def test_async_setup_entry_skips_devices_without_identifier(
+    termoweb_init: Any,
+    stub_hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class PartialClient(BaseFakeClient):
+        instances: list["PartialClient"] = []
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            type(self).instances.append(self)
+
+        async def list_devices(self) -> list[dict[str, Any]]:
+            return [
+                "invalid",
+                {"name": "No identifier"},
+                {"id": " dev-2 ", "name": "Valid"},
+            ]
+
+        async def get_nodes(self, dev_id: str) -> dict[str, Any]:
+            await super().get_nodes(dev_id)
+            return {"nodes": []}
+
+    monkeypatch.setattr(termoweb_init, "RESTClient", PartialClient)
+    import_mock = AsyncMock()
+    monkeypatch.setattr(termoweb_init, "_async_import_energy_history", import_mock)
+
+    entry = ConfigEntry("partial", data={"username": "user", "password": "pw"})
+    stub_hass.config_entries.add(entry)
+
+    async def _run() -> None:
+        await termoweb_init.async_setup_entry(stub_hass, entry)
+
+    with caplog.at_level(logging.DEBUG):
+        asyncio.run(_run())
+
+    assert any(
+        "Skipping device entry without identifier" in message
+        for message in caplog.messages
+    )
+    assert FakeCoordinator.instances
+    record = FakeCoordinator.instances[0]
+    assert record.dev_id == "dev-2"
+    assert PartialClient.instances[0].get_nodes_calls == ["dev-2"]
+
+
+def test_async_setup_entry_rejects_all_devices_without_identifier(
+    termoweb_init: Any,
+    stub_hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class InvalidClient(BaseFakeClient):
+        instances: list["InvalidClient"] = []
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            type(self).instances.append(self)
+
+        async def list_devices(self) -> list[dict[str, Any]]:
+            return [{"name": "Missing"}, {}]
+
+    monkeypatch.setattr(termoweb_init, "RESTClient", InvalidClient)
+    entry = ConfigEntry("invalid", data={"username": "user", "password": "pw"})
+    stub_hass.config_entries.add(entry)
+
+    async def _run() -> None:
+        await termoweb_init.async_setup_entry(stub_hass, entry)
+
+    with caplog.at_level(logging.DEBUG):
+        with pytest.raises(ConfigEntryNotReady):
+            asyncio.run(_run())
+
+    assert any(
+        "Skipping device entry without identifier" in message
+        for message in caplog.messages
+    )
+    assert not FakeCoordinator.instances
+    assert InvalidClient.instances[0].get_nodes_calls == []
+
+
+def test_async_setup_entry_supports_mapping_devices_payload(
+    termoweb_init: Any,
+    stub_hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class MappingClient(BaseFakeClient):
+        instances: list["MappingClient"] = []
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            type(self).instances.append(self)
+
+        async def list_devices(self) -> dict[str, Any]:
+            return {"serial_id": " mapping-dev "}
+
+        async def get_nodes(self, dev_id: str) -> dict[str, Any]:
+            await super().get_nodes(dev_id)
+            return {}
+
+    monkeypatch.setattr(termoweb_init, "RESTClient", MappingClient)
+    import_mock = AsyncMock()
+    monkeypatch.setattr(termoweb_init, "_async_import_energy_history", import_mock)
+
+    entry = ConfigEntry("mapping", data={"username": "user", "password": "pw"})
+    stub_hass.config_entries.add(entry)
+
+    async def _run() -> None:
+        await termoweb_init.async_setup_entry(stub_hass, entry)
+
+    asyncio.run(_run())
+
+    assert FakeCoordinator.instances
+    record = FakeCoordinator.instances[0]
+    assert record.dev_id == "mapping-dev"
+    assert MappingClient.instances[0].get_nodes_calls == ["mapping-dev"]
+
+
+def test_async_setup_entry_logs_unexpected_devices_payload(
+    termoweb_init: Any,
+    stub_hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class WeirdClient(BaseFakeClient):
+        instances: list["WeirdClient"] = []
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            type(self).instances.append(self)
+
+        async def list_devices(self) -> Any:
+            return "unexpected"
+
+    monkeypatch.setattr(termoweb_init, "RESTClient", WeirdClient)
+    entry = ConfigEntry("weird", data={"username": "user", "password": "pw"})
+    stub_hass.config_entries.add(entry)
+
+    async def _run() -> None:
+        await termoweb_init.async_setup_entry(stub_hass, entry)
+
+    with caplog.at_level(logging.DEBUG):
+        with pytest.raises(ConfigEntryNotReady):
+            asyncio.run(_run())
+
+    assert any(
+        "Unexpected list_devices payload" in message for message in caplog.messages
+    )
+    assert not FakeCoordinator.instances
+    assert WeirdClient.instances[0].get_nodes_calls == []
+
+
 def test_async_setup_entry_defers_until_started(
     termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
