@@ -608,6 +608,67 @@ def test_async_import_energy_history_already_imported(
     assert "energy history already imported" in caplog.text
 
 
+def test_async_import_energy_history_handles_partial_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        (
+            mod,
+            const,
+            _import_stats,
+            _update_meta,
+            _last_stats,
+            _get_period,
+            _delete_stats,
+            ConfigEntry,
+            HomeAssistant,
+            _ent_reg,
+        ) = await _load_module(monkeypatch)
+
+        updates: list[dict[str, Any]] = []
+
+        def record_update(entry, *, options):
+            updates.append(dict(options))
+            entry.options.update(options)
+
+        hass = HomeAssistant()
+        hass.config_entries = types.SimpleNamespace(async_update_entry=record_update)
+
+        entry = ConfigEntry(
+            "1",
+            options={
+                mod.OPTION_MAX_HISTORY_RETRIEVED: None,
+                mod.OPTION_ENERGY_HISTORY_PROGRESS: None,
+            },
+        )
+
+        client = types.SimpleNamespace()
+        client.get_node_samples = AsyncMock()
+        hass.data = {
+            const.DOMAIN: {
+                entry.entry_id: {
+                    "client": client,
+                    "dev_id": "dev",
+                    "node_inventory": [],
+                    "config_entry": entry,
+                }
+            }
+        }
+
+        await mod._async_import_energy_history(
+            hass,
+            entry,
+            reset_progress=True,
+        )
+
+        client.get_node_samples.assert_not_awaited()
+        assert updates
+        assert updates[0].get(mod.OPTION_ENERGY_HISTORY_PROGRESS) == {}
+        assert mod.OPTION_ENERGY_HISTORY_IMPORTED not in updates[0]
+
+    asyncio.run(_run())
+
+
 def test_async_import_energy_history_waits_between_queries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
 from .nodes import (
@@ -191,7 +191,21 @@ class InstallationSnapshot:
 
         if self._sample_targets is None:
             normalized_map, _ = self.heater_sample_address_map
-            self._sample_targets = heater_sample_subscription_targets(normalized_map)
+            raw_targets = heater_sample_subscription_targets(normalized_map)
+            validated: list[tuple[str, str]] = []
+            for item in raw_targets:
+                if (
+                    isinstance(item, Sequence)
+                    and not isinstance(item, (str, bytes))
+                    and len(item) == 2
+                ):
+                    node_type, addr = item
+                    if node_type is not None and addr is not None:
+                        node_str = str(node_type).strip()
+                        addr_str = str(addr).strip()
+                        if node_str and addr_str:
+                            validated.append((node_str, addr_str))
+            self._sample_targets = validated
         return list(self._sample_targets)
 
     def heater_name_map(
