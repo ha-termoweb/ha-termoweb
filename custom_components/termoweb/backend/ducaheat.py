@@ -7,7 +7,7 @@ import logging
 from typing import Any
 
 from ..api import RESTClient
-from ..const import BRAND_DUCAHEAT, WS_NAMESPACE
+from ..const import BRAND_DUCAHEAT
 from ..nodes import NodeDescriptor
 from ..ws_client import DucaheatWSClient
 from .base import Backend, WsClientProto
@@ -519,7 +519,7 @@ class DucaheatBackend(Backend):
             api_client=self.client,
             coordinator=coordinator,
             protocol="engineio2",
-            namespace=WS_NAMESPACE,
+            namespace="/",
         )
 
 

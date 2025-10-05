@@ -24,7 +24,15 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 import socketio
 
 from .api import RESTClient
-from .const import API_BASE, DOMAIN, WS_NAMESPACE, signal_ws_data, signal_ws_status
+from .const import (
+    ACCEPT_LANGUAGE,
+    API_BASE,
+    DOMAIN,
+    USER_AGENT,
+    WS_NAMESPACE,
+    signal_ws_data,
+    signal_ws_status,
+)
 from .installation import InstallationSnapshot, ensure_snapshot
 from .nodes import (
     NODE_CLASS_BY_TYPE,
@@ -93,10 +101,16 @@ class WebSocketClient:
         self._task: asyncio.Task | None = None
         self._namespace = namespace or WS_NAMESPACE
 
+        http_session = (
+            self._session
+            if isinstance(self._session, aiohttp.ClientSession)
+            else None
+        )
         self._sio = socketio.AsyncClient(
             reconnection=False,
             logger=_LOGGER.getChild(f"socketio.{dev_id}"),
             engineio_logger=_LOGGER.getChild(f"engineio.{dev_id}"),
+            http_session=http_session,
         )
         self._sio.start_background_task = self._wrap_background_task
         http_target: Any = self._session
@@ -1841,7 +1855,7 @@ class DucaheatWSClient(WebSocketClient):
         session: aiohttp.ClientSession | None = None,
         handshake_fail_threshold: int = 5,
         protocol: str | None = None,
-        namespace: str = WS_NAMESPACE,
+        namespace: str = "/",
     ) -> None:
         """Initialise the websocket client with extended debug logging."""
 
@@ -1869,17 +1883,22 @@ class DucaheatWSClient(WebSocketClient):
 
         self._connect_response_logged = False
         token = await self._get_token()
-        headers = await self._client._authed_headers()  # noqa: SLF001
-        base = self._api_base().rstrip("/")
-        socket_path = f"{base}/api/v2/socket_io"
         query_params = {"token": token, "dev_id": self.dev_id}
+        base_url = self._ducaheat_socket_base()
+        socket_path = "/socket.io"
         params = urlencode(query_params)
-        url = f"{socket_path}?{params}"
+        url = f"{base_url}{socket_path}?{params}"
+        headers = {
+            "Origin": "https://localhost",
+            "User-Agent": USER_AGENT,
+            "Accept-Language": ACCEPT_LANGUAGE,
+            "X-Requested-With": "net.termoweb.ducaheat.app",
+        }
         self._log_connect_request(
-            base=base,
+            base=base_url,
             socket_path=socket_path,
             params=query_params,
-            headers=headers if isinstance(headers, Mapping) else {},
+            headers=headers,
         )
         _LOGGER.debug("WS (ducaheat): connecting to %s", url)
 
@@ -1888,13 +1907,34 @@ class DucaheatWSClient(WebSocketClient):
         engineio_path = "socket.io"
         await self._sio.connect(
             url,
-            transports=["websocket"],
+            headers=headers,
+            transports=["polling", "websocket"],
             namespaces=[self._namespace],
             socketio_path=engineio_path,
             wait=True,
             wait_timeout=15,
         )
         self._log_connect_response()
+
+    def _ducaheat_socket_base(self) -> str:
+        """Return the host-level base URL for Ducaheat websocket calls."""
+
+        base = self._api_base().rstrip("/")
+        parsed = urlsplit(base if base else API_BASE)
+        scheme = parsed.scheme or "https"
+        netloc = parsed.netloc or parsed.path
+        if not netloc:
+            raise RuntimeError("invalid API base")
+        return urlunsplit((scheme, netloc, "", "", ""))
+
+    async def _build_engineio_target(self) -> tuple[str, str]:
+        """Return the Engine.IO target for Ducaheat."""
+
+        token = await self._get_token()
+        base_url = self._ducaheat_socket_base().rstrip("/")
+        query = urlencode({"token": token, "dev_id": self.dev_id})
+        url = f"{base_url}/socket.io?{query}"
+        return url, "socket.io"
 
     def _redact_value(self, value: str) -> str:
         """Return a redacted representation of sensitive values."""
