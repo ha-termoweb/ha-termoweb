@@ -241,8 +241,19 @@ def test_translate_path_update_parses_segments(monkeypatch: pytest.MonkeyPatch) 
     }
     translated_nested = client._translate_path_update(nested_payload)
     assert translated_nested == {
-        "001": {"settings": {"setup": {"limits": {"max": {"value": 10}}}}}
+        "htr": {
+            "settings": {
+                "001": {"setup": {"limits": {"max": {"value": 10}}}}
+            }
+        }
     }
+
+    status_payload = {
+        "path": "/acm/2/status",
+        "body": {"state": "ok"},
+    }
+    translated_status = client._translate_path_update(status_payload)
+    assert translated_status == {"acm": {"status": {"2": {"state": "ok"}}}}
 
 
 def test_translate_path_update_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
