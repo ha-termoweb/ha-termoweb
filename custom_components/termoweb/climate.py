@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Callable, Mapping
 import logging
 import time
-from typing import Any
+from typing import Any, cast
 
 from homeassistant.components.climate import (
     ClimateEntity,
@@ -18,7 +18,8 @@ from homeassistant.helpers import entity_platform
 from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
-from .const import DOMAIN
+from .backend.ducaheat import DucaheatRESTClient
+from .const import BRAND_DUCAHEAT, DOMAIN
 from .heater import (
     HeaterNodeBase,
     iter_heater_maps,
@@ -778,6 +779,28 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         ptemp: list[float] | None,
         units: str,
     ) -> None:
+        brand: str | None = None
+        hass = getattr(self, "hass", None)
+        if hass is not None:
+            hass_data = hass.data.get(DOMAIN, {}).get(self._entry_id)
+            if isinstance(hass_data, Mapping):
+                brand_value = hass_data.get("brand")
+                if isinstance(brand_value, str):
+                    brand = brand_value
+
+        if brand == BRAND_DUCAHEAT and self._node_type == "acm":
+            client_dh = cast(DucaheatRESTClient, client)
+            await client_dh.set_node_settings(
+                self._dev_id,
+                (self._node_type, self._addr),
+                mode=mode,
+                stemp=stemp,
+                prog=prog,
+                ptemp=ptemp,
+                units=units,
+            )
+            return
+
         await client.set_node_settings(
             self._dev_id,
             (self._node_type, self._addr),
