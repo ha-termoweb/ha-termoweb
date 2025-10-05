@@ -1,7 +1,6 @@
 import asyncio
 from copy import deepcopy
 import logging
-import logging
 import time
 from contextlib import suppress
 from types import SimpleNamespace
