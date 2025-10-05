@@ -40,6 +40,10 @@ BRAND_BASIC_AUTH: Final[Mapping[str, str]] = {
     BRAND_DUCAHEAT: "NWM0OWRjZTk3NzUxMDM1MTUwNmM0MmRiOnRldm9sdmU=",
 }
 
+BRAND_SOCKETIO_PATHS: Final[Mapping[str, str]] = {
+    BRAND_DUCAHEAT: "api/v2/socket_io",
+}
+
 # UA / locale (matches app loosely; helps avoid quirky WAF rules)
 USER_AGENT: Final = "TermoWeb/2.5.1 (Android; HomeAssistant Integration)"
 DUCAHEAT_USER_AGENT: Final = "Ducaheat/1.40.1 (Android; HomeAssistant Integration)"
@@ -90,6 +94,15 @@ def get_brand_requested_with(brand: str) -> str | None:
     """Return the X-Requested-With header value for the brand."""
 
     return BRAND_REQUESTED_WITH.get(brand)
+
+
+def get_brand_socketio_path(brand: str) -> str:
+    """Return the Socket.IO path for the selected brand."""
+
+    path = BRAND_SOCKETIO_PATHS.get(brand)
+    if path:
+        return path.lstrip("/")
+    return "socket.io"
 
 # Socket.IO namespace used by the websocket client implementation
 WS_NAMESPACE: Final = "/api/v2/socket_io"

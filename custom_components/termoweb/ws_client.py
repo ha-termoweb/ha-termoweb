@@ -33,7 +33,9 @@ from .const import (
     DOMAIN,
     USER_AGENT,
     WS_NAMESPACE,
+    get_brand_api_base,
     get_brand_requested_with,
+    get_brand_socketio_path,
     get_brand_user_agent,
     signal_ws_data,
     signal_ws_status,
@@ -181,6 +183,7 @@ class WebSocketClient(_WsLeaseMixin):
 
         is_ducaheat = getattr(api_client, "_is_ducaheat", False)
         brand = BRAND_DUCAHEAT if is_ducaheat else BRAND_TERMOWEB
+        self._brand = brand
         self._user_agent = getattr(
             api_client, "user_agent", None
         ) or get_brand_user_agent(brand)
@@ -489,15 +492,15 @@ class WebSocketClient(_WsLeaseMixin):
         """Open the Socket.IO connection."""
         if self._stop_event.is_set():
             return
-        url, engineio_path = await self._build_engineio_target()
-        _LOGGER.debug("WS: connecting to %s (path=%s)", url, engineio_path)
+        url, socketio_path = await self._build_engineio_target()
+        _LOGGER.debug("WS: connecting to %s (path=%s)", url, socketio_path)
         self._disconnected.clear()
         self._reset_backoff()
         await self._sio.connect(
             url,
             transports=["websocket"],
             namespaces=[self._namespace],
-            socketio_path=engineio_path,
+            socketio_path=socketio_path,
             wait=True,
             wait_timeout=15,
         )
@@ -535,7 +538,8 @@ class WebSocketClient(_WsLeaseMixin):
         self._disconnected.set()
 
     async def _build_engineio_target(self) -> tuple[str, str]:
-        """Return the Engine.IO base URL and path."""
+        """Return the Socket.IO base URL and path."""
+
         token = await self._get_token()
         base = self._api_base().rstrip("/")
         parsed = urlsplit(base if base else API_BASE)
@@ -543,9 +547,11 @@ class WebSocketClient(_WsLeaseMixin):
         netloc = parsed.netloc or parsed.path
         if not netloc:
             raise RuntimeError("invalid API base")
+        socketio_path = get_brand_socketio_path(getattr(self, "_brand", BRAND_TERMOWEB))
+        path = f"/{socketio_path.lstrip('/')}"
         query = urlencode({"token": token, "dev_id": self.dev_id})
-        url = urlunsplit((scheme, netloc, "/socket.io", query, ""))
-        return url, "socket.io"
+        url = urlunsplit((scheme, netloc, path, query, ""))
+        return url, socketio_path
 
     # ------------------------------------------------------------------
     # Socket.IO event handlers
@@ -2139,38 +2145,56 @@ class DucaheatWSClient(WebSocketClient):
         self._debug_probe_logged_handshake = False
         self._debug_probe_logged_update = False
         self._ensure_engineio_logger_level()
+        assert (
+            self._brand == BRAND_DUCAHEAT
+        ), "Ducaheat websocket client initialised with unexpected brand"
         token = await self._get_token()
         query_params = {"token": token, "dev_id": self.dev_id}
-        base_url = self._ducaheat_socket_base()
-        socket_path = "/socket.io"
-        params = urlencode(query_params)
-        url = f"{base_url}{socket_path}?{params}"
+        base_host = self._ducaheat_socket_base()
+        socketio_path = get_brand_socketio_path(self._brand)
+        query_string = urlencode(query_params)
+        connect_host = f"{base_host}?{query_string}"
         headers = self._brand_headers(origin="https://localhost")
         self._log_connect_request(
-            base=base_url,
-            socket_path=socket_path,
+            base=base_host,
+            socket_path=socketio_path,
             params=query_params,
             headers=headers,
         )
 
-        engineio_path = "socket.io"
-        transports = ["polling", "websocket"]
-        sanitised_url = self._sanitise_url(url)
+        transports = ["websocket"]
+        sanitised_params = self._sanitise_params(query_params)
+        safe_qs = "&".join(
+            f"{key}={sanitised_params[key]}" for key in query_params
+        )
+        parsed_host = urlsplit(base_host)
+        scheme = parsed_host.scheme or "https"
+        netloc = parsed_host.netloc or parsed_host.path
+        path = f"/{socketio_path.lstrip('/')}"
+        handshake_url = urlunsplit((scheme, netloc, path, query_string, ""))
+        sanitised_url = self._sanitise_url(handshake_url)
         _LOGGER.debug(
-            "WS (ducaheat): connecting url=%s socketio_path=%s transports=%s",
+            "WS[DUCAHEAT]: connecting host=%s socketio_path=%s transports=%s qs=%s",
+            urlunsplit((scheme, netloc, "", "", "")),
+            socketio_path,
+            transports,
+            safe_qs,
+        )
+        _LOGGER.debug(
+            "WS[DUCAHEAT]: connecting url=%s socketio_path=%s transports=%s",
             sanitised_url,
-            engineio_path,
+            socketio_path,
             transports,
         )
 
         self._disconnected.clear()
         self._reset_backoff()
         await self._sio.connect(
-            url,
+            connect_host,
             headers=headers,
             transports=transports,
             namespaces=[self._namespace],
-            socketio_path=engineio_path,
+            socketio_path=socketio_path,
             wait=True,
             wait_timeout=15,
         )
@@ -2179,7 +2203,7 @@ class DucaheatWSClient(WebSocketClient):
     def _ducaheat_socket_base(self) -> str:
         """Return the host-level base URL for Ducaheat websocket calls."""
 
-        base = self._api_base().rstrip("/")
+        base = get_brand_api_base(self._brand).rstrip("/")
         parsed = urlsplit(base if base else API_BASE)
         scheme = parsed.scheme or "https"
         netloc = parsed.netloc or parsed.path
@@ -2188,13 +2212,18 @@ class DucaheatWSClient(WebSocketClient):
         return urlunsplit((scheme, netloc, "", "", ""))
 
     async def _build_engineio_target(self) -> tuple[str, str]:
-        """Return the Engine.IO target for Ducaheat."""
+        """Return the Socket.IO target for Ducaheat."""
 
         token = await self._get_token()
-        base_url = self._ducaheat_socket_base().rstrip("/")
+        base_host = self._ducaheat_socket_base()
+        socketio_path = get_brand_socketio_path(self._brand)
         query = urlencode({"token": token, "dev_id": self.dev_id})
-        url = f"{base_url}/socket.io?{query}"
-        return url, "socket.io"
+        parsed_host = urlsplit(base_host)
+        scheme = parsed_host.scheme or "https"
+        netloc = parsed_host.netloc or parsed_host.path
+        path = f"/{socketio_path.lstrip('/')}"
+        url = urlunsplit((scheme, netloc, path, query, ""))
+        return url, socketio_path
 
     def _ensure_engineio_logger_level(self) -> None:
         """Ensure the engine.io logger remains active when debugging."""
@@ -2225,15 +2254,20 @@ class DucaheatWSClient(WebSocketClient):
 
         if not _LOGGER.isEnabledFor(logging.DEBUG):
             return
+        sanitised_params = self._sanitise_params(params)
+        safe_qs = "&".join(
+            f"{key}={sanitised_params[key]}" for key in params
+        ) or "(none)"
         _LOGGER.debug(
-            "WS (ducaheat): connect target base=%s path=%s params=%s",
+            "WS[DUCAHEAT]: connect target base=%s path=%s qs=%s",
             base,
             socket_path,
-            self._sanitise_params(params),
+            safe_qs,
         )
         if headers:
             _LOGGER.debug(
-                "WS (ducaheat): request headers=%s", self._sanitise_headers(headers)
+                "WS[DUCAHEAT]: request headers=%s",
+                self._sanitise_headers(headers),
             )
 
     def _log_connect_response(self) -> None:
