@@ -171,13 +171,15 @@ connectivity drops.
 ## WebSocket (Socket.IO)
 
 **Path:** `/socket.io?token=<access_token>&dev_id=<dev_id>` (handshake may be redirected to a session identifier URL fragment).
-**Namespace:** `/` (default).
+**Namespace:** `/api/v2/socket_io`.
 
 The app listens for at least these events:
 - `dev_handshake` — initial device list / permissions (not observed in this capture but present in prior reverse engineering).
 - `dev_data` — full gateway snapshot (see above).
 - `update` — incremental node changes. The payload contains `path` (e.g., `/acm/2/status`) and `body` matching the corresponding
   REST resource. Clients should route updates by node type and address using the `path` components.
+- App heartbeat: the backend emits `"message"` events with payload `"ping"`. Reply with `"pong"` to avoid the server pausing
+  updates after a few minutes.
 
 ---
 
@@ -210,6 +212,7 @@ curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"   -
 
 ## Notes and caveats
 
+- REST and websocket calls include `User-Agent: Ducaheat/...` plus `X-Requested-With: net.termoweb.ducaheat.app` (and `Origin: https://localhost` for Socket.IO) to match the Android hybrid app environment.
 - Treat unknown keys as forward‑compatible; the app is tolerant of additional fields.
 - Program payload (`/prog`) structure varies by model/firmware. Capture the GET shape first and write it back unchanged after edits.
 - Some deployments may accept `/htr/{addr}/boost` as a synonym for boosting, but `/status` with `{ "boost": true }` is consistently present in the app bundle.

@@ -17,13 +17,26 @@ from custom_components.termoweb.installation import InstallationSnapshot
 class DummyREST:
     """Minimal REST client stub for websocket tests."""
 
-    def __init__(self, base: str = "https://api.example.com/api/v2") -> None:
+    def __init__(
+        self,
+        base: str = "https://api.example.com/api/v2",
+        *,
+        user_agent: str | None = None,
+        requested_with: str | None = None,
+    ) -> None:
         self.api_base = base
         self._session = SimpleNamespace()
         self._headers = {"Authorization": "Bearer token"}
         self._ensure_token = AsyncMock()
         self._set_node_settings = AsyncMock(return_value={"status": "ok"})
         self._get_rtc_time = AsyncMock(return_value={"status": "ok"})
+        self.user_agent = user_agent or module.get_brand_user_agent(module.BRAND_TERMOWEB)
+        self.requested_with = (
+            requested_with
+            if requested_with is not None
+            else module.get_brand_requested_with(module.BRAND_TERMOWEB)
+        )
+        self._is_ducaheat = False
 
     async def _authed_headers(self) -> dict[str, str]:
         return self._headers
@@ -153,7 +166,7 @@ def _make_ducaheat_client(
     monkeypatch: pytest.MonkeyPatch,
     *,
     hass_loop: Any | None = None,
-    namespace: str = "/",
+    namespace: str | None = None,
     rest: DummyREST | None = None,
 ) -> module.DucaheatWSClient:
     """Return a Ducaheat websocket client configured for tests."""
@@ -174,7 +187,11 @@ def _make_ducaheat_client(
     coordinator = SimpleNamespace(
         data={}, update_nodes=MagicMock(), async_request_refresh=AsyncMock()
     )
-    rest_client = rest or DummyREST()
+    rest_client = rest or DummyREST(
+        user_agent=module.get_brand_user_agent(module.BRAND_DUCAHEAT),
+        requested_with=module.get_brand_requested_with(module.BRAND_DUCAHEAT),
+    )
+    rest_client._is_ducaheat = True
     dispatcher_mock = MagicMock()
     monkeypatch.setattr(module, "async_dispatcher_send", dispatcher_mock)
     client = module.DucaheatWSClient(
@@ -201,9 +218,10 @@ def test_ducaheat_client_default_namespace(monkeypatch: pytest.MonkeyPatch) -> N
     """Verify the Ducaheat client uses the API v2 namespace by default."""
 
     client = _make_ducaheat_client(monkeypatch)
-    assert client._namespace == "/"
-    assert ("dev_data", "/") in client._sio.events
-    assert ("disconnect", "/") in client._sio.events
+    assert client._namespace == module.WS_NAMESPACE
+    assert ("dev_data", module.WS_NAMESPACE) in client._sio.events
+    assert ("disconnect", module.WS_NAMESPACE) in client._sio.events
+    assert ("message", module.WS_NAMESPACE) in client._sio.events
 
 
 @pytest.mark.asyncio
@@ -220,8 +238,38 @@ async def test_ducaheat_connect_uses_brand_headers(
     await client._connect_once()
 
     headers = connect_mock.await_args.kwargs["headers"]
-    assert headers["Origin"] == "https://localhost"
-    assert headers["X-Requested-With"] == "net.termoweb.ducaheat.app"
+    assert headers == client._brand_headers(origin="https://localhost")
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_message_ping_ack(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reply to vendor ping messages with a pong and activity marker."""
+
+    client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    handler = client._sio.events[("message", client._namespace)]
+    emit_mock = AsyncMock()
+    client._sio.emit = emit_mock
+    monkeypatch.setattr(module.time, "time", lambda: 1234.0)
+
+    await handler("ping")
+
+    emit_mock.assert_awaited_once_with("message", "pong", namespace=client._namespace)
+    assert client._stats.last_event_ts == 1234.0
+    assert client._last_payload_at == 1234.0
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_message_ignores_non_ping(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure non-ping message events are ignored."""
+
+    client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    handler = client._sio.events[("message", client._namespace)]
+    emit_mock = AsyncMock()
+    client._sio.emit = emit_mock
+
+    await handler("status")
+
+    emit_mock.assert_not_awaited()
 
 
 def test_translate_path_update_parses_segments(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2131,14 +2179,9 @@ async def test_ducaheat_connect_matches_reference(monkeypatch: pytest.MonkeyPatc
     assert args == (
         "https://api-tevolve.termoweb.net/socket.io?token=abc&dev_id=device",
     )
-    assert kwargs["headers"] == {
-        "Origin": "https://localhost",
-        "User-Agent": module.USER_AGENT,
-        "Accept-Language": module.ACCEPT_LANGUAGE,
-        "X-Requested-With": "net.termoweb.ducaheat.app",
-    }
+    assert kwargs["headers"] == client._brand_headers(origin="https://localhost")
     assert kwargs["transports"] == ["polling", "websocket"]
-    assert kwargs["namespaces"] == ["/"]
+    assert kwargs["namespaces"] == [module.WS_NAMESPACE]
     assert kwargs["socketio_path"] == "socket.io"
     assert kwargs["wait"] is True
     assert kwargs["wait_timeout"] == 15
@@ -2211,7 +2254,7 @@ def test_ducaheat_connect_response_logging(
     client._sio.connection_url = "https://api.example.com/socket.io?token=abc"
     client._sio.connection_headers = {"Authorization": "Bearer secret-token"}
     client._sio.connection_transports = ["websocket"]
-    client._sio.connection_namespaces = ["/"]
+    client._sio.connection_namespaces = [module.WS_NAMESPACE]
     response = SimpleNamespace(
         status=101,
         headers={"Upgrade": "websocket", "Set-Cookie": "SESSION=abcdef"},
@@ -2326,7 +2369,10 @@ async def test_ducaheat_on_namespace_connect_emits_namespace(
 
     await client._on_namespace_connect()
 
-    assert emit_mock.await_args_list == [call("dev_data", namespace="/")]
+    assert emit_mock.await_args_list == [
+        call("join", namespace=module.WS_NAMESPACE),
+        call("dev_data", namespace=module.WS_NAMESPACE),
+    ]
 
 
 @pytest.mark.asyncio
@@ -2528,6 +2574,80 @@ async def test_legacy_session_subscription_helper(
     send_mock.assert_awaited_once_with(
         f'5::{module.WS_NAMESPACE}:{{"name":"subscribe","args":["/mgr/session"]}}'
     )
+
+
+@pytest.mark.asyncio
+async def test_legacy_handshake_uses_localhost_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure the legacy handshake mirrors the mobile app origin header."""
+
+    client = _make_legacy_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+
+    class StubResponse:
+        def __init__(self) -> None:
+            self.status = 200
+
+        async def text(self) -> str:
+            return "sid:60:60:websocket,xhr-polling"
+
+        async def __aenter__(self) -> "StubResponse":
+            return self
+
+        async def __aexit__(self, *args: Any) -> bool:
+            return False
+
+    class StubSession:
+        def __init__(self) -> None:
+            self.handshake_headers: dict[str, str] | None = None
+
+        def get(self, *_: Any, headers: Mapping[str, str], **__: Any) -> StubResponse:
+            self.handshake_headers = dict(headers)
+            return StubResponse()
+
+    stub_session = StubSession()
+    client._session = stub_session  # type: ignore[assignment]
+    monkeypatch.setattr(client, "_get_token", AsyncMock(return_value="TOKEN"))
+
+    sid, timeout = await client._handshake()
+
+    assert sid == "sid"
+    assert timeout == 60
+    assert stub_session.handshake_headers is not None
+    assert stub_session.handshake_headers.get("Origin") == "https://localhost"
+
+
+@pytest.mark.asyncio
+async def test_legacy_websocket_connect_uses_localhost_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure the websocket upgrade reuses the localhost origin."""
+
+    client = _make_legacy_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+
+    class StubSession:
+        def __init__(self) -> None:
+            self.ws_headers: dict[str, str] | None = None
+
+        async def ws_connect(
+            self,
+            *_: Any,
+            headers: Mapping[str, str],
+            **__: Any,
+        ) -> Any:
+            self.ws_headers = dict(headers)
+            return SimpleNamespace(closed=False)
+
+    stub_session = StubSession()
+    client._session = stub_session  # type: ignore[assignment]
+    monkeypatch.setattr(client, "_get_token", AsyncMock(return_value="TOKEN"))
+
+    client._sanitise_url = lambda url: url  # type: ignore[assignment]
+
+    await client._connect_ws("sid123")
+
+    assert stub_session.ws_headers is not None
+    assert stub_session.ws_headers.get("Origin") == "https://localhost"
 
 
 @pytest.mark.asyncio

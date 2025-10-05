@@ -12,6 +12,12 @@ import pytest
 
 import custom_components.termoweb.api as api
 from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
+from custom_components.termoweb.const import (
+    BRAND_DUCAHEAT,
+    BRAND_TERMOWEB,
+    get_brand_requested_with,
+    get_brand_user_agent,
+)
 from custom_components.termoweb.nodes import AccumulatorNode
 
 RESTClient = api.RESTClient
@@ -174,7 +180,11 @@ def test_ducaheat_token_headers() -> None:
         assert session.post_calls
         headers = session.post_calls[0][2]["headers"]
         assert headers["X-SerialId"] == "15"
-        assert headers["X-Requested-With"] == "net.termoweb.ducaheat.app"
+        assert (
+            headers["X-Requested-With"]
+            == get_brand_requested_with(BRAND_DUCAHEAT)
+        )
+        assert headers["User-Agent"] == get_brand_user_agent(BRAND_DUCAHEAT)
 
     asyncio.run(_run())
 
@@ -737,8 +747,44 @@ def test_ducaheat_authed_request_headers() -> None:
         assert method == "GET"
         assert url == "https://api-tevolve.termoweb.net/api/v2/devs/"
         headers = kwargs["headers"]
-        assert headers["X-Requested-With"] == "net.termoweb.ducaheat.app"
+        assert (
+            headers["X-Requested-With"]
+            == get_brand_requested_with(BRAND_DUCAHEAT)
+        )
+        assert headers["User-Agent"] == get_brand_user_agent(BRAND_DUCAHEAT)
         assert headers["X-SerialId"] == "15"
+
+    asyncio.run(_run())
+
+
+def test_termoweb_authed_request_headers() -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_post(
+            MockResponse(
+                200,
+                {"access_token": "tok", "expires_in": 3600},
+                headers={"Content-Type": "application/json"},
+            )
+        )
+        session.queue_request(
+            MockResponse(200, [], headers={"Content-Type": "application/json"})
+        )
+
+        client = RESTClient(session, "user", "pw")
+
+        await client.list_devices()
+
+        assert session.request_calls
+        method, url, kwargs = session.request_calls[0]
+        assert method == "GET"
+        assert url == "https://control.termoweb.net/api/v2/devs/"
+        headers = kwargs["headers"]
+        assert headers["User-Agent"] == get_brand_user_agent(BRAND_TERMOWEB)
+        assert (
+            headers["X-Requested-With"]
+            == get_brand_requested_with(BRAND_TERMOWEB)
+        )
 
     asyncio.run(_run())
 

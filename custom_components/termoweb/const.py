@@ -40,6 +40,24 @@ BRAND_BASIC_AUTH: Final[Mapping[str, str]] = {
     BRAND_DUCAHEAT: "NWM0OWRjZTk3NzUxMDM1MTUwNmM0MmRiOnRldm9sdmU=",
 }
 
+# UA / locale (matches app loosely; helps avoid quirky WAF rules)
+USER_AGENT: Final = "TermoWeb/2.5.1 (Android; HomeAssistant Integration)"
+DUCAHEAT_USER_AGENT: Final = "Ducaheat/1.40.1 (Android; HomeAssistant Integration)"
+
+TERMOWEB_REQUESTED_WITH: Final = "com.casple.termoweb.v2"
+DUCAHEAT_REQUESTED_WITH: Final = "net.termoweb.ducaheat.app"
+ACCEPT_LANGUAGE: Final = "en-US,en;q=0.8"
+
+BRAND_USER_AGENTS: Final[Mapping[str, str]] = {
+    BRAND_TERMOWEB: USER_AGENT,
+    BRAND_DUCAHEAT: DUCAHEAT_USER_AGENT,
+}
+
+BRAND_REQUESTED_WITH: Final[Mapping[str, str]] = {
+    BRAND_TERMOWEB: TERMOWEB_REQUESTED_WITH,
+    BRAND_DUCAHEAT: DUCAHEAT_REQUESTED_WITH,
+}
+
 
 def get_brand_api_base(brand: str) -> str:
     """Return API base URL for the selected brand."""
@@ -61,18 +79,17 @@ def get_brand_label(brand: str) -> str:
 
     return BRAND_LABELS.get(brand, BRAND_LABELS[BRAND_TERMOWEB])
 
-# Polling
-DEFAULT_POLL_INTERVAL: Final = 120  # seconds
-MIN_POLL_INTERVAL: Final = 30  # seconds
-MAX_POLL_INTERVAL: Final = 3600  # seconds
-STRETCHED_POLL_INTERVAL: Final = 2700  # seconds (45 minutes) when WS healthy ≥5m
 
-# Heater energy polling interval when relying on push updates
-HTR_ENERGY_UPDATE_INTERVAL: Final = timedelta(hours=1)
+def get_brand_user_agent(brand: str) -> str:
+    """Return the preferred User-Agent string for the brand."""
 
-# UA / locale (matches app loosely; helps avoid quirky WAF rules)
-USER_AGENT: Final = "TermoWeb/2.5.1 (Android; HomeAssistant Integration)"
-ACCEPT_LANGUAGE: Final = "en-US,en;q=0.8"
+    return BRAND_USER_AGENTS.get(brand, USER_AGENT)
+
+
+def get_brand_requested_with(brand: str) -> str | None:
+    """Return the X-Requested-With header value for the brand."""
+
+    return BRAND_REQUESTED_WITH.get(brand)
 
 # Socket.IO namespace used by the websocket client implementation
 WS_NAMESPACE: Final = "/api/v2/socket_io"
@@ -82,9 +99,21 @@ WS_NAMESPACE: Final = "/api/v2/socket_io"
 
 def signal_ws_data(entry_id: str) -> str:
     """Signal name for WS ‘data’ frames dispatched to platforms."""
+
     return f"{DOMAIN}_{entry_id}_ws_data"
 
 
 def signal_ws_status(entry_id: str) -> str:
     """Signal name for WS status/health updates."""
+
     return f"{DOMAIN}_{entry_id}_ws_status"
+
+# Polling
+DEFAULT_POLL_INTERVAL: Final = 120  # seconds
+MIN_POLL_INTERVAL: Final = 30  # seconds
+MAX_POLL_INTERVAL: Final = 3600  # seconds
+STRETCHED_POLL_INTERVAL: Final = 2700  # seconds (45 minutes) when WS healthy ≥5m
+
+# Heater energy polling interval when relying on push updates
+HTR_ENERGY_UPDATE_INTERVAL: Final = timedelta(hours=1)
+
