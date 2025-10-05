@@ -149,7 +149,7 @@ def _make_ducaheat_client(
     monkeypatch: pytest.MonkeyPatch,
     *,
     hass_loop: Any | None = None,
-    namespace: str = module.WS_NAMESPACE,
+    namespace: str = "/",
 ) -> module.DucaheatWSClient:
     """Return a Ducaheat websocket client configured for tests."""
 
@@ -196,9 +196,9 @@ def test_ducaheat_client_default_namespace(monkeypatch: pytest.MonkeyPatch) -> N
     """Verify the Ducaheat client uses the API v2 namespace by default."""
 
     client = _make_ducaheat_client(monkeypatch)
-    assert client._namespace == module.WS_NAMESPACE
-    assert ("dev_data", module.WS_NAMESPACE) in client._sio.events
-    assert ("disconnect", module.WS_NAMESPACE) in client._sio.events
+    assert client._namespace == "/"
+    assert ("dev_data", "/") in client._sio.events
+    assert ("disconnect", "/") in client._sio.events
 
 
 def test_translate_path_update_parses_segments(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2055,20 +2055,46 @@ async def test_ducaheat_connect_matches_reference(monkeypatch: pytest.MonkeyPatc
     client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     client._stop_event = asyncio.Event()
     monkeypatch.setattr(client, "_get_token", AsyncMock(return_value="abc"))
-    monkeypatch.setattr(client, "_api_base", lambda: "https://api-tevolve.termoweb.net")
+    monkeypatch.setattr(
+        client, "_api_base", lambda: "https://api-tevolve.termoweb.net/api/v2"
+    )
     connect_mock = AsyncMock()
     client._sio.connect = connect_mock
 
     await client._connect_once()
 
-    connect_mock.assert_awaited_once_with(
-        "https://api-tevolve.termoweb.net/api/v2/socket_io?token=abc&dev_id=device",
-        transports=["websocket"],
-        namespaces=[module.WS_NAMESPACE],
-        socketio_path="socket.io",
-        wait=True,
-        wait_timeout=15,
+    assert connect_mock.await_count == 1
+    args, kwargs = connect_mock.await_args
+    assert args == (
+        "https://api-tevolve.termoweb.net/socket.io?token=abc&dev_id=device",
     )
+    assert kwargs["headers"] == {
+        "Origin": "https://localhost",
+        "User-Agent": module.USER_AGENT,
+        "Accept-Language": module.ACCEPT_LANGUAGE,
+        "X-Requested-With": "net.termoweb.ducaheat.app",
+    }
+    assert kwargs["transports"] == ["polling", "websocket"]
+    assert kwargs["namespaces"] == ["/"]
+    assert kwargs["socketio_path"] == "socket.io"
+    assert kwargs["wait"] is True
+    assert kwargs["wait_timeout"] == 15
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_build_engineio_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure Ducaheat Engine.IO targets use the root namespace path."""
+
+    client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    monkeypatch.setattr(client, "_get_token", AsyncMock(return_value="TOKEN"))
+    monkeypatch.setattr(
+        client, "_api_base", lambda: "https://api-tevolve.termoweb.net/api/v2"
+    )
+
+    url, path = await client._build_engineio_target()
+
+    assert url == "https://api-tevolve.termoweb.net/socket.io?token=TOKEN&dev_id=device"
+    assert path == "socket.io"
 
 
 @pytest.mark.asyncio
@@ -2237,10 +2263,7 @@ async def test_ducaheat_on_namespace_connect_emits_namespace(
 
     await client._on_namespace_connect()
 
-    assert emit_mock.await_args_list == [
-        call("join", namespace=module.WS_NAMESPACE),
-        call("dev_data", namespace=module.WS_NAMESPACE),
-    ]
+    assert emit_mock.await_args_list == [call("dev_data", namespace="/")]
 
 
 @pytest.mark.asyncio
