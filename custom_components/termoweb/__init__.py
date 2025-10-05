@@ -6,11 +6,11 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime as _datetime, timedelta
 import logging
 import time as _time
-from typing import Any
+from typing import Any, Awaitable
 
 from aiohttp import ClientError
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -193,6 +193,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     )
 
+    debug_enabled = bool(entry.options.get("debug", entry.data.get("debug", False)))
+
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = data = {
         "backend": backend,
@@ -209,6 +211,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "ws_state": {},  # dev_id -> status attrs
         "version": version,
         "brand": brand,
+        "debug": debug_enabled,
     }
 
     async def _start_ws(dev_id: str) -> None:
@@ -310,8 +313,116 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _async_import_energy_history,
     )
 
+    await async_register_ws_debug_probe_service(hass)
+
     _LOGGER.info("TermoWeb setup complete (v%s)", version)
     return True
+
+
+async def async_register_ws_debug_probe_service(hass: HomeAssistant) -> None:
+    """Register the ws_debug_probe debug helper service."""
+
+    if hass.services.has_service(DOMAIN, "ws_debug_probe"):
+        return
+
+    async def _async_ws_debug_probe(call: ServiceCall) -> None:
+        """Emit a websocket dev_data probe for debugging."""
+
+        entry_filter = call.data.get("entry_id")
+        dev_filter = call.data.get("dev_id")
+        domain_records = hass.data.get(DOMAIN, {})
+        if not isinstance(domain_records, Mapping):
+            _LOGGER.debug("ws_debug_probe: integration data unavailable")
+            return
+
+        entries: list[tuple[str, Mapping[str, Any]]] = []
+        if entry_filter:
+            record = domain_records.get(entry_filter)
+            if isinstance(record, Mapping):
+                entries.append((entry_filter, record))
+        else:
+            entries = [
+                (entry_id, rec)
+                for entry_id, rec in domain_records.items()
+                if isinstance(rec, Mapping)
+            ]
+
+        if not entries:
+            _LOGGER.debug("ws_debug_probe: no matching config entries")
+            return
+
+        tasks: list[Awaitable[Any]] = []
+        for entry_id, rec in entries:
+            if not rec.get("debug"):
+                _LOGGER.debug(
+                    "ws_debug_probe: debug helpers disabled for entry %s",
+                    entry_id,
+                )
+                continue
+            clients = rec.get("ws_clients")
+            if not isinstance(clients, Mapping) or not clients:
+                _LOGGER.debug(
+                    "ws_debug_probe: no websocket clients for entry %s",
+                    entry_id,
+                )
+                continue
+            if dev_filter:
+                target_dev_ids: Iterable[str] = [str(dev_filter)]
+            else:
+                target_dev_ids = [str(dev) for dev in clients.keys()]
+            for dev_id in target_dev_ids:
+                client = clients.get(dev_id)
+                if client is None:
+                    _LOGGER.debug(
+                        "ws_debug_probe: websocket client missing for %s/%s",
+                        entry_id,
+                        dev_id,
+                    )
+                    continue
+                probe = getattr(client, "debug_probe", None)
+                if probe is None:
+                    _LOGGER.debug(
+                        "ws_debug_probe: client %s/%s has no debug_probe",
+                        entry_id,
+                        dev_id,
+                    )
+                    continue
+                try:
+                    result = probe()
+                except TypeError as err:
+                    _LOGGER.debug(
+                        "ws_debug_probe: client %s/%s probe invocation failed: %s",
+                        entry_id,
+                        dev_id,
+                        err,
+                    )
+                    continue
+                if asyncio.iscoroutine(result):
+                    tasks.append(result)
+                else:
+                    _LOGGER.debug(
+                        "ws_debug_probe: client %s/%s returned non-awaitable probe",
+                        entry_id,
+                        dev_id,
+                    )
+
+        if not tasks:
+            _LOGGER.debug("ws_debug_probe: no matching websocket clients to probe")
+            return
+
+        _LOGGER.debug("ws_debug_probe: awaiting %d websocket probe(s)", len(tasks))
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for res in results:
+            if isinstance(res, asyncio.CancelledError):
+                raise res
+            if isinstance(res, Exception):
+                _LOGGER.debug("ws_debug_probe: probe raised %s", res)
+
+    hass.services.async_register(
+        DOMAIN,
+        "ws_debug_probe",
+        _async_ws_debug_probe,
+    )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -356,4 +467,5 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_update_entry_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options updates; recompute interval if needed."""
     rec = hass.data[DOMAIN][entry.entry_id]
+    rec["debug"] = bool(entry.options.get("debug", entry.data.get("debug", False)))
     rec["recalc_poll"]()
