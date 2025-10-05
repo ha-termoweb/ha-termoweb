@@ -1182,3 +1182,22 @@ def test_async_migrate_entry_returns_true(
     entry = ConfigEntry("migrate", data={})
     stub_hass.config_entries.add(entry)
     assert asyncio.run(termoweb_init.async_migrate_entry(stub_hass, entry)) is True
+
+
+@pytest.mark.asyncio
+async def test_shutdown_entry_ignores_non_mapping(termoweb_init: Any) -> None:
+    await termoweb_init._async_shutdown_entry(object())
+
+
+@pytest.mark.asyncio
+async def test_shutdown_entry_skips_completed_record(termoweb_init: Any) -> None:
+    rec: dict[str, object] = {"_shutdown_complete": True, "ws_clients": {}}
+    await termoweb_init._async_shutdown_entry(rec)
+    assert rec["_shutdown_complete"] is True
+
+
+@pytest.mark.asyncio
+async def test_shutdown_entry_handles_client_without_stop(termoweb_init: Any) -> None:
+    rec: dict[str, object] = {"ws_clients": {"dev": object()}}
+    await termoweb_init._async_shutdown_entry(rec)
+    assert rec["_shutdown_complete"] is True
