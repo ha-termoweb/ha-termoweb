@@ -148,6 +148,9 @@ Run tests with coverage:
 uv run pytest --cov=custom_components/termoweb --cov-report=term-missing
 ```
 
+See [`docs/developer-notes.md`](docs/developer-notes.md) for backend write semantics and other
+implementation details for contributors.
+
 ---
 
 ## Search keywords
