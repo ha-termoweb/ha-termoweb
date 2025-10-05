@@ -312,6 +312,22 @@ class RESTClient:
 
     # ----------------- Public API -----------------
 
+    async def authed_headers(self) -> dict[str, str]:
+        """Return HTTP headers including a valid bearer token."""
+
+        return await self._authed_headers()
+
+    async def refresh_token(self) -> None:
+        """Refresh the cached bearer token immediately."""
+
+        async with self._lock:
+            self._access_token = None
+            self._token_obtained_at = 0.0
+            self._token_obtained_monotonic = 0.0
+            self._token_expiry = 0.0
+            self._token_expiry_monotonic = 0.0
+        await self._ensure_token()
+
     async def list_devices(self) -> list[dict[str, Any]]:
         """Return normalized device list: [{'dev_id', ...}, ...]."""
         headers = await self._authed_headers()
@@ -634,4 +650,3 @@ class RESTClient:
         """Return websocket node payloads unchanged by default."""
 
         return nodes
-

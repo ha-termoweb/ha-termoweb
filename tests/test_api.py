@@ -6,6 +6,7 @@ import logging
 import logging
 import time
 from typing import Any, Callable
+from unittest.mock import AsyncMock
 
 import aiohttp
 import pytest
@@ -221,10 +222,7 @@ def test_ducaheat_token_headers() -> None:
         assert session.post_calls
         headers = session.post_calls[0][2]["headers"]
         assert headers["X-SerialId"] == "15"
-        assert (
-            headers["X-Requested-With"]
-            == get_brand_requested_with(BRAND_DUCAHEAT)
-        )
+        assert headers["X-Requested-With"] == get_brand_requested_with(BRAND_DUCAHEAT)
         assert headers["User-Agent"] == get_brand_user_agent(BRAND_DUCAHEAT)
 
     asyncio.run(_run())
@@ -389,6 +387,7 @@ def test_get_node_samples_404() -> None:
 
     asyncio.run(_run())
 
+
 def test_request_ignore_status_returns_none() -> None:
     async def _run() -> None:
         session = FakeSession()
@@ -457,6 +456,42 @@ def test_request_refreshes_once_then_raises() -> None:
         assert second_auth == "Bearer refreshed"
 
     asyncio.run(_run())
+
+
+@pytest.mark.asyncio
+async def test_authed_headers_public_wrapper(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = FakeSession()
+    client = RESTClient(session, "user", "pass")
+    sentinel = {"Authorization": "Bearer sentinel"}
+    fake_headers = AsyncMock(return_value=sentinel)
+    monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+    headers = await client.authed_headers()
+
+    assert headers is sentinel
+    assert fake_headers.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_public_wrapper(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = FakeSession()
+    client = RESTClient(session, "user", "pass")
+    client._access_token = "cached"
+    client._token_expiry = 123.0
+    client._token_expiry_monotonic = 456.0
+    client._token_obtained_at = 789.0
+    client._token_obtained_monotonic = 987.0
+    ensure_mock = AsyncMock(return_value="new-token")
+    monkeypatch.setattr(client, "_ensure_token", ensure_mock)
+
+    await client.refresh_token()
+
+    assert client._access_token is None
+    assert client._token_expiry == 0.0
+    assert client._token_expiry_monotonic == 0.0
+    assert client._token_obtained_at == 0.0
+    assert client._token_obtained_monotonic == 0.0
+    assert ensure_mock.await_count == 1
 
 
 def test_request_rate_limit_error() -> None:
@@ -575,7 +610,9 @@ def test_request_preview_logs_json_fallback(caplog) -> None:
         api.API_LOG_PREVIEW = False
 
     assert results == ['{"ok":true}']
-    preview_logs = [rec.message for rec in caplog.records if "body[0:200]" in rec.message]
+    preview_logs = [
+        rec.message for rec in caplog.records if "body[0:200]" in rec.message
+    ]
     assert preview_logs
 
 
@@ -790,10 +827,7 @@ def test_ducaheat_authed_request_headers() -> None:
         assert method == "GET"
         assert url == "https://api-tevolve.termoweb.net/api/v2/devs/"
         headers = kwargs["headers"]
-        assert (
-            headers["X-Requested-With"]
-            == get_brand_requested_with(BRAND_DUCAHEAT)
-        )
+        assert headers["X-Requested-With"] == get_brand_requested_with(BRAND_DUCAHEAT)
         assert headers["User-Agent"] == get_brand_user_agent(BRAND_DUCAHEAT)
         assert headers["X-SerialId"] == "15"
 
@@ -824,10 +858,7 @@ def test_termoweb_authed_request_headers() -> None:
         assert url == "https://control.termoweb.net/api/v2/devs/"
         headers = kwargs["headers"]
         assert headers["User-Agent"] == get_brand_user_agent(BRAND_TERMOWEB)
-        assert (
-            headers["X-Requested-With"]
-            == get_brand_requested_with(BRAND_TERMOWEB)
-        )
+        assert headers["X-Requested-With"] == get_brand_requested_with(BRAND_TERMOWEB)
 
     asyncio.run(_run())
 
@@ -909,7 +940,9 @@ def test_get_rtc_time_handles_non_dict(
     asyncio.run(_run())
 
 
-def test_get_node_settings_acm_logs(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
+def test_get_node_settings_acm_logs(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
     async def _run() -> None:
         session = FakeSession()
         session.queue_request(
@@ -1212,9 +1245,7 @@ def test_get_node_samples_malformed_items(monkeypatch, caplog) -> None:
         async def fake_headers() -> dict[str, str]:
             return {}
 
-        async def fake_request(
-            method: str, path: str, **kwargs: Any
-        ) -> dict[str, Any]:
+        async def fake_request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
             return {
                 "samples": [
                     123,
@@ -1313,9 +1344,7 @@ def test_list_devices_unexpected_dict_payload(monkeypatch, caplog) -> None:
         async def fake_headers() -> dict[str, str]:
             return {}
 
-        async def fake_request(
-            method: str, path: str, **kwargs: Any
-        ) -> dict[str, Any]:
+        async def fake_request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
             return {"weird": []}
 
         monkeypatch.setattr(client, "_authed_headers", fake_headers)
@@ -1397,7 +1426,9 @@ def test_ducaheat_get_node_settings_normalises_payload(
                         "units": "c",
                         "boost_active": True,
                     },
-                    "setup": {"extra_options": {"boost_temp": "23.0", "boost_time": 45}},
+                    "setup": {
+                        "extra_options": {"boost_temp": "23.0", "boost_time": 45}
+                    },
                     "prog": {
                         "days": {
                             "mon": {"slots": [0, 1, 2, 0] * 6},
@@ -1612,7 +1643,9 @@ def test_ducaheat_set_htr_settings_writes_segmented(monkeypatch) -> None:
 
         monkeypatch.setattr(client, "_authed_headers", fake_headers)
 
-        prog_list = [0] * 24 + [1] * 24 + [2] * 24 + [0] * 24 + [1] * 24 + [2] * 24 + [0] * 24
+        prog_list = (
+            [0] * 24 + [1] * 24 + [2] * 24 + [0] * 24 + [1] * 24 + [2] * 24 + [0] * 24
+        )
         ptemp_list = [5.0, 15.0, 21.0]
 
         result = await client.set_htr_settings(
@@ -1649,7 +1682,9 @@ def test_ducaheat_set_htr_settings_mode_only(monkeypatch) -> None:
     async def _run() -> None:
         session = FakeSession()
         session.queue_request(
-            MockResponse(200, {"ok": True}, headers={"Content-Type": "application/json"})
+            MockResponse(
+                200, {"ok": True}, headers={"Content-Type": "application/json"}
+            )
         )
 
         client = DucaheatRESTClient(
@@ -1731,7 +1766,9 @@ def test_ducaheat_set_htr_settings_prog_only(monkeypatch) -> None:
         session = FakeSession()
         session.queue_request(
             MockResponse(200, {}, headers={"Content-Type": "application/json"}),
-            MockResponse(200, {"saved": True}, headers={"Content-Type": "application/json"}),
+            MockResponse(
+                200, {"saved": True}, headers={"Content-Type": "application/json"}
+            ),
             MockResponse(200, {}, headers={"Content-Type": "application/json"}),
         )
 
@@ -1766,10 +1803,18 @@ def test_ducaheat_set_acm_settings_segmented(monkeypatch) -> None:
     async def _run() -> None:
         session = FakeSession()
         session.queue_request(
-            MockResponse(200, {"ok": True}, headers={"Content-Type": "application/json"}),
-            MockResponse(200, {"status": "updated"}, headers={"Content-Type": "application/json"}),
-            MockResponse(200, {"prog": "saved"}, headers={"Content-Type": "application/json"}),
-            MockResponse(200, {"temps": "saved"}, headers={"Content-Type": "application/json"}),
+            MockResponse(
+                200, {"ok": True}, headers={"Content-Type": "application/json"}
+            ),
+            MockResponse(
+                200, {"status": "updated"}, headers={"Content-Type": "application/json"}
+            ),
+            MockResponse(
+                200, {"prog": "saved"}, headers={"Content-Type": "application/json"}
+            ),
+            MockResponse(
+                200, {"temps": "saved"}, headers={"Content-Type": "application/json"}
+            ),
         )
 
         client = DucaheatRESTClient(
@@ -2060,11 +2105,7 @@ def test_ducaheat_normalise_settings_handles_half_hour_prog() -> None:
     )
 
     payload = {
-        "prog": {
-            "prog": {
-                str(day): [day % 3] * 48 for day in range(7)
-            }
-        },
+        "prog": {"prog": {str(day): [day % 3] * 48 for day in range(7)}},
         "status": {"mode": "AUTO"},
     }
 
@@ -2110,15 +2151,9 @@ def test_ducaheat_normalise_prog_invalid_inputs() -> None:
 
     bad_day = {"days": {"mon": ["x"]}}
     assert client._normalise_prog(bad_day) is None
-    assert (
-        client._normalise_prog({"days": {"mon": {"slots": None}}}) is None
-    )
-    assert (
-        client._normalise_prog({"days": {"mon": {"slots": 123}}}) is None
-    )
-    assert (
-        client._normalise_prog({"days": {"mon": {"values": "abc"}}}) is None
-    )
+    assert client._normalise_prog({"days": {"mon": {"slots": None}}}) is None
+    assert client._normalise_prog({"days": {"mon": {"slots": 123}}}) is None
+    assert client._normalise_prog({"days": {"mon": {"values": "abc"}}}) is None
 
 
 def test_ducaheat_normalise_prog_temps_variations() -> None:
@@ -2223,4 +2258,3 @@ def test_ducaheat_rest_client_header_properties_exposed() -> None:
 
     assert client.user_agent == get_brand_user_agent(BRAND_DUCAHEAT)
     assert client.requested_with == get_brand_requested_with(BRAND_DUCAHEAT)
-

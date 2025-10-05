@@ -30,16 +30,23 @@ class DummyREST:
         self._ensure_token = AsyncMock()
         self._set_node_settings = AsyncMock(return_value={"status": "ok"})
         self._get_rtc_time = AsyncMock(return_value={"status": "ok"})
-        self.user_agent = user_agent or module.get_brand_user_agent(module.BRAND_TERMOWEB)
+        self.user_agent = user_agent or module.get_brand_user_agent(
+            module.BRAND_TERMOWEB
+        )
         self.requested_with = (
             requested_with
             if requested_with is not None
             else module.get_brand_requested_with(module.BRAND_TERMOWEB)
         )
         self._is_ducaheat = False
+        self._access_token = "token"
 
-    async def _authed_headers(self) -> dict[str, str]:
+    async def authed_headers(self) -> dict[str, str]:
         return self._headers
+
+    async def refresh_token(self) -> None:
+        self._access_token = None
+        await self._ensure_token()
 
     async def set_node_settings(self, *args: Any, **kwargs: Any) -> Any:
         return await self._set_node_settings(*args, **kwargs)
@@ -313,7 +320,9 @@ async def test_ducaheat_message_ping_ack(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 @pytest.mark.asyncio
-async def test_ducaheat_message_ignores_non_ping(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_ducaheat_message_ignores_non_ping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Ensure non-ping message events are ignored."""
 
     client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
@@ -347,11 +356,7 @@ def test_translate_path_update_parses_segments(monkeypatch: pytest.MonkeyPatch) 
     }
     translated_nested = client._translate_path_update(nested_payload)
     assert translated_nested == {
-        "htr": {
-            "settings": {
-                "001": {"setup": {"limits": {"max": {"value": 10}}}}
-            }
-        }
+        "htr": {"settings": {"001": {"setup": {"limits": {"max": {"value": 10}}}}}}
     }
 
     status_payload = {
@@ -378,8 +383,7 @@ def test_translate_path_update_edge_cases(monkeypatch: pytest.MonkeyPatch) -> No
         is None
     )
     assert (
-        client._translate_path_update({"path": "/devs/dev/htr/001", "body": {}})
-        is None
+        client._translate_path_update({"path": "/devs/dev/htr/001", "body": {}}) is None
     )
     assert (
         client._translate_path_update({"path": "/devs/dev/htr/ /status", "body": {}})
@@ -764,13 +768,13 @@ def test_translate_path_update_requires_address_segments(
 ) -> None:
     client = _make_ducaheat_client(monkeypatch)
 
-    assert (
-        client._translate_path_update({"path": "/devs/dev/htr", "body": {}}) is None
-    )
+    assert client._translate_path_update({"path": "/devs/dev/htr", "body": {}}) is None
     assert client._translate_path_update({"path": "/htr", "body": {}}) is None
 
 
-def test_ducaheat_socket_base_requires_hostname(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ducaheat_socket_base_requires_hostname(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = _make_ducaheat_client(monkeypatch)
     client._api_base = lambda: "http://"
 
@@ -940,7 +944,9 @@ def test_ducaheat_log_probe_frame_skips_without_debug(
         module._LOGGER.setLevel(original_level)
 
 
-def test_ducaheat_complete_debug_probe_if_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ducaheat_complete_debug_probe_if_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = _make_ducaheat_client(monkeypatch)
     client._debug_probe_active = True
     client._debug_probe_logged_handshake = True
@@ -1026,6 +1032,8 @@ async def test_ducaheat_on_message_branches(
     client._sio.emit = failing_emit
     await client._on_message(("message", "ping"))
     failing_emit.assert_awaited()
+
+
 @pytest.mark.asyncio
 async def test_wrap_background_task_runs_coroutine(
     monkeypatch: pytest.MonkeyPatch,
@@ -1131,10 +1139,7 @@ def test_legacy_mark_event_tracks_payload(monkeypatch: pytest.MonkeyPatch) -> No
     client._mark_event(paths=None, count_event=True)
 
     assert client._last_payload_at == pytest.approx(1000.0)
-    assert (
-        client._ws_state_bucket()["last_payload_at"]
-        == pytest.approx(1000.0)
-    )
+    assert client._ws_state_bucket()["last_payload_at"] == pytest.approx(1000.0)
 
 
 def test_legacy_heartbeat_does_not_cancel_restart(
@@ -1493,9 +1498,7 @@ async def test_ducaheat_dev_data_node_list_translated(
     assert client._nodes_raw["htr"]["status"]["2"]["mode"] == "eco"
     assert client._nodes_raw["htr"]["settings"]["2"]["setup"]["name"] == "Heater"
     assert client._nodes_raw["htr"]["settings"]["2"]["prog_temps"]["comfort"] == 21
-    assert (
-        client._nodes_raw["htr"]["advanced"]["2"]["advanced_setup"]["boost"] is False
-    )
+    assert client._nodes_raw["htr"]["advanced"]["2"]["advanced_setup"]["boost"] is False
     assert client._nodes_raw["pmo"]["status"]["A1"]["power"] == 123
     assert client._nodes_raw["pmo"]["settings"]["A1"]["name"] == "Monitor"
 
@@ -1715,7 +1718,9 @@ async def test_ducaheat_fallback_logs_refresh_failures(
 
 
 @pytest.mark.asyncio
-async def test_ducaheat_fallback_skips_recent_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_ducaheat_fallback_skips_recent_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Skip triggering fallback when payloads arrived moments ago."""
 
     client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
@@ -1871,9 +1876,7 @@ async def test_runner_backoff_sequence(monkeypatch: pytest.MonkeyPatch) -> None:
 
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     clock = MutableClock(wall=1000.0, monotonic=50.0)
-    _patch_clock(
-        monkeypatch, wall=clock.wall_time, mono=clock.monotonic_time
-    )
+    _patch_clock(monkeypatch, wall=clock.wall_time, mono=clock.monotonic_time)
     monkeypatch.setattr(module.random, "uniform", lambda a, b: 1.0)
 
     delays: list[float] = []
@@ -2088,9 +2091,7 @@ async def test_refresh_subscription_updates_metadata(
     subscribe_mock = AsyncMock()
     monkeypatch.setattr(client, "_subscribe_heater_samples", subscribe_mock)
     clock = MutableClock(wall=5000.0, monotonic=250.0)
-    _patch_clock(
-        monkeypatch, wall=clock.wall_time, mono=clock.monotonic_time
-    )
+    _patch_clock(monkeypatch, wall=clock.wall_time, mono=clock.monotonic_time)
     monkeypatch.setattr(module._LOGGER, "isEnabledFor", lambda level: True)
 
     info_calls: list[tuple[Any, ...]] = []
@@ -2222,7 +2223,7 @@ async def test_disconnect_logs_exception(monkeypatch: pytest.MonkeyPatch) -> Non
 @pytest.mark.asyncio
 async def test_get_token_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
-    client._client._authed_headers = AsyncMock(return_value={})  # type: ignore[attr-defined]
+    client._client.authed_headers = AsyncMock(return_value={})
     with pytest.raises(RuntimeError):
         await client._get_token()
 
@@ -2239,9 +2240,20 @@ async def test_force_refresh_token_resets_access(
 ) -> None:
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     rest = client._client
-    rest._access_token = "abc"  # type: ignore[attr-defined]
+    rest._access_token = "abc"
     await client._force_refresh_token()
-    assert rest._ensure_token.await_count == 1  # type: ignore[attr-defined]
+    assert rest._access_token is None
+    assert rest._ensure_token.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_force_refresh_token_missing_method(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    client._client.refresh_token = None  # type: ignore[assignment]
+    with pytest.raises(RuntimeError):
+        await client._force_refresh_token()
 
 
 @pytest.mark.asyncio
@@ -2283,7 +2295,9 @@ async def test_on_namespace_connect_requests_snapshot(
 
 
 @pytest.mark.asyncio
-async def test_on_connect_debug_catch_all(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+async def test_on_connect_debug_catch_all(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """Verify that catch-all logging is registered only in DEBUG mode."""
 
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
@@ -2438,7 +2452,9 @@ def test_dispatch_nodes_handles_raw_payload(monkeypatch: pytest.MonkeyPatch) -> 
     assert updates and isinstance(updates[0], dict)
 
 
-def test_dispatch_nodes_updates_snapshot_record(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_dispatch_nodes_updates_snapshot_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Snapshot records should be updated when new nodes payloads arrive."""
 
     client = _make_client(monkeypatch)
@@ -2452,7 +2468,14 @@ def test_dispatch_nodes_updates_snapshot_record(monkeypatch: pytest.MonkeyPatch)
 
     payload = {
         "nodes": base_nodes,
-        "nodes_by_type": {"htr": {"addrs": ["1"], "settings": {"1": {}}, "advanced": {}, "samples": {}}},
+        "nodes_by_type": {
+            "htr": {
+                "addrs": ["1"],
+                "settings": {"1": {}},
+                "advanced": {},
+                "samples": {},
+            }
+        },
     }
 
     addr_map = client._dispatch_nodes(payload)
@@ -2469,7 +2492,9 @@ def test_heater_sample_subscription_targets_with_snapshot(
     """Derive heater sample subscriptions from snapshot-backed records."""
 
     client = _make_client(monkeypatch)
-    nodes_payload = {"nodes": [{"type": "htr", "addr": "1"}, {"type": "acm", "addr": "2"}]}
+    nodes_payload = {
+        "nodes": [{"type": "htr", "addr": "1"}, {"type": "acm", "addr": "2"}]
+    }
     snapshot = InstallationSnapshot(dev_id="device", raw_nodes=nodes_payload)
     energy_coordinator = SimpleNamespace(update_addresses=MagicMock())
     record = {"snapshot": snapshot, "energy_coordinator": energy_coordinator}
@@ -2621,7 +2646,9 @@ async def test_ducaheat_client_extended_logging(
 
 
 @pytest.mark.asyncio
-async def test_ducaheat_connect_matches_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_ducaheat_connect_matches_reference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Ensure the Ducaheat client connects with the minimal reference contract."""
 
     client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
