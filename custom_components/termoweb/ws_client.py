@@ -1231,7 +1231,7 @@ class WebSocketClient:
 
     async def _get_token(self) -> str:
         """Reuse the REST client token for websocket authentication."""
-        headers = await self._client._authed_headers()  # noqa: SLF001
+        headers = await self._client.authed_headers()
         auth_header = (
             headers.get("Authorization") if isinstance(headers, dict) else None
         )
@@ -1241,9 +1241,10 @@ class WebSocketClient:
 
     async def _force_refresh_token(self) -> None:
         """Force the REST client to fetch a fresh access token."""
-        with suppress(AttributeError, RuntimeError):
-            self._client._access_token = None  # type: ignore[attr-defined]  # noqa: SLF001
-        await self._client._ensure_token()  # noqa: SLF001
+        refresh = getattr(self._client, "refresh_token", None)
+        if refresh is None:
+            raise RuntimeError("REST client missing refresh_token()")
+        await refresh()
 
     def _api_base(self) -> str:
         """Return the base REST API URL used for websocket routes."""
