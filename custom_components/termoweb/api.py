@@ -14,11 +14,13 @@ from .const import (
     BASIC_AUTH_B64,
     BRAND_API_BASES,
     BRAND_DUCAHEAT,
+    BRAND_TERMOWEB,
     DEVS_PATH,
     NODE_SAMPLES_PATH_FMT,
     NODES_PATH_FMT,
     TOKEN_PATH,
-    USER_AGENT,
+    get_brand_requested_with,
+    get_brand_user_agent,
 )
 from .nodes import Node, NodeDescriptor, normalize_node_addr, normalize_node_type
 
@@ -29,7 +31,6 @@ API_LOG_PREVIEW = False
 
 DUCAHEAT_API_BASE = BRAND_API_BASES[BRAND_DUCAHEAT].rstrip("/")
 DUCAHEAT_SERIAL_ID = "15"
-DUCAHEAT_REQUESTED_WITH = "net.termoweb.ducaheat.app"
 
 
 class BackendAuthError(Exception):
@@ -75,6 +76,9 @@ class RESTClient:
         self._token_expiry: float = 0.0
         self._lock = asyncio.Lock()
         self._is_ducaheat = self._api_base == DUCAHEAT_API_BASE
+        self._brand = BRAND_DUCAHEAT if self._is_ducaheat else BRAND_TERMOWEB
+        self._user_agent = get_brand_user_agent(self._brand)
+        self._requested_with = get_brand_requested_with(self._brand)
 
     @property
     def api_base(self) -> str:
@@ -98,8 +102,10 @@ class RESTClient:
         """
         headers = kwargs.pop("headers", {})
         ignore_statuses = set(ignore_statuses)
-        headers.setdefault("User-Agent", USER_AGENT)
+        headers.setdefault("User-Agent", self._user_agent)
         headers.setdefault("Accept-Language", ACCEPT_LANGUAGE)
+        if self._requested_with:
+            headers.setdefault("X-Requested-With", self._requested_with)
         timeout = kwargs.pop("timeout", aiohttp.ClientTimeout(total=25))
 
         url = path if path.startswith("http") else f"{self._api_base}{path}"
@@ -216,12 +222,13 @@ class RESTClient:
                 "Authorization": f"Basic {self._basic_auth_b64}",
                 "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
                 "Accept": "application/json",
-                "User-Agent": USER_AGENT,
+                "User-Agent": self._user_agent,
                 "Accept-Language": ACCEPT_LANGUAGE,
             }
+            if self._requested_with:
+                headers["X-Requested-With"] = self._requested_with
             if self._is_ducaheat:
                 headers["X-SerialId"] = DUCAHEAT_SERIAL_ID
-                headers["X-Requested-With"] = DUCAHEAT_REQUESTED_WITH
             url = f"{self._api_base}{TOKEN_PATH}"
             _LOGGER.debug(
                 "Token POST %s for user domain=%s",
@@ -273,13 +280,26 @@ class RESTClient:
         headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/json",
-            "User-Agent": USER_AGENT,
+            "User-Agent": self._user_agent,
             "Accept-Language": ACCEPT_LANGUAGE,
         }
+        if self._requested_with:
+            headers["X-Requested-With"] = self._requested_with
         if self._is_ducaheat:
             headers["X-SerialId"] = DUCAHEAT_SERIAL_ID
-            headers["X-Requested-With"] = DUCAHEAT_REQUESTED_WITH
         return headers
+
+    @property
+    def user_agent(self) -> str:
+        """Return the configured User-Agent string."""
+
+        return self._user_agent
+
+    @property
+    def requested_with(self) -> str | None:
+        """Return the configured X-Requested-With header."""
+
+        return self._requested_with
 
     # ----------------- Public API -----------------
 

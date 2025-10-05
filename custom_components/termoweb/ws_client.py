@@ -27,9 +27,13 @@ from .api import RESTClient
 from .const import (
     ACCEPT_LANGUAGE,
     API_BASE,
+    BRAND_DUCAHEAT,
+    BRAND_TERMOWEB,
     DOMAIN,
     USER_AGENT,
     WS_NAMESPACE,
+    get_brand_requested_with,
+    get_brand_user_agent,
     signal_ws_data,
     signal_ws_status,
 )
@@ -100,6 +104,17 @@ class WebSocketClient:
         self._loop = getattr(hass, "loop", None) or asyncio.get_event_loop()
         self._task: asyncio.Task | None = None
         self._namespace = namespace or WS_NAMESPACE
+
+        is_ducaheat = getattr(api_client, "_is_ducaheat", False)
+        brand = BRAND_DUCAHEAT if is_ducaheat else BRAND_TERMOWEB
+        self._user_agent = (
+            getattr(api_client, "user_agent", None)
+            or get_brand_user_agent(brand)
+        )
+        requested_with = getattr(api_client, "requested_with", None)
+        if requested_with is None:
+            requested_with = get_brand_requested_with(brand)
+        self._requested_with = requested_with
 
         http_session = (
             self._session
@@ -182,6 +197,19 @@ class WebSocketClient:
         state = self._ws_state_bucket()
         state.setdefault("last_payload_at", None)
         state.setdefault("idle_restart_pending", False)
+
+    def _brand_headers(self, *, origin: str | None = None) -> dict[str, str]:
+        """Return baseline headers aligned with the REST client brand."""
+
+        headers = {
+            "User-Agent": self._user_agent or USER_AGENT,
+            "Accept-Language": ACCEPT_LANGUAGE,
+        }
+        if self._requested_with:
+            headers["X-Requested-With"] = self._requested_with
+        if origin:
+            headers["Origin"] = origin
+        return headers
 
     # ------------------------------------------------------------------
     # Public control
@@ -1158,6 +1186,9 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._disconnected = asyncio.Event()
         self._disconnected.set()
 
+        self._user_agent = get_brand_user_agent(BRAND_TERMOWEB)
+        self._requested_with = get_brand_requested_with(BRAND_TERMOWEB)
+
         self._closing = False
         self._connected_since: float | None = None
         self._healthy_since: float | None = None
@@ -1417,8 +1448,11 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         url = f"{base}/socket.io/1/?token={token}&dev_id={self.dev_id}&t={t_ms}"
         try:
             async with asyncio.timeout(15):
+                headers = self._brand_headers(origin="https://localhost")
                 async with self._session.get(
-                    url, timeout=aiohttp.ClientTimeout(total=15)
+                    url,
+                    timeout=aiohttp.ClientTimeout(total=15),
+                    headers=headers,
                 ) as resp:
                     body = await resp.text()
                     if resp.status == 401:
@@ -1450,11 +1484,13 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             f"?token={token}&dev_id={self.dev_id}"
         )
         _LOGGER.info("WS: connecting to %s", self._sanitise_url(ws_url))
+        headers = self._brand_headers(origin="https://localhost")
         self._ws = await self._session.ws_connect(
             ws_url,
             timeout=aiohttp.ClientTimeout(total=15),
             heartbeat=None,
             autoclose=False,
+            headers=headers,
         )
 
     async def _join_namespace(self) -> None:
@@ -1902,20 +1938,6 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
 class DucaheatWSClient(WebSocketClient):
     """Verbose websocket client variant with payload debug logging."""
 
-    class _Namespace(str):
-        """Namespace helper that matches both legacy and API paths."""
-
-        def __new__(cls, value: str) -> "DucaheatWSClient._Namespace":
-            return super().__new__(cls, value)
-
-        def __eq__(self, other: object) -> bool:
-            if isinstance(other, str):
-                return other in {"/", WS_NAMESPACE}
-            return super().__eq__(other)
-
-        def __hash__(self) -> int:
-            return hash(str(self))
-
     def __init__(
         self,
         hass: HomeAssistant,
@@ -1927,10 +1949,11 @@ class DucaheatWSClient(WebSocketClient):
         session: aiohttp.ClientSession | None = None,
         handshake_fail_threshold: int = 5,
         protocol: str | None = None,
-        namespace: str = "/",
+        namespace: str | None = None,
     ) -> None:
         """Initialise the websocket client with extended debug logging."""
 
+        resolved_namespace = namespace or WS_NAMESPACE
         super().__init__(
             hass,
             entry_id=entry_id,
@@ -1940,9 +1963,8 @@ class DucaheatWSClient(WebSocketClient):
             session=session,
             handshake_fail_threshold=handshake_fail_threshold,
             protocol=protocol,
-            namespace=namespace,
+            namespace=resolved_namespace,
         )
-        self._namespace = self._Namespace(str(self._namespace))
         self._connect_response_logged = False
         self._open_payload_logged = False
         self._fallback_last_refresh: float = 0.0
@@ -1952,6 +1974,7 @@ class DucaheatWSClient(WebSocketClient):
         self._debug_probe_logged_handshake = False
         self._debug_probe_logged_update = False
         self._ensure_engineio_logger_level()
+        self._sio.on("message", namespace=self._namespace, handler=self._on_message)
 
     async def _connect_once(self) -> None:
         """Open the Socket.IO connection using the simple Ducaheat contract."""
@@ -1970,12 +1993,7 @@ class DucaheatWSClient(WebSocketClient):
         socket_path = "/socket.io"
         params = urlencode(query_params)
         url = f"{base_url}{socket_path}?{params}"
-        headers = {
-            "Origin": "https://localhost",
-            "User-Agent": USER_AGENT,
-            "Accept-Language": ACCEPT_LANGUAGE,
-            "X-Requested-With": "net.termoweb.ducaheat.app",
-        }
+        headers = self._brand_headers(origin="https://localhost")
         self._log_connect_request(
             base=base_url,
             socket_path=socket_path,
@@ -2343,6 +2361,26 @@ class DucaheatWSClient(WebSocketClient):
             self._debug_probe_logged_update = True
             self._complete_debug_probe_if_ready()
         await super()._on_update(data)
+
+    async def _on_message(self, data: Any, *_: Any) -> None:
+        """Reply to app-level heartbeat pings with a pong."""
+
+        payload = data
+        if isinstance(payload, (list, tuple)):
+            if payload and payload[0] == "message" and len(payload) >= 2:
+                payload = payload[1]
+            elif payload:
+                payload = payload[0]
+            else:
+                payload = None
+        if payload != "ping":
+            return
+        self._mark_event(paths=None, count_event=False)
+        try:
+            await self._sio.emit("message", "pong", namespace=self._namespace)
+        except Exception:  # noqa: BLE001 - best effort heartbeat ack
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug("WS (ducaheat): failed to emit heartbeat pong", exc_info=True)
 
     def _mark_event(
         self, *, paths: list[str] | None, count_event: bool = False

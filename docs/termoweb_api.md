@@ -152,11 +152,13 @@ Observed cadence for `htr`: ~3600 s.
 GET /socket.io/1/?token=<Bearer>&dev_id=<dev_id>&t=<ms>
 → "<sid>:60:60:websocket,xhr-polling"
 ```
+- **Headers**: include `Origin: https://localhost` alongside the mobile app UA.
 
 ### WebSocket URL
 ```
 wss://control.termoweb.net/socket.io/1/websocket/<sid>?token=...&dev_id=...
 ```
+- **Headers**: reuse `Origin: https://localhost` when opening the websocket.
 
 ### Namespace & heartbeats
 - Join: `1::/api/v2/socket_io`
@@ -171,6 +173,7 @@ Observed paths in pushes: `/htr/<addr>/settings`, `/htr/<addr>/advanced_setup`, 
 ---
 
 ### Notes / gotchas
+- Mobile apps send `User-Agent: TermoWeb/...` together with `X-Requested-With: com.casple.termoweb.v2` on REST and websocket calls; mirror these headers to avoid WAF oddities.
 - Always send temperatures as strings with one decimal (e.g. `"20.0"`), otherwise some backends return `400`.
 - POST `/htr/*/settings` returns **201** `{}` and echoes via WebSocket shortly after; do a timed fallback poll if needed.
 - Schedules: 168‑element `prog` array with values `{0,1,2}` mapping to presets `[cold, night, day]` in `ptemp`.
