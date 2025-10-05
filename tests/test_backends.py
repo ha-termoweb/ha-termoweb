@@ -15,7 +15,7 @@ from custom_components.termoweb.backend import (  # noqa: E402
     TermoWebBackend,
     create_backend,
 )
-from custom_components.termoweb.const import BRAND_DUCAHEAT, WS_NAMESPACE  # noqa: E402
+from custom_components.termoweb.const import BRAND_DUCAHEAT  # noqa: E402
 from custom_components.termoweb.ws_client import (  # noqa: E402
     DucaheatWSClient,
     TermoWebWSClient,
@@ -75,7 +75,7 @@ def test_backend_factory_returns_expected_clients() -> None:
         assert isinstance(ws_client, WebSocketClient)
         assert isinstance(ws_client, DucaheatWSClient)
         assert ws_client._protocol_hint == "engineio2"
-        assert ws_client._namespace == WS_NAMESPACE
+        assert ws_client._namespace == "/"
         loop.run_until_complete(ws_client.stop())
     finally:
         loop.close()

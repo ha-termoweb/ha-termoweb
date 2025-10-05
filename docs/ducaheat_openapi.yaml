@@ -10,7 +10,7 @@ info:
     Key differences vs TermoWeb:
       - No consolidated `/settings` resource for heaters.
       - Writes are segmented: `/status`, `/mode`, `/prog`, `/prog_temps`, `/setup`, `/lock`, `/select`.
-      - Socket path differs: `/api/v2/socket_io?token=...`.
+      - Socket path differs: `/socket.io?token=...&dev_id=...`.
 
     Base host: https://api-tevolve.termoweb.net
 servers:

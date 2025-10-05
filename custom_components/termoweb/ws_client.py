@@ -647,19 +647,30 @@ class WebSocketClient:
 
         if devs_idx >= 0:
             relevant = segments[devs_idx + 1 :]
+            node_type_idx = 1
+            addr_idx = 2
+            section_idx = 3
+            if len(relevant) <= addr_idx:
+                return None
         else:
             relevant = segments
+            node_type_idx = 0
+            addr_idx = 1
+            section_idx = 2
+            if len(relevant) <= addr_idx:
+                return None
 
-        if len(relevant) < 3:
-            return None
-
-        node_type = normalize_node_type(relevant[1])
-        addr = normalize_node_addr(relevant[2])
+        node_type = normalize_node_type(relevant[node_type_idx])
+        addr = normalize_node_addr(relevant[addr_idx])
         if not node_type or not addr:
             return None
 
-        section = relevant[3] if len(relevant) >= 4 else None
-        remainder = relevant[4:] if len(relevant) >= 5 else []
+        section = relevant[section_idx] if len(relevant) > section_idx else None
+        remainder = (
+            relevant[section_idx + 1 :]
+            if len(relevant) > section_idx + 1
+            else []
+        )
 
         target_section, nested_key = self._resolve_update_section(section)
         if target_section is None:
@@ -1989,6 +2000,13 @@ class DucaheatWSClient(WebSocketClient):
         if logger is not None:
             logger.setLevel(logging.DEBUG)
             logger.disabled = False
+
+    async def ws_url(self) -> str:
+        """Return the websocket URL for diagnostics."""
+
+        url, _ = await self._build_engineio_target()
+        return url
+
 
     def _redact_value(self, value: str) -> str:
         """Return a redacted representation of sensitive values."""
