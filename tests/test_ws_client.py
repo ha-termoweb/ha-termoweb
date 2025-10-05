@@ -2094,9 +2094,9 @@ async def test_refresh_subscription_updates_metadata(
     _patch_clock(monkeypatch, wall=clock.wall_time, mono=clock.monotonic_time)
     monkeypatch.setattr(module._LOGGER, "isEnabledFor", lambda level: True)
 
-    info_calls: list[tuple[Any, ...]] = []
+    debug_calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr(
-        module._LOGGER, "info", lambda *args, **kwargs: info_calls.append(args)
+        module._LOGGER, "debug", lambda *args, **kwargs: debug_calls.append(args)
     )
 
     await client._refresh_subscription(reason="unit")
@@ -2106,7 +2106,7 @@ async def test_refresh_subscription_updates_metadata(
     assert client._subscription_refresh_failed is False
     assert client._subscription_refresh_last_attempt == pytest.approx(250.0)
     assert client._subscription_refresh_last_success == pytest.approx(250.0)
-    assert any("unit" in " ".join(str(part) for part in call) for call in info_calls)
+    assert any("unit" in " ".join(str(part) for part in call) for call in debug_calls)
 
 
 def test_forward_sample_updates_handles_missing_targets(

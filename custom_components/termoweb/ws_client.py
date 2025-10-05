@@ -64,6 +64,69 @@ def _now_pair() -> tuple[float, float]:
     return mono, wall
 
 
+class _WsLeaseMixin:
+    """Provide shared websocket lease and backoff helpers."""
+
+    def __init__(self) -> None:
+        """Initialise idle tracking and backoff state."""
+
+        self._payload_idle_window: float = 240.0
+        self._idle_restart_task: asyncio.Task | None = None
+        self._idle_restart_pending = False
+        self._idle_monitor_task: asyncio.Task | None = None
+
+        self._subscription_refresh_lock = asyncio.Lock()
+        self._subscription_refresh_failed = False
+        self._subscription_refresh_last_attempt: float = 0.0
+        self._subscription_refresh_last_success: float | None = None
+
+        self._backoff_seq: tuple[float, ...] = (5, 10, 30, 120, 300)
+        self._backoff_idx: int = 0
+
+    def _reset_backoff(self) -> None:
+        """Reset the connection retry backoff index."""
+
+        self._backoff_idx = 0
+
+    def _next_backoff_delay(self) -> float:
+        """Return the next backoff delay with jitter applied."""
+
+        delay = self._backoff_seq[min(self._backoff_idx, len(self._backoff_seq) - 1)]
+        self._backoff_idx = min(self._backoff_idx + 1, len(self._backoff_seq) - 1)
+        return delay * random.uniform(0.8, 1.2)
+
+    def _schedule_idle_restart(self, *, idle_for: float, source: str) -> None:
+        """Log idle payload detection and close the websocket for restart."""
+
+        if getattr(self, "_closing", False) or self._idle_restart_pending:
+            return
+        self._idle_restart_pending = True
+        self._ws_state_bucket()["idle_restart_pending"] = True
+        _LOGGER.warning(
+            "WS: no payloads for %.0f s (%s heartbeat); restarting", idle_for, source
+        )
+
+        async def _restart() -> None:
+            try:
+                await self._disconnect(reason="idle restart")
+            finally:
+                self._idle_restart_pending = False
+                self._idle_restart_task = None
+                self._ws_state_bucket()["idle_restart_pending"] = False
+
+        self._idle_restart_task = self._loop.create_task(_restart())
+
+    def _cancel_idle_restart(self) -> None:
+        """Cancel any scheduled idle restart due to new payload activity."""
+
+        task = self._idle_restart_task
+        if task and not task.done():
+            task.cancel()
+        self._idle_restart_task = None
+        self._idle_restart_pending = False
+        self._ws_state_bucket()["idle_restart_pending"] = False
+
+
 @dataclass
 class WSStats:
     """Track websocket activity statistics."""
@@ -86,7 +149,7 @@ class HandshakeError(RuntimeError):
         self.body_snippet = body_snippet
 
 
-class WebSocketClient:
+class WebSocketClient(_WsLeaseMixin):
     """Unified websocket client wrapping ``socketio.AsyncClient``."""
 
     def __init__(
@@ -114,21 +177,20 @@ class WebSocketClient:
         self._task: asyncio.Task | None = None
         self._namespace = namespace or WS_NAMESPACE
 
+        _WsLeaseMixin.__init__(self)
+
         is_ducaheat = getattr(api_client, "_is_ducaheat", False)
         brand = BRAND_DUCAHEAT if is_ducaheat else BRAND_TERMOWEB
-        self._user_agent = (
-            getattr(api_client, "user_agent", None)
-            or get_brand_user_agent(brand)
-        )
+        self._user_agent = getattr(
+            api_client, "user_agent", None
+        ) or get_brand_user_agent(brand)
         requested_with = getattr(api_client, "requested_with", None)
         if requested_with is None:
             requested_with = get_brand_requested_with(brand)
         self._requested_with = requested_with
 
         http_session = (
-            self._session
-            if isinstance(self._session, aiohttp.ClientSession)
-            else None
+            self._session if isinstance(self._session, aiohttp.ClientSession) else None
         )
         self._sio = socketio.AsyncClient(
             reconnection=False,
@@ -177,8 +239,6 @@ class WebSocketClient:
         self._stop_event = asyncio.Event()
         self._disconnected = asyncio.Event()
         self._disconnected.set()
-        self._backoff_seq = [5, 10, 30, 120, 300]
-        self._backoff_idx = 0
 
         self._connected_since: float | None = None
         self._connected_since_wall: float | None = None
@@ -194,15 +254,6 @@ class WebSocketClient:
         self._nodes: dict[str, Any] = {}
         self._nodes_raw: dict[str, Any] = {}
 
-        self._payload_idle_window: float = 240.0
-        self._idle_restart_task: asyncio.Task | None = None
-        self._idle_restart_pending = False
-        self._idle_monitor_task: asyncio.Task | None = None
-
-        self._subscription_refresh_lock = asyncio.Lock()
-        self._subscription_refresh_failed = False
-        self._subscription_refresh_last_attempt: float = 0.0
-        self._subscription_refresh_last_success: float | None = None
         self._handshake_logged = False
         self._debug_catch_all_registered = False
 
@@ -304,8 +355,15 @@ class WebSocketClient:
             for key, value in query_items
         ]
         sanitised_query = urlencode(sanitised_pairs, doseq=True)
-        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, sanitised_query, parsed.fragment))
-
+        return urlunsplit(
+            (
+                parsed.scheme,
+                parsed.netloc,
+                parsed.path,
+                sanitised_query,
+                parsed.fragment,
+            )
+        )
 
     # ------------------------------------------------------------------
     # Public control
@@ -412,13 +470,7 @@ class WebSocketClient:
                         await self._handle_connection_lost(error)
                 if self._closing:
                     break
-                delay = self._backoff_seq[
-                    min(self._backoff_idx, len(self._backoff_seq) - 1)
-                ]
-                self._backoff_idx = min(
-                    self._backoff_idx + 1, len(self._backoff_seq) - 1
-                )
-                await asyncio.sleep(delay * random.uniform(0.8, 1.2))
+                await asyncio.sleep(self._next_backoff_delay())
         finally:
             self._update_status("stopped")
 
@@ -440,7 +492,7 @@ class WebSocketClient:
         url, engineio_path = await self._build_engineio_target()
         _LOGGER.debug("WS: connecting to %s (path=%s)", url, engineio_path)
         self._disconnected.clear()
-        self._backoff_idx = 0
+        self._reset_backoff()
         await self._sio.connect(
             url,
             transports=["websocket"],
@@ -627,7 +679,9 @@ class WebSocketClient:
                 continue
             idle_for = time_mod() - last_event
             if idle_for >= self._payload_idle_window:
-                _LOGGER.info("WS: idle for %.0fs; refreshing websocket lease", idle_for)
+                _LOGGER.debug(
+                    "WS: idle for %.0fs; refreshing websocket lease", idle_for
+                )
                 try:
                     await self._refresh_subscription(reason="idle monitor")
                 except asyncio.CancelledError:  # pragma: no cover - task lifecycle
@@ -663,7 +717,7 @@ class WebSocketClient:
             now_mono = time_mod()
             self._subscription_refresh_last_attempt = now_mono
             if _LOGGER.isEnabledFor(logging.INFO):
-                _LOGGER.info("WS: refreshing websocket lease (%s)", reason)
+                _LOGGER.debug("WS: refreshing websocket lease (%s)", reason)
             await self._sio.emit("dev_data", namespace=self._namespace)
             await self._subscribe_heater_samples()
             self._subscription_refresh_failed = False
@@ -790,9 +844,7 @@ class WebSocketClient:
 
         section = relevant[section_idx] if len(relevant) > section_idx else None
         remainder = (
-            relevant[section_idx + 1 :]
-            if len(relevant) > section_idx + 1
-            else []
+            relevant[section_idx + 1 :] if len(relevant) > section_idx + 1 else []
         )
 
         target_section, nested_key = self._resolve_update_section(section)
@@ -1292,6 +1344,8 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._disconnected = asyncio.Event()
         self._disconnected.set()
 
+        _WsLeaseMixin.__init__(self)
+
         self._user_agent = get_brand_user_agent(BRAND_TERMOWEB)
         self._requested_with = get_brand_requested_with(BRAND_TERMOWEB)
 
@@ -1305,8 +1359,6 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._rtc_keepalive_task: asyncio.Task | None = None
         self._rtc_keepalive_interval: float = 30.0
 
-        self._backoff_seq = [5, 10, 30, 120, 300]
-        self._backoff_idx = 0
         self._hs_fail_threshold = handshake_fail_threshold
         self._hs_fail_count: int = 0
         self._hs_fail_start: float = 0.0
@@ -1324,16 +1376,6 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._handshake_payload: dict[str, Any] | None = None
         self._nodes: dict[str, Any] = {}
         self._nodes_raw: dict[str, Any] = {}
-
-        self._payload_idle_window: float = 240.0
-        self._idle_restart_task: asyncio.Task | None = None
-        self._idle_restart_pending = False
-        self._idle_monitor_task: asyncio.Task | None = None
-
-        self._subscription_refresh_lock = asyncio.Lock()
-        self._subscription_refresh_failed = False
-        self._subscription_refresh_last_attempt: float = 0.0
-        self._subscription_refresh_last_success: float | None = None
 
         self._ws_state: dict[str, Any] | None = None
         state = self._ws_state_bucket()
@@ -1543,12 +1585,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 self._update_status("disconnected")
             if self._closing or not should_retry:
                 break
-            delay = self._backoff_seq[
-                min(self._backoff_idx, len(self._backoff_seq) - 1)
-            ]
-            self._backoff_idx = min(self._backoff_idx + 1, len(self._backoff_seq) - 1)
-            jitter = random.uniform(0.8, 1.2)
-            await asyncio.sleep(delay * jitter)
+            await asyncio.sleep(self._next_backoff_delay())
 
     async def _handshake(self) -> tuple[str, int]:
         """Perform the legacy GET /socket.io/1/ handshake."""
@@ -1672,7 +1709,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 await asyncio.sleep(interval)
         except asyncio.CancelledError:
             raise
-        except Exception:  # pragma: no cover - defensive best effort
+        except Exception:  # noqa: BLE001 - pragma: no cover - defensive best effort
             if _LOGGER.isEnabledFor(logging.DEBUG):
                 _LOGGER.debug(
                     "WS: RTC keep-alive loop stopped unexpectedly", exc_info=True
@@ -1918,7 +1955,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 raise RuntimeError("websocket not connected")
             now_mono = time_mod()
             self._subscription_refresh_last_attempt = now_mono
-            _LOGGER.info("WS: refreshing websocket lease (%s)", reason)
+            _LOGGER.debug("WS: refreshing websocket lease (%s)", reason)
             try:
                 await self._send_snapshot_request()
                 await self._subscribe_session_metadata()
@@ -2127,7 +2164,7 @@ class DucaheatWSClient(WebSocketClient):
         )
 
         self._disconnected.clear()
-        self._backoff_idx = 0
+        self._reset_backoff()
         await self._sio.connect(
             url,
             headers=headers,
@@ -2175,7 +2212,6 @@ class DucaheatWSClient(WebSocketClient):
 
         url, _ = await self._build_engineio_target()
         return url
-
 
     def _log_connect_request(
         self,
@@ -2310,7 +2346,7 @@ class DucaheatWSClient(WebSocketClient):
             payload_text = json.dumps({"repr": repr(data)}, default=str)
         length = len(payload_text.encode("utf-8"))
         if isinstance(data, Mapping):
-            keys = sorted(str(key) for key in data.keys())
+            keys = sorted(str(key) for key in data)
         else:
             keys = [type(data).__name__]
         _LOGGER.debug(
@@ -2415,7 +2451,9 @@ class DucaheatWSClient(WebSocketClient):
             await self._sio.emit("message", "pong", namespace=self._namespace)
         except Exception:  # noqa: BLE001 - best effort heartbeat ack
             if _LOGGER.isEnabledFor(logging.DEBUG):
-                _LOGGER.debug("WS (ducaheat): failed to emit heartbeat pong", exc_info=True)
+                _LOGGER.debug(
+                    "WS (ducaheat): failed to emit heartbeat pong", exc_info=True
+                )
 
     def _mark_event(
         self, *, paths: list[str] | None, count_event: bool = False
@@ -2432,7 +2470,10 @@ class DucaheatWSClient(WebSocketClient):
         self._restart_count += 1
         mono_now, wall_now = _now_pair()
         last_payload = self._last_payload_at or self._last_event_at
-        if last_payload is not None and mono_now - last_payload < self._fallback_min_interval:
+        if (
+            last_payload is not None
+            and mono_now - last_payload < self._fallback_min_interval
+        ):
             return
         last_payload_wall = (
             self._last_payload_wall
