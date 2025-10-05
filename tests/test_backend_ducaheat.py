@@ -1,11 +1,16 @@
 import asyncio
+import logging
 from types import SimpleNamespace
 
 import pytest
 from aiohttp import ClientResponseError
 
 from custom_components.termoweb.api import RESTClient
-from custom_components.termoweb.backend.ducaheat import DucaheatBackend, DucaheatRESTClient
+from custom_components.termoweb.backend.ducaheat import (
+    DucaheatBackend,
+    DucaheatRESTClient,
+    _redact_log_value,
+)
 from custom_components.termoweb.const import WS_NAMESPACE
 from custom_components.termoweb.ws_client import DucaheatWSClient, WebSocketClient
 
@@ -49,20 +54,27 @@ class DummyClient:
         return {"Authorization": "Bearer token"}
 
 
-def test_ducaheat_backend_creates_ws_client() -> None:
-    backend = DucaheatBackend(brand="ducaheat", client=DummyClient())
-    loop = asyncio.new_event_loop()
-    try:
-        hass = SimpleNamespace(loop=loop, data={})
-        ws_client = backend.create_ws_client(
-            hass,
-            entry_id="entry",
-            dev_id="dev",
-            coordinator=object(),
-        )
-    finally:
-        loop.close()
+@pytest.fixture
+def ducaheat_rest_client(monkeypatch: pytest.MonkeyPatch) -> DucaheatRESTClient:
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
 
+    async def fake_headers() -> dict[str, str]:
+        return {"Authorization": "Bearer token"}
+
+    monkeypatch.setattr(client, "_authed_headers", fake_headers)
+    return client
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_backend_creates_ws_client() -> None:
+    backend = DucaheatBackend(brand="ducaheat", client=DummyClient())
+    hass = SimpleNamespace(loop=asyncio.get_running_loop(), data={})
+    ws_client = backend.create_ws_client(
+        hass,
+        entry_id="entry",
+        dev_id="dev",
+        coordinator=object(),
+    )
     assert isinstance(ws_client, WebSocketClient)
     assert isinstance(ws_client, DucaheatWSClient)
     assert ws_client.dev_id == "dev"
@@ -82,203 +94,170 @@ def test_dummy_client_get_node_settings_accepts_acm() -> None:
     assert data["addr"] == "3"
 
 
-def test_ducaheat_rest_client_fetches_generic_node(monkeypatch) -> None:
-    async def _run() -> None:
-        session = SimpleNamespace()
-        client = DucaheatRESTClient(session, "user", "pass")
+@pytest.mark.asyncio
+async def test_ducaheat_rest_client_fetches_generic_node(
+    ducaheat_rest_client: DucaheatRESTClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict[str, object] = {}
 
-        seen: dict[str, object] = {}
+    async def fake_request(method: str, path: str, **kwargs: object):
+        seen["method"] = method
+        seen["path"] = path
+        seen["kwargs"] = kwargs
+        return {"status": {"power": 0}}
 
-        async def fake_headers() -> dict[str, str]:
-            return {"Authorization": "Bearer token"}
+    monkeypatch.setattr(ducaheat_rest_client, "_request", fake_request)
 
-        async def fake_request(method: str, path: str, **kwargs: object):
-            seen["method"] = method
-            seen["path"] = path
-            seen["kwargs"] = kwargs
-            return {"status": {"power": 0}}
-
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
-        monkeypatch.setattr(client, "_request", fake_request)
-
-        result = await client.get_node_settings("dev", ("pmo", "9"))
-        assert result == {"status": {"power": 0}}
-        assert seen["method"] == "GET"
-        assert seen["path"] == "/api/v2/devs/dev/pmo/9"
-        assert seen["kwargs"] == {"headers": {"Authorization": "Bearer token"}}
-
-    asyncio.run(_run())
+    result = await ducaheat_rest_client.get_node_settings("dev", ("pmo", "9"))
+    assert result == {"status": {"power": 0}}
+    assert seen["method"] == "GET"
+    assert seen["path"] == "/api/v2/devs/dev/pmo/9"
+    assert seen["kwargs"] == {"headers": {"Authorization": "Bearer token"}}
 
 
-def test_ducaheat_rest_client_normalises_acm(monkeypatch) -> None:
-    async def _run() -> None:
-        session = SimpleNamespace()
-        client = DucaheatRESTClient(session, "user", "pass")
+@pytest.mark.asyncio
+async def test_ducaheat_rest_client_normalises_acm(
+    ducaheat_rest_client: DucaheatRESTClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict[str, object] = {}
 
-        seen: dict[str, object] = {}
+    async def fake_request(method: str, path: str, **kwargs: object):
+        seen["method"] = method
+        seen["path"] = path
+        seen["kwargs"] = kwargs
+        return {"status": {"mode": "AUTO"}}
 
-        async def fake_headers() -> dict[str, str]:
-            return {"Authorization": "Bearer token"}
+    monkeypatch.setattr(ducaheat_rest_client, "_request", fake_request)
 
-        async def fake_request(method: str, path: str, **kwargs: object):
-            seen["method"] = method
-            seen["path"] = path
-            seen["kwargs"] = kwargs
-            return {"status": {"mode": "AUTO"}}
+    def fake_normalise(self, payload, *, node_type: str = "htr"):
+        seen["node_type"] = node_type
+        seen["payload"] = payload
+        return {"normalized": True}
 
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
-        monkeypatch.setattr(client, "_request", fake_request)
+    monkeypatch.setattr(DucaheatRESTClient, "_normalise_settings", fake_normalise)
 
-        def fake_normalise(self, payload, *, node_type: str = "htr"):
-            seen["node_type"] = node_type
-            seen["payload"] = payload
-            return {"normalized": True}
-
-        monkeypatch.setattr(DucaheatRESTClient, "_normalise_settings", fake_normalise)
-
-        result = await client.get_node_settings("dev", ("acm", "2"))
-        assert result == {"normalized": True}
-        assert seen["node_type"] == "acm"
-        assert seen["payload"] == {"status": {"mode": "AUTO"}}
-        assert seen["method"] == "GET"
-        assert seen["path"] == "/api/v2/devs/dev/acm/2"
-        assert seen["kwargs"] == {"headers": {"Authorization": "Bearer token"}}
-
-    asyncio.run(_run())
+    result = await ducaheat_rest_client.get_node_settings("dev", ("acm", "2"))
+    assert result == {"normalized": True}
+    assert seen["node_type"] == "acm"
+    assert seen["payload"] == {"status": {"mode": "AUTO"}}
+    assert seen["method"] == "GET"
+    assert seen["path"] == "/api/v2/devs/dev/acm/2"
+    assert seen["kwargs"] == {"headers": {"Authorization": "Bearer token"}}
 
 
-def test_ducaheat_rest_set_node_settings_routes_non_special(monkeypatch) -> None:
-    async def _run() -> None:
-        session = SimpleNamespace()
-        client = DucaheatRESTClient(session, "user", "pass")
+@pytest.mark.asyncio
+async def test_ducaheat_rest_set_node_settings_routes_non_special(
+    ducaheat_rest_client: DucaheatRESTClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
 
-        captured: dict[str, object] = {}
+    async def fake_super(self, dev_id: str, node: tuple[str, str], **kwargs):
+        captured["args"] = (dev_id, node, kwargs)
+        return {"ok": True}
 
-        async def fake_super(self, dev_id: str, node: tuple[str, str], **kwargs):
-            captured["args"] = (dev_id, node, kwargs)
-            return {"ok": True}
+    monkeypatch.setattr(RESTClient, "set_node_settings", fake_super)
 
-        monkeypatch.setattr(RESTClient, "set_node_settings", fake_super)
+    result = await ducaheat_rest_client.set_node_settings(
+        "dev",
+        ("pmo", "4"),
+        mode="auto",
+        stemp=20.5,
+    )
 
-        result = await client.set_node_settings(
-            "dev",
-            ("pmo", "4"),
-            mode="auto",
-            stemp=20.5,
+    assert result == {"ok": True}
+    assert captured["args"] == (
+        "dev",
+        ("pmo", "4"),
+        {"mode": "auto", "stemp": 20.5, "prog": None, "ptemp": None, "units": "C"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_rest_set_node_settings_acm_mode_heat(
+    ducaheat_rest_client: DucaheatRESTClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fake_headers() -> dict[str, str]:
+        return {"Authorization": "Bearer"}
+
+    calls: list[tuple[str, str, dict[str, object]]] = []
+
+    async def fake_request(method: str, path: str, **kwargs: object):
+        calls.append((method, path, kwargs))
+        return {"status": "ok"}
+
+    monkeypatch.setattr(ducaheat_rest_client, "_authed_headers", fake_headers)
+    monkeypatch.setattr(ducaheat_rest_client, "_request", fake_request)
+
+    await ducaheat_rest_client.set_node_settings("dev", ("acm", "3"), mode="heat")
+
+    assert calls == [
+        (
+            "POST",
+            "/api/v2/devs/dev/acm/3/mode",
+            {"headers": {"Authorization": "Bearer"}, "json": {"mode": "manual"}},
+        )
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"stemp": "bad", "units": "C"},
+        {"stemp": 21.0, "units": "kelvin"},
+    ],
+)
+async def test_ducaheat_rest_set_node_settings_acm_invalid_inputs(
+    ducaheat_rest_client: DucaheatRESTClient,
+    monkeypatch: pytest.MonkeyPatch,
+    kwargs: dict[str, object],
+) -> None:
+    async def fake_headers() -> dict[str, str]:
+        return {}
+
+    monkeypatch.setattr(ducaheat_rest_client, "_authed_headers", fake_headers)
+
+    with pytest.raises(ValueError):
+        await ducaheat_rest_client.set_node_settings("dev", ("acm", "3"), **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_post_acm_endpoint_rethrows_server_error(
+    ducaheat_rest_client: DucaheatRESTClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fake_request(method: str, path: str, **kwargs: object):
+        raise ClientResponseError(
+            request_info=None,
+            history=(),
+            status=500,
+            message="server error",
         )
 
-        assert result == {"ok": True}
-        assert captured["args"] == (
-            "dev",
-            ("pmo", "4"),
-            {"mode": "auto", "stemp": 20.5, "prog": None, "ptemp": None, "units": "C"},
+    monkeypatch.setattr(ducaheat_rest_client, "_request", fake_request)
+
+    with pytest.raises(ClientResponseError):
+        await ducaheat_rest_client._post_acm_endpoint(
+            "/api/v2/devs/dev/acm/3/status", {}, {"mode": "manual"}
         )
 
-    asyncio.run(_run())
 
+@pytest.mark.asyncio
+async def test_ducaheat_rest_get_node_samples_forwards_non_htr(
+    ducaheat_rest_client: DucaheatRESTClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
 
-def test_ducaheat_rest_set_node_settings_acm_mode_heat(monkeypatch) -> None:
-    async def _run() -> None:
-        session = SimpleNamespace()
-        client = DucaheatRESTClient(session, "user", "pass")
+    async def fake_super(
+        self, dev_id: str, node: tuple[str, str], start: float, stop: float
+    ):
+        captured["args"] = (dev_id, node, start, stop)
+        return [{"t": 1}]
 
-        async def fake_headers() -> dict[str, str]:
-            return {"Authorization": "Bearer"}
+    monkeypatch.setattr(RESTClient, "get_node_samples", fake_super)
 
-        calls: list[tuple[str, str, dict[str, object]]] = []
-
-        async def fake_request(method: str, path: str, **kwargs: object):
-            calls.append((method, path, kwargs))
-            return {"status": "ok"}
-
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
-        monkeypatch.setattr(client, "_request", fake_request)
-
-        await client.set_node_settings("dev", ("acm", "3"), mode="heat")
-
-        assert calls == [
-            (
-                "POST",
-                "/api/v2/devs/dev/acm/3/mode",
-                {"headers": {"Authorization": "Bearer"}, "json": {"mode": "manual"}},
-            )
-        ]
-
-    asyncio.run(_run())
-
-
-def test_ducaheat_rest_set_node_settings_acm_invalid_stemp(monkeypatch) -> None:
-    async def _run() -> None:
-        client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
-
-        async def fake_headers() -> dict[str, str]:
-            return {}
-
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
-
-        with pytest.raises(ValueError):
-            await client.set_node_settings("dev", ("acm", "3"), stemp="bad", units="C")
-
-    asyncio.run(_run())
-
-
-def test_ducaheat_post_acm_endpoint_rethrows_server_error(monkeypatch) -> None:
-    async def _run() -> None:
-        client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
-
-        async def fake_request(method: str, path: str, **kwargs: object):
-            raise ClientResponseError(
-                request_info=None,
-                history=(),
-                status=500,
-                message="server error",
-            )
-
-        monkeypatch.setattr(client, "_request", fake_request)
-
-        with pytest.raises(ClientResponseError):
-            await client._post_acm_endpoint(
-                "/api/v2/devs/dev/acm/3/status", {}, {"mode": "manual"}
-            )
-
-    asyncio.run(_run())
-
-
-def test_ducaheat_rest_set_node_settings_acm_invalid_units(monkeypatch) -> None:
-    async def _run() -> None:
-        client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
-
-        async def fake_headers() -> dict[str, str]:
-            return {}
-
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
-
-        with pytest.raises(ValueError):
-            await client.set_node_settings("dev", ("acm", "3"), stemp=21.0, units="kelvin")
-
-    asyncio.run(_run())
-
-
-def test_ducaheat_rest_get_node_samples_forwards_non_htr(monkeypatch) -> None:
-    async def _run() -> None:
-        session = SimpleNamespace()
-        client = DucaheatRESTClient(session, "user", "pass")
-
-        captured: dict[str, object] = {}
-
-        async def fake_super(
-            self, dev_id: str, node: tuple[str, str], start: float, stop: float
-        ):
-            captured["args"] = (dev_id, node, start, stop)
-            return [{"t": 1}]
-
-        monkeypatch.setattr(RESTClient, "get_node_samples", fake_super)
-
-        result = await client.get_node_samples("dev", ("acm", "7"), 1.0, 2.0)
-        assert result == [{"t": 1}]
-        assert captured["args"] == ("dev", ("acm", "7"), 1.0, 2.0)
-
-    asyncio.run(_run())
+    result = await ducaheat_rest_client.get_node_samples("dev", ("acm", "7"), 1.0, 2.0)
+    assert result == [{"t": 1}]
+    assert captured["args"] == ("dev", ("acm", "7"), 1.0, 2.0)
 
 
 def test_ducaheat_rest_normalise_ws_nodes_prog() -> None:
@@ -319,3 +298,50 @@ def test_ducaheat_rest_normalise_ws_nodes_passthrough() -> None:
     nodes_with_scalar = {"htr": {"settings": {"01": 5}}}
     normalised = client.normalise_ws_nodes(nodes_with_scalar)
     assert normalised["htr"]["settings"]["01"] == 5
+
+
+def test_ducaheat_redact_log_value_masks_sensitive_tokens() -> None:
+    assert _redact_log_value("") == ""
+    sample = "Bearer abc token=secret user@example.com"
+    redacted = _redact_log_value(sample)
+    assert "secret" not in redacted
+    assert "user@example.com" not in redacted
+    assert "Bearer ***" in redacted
+    assert "token=***" in redacted
+    assert "***@***" in redacted
+
+
+def test_ducaheat_log_segmented_post_handles_non_mapping(
+    ducaheat_rest_client: DucaheatRESTClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(
+        logging.DEBUG, logger="custom_components.termoweb.backend.ducaheat"
+    )
+    ducaheat_rest_client._log_segmented_post(
+        path="https://example.invalid/path?token=abc",
+        node_type="acm",
+        dev_id="device@example.com",
+        addr="03",
+        payload=["unexpected"],
+    )
+    assert "<non-mapping>" in caplog.text
+    assert "token=***" in caplog.text
+    assert "***@***" in caplog.text
+    caplog.clear()
+    ducaheat_rest_client._log_segmented_post(
+        path="https://example.invalid/path?token=abc",
+        node_type="acm",
+        dev_id="device@example.com",
+        addr="03",
+        payload={"mode": "auto"},
+    )
+    assert "('mode',)" in caplog.text
+    caplog.clear()
+    ducaheat_rest_client._log_segmented_post(
+        path="https://example.invalid/path?token=abc",
+        node_type="acm",
+        dev_id="device@example.com",
+        addr="03",
+        payload=None,
+    )
+    assert "body_keys=()" in caplog.text
