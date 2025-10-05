@@ -13,6 +13,7 @@ import json
 import logging
 import random
 import time
+from time import monotonic as time_mod
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -53,6 +54,14 @@ from .nodes import (
 _LOGGER = logging.getLogger(__name__)
 
 build_node_inventory = _build_node_inventory  # re-exported for tests
+
+
+def _now_pair() -> tuple[float, float]:
+    """Return the current monotonic and wall-clock timestamps."""
+
+    mono = time_mod()
+    wall = time.time()
+    return mono, wall
 
 
 @dataclass
@@ -172,9 +181,13 @@ class WebSocketClient:
         self._backoff_idx = 0
 
         self._connected_since: float | None = None
+        self._connected_since_wall: float | None = None
         self._healthy_since: float | None = None
+        self._healthy_since_wall: float | None = None
         self._last_event_at: float | None = None
+        self._last_event_wall: float | None = None
         self._last_payload_at: float | None = None
+        self._last_payload_wall: float | None = None
         self._stats = WSStats()
 
         self._handshake_payload: dict[str, Any] | None = None
@@ -488,12 +501,18 @@ class WebSocketClient:
     async def _on_connect(self) -> None:
         """Handle socket connection establishment."""
         _LOGGER.debug("WS: connected")
-        now = time.time()
-        self._connected_since = now
+        mono_now, wall_now = _now_pair()
+        self._connected_since = mono_now
+        self._connected_since_wall = wall_now
         self._healthy_since = None
-        self._last_event_at = now
+        self._healthy_since_wall = None
+        self._last_event_at = mono_now
+        self._last_event_wall = wall_now
+        self._last_payload_at = mono_now
+        self._last_payload_wall = wall_now
         self._stats.frames_total = 0
         self._stats.events_total = 0
+        self._stats.last_event_ts = wall_now
         self._handshake_logged = False
         self._subscription_refresh_failed = False
         self._update_status("connected")
@@ -603,10 +622,10 @@ class WebSocketClient:
                 if self._disconnected.is_set():
                     break
                 continue
-            last_event = self._last_event_at or self._stats.last_event_ts
-            if not last_event:
+            last_event = self._last_event_at
+            if last_event is None:
                 continue
-            idle_for = time.time() - last_event
+            idle_for = time_mod() - last_event
             if idle_for >= self._payload_idle_window:
                 _LOGGER.info("WS: idle for %.0fs; refreshing websocket lease", idle_for)
                 try:
@@ -641,14 +660,14 @@ class WebSocketClient:
         async with self._subscription_refresh_lock:
             if not self._sio.connected:
                 raise RuntimeError("websocket not connected")
-            now = time.time()
-            self._subscription_refresh_last_attempt = now
+            now_mono = time_mod()
+            self._subscription_refresh_last_attempt = now_mono
             if _LOGGER.isEnabledFor(logging.INFO):
                 _LOGGER.info("WS: refreshing websocket lease (%s)", reason)
             await self._sio.emit("dev_data", namespace=self._namespace)
             await self._subscribe_heater_samples()
             self._subscription_refresh_failed = False
-            self._subscription_refresh_last_success = time.time()
+            self._subscription_refresh_last_success = time_mod()
 
     # ------------------------------------------------------------------
     # Payload handlers
@@ -1129,14 +1148,14 @@ class WebSocketClient:
         if status == self._status and status not in {"healthy", "connected"}:
             return
         self._status = status
-        now = time.time()
+        now_mono = time_mod()
         state = self._ws_state_bucket()
-        last_event = self._stats.last_event_ts or self._last_event_at
+        last_event = self._last_event_wall or self._stats.last_event_ts
         state["status"] = status
         state["last_event_at"] = last_event or None
-        state["healthy_since"] = self._healthy_since
+        state["healthy_since"] = self._healthy_since_wall
         state["healthy_minutes"] = (
-            int((now - self._healthy_since) / 60) if self._healthy_since else 0
+            int((now_mono - self._healthy_since) / 60) if self._healthy_since else 0
         )
         state["frames_total"] = self._stats.frames_total
         state["events_total"] = self._stats.events_total
@@ -1150,11 +1169,13 @@ class WebSocketClient:
         self, *, paths: list[str] | None, count_event: bool = False
     ) -> None:
         """Record receipt of a websocket event batch for health tracking."""
-        now = time.time()
+        mono_now, wall_now = _now_pair()
         self._cancel_idle_restart()
-        self._stats.last_event_ts = now
-        self._last_event_at = now
-        self._last_payload_at = now
+        self._stats.last_event_ts = wall_now
+        self._last_event_at = mono_now
+        self._last_event_wall = wall_now
+        self._last_payload_at = mono_now
+        self._last_payload_wall = wall_now
         if paths:
             self._stats.events_total += 1
             if _LOGGER.isEnabledFor(logging.DEBUG):
@@ -1168,12 +1189,13 @@ class WebSocketClient:
         elif count_event:
             self._stats.events_total += 1
         state: dict[str, Any] = self._ws_state_bucket()
-        state["last_event_at"] = now
-        state["last_payload_at"] = self._last_payload_at
+        state["last_event_at"] = wall_now
+        state["last_payload_at"] = self._last_payload_wall
         state["frames_total"] = self._stats.frames_total
         state["events_total"] = self._stats.events_total
         if self._healthy_since is None:
-            self._healthy_since = now
+            self._healthy_since = mono_now
+            self._healthy_since_wall = wall_now
             self._update_status("healthy")
 
     def _schedule_idle_restart(self, *, idle_for: float, source: str) -> None:
@@ -1274,7 +1296,9 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
 
         self._closing = False
         self._connected_since: float | None = None
+        self._connected_since_wall: float | None = None
         self._healthy_since: float | None = None
+        self._healthy_since_wall: float | None = None
         self._hb_send_interval: float = 27.0
         self._hb_task: asyncio.Task | None = None
         self._rtc_keepalive_task: asyncio.Task | None = None
@@ -1291,7 +1315,9 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._stop_event = asyncio.Event()
         self._handshake_logged = False
         self._last_event_at: float | None = None
+        self._last_event_wall: float | None = None
         self._last_payload_at: float | None = None
+        self._last_payload_wall: float | None = None
         self._last_heartbeat_at: float | None = None
 
         self._handshake_payload: dict[str, Any] | None = None
@@ -1369,7 +1395,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                                 raise
                             except Exception:  # noqa: BLE001 - defensive logging
                                 _LOGGER.debug(
-                                    "WS: maybe_restart_after_write failed",
+                                    "WS: maybe_restart_after_write failed for %s",
                                     ws_client.dev_id,
                                     exc_info=True,
                                 )
@@ -1387,12 +1413,10 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
     async def maybe_restart_after_write(self) -> None:
         """Restart the websocket if writes follow long periods of inactivity."""
 
-        last_payload = self._last_payload_at
+        last_payload = self._last_payload_at or self._last_event_at
         if last_payload is None:
-            last_payload = self._stats.last_event_ts or self._last_event_at
-        if not last_payload:
             return
-        idle_for = time.time() - last_payload
+        idle_for = time_mod() - last_payload
         if idle_for < self._payload_idle_window:
             return
         if _LOGGER.isEnabledFor(logging.INFO):
@@ -1450,8 +1474,11 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 await self._send_snapshot_request()
                 await self._subscribe_session_metadata()
                 await self._subscribe_htr_samples()
-                self._connected_since = time.time()
+                mono_now, wall_now = _now_pair()
+                self._connected_since = mono_now
+                self._connected_since_wall = wall_now
                 self._healthy_since = None
+                self._healthy_since_wall = None
                 self._update_status("connected")
                 if self._idle_monitor_task is None or self._idle_monitor_task.done():
                     _LOGGER.debug("WS: starting legacy idle monitor")
@@ -1470,12 +1497,12 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             except HandshakeError as err:
                 self._hs_fail_count += 1
                 if self._hs_fail_count == 1:
-                    self._hs_fail_start = time.time()
+                    self._hs_fail_start = time_mod()
                 _LOGGER.info(
                     "WS: connection error (%s: %s); will retry", type(err).__name__, err
                 )
                 if self._hs_fail_count >= self._hs_fail_threshold:
-                    elapsed = time.time() - self._hs_fail_start
+                    elapsed = time_mod() - self._hs_fail_start
                     _LOGGER.warning(
                         "WS: handshake failed %d times over %.1f s",
                         self._hs_fail_count,
@@ -1821,9 +1848,11 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         """Record payload batches and update the payload timestamp."""
 
         super()._mark_event(paths=paths, count_event=count_event)
-        self._last_payload_at = self._stats.last_event_ts or self._last_event_at
+        if self._last_payload_at is None and self._last_event_at is not None:
+            self._last_payload_at = self._last_event_at
+            self._last_payload_wall = self._last_event_wall
         state = self._ws_state_bucket()
-        state["last_payload_at"] = self._last_payload_at
+        state["last_payload_at"] = self._last_payload_wall
 
     def _update_legacy_section(
         self,
@@ -1886,8 +1915,8 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             ws = self._ws
             if ws is None or getattr(ws, "closed", False):
                 raise RuntimeError("websocket not connected")
-            now = time.time()
-            self._subscription_refresh_last_attempt = now
+            now_mono = time_mod()
+            self._subscription_refresh_last_attempt = now_mono
             _LOGGER.info("WS: refreshing websocket lease (%s)", reason)
             try:
                 await self._send_snapshot_request()
@@ -1908,7 +1937,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 )
                 raise
             self._subscription_refresh_failed = False
-            self._subscription_refresh_last_success = time.time()
+            self._subscription_refresh_last_success = time_mod()
 
     async def _send_text(self, data: str) -> None:
         """Send a websocket text frame."""
@@ -1952,10 +1981,11 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         """Record receipt of a heartbeat frame."""
 
         _ = source
-        now = time.time()
-        self._stats.last_event_ts = now
-        self._last_event_at = now
-        self._last_heartbeat_at = now
+        mono_now, wall_now = _now_pair()
+        self._stats.last_event_ts = wall_now
+        self._last_event_at = mono_now
+        self._last_event_wall = wall_now
+        self._last_heartbeat_at = mono_now
 
     async def _idle_monitor(self) -> None:
         """Monitor payload idleness and restart stale websocket sessions."""
@@ -1968,10 +1998,10 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                     break
                 continue
             last_payload = self._last_payload_at
-            now = time.time()
+            now_mono = time_mod()
             idle_for: float | None = None
-            if last_payload:
-                idle_for = now - last_payload
+            if last_payload is not None:
+                idle_for = now_mono - last_payload
                 if idle_for >= self._payload_idle_window:
                     _LOGGER.info(
                         "WS: no payloads for %.0f s; scheduling websocket restart",
@@ -2051,6 +2081,7 @@ class DucaheatWSClient(WebSocketClient):
         self._connect_response_logged = False
         self._open_payload_logged = False
         self._fallback_last_refresh: float = 0.0
+        self._fallback_last_refresh_wall: float = 0.0
         self._fallback_min_interval: float = 30.0
         self._restart_count: int = 0
         self._debug_probe_active = False
@@ -2374,10 +2405,11 @@ class DucaheatWSClient(WebSocketClient):
                 payload = None
         if payload != "ping":
             return
-        now = time.time()
-        self._stats.last_event_ts = now
-        self._last_event_at = now
-        self._last_heartbeat_at = now
+        mono_now, wall_now = _now_pair()
+        self._stats.last_event_ts = wall_now
+        self._last_event_at = mono_now
+        self._last_event_wall = wall_now
+        self._last_heartbeat_at = mono_now
         try:
             await self._sio.emit("message", "pong", namespace=self._namespace)
         except Exception:  # noqa: BLE001 - best effort heartbeat ack
@@ -2397,17 +2429,28 @@ class DucaheatWSClient(WebSocketClient):
 
         await super()._handle_connection_lost(error)
         self._restart_count += 1
-        now = time.time()
-        last_payload = self._stats.last_event_ts or self._last_event_at
-        if last_payload and now - last_payload < self._fallback_min_interval:
+        mono_now, wall_now = _now_pair()
+        last_payload = self._last_payload_at or self._last_event_at
+        if last_payload is not None and mono_now - last_payload < self._fallback_min_interval:
+            return
+        last_payload_wall = (
+            self._last_payload_wall
+            or self._last_event_wall
+            or self._stats.last_event_ts
+        )
+        if (
+            last_payload_wall is not None
+            and wall_now - last_payload_wall < self._fallback_min_interval
+        ):
             return
         if self._restart_count <= 1:
             return
-        if now - self._fallback_last_refresh < self._fallback_min_interval:
+        if mono_now - self._fallback_last_refresh < self._fallback_min_interval:
             return
-        self._fallback_last_refresh = now
+        self._fallback_last_refresh = mono_now
+        self._fallback_last_refresh_wall = wall_now
         state = self._ws_state_bucket()
-        state["last_fallback_at"] = now
+        state["last_fallback_at"] = wall_now
         state["last_fallback_error"] = (
             f"{type(error).__name__}: {error}" if error else None
         )

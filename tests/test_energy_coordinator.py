@@ -203,6 +203,7 @@ def test_power_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
             return fake_time
 
         monkeypatch.setattr(coord_module.time, "time", _fake_time)
+        monkeypatch.setattr(coord_module, "time_mod", _fake_time)
 
         await coord.async_refresh()
         assert coord.data["1"]["htr"]["energy"]["A"] == pytest.approx(0.001)
@@ -905,6 +906,7 @@ def test_counter_reset(monkeypatch: pytest.MonkeyPatch) -> None:
             return fake_time
 
         monkeypatch.setattr(coord_module.time, "time", _fake_time)
+        monkeypatch.setattr(coord_module, "time_mod", _fake_time)
 
         await coord.async_refresh()
         fake_time = 1900.0
@@ -921,7 +923,7 @@ def test_energy_processing_consistent_between_poll_and_ws(
 ) -> None:
     async def _run() -> None:
         monkeypatch.setattr(coord_module.time, "time", lambda: 4000.0)
-        monkeypatch.setattr(coord_module.time, "monotonic", lambda: 4000.0)
+        monkeypatch.setattr(coord_module, "time_mod", lambda: 4000.0)
 
         poll_client = types.SimpleNamespace()
         poll_client.get_node_samples = AsyncMock(
@@ -1100,7 +1102,7 @@ def test_ws_samples_update_defers_polling(monkeypatch: pytest.MonkeyPatch) -> No
             return fake_time
 
         monkeypatch.setattr(coord_module.time, "time", _fake_time)
-        monkeypatch.setattr(coord_module.time, "monotonic", _fake_time)
+        monkeypatch.setattr(coord_module, "time_mod", _fake_time)
 
         await coord.async_refresh()
 
@@ -1152,12 +1154,12 @@ def test_should_skip_poll_conditions(monkeypatch: pytest.MonkeyPatch) -> None:
     assert coord._should_skip_poll() is False
 
     coord._ws_deadline = 10.0
-    monkeypatch.setattr(coord_module.time, "monotonic", lambda: 15.0)
+    monkeypatch.setattr(coord_module, "time_mod", lambda: 15.0)
     assert coord._should_skip_poll() is False
 
     coord.data = {"dev": {}}
     coord._ws_deadline = 20.0
-    monkeypatch.setattr(coord_module.time, "monotonic", lambda: 5.0)
+    monkeypatch.setattr(coord_module, "time_mod", lambda: 5.0)
     assert coord._should_skip_poll() is True
 
 
@@ -1177,7 +1179,7 @@ def test_async_update_data_uses_cached_samples(monkeypatch: pytest.MonkeyPatch) 
         }
         coord._ws_deadline = 100.0
 
-        monkeypatch.setattr(coord_module.time, "monotonic", lambda: 50.0)
+        monkeypatch.setattr(coord_module, "time_mod", lambda: 50.0)
 
         cached = await coord._async_update_data()
         assert cached == coord.data
@@ -1250,7 +1252,7 @@ def test_handle_ws_samples_branching(monkeypatch: pytest.MonkeyPatch) -> None:
     def _fake_time() -> float:
         return fake_now
 
-    monkeypatch.setattr(coord_module.time, "monotonic", _fake_time)
+    monkeypatch.setattr(coord_module, "time_mod", _fake_time)
     monkeypatch.setattr(coord_module.time, "time", _fake_time)
 
     updates = {

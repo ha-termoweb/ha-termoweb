@@ -97,6 +97,7 @@ def test_prune_and_register_pending_settings(monkeypatch: pytest.MonkeyPatch) ->
         return fake_time["value"]
 
     monkeypatch.setattr(coord_module.time, "time", _fake_time)
+    monkeypatch.setattr(coord_module, "time_mod", _fake_time)
 
     coordinator._pending_settings[("htr", "1")] = coord_module.PendingSetting(
         mode="auto",
@@ -132,6 +133,7 @@ def test_should_defer_pending_setting_branches(
         return fake_time["value"]
 
     monkeypatch.setattr(coord_module.time, "time", _fake_time)
+    monkeypatch.setattr(coord_module, "time_mod", _fake_time)
 
     coordinator._pending_settings[("htr", "1")] = coord_module.PendingSetting(
         mode="auto",
