@@ -171,10 +171,40 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.info("list_devices returned no devices")
         raise ConfigEntryNotReady
 
-    dev = devices[0] if isinstance(devices, list) and devices else {}
-    dev_id = str(
-        dev.get("dev_id") or dev.get("id") or dev.get("serial_id") or ""
-    ).strip()
+    dev: Mapping[str, Any] | None = None
+    dev_id = ""
+    if isinstance(devices, list):
+        for index, candidate in enumerate(devices):
+            if not isinstance(candidate, Mapping):
+                continue
+            candidate_id = str(
+                candidate.get("dev_id")
+                or candidate.get("id")
+                or candidate.get("serial_id")
+                or ""
+            ).strip()
+            if candidate_id:
+                dev = candidate
+                dev_id = candidate_id
+                break
+            _LOGGER.debug(
+                "Skipping device entry without identifier at index %s: %s",
+                index,
+                candidate,
+            )
+    elif isinstance(devices, Mapping):
+        dev = devices
+        dev_id = str(
+            dev.get("dev_id") or dev.get("id") or dev.get("serial_id") or ""
+        ).strip()
+    else:
+        _LOGGER.debug("Unexpected list_devices payload: %s", devices)
+
+    if not dev_id:
+        _LOGGER.info("list_devices returned no usable devices")
+        raise ConfigEntryNotReady
+
+    dev = dev or {}
     nodes = await client.get_nodes(dev_id)
     node_inventory = build_node_inventory(nodes)
     snapshot = InstallationSnapshot(

@@ -5,9 +5,15 @@ from __future__ import annotations
 import logging
 from types import MappingProxyType, SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
+from conftest import _install_stubs
+
+_install_stubs()
+
+import custom_components.termoweb.coordinator as coordinator_module
 import custom_components.termoweb.installation as installation_module
 import custom_components.termoweb.nodes as nodes_module
 from custom_components.termoweb.nodes import (
@@ -22,6 +28,27 @@ from custom_components.termoweb.nodes import (
     normalize_node_type,
     _existing_nodes_map,
 )
+from homeassistant.core import HomeAssistant
+
+
+def _make_state_coordinator(
+    hass: HomeAssistant,
+    nodes: Any,
+    *,
+    inventory: list[nodes_module.Node] | None = None,
+) -> coordinator_module.StateCoordinator:
+    """Construct a coordinator with predictable defaults for tests."""
+
+    client = SimpleNamespace(get_node_settings=AsyncMock())
+    return coordinator_module.StateCoordinator(
+        hass,
+        client,
+        30,
+        "dev",
+        {"name": "Device"},
+        nodes,  # type: ignore[arg-type]
+        inventory,
+    )
 
 
 def test_heater_node_normalises_inputs() -> None:
@@ -194,6 +221,39 @@ def test_build_node_inventory_falls_back_to_address_field() -> None:
 
     assert len(nodes) == 1
     assert nodes[0].addr == "09"
+
+
+def test_state_coordinator_handles_none_nodes_payload(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    hass = HomeAssistant()
+
+    with caplog.at_level(logging.DEBUG):
+        coordinator = _make_state_coordinator(hass, None)
+
+    assert coordinator._nodes == {}
+    assert coordinator._node_inventory == []
+    assert sum(
+        "Ignoring unexpected nodes payload" in message for message in caplog.messages
+    )
+    assert coordinator._nodes_by_type == {}
+
+
+def test_state_coordinator_logs_once_for_invalid_nodes(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    hass = HomeAssistant()
+    coordinator = _make_state_coordinator(hass, {})
+
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG):
+        coordinator.update_nodes(["bad"])
+        coordinator.update_nodes("also bad")
+
+    assert coordinator._nodes == {}
+    assert sum(
+        "Ignoring unexpected nodes payload" in message for message in caplog.messages
+    ) == 1
 
 
 def test_utils_normalization_matches_node_inventory() -> None:
