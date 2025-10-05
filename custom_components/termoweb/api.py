@@ -12,6 +12,8 @@ from .const import (
     ACCEPT_LANGUAGE,
     API_BASE,
     BASIC_AUTH_B64,
+    BRAND_API_BASES,
+    BRAND_DUCAHEAT,
     DEVS_PATH,
     NODE_SAMPLES_PATH_FMT,
     NODES_PATH_FMT,
@@ -24,6 +26,10 @@ _LOGGER = logging.getLogger(__name__)
 
 # Toggle to preview bodies in debug logs (redacted). Leave False by default.
 API_LOG_PREVIEW = False
+
+DUCAHEAT_API_BASE = BRAND_API_BASES[BRAND_DUCAHEAT].rstrip("/")
+DUCAHEAT_SERIAL_ID = "15"
+DUCAHEAT_REQUESTED_WITH = "net.termoweb.ducaheat.app"
 
 
 class BackendAuthError(Exception):
@@ -68,6 +74,7 @@ class RESTClient:
         self._token_obtained_at: float = 0.0
         self._token_expiry: float = 0.0
         self._lock = asyncio.Lock()
+        self._is_ducaheat = self._api_base == DUCAHEAT_API_BASE
 
     @property
     def api_base(self) -> str:
@@ -212,6 +219,9 @@ class RESTClient:
                 "User-Agent": USER_AGENT,
                 "Accept-Language": ACCEPT_LANGUAGE,
             }
+            if self._is_ducaheat:
+                headers["X-SerialId"] = DUCAHEAT_SERIAL_ID
+                headers["X-Requested-With"] = DUCAHEAT_REQUESTED_WITH
             url = f"{self._api_base}{TOKEN_PATH}"
             _LOGGER.debug(
                 "Token POST %s for user domain=%s",
@@ -260,12 +270,16 @@ class RESTClient:
     async def _authed_headers(self) -> dict[str, str]:
         """Return HTTP headers including a valid bearer token."""
         token = await self._ensure_token()
-        return {
+        headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/json",
             "User-Agent": USER_AGENT,
             "Accept-Language": ACCEPT_LANGUAGE,
         }
+        if self._is_ducaheat:
+            headers["X-SerialId"] = DUCAHEAT_SERIAL_ID
+            headers["X-Requested-With"] = DUCAHEAT_REQUESTED_WITH
+        return headers
 
     # ----------------- Public API -----------------
 
