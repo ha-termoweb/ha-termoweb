@@ -1163,6 +1163,8 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._healthy_since: float | None = None
         self._hb_send_interval: float = 27.0
         self._hb_task: asyncio.Task | None = None
+        self._rtc_keepalive_task: asyncio.Task | None = None
+        self._rtc_keepalive_interval: float = 30.0
 
         self._backoff_seq = [5, 10, 30, 120, 300]
         self._backoff_idx = 0
@@ -1295,6 +1297,11 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             with suppress(asyncio.CancelledError):
                 await self._hb_task
             self._hb_task = None
+        if self._rtc_keepalive_task:
+            self._rtc_keepalive_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._rtc_keepalive_task
+            self._rtc_keepalive_task = None
         await super().stop()
 
     # ------------------------------------------------------------------
@@ -1338,6 +1345,11 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                         self._idle_monitor()
                     )
                 self._hb_task = self._loop.create_task(self._heartbeat_loop())
+                if self._rtc_keepalive_task and not self._rtc_keepalive_task.done():
+                    self._rtc_keepalive_task.cancel()
+                self._rtc_keepalive_task = self._loop.create_task(
+                    self._rtc_keepalive_loop()
+                )
                 await self._read_loop()
             except asyncio.CancelledError:
                 should_retry = False
@@ -1369,6 +1381,9 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 if self._hb_task:
                     self._hb_task.cancel()
                     self._hb_task = None
+                if self._rtc_keepalive_task:
+                    self._rtc_keepalive_task.cancel()
+                    self._rtc_keepalive_task = None
                 if self._idle_monitor_task:
                     _LOGGER.debug("WS: stopping legacy idle monitor")
                     self._idle_monitor_task.cancel()
@@ -1487,6 +1502,32 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             return
         except (aiohttp.ClientError, RuntimeError):  # pragma: no cover - best effort
             return
+
+    async def _rtc_keepalive_loop(self) -> None:
+        """Poll the REST API to keep the device session alive."""
+
+        interval = self._rtc_keepalive_interval
+        try:
+            while not self._closing:
+                try:
+                    await self._client.get_rtc_time(self.dev_id)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as err:  # noqa: BLE001
+                    if _LOGGER.isEnabledFor(logging.DEBUG):
+                        _LOGGER.debug(
+                            "WS: RTC keep-alive failed (%s: %s)",
+                            type(err).__name__,
+                            err,
+                        )
+                await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # pragma: no cover - defensive best effort
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug(
+                    "WS: RTC keep-alive loop stopped unexpectedly", exc_info=True
+                )
 
     async def _read_loop(self) -> None:
         """Consume websocket frames and route events for the legacy protocol."""
