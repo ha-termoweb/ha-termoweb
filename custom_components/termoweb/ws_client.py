@@ -498,7 +498,11 @@ class WebSocketClient(_WsLeaseMixin):
         self._reset_backoff()
         await self._sio.connect(
             url,
-            transports=["websocket"],
+            headers={
+                "User-Agent": get_brand_user_agent(self._brand),
+                "X-Requested-With": get_brand_requested_with(self._brand),
+                "Accept-Language": ACCEPT_LANGUAGE,
+            },
             namespaces=[self._namespace],
             socketio_path=socketio_path,
             wait=True,
