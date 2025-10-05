@@ -244,11 +244,9 @@ class WebSocketClient:
 
     async def ws_url(self) -> str:
         """Return the websocket URL using the API client's token helper."""
-        token = await self._get_token()
-        base = self._api_base().rstrip("/")
-        if not base.endswith("/api/v2"):
-            base = f"{base}/api/v2"
-        return f"{base}/socket_io?token={token}&dev_id={self.dev_id}"
+
+        url, _ = await self._build_engineio_target()
+        return url
 
     async def debug_probe(self) -> None:
         """Emit a dev_data probe for debugging purposes."""
@@ -369,14 +367,9 @@ class WebSocketClient:
         netloc = parsed.netloc or parsed.path
         if not netloc:
             raise RuntimeError("invalid API base")
-        path = parsed.path.rstrip("/")
-        if not path.endswith("/api/v2"):
-            path = f"{path}/api/v2" if path else "/api/v2"
-        socket_path = f"{path}/socket_io"
-        engineio_path = socket_path.strip("/")
         query = urlencode({"token": token, "dev_id": self.dev_id})
-        url = urlunsplit((scheme, netloc, socket_path, query, ""))
-        return url, engineio_path
+        url = urlunsplit((scheme, netloc, "/socket.io", query, ""))
+        return url, "socket.io"
 
     # ------------------------------------------------------------------
     # Socket.IO event handlers
