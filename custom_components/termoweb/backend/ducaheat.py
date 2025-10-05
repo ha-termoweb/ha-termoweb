@@ -158,107 +158,50 @@ class DucaheatRESTClient(RESTClient):
             base = f"/api/v2/devs/{dev_id}/htr/{addr}"
             responses: dict[str, Any] = {}
 
-            mode_payload = None
-            status_payload: dict[str, Any] = {}
-
+            mode_value: str | None = None
             if mode is not None:
-                mode_norm = str(mode).lower()
-                if mode_norm == "heat":
-                    mode_norm = "manual"
-                mode_payload = {"mode": mode_norm}
+                mode_value = str(mode).lower()
+                if mode_value == "heat":
+                    mode_value = "manual"
 
+            status_payload: dict[str, Any] = {}
+            status_includes_mode = False
             if stemp is not None:
                 try:
                     status_payload["stemp"] = self._ensure_temperature(stemp)
                 except ValueError as err:
                     raise ValueError(f"Invalid stemp value: {stemp}") from err
-                if mode_payload is not None:
-                    status_payload["mode"] = mode_payload["mode"]
+                status_payload["units"] = self._ensure_units(units)
+                if mode_value is not None:
+                    status_payload["mode"] = mode_value
+                    status_includes_mode = True
+            elif (
+                units is not None
+                and mode is None
+                and prog is None
+                and ptemp is None
+            ):
+                status_payload["units"] = self._ensure_units(units)
 
+            segment_plan: list[tuple[str, dict[str, Any]]] = []
             if status_payload:
-                unit_str = units.upper() if isinstance(units, str) else "C"
-                if unit_str not in {"C", "F"}:
-                    raise ValueError(f"Invalid units: {units}")
-                status_payload["units"] = unit_str
-            else:
-                status_payload = {}
+                segment_plan.append(("status", status_payload))
+            if mode_value is not None and not status_includes_mode:
+                segment_plan.append(("mode", {"mode": mode_value}))
+            if prog is not None:
+                segment_plan.append(("prog", self._serialise_prog(prog)))
+            if ptemp is not None:
+                segment_plan.append(("prog_temps", self._serialise_prog_temps(ptemp)))
 
-            prog_payload = self._serialise_prog(prog) if prog is not None else None
-            ptemp_payload = (
-                self._serialise_prog_temps(ptemp) if ptemp is not None else None
-            )
-
-            requires_select = bool(status_payload or prog_payload or ptemp_payload)
-            try:
-                if requires_select:
-                    await self._post_segmented(
-                        f"{base}/select",
-                        headers=headers,
-                        payload={"select": True},
-                        dev_id=dev_id,
-                        addr=addr,
-                        node_type=node_type,
-                        ignore_statuses=(404,),
-                    )
-
-                if status_payload:
-                    responses["status"] = await self._post_segmented(
-                        f"{base}/status",
-                        headers=headers,
-                        payload=status_payload,
-                        dev_id=dev_id,
-                        addr=addr,
-                        node_type=node_type,
-                    )
-                elif mode_payload is not None:
-                    responses["mode"] = await self._post_segmented(
-                        f"{base}/mode",
-                        headers=headers,
-                        payload=mode_payload,
-                        dev_id=dev_id,
-                        addr=addr,
-                        node_type=node_type,
-                    )
-
-                if prog_payload is not None:
-                    responses["prog"] = await self._post_segmented(
-                        f"{base}/prog",
-                        headers=headers,
-                        payload=prog_payload,
-                        dev_id=dev_id,
-                        addr=addr,
-                        node_type=node_type,
-                    )
-
-                if ptemp_payload is not None:
-                    responses["prog_temps"] = await self._post_segmented(
-                        f"{base}/prog_temps",
-                        headers=headers,
-                        payload=ptemp_payload,
-                        dev_id=dev_id,
-                        addr=addr,
-                        node_type=node_type,
-                    )
-
-            finally:
-                if requires_select:
-                    try:
-                        await self._post_segmented(
-                            f"{base}/select",
-                            headers=headers,
-                            payload={"select": False},
-                            dev_id=dev_id,
-                            addr=addr,
-                            node_type=node_type,
-                            ignore_statuses=(404,),
-                        )
-                    except Exception as err:  # pragma: no cover - diagnostic only  # noqa: BLE001
-                        _LOGGER.debug(
-                            "Failed to release Ducaheat node %s/%s: %s",
-                            dev_id,
-                            addr,
-                            _redact_log_value(str(err)),
-                        )
+            for name, payload in segment_plan:
+                responses[name] = await self._post_segmented(
+                    f"{base}/{name}",
+                    headers=headers,
+                    payload=payload,
+                    dev_id=dev_id,
+                    addr=addr,
+                    node_type=node_type,
+                )
             return responses
 
         if node_type == "acm":
@@ -598,20 +541,23 @@ class DucaheatRESTClient(RESTClient):
         base = f"/api/v2/devs/{dev_id}/acm/{addr}"
         responses: dict[str, Any] = {}
 
-        mode_payload: dict[str, str] | None = None
+        mode_value: str | None = None
         if mode is not None:
             mode_value = str(mode).lower()
             if mode_value == "heat":
                 mode_value = "manual"
-            mode_payload = {"mode": mode_value}
 
         status_payload: dict[str, str] = {}
+        status_includes_mode = False
         if stemp is not None:
             try:
                 status_payload["stemp"] = self._format_temp(stemp)
             except ValueError as err:
                 raise ValueError(f"Invalid stemp value: {stemp}") from err
             status_payload["units"] = self._ensure_units(units)
+            if mode_value is not None:
+                status_payload["mode"] = mode_value
+                status_includes_mode = True
         elif (
             units is not None
             and mode is None
@@ -619,45 +565,26 @@ class DucaheatRESTClient(RESTClient):
             and ptemp is None
         ):
             status_payload["units"] = self._ensure_units(units)
-        if status_payload and mode_payload is not None and stemp is not None:
-            status_payload["mode"] = mode_payload["mode"]
 
-        if mode_payload is not None:
-            responses["mode"] = await self._post_acm_endpoint(
-                f"{base}/mode",
-                headers,
-                mode_payload,
-                dev_id=dev_id,
-                addr=addr,
-            )
-
+        segment_plan: list[tuple[str, dict[str, Any]]] = []
         if status_payload:
-            responses["status"] = await self._post_acm_endpoint(
-                f"{base}/status",
-                headers,
-                status_payload,
-                dev_id=dev_id,
-                addr=addr,
-            )
-
+            segment_plan.append(("status", status_payload))
+        if mode_value is not None and not status_includes_mode:
+            segment_plan.append(("mode", {"mode": mode_value}))
         if prog is not None:
             if len(prog) != 168:
                 raise ValueError(
                     f"acm weekly program must contain 168 slots; got {len(prog)}"
                 )
-            responses["prog"] = await self._post_acm_endpoint(
-                f"{base}/prog",
-                headers,
-                {"prog": self._ensure_prog(prog)},
-                dev_id=dev_id,
-                addr=addr,
-            )
-
+            segment_plan.append(("prog", {"prog": self._ensure_prog(prog)}))
         if ptemp is not None:
-            responses["prog_temps"] = await self._post_acm_endpoint(
-                f"{base}/prog_temps",
+            segment_plan.append(("prog_temps", {"ptemp": self._ensure_ptemp(ptemp)}))
+
+        for name, payload in segment_plan:
+            responses[name] = await self._post_acm_endpoint(
+                f"{base}/{name}",
                 headers,
-                {"ptemp": self._ensure_ptemp(ptemp)},
+                payload,
                 dev_id=dev_id,
                 addr=addr,
             )
@@ -700,10 +627,15 @@ class DucaheatRESTClient(RESTClient):
 
         return self._ensure_temperature(value)
 
-    def _ensure_units(self, value: str) -> str:
-        """Validate and normalise accumulator units."""
+    def _ensure_units(self, value: str | None) -> str:
+        """Validate and normalise temperature units."""
 
-        unit = str(value).upper()
+        if value is None:
+            unit = "C"
+        else:
+            unit = str(value).strip().upper()
+        if not unit:
+            unit = "C"
         if unit not in {"C", "F"}:
             raise ValueError(f"Invalid units: {value}")
         return unit

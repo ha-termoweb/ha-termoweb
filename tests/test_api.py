@@ -1661,18 +1661,16 @@ def test_ducaheat_set_htr_settings_writes_segmented(monkeypatch) -> None:
         assert set(result) == {"status", "prog", "prog_temps"}
         urls = [call[1] for call in session.request_calls]
         assert urls == [
-            "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/select",
             "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/status",
             "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/prog",
             "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/prog_temps",
-            "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/select",
         ]
-        status_json = session.request_calls[1][2]["json"]
+        status_json = session.request_calls[0][2]["json"]
         assert status_json == {"mode": "manual", "stemp": "21.2", "units": "C"}
-        prog_json = session.request_calls[2][2]["json"]
+        prog_json = session.request_calls[1][2]["json"]
         assert set(prog_json) == {"prog"}
         assert prog_json["prog"]["1"] == [1] * 48
-        ptemp_json = session.request_calls[3][2]["json"]
+        ptemp_json = session.request_calls[2][2]["json"]
         assert ptemp_json == {"antifrost": "5.0", "eco": "15.0", "comfort": "21.0"}
 
     asyncio.run(_run())
@@ -1765,11 +1763,9 @@ def test_ducaheat_set_htr_settings_prog_only(monkeypatch) -> None:
     async def _run() -> None:
         session = FakeSession()
         session.queue_request(
-            MockResponse(200, {}, headers={"Content-Type": "application/json"}),
             MockResponse(
                 200, {"saved": True}, headers={"Content-Type": "application/json"}
             ),
-            MockResponse(200, {}, headers={"Content-Type": "application/json"}),
         )
 
         client = DucaheatRESTClient(
@@ -1791,9 +1787,7 @@ def test_ducaheat_set_htr_settings_prog_only(monkeypatch) -> None:
 
         urls = [call[1] for call in session.request_calls]
         assert urls == [
-            "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/select",
             "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/prog",
-            "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/select",
         ]
 
     asyncio.run(_run())
@@ -1847,28 +1841,24 @@ def test_ducaheat_set_acm_settings_segmented(monkeypatch) -> None:
             units="f",
         )
 
-        assert set(result) == {"mode", "status", "prog", "prog_temps"}
+        assert set(result) == {"status", "prog", "prog_temps"}
 
         urls = [call[1] for call in session.request_calls]
         assert urls == [
-            "https://api.termoweb.fake/api/v2/devs/dev/acm/5/mode",
             "https://api.termoweb.fake/api/v2/devs/dev/acm/5/status",
             "https://api.termoweb.fake/api/v2/devs/dev/acm/5/prog",
             "https://api.termoweb.fake/api/v2/devs/dev/acm/5/prog_temps",
         ]
 
-        mode_call = session.request_calls[0]
-        assert mode_call[0] == "POST"
-        assert mode_call[2]["json"] == {"mode": "manual"}
-        status_call = session.request_calls[1]
+        status_call = session.request_calls[0]
         assert status_call[2]["json"] == {
             "mode": "manual",
             "stemp": "21.2",
             "units": "F",
         }
-        prog_call = session.request_calls[2]
+        prog_call = session.request_calls[1]
         assert prog_call[2]["json"] == {"prog": [0] * 168}
-        temps_call = session.request_calls[3]
+        temps_call = session.request_calls[2]
         assert temps_call[2]["json"] == {"ptemp": ["5.0", "15.0", "21.0"]}
 
         for _, _, kwargs in session.request_calls:
