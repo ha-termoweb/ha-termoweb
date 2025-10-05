@@ -1370,7 +1370,9 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                     self._hs_fail_count = 0
                     self._hs_fail_start = 0.0
                 _LOGGER.debug(
-                    "WS: handshake error url=%s body=%r", err.url, err.body_snippet
+                    "WS: handshake error url=%s body=%r",
+                    self._sanitise_url(err.url),
+                    err.body_snippet,
                 )
             except Exception as err:  # noqa: BLE001
                 _LOGGER.info(
@@ -1447,7 +1449,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             f"{self._socket_base()}/socket.io/1/websocket/{sid}"
             f"?token={token}&dev_id={self.dev_id}"
         )
-        _LOGGER.info("WS: connecting to %s", ws_url)
+        _LOGGER.info("WS: connecting to %s", self._sanitise_url(ws_url))
         self._ws = await self._session.ws_connect(
             ws_url,
             timeout=aiohttp.ClientTimeout(total=15),
@@ -2054,6 +2056,20 @@ class DucaheatWSClient(WebSocketClient):
             return f"{trimmed[:2]}***{trimmed[-2:]}"
         return f"{trimmed[:4]}...{trimmed[-4:]}"
 
+    def _mask_identifier(self, value: str) -> str:
+        """Return a partially masked identifier for log output."""
+
+        trimmed = value.strip()
+        if not trimmed:
+            return ""
+        if len(trimmed) <= 4:
+            return "***"
+        if len(trimmed) <= 8:
+            return f"{trimmed[:2]}...{trimmed[-2:]}"
+        prefix = trimmed[:6]
+        suffix = trimmed[-4:]
+        return f"{prefix}...{suffix}"
+
     def _sanitise_headers(self, headers: Mapping[str, Any]) -> dict[str, Any]:
         """Redact sensitive header values for logging."""
 
@@ -2080,7 +2096,12 @@ class DucaheatWSClient(WebSocketClient):
 
         sanitised: dict[str, str] = {}
         for key, value in params.items():
-            sanitised[key] = self._redact_value(value) if key == "token" else value
+            if key == "token":
+                sanitised[key] = self._redact_value(str(value))
+            elif key == "dev_id":
+                sanitised[key] = self._mask_identifier(str(value))
+            else:
+                sanitised[key] = value
         return sanitised
 
     def _sanitise_url(self, url: str) -> str:
@@ -2092,7 +2113,14 @@ class DucaheatWSClient(WebSocketClient):
             return url
         query_items = parse_qsl(parsed.query, keep_blank_values=True)
         sanitised_pairs = [
-            (key, self._redact_value(value) if key == "token" else value)
+            (
+                key,
+                self._redact_value(value)
+                if key == "token"
+                else self._mask_identifier(value)
+                if key == "dev_id"
+                else value,
+            )
             for key, value in query_items
         ]
         sanitised_query = urlencode(sanitised_pairs, doseq=True)
