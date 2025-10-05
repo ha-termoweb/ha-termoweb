@@ -2158,7 +2158,7 @@ class DucaheatWSClient(WebSocketClient):
         socketio_path = get_brand_socketio_path(self._brand)
         query_string = urlencode(query_params)
         connect_host = f"{base_host}?{query_string}"
-        headers = self._brand_headers(origin="https://localhost")
+        headers = self._brand_headers()
         self._log_connect_request(
             base=base_host,
             socket_path=socketio_path,
@@ -2166,7 +2166,7 @@ class DucaheatWSClient(WebSocketClient):
             headers=headers,
         )
 
-        transports = ["websocket"]
+        transports = None  # default polling->upgrade
         sanitised_params = self._sanitise_params(query_params)
         safe_qs = "&".join(
             f"{key}={sanitised_params[key]}" for key in query_params
@@ -2196,7 +2196,6 @@ class DucaheatWSClient(WebSocketClient):
         await self._sio.connect(
             connect_host,
             headers=headers,
-            transports=transports,
             namespaces=[self._namespace],
             socketio_path=socketio_path,
             wait=True,
