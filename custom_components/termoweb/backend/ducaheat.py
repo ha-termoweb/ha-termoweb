@@ -1,9 +1,10 @@
 """Ducaheat backend implementation and HTTP adapter."""
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from copy import deepcopy
 import logging
+import re
 from typing import Any
 
 from aiohttp import ClientResponseError
@@ -18,20 +19,95 @@ _LOGGER = logging.getLogger(__name__)
 
 _DAY_ORDER = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
+
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_BEARER_RE = re.compile(r"Bearer\s+[A-Za-z0-9\-._~+/]+=*", re.IGNORECASE)
+_TOKEN_QUERY_RE = re.compile(r"(?i)(token|refresh_token|access_token)=([^&\s]+)")
+
+
+def _redact_log_value(value: str) -> str:
+    """Redact bearer tokens and email addresses from log strings."""
+
+    if not value:
+        return ""
+    redacted = _BEARER_RE.sub("Bearer ***", value)
+    redacted = _EMAIL_RE.sub("***@***", redacted)
+    return _TOKEN_QUERY_RE.sub(lambda match: f"{match.group(1)}=***", redacted)
+
 class DucaheatRequestError(Exception):
     """Raised when the Ducaheat API returns a client error."""
 
     def __init__(self, *, status: int, path: str, body: str) -> None:
         """Initialise error metadata for logging and diagnostics."""
 
-        super().__init__(f"Ducaheat request failed ({status}) for {path}: {body}")
+        clean_body = _redact_log_value(body)
+        clean_path = _redact_log_value(path)
+        super().__init__(
+            f"Ducaheat request failed ({status}) for {clean_path}: {clean_body}"
+        )
         self.status = status
-        self.path = path
-        self.body = body
+        self.path = clean_path
+        self.body = clean_body
 
 
 class DucaheatRESTClient(RESTClient):
     """HTTP adapter that speaks the segmented Ducaheat API."""
+
+    async def _post_segmented(
+        self,
+        path: str,
+        *,
+        headers: Mapping[str, str],
+        payload: Mapping[str, Any],
+        dev_id: str,
+        addr: str,
+        node_type: str,
+        ignore_statuses: Iterable[int] | None = None,
+    ) -> Any:
+        """Log segmented POST requests before delegating to ``_request``."""
+
+        self._log_segmented_post(
+            path=path,
+            node_type=node_type,
+            dev_id=dev_id,
+            addr=addr,
+            payload=payload,
+        )
+        request_kwargs: dict[str, Any] = {
+            "headers": dict(headers),
+            "json": dict(payload),
+        }
+        if ignore_statuses:
+            request_kwargs["ignore_statuses"] = tuple(ignore_statuses)
+        return await self._request("POST", path, **request_kwargs)
+
+    def _log_segmented_post(
+        self,
+        *,
+        path: str,
+        node_type: str,
+        dev_id: str,
+        addr: str,
+        payload: Mapping[str, Any] | None,
+    ) -> None:
+        """Emit a debug log for segmented POST calls with sanitized metadata."""
+
+        if not _LOGGER.isEnabledFor(logging.DEBUG):
+            return
+        if isinstance(payload, Mapping):
+            body_keys = tuple(sorted(str(key) for key in payload))
+        elif payload is None:
+            body_keys = ()
+        else:
+            body_keys = ("<non-mapping>",)
+        _LOGGER.debug(
+            "POST %s (node_type=%s dev=%s addr=%s) body_keys=%s",
+            _redact_log_value(path),
+            node_type,
+            _redact_log_value(dev_id),
+            _redact_log_value(addr),
+            body_keys,
+        )
 
     async def get_node_settings(
         self, dev_id: str, node: NodeDescriptor
@@ -115,61 +191,73 @@ class DucaheatRESTClient(RESTClient):
             requires_select = bool(status_payload or prog_payload or ptemp_payload)
             try:
                 if requires_select:
-                    await self._request(
-                        "POST",
+                    await self._post_segmented(
                         f"{base}/select",
                         headers=headers,
-                        json={"select": True},
+                        payload={"select": True},
+                        dev_id=dev_id,
+                        addr=addr,
+                        node_type=node_type,
                         ignore_statuses=(404,),
                     )
 
                 if status_payload:
-                    responses["status"] = await self._request(
-                        "POST",
+                    responses["status"] = await self._post_segmented(
                         f"{base}/status",
                         headers=headers,
-                        json=status_payload,
+                        payload=status_payload,
+                        dev_id=dev_id,
+                        addr=addr,
+                        node_type=node_type,
                     )
                 elif mode_payload is not None:
-                    responses["mode"] = await self._request(
-                        "POST",
+                    responses["mode"] = await self._post_segmented(
                         f"{base}/mode",
                         headers=headers,
-                        json=mode_payload,
+                        payload=mode_payload,
+                        dev_id=dev_id,
+                        addr=addr,
+                        node_type=node_type,
                     )
 
                 if prog_payload is not None:
-                    responses["prog"] = await self._request(
-                        "POST",
+                    responses["prog"] = await self._post_segmented(
                         f"{base}/prog",
                         headers=headers,
-                        json=prog_payload,
+                        payload=prog_payload,
+                        dev_id=dev_id,
+                        addr=addr,
+                        node_type=node_type,
                     )
 
                 if ptemp_payload is not None:
-                    responses["prog_temps"] = await self._request(
-                        "POST",
+                    responses["prog_temps"] = await self._post_segmented(
                         f"{base}/prog_temps",
                         headers=headers,
-                        json=ptemp_payload,
+                        payload=ptemp_payload,
+                        dev_id=dev_id,
+                        addr=addr,
+                        node_type=node_type,
                     )
 
             finally:
                 if requires_select:
                     try:
-                        await self._request(
-                            "POST",
+                        await self._post_segmented(
                             f"{base}/select",
                             headers=headers,
-                            json={"select": False},
+                            payload={"select": False},
+                            dev_id=dev_id,
+                            addr=addr,
+                            node_type=node_type,
                             ignore_statuses=(404,),
                         )
-                    except Exception as err:  # pragma: no cover - diagnostic only
+                    except Exception as err:  # pragma: no cover - diagnostic only  # noqa: BLE001
                         _LOGGER.debug(
                             "Failed to release Ducaheat node %s/%s: %s",
                             dev_id,
                             addr,
-                            err,
+                            _redact_log_value(str(err)),
                         )
             return responses
 
@@ -536,12 +624,20 @@ class DucaheatRESTClient(RESTClient):
 
         if mode_payload is not None:
             responses["mode"] = await self._post_acm_endpoint(
-                f"{base}/mode", headers, mode_payload
+                f"{base}/mode",
+                headers,
+                mode_payload,
+                dev_id=dev_id,
+                addr=addr,
             )
 
         if status_payload:
             responses["status"] = await self._post_acm_endpoint(
-                f"{base}/status", headers, status_payload
+                f"{base}/status",
+                headers,
+                status_payload,
+                dev_id=dev_id,
+                addr=addr,
             )
 
         if prog is not None:
@@ -553,6 +649,8 @@ class DucaheatRESTClient(RESTClient):
                 f"{base}/prog",
                 headers,
                 {"prog": self._ensure_prog(prog)},
+                dev_id=dev_id,
+                addr=addr,
             )
 
         if ptemp is not None:
@@ -560,6 +658,8 @@ class DucaheatRESTClient(RESTClient):
                 f"{base}/prog_temps",
                 headers,
                 {"ptemp": self._ensure_ptemp(ptemp)},
+                dev_id=dev_id,
+                addr=addr,
             )
 
         return responses
@@ -569,11 +669,20 @@ class DucaheatRESTClient(RESTClient):
         path: str,
         headers: Mapping[str, str],
         payload: Mapping[str, Any],
+        dev_id: str | None = None,
+        addr: str | None = None,
     ) -> Any:
         """POST to an ACM endpoint, translating client errors."""
 
         try:
-            return await self._request("POST", path, headers=dict(headers), json=dict(payload))
+            return await self._post_segmented(
+                path,
+                headers=headers,
+                payload=payload,
+                dev_id=dev_id or "<unknown>",
+                addr=addr or "<unknown>",
+                node_type="acm",
+            )
         except ClientResponseError as err:
             if 400 <= err.status < 500:
                 message = getattr(err, "message", None)
