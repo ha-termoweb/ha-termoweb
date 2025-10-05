@@ -170,7 +170,8 @@ connectivity drops.
 
 ## WebSocket (Socket.IO)
 
-**Path:** `/api/v2/socket_io?token=<access_token>` (handshake may be redirected to a session identifier URL fragment).
+**Path:** `/socket.io?token=<access_token>&dev_id=<dev_id>` (handshake may be redirected to a session identifier URL fragment).
+**Namespace:** `/` (default).
 
 The app listens for at least these events:
 - `dev_handshake` — initial device list / permissions (not observed in this capture but present in prior reverse engineering).
