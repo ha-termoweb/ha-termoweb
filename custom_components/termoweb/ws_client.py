@@ -1936,6 +1936,12 @@ class DucaheatWSClient(WebSocketClient):
         url = f"{base_url}/socket.io?{query}"
         return url, "socket.io"
 
+    async def ws_url(self) -> str:
+        """Return the websocket URL for diagnostics."""
+
+        url, _ = await self._build_engineio_target()
+        return url
+
     def _redact_value(self, value: str) -> str:
         """Return a redacted representation of sensitive values."""
 

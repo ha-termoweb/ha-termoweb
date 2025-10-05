@@ -150,6 +150,7 @@ def _make_ducaheat_client(
     *,
     hass_loop: Any | None = None,
     namespace: str = "/",
+    rest: DummyREST | None = None,
 ) -> module.DucaheatWSClient:
     """Return a Ducaheat websocket client configured for tests."""
 
@@ -169,7 +170,7 @@ def _make_ducaheat_client(
     coordinator = SimpleNamespace(
         data={}, update_nodes=MagicMock(), async_request_refresh=AsyncMock()
     )
-    rest_client = DummyREST()
+    rest_client = rest or DummyREST()
     dispatcher_mock = MagicMock()
     monkeypatch.setattr(module, "async_dispatcher_send", dispatcher_mock)
     client = module.DucaheatWSClient(
@@ -199,6 +200,24 @@ def test_ducaheat_client_default_namespace(monkeypatch: pytest.MonkeyPatch) -> N
     assert client._namespace == "/"
     assert ("dev_data", "/") in client._sio.events
     assert ("disconnect", "/") in client._sio.events
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_connect_uses_brand_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure the Ducaheat client sets required brand headers."""
+
+    client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    client._stop_event = asyncio.Event()
+    connect_mock = AsyncMock()
+    client._sio.connect = connect_mock
+
+    await client._connect_once()
+
+    headers = connect_mock.await_args.kwargs["headers"]
+    assert headers["Origin"] == "https://localhost"
+    assert headers["X-Requested-With"] == "net.termoweb.ducaheat.app"
 
 
 def test_translate_path_update_parses_segments(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -480,16 +499,14 @@ def test_http_wrapping_handles_missing_attributes(
 
 @pytest.mark.asyncio
 async def test_ws_url_and_engineio_target(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
 
     ws_url = await client.ws_url()
-    assert (
-        ws_url == "https://api.example.com/api/v2/socket_io?token=token&dev_id=device"
-    )
+    assert ws_url == "https://api.example.com/socket.io?token=token&dev_id=device"
 
     base, path = await client._build_engineio_target()
-    assert base == "https://api.example.com/api/v2/socket_io?token=token&dev_id=device"
-    assert path == "api/v2/socket_io"
+    assert base == "https://api.example.com/socket.io?token=token&dev_id=device"
+    assert path == "socket.io"
 
 
 @pytest.mark.asyncio
@@ -499,22 +516,19 @@ async def test_ws_url_appends_missing_api_version(
     """Ensure websocket targets append the API version path when absent."""
 
     rest = DummyREST(base="https://api.example.com")
-    client = _make_client(
+    client = _make_ducaheat_client(
         monkeypatch,
         hass_loop=asyncio.get_event_loop(),
+        namespace="/",
         rest=rest,
     )
 
     ws_url = await client.ws_url()
-    assert ws_url.startswith(
-        "https://api.example.com/api/v2/socket_io?token=token&dev_id=device"
-    )
+    assert ws_url == "https://api.example.com/socket.io?token=token&dev_id=device"
 
     base, path = await client._build_engineio_target()
-    assert base.startswith(
-        "https://api.example.com/api/v2/socket_io?token=token&dev_id=device"
-    )
-    assert path == "api/v2/socket_io"
+    assert base == "https://api.example.com/socket.io?token=token&dev_id=device"
+    assert path == "socket.io"
 
 
 @pytest.mark.asyncio
@@ -1607,7 +1621,7 @@ async def test_connect_once_invokes_socket(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(
         client,
         "_build_engineio_target",
-        AsyncMock(return_value=("https://socket", "api/v2/socket_io")),
+        AsyncMock(return_value=("https://socket", "socket.io")),
     )
     connect_mock = AsyncMock()
     client._sio.connect = connect_mock
@@ -2145,7 +2159,7 @@ def test_ducaheat_connect_response_logging(
     client = _make_ducaheat_client(monkeypatch)
     caplog.set_level(logging.DEBUG)
     client._connect_response_logged = False
-    client._sio.connection_url = "https://api.example.com/api/v2/socket_io?token=abc"
+    client._sio.connection_url = "https://api.example.com/socket.io?token=abc"
     client._sio.connection_headers = {"Authorization": "Bearer secret-token"}
     client._sio.connection_transports = ["websocket"]
     client._sio.connection_namespaces = ["/"]
