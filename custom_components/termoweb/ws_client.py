@@ -1,6 +1,7 @@
 """Unified websocket client for TermoWeb backends."""
 
 from __future__ import annotations
+from urllib.parse import urlencode
 
 import asyncio
 import codecs
@@ -39,7 +40,7 @@ from .const import (
     get_brand_user_agent,
     signal_ws_data,
     signal_ws_status,
-)
+, BRAND_SOCKETIO_PATHS)
 from .installation import InstallationSnapshot, ensure_snapshot
 from .nodes import (
     NODE_CLASS_BY_TYPE,
