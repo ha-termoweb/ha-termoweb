@@ -6,6 +6,8 @@ from copy import deepcopy
 import logging
 from typing import Any
 
+from aiohttp import ClientResponseError
+
 from ..api import RESTClient
 from ..const import BRAND_DUCAHEAT, WS_NAMESPACE
 from ..nodes import NodeDescriptor
@@ -15,6 +17,18 @@ from .base import Backend, WsClientProto
 _LOGGER = logging.getLogger(__name__)
 
 _DAY_ORDER = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+class DucaheatRequestError(Exception):
+    """Raised when the Ducaheat API returns a client error."""
+
+    def __init__(self, *, status: int, path: str, body: str) -> None:
+        """Initialise error metadata for logging and diagnostics."""
+
+        super().__init__(f"Ducaheat request failed ({status}) for {path}: {body}")
+        self.status = status
+        self.path = path
+        self.body = body
+
 
 class DucaheatRESTClient(RESTClient):
     """HTTP adapter that speaks the segmented Ducaheat API."""
@@ -63,10 +77,106 @@ class DucaheatRESTClient(RESTClient):
         """Write heater settings using the segmented endpoints."""
 
         node_type, addr = self._resolve_node_descriptor(node)
-        if node_type != "htr":
-            return await super().set_node_settings(
+        if node_type == "htr":
+            headers = await self._authed_headers()
+            base = f"/api/v2/devs/{dev_id}/htr/{addr}"
+            responses: dict[str, Any] = {}
+
+            mode_payload = None
+            status_payload: dict[str, Any] = {}
+
+            if mode is not None:
+                mode_norm = str(mode).lower()
+                if mode_norm == "heat":
+                    mode_norm = "manual"
+                mode_payload = {"mode": mode_norm}
+
+            if stemp is not None:
+                try:
+                    status_payload["stemp"] = self._ensure_temperature(stemp)
+                except ValueError as err:
+                    raise ValueError(f"Invalid stemp value: {stemp}") from err
+                if mode_payload is not None:
+                    status_payload["mode"] = mode_payload["mode"]
+
+            if status_payload:
+                unit_str = units.upper() if isinstance(units, str) else "C"
+                if unit_str not in {"C", "F"}:
+                    raise ValueError(f"Invalid units: {units}")
+                status_payload["units"] = unit_str
+            else:
+                status_payload = {}
+
+            prog_payload = self._serialise_prog(prog) if prog is not None else None
+            ptemp_payload = (
+                self._serialise_prog_temps(ptemp) if ptemp is not None else None
+            )
+
+            requires_select = bool(status_payload or prog_payload or ptemp_payload)
+            try:
+                if requires_select:
+                    await self._request(
+                        "POST",
+                        f"{base}/select",
+                        headers=headers,
+                        json={"select": True},
+                        ignore_statuses=(404,),
+                    )
+
+                if status_payload:
+                    responses["status"] = await self._request(
+                        "POST",
+                        f"{base}/status",
+                        headers=headers,
+                        json=status_payload,
+                    )
+                elif mode_payload is not None:
+                    responses["mode"] = await self._request(
+                        "POST",
+                        f"{base}/mode",
+                        headers=headers,
+                        json=mode_payload,
+                    )
+
+                if prog_payload is not None:
+                    responses["prog"] = await self._request(
+                        "POST",
+                        f"{base}/prog",
+                        headers=headers,
+                        json=prog_payload,
+                    )
+
+                if ptemp_payload is not None:
+                    responses["prog_temps"] = await self._request(
+                        "POST",
+                        f"{base}/prog_temps",
+                        headers=headers,
+                        json=ptemp_payload,
+                    )
+
+            finally:
+                if requires_select:
+                    try:
+                        await self._request(
+                            "POST",
+                            f"{base}/select",
+                            headers=headers,
+                            json={"select": False},
+                            ignore_statuses=(404,),
+                        )
+                    except Exception as err:  # pragma: no cover - diagnostic only
+                        _LOGGER.debug(
+                            "Failed to release Ducaheat node %s/%s: %s",
+                            dev_id,
+                            addr,
+                            err,
+                        )
+            return responses
+
+        if node_type == "acm":
+            return await self._set_acm_settings(
                 dev_id,
-                (node_type, addr),
+                addr,
                 mode=mode,
                 stemp=stemp,
                 prog=prog,
@@ -74,100 +184,15 @@ class DucaheatRESTClient(RESTClient):
                 units=units,
             )
 
-        headers = await self._authed_headers()
-        base = f"/api/v2/devs/{dev_id}/htr/{addr}"
-        responses: dict[str, Any] = {}
-
-        mode_payload = None
-        status_payload: dict[str, Any] = {}
-
-        if mode is not None:
-            mode_norm = str(mode).lower()
-            if mode_norm == "heat":
-                mode_norm = "manual"
-            mode_payload = {"mode": mode_norm}
-
-        if stemp is not None:
-            try:
-                status_payload["stemp"] = self._ensure_temperature(stemp)
-            except ValueError as err:
-                raise ValueError(f"Invalid stemp value: {stemp}") from err
-            if mode_payload is not None:
-                status_payload["mode"] = mode_payload["mode"]
-
-        if status_payload:
-            unit_str = units.upper() if isinstance(units, str) else "C"
-            if unit_str not in {"C", "F"}:
-                raise ValueError(f"Invalid units: {units}")
-            status_payload["units"] = unit_str
-        else:
-            status_payload = {}
-
-        prog_payload = self._serialise_prog(prog) if prog is not None else None
-        ptemp_payload = (
-            self._serialise_prog_temps(ptemp) if ptemp is not None else None
+        return await super().set_node_settings(
+            dev_id,
+            (node_type, addr),
+            mode=mode,
+            stemp=stemp,
+            prog=prog,
+            ptemp=ptemp,
+            units=units,
         )
-
-        requires_select = bool(status_payload or prog_payload or ptemp_payload)
-        try:
-            if requires_select:
-                await self._request(
-                    "POST",
-                    f"{base}/select",
-                    headers=headers,
-                    json={"select": True},
-                    ignore_statuses=(404,),
-                )
-
-            if status_payload:
-                responses["status"] = await self._request(
-                    "POST",
-                    f"{base}/status",
-                    headers=headers,
-                    json=status_payload,
-                )
-            elif mode_payload is not None:
-                responses["mode"] = await self._request(
-                    "POST",
-                    f"{base}/mode",
-                    headers=headers,
-                    json=mode_payload,
-                )
-
-            if prog_payload is not None:
-                responses["prog"] = await self._request(
-                    "POST",
-                    f"{base}/prog",
-                    headers=headers,
-                    json=prog_payload,
-                )
-
-            if ptemp_payload is not None:
-                responses["prog_temps"] = await self._request(
-                    "POST",
-                    f"{base}/prog_temps",
-                    headers=headers,
-                    json=ptemp_payload,
-                )
-
-        finally:
-            if requires_select:
-                try:
-                    await self._request(
-                        "POST",
-                        f"{base}/select",
-                        headers=headers,
-                        json={"select": False},
-                        ignore_statuses=(404,),
-                    )
-                except Exception as err:  # pragma: no cover - diagnostic only
-                    _LOGGER.debug(
-                        "Failed to release Ducaheat node %s/%s: %s",
-                        dev_id,
-                        addr,
-                        err,
-                    )
-        return responses
 
     async def get_node_samples(
         self,
@@ -468,6 +493,112 @@ class DucaheatRESTClient(RESTClient):
                 formatted.append(safe)
         return formatted
 
+    async def _set_acm_settings(
+        self,
+        dev_id: str,
+        addr: str,
+        *,
+        mode: str | None,
+        stemp: float | None,
+        prog: list[int] | None,
+        ptemp: list[float] | None,
+        units: str,
+    ) -> dict[str, Any]:
+        """Apply segmented writes for accumulator nodes."""
+
+        headers = await self._authed_headers()
+        base = f"/api/v2/devs/{dev_id}/acm/{addr}"
+        responses: dict[str, Any] = {}
+
+        mode_payload: dict[str, str] | None = None
+        if mode is not None:
+            mode_value = str(mode).lower()
+            if mode_value == "heat":
+                mode_value = "manual"
+            mode_payload = {"mode": mode_value}
+
+        status_payload: dict[str, str] = {}
+        if stemp is not None:
+            try:
+                status_payload["stemp"] = self._format_temp(stemp)
+            except ValueError as err:
+                raise ValueError(f"Invalid stemp value: {stemp}") from err
+            status_payload["units"] = self._ensure_units(units)
+        elif (
+            units is not None
+            and mode is None
+            and prog is None
+            and ptemp is None
+        ):
+            status_payload["units"] = self._ensure_units(units)
+        if status_payload and mode_payload is not None and stemp is not None:
+            status_payload["mode"] = mode_payload["mode"]
+
+        if mode_payload is not None:
+            responses["mode"] = await self._post_acm_endpoint(
+                f"{base}/mode", headers, mode_payload
+            )
+
+        if status_payload:
+            responses["status"] = await self._post_acm_endpoint(
+                f"{base}/status", headers, status_payload
+            )
+
+        if prog is not None:
+            if len(prog) != 168:
+                raise ValueError(
+                    f"acm weekly program must contain 168 slots; got {len(prog)}"
+                )
+            responses["prog"] = await self._post_acm_endpoint(
+                f"{base}/prog",
+                headers,
+                {"prog": self._ensure_prog(prog)},
+            )
+
+        if ptemp is not None:
+            responses["prog_temps"] = await self._post_acm_endpoint(
+                f"{base}/prog_temps",
+                headers,
+                {"ptemp": self._ensure_ptemp(ptemp)},
+            )
+
+        return responses
+
+    async def _post_acm_endpoint(
+        self,
+        path: str,
+        headers: Mapping[str, str],
+        payload: Mapping[str, Any],
+    ) -> Any:
+        """POST to an ACM endpoint, translating client errors."""
+
+        try:
+            return await self._request("POST", path, headers=dict(headers), json=dict(payload))
+        except ClientResponseError as err:
+            if 400 <= err.status < 500:
+                message = getattr(err, "message", None)
+                if not message and err.args:
+                    message = str(err.args[0])
+                raise DucaheatRequestError(
+                    status=err.status,
+                    path=path,
+                    body=str(message or ""),
+                ) from err
+            raise
+
+    def _format_temp(self, value: float | str) -> str:
+        """Format temperatures using one decimal precision."""
+
+        return self._ensure_temperature(value)
+
+    def _ensure_units(self, value: str) -> str:
+        """Validate and normalise accumulator units."""
+
+        unit = str(value).upper()
+        if unit not in {"C", "F"}:
+            raise ValueError(f"Invalid units: {value}")
+        return unit
+
     def _serialise_prog(self, prog: list[int]) -> dict[str, Any]:
         """Serialise the 168-slot programme back to API structure."""
         normalised = self._ensure_prog(prog)
@@ -526,4 +657,5 @@ __all__ = [
     "BRAND_DUCAHEAT",
     "DucaheatBackend",
     "DucaheatRESTClient",
+    "DucaheatRequestError",
 ]

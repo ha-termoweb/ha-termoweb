@@ -144,7 +144,7 @@ def test_ducaheat_rest_client_normalises_acm(monkeypatch) -> None:
     asyncio.run(_run())
 
 
-def test_ducaheat_rest_set_node_settings_routes_non_htr(monkeypatch) -> None:
+def test_ducaheat_rest_set_node_settings_routes_non_special(monkeypatch) -> None:
     async def _run() -> None:
         session = SimpleNamespace()
         client = DucaheatRESTClient(session, "user", "pass")
@@ -159,7 +159,7 @@ def test_ducaheat_rest_set_node_settings_routes_non_htr(monkeypatch) -> None:
 
         result = await client.set_node_settings(
             "dev",
-            ("acm", "4"),
+            ("pmo", "4"),
             mode="auto",
             stemp=20.5,
         )
@@ -167,7 +167,7 @@ def test_ducaheat_rest_set_node_settings_routes_non_htr(monkeypatch) -> None:
         assert result == {"ok": True}
         assert captured["args"] == (
             "dev",
-            ("acm", "4"),
+            ("pmo", "4"),
             {"mode": "auto", "stemp": 20.5, "prog": None, "ptemp": None, "units": "C"},
         )
 
