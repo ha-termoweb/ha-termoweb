@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Iterable
 import logging
 import time
+from time import monotonic as time_mod
 from typing import Any
 
 import aiohttp
@@ -74,6 +75,8 @@ class RESTClient:
         self._access_token: str | None = None
         self._token_obtained_at: float = 0.0
         self._token_expiry: float = 0.0
+        self._token_obtained_monotonic: float = 0.0
+        self._token_expiry_monotonic: float = 0.0
         self._lock = asyncio.Lock()
         self._is_ducaheat = self._api_base == DUCAHEAT_API_BASE
         self._brand = BRAND_DUCAHEAT if self._is_ducaheat else BRAND_TERMOWEB
@@ -154,6 +157,7 @@ class RESTClient:
                         if attempt == 0:
                             self._access_token = None
                             self._token_expiry = 0.0
+                            self._token_expiry_monotonic = 0.0
                             token = await self._ensure_token()
                             headers["Authorization"] = f"Bearer {token}"
                             continue
@@ -206,11 +210,11 @@ class RESTClient:
 
     async def _ensure_token(self) -> str:
         """Ensure a bearer token is present; fetch if missing."""
-        if self._access_token and time.time() <= self._token_expiry:
+        if self._access_token and time_mod() <= self._token_expiry_monotonic:
             return self._access_token
 
         async with self._lock:
-            if self._access_token and time.time() <= self._token_expiry:
+            if self._access_token and time_mod() <= self._token_expiry_monotonic:
                 return self._access_token
 
             data = {
@@ -266,12 +270,17 @@ class RESTClient:
                     _LOGGER.error("No access_token in response JSON")
                     raise BackendAuthError("No access_token in response")
                 self._access_token = token
-                self._token_obtained_at = time.time()
+                now_wall = time.time()
+                now_mono = time_mod()
+                self._token_obtained_at = now_wall
+                self._token_obtained_monotonic = now_mono
                 expires_in = js.get("expires_in")
                 if isinstance(expires_in, (int, float)):
-                    self._token_expiry = self._token_obtained_at + float(expires_in)
+                    ttl = max(float(expires_in), 0.0)
                 else:
-                    self._token_expiry = self._token_obtained_at + 3600
+                    ttl = 3600.0
+                self._token_expiry = now_wall + ttl
+                self._token_expiry_monotonic = now_mono + ttl
                 return token
 
     async def _authed_headers(self) -> dict[str, str]:

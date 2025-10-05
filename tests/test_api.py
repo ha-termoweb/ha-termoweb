@@ -26,6 +26,46 @@ from custom_components.termoweb.nodes import AccumulatorNode
 RESTClient = api.RESTClient
 
 
+def _patch_api_clock(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    wall: float | Callable[[], float],
+    mono: float | Callable[[], float] | None = None,
+) -> None:
+    """Patch both wall-clock and monotonic timers used by the API client."""
+
+    if callable(wall):
+        wall_func = wall
+    else:
+        wall_value = float(wall)
+
+        def wall_func() -> float:
+            return wall_value
+
+    monkeypatch.setattr(api.time, "time", wall_func)
+
+    if mono is None:
+        mono_func = wall_func
+    elif callable(mono):
+        mono_func = mono
+    else:
+        mono_value = float(mono)
+
+        def mono_func() -> float:
+            return mono_value
+
+    monkeypatch.setattr(api, "time_mod", mono_func)
+
+
+def _set_token_expiry_seconds(client: RESTClient, seconds: float) -> None:
+    """Set token expiry relative to the current time providers."""
+
+    now_wall = api.time.time()
+    now_mono = api.time_mod()
+    client._token_expiry = now_wall + seconds
+    client._token_expiry_monotonic = now_mono + seconds
+
+
 class MockResponse:
     def __init__(
         self,
@@ -140,14 +180,12 @@ def test_token_refresh(monkeypatch) -> None:
 
         client = RESTClient(session, "user", "pass")
 
-        import custom_components.termoweb.api as api_module
-
         fake_time = 0.0
 
         def _fake_time() -> float:
             return fake_time
 
-        monkeypatch.setattr(api_module.time, "time", _fake_time)
+        _patch_api_clock(monkeypatch, wall=_fake_time)
         token1 = await client._ensure_token()
         assert token1 == "t1"
 
@@ -291,8 +329,9 @@ def test_ensure_token_non_numeric_expires_in(monkeypatch) -> None:
         assert token == "tok"
         assert client._token_obtained_at == fake_time
         assert client._token_expiry == fake_time + 3600
+        assert client._token_expiry_monotonic == pytest.approx(fake_time + 3600)
 
-    monkeypatch.setattr(api.time, "time", lambda: fake_time)
+    _patch_api_clock(monkeypatch, wall=lambda: fake_time)
     asyncio.run(_run())
 
 
@@ -610,7 +649,7 @@ def test_ensure_token_uses_cache_without_http() -> None:
         session = FakeSession()
         client = RESTClient(session, "user", "pw")
         client._access_token = "cached"
-        client._token_expiry = time.time() + 1000
+        _set_token_expiry_seconds(client, 1000.0)
 
         token = await client._ensure_token()
         assert token == "cached"
@@ -645,6 +684,7 @@ def test_ensure_token_returns_cached_after_lock_entry() -> None:
         client = RESTClient(session, "user", "pw")
         client._access_token = None
         client._token_expiry = 0.0
+        client._token_expiry_monotonic = 0.0
 
         class FakeLock:
             def __init__(self, owner: RESTClient) -> None:
@@ -652,7 +692,7 @@ def test_ensure_token_returns_cached_after_lock_entry() -> None:
 
             async def __aenter__(self) -> "FakeLock":
                 self._owner._access_token = "cached"
-                self._owner._token_expiry = time.time() + 100
+                _set_token_expiry_seconds(self._owner, 100.0)
                 return self
 
             async def __aexit__(self, *_exc: Any) -> bool:
@@ -797,7 +837,7 @@ def test_get_nodes_and_settings_use_expected_paths(monkeypatch) -> None:
         session = FakeSession()
         client = RESTClient(session, "user", "pw")
         client._access_token = "tok"
-        client._token_expiry = time.time() + 1000
+        _set_token_expiry_seconds(client, 1000.0)
 
         calls: list[tuple[str, str]] = []
 
@@ -825,7 +865,7 @@ def test_get_rtc_time_uses_expected_path(monkeypatch: pytest.MonkeyPatch) -> Non
         session = FakeSession()
         client = RESTClient(session, "user", "pw")
         client._access_token = "tok"
-        client._token_expiry = time.time() + 1000
+        _set_token_expiry_seconds(client, 1000.0)
 
         calls: list[tuple[str, str]] = []
 
@@ -850,7 +890,7 @@ def test_get_rtc_time_handles_non_dict(
         session = FakeSession()
         client = RESTClient(session, "user", "pw")
         client._access_token = "tok"
-        client._token_expiry = time.time() + 1000
+        _set_token_expiry_seconds(client, 1000.0)
 
         async def fake_request(method: str, path: str, **kwargs: Any) -> Any:
             return ["unexpected"]
@@ -882,7 +922,7 @@ def test_get_node_settings_acm_logs(monkeypatch, caplog: pytest.LogCaptureFixtur
 
         client = RESTClient(session, "user", "pw")
         client._access_token = "tok"
-        client._token_expiry = time.time() + 1000
+        _set_token_expiry_seconds(client, 1000.0)
 
         async def fake_headers() -> dict[str, str]:
             return {"Authorization": "Bearer tok"}
@@ -917,7 +957,7 @@ def test_get_node_samples_logs_for_unknown_type(
 
         client = RESTClient(session, "user", "pw")
         client._access_token = "tok"
-        client._token_expiry = time.time() + 1000
+        _set_token_expiry_seconds(client, 1000.0)
 
         async def fake_headers() -> dict[str, str]:
             return {"Authorization": "Bearer tok"}
@@ -941,7 +981,7 @@ def test_set_htr_settings_includes_prog_and_ptemp(monkeypatch) -> None:
         session = FakeSession()
         client = RESTClient(session, "user", "pw")
         client._access_token = "tok"
-        client._token_expiry = time.time() + 1000
+        _set_token_expiry_seconds(client, 1000.0)
 
         received: list[dict[str, Any]] = []
 

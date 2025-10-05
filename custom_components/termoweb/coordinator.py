@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 import logging
 import time
+from time import monotonic as time_mod
 from typing import Any
 
 from aiohttp import ClientError
@@ -243,7 +244,7 @@ class StateCoordinator(
     def _prune_pending_settings(self) -> None:
         """Drop expired pending settings entries."""
 
-        now = time.time()
+        now = time_mod()
         stale = [
             key
             for key, entry in self._pending_settings.items()
@@ -271,7 +272,7 @@ class StateCoordinator(
             ttl_value = float(ttl)
         except (TypeError, ValueError):  # pragma: no cover - defensive
             ttl_value = _PENDING_SETTINGS_TTL
-        expires_at = time.time() + max(ttl_value, 0.0)
+        expires_at = time_mod() + max(ttl_value, 0.0)
         normalized_mode = self._normalize_mode_value(mode)
         normalized_stemp = float_or_none(stemp)
         self._pending_settings[key] = PendingSetting(
@@ -304,7 +305,7 @@ class StateCoordinator(
         if entry is None:
             return False
 
-        now = time.time()
+        now = time_mod()
         if entry.expires_at <= now:
             _LOGGER.debug("Pending settings expired type=%s addr=%s", *key)
             self._pending_settings.pop(key, None)
@@ -940,7 +941,7 @@ class EnergyStateCoordinator(
             return False
         if self._ws_deadline is None:
             return False
-        if time.monotonic() >= self._ws_deadline:
+        if time_mod() >= self._ws_deadline:
             return False
         return True
 
@@ -998,7 +999,7 @@ class EnergyStateCoordinator(
         if lease_seconds is not None:
             self._ws_lease = float(lease_seconds) if lease_seconds > 0 else 0.0
 
-        now = time.monotonic()
+        now = time_mod()
         if self._ws_lease > 0:
             margin = self._ws_margin_seconds()
             wait_seconds = max(self._ws_lease + margin, 300.0)

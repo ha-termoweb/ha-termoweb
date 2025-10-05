@@ -5,7 +5,7 @@ import logging
 import time
 from contextlib import suppress
 from types import SimpleNamespace
-from typing import Any, Mapping, cast
+from typing import Any, Callable, Mapping, cast
 from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
@@ -207,6 +207,58 @@ def _make_ducaheat_client(
     return client
 
 
+def _patch_clock(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    wall: float | Callable[[], float],
+    mono: float | Callable[[], float] | None = None,
+) -> None:
+    """Patch both wall-clock and monotonic time providers in the module."""
+
+    wall_func: Callable[[], float]
+    if callable(wall):
+        wall_func = wall
+    else:
+        wall_value = float(wall)
+
+        def _wall() -> float:
+            return wall_value
+
+        wall_func = _wall
+    monkeypatch.setattr(module.time, "time", wall_func)
+
+    if mono is None:
+        mono_func = wall_func
+    elif callable(mono):
+        mono_func = mono
+    else:
+        mono_value = float(mono)
+
+        def _mono() -> float:
+            return mono_value
+
+        mono_func = _mono
+    monkeypatch.setattr(module, "time_mod", mono_func)
+
+
+class MutableClock:
+    """Helper to control wall and monotonic time in tests."""
+
+    def __init__(self, *, wall: float, monotonic: float) -> None:
+        self.wall = wall
+        self.monotonic = monotonic
+
+    def wall_time(self) -> float:
+        return self.wall
+
+    def monotonic_time(self) -> float:
+        return self.monotonic
+
+    def advance(self, delta: float) -> None:
+        self.wall += delta
+        self.monotonic += delta
+
+
 def test_websocket_client_default_namespace(monkeypatch: pytest.MonkeyPatch) -> None:
     """Ensure the base client defaults to the legacy namespace."""
 
@@ -250,7 +302,7 @@ async def test_ducaheat_message_ping_ack(monkeypatch: pytest.MonkeyPatch) -> Non
     emit_mock = AsyncMock()
     client._sio.emit = emit_mock
     client._last_payload_at = 1000.0
-    monkeypatch.setattr(module.time, "time", lambda: 1234.0)
+    _patch_clock(monkeypatch, wall=lambda: 1234.0)
 
     await handler("ping")
 
@@ -451,12 +503,14 @@ async def test_legacy_write_restart_after_idle(
 ) -> None:
     """Schedule an immediate restart when a write follows long inactivity."""
 
+    _patch_clock(monkeypatch, wall=1000.0)
     client = _make_legacy_client(monkeypatch)
     rest_client = client._client
-    now = module.time.time()
+    now_wall = module.time.time()
+    now_mono = module.time_mod()
     client._payload_idle_window = 600.0
-    client._last_payload_at = now - 700
-    client._stats.last_event_ts = now - 700
+    client._last_payload_at = now_mono - 700
+    client._stats.last_event_ts = now_wall - 700
     client._idle_restart_pending = False
     client._idle_restart_task = None
 
@@ -473,12 +527,14 @@ async def test_legacy_write_recent_payload_skips_restart(
 ) -> None:
     """Avoid restarting when payloads have been received recently."""
 
+    _patch_clock(monkeypatch, wall=1000.0)
     client = _make_legacy_client(monkeypatch)
     rest_client = client._client
-    now = module.time.time()
+    now_wall = module.time.time()
+    now_mono = module.time_mod()
     client._payload_idle_window = 600.0
-    client._last_payload_at = now - 120
-    client._stats.last_event_ts = now - 120
+    client._last_payload_at = now_mono - 120
+    client._stats.last_event_ts = now_wall - 120
     client._idle_restart_pending = False
     client._idle_restart_task = None
 
@@ -495,10 +551,11 @@ async def test_legacy_write_other_device_ignored(
 ) -> None:
     """Ignore writes for other devices when monitoring restart triggers."""
 
+    _patch_clock(monkeypatch, wall=1000.0)
     client = _make_legacy_client(monkeypatch)
     rest_client = client._client
-    now = module.time.time()
-    client._stats.last_event_ts = now - 700
+    now_wall = module.time.time()
+    client._stats.last_event_ts = now_wall - 700
     client._idle_restart_pending = False
     client._idle_restart_task = None
 
@@ -1068,7 +1125,7 @@ def test_legacy_mark_event_tracks_payload(monkeypatch: pytest.MonkeyPatch) -> No
     """Update the payload timestamp when legacy batches arrive."""
 
     client = _make_legacy_client(monkeypatch)
-    monkeypatch.setattr(module.time, "time", lambda: 1000.0)
+    _patch_clock(monkeypatch, wall=1000.0)
 
     client._last_payload_at = None
     client._mark_event(paths=None, count_event=True)
@@ -1088,7 +1145,7 @@ def test_legacy_heartbeat_does_not_cancel_restart(
     client = _make_legacy_client(monkeypatch)
     client._idle_restart_pending = True
     client._last_payload_at = 900.0
-    monkeypatch.setattr(module.time, "time", lambda: 1200.0)
+    _patch_clock(monkeypatch, wall=1200.0)
 
     client._record_heartbeat(source="socketio09")
 
@@ -1113,7 +1170,7 @@ async def test_maybe_restart_after_write_ignores_heartbeat_activity(
         value = timestamps.pop(0) if timestamps else 1900.0
         return value
 
-    monkeypatch.setattr(module.time, "time", fake_time)
+    _patch_clock(monkeypatch, wall=fake_time)
 
     client._record_heartbeat(source="socketio09")
 
@@ -1170,7 +1227,7 @@ async def test_legacy_idle_monitor_schedules_restart_after_idle(
     client._payload_idle_window = 10
     client._last_payload_at = 900.0
 
-    monkeypatch.setattr(module.time, "time", lambda: 920.0)
+    _patch_clock(monkeypatch, wall=920.0)
     monkeypatch.setattr(module.asyncio, "sleep", AsyncMock(return_value=None))
 
     triggered: list[tuple[float, str]] = []
@@ -1205,7 +1262,7 @@ async def test_legacy_idle_monitor_reset_by_payload(
     def fake_time() -> float:
         return times.pop(0) if times else 905.0
 
-    monkeypatch.setattr(module.time, "time", fake_time)
+    _patch_clock(monkeypatch, wall=fake_time)
 
     async def fake_sleep(_: float) -> None:
         client._closing = True
@@ -1241,7 +1298,7 @@ async def test_legacy_idle_monitor_retries_failed_refresh(
     refresh = AsyncMock(side_effect=RuntimeError("refresh boom"))
     monkeypatch.setattr(client, "_refresh_subscription", refresh)
     monkeypatch.setattr(module.asyncio, "sleep", AsyncMock(return_value=None))
-    monkeypatch.setattr(module.time, "time", lambda: 1010.0)
+    _patch_clock(monkeypatch, wall=1010.0)
 
     triggered: list[tuple[float, str]] = []
 
@@ -1524,7 +1581,7 @@ async def test_ducaheat_connection_lost_triggers_fallback(
     def fake_time() -> float:
         return current_time
 
-    monkeypatch.setattr(module.time, "time", fake_time)
+    _patch_clock(monkeypatch, wall=fake_time)
 
     await client._handle_connection_lost(RuntimeError("ws error"))
     assert refresh.await_count == 0
@@ -1572,7 +1629,7 @@ async def test_ducaheat_fallback_handles_missing_refresh(
     client._restart_count = 1
     client._fallback_last_refresh = 0.0
     client._fallback_min_interval = 0.0
-    monkeypatch.setattr(module.time, "time", lambda: 1000.0)
+    _patch_clock(monkeypatch, wall=1000.0)
     client._coordinator.async_request_refresh = None
 
     await client._handle_connection_lost(None)
@@ -1598,7 +1655,7 @@ async def test_ducaheat_fallback_type_error_schedules_refresh(
     client._restart_count = 1
     client._fallback_last_refresh = 0.0
     client._fallback_min_interval = 0.0
-    monkeypatch.setattr(module.time, "time", lambda: 1000.0)
+    _patch_clock(monkeypatch, wall=1000.0)
 
     def raise_type_error() -> None:
         raise TypeError("bad signature")
@@ -1624,7 +1681,7 @@ async def test_ducaheat_fallback_skips_non_coroutine_refresh(
     client._restart_count = 1
     client._fallback_last_refresh = 0.0
     client._fallback_min_interval = 0.0
-    monkeypatch.setattr(module.time, "time", lambda: 1000.0)
+    _patch_clock(monkeypatch, wall=1000.0)
     refresh_mock = MagicMock(return_value=None)
     client._coordinator.async_request_refresh = refresh_mock
 
@@ -1648,7 +1705,7 @@ async def test_ducaheat_fallback_logs_refresh_failures(
     client._restart_count = 1
     client._fallback_last_refresh = 0.0
     client._fallback_min_interval = 0.0
-    monkeypatch.setattr(module.time, "time", lambda: 1000.0)
+    _patch_clock(monkeypatch, wall=1000.0)
     refresh_mock = AsyncMock(side_effect=RuntimeError("refresh failed"))
     client._coordinator.async_request_refresh = refresh_mock
 
@@ -1667,7 +1724,31 @@ async def test_ducaheat_fallback_skips_recent_payload(monkeypatch: pytest.Monkey
     client._fallback_min_interval = 10.0
     current_time = 1_000_000.0
     client._stats.last_event_ts = current_time - 1
-    monkeypatch.setattr(module.time, "time", lambda: current_time)
+    _patch_clock(monkeypatch, wall=lambda: current_time)
+    client._last_event_at = module.time_mod() - 1
+    client._last_event_wall = current_time - 1
+
+    await client._handle_connection_lost(None)
+
+    assert client._fallback_last_refresh == 0.0
+    assert client._coordinator.async_request_refresh.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_fallback_skips_recent_wall_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Guard fallback using the last wall-clock payload timestamp."""
+
+    client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    client._restart_count = 1
+    client._fallback_last_refresh = 0.0
+    client._fallback_min_interval = 10.0
+    current_time = 2_000_000.0
+    client._stats.last_event_ts = current_time - 2
+    client._last_event_at = None
+    client._last_event_wall = None
+    _patch_clock(monkeypatch, wall=lambda: current_time)
 
     await client._handle_connection_lost(None)
 
@@ -1785,11 +1866,46 @@ async def test_runner_propagates_cancel(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 @pytest.mark.asyncio
+async def test_runner_backoff_sequence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Apply deterministic backoff delays between connection attempts."""
+
+    client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
+    clock = MutableClock(wall=1000.0, monotonic=50.0)
+    _patch_clock(
+        monkeypatch, wall=clock.wall_time, mono=clock.monotonic_time
+    )
+    monkeypatch.setattr(module.random, "uniform", lambda a, b: 1.0)
+
+    delays: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        delays.append(delay)
+        clock.advance(delay)
+        if len(delays) >= 3:
+            client._closing = True
+
+    monkeypatch.setattr(module.asyncio, "sleep", fake_sleep)
+
+    async def failing_connect() -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(client, "_connect_once", failing_connect)
+    monkeypatch.setattr(client, "_disconnect", AsyncMock())
+    monkeypatch.setattr(client, "_handle_connection_lost", AsyncMock())
+    monkeypatch.setattr(client, "_update_status", MagicMock())
+
+    await client._runner()
+
+    assert delays == pytest.approx([5.0, 10.0, 30.0])
+    assert clock.monotonic == pytest.approx(95.0)
+
+
+@pytest.mark.asyncio
 async def test_idle_monitor_triggers_restart(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     client._sio.connected = True
     client._payload_idle_window = 10
-    client._last_event_at = time.time() - 5
+    client._last_event_at = module.time_mod() - 5
     triggered: list[tuple[float, str]] = []
 
     def fake_schedule(*, idle_for: float, source: str) -> None:
@@ -1867,7 +1983,7 @@ async def test_idle_monitor_retries_failed_refresh(
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     client._sio.connected = True
     client._payload_idle_window = 10
-    client._last_event_at = time.time() - 5
+    client._last_event_at = module.time_mod() - 5
     client._subscription_refresh_failed = True
 
     triggered: list[str] = []
@@ -1895,7 +2011,7 @@ async def test_idle_monitor_refresh_success(monkeypatch: pytest.MonkeyPatch) -> 
     client = _make_client(monkeypatch, hass_loop=asyncio.get_event_loop())
     client._sio.connected = True
     client._payload_idle_window = 1
-    client._last_event_at = time.time() - 5
+    client._last_event_at = module.time_mod() - 5
 
     calls: list[str] = []
 
@@ -1971,7 +2087,10 @@ async def test_refresh_subscription_updates_metadata(
     client._sio.emit = fake_emit  # type: ignore[assignment]
     subscribe_mock = AsyncMock()
     monkeypatch.setattr(client, "_subscribe_heater_samples", subscribe_mock)
-    monkeypatch.setattr(module.time, "time", lambda: 1000.0)
+    clock = MutableClock(wall=5000.0, monotonic=250.0)
+    _patch_clock(
+        monkeypatch, wall=clock.wall_time, mono=clock.monotonic_time
+    )
     monkeypatch.setattr(module._LOGGER, "isEnabledFor", lambda level: True)
 
     info_calls: list[tuple[Any, ...]] = []
@@ -1984,7 +2103,8 @@ async def test_refresh_subscription_updates_metadata(
     assert emit_calls[0] == ("dev_data", None, module.WS_NAMESPACE)
     assert subscribe_mock.await_count == 1
     assert client._subscription_refresh_failed is False
-    assert client._subscription_refresh_last_success == pytest.approx(1000.0)
+    assert client._subscription_refresh_last_attempt == pytest.approx(250.0)
+    assert client._subscription_refresh_last_success == pytest.approx(250.0)
     assert any("unit" in " ".join(str(part) for part in call) for call in info_calls)
 
 
