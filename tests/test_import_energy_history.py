@@ -1979,9 +1979,11 @@ def test_setup_defers_import_until_started(monkeypatch: pytest.MonkeyPatch) -> N
         assert await mod.async_setup_entry(hass, entry) is True
         import_mock.assert_not_called()
 
-        assert len(listeners) == 1
-        event, cb = listeners[0]
-        assert event == mod.EVENT_HOMEASSISTANT_STARTED
+        start_listeners = [
+            cb for event, cb in listeners if event == mod.EVENT_HOMEASSISTANT_STARTED
+        ]
+        assert len(start_listeners) == 1
+        cb = start_listeners[0]
 
         hass.async_create_task(cb(None))
         if tasks:
