@@ -76,3 +76,19 @@ import_energy_history:
           min: 1
           max: 3650
           unit_of_measurement: days
+
+ws_debug_probe:
+  name: Emit websocket debug probe
+  description: >-
+    Request an immediate ``dev_data`` refresh from the websocket client and log
+    the next ``dev_handshake`` and ``update`` frame sizes. Enable the debug
+    option in the integration settings before using this helper.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Restrict the probe to a single TermoWeb config entry.
+      example: abcd1234deadbeef
+    dev_id:
+      name: Device ID
+      description: Restrict the probe to a single gateway device.
+      example: 0000abcd

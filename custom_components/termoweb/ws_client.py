@@ -15,7 +15,7 @@ import random
 import time
 from types import SimpleNamespace
 from typing import Any
-from urllib.parse import urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import weakref
 
 import aiohttp
@@ -249,6 +249,17 @@ class WebSocketClient:
         if not base.endswith("/api/v2"):
             base = f"{base}/api/v2"
         return f"{base}/socket_io?token={token}&dev_id={self.dev_id}"
+
+    async def debug_probe(self) -> None:
+        """Emit a dev_data probe for debugging purposes."""
+
+        if not _LOGGER.isEnabledFor(logging.DEBUG):
+            return
+        try:
+            await self._sio.emit("dev_data", namespace=self._namespace)
+            _LOGGER.debug("WS: debug probe dev_data emitted")
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("WS: debug probe dev_data emit failed", exc_info=True)
 
     # ------------------------------------------------------------------
     # Core loop and protocol dispatch
@@ -1855,6 +1866,20 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
 class DucaheatWSClient(WebSocketClient):
     """Verbose websocket client variant with payload debug logging."""
 
+    class _Namespace(str):
+        """Namespace helper that matches both legacy and API paths."""
+
+        def __new__(cls, value: str) -> "DucaheatWSClient._Namespace":
+            return super().__new__(cls, value)
+
+        def __eq__(self, other: object) -> bool:
+            if isinstance(other, str):
+                return other in {"/", WS_NAMESPACE}
+            return super().__eq__(other)
+
+        def __hash__(self) -> int:
+            return hash(str(self))
+
     def __init__(
         self,
         hass: HomeAssistant,
@@ -1881,10 +1906,16 @@ class DucaheatWSClient(WebSocketClient):
             protocol=protocol,
             namespace=namespace,
         )
+        self._namespace = self._Namespace(str(self._namespace))
         self._connect_response_logged = False
+        self._open_payload_logged = False
         self._fallback_last_refresh: float = 0.0
         self._fallback_min_interval: float = 30.0
         self._restart_count: int = 0
+        self._debug_probe_active = False
+        self._debug_probe_logged_handshake = False
+        self._debug_probe_logged_update = False
+        self._ensure_engineio_logger_level()
 
     async def _connect_once(self) -> None:
         """Open the Socket.IO connection using the simple Ducaheat contract."""
@@ -1893,6 +1924,10 @@ class DucaheatWSClient(WebSocketClient):
             return
 
         self._connect_response_logged = False
+        self._open_payload_logged = False
+        self._debug_probe_logged_handshake = False
+        self._debug_probe_logged_update = False
+        self._ensure_engineio_logger_level()
         token = await self._get_token()
         query_params = {"token": token, "dev_id": self.dev_id}
         base_url = self._ducaheat_socket_base()
@@ -1911,15 +1946,23 @@ class DucaheatWSClient(WebSocketClient):
             params=query_params,
             headers=headers,
         )
-        _LOGGER.debug("WS (ducaheat): connecting to %s", url)
+
+        engineio_path = "socket.io"
+        transports = ["polling", "websocket"]
+        sanitised_url = self._sanitise_url(url)
+        _LOGGER.debug(
+            "WS (ducaheat): connecting url=%s socketio_path=%s transports=%s",
+            sanitised_url,
+            engineio_path,
+            transports,
+        )
 
         self._disconnected.clear()
         self._backoff_idx = 0
-        engineio_path = "socket.io"
         await self._sio.connect(
             url,
             headers=headers,
-            transports=["polling", "websocket"],
+            transports=transports,
             namespaces=[self._namespace],
             socketio_path=engineio_path,
             wait=True,
@@ -1947,11 +1990,23 @@ class DucaheatWSClient(WebSocketClient):
         url = f"{base_url}/socket.io?{query}"
         return url, "socket.io"
 
+    def _ensure_engineio_logger_level(self) -> None:
+        """Ensure the engine.io logger remains active when debugging."""
+
+        if not _LOGGER.isEnabledFor(logging.DEBUG):
+            return
+        eio = getattr(self._sio, "eio", None)
+        logger = getattr(eio, "logger", None) if eio is not None else None
+        if logger is not None:
+            logger.setLevel(logging.DEBUG)
+            logger.disabled = False
+
     async def ws_url(self) -> str:
         """Return the websocket URL for diagnostics."""
 
         url, _ = await self._build_engineio_target()
         return url
+
 
     def _redact_value(self, value: str) -> str:
         """Return a redacted representation of sensitive values."""
@@ -1994,6 +2049,23 @@ class DucaheatWSClient(WebSocketClient):
             sanitised[key] = self._redact_value(value) if key == "token" else value
         return sanitised
 
+    def _sanitise_url(self, url: str) -> str:
+        """Return a redacted representation of the websocket URL."""
+
+        try:
+            parsed = urlsplit(url)
+        except ValueError:
+            return url
+        query_items = parse_qsl(parsed.query, keep_blank_values=True)
+        sanitised_pairs = [
+            (key, self._redact_value(value) if key == "token" else value)
+            for key, value in query_items
+        ]
+        sanitised_query = urlencode(sanitised_pairs, doseq=True)
+        return urlunsplit(
+            (parsed.scheme, parsed.netloc, parsed.path, sanitised_query, parsed.fragment)
+        )
+
     def _log_connect_request(
         self,
         *,
@@ -2028,7 +2100,9 @@ class DucaheatWSClient(WebSocketClient):
         sio = self._sio
         url = getattr(sio, "connection_url", None)
         if url:
-            _LOGGER.debug("WS (ducaheat): connected URL=%s", url)
+            _LOGGER.debug(
+                "WS (ducaheat): connected URL=%s", self._sanitise_url(str(url))
+            )
         headers = getattr(sio, "connection_headers", None)
         if isinstance(headers, Mapping) and headers:
             _LOGGER.debug(
@@ -2043,6 +2117,7 @@ class DucaheatWSClient(WebSocketClient):
         eio = getattr(sio, "eio", None)
         if eio is None:
             return
+        self._log_engineio_open_payload(eio)
         sid = getattr(eio, "sid", None)
         if sid:
             _LOGGER.debug("WS (ducaheat): engine.io sid=%s", sid)
@@ -2067,6 +2142,79 @@ class DucaheatWSClient(WebSocketClient):
                 self._sanitise_headers(header_map),
             )
 
+    def _log_engineio_open_payload(self, eio: Any) -> None:
+        """Log the Engine.IO open payload metadata once per connection."""
+
+        if self._open_payload_logged:
+            return
+        if not _LOGGER.isEnabledFor(logging.DEBUG):
+            return
+        if eio is None:
+            return
+        handshake: dict[str, Any] = {}
+        sid = getattr(eio, "sid", None)
+        if sid:
+            handshake["sid"] = sid
+        upgrades = getattr(eio, "upgrades", None)
+        if upgrades is not None:
+            if isinstance(upgrades, (list, tuple)):
+                handshake["upgrades"] = list(upgrades)
+            else:
+                handshake["upgrades"] = upgrades
+        ping_interval = getattr(eio, "ping_interval", None)
+        if isinstance(ping_interval, (int, float)):
+            handshake["pingInterval"] = int(ping_interval * 1000)
+        ping_timeout = getattr(eio, "ping_timeout", None)
+        if isinstance(ping_timeout, (int, float)):
+            handshake["pingTimeout"] = int(ping_timeout * 1000)
+        if not handshake:
+            return
+        payload_text = json.dumps(handshake, default=str, separators=(",", ":"))
+        _LOGGER.debug(
+            "WS (ducaheat): engine.io open payload bytes=%d keys=%s",
+            len(payload_text.encode("utf-8")),
+            sorted(handshake.keys()),
+        )
+        self._open_payload_logged = True
+
+    async def debug_probe(self) -> None:
+        """Emit a dev_data probe and enable frame length logging."""
+
+        if not _LOGGER.isEnabledFor(logging.DEBUG):
+            return
+        self._debug_probe_active = True
+        self._debug_probe_logged_handshake = False
+        self._debug_probe_logged_update = False
+        _LOGGER.debug("WS (ducaheat): debug probe requested")
+        await super().debug_probe()
+
+    def _log_probe_frame(self, event: str, data: Any) -> None:
+        """Log encoded frame length details for debug probes."""
+
+        if not _LOGGER.isEnabledFor(logging.DEBUG):
+            return
+        try:
+            payload_text = json.dumps(data, default=str, separators=(",", ":"))
+        except TypeError:
+            payload_text = json.dumps({"repr": repr(data)}, default=str)
+        length = len(payload_text.encode("utf-8"))
+        if isinstance(data, Mapping):
+            keys = sorted(str(key) for key in data.keys())
+        else:
+            keys = [type(data).__name__]
+        _LOGGER.debug(
+            "WS (ducaheat): debug probe %s frame bytes=%d keys=%s",
+            event,
+            length,
+            keys,
+        )
+
+    def _complete_debug_probe_if_ready(self) -> None:
+        """Clear debug probe state once both frames were observed."""
+
+        if self._debug_probe_logged_handshake and self._debug_probe_logged_update:
+            self._debug_probe_active = False
+
     def _summarise_addresses(self, data: Any) -> str:
         """Return a condensed summary of node addresses in ``data``."""
 
@@ -2090,6 +2238,10 @@ class DucaheatWSClient(WebSocketClient):
         if _LOGGER.isEnabledFor(logging.DEBUG):
             _LOGGER.debug("WS (ducaheat): disconnected")
         self._connect_response_logged = False
+        self._open_payload_logged = False
+        self._debug_probe_active = False
+        self._debug_probe_logged_handshake = False
+        self._debug_probe_logged_update = False
         await super()._on_disconnect()
 
     async def _on_dev_handshake(self, data: Any) -> None:
@@ -2100,6 +2252,10 @@ class DucaheatWSClient(WebSocketClient):
                 "WS (ducaheat): handshake payload detail: %s",
                 json.dumps(data, default=str),
             )
+        if self._debug_probe_active and not self._debug_probe_logged_handshake:
+            self._log_probe_frame("dev_handshake", data)
+            self._debug_probe_logged_handshake = True
+            self._complete_debug_probe_if_ready()
         await super()._on_dev_handshake(data)
 
     async def _on_dev_data(self, data: Any) -> None:
@@ -2120,6 +2276,10 @@ class DucaheatWSClient(WebSocketClient):
             _LOGGER.debug(
                 "WS (ducaheat): update payload: %s", json.dumps(data, default=str)
             )
+        if self._debug_probe_active and not self._debug_probe_logged_update:
+            self._log_probe_frame("update", data)
+            self._debug_probe_logged_update = True
+            self._complete_debug_probe_if_ready()
         await super()._on_update(data)
 
     def _mark_event(

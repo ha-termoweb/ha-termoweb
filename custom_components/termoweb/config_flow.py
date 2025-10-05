@@ -242,12 +242,19 @@ class TermoWebOptionsFlow(config_entries.OptionsFlow):
             MIN_POLL_INTERVAL,
         )
         current_poll = int(self.entry.options.get("poll_interval", self.entry.data.get("poll_interval", DEFAULT_POLL_INTERVAL)))
+        debug_default = bool(
+            self.entry.options.get("debug", self.entry.data.get("debug", False))
+        )
         schema = vol.Schema(
             {
                 vol.Required(
                     "poll_interval",
                     default=max(MIN_POLL_INTERVAL, int(current_poll)),
-                ): vol.All(int, vol.Range(min=MIN_POLL_INTERVAL, max=MAX_POLL_INTERVAL)),
+                ): vol.All(
+                    int,
+                    vol.Range(min=MIN_POLL_INTERVAL, max=MAX_POLL_INTERVAL),
+                ),
+                vol.Optional("debug", default=debug_default): bool,
             }
         )
         ver = await _get_version(self.hass)

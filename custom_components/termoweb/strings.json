@@ -14,5 +14,17 @@
     },
     "error": {},
     "abort": {}
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "TermoWeb Options",
+        "description": "Version: {version}",
+        "data": {
+          "poll_interval": "Base poll interval (seconds)",
+          "debug": "Enable debug helpers"
+        }
+      }
+    }
   }
 }
