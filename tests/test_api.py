@@ -150,6 +150,35 @@ def test_token_refresh(monkeypatch) -> None:
     asyncio.run(_run())
 
 
+def test_ducaheat_token_headers() -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_post(
+            MockResponse(
+                200,
+                {"access_token": "tok", "expires_in": 3600},
+                headers={"Content-Type": "application/json"},
+            )
+        )
+
+        client = RESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api-tevolve.termoweb.net",
+        )
+
+        token = await client._ensure_token()
+        assert token == "tok"
+
+        assert session.post_calls
+        headers = session.post_calls[0][2]["headers"]
+        assert headers["X-SerialId"] == "15"
+        assert headers["X-Requested-With"] == "net.termoweb.ducaheat.app"
+
+    asyncio.run(_run())
+
+
 def test_ensure_token_401_raises_auth_error() -> None:
     async def _run() -> None:
         session = FakeSession()
@@ -676,6 +705,40 @@ def test_list_devices_handles_various_shapes() -> None:
 
         assert first == [{"id": 1}]
         assert second == [{"dev_id": "abc"}]
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_authed_request_headers() -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_post(
+            MockResponse(
+                200,
+                {"access_token": "tok", "expires_in": 3600},
+                headers={"Content-Type": "application/json"},
+            )
+        )
+        session.queue_request(
+            MockResponse(200, [], headers={"Content-Type": "application/json"})
+        )
+
+        client = RESTClient(
+            session,
+            "user",
+            "pw",
+            api_base="https://api-tevolve.termoweb.net",
+        )
+
+        await client.list_devices()
+
+        assert session.request_calls
+        method, url, kwargs = session.request_calls[0]
+        assert method == "GET"
+        assert url == "https://api-tevolve.termoweb.net/api/v2/devs/"
+        headers = kwargs["headers"]
+        assert headers["X-Requested-With"] == "net.termoweb.ducaheat.app"
+        assert headers["X-SerialId"] == "15"
 
     asyncio.run(_run())
 
