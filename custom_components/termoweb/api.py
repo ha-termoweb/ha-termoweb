@@ -322,6 +322,21 @@ class RESTClient:
         )
         return data
 
+    async def get_rtc_time(self, dev_id: str) -> dict[str, Any]:
+        """Return RTC metadata for a device's manager endpoint."""
+
+        headers = await self._authed_headers()
+        path = f"/api/v2/devs/{dev_id}/mgr/rtc/time"
+        data = await self._request("GET", path, headers=headers)
+        if isinstance(data, dict):
+            return data
+        _LOGGER.debug(
+            "Unexpected RTC time payload for dev %s (%s); returning empty dict",
+            dev_id,
+            type(data).__name__,
+        )
+        return {}
+
     def _ensure_temperature(self, value: Any) -> str:
         """Normalise a numeric temperature to a string with one decimal."""
 

@@ -23,12 +23,16 @@ class DummyREST:
         self._headers = {"Authorization": "Bearer token"}
         self._ensure_token = AsyncMock()
         self._set_node_settings = AsyncMock(return_value={"status": "ok"})
+        self._get_rtc_time = AsyncMock(return_value={"status": "ok"})
 
     async def _authed_headers(self) -> dict[str, str]:
         return self._headers
 
     async def set_node_settings(self, *args: Any, **kwargs: Any) -> Any:
         return await self._set_node_settings(*args, **kwargs)
+
+    async def get_rtc_time(self, dev_id: str) -> Any:
+        return await self._get_rtc_time(dev_id)
 
 
 @pytest.fixture(autouse=True)
@@ -453,6 +457,40 @@ async def test_legacy_write_other_device_ignored(
     assert rest_client._set_node_settings.await_count == 1
     assert client._idle_restart_pending is False
     assert client._idle_restart_task is None
+
+
+@pytest.mark.asyncio
+async def test_legacy_rtc_keepalive_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Poll the REST API on a fixed cadence while connected."""
+
+    client = _make_legacy_client(monkeypatch)
+    rest_client = client._client
+
+    calls: list[str] = []
+
+    async def fake_get(dev_id: str) -> dict[str, Any]:
+        calls.append(dev_id)
+        return {"ok": True}
+
+    rest_client.get_rtc_time = AsyncMock(side_effect=fake_get)
+
+    intervals: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        intervals.append(delay)
+        if len(intervals) >= 2:
+            client._closing = True
+
+    monkeypatch.setattr(module.asyncio, "sleep", fake_sleep)
+
+    client._closing = False
+    client._rtc_keepalive_interval = 0.05
+
+    await client._rtc_keepalive_loop()
+
+    assert calls and all(dev_id == "device" for dev_id in calls)
+    assert len(calls) >= 2
+    assert intervals[0] == pytest.approx(0.05)
 
 
 def test_http_wrapping_handles_missing_attributes(

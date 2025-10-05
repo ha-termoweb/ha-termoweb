@@ -771,6 +771,55 @@ def test_get_nodes_and_settings_use_expected_paths(monkeypatch) -> None:
     asyncio.run(_run())
 
 
+def test_get_rtc_time_uses_expected_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        client = RESTClient(session, "user", "pw")
+        client._access_token = "tok"
+        client._token_expiry = time.time() + 1000
+
+        calls: list[tuple[str, str]] = []
+
+        async def fake_request(method: str, path: str, **kwargs: Any) -> Any:
+            calls.append((method, path))
+            return {"status": "ok"}
+
+        monkeypatch.setattr(client, "_request", fake_request)
+
+        data = await client.get_rtc_time("dev123")
+
+        assert data == {"status": "ok"}
+        assert calls == [("GET", "/api/v2/devs/dev123/mgr/rtc/time")]
+
+    asyncio.run(_run())
+
+
+def test_get_rtc_time_handles_non_dict(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        client = RESTClient(session, "user", "pw")
+        client._access_token = "tok"
+        client._token_expiry = time.time() + 1000
+
+        async def fake_request(method: str, path: str, **kwargs: Any) -> Any:
+            return ["unexpected"]
+
+        monkeypatch.setattr(client, "_request", fake_request)
+
+        caplog.set_level(logging.DEBUG, logger=api.__name__)
+        data = await client.get_rtc_time("dev456")
+
+        assert data == {}
+        assert any(
+            "Unexpected RTC time payload" in record.getMessage()
+            for record in caplog.records
+        )
+
+    asyncio.run(_run())
+
+
 def test_get_node_settings_acm_logs(monkeypatch, caplog: pytest.LogCaptureFixture) -> None:
     async def _run() -> None:
         session = FakeSession()
