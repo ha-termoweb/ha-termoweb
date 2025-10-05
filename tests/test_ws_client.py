@@ -2650,6 +2650,23 @@ async def test_legacy_websocket_connect_uses_localhost_origin(
     assert stub_session.ws_headers.get("Origin") == "https://localhost"
 
 
+def test_legacy_sanitise_url_masks_sensitive_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure the legacy client redacts sensitive URL components."""
+
+    client = _make_legacy_client(monkeypatch)
+
+    sanitised = client._sanitise_url(
+        "https://example/socket.io?token=supersecret&dev_id=abcdef123456&other=value"
+    )
+
+    assert "supersecret" not in sanitised
+    assert "abcdef123456" not in sanitised
+    assert "abcdef...3456" in sanitised
+    assert "other=value" in sanitised
+
+
 @pytest.mark.asyncio
 async def test_ducaheat_client_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
     client = module.DucaheatWSClient(
