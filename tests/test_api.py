@@ -11,7 +11,10 @@ import aiohttp
 import pytest
 
 import custom_components.termoweb.api as api
-from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
+from custom_components.termoweb.backend.ducaheat import (
+    DucaheatRESTClient,
+    DucaheatRequestError,
+)
 from custom_components.termoweb.const import (
     BRAND_DUCAHEAT,
     BRAND_TERMOWEB,
@@ -1715,6 +1718,203 @@ def test_ducaheat_set_htr_settings_prog_only(monkeypatch) -> None:
             "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/prog",
             "https://api.termoweb.fake/api/v2/devs/dev/htr/A1/select",
         ]
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_set_acm_settings_segmented(monkeypatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(200, {"ok": True}, headers={"Content-Type": "application/json"}),
+            MockResponse(200, {"status": "updated"}, headers={"Content-Type": "application/json"}),
+            MockResponse(200, {"prog": "saved"}, headers={"Content-Type": "application/json"}),
+            MockResponse(200, {"temps": "saved"}, headers={"Content-Type": "application/json"}),
+        )
+
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {
+                "Authorization": "Bearer token",
+                "X-Requested-With": "ducaheat-app",
+                "X-SerialId": "15",
+                "User-Agent": "Ducaheat/1.40.1 (Android; HomeAssistant Integration)",
+            }
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        prog_list = [0] * 168
+        ptemp_list = [5.0, 15.0, 21.0]
+
+        result = await client.set_node_settings(
+            "dev",
+            ("acm", "5"),
+            mode="manual",
+            stemp=21.2,
+            prog=prog_list,
+            ptemp=ptemp_list,
+            units="f",
+        )
+
+        assert set(result) == {"mode", "status", "prog", "prog_temps"}
+
+        urls = [call[1] for call in session.request_calls]
+        assert urls == [
+            "https://api.termoweb.fake/api/v2/devs/dev/acm/5/mode",
+            "https://api.termoweb.fake/api/v2/devs/dev/acm/5/status",
+            "https://api.termoweb.fake/api/v2/devs/dev/acm/5/prog",
+            "https://api.termoweb.fake/api/v2/devs/dev/acm/5/prog_temps",
+        ]
+
+        mode_call = session.request_calls[0]
+        assert mode_call[0] == "POST"
+        assert mode_call[2]["json"] == {"mode": "manual"}
+        status_call = session.request_calls[1]
+        assert status_call[2]["json"] == {
+            "mode": "manual",
+            "stemp": "21.2",
+            "units": "F",
+        }
+        prog_call = session.request_calls[2]
+        assert prog_call[2]["json"] == {"prog": [0] * 168}
+        temps_call = session.request_calls[3]
+        assert temps_call[2]["json"] == {"ptemp": ["5.0", "15.0", "21.0"]}
+
+        for _, _, kwargs in session.request_calls:
+            headers = kwargs["headers"]
+            assert headers["Authorization"] == "Bearer token"
+            assert headers["X-SerialId"] == "15"
+            assert headers["X-Requested-With"] == "ducaheat-app"
+            assert headers["User-Agent"].startswith("Ducaheat/")
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_set_acm_settings_short_prog(monkeypatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        with pytest.raises(ValueError) as exc:
+            await client.set_node_settings("dev", ("acm", "5"), prog=[0] * 24)
+
+        assert "168" in str(exc.value)
+        assert not session.request_calls
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_set_acm_settings_client_error(monkeypatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(
+                400,
+                {},
+                headers={"Content-Type": "text/plain"},
+                text_data="bad request",
+            )
+        )
+
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        with pytest.raises(DucaheatRequestError) as exc:
+            await client.set_node_settings("dev", ("acm", "5"), mode="manual")
+
+        assert "bad request" in str(exc.value)
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_set_acm_settings_mode_only(monkeypatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(
+                200,
+                {"ok": True},
+                headers={"Content-Type": "application/json"},
+            )
+        )
+
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token", "X-SerialId": "15"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        result = await client.set_node_settings("dev", ("acm", "3"), mode="auto")
+        assert result == {"mode": {"ok": True}}
+
+        assert len(session.request_calls) == 1
+        call = session.request_calls[0]
+        assert call[1] == "https://api.termoweb.fake/api/v2/devs/dev/acm/3/mode"
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_set_acm_settings_units_only(monkeypatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(
+                200,
+                {"ok": True},
+                headers={"Content-Type": "application/json"},
+            )
+        )
+
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        result = await client.set_node_settings("dev", ("acm", "3"), units="f")
+        assert result == {"status": {"ok": True}}
+
+        assert len(session.request_calls) == 1
+        call = session.request_calls[0]
+        assert call[1] == "https://api.termoweb.fake/api/v2/devs/dev/acm/3/status"
+        assert call[2]["json"] == {"units": "F"}
 
     asyncio.run(_run())
 
