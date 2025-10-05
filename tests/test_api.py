@@ -2160,3 +2160,27 @@ def test_extract_samples_handles_list_payload() -> None:
 
     assert samples == [{"t": 2000, "counter": "5.5"}, {"t": 1000, "counter": "3"}]
 
+
+def test_rest_client_header_properties_exposed() -> None:
+    client = RESTClient(
+        FakeSession(),
+        "user",
+        "pass",
+        api_base="https://api.termoweb.fake",
+    )
+
+    assert client.user_agent == get_brand_user_agent(BRAND_TERMOWEB)
+    assert client.requested_with == get_brand_requested_with(BRAND_TERMOWEB)
+
+
+def test_ducaheat_rest_client_header_properties_exposed() -> None:
+    client = DucaheatRESTClient(
+        FakeSession(),
+        "user",
+        "pass",
+        api_base=api.DUCAHEAT_API_BASE,
+    )
+
+    assert client.user_agent == get_brand_user_agent(BRAND_DUCAHEAT)
+    assert client.requested_with == get_brand_requested_with(BRAND_DUCAHEAT)
+

@@ -629,6 +629,345 @@ async def test_ws_url_appends_missing_api_version(
 
 
 @pytest.mark.asyncio
+async def test_termoweb_ws_url_and_engineio_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _make_client(monkeypatch, hass_loop=asyncio.get_running_loop())
+
+    ws_url = await client.ws_url()
+    assert ws_url == "https://api.example.com/socket.io?token=token&dev_id=device"
+
+    base, path = await client._build_engineio_target()
+    assert base == "https://api.example.com/socket.io?token=token&dev_id=device"
+    assert path == "socket.io"
+
+
+@pytest.mark.asyncio
+async def test_termoweb_debug_probe_emits_in_debug_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = _make_client(monkeypatch, hass_loop=asyncio.get_running_loop())
+    caplog.set_level(logging.DEBUG, logger=module.__name__)
+
+    await client.debug_probe()
+
+    assert client._sio.last_emit == ("dev_data", None, client._namespace)
+
+
+@pytest.mark.asyncio
+async def test_termoweb_debug_probe_handles_emit_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = _make_client(monkeypatch, hass_loop=asyncio.get_running_loop())
+    caplog.set_level(logging.DEBUG, logger=module.__name__)
+
+    failing_emit = AsyncMock(side_effect=RuntimeError("emit failed"))
+    client._sio.emit = failing_emit
+
+    await client.debug_probe()
+
+    failing_emit.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_termoweb_debug_probe_noop_when_not_debug(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _make_client(monkeypatch, hass_loop=asyncio.get_running_loop())
+    original_level = module._LOGGER.level
+    try:
+        module._LOGGER.setLevel(logging.INFO)
+        emit_mock = AsyncMock()
+        client._sio.emit = emit_mock
+
+        await client.debug_probe()
+
+        emit_mock.assert_not_awaited()
+    finally:
+        module._LOGGER.setLevel(original_level)
+
+
+@pytest.mark.asyncio
+async def test_termoweb_engineio_target_requires_valid_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _make_client(monkeypatch, hass_loop=asyncio.get_running_loop())
+    client._api_base = lambda: "http://"
+
+    with pytest.raises(RuntimeError, match="invalid API base"):
+        await client._build_engineio_target()
+
+
+def test_translate_path_update_requires_address_segments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _make_ducaheat_client(monkeypatch)
+
+    assert (
+        client._translate_path_update({"path": "/devs/dev/htr", "body": {}}) is None
+    )
+    assert client._translate_path_update({"path": "/htr", "body": {}}) is None
+
+
+def test_ducaheat_socket_base_requires_hostname(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _make_ducaheat_client(monkeypatch)
+    client._api_base = lambda: "http://"
+
+    with pytest.raises(RuntimeError, match="invalid API base"):
+        client._ducaheat_socket_base()
+
+
+def test_ducaheat_ensure_engineio_logger_level(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = _make_ducaheat_client(monkeypatch)
+    caplog.set_level(logging.DEBUG, logger=module.__name__)
+
+    class _StubLogger:
+        def __init__(self) -> None:
+            self.level: int | None = None
+            self.disabled = True
+
+        def setLevel(self, level: int) -> None:  # noqa: N802 - mimic logging
+            self.level = level
+
+    stub_logger = _StubLogger()
+    client._sio.eio.logger = stub_logger
+
+    client._ensure_engineio_logger_level()
+
+    assert stub_logger.level == logging.DEBUG
+    assert stub_logger.disabled is False
+
+
+def test_ducaheat_redact_and_mask_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _make_ducaheat_client(monkeypatch)
+
+    assert client._redact_value("   ") == ""
+    assert client._redact_value("123") == "***"
+    assert client._redact_value("123456") == "12***56"
+    assert client._redact_value("123456789") == "1234...6789"
+
+    assert client._mask_identifier("   ") == ""
+    assert client._mask_identifier("123") == "***"
+    assert client._mask_identifier("123456") == "12...56"
+    assert client._mask_identifier("123456789") == "123456...6789"
+
+    sanitised = client._sanitise_params(
+        {"token": "secret", "dev_id": "abcdef01", "mode": "auto"}
+    )
+    assert sanitised["mode"] == "auto"
+
+
+def test_ducaheat_sanitise_url_handles_value_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _make_ducaheat_client(monkeypatch)
+
+    assert client._sanitise_url("https://[::1") == "https://[::1"
+
+
+def test_ducaheat_log_engineio_open_payload_variants(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = _make_ducaheat_client(monkeypatch)
+    caplog.set_level(logging.DEBUG, logger=module.__name__)
+
+    client._open_payload_logged = True
+    client._log_engineio_open_payload(SimpleNamespace())
+
+    original_level = module._LOGGER.level
+    try:
+        module._LOGGER.setLevel(logging.INFO)
+        client._open_payload_logged = False
+        client._log_engineio_open_payload(SimpleNamespace())
+    finally:
+        module._LOGGER.setLevel(original_level)
+
+    client._open_payload_logged = False
+    client._log_engineio_open_payload(None)
+
+    client._open_payload_logged = False
+    eio = SimpleNamespace(
+        sid="abc",
+        upgrades=("websocket",),
+        ping_interval=0.5,
+        ping_timeout=1.0,
+    )
+    client._log_engineio_open_payload(eio)
+    assert client._open_payload_logged is True
+
+    client._open_payload_logged = False
+    eio_variant = SimpleNamespace(sid="xyz", upgrades="polling", ping_interval=None)
+    client._log_engineio_open_payload(eio_variant)
+    assert client._open_payload_logged is True
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_debug_probe_enables_tracking(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_running_loop())
+    caplog.set_level(logging.DEBUG, logger=module.__name__)
+
+    emit_mock = AsyncMock()
+    client._sio.emit = emit_mock
+
+    await client.debug_probe()
+
+    assert client._debug_probe_active is True
+    assert client._debug_probe_logged_handshake is False
+    assert client._debug_probe_logged_update is False
+    emit_mock.assert_awaited_with("dev_data", namespace=client._namespace)
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_debug_probe_skips_when_not_debug(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_running_loop())
+    original_level = module._LOGGER.level
+    try:
+        module._LOGGER.setLevel(logging.INFO)
+        emit_mock = AsyncMock()
+        client._sio.emit = emit_mock
+
+        await client.debug_probe()
+
+        emit_mock.assert_not_awaited()
+        assert client._debug_probe_active is False
+    finally:
+        module._LOGGER.setLevel(original_level)
+
+
+def test_ducaheat_log_probe_frame_handles_payloads(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = _make_ducaheat_client(monkeypatch)
+    caplog.set_level(logging.DEBUG, logger=module.__name__)
+
+    original_dumps = module.json.dumps
+    call_state = {"count": 0}
+
+    def _raise_type_error(*args: Any, **kwargs: Any) -> str:
+        if call_state["count"] == 0:
+            call_state["count"] += 1
+            raise TypeError("boom")
+        return original_dumps(*args, **kwargs)
+
+    monkeypatch.setattr(module.json, "dumps", _raise_type_error)
+    client._log_probe_frame("event", object())
+    monkeypatch.setattr(module.json, "dumps", original_dumps)
+
+    client._log_probe_frame("event", {"a": 1})
+    client._log_probe_frame("event", ["a", "b"])
+
+
+def test_ducaheat_log_probe_frame_skips_without_debug(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _make_ducaheat_client(monkeypatch)
+    original_level = module._LOGGER.level
+    try:
+        module._LOGGER.setLevel(logging.INFO)
+        client._log_probe_frame("event", {"a": 1})
+    finally:
+        module._LOGGER.setLevel(original_level)
+
+
+def test_ducaheat_complete_debug_probe_if_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _make_ducaheat_client(monkeypatch)
+    client._debug_probe_active = True
+    client._debug_probe_logged_handshake = True
+    client._debug_probe_logged_update = True
+
+    client._complete_debug_probe_if_ready()
+
+    assert client._debug_probe_active is False
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_debug_probe_handshake_logging(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_running_loop())
+    caplog.set_level(logging.DEBUG, logger=module.__name__)
+
+    client._handle_handshake = MagicMock()
+    client._log_probe_frame = MagicMock()
+    client._debug_probe_active = True
+    client._debug_probe_logged_handshake = False
+
+    await client._on_dev_handshake({"nodes": {}})
+
+    client._log_probe_frame.assert_called_once_with("dev_handshake", {"nodes": {}})
+    assert client._debug_probe_logged_handshake is True
+    assert client._debug_probe_active is True
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_debug_probe_update_logging(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_running_loop())
+    caplog.set_level(logging.DEBUG, logger=module.__name__)
+
+    client._handle_update = MagicMock()
+    client._log_probe_frame = MagicMock()
+    client._debug_probe_active = True
+    client._debug_probe_logged_handshake = True
+    client._debug_probe_logged_update = False
+
+    await client._on_update({"htr": {"status": {"001": {}}}})
+
+    client._log_probe_frame.assert_called_once()
+    assert client._debug_probe_logged_update is True
+    assert client._debug_probe_active is False
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_on_message_branches(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = _make_ducaheat_client(monkeypatch, hass_loop=asyncio.get_running_loop())
+    caplog.set_level(logging.DEBUG, logger=module.__name__)
+
+    mark_event = MagicMock()
+    client._mark_event = mark_event
+
+    emit_mock = AsyncMock()
+    client._sio.emit = emit_mock
+
+    await client._on_message(("message", "ping"))
+    emit_mock.assert_awaited_with("message", "pong", namespace=client._namespace)
+    mark_event.assert_called_once()
+
+    emit_mock.reset_mock()
+    mark_event.reset_mock()
+    await client._on_message(("ping",))
+    emit_mock.assert_awaited_with("message", "pong", namespace=client._namespace)
+    mark_event.assert_called_once()
+
+    emit_mock.reset_mock()
+    mark_event.reset_mock()
+    await client._on_message(())
+    emit_mock.assert_not_awaited()
+    mark_event.assert_not_called()
+
+    failing_emit = AsyncMock(side_effect=RuntimeError("emit failed"))
+    client._sio.emit = failing_emit
+    await client._on_message(("message", "ping"))
+    failing_emit.assert_awaited()
+@pytest.mark.asyncio
 async def test_wrap_background_task_runs_coroutine(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
