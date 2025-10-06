@@ -987,6 +987,61 @@ async def test_namespace_ack_replays_cached_subscriptions(
 
 
 @pytest.mark.asyncio
+async def test_namespace_ack_processes_embedded_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Namespace frames with embedded events should be processed."""
+
+    client = _make_client(monkeypatch)
+
+    class AckWS:
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def send_str(self, payload: str) -> None:
+            return None
+
+        def __aiter__(self) -> Any:
+            async def _iterator() -> Any:
+                yield SimpleNamespace(
+                    type=aiohttp.WSMsgType.TEXT,
+                    data=(
+                        "40/api/v2/socket_io,42/api/v2/socket_io,"
+                        "[\"dev_data\",{\"nodes\":{\"htr\":{\"status\":{\"1\":{}}}}}]"
+                    ),
+                )
+            return _iterator()
+
+    client._ws = AckWS()  # type: ignore[assignment]
+    client._pending_dev_data = True
+
+    emit_calls: list[tuple[Any, ...]] = []
+
+    async def _record_emit(event: str, *args: Any) -> None:
+        emit_calls.append((event, *args))
+
+    monkeypatch.setattr(client, "_emit_sio", AsyncMock(side_effect=_record_emit))
+    monkeypatch.setattr(client, "_replay_subscription_paths", AsyncMock())
+    monkeypatch.setattr(client, "_log_nodes_summary", lambda nodes: None)
+    monkeypatch.setattr(client, "_normalise_nodes_payload", lambda nodes: nodes)
+    monkeypatch.setattr(client, "_build_nodes_snapshot", lambda nodes: {"nodes": nodes})
+    dispatch = MagicMock()
+    monkeypatch.setattr(client, "_dispatch_nodes", dispatch)
+    subscribe_mock = AsyncMock(return_value=2)
+    monkeypatch.setattr(client, "_subscribe_feeds", subscribe_mock)
+    statuses: list[str] = []
+    monkeypatch.setattr(client, "_update_status", lambda status: statuses.append(status))
+
+    await client._read_loop_ws()
+
+    assert emit_calls and emit_calls[0] == ("dev_data",)
+    subscribe_mock.assert_awaited_once()
+    dispatch.assert_called_once()
+    assert statuses and statuses[0] == "healthy"
+    assert statuses[-1] == "healthy"
+
+
+@pytest.mark.asyncio
 async def test_namespace_ack_ignores_unexpected_namespace(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

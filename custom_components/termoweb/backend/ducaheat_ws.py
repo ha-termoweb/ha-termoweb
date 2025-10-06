@@ -333,65 +333,86 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 if msg.type == aiohttp.WSMsgType.TEXT:
                     data = msg.data
                     self._stats.frames_total += 1
-                    if data == "2":
-                        _LOGGER.debug("WS (ducaheat): <- EIO 2 (ping) -> EIO 3 (pong)")
-                        await ws.send_str("3")
-                        continue
-                    if not data.startswith("4"):
-                        continue
-                    if data.startswith("40"):
-                        ns_payload = data[2:]
-                        if ns_payload:
-                            namespace, _, _ = ns_payload.partition(",")
-                            if namespace and namespace != self._namespace:
-                                _LOGGER.debug(
-                                    "WS (ducaheat): <- SIO 40 for unexpected namespace %s",
-                                    namespace,
-                                )
+                    while data:
+                        if data == "2":
+                            _LOGGER.debug("WS (ducaheat): <- EIO 2 (ping) -> EIO 3 (pong)")
+                            await ws.send_str("3")
+                            break
+                        if not data.startswith("4"):
+                            break
+                        if data.startswith("40"):
+                            ns_payload = data[2:]
+                            rest_payload = ""
+                            if ns_payload:
+                                namespace, sep, remainder = ns_payload.partition(",")
+                                if namespace and namespace != self._namespace:
+                                    _LOGGER.debug(
+                                        "WS (ducaheat): <- SIO 40 for unexpected namespace %s",
+                                        namespace,
+                                    )
+                                    if sep and remainder:
+                                        data = remainder if remainder.startswith("4") else "4" + remainder
+                                        continue
+                                    break
+                                if sep and remainder:
+                                    rest_payload = remainder
+                            _LOGGER.debug("WS (ducaheat): <- SIO 40 (namespace ack)")
+                            self._update_status("healthy")
+                            if self._pending_dev_data:
+                                self._pending_dev_data = False
+                                try:
+                                    await self._emit_sio("dev_data")
+                                    await self._replay_subscription_paths()
+                                except Exception:  # noqa: BLE001  # pragma: no cover - defensive
+                                    _LOGGER.debug(
+                                        "WS (ducaheat): failed to emit dev_data or replay subscriptions",
+                                        exc_info=True,
+                                    )
+                            if rest_payload:
+                                data = rest_payload if rest_payload.startswith("4") else "4" + rest_payload
                                 continue
-                        _LOGGER.debug("WS (ducaheat): <- SIO 40 (namespace ack)")
-                        self._update_status("healthy")
-                        if self._pending_dev_data:
-                            self._pending_dev_data = False
-                            try:
-                                await self._emit_sio("dev_data")
-                                await self._replay_subscription_paths()
-                            except Exception:  # noqa: BLE001  # pragma: no cover - defensive
-                                _LOGGER.debug(
-                                    "WS (ducaheat): failed to emit dev_data or replay subscriptions",
-                                    exc_info=True,
-                                )
-                        continue
-                    payload = data[1:]
-                    if payload == "2" or payload.startswith("2/"):
+                            break
+                        payload = data[1:]
                         if payload == "2":
                             _LOGGER.debug("WS (ducaheat): <- SIO 2 (ping) -> SIO 3 (pong)")
                             await ws.send_str("3")
-                        else:
-                            ns = payload[1:].split(",", 1)[0]
-                            _LOGGER.debug("WS (ducaheat): <- SIO 2%s (ping) -> SIO 3%s (pong)", ns, ns)
-                            await ws.send_str("3" + ns)
-                        continue
+                            break
+                        if payload.startswith("2/"):
+                            ns_payload = payload[1:]
+                            ns, sep, body = ns_payload.partition(",")
+                            if not sep or body in {"", "[]", "[\"ping\"]"}:
+                                _LOGGER.debug(
+                                    "WS (ducaheat): <- SIO 2%s (ping) -> SIO 3%s (pong)",
+                                    ns,
+                                    ns,
+                                )
+                                await ws.send_str("3" + ns)
+                                break
 
-                    if payload.startswith("42"):
-                        content = payload[2:]
+                        content: str | None = None
+                        if data.startswith("42"):
+                            content = data[2:]
+                        elif payload.startswith("42"):
+                            content = payload[2:]
+                        if content is None:
+                            break
                         if content.startswith("/"):
                             _ns, sep, content = content.partition(",")
                             if sep != ",":
-                                continue
+                                break
                         try:
                             arr = json.loads(content)
                         except Exception:
-                            continue
+                            break
                         if not isinstance(arr, list) or not arr:
-                            continue
+                            break
                         evt, *args = arr
                         _LOGGER.debug("WS (ducaheat): <- SIO 42 event=%s args_len=%d", evt, len(args))
 
                         if evt == "message" and args and args[0] == "ping":
                             _LOGGER.debug("WS (ducaheat): app ping -> pong")
                             await self._emit_sio("message", "pong")
-                            continue
+                            break
 
                         if evt == "dev_data" and args and isinstance(args[0], dict):
                             nodes = args[0].get("nodes") if isinstance(args[0], dict) else None
@@ -411,7 +432,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                     "WS (ducaheat): subscribed %d feeds", subs
                                 )
                                 self._update_status("healthy")
-                            continue
+                            break
 
                         if evt == "update" and args:
                             payload_body = args[0]
@@ -430,8 +451,10 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                     if sample_updates:
                                         self._forward_sample_updates(sample_updates)
                             self._update_status("healthy")
-                            continue
-                        continue
+                            break
+                        break
+                        break
+                    continue
                 elif msg.type == aiohttp.WSMsgType.ERROR:
                     raise RuntimeError(f"websocket error: {ws.exception()}")
                 elif msg.type in {aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED}:
