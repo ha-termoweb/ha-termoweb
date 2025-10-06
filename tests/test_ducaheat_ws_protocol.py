@@ -168,8 +168,31 @@ async def test_connect_once_performs_full_handshake(monkeypatch: pytest.MonkeyPa
 
     assert client._ws is not None
     assert statuses[-1] == "connected"
-    assert "42/api/v2/socket_io,[\"dev_data\"]" in client._ws.sent
+    assert client._pending_dev_data is True
+    assert all("dev_data" not in frame for frame in client._ws.sent)
     assert client._ws.sent.count("3") == 0  # handshake should not issue pong during setup
+
+
+@pytest.mark.asyncio
+async def test_emit_sio_logs_subscribe(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """Debug logging should include subscription path summaries."""
+
+    client = _make_client(monkeypatch)
+    client._ws = StubWebSocket()
+    caplog.set_level(logging.DEBUG, logger="custom_components.termoweb.backend.ducaheat_ws")
+
+    await client._emit_sio("subscribe", "/htr/1/status")
+    await client._emit_sio("message", "pong")
+
+    assert client._ws.sent == [
+        '42/api/v2/socket_io,["subscribe","/htr/1/status"]',
+        '42/api/v2/socket_io,["message","pong"]',
+    ]
+    assert any(
+        "-> 42 subscribe" in record.message and "path=/htr/1/status" in record.message
+        for record in caplog.records
+    )
+    assert any("-> 42 message" in record.message and "args=('pong',)" in record.message for record in caplog.records)
 
 
 def test_rand_t_token_format() -> None:
@@ -810,6 +833,30 @@ async def test_emit_sio_requires_connection(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 @pytest.mark.asyncio
+async def test_emit_sio_sends_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_emit_sio should serialise payloads and forward them to the websocket."""
+
+    client = _make_client(monkeypatch)
+
+    class RecorderWS:
+        def __init__(self) -> None:
+            self.closed = False
+            self.sent: list[str] = []
+
+        async def send_str(self, payload: str) -> None:
+            self.sent.append(payload)
+
+    ws = RecorderWS()
+    client._ws = ws  # type: ignore[assignment]
+
+    await client._emit_sio("sample", {"x": 1})
+
+    assert ws.sent == [
+        "42" + ducaheat_ws.DUCAHEAT_NAMESPACE + ',["sample",{"x":1}]'
+    ]
+
+
+@pytest.mark.asyncio
 async def test_get_token_success(monkeypatch: pytest.MonkeyPatch) -> None:
     """The access token should be extracted from the Authorization header."""
 
@@ -880,13 +927,156 @@ async def test_read_loop_handles_engineio_and_socketio_frames(
 
     fake_ws = FakeWS()
     client._ws = fake_ws  # type: ignore[assignment]
+    client._pending_dev_data = True
 
     monkeypatch.setattr(client, "_dispatch_nodes", MagicMock())
-    monkeypatch.setattr(client, "_emit_sio", AsyncMock())
+    emit_mock = AsyncMock()
+    monkeypatch.setattr(client, "_emit_sio", emit_mock)
     monkeypatch.setattr(client, "_update_status", lambda status: None)
     await client._read_loop_ws()
 
     assert any(frame == "3" for frame in send_history)
+    assert any(call.args == ("dev_data",) for call in emit_mock.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_namespace_ack_replays_cached_subscriptions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Namespace acknowledgements should trigger dev_data and subscription replay."""
+
+    client = _make_client(monkeypatch)
+
+    class AckWS:
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def send_str(self, payload: str) -> None:
+            return None
+
+        def __aiter__(self) -> Any:
+            async def _iterator() -> Any:
+                yield SimpleNamespace(
+                    type=aiohttp.WSMsgType.TEXT,
+                    data="40/api/v2/socket_io",
+                )
+            return _iterator()
+
+    client._ws = AckWS()  # type: ignore[assignment]
+    client._pending_dev_data = True
+    client._subscription_paths = {"/htr/1/status", "/htr/1/samples"}
+
+    emit_calls: list[tuple[Any, ...]] = []
+
+    async def _record_emit(event: str, *args: Any) -> None:
+        emit_calls.append((event, *args))
+
+    monkeypatch.setattr(client, "_emit_sio", AsyncMock(side_effect=_record_emit))
+    statuses: list[str] = []
+    monkeypatch.setattr(client, "_update_status", lambda status: statuses.append(status))
+
+    await client._read_loop_ws()
+
+    assert client._pending_dev_data is False
+    assert statuses and statuses[-1] == "healthy"
+    assert ("dev_data",) == emit_calls[0]
+    assert emit_calls[1:] == [
+        ("subscribe", "/htr/1/samples"),
+        ("subscribe", "/htr/1/status"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_namespace_ack_processes_embedded_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Namespace frames with embedded events should be processed."""
+
+    client = _make_client(monkeypatch)
+
+    class AckWS:
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def send_str(self, payload: str) -> None:
+            return None
+
+        def __aiter__(self) -> Any:
+            async def _iterator() -> Any:
+                yield SimpleNamespace(
+                    type=aiohttp.WSMsgType.TEXT,
+                    data=(
+                        "40/api/v2/socket_io,42/api/v2/socket_io,"
+                        "[\"dev_data\",{\"nodes\":{\"htr\":{\"status\":{\"1\":{}}}}}]"
+                    ),
+                )
+            return _iterator()
+
+    client._ws = AckWS()  # type: ignore[assignment]
+    client._pending_dev_data = True
+
+    emit_calls: list[tuple[Any, ...]] = []
+
+    async def _record_emit(event: str, *args: Any) -> None:
+        emit_calls.append((event, *args))
+
+    monkeypatch.setattr(client, "_emit_sio", AsyncMock(side_effect=_record_emit))
+    monkeypatch.setattr(client, "_replay_subscription_paths", AsyncMock())
+    monkeypatch.setattr(client, "_log_nodes_summary", lambda nodes: None)
+    monkeypatch.setattr(client, "_normalise_nodes_payload", lambda nodes: nodes)
+    monkeypatch.setattr(client, "_build_nodes_snapshot", lambda nodes: {"nodes": nodes})
+    dispatch = MagicMock()
+    monkeypatch.setattr(client, "_dispatch_nodes", dispatch)
+    subscribe_mock = AsyncMock(return_value=2)
+    monkeypatch.setattr(client, "_subscribe_feeds", subscribe_mock)
+    statuses: list[str] = []
+    monkeypatch.setattr(client, "_update_status", lambda status: statuses.append(status))
+
+    await client._read_loop_ws()
+
+    assert emit_calls and emit_calls[0] == ("dev_data",)
+    subscribe_mock.assert_awaited_once()
+    dispatch.assert_called_once()
+    assert statuses and statuses[0] == "healthy"
+    assert statuses[-1] == "healthy"
+
+
+@pytest.mark.asyncio
+async def test_namespace_ack_ignores_unexpected_namespace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Namespace acknowledgements for other namespaces should be ignored."""
+
+    client = _make_client(monkeypatch)
+
+    class AckWS:
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def send_str(self, payload: str) -> None:
+            return None
+
+        def __aiter__(self) -> Any:
+            async def _iterator() -> Any:
+                yield SimpleNamespace(
+                    type=aiohttp.WSMsgType.TEXT,
+                    data="40/other",  # not our namespace
+                )
+            return _iterator()
+
+    client._ws = AckWS()  # type: ignore[assignment]
+    client._pending_dev_data = True
+
+    emit_mock = AsyncMock()
+    monkeypatch.setattr(client, "_emit_sio", emit_mock)
+    statuses: list[str] = []
+    monkeypatch.setattr(client, "_update_status", lambda status: statuses.append(status))
+
+    await client._read_loop_ws()
+
+    assert client._pending_dev_data is True
+    emit_mock.assert_not_awaited()
+    assert not statuses
 
 
 @pytest.mark.asyncio
@@ -904,11 +1094,13 @@ async def test_disconnect_closes_websocket(monkeypatch: pytest.MonkeyPatch) -> N
             close_called["message"] = message
 
     client._ws = ClosingWS()  # type: ignore[assignment]
+    client._pending_dev_data = True
     await client._disconnect("reason")
 
     assert close_called["code"] == aiohttp.WSCloseCode.GOING_AWAY
     assert close_called["message"] == b"reason"
     assert client._ws is None
+    assert client._pending_dev_data is False
 
 
 @pytest.mark.asyncio
