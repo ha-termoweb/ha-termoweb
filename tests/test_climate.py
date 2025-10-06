@@ -6,7 +6,7 @@ import logging
 from collections import deque
 from collections.abc import Coroutine
 import types
-from typing import Any, Deque, Iterable, cast
+from typing import Any, Callable, Deque, Iterable, Mapping, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -453,8 +453,10 @@ def test_async_setup_entry_creates_accumulator_entity() -> None:
         assert acc._attr_unique_id == f"{DOMAIN}:{dev_id}:acm:7:climate"
         assert acc.available
         assert acc.device_info["model"] == "Accumulator"
-        assert "boost" in acc._attr_hvac_modes
-        assert acc.hvac_mode == "boost"
+        assert acc._attr_hvac_modes == [HVACMode.OFF, HVACMode.AUTO]
+        assert acc.preset_modes == ["none", "boost"]
+        assert acc.hvac_mode == HVACMode.AUTO
+        assert acc.preset_mode == "boost"
 
         prog = [0, 1, 2] * 56
         await acc.async_set_schedule(list(prog))
@@ -524,23 +526,17 @@ def test_accumulator_hvac_mode_reporting() -> None:
     assert entity._default_mode_for_setpoint() is None
     assert entity._requires_setpoint_with_mode(HVACMode.AUTO) is False
     assert entity._allows_setpoint_in_mode(HVACMode.AUTO) is True
-    assert entity._hvac_mode_to_backend("boost") == "boost"
-    assert entity._hvac_mode_to_backend("off") == "off"
-    assert entity._hvac_mode_to_backend("auto") == "auto"
-    assert entity._hvac_mode_to_backend(HVACMode.OFF) == "off"
-    assert entity._hvac_mode_to_backend(HVACMode.AUTO) == "auto"
-    assert entity._hvac_mode_to_backend(HVACMode.HEAT) == "manual"
-    assert entity._hvac_mode_to_backend("eco") == "eco"
-
     assert entity.hvac_mode == HVACMode.OFF
     settings["mode"] = "auto"
     assert entity.hvac_mode == HVACMode.AUTO
     settings["mode"] = "boost"
-    assert entity.hvac_mode == "boost"
+    assert entity.hvac_mode == HVACMode.AUTO
+    assert entity.preset_mode == "boost"
     settings["mode"] = "manual"
     assert entity.hvac_mode == HVACMode.HEAT
     settings["mode"] = "unexpected"
     assert entity.hvac_mode == HVACMode.HEAT
+    assert entity.preset_mode == "none"
 
 
 def test_accumulator_async_set_hvac_mode_paths(
@@ -594,7 +590,7 @@ def test_accumulator_async_set_hvac_mode_paths(
         caplog.set_level(logging.INFO, logger=climate_module._LOGGER.name)
         await entity.async_set_hvac_mode("boost")
         assert super_mock.await_count == 0
-        assert "Boost HVAC mode not yet implemented" in caplog.text
+        assert "preset_mode" in caplog.text
 
         error_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
@@ -619,6 +615,51 @@ def test_accumulator_async_set_hvac_mode_paths(
         caplog.clear()
         await entity.async_set_hvac_mode(HVACMode.AUTO)
         super_mock.assert_awaited_once_with(HVACMode.AUTO)
+
+        super_mock.reset_mock()
+        commit_calls: list[dict[str, Any]] = []
+        settings_map = coordinator.data[dev_id]["nodes_by_type"]["acm"]["settings"][addr]
+
+        async def fake_commit_write(
+            *,
+            log_context: str,
+            write_kwargs: Mapping[str, Any],
+            apply_fn: Callable[[dict[str, Any]], None],
+            success_details: Mapping[str, Any] | None = None,
+        ) -> None:
+            commit_calls.append(
+                {
+                    "log_context": log_context,
+                    "write_kwargs": dict(write_kwargs),
+                    "success_details": dict(success_details or {}),
+                }
+            )
+            apply_fn(settings_map)
+
+        monkeypatch.setattr(entity, "_commit_write", fake_commit_write)
+
+        settings_map["mode"] = "auto"
+        await entity.async_set_preset_mode("boost")
+        assert commit_calls and commit_calls[0]["write_kwargs"] == {"mode": "boost"}
+        assert settings_map["mode"] == "boost"
+        assert entity._boost_resume_mode == HVACMode.AUTO
+
+        commit_calls.clear()
+        await entity.async_set_preset_mode("none")
+        assert not commit_calls
+        super_mock.assert_awaited_once_with(HVACMode.AUTO)
+        assert entity._boost_resume_mode is None
+
+        super_mock.reset_mock()
+        commit_calls.clear()
+        settings_map["mode"] = "auto"
+        await entity.async_set_preset_mode("none")
+        assert not commit_calls
+        assert super_mock.await_count == 0
+
+        prev_error_count = len(error_calls)
+        await entity.async_set_preset_mode("invalid")
+        assert len(error_calls) == prev_error_count + 1
 
     asyncio.run(_run())
 
