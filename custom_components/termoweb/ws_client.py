@@ -1,28 +1,23 @@
-"""Unified websocket client for TermoWeb backends."""
-
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import asyncio
-import codecs
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass
-from functools import partial, wraps
+import gzip
 import json
 import logging
 import random
+import string
 import time
 from time import monotonic as time_mod
-from types import SimpleNamespace
-from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
-import weakref
+from typing import Any, Iterable, Mapping
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-import socketio
 
 from .api import RESTClient
 from .const import (
@@ -35,7 +30,6 @@ from .const import (
     WS_NAMESPACE,
     get_brand_api_base,
     get_brand_requested_with,
-    get_brand_socketio_path,
     get_brand_user_agent,
     signal_ws_data,
     signal_ws_status,
@@ -44,9 +38,8 @@ from .installation import InstallationSnapshot, ensure_snapshot
 from .nodes import (
     NODE_CLASS_BY_TYPE,
     addresses_by_node_type,
-    build_node_inventory as _build_node_inventory,
-    collect_heater_sample_addresses,
     ensure_node_inventory,
+    collect_heater_sample_addresses,
     heater_sample_subscription_targets,
     normalize_heater_addresses,
     normalize_node_addr,
@@ -55,105 +48,41 @@ from .nodes import (
 
 _LOGGER = logging.getLogger(__name__)
 
-build_node_inventory = _build_node_inventory  # re-exported for tests
-
-
-def _now_pair() -> tuple[float, float]:
-    """Return the current monotonic and wall-clock timestamps."""
-
-    mono = time_mod()
-    wall = time.time()
-    return mono, wall
-
-
-class _WsLeaseMixin:
-    """Provide shared websocket lease and backoff helpers."""
-
-    def __init__(self) -> None:
-        """Initialise idle tracking and backoff state."""
-
-        self._payload_idle_window: float = 240.0
-        self._idle_restart_task: asyncio.Task | None = None
-        self._idle_restart_pending = False
-        self._idle_monitor_task: asyncio.Task | None = None
-
-        self._subscription_refresh_lock = asyncio.Lock()
-        self._subscription_refresh_failed = False
-        self._subscription_refresh_last_attempt: float = 0.0
-        self._subscription_refresh_last_success: float | None = None
-
-        self._backoff_seq: tuple[float, ...] = (5, 10, 30, 120, 300)
-        self._backoff_idx: int = 0
-
-    def _reset_backoff(self) -> None:
-        """Reset the connection retry backoff index."""
-
-        self._backoff_idx = 0
-
-    def _next_backoff_delay(self) -> float:
-        """Return the next backoff delay with jitter applied."""
-
-        delay = self._backoff_seq[min(self._backoff_idx, len(self._backoff_seq) - 1)]
-        self._backoff_idx = min(self._backoff_idx + 1, len(self._backoff_seq) - 1)
-        return delay * random.uniform(0.8, 1.2)
-
-    def _schedule_idle_restart(self, *, idle_for: float, source: str) -> None:
-        """Log idle payload detection and close the websocket for restart."""
-
-        if getattr(self, "_closing", False) or self._idle_restart_pending:
-            return
-        self._idle_restart_pending = True
-        self._ws_state_bucket()["idle_restart_pending"] = True
-        _LOGGER.warning(
-            "WS: no payloads for %.0f s (%s heartbeat); restarting", idle_for, source
-        )
-
-        async def _restart() -> None:
-            try:
-                await self._disconnect(reason="idle restart")
-            finally:
-                self._idle_restart_pending = False
-                self._idle_restart_task = None
-                self._ws_state_bucket()["idle_restart_pending"] = False
-
-        self._idle_restart_task = self._loop.create_task(_restart())
-
-    def _cancel_idle_restart(self) -> None:
-        """Cancel any scheduled idle restart due to new payload activity."""
-
-        task = self._idle_restart_task
-        if task and not task.done():
-            task.cancel()
-        self._idle_restart_task = None
-        self._idle_restart_pending = False
-        self._ws_state_bucket()["idle_restart_pending"] = False
+DUCAHEAT_NAMESPACE = "/api/v2/socket_io"
 
 
 @dataclass
 class WSStats:
-    """Track websocket activity statistics."""
-
     frames_total: int = 0
     events_total: int = 0
     last_event_ts: float = 0.0
-    last_paths: list[str] | None = None
 
 
 class HandshakeError(RuntimeError):
-    """Capture context for failed websocket handshakes."""
-
-    def __init__(self, status: int, url: str, body_snippet: str) -> None:
-        """Initialise the error with the HTTP response details."""
-
-        super().__init__(f"handshake failed (status={status})")
+    def __init__(self, status: int, url: str, detail: str) -> None:
+        super().__init__(f"handshake failed: status={status}, detail={detail}")
         self.status = status
         self.url = url
-        self.body_snippet = body_snippet
+
+
+class _WsLeaseMixin:
+    def __init__(self) -> None:
+        self._payload_idle_window: float = 240.0
+        self._subscription_refresh_lock = asyncio.Lock()
+        self._subscription_refresh_failed = False
+        self._backoff_idx = 0
+        self._backoff = (5, 10, 30, 120, 300)
+
+    def _reset_backoff(self) -> None:
+        self._backoff_idx = 0
+
+    def _next_backoff(self) -> float:
+        idx = min(self._backoff_idx, len(self._backoff) - 1)
+        self._backoff_idx = min(self._backoff_idx + 1, len(self._backoff) - 1)
+        return self._backoff[idx]
 
 
 class WebSocketClient(_WsLeaseMixin):
-    """Unified websocket client wrapping ``socketio.AsyncClient``."""
-
     def __init__(
         self,
         hass: HomeAssistant,
@@ -163,11 +92,10 @@ class WebSocketClient(_WsLeaseMixin):
         api_client: RESTClient,
         coordinator: Any,
         session: aiohttp.ClientSession | None = None,
-        handshake_fail_threshold: int = 5,  # legacy compatibility
         protocol: str | None = None,
         namespace: str = WS_NAMESPACE,
     ) -> None:
-        """Initialise the websocket client container."""
+        _WsLeaseMixin.__init__(self)
         self.hass = hass
         self.entry_id = entry_id
         self.dev_id = dev_id
@@ -175,819 +103,142 @@ class WebSocketClient(_WsLeaseMixin):
         self._coordinator = coordinator
         self._session = session or getattr(api_client, "_session", None)
         self._protocol_hint = protocol
-        self._loop = getattr(hass, "loop", None) or asyncio.get_event_loop()
-        self._task: asyncio.Task | None = None
         self._namespace = namespace or WS_NAMESPACE
-
-        _WsLeaseMixin.__init__(self)
-
-        is_ducaheat = getattr(api_client, "_is_ducaheat", False)
-        brand = BRAND_DUCAHEAT if is_ducaheat else BRAND_TERMOWEB
-        self._brand = brand
-        self._user_agent = getattr(
-            api_client, "user_agent", None
-        ) or get_brand_user_agent(brand)
-        requested_with = getattr(api_client, "requested_with", None)
-        if requested_with is None:
-            requested_with = get_brand_requested_with(brand)
-        self._requested_with = requested_with
-
-        http_session = (
-            self._session if isinstance(self._session, aiohttp.ClientSession) else None
-        )
-        self._sio = socketio.AsyncClient(
-            reconnection=False,
-            logger=_LOGGER.getChild(f"socketio.{dev_id}"),
-            engineio_logger=_LOGGER.getChild(f"engineio.{dev_id}"),
-            http_session=http_session,
-        )
-        self._sio.start_background_task = self._wrap_background_task
-        http_target: Any = self._session
-        if http_target is None or not hasattr(http_target, "closed"):
-            http_target = SimpleNamespace(closed=True)
-        try:
-            self._sio.http = http_target
-        except AttributeError:
-            setattr(self._sio, "http", http_target)
-        if hasattr(self._sio, "eio"):
-            self._sio.eio.start_background_task = self._wrap_background_task
-            eio_http = getattr(self._sio.eio, "http", None)
-            if eio_http is None or not hasattr(eio_http, "closed"):
-                self._sio.eio.http = http_target
-            else:
-                self._sio.eio.http = eio_http
-
-        self._sio.on("connect", handler=self._on_connect)
-        self._sio.on("disconnect", handler=self._on_disconnect)
-        self._sio.on("reconnect", handler=self._on_reconnect)
-        self._sio.on("connect_error", handler=self._on_connect_error)
-        self._sio.on("error", handler=self._on_error)
-        self._sio.on("reconnect_failed", handler=self._on_reconnect_failed)
-        self._sio.on(
-            "connect", namespace=self._namespace, handler=self._on_namespace_connect
-        )
-        self._sio.on(
-            "disconnect",
-            namespace=self._namespace,
-            handler=self._on_namespace_disconnect,
-        )
-        self._sio.on(
-            "dev_handshake", namespace=self._namespace, handler=self._on_dev_handshake
-        )
-        self._sio.on("dev_data", namespace=self._namespace, handler=self._on_dev_data)
-        self._sio.on("update", namespace=self._namespace, handler=self._on_update)
-
-        self._closing = False
-        self._status: str = "stopped"
-        self._stop_event = asyncio.Event()
-        self._disconnected = asyncio.Event()
-        self._disconnected.set()
-
-        self._connected_since: float | None = None
-        self._connected_since_wall: float | None = None
-        self._healthy_since: float | None = None
-        self._healthy_since_wall: float | None = None
-        self._last_event_at: float | None = None
-        self._last_event_wall: float | None = None
-        self._last_payload_at: float | None = None
-        self._last_payload_wall: float | None = None
-        self._stats = WSStats()
-
-        self._handshake_payload: dict[str, Any] | None = None
-        self._nodes: dict[str, Any] = {}
-        self._nodes_raw: dict[str, Any] = {}
-
-        self._handshake_logged = False
-        self._debug_catch_all_registered = False
-
-        self._ws_state: dict[str, Any] | None = None
-        state = self._ws_state_bucket()
-        state.setdefault("last_payload_at", None)
-        state.setdefault("idle_restart_pending", False)
-
-    def _brand_headers(self, *, origin: str | None = None) -> dict[str, str]:
-        """Return baseline headers aligned with the REST client brand."""
-
-        headers = {
-            "User-Agent": self._user_agent or USER_AGENT,
-            "Accept-Language": ACCEPT_LANGUAGE,
-        }
-        if self._requested_with:
-            headers["X-Requested-With"] = self._requested_with
-        if origin:
-            headers["Origin"] = origin
-        return headers
-
-    def _redact_value(self, value: str) -> str:
-        """Return a redacted representation of sensitive values."""
-
-        trimmed = value.strip()
-        if not trimmed:
-            return ""
-        if len(trimmed) <= 4:
-            return "***"
-        if len(trimmed) <= 8:
-            return f"{trimmed[:2]}***{trimmed[-2:]}"
-        return f"{trimmed[:4]}...{trimmed[-4:]}"
-
-    def _mask_identifier(self, value: str) -> str:
-        """Return a partially masked identifier for log output."""
-
-        trimmed = value.strip()
-        if not trimmed:
-            return ""
-        if len(trimmed) <= 4:
-            return "***"
-        if len(trimmed) <= 8:
-            return f"{trimmed[:2]}...{trimmed[-2:]}"
-        prefix = trimmed[:6]
-        suffix = trimmed[-4:]
-        return f"{prefix}...{suffix}"
-
-    def _sanitise_headers(self, headers: Mapping[str, Any]) -> dict[str, Any]:
-        """Redact sensitive header values for logging."""
-
-        sanitised: dict[str, Any] = {}
-        for key, value in headers.items():
-            text: str
-            if isinstance(value, bytes):
-                text = value.decode(errors="ignore")
-            else:
-                text = str(value)
-            if key.lower() == "authorization":
-                prefix, _, token = text.partition(" ")
-                if token:
-                    text = f"{prefix} {self._redact_value(token)}".strip()
-                else:
-                    text = self._redact_value(text)
-            elif key.lower() in {"cookie", "set-cookie"}:
-                text = self._redact_value(text)
-            sanitised[key] = text
-        return sanitised
-
-    def _sanitise_params(self, params: Mapping[str, str]) -> dict[str, str]:
-        """Redact sensitive query parameter values for logging."""
-
-        sanitised: dict[str, str] = {}
-        for key, value in params.items():
-            if key == "token":
-                sanitised[key] = self._redact_value(str(value))
-            elif key == "dev_id":
-                sanitised[key] = self._mask_identifier(str(value))
-            else:
-                sanitised[key] = value
-        return sanitised
-
-    def _sanitise_url(self, url: str) -> str:
-        """Return a redacted representation of the websocket URL."""
-
-        try:
-            parsed = urlsplit(url)
-        except ValueError:
-            return url
-        query_items = parse_qsl(parsed.query, keep_blank_values=True)
-        sanitised_pairs = [
-            (
-                key,
-                self._redact_value(value)
-                if key == "token"
-                else self._mask_identifier(value)
-                if key == "dev_id"
-                else value,
-            )
-            for key, value in query_items
-        ]
-        sanitised_query = urlencode(sanitised_pairs, doseq=True)
-        return urlunsplit(
-            (
-                parsed.scheme,
-                parsed.netloc,
-                parsed.path,
-                sanitised_query,
-                parsed.fragment,
-            )
-        )
-
-    # ------------------------------------------------------------------
-    # Public control
-    # ------------------------------------------------------------------
-    def _wrap_background_task(
-        self, target: Any, *args: Any, **kwargs: Any
-    ) -> asyncio.Task:
-        """Schedule socket.io background tasks on the HA loop."""
-        coro = target(*args, **kwargs)
-        if not asyncio.iscoroutine(coro):
-
-            async def _runner() -> Any:
-                return coro
-
-            coro = _runner()
-        return self._loop.create_task(coro)
+        self._loop = getattr(hass, "loop", None) or asyncio.get_event_loop()
+        self._delegate: Any | None = None
+        self._brand = BRAND_DUCAHEAT if getattr(api_client, "_is_ducaheat", False) else BRAND_TERMOWEB
 
     def start(self) -> asyncio.Task:
-        """Start the websocket client background task."""
-        if self._task and not self._task.done():
-            return self._task
-        _LOGGER.debug("WS: start requested")
-        self._closing = False
-        self._stop_event = asyncio.Event()
-        self._handshake_logged = False
-        self._subscription_refresh_failed = False
-        self._task = self._loop.create_task(
-            self._runner(), name=f"{DOMAIN}-ws-{self.dev_id}"
-        )
-        return self._task
+        if self._delegate is not None:
+            return self._delegate.start()
+        if self._brand == BRAND_DUCAHEAT:
+            self._delegate = DucaheatWSClient(
+                self.hass,
+                entry_id=self.entry_id,
+                dev_id=self.dev_id,
+                api_client=self._client,
+                coordinator=self._coordinator,
+                session=self._session,
+                namespace=DUCAHEAT_NAMESPACE,
+            )
+        else:
+            self._delegate = TermoWebWSClient(
+                self.hass,
+                entry_id=self.entry_id,
+                dev_id=self.dev_id,
+                api_client=self._client,
+                coordinator=self._coordinator,
+                session=self._session,
+                namespace=self._namespace,
+            )
+        return self._delegate.start()
 
     async def stop(self) -> None:
-        """Cancel tasks and close websocket sessions."""
-        _LOGGER.debug("WS: stop requested")
-        self._closing = True
-        self._stop_event.set()
-        if self._idle_restart_task:
-            self._idle_restart_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._idle_restart_task
-            self._idle_restart_task = None
-        self._idle_restart_pending = False
-        if self._idle_monitor_task:
-            self._idle_monitor_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._idle_monitor_task
-            self._idle_monitor_task = None
-        self._subscription_refresh_failed = False
-        await self._disconnect(reason="client stop")
-        if self._task:
-            self._task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._task
-            self._task = None
-        self._update_status("stopped")
+        if self._delegate is not None:
+            await self._delegate.stop()
 
     def is_running(self) -> bool:
-        """Return True if the websocket client task is active."""
-        return bool(self._task and not self._task.done())
+        return bool(self._delegate and self._delegate.is_running())
 
     async def ws_url(self) -> str:
-        """Return the websocket URL using the API client's token helper."""
+        if self._delegate and hasattr(self._delegate, "ws_url"):
+            return await self._delegate.ws_url()
+        return ""
 
-        url, _ = await self._build_engineio_target()
-        return url
 
-    async def debug_probe(self) -> None:
-        """Emit a dev_data probe for debugging purposes."""
+# ---------------------- shared helpers ----------------------
 
-        if not _LOGGER.isEnabledFor(logging.DEBUG):
-            return
+def _now_pair() -> tuple[float, float]:
+    return time_mod(), time.time()
+
+
+def _rand_t() -> str:
+    alphabet = string.ascii_letters + string.digits
+    return "P" + "".join(random.choice(alphabet) for _ in range(7))
+
+
+def _encode_polling_packet(pkt: str) -> bytes:
+    data = pkt.encode("utf-8")
+    return f"{len(data)}:".encode("ascii") + data
+
+
+def _decode_polling_packets(body: bytes) -> list[str]:
+    """Engine.IO v3 *binary* polling decoder per vendor dump.
+    Format (repeat): [0x00|0x01] <digit-bytes '0'..'9' until 0xFF> 0xFF <payload>
+    length is the decimal value of the digit bytes sequence.
+    """
+    buf = body
+    if len(buf) >= 2 and buf[:2] == b"\x1f\x8b":
         try:
-            await self._sio.emit("dev_data", namespace=self._namespace)
-            _LOGGER.debug("WS: debug probe dev_data emitted")
-        except Exception:  # noqa: BLE001
-            _LOGGER.debug("WS: debug probe dev_data emit failed", exc_info=True)
-
-    # ------------------------------------------------------------------
-    # Core loop and protocol dispatch
-    # ------------------------------------------------------------------
-    async def _runner(self) -> None:
-        """Manage connection attempts with backoff."""
-        self._update_status("starting")
+            buf = gzip.decompress(buf)
+        except Exception:
+            pass
+    out: list[str] = []
+    i = 0
+    n = len(buf)
+    while i < n:
+        if i + 4 > n:
+            break
+        _typ = buf[i]
+        i += 1
+        length = 0
+        had_digit = False
+        while i < n and buf[i] != 0xFF:
+            d = buf[i]
+            i += 1
+            if d > 9:
+                return out
+            had_digit = True
+            length = length * 10 + d
+        if not had_digit or i >= n or buf[i] != 0xFF:
+            return out
+        i += 1
+        end = i + length
+        if end > n:
+            return out
+        payload = buf[i:end]
+        i = end
         try:
-            while not self._closing:
-                error: Exception | None = None
-                try:
-                    await self._connect_once()
-                    await self._wait_for_events()
-                except asyncio.CancelledError:
-                    raise
-                except Exception as err:  # noqa: BLE001
-                    error = err
-                    _LOGGER.info(
-                        "WS: connection error (%s: %s); will retry",
-                        type(err).__name__,
-                        err,
-                    )
-                    _LOGGER.debug("WS: connection error details", exc_info=True)
-                finally:
-                    await self._disconnect(reason="loop cleanup")
-                    if not self._closing:
-                        self._update_status("disconnected")
-                        await self._handle_connection_lost(error)
-                if self._closing:
-                    break
-                await asyncio.sleep(self._next_backoff_delay())
-        finally:
-            self._update_status("stopped")
+            pkt = payload.decode("utf-8", errors="ignore")
+        except Exception:
+            pkt = ""
+        if pkt:
+            out.append(pkt)
+    return out
 
-    async def _handle_connection_lost(self, error: Exception | None) -> None:
-        """Record connection loss metadata before the next restart."""
 
-        state = self._ws_state_bucket()
-        restart_count = int(state.get("restart_count") or 0) + 1
-        state["restart_count"] = restart_count
-        state["last_disconnect_at"] = time.time()
-        state["last_disconnect_error"] = (
-            f"{type(error).__name__}: {error}" if error else None
+def _brand_headers(user_agent: str, requested_with: str) -> dict[str, str]:
+    # For polling requests only (WS sets its own)
+    return {
+        "User-Agent": user_agent or USER_AGENT,
+        "Accept-Language": ACCEPT_LANGUAGE,
+        "X-Requested-With": requested_with,
+        "Origin": "https://localhost",
+        "Referer": "https://localhost/",
+        "Accept": "*/*",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "Connection": "keep-alive",
+    }
+
+
+class _WSCommon:
+    def _ws_state_bucket(self) -> dict[str, Any]:
+        if not hasattr(self.hass, "data") or self.hass.data is None:  # type: ignore[attr-defined]
+            setattr(self.hass, "data", {})  # type: ignore[attr-defined]
+        domain_bucket = self.hass.data.setdefault(DOMAIN, {})  # type: ignore[attr-defined]
+        entry_bucket = domain_bucket.setdefault(self.entry_id, {})
+        ws_state = entry_bucket.setdefault("ws_state", {})
+        return ws_state.setdefault(self.dev_id, {})
+
+    def _update_status(self, status: str) -> None:
+        async_dispatcher_send(
+            self.hass, signal_ws_status(self.entry_id), {"dev_id": self.dev_id, "status": status}
         )
 
-    async def _connect_once(self) -> None:
-        """Open the Socket.IO connection."""
-        if self._stop_event.is_set():
-            return
-        url, socketio_path = await self._build_engineio_target()
-        _LOGGER.debug("WS: connecting to %s (path=%s)", url, socketio_path)
-        self._disconnected.clear()
-        self._reset_backoff()
-        await self._sio.connect(
-            url,
-            headers={
-                "User-Agent": get_brand_user_agent(self._brand),
-                "X-Requested-With": get_brand_requested_with(self._brand),
-                "Accept-Language": ACCEPT_LANGUAGE,
-            },
-            namespaces=[self._namespace],
-            socketio_path=socketio_path,
-            wait=True,
-            wait_timeout=15,
-        )
-
-    async def _wait_for_events(self) -> None:
-        """Wait for the connection to close or stop to be requested."""
-        stop_task = self._loop.create_task(self._stop_event.wait())
-        disconnect_task = self._loop.create_task(self._disconnected.wait())
-        try:
-            done, pending = await asyncio.wait(
-                [stop_task, disconnect_task], return_when=asyncio.FIRST_COMPLETED
-            )
-            for task in pending:
-                task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await task
-            for task in done:
-                with suppress(asyncio.CancelledError):
-                    await task
-        finally:
-            stop_task.cancel()
-            disconnect_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await stop_task
-            with suppress(asyncio.CancelledError):
-                await disconnect_task
-
-    async def _disconnect(self, *, reason: str) -> None:
-        """Ensure the AsyncClient is disconnected."""
-        if self._sio.connected:
-            try:
-                await self._sio.disconnect()
-            except Exception:  # noqa: BLE001
-                _LOGGER.debug("WS: disconnect due to %s failed", reason, exc_info=True)
-        self._disconnected.set()
-
-    async def _build_engineio_target(self) -> tuple[str, str]:
-        """Return the Socket.IO base URL and path."""
-
-        token = await self._get_token()
-        base = self._api_base().rstrip("/")
-        parsed = urlsplit(base if base else API_BASE)
-        scheme = parsed.scheme or "https"
-        netloc = parsed.netloc or parsed.path
-        if not netloc:
-            raise RuntimeError("invalid API base")
-        socketio_path = get_brand_socketio_path(getattr(self, "_brand", BRAND_TERMOWEB))
-        path = f"/{socketio_path.lstrip('/')}"
-        query = urlencode({"token": token, "dev_id": self.dev_id})
-        url = urlunsplit((scheme, netloc, path, query, ""))
-        return url, socketio_path
-
-    # ------------------------------------------------------------------
-    # Socket.IO event handlers
-    # ------------------------------------------------------------------
-    async def _on_connect(self) -> None:
-        """Handle socket connection establishment."""
-        _LOGGER.debug("WS: connected")
-        mono_now, wall_now = _now_pair()
-        self._connected_since = mono_now
-        self._connected_since_wall = wall_now
-        self._healthy_since = None
-        self._healthy_since_wall = None
-        self._last_event_at = mono_now
-        self._last_event_wall = wall_now
-        self._last_payload_at = mono_now
-        self._last_payload_wall = wall_now
-        self._stats.frames_total = 0
-        self._stats.events_total = 0
-        self._stats.last_event_ts = wall_now
-        self._handshake_logged = False
-        self._subscription_refresh_failed = False
-        self._update_status("connected")
-        if self._idle_monitor_task is None or self._idle_monitor_task.done():
-            self._idle_monitor_task = self._loop.create_task(self._idle_monitor())
-        self._register_debug_catch_all()
-
-    async def _on_namespace_connect(self) -> None:
-        """Join the namespace and request the initial snapshot."""
-
-        try:
-            if self._namespace != "/":
-                await self._sio.emit("join", namespace=self._namespace)
-            await self._sio.emit("dev_data", namespace=self._namespace)
-        except Exception:  # noqa: BLE001
-            _LOGGER.debug("WS: namespace join failed", exc_info=True)
-
-    def _register_debug_catch_all(self) -> None:
-        """Register a catch-all listener to trace websocket traffic when debugging."""
-
-        if self._debug_catch_all_registered:
-            return
-        if not _LOGGER.isEnabledFor(logging.DEBUG):
-            return
-
-        async def _log_catch_all(event: str, *args: Any, **kwargs: Any) -> None:
-            """Emit DEBUG logs for all websocket events received."""
-
-            if not _LOGGER.isEnabledFor(logging.DEBUG):
-                return
-            _LOGGER.debug(
-                "WS: catch-all (%s) event=%s args=%s kwargs=%s",
-                self._namespace,
-                event,
-                args,
-                kwargs,
-            )
-
-        self._sio.on("*", handler=_log_catch_all, namespace=self._namespace)
-        self._debug_catch_all_registered = True
-
-    async def _on_disconnect(self) -> None:
-        """Handle socket disconnection."""
-        _LOGGER.debug("WS: disconnected")
-        if self._idle_monitor_task:
-            self._idle_monitor_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._idle_monitor_task
-            self._idle_monitor_task = None
-        self._subscription_refresh_failed = False
-        self._handshake_logged = False
-        self._disconnected.set()
-
-    async def _on_reconnect(self) -> None:
-        """Handle socket reconnection attempts."""
-        _LOGGER.debug("WS: reconnect event")
-        await self._subscribe_heater_samples()
-
-    async def _on_connect_error(self, data: Any) -> None:
-        """Log ``connect_error`` events with their payload."""
-
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS: connect_error payload: %s", data)
-
-    async def _on_error(self, data: Any) -> None:
-        """Log socket.io ``error`` events with full details."""
-
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS: error event payload: %s", data)
-
-    async def _on_reconnect_failed(self, data: Any | None = None) -> None:
-        """Log ``reconnect_failed`` events with the reported context."""
-
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS: reconnect_failed details: %s", data)
-
-    async def _on_namespace_disconnect(self, reason: Any | None = None) -> None:
-        """Log namespace-level disconnect callbacks with their reason."""
-
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS: namespace disconnect (%s): %s", self._namespace, reason)
-
-    async def _on_dev_handshake(self, data: Any) -> None:
-        """Handle the ``dev_handshake`` payload."""
-        self._stats.frames_total += 1
-        if not self._handshake_logged and _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS: dev_handshake payload: %s", data)
-            self._handshake_logged = True
-        self._handle_handshake(data)
-
-    async def _on_dev_data(self, data: Any) -> None:
-        """Handle the ``dev_data`` payload."""
-        self._stats.frames_total += 1
-        self._handle_dev_data(data)
-        await self._subscribe_heater_samples()
-
-    async def _on_update(self, data: Any) -> None:
-        """Handle the ``update`` payload."""
-        self._stats.frames_total += 1
-        self._handle_update(data)
-
-    async def _idle_monitor(self) -> None:
-        """Monitor idle websocket periods and trigger restarts."""
-        while not self._closing:
-            await asyncio.sleep(60)
-            if not self._sio.connected:
-                if self._disconnected.is_set():
-                    break
-                continue
-            last_event = self._last_event_at
-            if last_event is None:
-                continue
-            idle_for = time_mod() - last_event
-            if idle_for >= self._payload_idle_window:
-                _LOGGER.debug(
-                    "WS: idle for %.0fs; refreshing websocket lease", idle_for
-                )
-                try:
-                    await self._refresh_subscription(reason="idle monitor")
-                except asyncio.CancelledError:  # pragma: no cover - task lifecycle
-                    raise
-                except Exception:  # noqa: BLE001
-                    self._schedule_idle_restart(
-                        idle_for=idle_for, source="idle monitor refresh failed"
-                    )
-                    break
-                continue
-            if self._subscription_refresh_failed:
-                # Retry quickly if the last scheduled renewal failed.
-                _LOGGER.info(
-                    "WS: retrying websocket lease after failure; idle for %.0fs",
-                    idle_for,
-                )
-                try:
-                    await self._refresh_subscription(reason="idle monitor retry")
-                except asyncio.CancelledError:  # pragma: no cover - task lifecycle
-                    raise
-                except Exception:  # noqa: BLE001
-                    self._schedule_idle_restart(
-                        idle_for=idle_for, source="idle monitor retry failed"
-                    )
-                    break
-
-    async def _refresh_subscription(self, *, reason: str) -> None:
-        """Re-request device data to keep the websocket session active."""
-
-        async with self._subscription_refresh_lock:
-            if not self._sio.connected:
-                raise RuntimeError("websocket not connected")
-            now_mono = time_mod()
-            self._subscription_refresh_last_attempt = now_mono
-            if _LOGGER.isEnabledFor(logging.INFO):
-                _LOGGER.debug("WS: refreshing websocket lease (%s)", reason)
-            await self._sio.emit("dev_data", namespace=self._namespace)
-            await self._subscribe_heater_samples()
-            self._subscription_refresh_failed = False
-            self._subscription_refresh_last_success = time_mod()
-
-    # ------------------------------------------------------------------
-    # Payload handlers
-    # ------------------------------------------------------------------
-    def _handle_handshake(self, data: Any) -> None:
-        """Process the initial handshake payload from the server."""
-        if isinstance(data, dict):
-            self._handshake_payload = deepcopy(data)
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                _LOGGER.debug(
-                    "WS: dev_handshake payload keys: %s", ", ".join(sorted(data.keys()))
-                )
-            self._update_status("connected")
-        else:
-            _LOGGER.debug("WS: invalid handshake payload")
-
-    def _handle_dev_data(self, data: Any) -> None:
-        """Handle the first full snapshot of nodes from the websocket."""
-        self._apply_nodes_payload(data, merge=False, event="dev_data")
-
-    def _handle_update(self, data: Any) -> None:
-        """Merge incremental node updates from the websocket feed."""
-        self._apply_nodes_payload(data, merge=True, event="update")
-
-    def _apply_nodes_payload(self, payload: Any, *, merge: bool, event: str) -> None:
-        """Update cached nodes from the websocket payload and notify listeners."""
-        nodes = self._extract_nodes(payload)
-        if nodes is None:
-            nodes = self._translate_path_update(payload)
-        if nodes is None:
-            _LOGGER.debug("WS: %s without nodes", event)
-            return
-        normaliser = getattr(self._client, "normalise_ws_nodes", None)
-        if callable(normaliser):
-            try:
-                nodes = normaliser(nodes)  # type: ignore[arg-type]
-            except Exception:  # noqa: BLE001  # pragma: no cover - defensive logging only
-                _LOGGER.debug("WS: normalise_ws_nodes failed; using raw payload")
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            changed = self._collect_update_addresses(nodes)
-            if merge:
-                if changed:
-                    _LOGGER.debug(
-                        "WS: update event for %s",
-                        ", ".join(f"{node_type}/{addr}" for node_type, addr in changed),
-                    )
-                else:
-                    _LOGGER.debug("WS: update event without address changes")
-            else:
-                _LOGGER.debug(
-                    "WS: dev_data snapshot contains %d node groups", len(nodes)
-                )
-        sample_updates: dict[str, dict[str, Any]] = {}
-        for node_type, type_payload in nodes.items():
-            if not isinstance(node_type, str) or not isinstance(type_payload, Mapping):
-                continue
-            samples = type_payload.get("samples")
-            if not isinstance(samples, Mapping):
-                continue
-            bucket: dict[str, Any] = {}
-            for addr, sample_payload in samples.items():
-                normalised_addr = normalize_node_addr(addr)
-                if not normalised_addr:
-                    continue
-                bucket[normalised_addr] = sample_payload
-            if bucket:
-                sample_updates[node_type] = bucket
-
-        if merge and self._nodes_raw:
-            self._merge_nodes(self._nodes_raw, nodes)
-        else:
-            self._nodes_raw = deepcopy(nodes)
-        self._nodes = self._build_nodes_snapshot(self._nodes_raw)
-        self._dispatch_nodes(self._nodes)
-        if sample_updates:
-            self._forward_sample_updates(sample_updates)
-        self._mark_event(paths=None, count_event=True)
-
-    def _translate_path_update(self, payload: Any) -> dict[str, Any] | None:
-        """Translate Ducaheat ``{"path": ..., "body": ...}`` frames into nodes."""
-
-        if not isinstance(payload, Mapping):
-            return None
-        if "nodes" in payload:
-            return None
-        path = payload.get("path")
-        body = payload.get("body")
-        if not isinstance(path, str) or body is None:
-            return None
-
-        path = path.split("?", 1)[0]
-        segments = [segment for segment in path.split("/") if segment]
-        if not segments:
-            return None
-
-        try:
-            devs_idx = segments.index("devs")
-        except ValueError:
-            devs_idx = -1
-
-        if devs_idx >= 0:
-            relevant = segments[devs_idx + 1 :]
-            node_type_idx = 1
-            addr_idx = 2
-            section_idx = 3
-            if len(relevant) <= addr_idx:
-                return None
-        else:
-            relevant = segments
-            node_type_idx = 0
-            addr_idx = 1
-            section_idx = 2
-            if len(relevant) <= addr_idx:
-                return None
-
-        node_type = normalize_node_type(relevant[node_type_idx])
-        addr = normalize_node_addr(relevant[addr_idx])
-        if not node_type or not addr:
-            return None
-
-        section = relevant[section_idx] if len(relevant) > section_idx else None
-        remainder = (
-            relevant[section_idx + 1 :] if len(relevant) > section_idx + 1 else []
-        )
-
-        target_section, nested_key = self._resolve_update_section(section)
-        if target_section is None:
-            return None
-
-        payload_body: Any = body
-        for segment in reversed(remainder):
-            payload_body = {segment: payload_body}
-        if nested_key:
-            payload_body = {nested_key: payload_body}
-
-        return {node_type: {target_section: {addr: payload_body}}}
-
-    @staticmethod
-    def _resolve_update_section(section: str | None) -> tuple[str | None, str | None]:
-        """Map a websocket path segment onto the node bucket name."""
-
-        if not section:
-            return None, None
-
-        lowered = section.lower()
-        if lowered in {"status", "samples", "settings", "advanced"}:
-            return lowered, None
-        if lowered in {"advanced_setup"}:
-            return "advanced", "advanced_setup"
-        if lowered in {"setup", "prog", "prog_temps", "capabilities"}:
-            return "settings", lowered
-        return "settings", lowered
-
-    def _forward_sample_updates(self, updates: Mapping[str, Mapping[str, Any]]) -> None:
-        """Relay websocket heater sample updates to the energy coordinator."""
-
-        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-        if not isinstance(record, Mapping):
-            return
-        energy_coordinator = record.get("energy_coordinator")
-        handler = getattr(energy_coordinator, "handle_ws_samples", None)
-        if not callable(handler):
-            return
-        try:
-            handler(
-                self.dev_id,
-                {node_type: dict(section) for node_type, section in updates.items()},
-            )
-        except Exception:  # noqa: BLE001  # pragma: no cover - defensive logging
-            _LOGGER.debug("WS: forwarding heater samples failed", exc_info=True)
-
-    def _extract_nodes(self, data: Any) -> dict[str, Any] | None:
-        """Extract the nodes dictionary from a websocket payload."""
-        if not isinstance(data, dict):
-            return None
-        nodes = data.get("nodes")
-        if isinstance(nodes, dict):
-            return nodes
-        if isinstance(nodes, list):
-            mapped = self._translate_nodes_list(nodes)
-            data["nodes"] = mapped
-            return mapped
-        return None
-
-    def _translate_nodes_list(
-        self, nodes: Iterable[Any]
-    ) -> dict[str, dict[str, dict[str, Any]]]:
-        """Convert list-based node payloads into the nested mapping schema."""
-
-        translated: dict[str, dict[str, dict[str, Any]]] = {}
-        for entry in nodes:
-            if not isinstance(entry, Mapping):
-                continue
-            node_type = normalize_node_type(entry.get("type"))
-            addr = normalize_node_addr(entry.get("addr"))
-            if not node_type or not addr:
-                continue
-            node_bucket = translated.setdefault(node_type, {})
-            added = False
-            for key, value in entry.items():
-                if key in {"type", "addr"}:
-                    continue
-                if not isinstance(key, str):
-                    continue
-                section, nested_key = self._resolve_update_section(key)
-                if section is None:
-                    continue
-                section_bucket = node_bucket.setdefault(section, {})
-                if nested_key:
-                    existing = section_bucket.get(addr)
-                    if isinstance(existing, Mapping):
-                        merged = dict(existing)
-                    else:
-                        merged = {}
-                    merged[nested_key] = deepcopy(value)
-                    section_bucket[addr] = merged
-                else:
-                    section_bucket[addr] = deepcopy(value)
-                added = True
-            if not added and not node_bucket:
-                translated.pop(node_type, None)
-        return translated
-
-    @staticmethod
-    def _collect_update_addresses(nodes: Mapping[str, Any]) -> list[tuple[str, str]]:
-        """Return a sorted list of ``(node_type, addr)`` pairs in ``nodes``."""
-
-        found: set[tuple[str, str]] = set()
-        for node_type, payload in nodes.items():
-            if not isinstance(node_type, str) or not isinstance(payload, Mapping):
-                continue
-            for section in payload.values():
-                if not isinstance(section, Mapping):
-                    continue
-                for addr, value in section.items():
-                    if isinstance(addr, str) and value is not None:
-                        found.add((node_type, addr))
-        return sorted(found)
-
-    def _dispatch_nodes(self, payload: dict[str, Any]) -> dict[str, list[str]]:
-        """Publish node updates and return the address map by node type."""
-
-        if not isinstance(payload, dict):  # pragma: no cover - defensive
-            return {}
-
-        is_snapshot = isinstance(payload.get("nodes_by_type"), dict)
-        raw_nodes: Any
-        snapshot: dict[str, Any]
-
-        if is_snapshot:
-            snapshot = payload
-            raw_nodes = snapshot.get("nodes")
-        else:
-            raw_nodes = payload
-            snapshot = {"nodes": deepcopy(raw_nodes), "nodes_by_type": {}}
-
+    def _dispatch_nodes(self, payload: dict[str, Any]) -> None:
+        raw_nodes = payload.get("nodes") if "nodes" in payload else payload
         record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
         snapshot_obj = ensure_snapshot(record)
         if isinstance(snapshot_obj, InstallationSnapshot):
@@ -996,333 +247,69 @@ class WebSocketClient(_WsLeaseMixin):
             if isinstance(record, dict):
                 record["node_inventory"] = list(inventory)
         else:
-            record_map: Mapping[str, Any]
-            if isinstance(record, Mapping):
-                record_map = record
-            else:
-                record_map = {}  # pragma: no cover - defensive default
-
+            record_map: Mapping[str, Any] = record if isinstance(record, Mapping) else {}
             inventory = ensure_node_inventory(record_map, nodes=raw_nodes)
-
-        addr_map, unknown_types = addresses_by_node_type(
-            inventory, known_types=NODE_CLASS_BY_TYPE
-        )
-        if unknown_types:  # pragma: no cover - diagnostic branch
-            _LOGGER.debug(
-                "WS: unknown node types in inventory: %s",
-                ", ".join(sorted(unknown_types)),
-            )
-
-        if not is_snapshot:  # pragma: no cover - legacy branch
-            nodes_by_type = {
-                node_type: {"addrs": list(addrs)}
-                for node_type, addrs in addr_map.items()
-            }
-            snapshot["nodes_by_type"] = nodes_by_type
-            if "htr" in nodes_by_type:
-                snapshot.setdefault("htr", nodes_by_type["htr"])
-
-        if raw_nodes is None:  # pragma: no cover - defensive default
-            raw_nodes = {}
-
+        addr_map, _ = addresses_by_node_type(inventory, known_types=NODE_CLASS_BY_TYPE)
         if hasattr(self._coordinator, "update_nodes"):
             self._coordinator.update_nodes(raw_nodes, inventory)
-
-        if isinstance(record, dict) and snapshot_obj is None:
-            record["nodes"] = raw_nodes
-            record["node_inventory"] = inventory
-
-        self._apply_heater_addresses(addr_map, inventory=None)
-
         payload_copy = {
             "dev_id": self.dev_id,
             "node_type": None,
-            "nodes": deepcopy(snapshot.get("nodes")),
-            "nodes_by_type": deepcopy(snapshot.get("nodes_by_type", {})),
+            "nodes": deepcopy(raw_nodes),
+            "addr_map": {t: list(a) for t, a in addr_map.items()},
         }
-        payload_copy.setdefault(
-            "addr_map",
-            {node_type: list(addrs) for node_type, addrs in addr_map.items()},
-        )
-        if unknown_types:
-            payload_copy.setdefault("unknown_types", sorted(unknown_types))
+        async_dispatcher_send(self.hass, signal_ws_data(self.entry_id), payload_copy)
 
-        def _send() -> None:
-            """Fire the dispatcher signal with the latest node payload."""
 
-            async_dispatcher_send(
-                self.hass, signal_ws_data(self.entry_id), payload_copy
-            )
+# ---------------------- TermoWeb legacy stub (not used for Ducaheat) ----------------------
 
-        loop = getattr(self.hass, "loop", None)
-        call_soon = getattr(loop, "call_soon_threadsafe", None)
-        if callable(call_soon):
-            call_soon(_send)
-        else:  # pragma: no cover - legacy hass loop stub
-            _send()
-
-        return {node_type: list(addrs) for node_type, addrs in addr_map.items()}
-
-    def _ensure_type_bucket(
-        self, dev_map: dict[str, Any], nodes_by_type: dict[str, Any], node_type: str
-    ) -> dict[str, Any]:
-        """Return the node bucket for ``node_type`` with default sections."""
-        bucket = nodes_by_type.get(node_type)
-        if bucket is None:
-            bucket = {
-                "addrs": [],
-                "settings": {},
-                "advanced": {},
-                "samples": {},
-            }
-            nodes_by_type[node_type] = bucket
-        else:
-            bucket.setdefault("addrs", [])
-            bucket.setdefault("settings", {})
-            bucket.setdefault("advanced", {})
-            bucket.setdefault("samples", {})
-        if node_type == "htr":
-            dev_map["htr"] = bucket
-        return bucket
-
-    def _apply_heater_addresses(
+class TermoWebWSClient(_WsLeaseMixin, _WSCommon):
+    def __init__(
         self,
-        addr_map: Mapping[Any, Iterable[Any]] | Iterable[Any] | None,
+        hass: HomeAssistant,
         *,
-        inventory: list[Any] | None = None,
-    ) -> dict[str, list[str]]:
-        """Update entry and coordinator state with heater address data."""
-
-        normalized_map, _compat_aliases = normalize_heater_addresses(addr_map)
-        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-        snapshot_obj = ensure_snapshot(record)
-        if isinstance(snapshot_obj, InstallationSnapshot) and inventory is not None:
-            snapshot_obj.update_nodes(snapshot_obj.raw_nodes, node_inventory=inventory)
-            if isinstance(record, dict):
-                record["node_inventory"] = list(snapshot_obj.inventory)
-
-        if isinstance(record, dict) and snapshot_obj is None:
-            if inventory is not None:
-                record["node_inventory"] = inventory
-            energy_coordinator = record.get("energy_coordinator")
-            if hasattr(energy_coordinator, "update_addresses"):
-                energy_coordinator.update_addresses(normalized_map)
-        else:
-            energy_coordinator = (
-                record.get("energy_coordinator")
-                if isinstance(record, Mapping)
-                else None
-            )
-            if hasattr(energy_coordinator, "update_addresses"):
-                energy_coordinator.update_addresses(normalized_map)
-
-        coordinator_data = getattr(self._coordinator, "data", None)
-        if isinstance(coordinator_data, dict):
-            dev_map = coordinator_data.get(self.dev_id)
-            if isinstance(dev_map, dict):
-                nodes_by_type: dict[str, Any] = dev_map.setdefault("nodes_by_type", {})
-                for node_type, addrs in normalized_map.items():
-                    if not addrs and node_type != "htr":
-                        continue
-                    bucket = self._ensure_type_bucket(dev_map, nodes_by_type, node_type)
-                    if addrs:
-                        bucket["addrs"] = list(addrs)
-                updated = dict(coordinator_data)
-                updated[self.dev_id] = dev_map
-                self._coordinator.data = updated  # type: ignore[attr-defined]
-
-        return normalized_map
-
-    def _heater_sample_subscription_targets(self) -> list[tuple[str, str]]:
-        """Return ordered ``(node_type, addr)`` heater sample subscriptions."""
-
-        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-        inventory, normalized_map, _ = collect_heater_sample_addresses(
-            record, coordinator=self._coordinator
-        )
-        normalized_map = self._apply_heater_addresses(
-            normalized_map, inventory=inventory or None
-        )
-        return heater_sample_subscription_targets(normalized_map)
-
-    async def _subscribe_heater_samples(self) -> None:
-        """Subscribe to heater and accumulator sample updates."""
-
-        try:
-            for node_type, addr in self._heater_sample_subscription_targets():
-                await self._sio.emit(
-                    "subscribe",
-                    f"/{node_type}/{addr}/samples",
-                    namespace=self._namespace,
-                )
-        except asyncio.CancelledError:  # pragma: no cover - task lifecycle
-            raise
-        except Exception:  # noqa: BLE001 - defensive logging
-            _LOGGER.debug("WS: sample subscription setup failed", exc_info=True)
-
-    @staticmethod
-    def _build_nodes_snapshot(nodes: dict[str, Any]) -> dict[str, Any]:
-        """Normalise the nodes payload for consumers."""
-        nodes_copy = deepcopy(nodes)
-        nodes_by_type: dict[str, Any] = {
-            node_type: payload
-            for node_type, payload in nodes_copy.items()
-            if isinstance(payload, dict)
-        }
-        snapshot: dict[str, Any] = {
-            "nodes": nodes_copy,
-            "nodes_by_type": nodes_by_type,
-        }
-        snapshot.update(nodes_by_type)
-        if "htr" in nodes_by_type:
-            snapshot.setdefault("htr", nodes_by_type["htr"])
-        return snapshot
-
-    @staticmethod
-    def _merge_nodes(target: dict[str, Any], source: dict[str, Any]) -> None:
-        """Deep-merge incremental node updates into the stored snapshot."""
-        for key, value in source.items():
-            if isinstance(value, dict):
-                existing = target.get(key)
-                if isinstance(existing, dict):
-                    WebSocketClient._merge_nodes(existing, value)
-                else:
-                    target[key] = deepcopy(value)
-            else:
-                target[key] = value
-
-    # ------------------------------------------------------------------
-    # Helpers shared across implementations
-    # ------------------------------------------------------------------
-    def _ws_state_bucket(self) -> dict[str, Any]:
-        """Return the websocket state bucket for this device."""
-        if self._ws_state is None:
-            if not hasattr(self.hass, "data") or self.hass.data is None:  # type: ignore[attr-defined]
-                setattr(self.hass, "data", {})  # type: ignore[attr-defined]
-            domain_bucket = self.hass.data.setdefault(DOMAIN, {})  # type: ignore[attr-defined]
-            entry_bucket = domain_bucket.setdefault(self.entry_id, {})
-            ws_state = entry_bucket.setdefault("ws_state", {})
-            self._ws_state = ws_state.setdefault(self.dev_id, {})
-        return self._ws_state
-
-    def _update_status(self, status: str) -> None:
-        """Publish the websocket status to Home Assistant listeners."""
-        if status == self._status and status not in {"healthy", "connected"}:
-            return
-        self._status = status
-        now_mono = time_mod()
-        state = self._ws_state_bucket()
-        last_event = self._last_event_wall or self._stats.last_event_ts
-        state["status"] = status
-        state["last_event_at"] = last_event or None
-        state["healthy_since"] = self._healthy_since_wall
-        state["healthy_minutes"] = (
-            int((now_mono - self._healthy_since) / 60) if self._healthy_since else 0
-        )
-        state["frames_total"] = self._stats.frames_total
-        state["events_total"] = self._stats.events_total
-        async_dispatcher_send(
-            self.hass,
-            signal_ws_status(self.entry_id),
-            {"dev_id": self.dev_id, "status": status},
-        )
-
-    def _mark_event(
-        self, *, paths: list[str] | None, count_event: bool = False
+        entry_id: str,
+        dev_id: str,
+        api_client: RESTClient,
+        coordinator: Any,
+        session: aiohttp.ClientSession | None = None,
+        namespace: str | None = None,
     ) -> None:
-        """Record receipt of a websocket event batch for health tracking."""
-        mono_now, wall_now = _now_pair()
-        self._cancel_idle_restart()
-        self._stats.last_event_ts = wall_now
-        self._last_event_at = mono_now
-        self._last_event_wall = wall_now
-        self._last_payload_at = mono_now
-        self._last_payload_wall = wall_now
-        if paths:
-            self._stats.events_total += 1
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                uniq: list[str] = []
-                for path in paths:
-                    if path not in uniq:
-                        uniq.append(path)
-                    if len(uniq) >= 5:
-                        break
-                self._stats.last_paths = uniq
-        elif count_event:
-            self._stats.events_total += 1
-        state: dict[str, Any] = self._ws_state_bucket()
-        state["last_event_at"] = wall_now
-        state["last_payload_at"] = self._last_payload_wall
-        state["frames_total"] = self._stats.frames_total
-        state["events_total"] = self._stats.events_total
-        if self._healthy_since is None:
-            self._healthy_since = mono_now
-            self._healthy_since_wall = wall_now
-            self._update_status("healthy")
+        _WsLeaseMixin.__init__(self)
+        self.hass = hass
+        self.entry_id = entry_id
+        self.dev_id = dev_id
+        self._client = api_client
+        self._coordinator = coordinator
+        self._session = session or getattr(api_client, "_session", None)
+        self._loop = getattr(hass, "loop", None) or asyncio.get_event_loop()
+        self._namespace = namespace or WS_NAMESPACE
+        self._task: asyncio.Task | None = None
 
-    def _schedule_idle_restart(self, *, idle_for: float, source: str) -> None:
-        """Log idle payload detection and close the websocket for restart."""
+    def start(self) -> asyncio.Task:
+        if self._task and not self._task.done():
+            return self._task
+        self._task = self._loop.create_task(self._stub(), name=f"{DOMAIN}-ws-{self.dev_id}")
+        return self._task
 
-        if self._closing or self._idle_restart_pending:
-            return
-        self._idle_restart_pending = True
-        self._ws_state_bucket()["idle_restart_pending"] = True
-        _LOGGER.warning(
-            "WS: no payloads for %.0f s (%s heartbeat); restarting", idle_for, source
-        )
+    async def _stub(self) -> None:
+        _LOGGER.info("TermoWebWSClient: legacy path not modified in this file")
 
-        async def _restart() -> None:
-            try:
-                await self._disconnect(reason="idle restart")
-            finally:
-                self._idle_restart_pending = False
-                self._idle_restart_task = None
-                self._ws_state_bucket()["idle_restart_pending"] = False
+    async def stop(self) -> None:
+        if self._task:
+            self._task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._task
+            self._task = None
 
-        self._idle_restart_task = self._loop.create_task(_restart())
-
-    def _cancel_idle_restart(self) -> None:
-        """Cancel any scheduled idle restart due to new payload activity."""
-
-        task = self._idle_restart_task
-        if task and not task.done():
-            task.cancel()
-        self._idle_restart_task = None
-        self._idle_restart_pending = False
-        self._ws_state_bucket()["idle_restart_pending"] = False
-
-    async def _get_token(self) -> str:
-        """Reuse the REST client token for websocket authentication."""
-        headers = await self._client.authed_headers()
-        auth_header = (
-            headers.get("Authorization") if isinstance(headers, dict) else None
-        )
-        if not auth_header:
-            raise RuntimeError("authorization token missing")
-        return auth_header.split(" ", 1)[1]
-
-    async def _force_refresh_token(self) -> None:
-        """Force the REST client to fetch a fresh access token."""
-        refresh = getattr(self._client, "refresh_token", None)
-        if refresh is None:
-            raise RuntimeError("REST client missing refresh_token()")
-        await refresh()
-
-    def _api_base(self) -> str:
-        """Return the base REST API URL used for websocket routes."""
-        base = getattr(self._client, "api_base", None)
-        if isinstance(base, str) and base:
-            return base.rstrip("/")
-        return API_BASE
+    def is_running(self) -> bool:
+        return bool(self._task and not self._task.done())
 
 
-# ----------------------------------------------------------------------
-# Legacy Socket.IO 0.9 client
-# ----------------------------------------------------------------------
+# ---------------------- Ducaheat exact EIO3 client ----------------------
 
-
-class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network client
-    """Legacy Socket.IO 0.9 websocket client for TermoWeb."""
+class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
+    """Vendor flow: /socket.io/ + EIO=3 polling -> POST '40/ns' -> drain GET -> WS upgrade."""
 
     def __init__(
         self,
@@ -1333,11 +320,9 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         api_client: RESTClient,
         coordinator: Any,
         session: aiohttp.ClientSession | None = None,
-        handshake_fail_threshold: int = 5,
-        protocol: str | None = None,
+        namespace: str | None = None,
     ) -> None:
-        """Initialise the legacy websocket client container."""
-
+        _WsLeaseMixin.__init__(self)
         self.hass = hass
         self.entry_id = entry_id
         self.dev_id = dev_id
@@ -1345,1213 +330,330 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._coordinator = coordinator
         self._session = session or getattr(api_client, "_session", None)
         if self._session is None:
-            raise RuntimeError("aiohttp session required for websocket client")
-        self._protocol_hint = protocol
+            raise RuntimeError("aiohttp session required")
+        self._namespace = namespace or DUCAHEAT_NAMESPACE
         self._loop = getattr(hass, "loop", None) or asyncio.get_event_loop()
+
+        self._brand = BRAND_DUCAHEAT
+        self._ua = get_brand_user_agent(self._brand)
+        self._xrw = get_brand_requested_with(self._brand)
+
         self._task: asyncio.Task | None = None
-        self._namespace = WS_NAMESPACE
         self._ws: aiohttp.ClientWebSocketResponse | None = None
-        self._disconnected = asyncio.Event()
-        self._disconnected.set()
-
-        _WsLeaseMixin.__init__(self)
-
-        self._user_agent = get_brand_user_agent(BRAND_TERMOWEB)
-        self._requested_with = get_brand_requested_with(BRAND_TERMOWEB)
-
-        self._closing = False
-        self._connected_since: float | None = None
-        self._connected_since_wall: float | None = None
-        self._healthy_since: float | None = None
-        self._healthy_since_wall: float | None = None
-        self._hb_send_interval: float = 27.0
-        self._hb_task: asyncio.Task | None = None
-        self._rtc_keepalive_task: asyncio.Task | None = None
-        self._rtc_keepalive_interval: float = 30.0
-
-        self._hs_fail_threshold = handshake_fail_threshold
-        self._hs_fail_count: int = 0
-        self._hs_fail_start: float = 0.0
-
         self._stats = WSStats()
-        self._status: str = "stopped"
-        self._stop_event = asyncio.Event()
-        self._handshake_logged = False
-        self._last_event_at: float | None = None
-        self._last_event_wall: float | None = None
-        self._last_payload_at: float | None = None
-        self._last_payload_wall: float | None = None
-        self._last_heartbeat_at: float | None = None
 
-        self._handshake_payload: dict[str, Any] | None = None
-        self._nodes: dict[str, Any] = {}
-        self._nodes_raw: dict[str, Any] = {}
-
-        self._ws_state: dict[str, Any] | None = None
-        state = self._ws_state_bucket()
-        state.setdefault("last_payload_at", None)
-        state.setdefault("idle_restart_pending", False)
-
-        self._write_hook_installed = False
-        self._write_hook_original: Callable[..., Awaitable[Any]] | None = None
-        self._install_write_hook()
-
-    # ------------------------------------------------------------------
-    # Public control
-    # ------------------------------------------------------------------
-    def _install_write_hook(self) -> None:
-        """Wrap REST writes so we can observe successful node updates."""
-
-        if self._write_hook_installed:
-            return
-        client = self._client
-        original = getattr(client, "set_node_settings", None)
-        if not callable(original):
-            self._write_hook_installed = True
-            return
-
-        watchers: dict[str, weakref.WeakSet[TermoWebWSClient]]
-        watchers = getattr(client, "_tw_ws_write_watchers", None)
-        if watchers is None:
-            watchers = {}
-            setattr(client, "_tw_ws_write_watchers", watchers)
-
-        dev_watchers = watchers.get(self.dev_id)
-        if dev_watchers is None:
-            dev_watchers = weakref.WeakSet()
-            watchers[self.dev_id] = dev_watchers
-        dev_watchers.add(self)
-
-        if not hasattr(client, "_tw_ws_write_wrapper"):
-
-            @wraps(original)
-            async def _wrapped_set_node_settings(*args: Any, **kwargs: Any) -> Any:
-                result = await original(*args, **kwargs)
-                dev_id_arg = kwargs.get("dev_id") if "dev_id" in kwargs else None
-                if dev_id_arg is None and args:
-                    dev_id_arg = args[0]
-                if isinstance(dev_id_arg, str):
-                    hooks = getattr(client, "_tw_ws_write_watchers", {})
-                    watchers_for_dev = hooks.get(dev_id_arg)
-                    if watchers_for_dev:
-                        for ws_client in list(watchers_for_dev):
-                            maybe = getattr(
-                                ws_client, "maybe_restart_after_write", None
-                            )
-                            if maybe is None or not callable(maybe):
-                                continue
-                            try:
-                                await maybe()
-                            except (
-                                asyncio.CancelledError
-                            ):  # pragma: no cover - passthrough
-                                raise
-                            except Exception:  # noqa: BLE001 - defensive logging
-                                _LOGGER.debug(
-                                    "WS: maybe_restart_after_write failed for %s",
-                                    ws_client.dev_id,
-                                    exc_info=True,
-                                )
-                        if not watchers_for_dev:
-                            hooks.pop(dev_id_arg, None)
-                return result
-
-            setattr(client, "set_node_settings", _wrapped_set_node_settings)
-            setattr(client, "_tw_ws_write_wrapper", _wrapped_set_node_settings)
-            setattr(client, "_tw_ws_write_original", original)
-
-        self._write_hook_original = getattr(client, "_tw_ws_write_original", original)
-        self._write_hook_installed = True
-
-    async def maybe_restart_after_write(self) -> None:
-        """Restart the websocket if writes follow long periods of inactivity."""
-
-        last_payload = self._last_payload_at or self._last_event_at
-        if last_payload is None:
-            return
-        idle_for = time_mod() - last_payload
-        if idle_for < self._payload_idle_window:
-            return
-        if _LOGGER.isEnabledFor(logging.INFO):
-            _LOGGER.info(
-                "WS: write acknowledged after %.0f s without payloads; restarting",
-                idle_for,
-            )
-        self._schedule_idle_restart(idle_for=idle_for, source="write notification")
+    def start(self) -> asyncio.Task:
+        if self._task and not self._task.done():
+            return self._task
+        self._task = self._loop.create_task(self._runner(), name=f"{DOMAIN}-ws-{self.dev_id}")
+        return self._task
 
     async def stop(self) -> None:
-        """Cancel tasks, close websocket sessions and reset legacy state."""
-
-        self._closing = True
-        if self._hb_task:
-            self._hb_task.cancel()
+        await self._disconnect("stop")
+        if self._task:
+            self._task.cancel()
             with suppress(asyncio.CancelledError):
-                await self._hb_task
-            self._hb_task = None
-        if self._rtc_keepalive_task:
-            self._rtc_keepalive_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._rtc_keepalive_task
-            self._rtc_keepalive_task = None
-        await super().stop()
+                await self._task
+            self._task = None
 
-    # ------------------------------------------------------------------
-    # Core loop and protocol dispatch
-    # ------------------------------------------------------------------
+    def is_running(self) -> bool:
+        return bool(self._task and not self._task.done())
+
+    def _base_host(self) -> str:
+        base = get_brand_api_base(self._brand).rstrip("/")
+        parsed = urlsplit(base if base else API_BASE)
+        return urlunsplit((parsed.scheme or "https", parsed.netloc or parsed.path, "", "", ""))
+
+    def _path(self) -> str:
+        return "/socket.io/"  # trailing slash per dump
+
+    async def ws_url(self) -> str:
+        token = await self._get_token()
+        params = {
+            "token": token,
+            "dev_id": self.dev_id,
+            "EIO": "3",
+            "transport": "polling",
+            "t": _rand_t(),
+        }
+        return urlunsplit(urlsplit(self._base_host())._replace(path=self._path(), query=urlencode(params)))
+
     async def _runner(self) -> None:
-        """Manage reconnection attempts and lifecycle."""
-
         self._update_status("starting")
         try:
-            await self._run_socketio_09()
+            while True:
+                try:
+                    await self._connect_once()
+                    await self._read_loop_ws()
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    _LOGGER.debug("WS (ducaheat): error %s", e, exc_info=True)
+                    await asyncio.sleep(self._next_backoff())
+                finally:
+                    await self._disconnect("loop")
+                    self._update_status("disconnected")
         finally:
             self._update_status("stopped")
 
-    async def _run_socketio_09(self) -> None:
-        """Manage reconnection loops for the legacy Socket.IO protocol."""
-
-        while not self._closing:
-            should_retry = True
-            try:
-                _LOGGER.debug("WS: initiating Socket.IO 0.9 handshake")
-                sid, hb_timeout = await self._handshake()
-                _LOGGER.debug(
-                    "WS: handshake succeeded sid=%s hb_timeout=%s", sid, hb_timeout
-                )
-                self._hs_fail_count = 0
-                self._hs_fail_start = 0.0
-                self._hb_send_interval = max(5.0, min(30.0, hb_timeout * 0.45))
-                await self._connect_ws(sid)
-                _LOGGER.debug("WS: websocket connection established")
-                await self._join_namespace()
-                await self._send_snapshot_request()
-                await self._subscribe_session_metadata()
-                await self._subscribe_htr_samples()
-                mono_now, wall_now = _now_pair()
-                self._connected_since = mono_now
-                self._connected_since_wall = wall_now
-                self._healthy_since = None
-                self._healthy_since_wall = None
-                self._update_status("connected")
-                if self._idle_monitor_task is None or self._idle_monitor_task.done():
-                    _LOGGER.debug("WS: starting legacy idle monitor")
-                    self._idle_monitor_task = self._loop.create_task(
-                        self._idle_monitor()
-                    )
-                self._hb_task = self._loop.create_task(self._heartbeat_loop())
-                if self._rtc_keepalive_task and not self._rtc_keepalive_task.done():
-                    self._rtc_keepalive_task.cancel()
-                self._rtc_keepalive_task = self._loop.create_task(
-                    self._rtc_keepalive_loop()
-                )
-                await self._read_loop()
-            except asyncio.CancelledError:
-                should_retry = False
-            except HandshakeError as err:
-                self._hs_fail_count += 1
-                if self._hs_fail_count == 1:
-                    self._hs_fail_start = time_mod()
-                _LOGGER.info(
-                    "WS: connection error (%s: %s); will retry", type(err).__name__, err
-                )
-                if self._hs_fail_count >= self._hs_fail_threshold:
-                    elapsed = time_mod() - self._hs_fail_start
-                    _LOGGER.warning(
-                        "WS: handshake failed %d times over %.1f s",
-                        self._hs_fail_count,
-                        elapsed,
-                    )
-                    self._hs_fail_count = 0
-                    self._hs_fail_start = 0.0
-                _LOGGER.debug(
-                    "WS: handshake error url=%s body=%r",
-                    self._sanitise_url(err.url),
-                    err.body_snippet,
-                )
-            except Exception as err:  # noqa: BLE001
-                _LOGGER.info(
-                    "WS: connection error (%s: %s); will retry", type(err).__name__, err
-                )
-                _LOGGER.debug("WS: connection error details", exc_info=True)
-            finally:
-                if self._hb_task:
-                    self._hb_task.cancel()
-                    self._hb_task = None
-                if self._rtc_keepalive_task:
-                    self._rtc_keepalive_task.cancel()
-                    self._rtc_keepalive_task = None
-                if self._idle_monitor_task:
-                    _LOGGER.debug("WS: stopping legacy idle monitor")
-                    self._idle_monitor_task.cancel()
-                    if hasattr(self._idle_monitor_task, "__await__"):
-                        with suppress(asyncio.CancelledError):
-                            await self._idle_monitor_task
-                    self._idle_monitor_task = None
-                self._subscription_refresh_failed = False
-                if self._ws:
-                    with suppress(aiohttp.ClientError, RuntimeError):
-                        await self._ws.close()
-                    self._ws = None
-                self._update_status("disconnected")
-            if self._closing or not should_retry:
-                break
-            await asyncio.sleep(self._next_backoff_delay())
-
-    async def _handshake(self) -> tuple[str, int]:
-        """Perform the legacy GET /socket.io/1/ handshake."""
-
+    async def _connect_once(self) -> None:
         token = await self._get_token()
-        t_ms = int(time.time() * 1000)
-        base = self._api_base()
-        url = f"{base}/socket.io/1/?token={token}&dev_id={self.dev_id}&t={t_ms}"
-        try:
-            async with asyncio.timeout(15):
-                headers = self._brand_headers(origin="https://localhost")
-                async with self._session.get(
-                    url,
-                    timeout=aiohttp.ClientTimeout(total=15),
-                    headers=headers,
-                ) as resp:
-                    body = await resp.text()
-                    if resp.status == 401:
-                        _LOGGER.info("WS: handshake 401; refreshing token")
-                        await self._force_refresh_token()
-                        raise HandshakeError(resp.status, url, body)
-                    if resp.status != 200:
-                        raise HandshakeError(resp.status, url, body)
-        except TimeoutError as err:
-            raise HandshakeError(599, url, "timeout") from err
-        except aiohttp.ClientError as err:
-            raise HandshakeError(598, url, str(err)) from err
-        parts = body.strip().split(":")
-        if len(parts) < 3:
-            raise HandshakeError(590, url, body[:120])
-        sid = parts[0]
-        try:
-            hb_timeout = int(parts[1])
-        except ValueError as err:
-            raise HandshakeError(591, url, body[:120]) from err
-        return sid, hb_timeout
+        headers = _brand_headers(self._ua, self._xrw)
 
-    async def _connect_ws(self, sid: str) -> None:
-        """Open the websocket connection using the handshake session id."""
+        # 1) Polling OPEN (GET)
+        open_params = {
+            "token": token,
+            "dev_id": self.dev_id,
+            "EIO": "3",
+            "transport": "polling",
+            "t": _rand_t(),
+        }
+        open_url = urlunsplit(urlsplit(self._base_host())._replace(path=self._path(), query=urlencode(open_params)))
+        _LOGGER.debug("WS (ducaheat): OPEN GET %s", open_url.replace(token, "…"))
+        async with asyncio.timeout(15):
+            async with self._session.get(open_url, headers=headers) as resp:
+                body = await resp.read()
+                _LOGGER.debug("WS (ducaheat): OPEN GET -> %s bytes (status=%s)", len(body), resp.status)
+                if resp.status != 200:
+                    raise HandshakeError(resp.status, open_url, "open GET")
+        packets = _decode_polling_packets(body)
+        open_pkt = next((p for p in packets if p and p[0] == "0"), None)
+        if not open_pkt:
+            _LOGGER.debug("WS (ducaheat): open raw first 120 bytes: %r", body[:120])
+            raise HandshakeError(590, open_url, "missing OPEN (0)")
+        try:
+            info = json.loads(open_pkt[1:])
+        except Exception:
+            raise HandshakeError(591, open_url, "invalid OPEN json")
+        sid = info.get("sid")
+        ping_interval = info.get("pingInterval")
+        ping_timeout = info.get("pingTimeout")
+        _LOGGER.info("WS (ducaheat): OPEN decoded sid=%s pingInterval=%s pingTimeout=%s", sid, ping_interval, ping_timeout)
+        if not isinstance(sid, str) or not sid:
+            raise HandshakeError(592, open_url, "missing sid")
 
-        token = await self._get_token()
-        ws_url = (
-            f"{self._socket_base()}/socket.io/1/websocket/{sid}"
-            f"?token={token}&dev_id={self.dev_id}"
-        )
-        _LOGGER.info("WS: connecting to %s", self._sanitise_url(ws_url))
-        headers = self._brand_headers(origin="https://localhost")
+        # 2) Polling POST SIO open "40/ns"
+        post_params = {
+            "token": token,
+            "dev_id": self.dev_id,
+            "EIO": "3",
+            "transport": "polling",
+            "t": _rand_t(),
+            "sid": sid,
+        }
+        post_url = urlunsplit(urlsplit(self._base_host())._replace(path=self._path(), query=urlencode(post_params)))
+        sio_open = f"40{self._namespace}"
+        payload = _encode_polling_packet(sio_open)
+        _LOGGER.debug("WS (ducaheat): POST 40/ns %s", post_url.replace(token, "…"))
+        async with asyncio.timeout(15):
+            async with self._session.post(
+                post_url,
+                headers={**headers, "Content-Type": "text/plain;charset=UTF-8"},
+                data=payload,
+            ) as resp:
+                body = await resp.read()
+                _LOGGER.debug("WS (ducaheat): POST 40/ns -> status=%s len=%s", resp.status, len(body))
+                if resp.status != 200:
+                    raise HandshakeError(resp.status, post_url, "POST 40/ns")
+
+        # 2b) Polling GET to drain acks
+        drain_params = dict(post_params)
+        drain_params["t"] = _rand_t()
+        drain_url = urlunsplit(urlsplit(self._base_host())._replace(path=self._path(), query=urlencode(drain_params)))
+        _LOGGER.debug("WS (ducaheat): DRAIN GET %s", drain_url.replace(token, "…"))
+        async with asyncio.timeout(15):
+            async with self._session.get(drain_url, headers=headers) as resp:
+                body = await resp.read()
+                _LOGGER.debug("WS (ducaheat): DRAIN GET -> status=%s len=%s", resp.status, len(body))
+                if resp.status != 200:
+                    raise HandshakeError(resp.status, drain_url, "drain GET")
+
+        # 3) WebSocket upgrade (no t param)
+        ws_params = {
+            "token": token,
+            "dev_id": self.dev_id,
+            "EIO": "3",
+            "transport": "websocket",
+            "sid": sid,
+        }
+        ws_url = urlunsplit(urlsplit(self._base_host())._replace(path=self._path(), query=urlencode(ws_params)))
+        ws_headers = {k: v for k, v in headers.items() if k.lower() not in ("connection", "accept-encoding")}
+        _LOGGER.debug("WS (ducaheat): upgrading WS %s", ws_url.replace(token, "…"))
         self._ws = await self._session.ws_connect(
             ws_url,
-            timeout=aiohttp.ClientTimeout(total=15),
+            headers=ws_headers,
             heartbeat=None,
             autoclose=False,
-            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=15),
         )
+        _LOGGER.info("WS (ducaheat): upgrade OK")
 
-    async def _join_namespace(self) -> None:
-        """Join the API namespace after the websocket connects."""
+        # EIO3 probe/upgrade
+        await self._ws.send_str("2probe")
+        _LOGGER.debug("WS (ducaheat): sent 2probe")
+        probe = await self._ws.receive_str()
+        _LOGGER.debug("WS (ducaheat): recv %r", probe)
+        if probe != "3probe":
+            _LOGGER.debug("WS (ducaheat): unexpected probe ack: %r", probe)
+        await self._ws.send_str("5")
+        _LOGGER.debug("WS (ducaheat): sent 5 (upgrade)")
 
-        await self._send_text(f"1::{self._namespace}")
+        await self._ws.send_str(f"40{self._namespace}")
+        _LOGGER.debug("WS (ducaheat): namespace open sent %s", self._namespace)
 
-    async def _send_snapshot_request(self) -> None:
-        """Request the initial device snapshot."""
+        await self._emit_sio("dev_data")
+        _LOGGER.debug("WS (ducaheat): dev_data emitted")
 
-        payload = {"name": "dev_data", "args": []}
-        await self._send_text(
-            f"5::{self._namespace}:{json.dumps(payload, separators=(',', ':'))}"
-        )
+        subs = await self._subscribe_samples()
+        _LOGGER.info("WS (ducaheat): subscribed %d sample targets", subs)
 
-    async def _subscribe_session_metadata(self) -> None:
-        """Subscribe to legacy session metadata updates."""
+        self._update_status("connected")
 
-        payload = {"name": "subscribe", "args": ["/mgr/session"]}
-        await self._send_text(
-            f"5::{self._namespace}:{json.dumps(payload, separators=(',', ':'))}"
-        )
-
-    async def _subscribe_htr_samples(self) -> None:
-        """Subscribe to heater sample updates."""
-
-        targets = self._heater_sample_subscription_targets()
-        if not targets:
-            return
-        for node_type, addr in targets:
-            payload = {
-                "name": "subscribe",
-                "args": [f"/{node_type}/{addr}/samples"],
-            }
-            await self._send_text(
-                f"5::{self._namespace}:{json.dumps(payload, separators=(',', ':'))}"
-            )
-
-    async def _heartbeat_loop(self) -> None:
-        """Send periodic heartbeat frames to keep the connection alive."""
-
-        try:
-            await self._run_heartbeat(
-                self._hb_send_interval, partial(self._send_text, "2::")
-            )
-        except asyncio.CancelledError:
-            return
-        except (aiohttp.ClientError, RuntimeError):  # pragma: no cover - best effort
-            return
-
-    async def _rtc_keepalive_loop(self) -> None:
-        """Poll the REST API to keep the device session alive."""
-
-        interval = self._rtc_keepalive_interval
-        try:
-            while not self._closing:
-                try:
-                    await self._client.get_rtc_time(self.dev_id)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as err:  # noqa: BLE001
-                    if _LOGGER.isEnabledFor(logging.DEBUG):
-                        _LOGGER.debug(
-                            "WS: RTC keep-alive failed (%s: %s)",
-                            type(err).__name__,
-                            err,
-                        )
-                await asyncio.sleep(interval)
-        except asyncio.CancelledError:
-            raise
-        except Exception:  # noqa: BLE001 - pragma: no cover - defensive best effort
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                _LOGGER.debug(
-                    "WS: RTC keep-alive loop stopped unexpectedly", exc_info=True
-                )
-
-    async def _read_loop(self) -> None:
-        """Consume websocket frames and route events for the legacy protocol."""
-
+    async def _read_loop_ws(self) -> None:
         ws = self._ws
         if ws is None:
             return
-        async for data in self._ws_payload_stream(ws, context="websocket"):
-            if data.startswith("2::"):
-                self._record_heartbeat(source="socketio09")
-                continue
-            if data.startswith(f"1::{self._namespace}"):
-                continue
-            if data.startswith(f"5::{self._namespace}:"):
-                try:
-                    payload = json.loads(data.split(f"5::{self._namespace}:", 1)[1])
-                except Exception:  # noqa: BLE001
-                    continue
-                self._handle_event(payload)
-                continue
-            if data.startswith("0::"):
-                raise RuntimeError("server disconnect")
-
-    def _handle_event(self, evt: dict[str, Any]) -> None:
-        """Process a Socket.IO 0.9 event payload."""
-
-        if not isinstance(evt, dict):
-            return
-        name = evt.get("name")
-        args = evt.get("args")
-        if name != "data" or not isinstance(args, list) or not args:
-            return
-        batch = args[0] if isinstance(args[0], list) else None
-        if not isinstance(batch, list):
-            return
-        paths: list[str] = []
-        updated_nodes = False
-        updated_addrs: list[tuple[str, str]] = []
-        sample_addrs: list[tuple[str, str]] = []
-
-        def _extract_type_addr(path: str) -> tuple[str | None, str | None]:
-            """Extract the node type and address from a websocket path."""
-
-            if not path:
-                return None, None
-            parts = [segment for segment in path.split("/") if segment]
-            for idx in range(len(parts) - 2):
-                node_type = parts[idx]
-                addr = parts[idx + 1]
-                leaf = parts[idx + 2]
-                if leaf in {"settings", "samples", "advanced_setup"}:
-                    return node_type, addr
-            return None, None
-
-        for item in batch:
-            if not isinstance(item, Mapping):
-                continue
-            path = item.get("path")
-            body = item.get("body")
-            if not isinstance(path, str):
-                continue
-            paths.append(path)
-            dev_map: dict[str, Any] = (self._coordinator.data or {}).get(
-                self.dev_id
-            ) or {}
-            if not dev_map:
-                htr_bucket: dict[str, Any] = {
-                    "addrs": [],
-                    "settings": {},
-                    "advanced": {},
-                    "samples": {},
-                }
-                dev_map = {
-                    "dev_id": self.dev_id,
-                    "name": f"Device {self.dev_id}",
-                    "raw": {},
-                    "connected": True,
-                    "nodes": None,
-                    "nodes_by_type": {"htr": htr_bucket},
-                    "htr": htr_bucket,
-                }
-                cur = dict(self._coordinator.data or {})
-                cur[self.dev_id] = dev_map
-                self._coordinator.data = cur  # type: ignore[attr-defined]
-            nodes_by_type: dict[str, Any] = dev_map.setdefault("nodes_by_type", {})
-            if path.endswith("/mgr/nodes"):
-                if isinstance(body, dict):
-                    dev_map["nodes"] = body
-                    self._nodes_raw = deepcopy(body)
-                    self._nodes = self._build_nodes_snapshot(self._nodes_raw)
-                    type_to_addrs = self._dispatch_nodes(body)
-                    for node_type, addrs in type_to_addrs.items():
-                        bucket = self._ensure_type_bucket(
-                            dev_map, nodes_by_type, node_type
-                        )
-                        bucket["addrs"] = list(addrs)
-                    updated_nodes = True
-                continue
-            node_type, addr = _extract_type_addr(path)
-            if node_type and addr and node_type != "mgr":
-                section = self._legacy_section_for_path(path)
-                if section:
-                    if section in {"settings", "advanced"} and not isinstance(
-                        body, Mapping
-                    ):
-                        continue
-                    if self._update_legacy_section(
-                        node_type=node_type,
-                        addr=addr,
-                        section=section,
-                        body=body,
-                        dev_map=dev_map,
-                        nodes_by_type=nodes_by_type,
-                    ):
-                        if section == "samples":
-                            sample_addrs.append((node_type, addr))
-                        elif section == "settings":
-                            updated_addrs.append((node_type, addr))
-                        updated_nodes = True
-                    continue
-            raw = dev_map.setdefault("raw", {})
-            key = path.strip("/").replace("/", "_")
-            raw[key] = body
-
-        if updated_nodes:
-            self._nodes = self._build_nodes_snapshot(self._nodes_raw)
-        self._mark_event(paths=paths)
-        payload_base = {
-            "dev_id": self.dev_id,
-            "ts": self._stats.last_event_ts,
-            "node_type": None,
-        }
-        if updated_nodes:
-            async_dispatcher_send(
-                self.hass,
-                signal_ws_data(self.entry_id),
-                {**payload_base, "addr": None, "kind": "nodes"},
-            )
-        for node_type, addr in set(updated_addrs):
-            async_dispatcher_send(
-                self.hass,
-                signal_ws_data(self.entry_id),
-                {
-                    **payload_base,
-                    "addr": addr,
-                    "kind": f"{node_type}_settings",
-                    "node_type": node_type,
-                },
-            )
-        for node_type, addr in set(sample_addrs):
-            async_dispatcher_send(
-                self.hass,
-                signal_ws_data(self.entry_id),
-                {
-                    **payload_base,
-                    "addr": addr,
-                    "kind": f"{node_type}_samples",
-                    "node_type": node_type,
-                },
-            )
-        self._log_legacy_update(
-            updated_nodes=updated_nodes,
-            updated_addrs=updated_addrs,
-            sample_addrs=sample_addrs,
-        )
-
-    def _mark_event(
-        self, *, paths: list[str] | None, count_event: bool = False
-    ) -> None:
-        """Record payload batches and update the payload timestamp."""
-
-        super()._mark_event(paths=paths, count_event=count_event)
-        if self._last_payload_at is None and self._last_event_at is not None:
-            self._last_payload_at = self._last_event_at
-            self._last_payload_wall = self._last_event_wall
-        state = self._ws_state_bucket()
-        state["last_payload_at"] = self._last_payload_wall
-
-    def _update_legacy_section(
-        self,
-        *,
-        node_type: str,
-        addr: str,
-        section: str,
-        body: Any,
-        dev_map: dict[str, Any],
-        nodes_by_type: dict[str, Any],
-    ) -> bool:
-        """Store legacy section updates and mirror them in raw state."""
-
-        bucket = self._ensure_type_bucket(dev_map, nodes_by_type, node_type)
-        section_map: dict[str, Any] = bucket.setdefault(section, {})
-        if not isinstance(section_map, dict):
-            return False
-        value: Any = dict(body) if isinstance(body, Mapping) else body
-        section_map[addr] = value
-        raw_bucket = self._nodes_raw.setdefault(node_type, {})
-        raw_section = raw_bucket.setdefault(section, {})
-        if isinstance(raw_section, dict):
-            raw_section[addr] = deepcopy(body)
-        return True
-
-    @staticmethod
-    def _legacy_section_for_path(path: str) -> str | None:
-        """Return the legacy section identifier for ``path`` if supported."""
-
-        if path.endswith("/settings"):
-            return "settings"
-        if path.endswith("/advanced_setup"):
-            return "advanced"
-        if path.endswith("/samples"):
-            return "samples"
-        return None
-
-    def _log_legacy_update(
-        self,
-        *,
-        updated_nodes: bool,
-        updated_addrs: Iterable[tuple[str, str]],
-        sample_addrs: Iterable[tuple[str, str]],
-    ) -> None:
-        """Emit debug logging for the legacy websocket update batch."""
-
-        if not _LOGGER.isEnabledFor(logging.DEBUG):
-            return
-        addr_pairs = {f"{node_type}/{addr}" for node_type, addr in updated_addrs}
-        addr_pairs.update(f"{node_type}/{addr}" for node_type, addr in sample_addrs)
-        if addr_pairs:
-            _LOGGER.debug("WS: legacy update for %s", ", ".join(sorted(addr_pairs)))
-        elif updated_nodes:
-            _LOGGER.debug("WS: legacy nodes refresh")
-
-    async def _refresh_subscription(self, *, reason: str) -> None:
-        """Replay subscription calls to keep the legacy websocket active."""
-
-        async with self._subscription_refresh_lock:
-            ws = self._ws
-            if ws is None or getattr(ws, "closed", False):
-                raise RuntimeError("websocket not connected")
-            now_mono = time_mod()
-            self._subscription_refresh_last_attempt = now_mono
-            _LOGGER.debug("WS: refreshing websocket lease (%s)", reason)
-            try:
-                await self._send_snapshot_request()
-                await self._subscribe_session_metadata()
-                await self._subscribe_htr_samples()
-            except asyncio.CancelledError:  # pragma: no cover - task lifecycle
-                raise
-            except Exception as err:
-                self._subscription_refresh_failed = True
-                _LOGGER.warning(
-                    "WS: legacy lease refresh failed (%s: %s)",
-                    type(err).__name__,
-                    err,
-                    exc_info=True,
-                )
-                self._schedule_idle_restart(
-                    idle_for=self._payload_idle_window, source="lease refresh failure"
-                )
-                raise
-            self._subscription_refresh_failed = False
-            self._subscription_refresh_last_success = time_mod()
-
-    async def _send_text(self, data: str) -> None:
-        """Send a websocket text frame."""
-
-        if not self._ws:
-            raise RuntimeError("websocket not connected")
-        await self._ws.send_str(data)
-
-    async def _disconnect(self, *, reason: str) -> None:
-        """Close the websocket connection if active."""
-
-        if self._ws:
-            with suppress(aiohttp.ClientError, RuntimeError):
-                await self._ws.close(
-                    code=aiohttp.WSCloseCode.GOING_AWAY, message=reason.encode()
-                )
-            self._ws = None
-
-    async def _ws_payload_stream(
-        self, ws: aiohttp.ClientWebSocketResponse, *, context: str
-    ) -> AsyncIterator[str]:
-        """Yield websocket payload strings."""
-
         async for msg in ws:
             if msg.type == aiohttp.WSMsgType.TEXT:
+                data = msg.data
                 self._stats.frames_total += 1
-                yield msg.data
-            elif msg.type == aiohttp.WSMsgType.BINARY:
-                try:
-                    decoded = codecs.decode(msg.data, "utf-8")
-                except Exception:  # noqa: BLE001
+                if data == "2":  # ping
+                    _LOGGER.debug("WS (ducaheat): <- 2 (ping) -> 3 (pong)")
+                    await ws.send_str("3")
                     continue
-                self._stats.frames_total += 1
-                yield decoded
+                if not data.startswith("4"):  # not Engine.IO message
+                    continue
+                payload = data[1:]
+                if payload.startswith("40"):
+                    _LOGGER.debug("WS (ducaheat): 40 (namespace open ack)")
+                    self._update_status("healthy")
+                    continue
+                if payload.startswith("42"):
+                    content = payload[2:]
+                    if content.startswith("/"):
+                        _ns, sep, content = content.partition(",")
+                        if sep != ",":
+                            continue
+                    try:
+                        arr = json.loads(content)
+                    except Exception:
+                        continue
+                    if not isinstance(arr, list) or not arr:
+                        continue
+                    evt = arr[0]
+                    args = arr[1:]
+                    _LOGGER.debug("WS (ducaheat): 42 event=%s size=%s", evt, sum(len(json.dumps(a)) if not isinstance(a, str) else len(a) for a in args))
+                    if evt == "message" and args and args[0] == "ping":
+                        _LOGGER.debug("WS (ducaheat): app ping -> pong")
+                        await self._emit_sio("message", "pong")
+                        continue
+                    if evt == "dev_data" and args and isinstance(args[0], dict):
+                        nodes = args[0].get("nodes") if isinstance(args[0], dict) else None
+                        if isinstance(nodes, dict):
+                            self._log_nodes_summary(nodes)
+                            self._dispatch_nodes({"nodes": nodes})
+                            self._update_status("healthy")
+                        continue
+                    if evt == "update" and args:
+                        self._log_update_brief(args[0])
+                        self._update_status("healthy")
+                        continue
+                    continue
             elif msg.type == aiohttp.WSMsgType.ERROR:
-                raise RuntimeError(f"{context} error: {ws.exception()}")
+                raise RuntimeError(f"websocket error: {ws.exception()}")
             elif msg.type in {aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED}:
-                raise RuntimeError(f"{context} closed")
+                raise RuntimeError("websocket closed")
 
-    def _record_heartbeat(self, *, source: str) -> None:
-        """Record receipt of a heartbeat frame."""
-
-        _ = source
-        mono_now, wall_now = _now_pair()
-        self._stats.last_event_ts = wall_now
-        self._last_event_at = mono_now
-        self._last_event_wall = wall_now
-        self._last_heartbeat_at = mono_now
-
-    async def _idle_monitor(self) -> None:
-        """Monitor payload idleness and restart stale websocket sessions."""
-
-        while not self._closing:
-            await asyncio.sleep(60)
-            ws = self._ws
-            if ws is None or getattr(ws, "closed", True):
-                if self._disconnected.is_set():
-                    break
-                continue
-            last_payload = self._last_payload_at
-            now_mono = time_mod()
-            idle_for: float | None = None
-            if last_payload is not None:
-                idle_for = now_mono - last_payload
-                if idle_for >= self._payload_idle_window:
-                    _LOGGER.info(
-                        "WS: no payloads for %.0f s; scheduling websocket restart",
-                        idle_for,
-                    )
-                    self._schedule_idle_restart(
-                        idle_for=idle_for, source="idle monitor payload timeout"
-                    )
-                    break
-            if self._subscription_refresh_failed:
-                try:
-                    await self._refresh_subscription(reason="idle monitor retry")
-                except asyncio.CancelledError:  # pragma: no cover - task lifecycle
-                    raise
-                except Exception:  # noqa: BLE001
-                    fallback_idle = (
-                        idle_for if idle_for is not None else self._payload_idle_window
-                    )
-                    self._schedule_idle_restart(
-                        idle_for=fallback_idle, source="idle monitor retry failed"
-                    )
-                    break
-
-    async def _run_heartbeat(
-        self, interval: float, send: Callable[[], Awaitable[Any]]
-    ) -> None:
-        """Send periodic heartbeats until cancelled."""
-
-        while not self._closing:
-            await asyncio.sleep(interval)
-            try:
-                await send()
-            except Exception:  # noqa: BLE001
-                return
-
-    def _socket_base(self) -> str:
-        """Return the base URL for websocket connections."""
-
-        base = self._api_base().rstrip("/")
-        parsed = urlsplit(base if base else API_BASE)
-        scheme = parsed.scheme or "https"
-        netloc = parsed.netloc or parsed.path
-        path = parsed.path.rstrip("/")
-        return urlunsplit((scheme, netloc, path or "", "", ""))
-
-
-class DucaheatWSClient(WebSocketClient):
-    """Verbose websocket client variant with payload debug logging."""
-
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        *,
-        entry_id: str,
-        dev_id: str,
-        api_client: RESTClient,
-        coordinator: Any,
-        session: aiohttp.ClientSession | None = None,
-        handshake_fail_threshold: int = 5,
-        protocol: str | None = None,
-        namespace: str | None = None,
-    ) -> None:
-        """Initialise the websocket client with extended debug logging."""
-
-        resolved_namespace = namespace or WS_NAMESPACE
-        super().__init__(
-            hass,
-            entry_id=entry_id,
-            dev_id=dev_id,
-            api_client=api_client,
-            coordinator=coordinator,
-            session=session,
-            handshake_fail_threshold=handshake_fail_threshold,
-            protocol=protocol,
-            namespace=resolved_namespace,
-        )
-        self._connect_response_logged = False
-        self._open_payload_logged = False
-        self._fallback_last_refresh: float = 0.0
-        self._fallback_last_refresh_wall: float = 0.0
-        self._fallback_min_interval: float = 30.0
-        self._restart_count: int = 0
-        self._debug_probe_active = False
-        self._debug_probe_logged_handshake = False
-        self._debug_probe_logged_update = False
-        self._ensure_engineio_logger_level()
-        self._sio.on("message", namespace=self._namespace, handler=self._on_message)
-
-    async def _connect_once(self) -> None:
-        """Open the Socket.IO connection using the simple Ducaheat contract."""
-
-        if self._stop_event.is_set():
+    def _log_nodes_summary(self, nodes: Mapping[str, Any]) -> None:
+        if not _LOGGER.isEnabledFor(logging.INFO):
             return
+        kinds = []
+        for k, v in nodes.items():
+            if isinstance(v, Mapping):
+                # count addrs under settings/samples/etc.
+                addrs = set()
+                for section in ("settings", "samples", "status", "advanced"):
+                    sec = v.get(section)
+                    if isinstance(sec, Mapping):
+                        addrs.update(a for a in sec.keys() if isinstance(a, str))
+                kinds.append(f"{k}={len(addrs) if addrs else 0}")
+        _LOGGER.info("WS (ducaheat): dev_data nodes: %s", " ".join(kinds) if kinds else "(no nodes)")
 
-        self._connect_response_logged = False
-        self._open_payload_logged = False
-        self._debug_probe_logged_handshake = False
-        self._debug_probe_logged_update = False
-        self._ensure_engineio_logger_level()
-        assert (
-            self._brand == BRAND_DUCAHEAT
-        ), "Ducaheat websocket client initialised with unexpected brand"
-        token = await self._get_token()
-        query_params = {"token": token, "dev_id": self.dev_id}
-        base_host = self._ducaheat_socket_base()
-        socketio_path = "socket.io"
-        query_string = urlencode(query_params)
-        connect_host = f"{base_host}?{query_string}"
-        headers = self._brand_headers()
-        self._log_connect_request(
-            base=base_host,
-            socket_path=socketio_path,
-            params=query_params,
-            headers=headers,
-        )
-
-        transports = None  # disabled (use polling→upgrade)
-        sanitised_params = self._sanitise_params(query_params)
-        safe_qs = "&".join(
-            f"{key}={sanitised_params[key]}" for key in query_params
-        )
-        parsed_host = urlsplit(base_host)
-        scheme = parsed_host.scheme or "https"
-        netloc = parsed_host.netloc or parsed_host.path
-        path = f"/{socketio_path.lstrip('/')}"
-        handshake_url = urlunsplit((scheme, netloc, path, query_string, ""))
-        sanitised_url = self._sanitise_url(handshake_url)
-        _LOGGER.debug(
-            "WS[DUCAHEAT]: connecting host=%s socketio_path=%s transports=%s qs=%s",
-            urlunsplit((scheme, netloc, "", "", "")),
-            socketio_path,
-            'default',
-            safe_qs,
-        )
-        _LOGGER.debug(
-            "WS[DUCAHEAT]: connecting url=%s socketio_path=%s transports=%s",
-            sanitised_url,
-            socketio_path,
-            'default',
-        )
-
-        self._disconnected.clear()
-        self._reset_backoff()
-        await self._sio.connect(connect_host,
-            headers=headers,
-            namespaces=[self._namespace],
-            socketio_path=socketio_path,
-            wait=True,
-            wait_timeout=15,
-        )
-        self._log_connect_response()
-
-    def _ducaheat_socket_base(self) -> str:
-        """Return the host-level base URL for Ducaheat websocket calls."""
-
-        base = get_brand_api_base(self._brand).rstrip("/")
-        parsed = urlsplit(base if base else API_BASE)
-        scheme = parsed.scheme or "https"
-        netloc = parsed.netloc or parsed.path
-        if not netloc:
-            raise RuntimeError("invalid API base")
-        return urlunsplit((scheme, netloc, "", "", ""))
-
-    async def _build_engineio_target(self) -> tuple[str, str]:
-        """Return the Socket.IO target for Ducaheat."""
-
-        token = await self._get_token()
-        base_host = self._ducaheat_socket_base()
-        socketio_path = get_brand_socketio_path(self._brand)
-        query = urlencode({"token": token, "dev_id": self.dev_id})
-        parsed_host = urlsplit(base_host)
-        scheme = parsed_host.scheme or "https"
-        netloc = parsed_host.netloc or parsed_host.path
-        path = f"/{socketio_path.lstrip('/')}"
-        url = urlunsplit((scheme, netloc, path, query, ""))
-        return url, socketio_path
-
-    def _ensure_engineio_logger_level(self) -> None:
-        """Ensure the engine.io logger remains active when debugging."""
-
+    def _log_update_brief(self, body: Any) -> None:
         if not _LOGGER.isEnabledFor(logging.DEBUG):
             return
-        eio = getattr(self._sio, "eio", None)
-        logger = getattr(eio, "logger", None) if eio is not None else None
-        if logger is not None:
-            logger.setLevel(logging.DEBUG)
-            logger.disabled = False
+        path = None
+        keys = None
+        if isinstance(body, Mapping):
+            path = body.get("path")
+            b = body.get("body")
+            if isinstance(b, Mapping):
+                keys = ",".join(list(b.keys())[:6])
+        _LOGGER.debug("WS (ducaheat): update path=%s keys=%s", path, keys)
 
-    async def ws_url(self) -> str:
-        """Return the websocket URL for diagnostics."""
-
-        url, _ = await self._build_engineio_target()
-        return url
-
-    def _log_connect_request(
-        self,
-        *,
-        base: str,
-        socket_path: str,
-        params: Mapping[str, str],
-        headers: Mapping[str, Any],
-    ) -> None:
-        """Log the prepared websocket request metadata."""
-
-        if not _LOGGER.isEnabledFor(logging.DEBUG):
-            return
-        sanitised_params = self._sanitise_params(params)
-        safe_qs = "&".join(
-            f"{key}={sanitised_params[key]}" for key in params
-        ) or "(none)"
-        _LOGGER.debug(
-            "WS[DUCAHEAT]: connect target base=%s path=%s qs=%s",
-            base,
-            socket_path,
-            safe_qs,
-        )
-        if headers:
-            _LOGGER.debug(
-                "WS[DUCAHEAT]: request headers=%s",
-                self._sanitise_headers(headers),
-            )
-
-    def _log_connect_response(self) -> None:
-        """Log handshake response details when available."""
-
-        if not _LOGGER.isEnabledFor(logging.DEBUG):
-            return
-        if self._connect_response_logged:
-            return
-        self._connect_response_logged = True
-        sio = self._sio
-        url = getattr(sio, "connection_url", None)
-        if url:
-            _LOGGER.debug(
-                "WS (ducaheat): connected URL=%s", self._sanitise_url(str(url))
-            )
-        headers = getattr(sio, "connection_headers", None)
-        if isinstance(headers, Mapping) and headers:
-            _LOGGER.debug(
-                "WS (ducaheat): connection headers=%s", self._sanitise_headers(headers)
-            )
-        transports = getattr(sio, "connection_transports", None)
-        if transports:
-            _LOGGER.debug("WS (ducaheat): connection transports=%s", transports)
-        namespaces = getattr(sio, "connection_namespaces", None)
-        if namespaces:
-            _LOGGER.debug("WS (ducaheat): connection namespaces=%s", namespaces)
-        eio = getattr(sio, "eio", None)
-        if eio is None:
-            return
-        self._log_engineio_open_payload(eio)
-        sid = getattr(eio, "sid", None)
-        if sid:
-            _LOGGER.debug("WS (ducaheat): engine.io sid=%s", sid)
-        transport = getattr(eio, "transport", None)
-        if transport:
-            _LOGGER.debug("WS (ducaheat): engine.io transport=%s", transport)
-        ws = getattr(eio, "ws", None)
-        response = getattr(ws, "response", None) if ws is not None else None
-        if response is None:
-            return
-        status = getattr(response, "status", None)
-        if status is not None:
-            _LOGGER.debug("WS (ducaheat): websocket handshake status=%s", status)
-        resp_headers = getattr(response, "headers", None)
-        if resp_headers:
-            try:
-                header_map = dict(resp_headers)
-            except (TypeError, ValueError):
-                header_map = {"raw": str(resp_headers)}
-            _LOGGER.debug(
-                "WS (ducaheat): websocket response headers=%s",
-                self._sanitise_headers(header_map),
-            )
-
-    def _log_engineio_open_payload(self, eio: Any) -> None:
-        """Log the Engine.IO open payload metadata once per connection."""
-
-        if self._open_payload_logged:
-            return
-        if not _LOGGER.isEnabledFor(logging.DEBUG):
-            return
-        if eio is None:
-            return
-        handshake: dict[str, Any] = {}
-        sid = getattr(eio, "sid", None)
-        if sid:
-            handshake["sid"] = sid
-        upgrades = getattr(eio, "upgrades", None)
-        if upgrades is not None:
-            if isinstance(upgrades, (list, tuple)):
-                handshake["upgrades"] = list(upgrades)
-            else:
-                handshake["upgrades"] = upgrades
-        ping_interval = getattr(eio, "ping_interval", None)
-        if isinstance(ping_interval, (int, float)):
-            handshake["pingInterval"] = int(ping_interval * 1000)
-        ping_timeout = getattr(eio, "ping_timeout", None)
-        if isinstance(ping_timeout, (int, float)):
-            handshake["pingTimeout"] = int(ping_timeout * 1000)
-        if not handshake:
-            return
-        payload_text = json.dumps(handshake, default=str, separators=(",", ":"))
-        _LOGGER.debug(
-            "WS (ducaheat): engine.io open payload bytes=%d keys=%s",
-            len(payload_text.encode("utf-8")),
-            sorted(handshake.keys()),
-        )
-        self._open_payload_logged = True
-
-    async def debug_probe(self) -> None:
-        """Emit a dev_data probe and enable frame length logging."""
-
-        if not _LOGGER.isEnabledFor(logging.DEBUG):
-            return
-        self._debug_probe_active = True
-        self._debug_probe_logged_handshake = False
-        self._debug_probe_logged_update = False
-        _LOGGER.debug("WS (ducaheat): debug probe requested")
-        await super().debug_probe()
-
-    def _log_probe_frame(self, event: str, data: Any) -> None:
-        """Log encoded frame length details for debug probes."""
-
-        if not _LOGGER.isEnabledFor(logging.DEBUG):
-            return
+    def _translate_path_update(self, payload: Mapping[str, Any]) -> dict[str, Any] | None:
+        path = payload.get("path")
+        body = payload.get("body")
+        if not isinstance(path, str):
+            return None
+        path = path.split("?", 1)[0]
+        parts = [p for p in path.split("/") if p]
+        if not parts:
+            return None
         try:
-            payload_text = json.dumps(data, default=str, separators=(",", ":"))
-        except TypeError:
-            payload_text = json.dumps({"repr": repr(data)}, default=str)
-        length = len(payload_text.encode("utf-8"))
-        if isinstance(data, Mapping):
-            keys = sorted(str(key) for key in data)
-        else:
-            keys = [type(data).__name__]
-        _LOGGER.debug(
-            "WS (ducaheat): debug probe %s frame bytes=%d keys=%s",
-            event,
-            length,
-            keys,
-        )
+            idx = parts.index("devs")
+            parts = parts[idx + 1 :]
+        except ValueError:
+            pass
+        if len(parts) < 3:
+            return None
+        node_type = normalize_node_type(parts[0])
+        addr = normalize_node_addr(parts[1])
+        if not node_type or not addr:
+            return None
+        section = parts[2] if len(parts) > 2 else None
+        if section in {"samples", "status", "settings", "advanced"}:
+            return {node_type: {section: {addr: body}}}
+        return {node_type: {"settings": {addr: {section: body} if section else body}}}
 
-    def _complete_debug_probe_if_ready(self) -> None:
-        """Clear debug probe state once both frames were observed."""
+    async def _emit_sio(self, event: str, *args: Any) -> None:
+        if not self._ws or self._ws.closed:
+            raise RuntimeError("websocket not connected")
+        arr = [event, *args]
+        payload = json.dumps(arr, separators=(",", ":"), default=str)
+        pkt = f"42{DUCAHEAT_NAMESPACE}," + payload
+        await self._ws.send_str(pkt)
 
-        if self._debug_probe_logged_handshake and self._debug_probe_logged_update:
-            self._debug_probe_active = False
-
-    def _summarise_addresses(self, data: Any) -> str:
-        """Return a condensed summary of node addresses in ``data``."""
-
-        nodes = self._extract_nodes(data)
-        if not nodes:
-            return "no node addresses"
-        addresses = self._collect_update_addresses(nodes)
-        if not addresses:
-            return "no node addresses"
-        return ", ".join(f"{node_type}/{addr}" for node_type, addr in addresses)
-
-    async def _on_connect(self) -> None:
-        """Log connect events before delegating to the base implementation."""
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS (ducaheat): connected")
-            self._log_connect_response()
-        await super()._on_connect()
-
-    async def _on_disconnect(self) -> None:
-        """Log disconnect events before delegating."""
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS (ducaheat): disconnected")
-        self._connect_response_logged = False
-        self._open_payload_logged = False
-        self._debug_probe_active = False
-        self._debug_probe_logged_handshake = False
-        self._debug_probe_logged_update = False
-        await super()._on_disconnect()
-
-    async def _on_dev_handshake(self, data: Any) -> None:
-        """Log handshake payloads prior to standard handling."""
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("WS (ducaheat): handshake payload: %s", data)
-            _LOGGER.debug(
-                "WS (ducaheat): handshake payload detail: %s",
-                json.dumps(data, default=str),
-            )
-        if self._debug_probe_active and not self._debug_probe_logged_handshake:
-            self._log_probe_frame("dev_handshake", data)
-            self._debug_probe_logged_handshake = True
-            self._complete_debug_probe_if_ready()
-        await super()._on_dev_handshake(data)
-
-    async def _on_dev_data(self, data: Any) -> None:
-        """Log initial dev_data snapshots with condensed address details."""
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            summary = self._summarise_addresses(data)
-            _LOGGER.debug("WS (ducaheat): dev_data addresses: %s", summary)
-            _LOGGER.debug(
-                "WS (ducaheat): dev_data payload: %s", json.dumps(data, default=str)
-            )
-        await super()._on_dev_data(data)
-
-    async def _on_update(self, data: Any) -> None:
-        """Log incremental update payloads with condensed address details."""
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            summary = self._summarise_addresses(data)
-            _LOGGER.debug("WS (ducaheat): update addresses: %s", summary)
-            _LOGGER.debug(
-                "WS (ducaheat): update payload: %s", json.dumps(data, default=str)
-            )
-        if self._debug_probe_active and not self._debug_probe_logged_update:
-            self._log_probe_frame("update", data)
-            self._debug_probe_logged_update = True
-            self._complete_debug_probe_if_ready()
-        await super()._on_update(data)
-
-    async def _on_message(self, data: Any, *_: Any) -> None:
-        """Reply to app-level heartbeat pings with a pong."""
-
-        payload = data
-        if isinstance(payload, (list, tuple)):
-            if payload and payload[0] == "message" and len(payload) >= 2:
-                payload = payload[1]
-            elif payload:
-                payload = payload[0]
-            else:
-                payload = None
-        if payload != "ping":
-            return
-        mono_now, wall_now = _now_pair()
-        self._stats.last_event_ts = wall_now
-        self._last_event_at = mono_now
-        self._last_event_wall = wall_now
-        self._last_heartbeat_at = mono_now
+    async def _subscribe_samples(self) -> int:
+        """Subscribe to heater/accumulator sample updates; return count."""
+        count = 0
         try:
-            await self._sio.emit("message", "pong", namespace=self._namespace)
-        except Exception:  # noqa: BLE001 - best effort heartbeat ack
-            if _LOGGER.isEnabledFor(logging.DEBUG):
-                _LOGGER.debug(
-                    "WS (ducaheat): failed to emit heartbeat pong", exc_info=True
-                )
+            record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
+            inventory, normalized_map, _ = collect_heater_sample_addresses(
+                record, coordinator=self._coordinator
+            )
+            normalized_map, _ = normalize_heater_addresses(normalized_map)
+            targets = list(heater_sample_subscription_targets(normalized_map))
+            for node_type, addr in targets:
+                await self._emit_sio("subscribe", f"/{node_type}/{addr}/samples")
+            count = len(targets)
+        except Exception:
+            _LOGGER.debug("WS (ducaheat): subscribe failed", exc_info=True)
+        return count
 
-    def _mark_event(
-        self, *, paths: list[str] | None, count_event: bool = False
-    ) -> None:
-        """Reset fallback counters when fresh payloads arrive."""
+    async def _disconnect(self, reason: str) -> None:
+        if self._ws:
+            with suppress(aiohttp.ClientError, RuntimeError):
+                await self._ws.close(code=aiohttp.WSCloseCode.GOING_AWAY, message=reason.encode())
+            self._ws = None
 
-        super()._mark_event(paths=paths, count_event=count_event)
-        self._restart_count = 0
-
-    async def _handle_connection_lost(self, error: Exception | None) -> None:
-        """Trigger REST fallback refreshes when the websocket drops."""
-
-        await super()._handle_connection_lost(error)
-        self._restart_count += 1
-        mono_now, wall_now = _now_pair()
-        last_payload = self._last_payload_at or self._last_event_at
-        if (
-            last_payload is not None
-            and mono_now - last_payload < self._fallback_min_interval
-        ):
-            return
-        last_payload_wall = (
-            self._last_payload_wall
-            or self._last_event_wall
-            or self._stats.last_event_ts
-        )
-        if (
-            last_payload_wall is not None
-            and wall_now - last_payload_wall < self._fallback_min_interval
-        ):
-            return
-        if self._restart_count <= 1:
-            return
-        if mono_now - self._fallback_last_refresh < self._fallback_min_interval:
-            return
-        self._fallback_last_refresh = mono_now
-        self._fallback_last_refresh_wall = wall_now
-        state = self._ws_state_bucket()
-        state["last_fallback_at"] = wall_now
-        state["last_fallback_error"] = (
-            f"{type(error).__name__}: {error}" if error else None
-        )
-        self._update_status("fallback")
-        refresh_cb = getattr(self._coordinator, "async_request_refresh", None)
-        if not callable(refresh_cb):
-            return
-        try:
-            result = refresh_cb()
-        except TypeError:
-            self._loop.call_soon_threadsafe(refresh_cb)
-            return
-        if not asyncio.iscoroutine(result):
-            return
-        try:
-            await result
-        except Exception:  # noqa: BLE001
-            _LOGGER.debug("WS (ducaheat): fallback refresh failed", exc_info=True)
+    async def _get_token(self) -> str:
+        headers = await self._client.authed_headers()
+        auth = headers.get("Authorization") if isinstance(headers, dict) else None
+        if not auth:
+            raise RuntimeError("missing Authorization")
+        return auth.split(" ", 1)[1]
 
 
-__all__ = [
-    "DucaheatWSClient",
-    "TermoWebWSClient",
-    "WSStats",
-    "WebSocketClient",
-]
+__all__ = ["WebSocketClient", "DucaheatWSClient", "TermoWebWSClient"]
+
