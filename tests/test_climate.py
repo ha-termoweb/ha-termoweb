@@ -664,6 +664,131 @@ def test_accumulator_async_set_hvac_mode_paths(
     asyncio.run(_run())
 
 
+def test_accumulator_extra_state_attributes_include_boost_metadata() -> None:
+    """Ensure accumulator attributes expose boost information alongside program data."""
+
+    _reset_environment()
+    hass = HomeAssistant()
+    entry_id = "entry-acm-attrs"
+    dev_id = "dev-acm-attrs"
+    addr = "5"
+    prog = [2] * 168
+    settings = {
+        "mode": "boost",
+        "units": "C",
+        "max_power": 1800,
+        "ptemp": ["15.0", "18.0", "21.0"],
+        "prog": prog,
+        "boost_active": "true",
+        "boost_end_day": 1,
+        "boost_end_min": 150,
+    }
+    coordinator = _make_coordinator(
+        hass,
+        dev_id,
+        {
+            "nodes": {},
+            "nodes_by_type": {"acm": {"settings": {addr: settings}}},
+            "htr": {"settings": {}},
+        },
+    )
+    hass.data = {
+        DOMAIN: {
+            entry_id: {
+                "coordinator": coordinator,
+                "dev_id": dev_id,
+                "client": AsyncMock(),
+                "brand": BRAND_TERMOWEB,
+            }
+        }
+    }
+
+    entity = climate_module.AccumulatorClimateEntity(
+        coordinator,
+        entry_id,
+        dev_id,
+        addr,
+        "Accumulator",
+        node_type="acm",
+    )
+    entity.hass = hass
+
+    original_now = dt_util.NOW
+    try:
+        dt_util.NOW = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
+        attrs = entity.extra_state_attributes
+    finally:
+        dt_util.NOW = original_now
+
+    assert attrs["program_slot"] == "day"
+    assert attrs["program_setpoint"] == pytest.approx(21.0)
+    assert attrs["boost_active"] is True
+    assert attrs["boost_minutes_remaining"] == 150
+    assert attrs["boost_end"] == "2024-01-01T02:30:00+00:00"
+
+
+def test_accumulator_extra_state_attributes_fallbacks() -> None:
+    """Verify accumulator boost attributes gracefully handle missing day/min data."""
+
+    _reset_environment()
+    hass = HomeAssistant()
+    entry_id = "entry-acm-fallback"
+    dev_id = "dev-acm-fallback"
+    addr = "6"
+    prog = [0] * 168
+    settings = {
+        "mode": "auto",
+        "units": "C",
+        "ptemp": ["15.0", "18.0", "21.0"],
+        "prog": prog,
+        "boost_remaining": "30",
+        "boost_end": "2024-01-01T00:30:00+00:00",
+        "boost_active": False,
+    }
+    coordinator = _make_coordinator(
+        hass,
+        dev_id,
+        {
+            "nodes": {},
+            "nodes_by_type": {"acm": {"settings": {addr: settings}}},
+            "htr": {"settings": {}},
+        },
+    )
+    hass.data = {
+        DOMAIN: {
+            entry_id: {
+                "coordinator": coordinator,
+                "dev_id": dev_id,
+                "client": AsyncMock(),
+                "brand": BRAND_TERMOWEB,
+            }
+        }
+    }
+
+    entity = climate_module.AccumulatorClimateEntity(
+        coordinator,
+        entry_id,
+        dev_id,
+        addr,
+        "Accumulator",
+        node_type="acm",
+    )
+    entity.hass = hass
+
+    original_now = dt_util.NOW
+    try:
+        dt_util.NOW = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
+        attrs = entity.extra_state_attributes
+    finally:
+        dt_util.NOW = original_now
+
+    assert attrs["boost_active"] is False
+    assert attrs["boost_minutes_remaining"] == 30
+    assert attrs["boost_end"] == "2024-01-01T00:30:00+00:00"
+    assert attrs["program_slot"] == "cold"
+    assert attrs["program_setpoint"] == pytest.approx(15.0)
+
+
 def test_accumulator_submit_settings_brand_switch() -> None:
     """Verify accumulator writes use Ducaheat client when the brand matches."""
 

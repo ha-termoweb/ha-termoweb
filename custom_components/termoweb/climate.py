@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Mapping
+from datetime import datetime, timedelta
 import logging
 import time
 from typing import Any, cast
@@ -804,8 +805,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
 
     _attr_hvac_modes: list[HVACMode] = [HVACMode.OFF, HVACMode.AUTO]
     _attr_supported_features = (
-        HeaterClimateEntity._attr_supported_features
-        | ClimateEntityFeature.PRESET_MODE
+        ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.PRESET_MODE
     )
     _attr_preset_modes = ["none", "boost"]
 
@@ -918,6 +918,119 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         resume_mode = self._boost_resume_mode or self.hvac_mode
         self._boost_resume_mode = None
         await super().async_set_hvac_mode(resume_mode)
+
+    @property  # type: ignore[override]
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return accumulator attributes including boost metadata."""
+
+        attrs = super().extra_state_attributes
+        settings = self.heater_settings() or {}
+
+        def _coerce_bool(value: Any) -> bool | None:
+            """Return ``value`` as a boolean when possible."""
+
+            if isinstance(value, bool):
+                return value
+            if value is None:
+                return None
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                if value == 1:
+                    return True
+                if value == 0:
+                    return False
+            try:
+                text = str(value).strip().lower()
+            except Exception:  # noqa: BLE001 - defensive
+                return None
+            if text in {"true", "1", "yes", "on"}:
+                return True
+            if text in {"false", "0", "no", "off"}:
+                return False
+            return None
+
+        def _coerce_minutes(value: Any) -> int | None:
+            """Return ``value`` as non-negative minutes when possible."""
+
+            if value is None or isinstance(value, bool):
+                return None
+            try:
+                if isinstance(value, (int, float)):
+                    minutes = int(value)
+                else:
+                    text = str(value).strip()
+                    if not text:
+                        return None
+                    minutes = int(float(text))
+            except (TypeError, ValueError):  # pragma: no cover - defensive
+                return None
+            return minutes if minutes >= 0 else None
+
+        boost_active = _coerce_bool(settings.get("boost_active"))
+        if boost_active is None:
+            boost_active = _coerce_bool(settings.get("boost"))
+        if boost_active is None:
+            boost_active = (settings.get("mode") or "").lower() == "boost"
+
+        boost_day: Any = settings.get("boost_end_day")
+        boost_minute: Any = settings.get("boost_end_min")
+        raw_end = settings.get("boost_end")
+        if isinstance(raw_end, Mapping):
+            boost_day = boost_day if boost_day is not None else raw_end.get("day")
+            boost_minute = (
+                boost_minute if boost_minute is not None else raw_end.get("minute")
+            )
+
+        boost_end_dt: datetime | None = None
+        boost_minutes: int | None = None
+        resolver = getattr(self.coordinator, "resolve_boost_end", None)
+        if (
+            callable(resolver)
+            and boost_day is not None
+            and boost_minute is not None
+        ):
+            try:
+                boost_end_dt, boost_minutes = resolver(boost_day, boost_minute)
+            except Exception:  # noqa: BLE001 - defensive
+                boost_end_dt = None
+                boost_minutes = None
+
+        if boost_minutes is None:
+            boost_minutes = _coerce_minutes(settings.get("boost_remaining"))
+
+        if boost_minutes is None and boost_end_dt is not None:
+            delta_seconds = (boost_end_dt - dt_util.now()).total_seconds()
+            boost_minutes = int(max(0.0, delta_seconds) // 60)
+
+        boost_end_iso: str | None = None
+        if boost_end_dt is not None:
+            try:
+                boost_end_iso = boost_end_dt.isoformat()
+            except Exception:  # noqa: BLE001 - defensive
+                boost_end_iso = None
+        else:
+            if isinstance(raw_end, str):
+                boost_end_iso = raw_end
+            elif isinstance(raw_end, Mapping):
+                day = raw_end.get("day")
+                minute = raw_end.get("minute")
+                if callable(resolver) and day is not None and minute is not None:
+                    try:
+                        derived_dt, _ = resolver(day, minute)
+                    except Exception:  # noqa: BLE001 - defensive
+                        derived_dt = None
+                    if derived_dt is not None:
+                        boost_end_iso = derived_dt.isoformat()
+
+        if boost_end_iso is None and boost_minutes is not None:
+            boost_end_iso = (
+                dt_util.now() + timedelta(minutes=boost_minutes)
+            ).isoformat()
+
+        attrs["boost_active"] = boost_active
+        attrs["boost_minutes_remaining"] = boost_minutes
+        attrs["boost_end"] = boost_end_iso
+
+        return attrs
 
     async def _async_submit_settings(  # type: ignore[override]
         self,
