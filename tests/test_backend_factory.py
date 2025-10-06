@@ -106,6 +106,40 @@ def test_termoweb_backend_creates_ws_client() -> None:
     assert ws_client._protocol_hint is None
 
 
+def test_termoweb_backend_sets_protocol_for_websocket_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TermoWebBackend should pass the socket.io protocol hint to WebSocketClient subclasses."""
+
+    from custom_components.termoweb.backend.ws_client import WebSocketClient
+
+    client = DummyHttpClient()
+    backend = TermoWebBackend(brand="termoweb", client=client)
+
+    class FakeWS(WebSocketClient):
+        def __init__(self, hass: Any, **kwargs: Any) -> None:
+            kwargs.setdefault("session", SimpleNamespace(closed=True))
+            super().__init__(hass, **kwargs)
+
+    monkeypatch.setitem(
+        termoweb_backend.sys.modules,
+        "custom_components.termoweb",
+        SimpleNamespace(TermoWebWSClient=FakeWS),
+    )
+    loop = asyncio.new_event_loop()
+    try:
+        hass = SimpleNamespace(loop=loop)
+        ws_client = backend.create_ws_client(
+            hass,
+            entry_id="entry", 
+            dev_id="dev", 
+            coordinator=object(),
+        )
+    finally:
+        loop.close()
+
+    assert isinstance(ws_client, FakeWS)
+    assert ws_client._protocol_hint == "socketio09"
+
+
 def test_termoweb_backend_fallback_ws_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
     import custom_components.termoweb as init_module
 
