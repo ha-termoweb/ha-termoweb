@@ -1,14 +1,15 @@
-# -*- coding: utf-8 -*-
 """Ducaheat specific websocket client."""
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
+from copy import deepcopy
 import gzip
 import json
 import logging
 import random
 import string
-from typing import Any, Mapping
+from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import aiohttp
@@ -29,6 +30,8 @@ from ..nodes import (
     collect_heater_sample_addresses,
     heater_sample_subscription_targets,
     normalize_heater_addresses,
+    normalize_node_addr,
+    normalize_node_type,
 )
 from .ws_client import (
     DUCAHEAT_NAMESPACE,
@@ -146,6 +149,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._task: asyncio.Task | None = None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._stats = WSStats()
+        self._nodes: dict[str, Any] = {}
+        self._nodes_raw: dict[str, Any] = {}
 
     def start(self) -> asyncio.Task:
         if self._task and not self._task.done():
@@ -375,12 +380,50 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                             nodes = args[0].get("nodes") if isinstance(args[0], dict) else None
                             if isinstance(nodes, dict):
                                 self._log_nodes_summary(nodes)
-                                self._dispatch_nodes({"nodes": nodes})
+                                normaliser = getattr(self._client, "normalise_ws_nodes", None)
+                                if callable(normaliser):
+                                    try:
+                                        nodes = normaliser(nodes)  # type: ignore[arg-type]
+                                    except Exception:  # pragma: no cover - defensive logging only
+                                        _LOGGER.debug(
+                                            "WS (ducaheat): normalise_ws_nodes failed; using raw snapshot",
+                                            exc_info=True,
+                                        )
+                                self._nodes_raw = deepcopy(nodes)
+                                self._nodes = self._build_nodes_snapshot(self._nodes_raw)
+                                self._dispatch_nodes(self._nodes)
                                 self._update_status("healthy")
                             continue
 
                         if evt == "update" and args:
-                            self._log_update_brief(args[0])
+                            payload = args[0]
+                            self._log_update_brief(payload)
+                            nodes_payload: dict[str, Any] | None = None
+                            if isinstance(payload, Mapping):
+                                nodes_field = payload.get("nodes")
+                                if isinstance(nodes_field, Mapping):
+                                    nodes_payload = nodes_field
+                                else:
+                                    nodes_payload = self._translate_path_update(payload)
+                            if nodes_payload:
+                                normaliser = getattr(self._client, "normalise_ws_nodes", None)
+                                if callable(normaliser):
+                                    try:
+                                        nodes_payload = normaliser(nodes_payload)  # type: ignore[arg-type]
+                                    except Exception:  # pragma: no cover - defensive logging only
+                                        _LOGGER.debug(
+                                            "WS (ducaheat): normalise_ws_nodes failed; using raw update",
+                                            exc_info=True,
+                                        )
+                                sample_updates = self._collect_sample_updates(nodes_payload)
+                                if self._nodes_raw:
+                                    self._merge_nodes(self._nodes_raw, nodes_payload)
+                                else:
+                                    self._nodes_raw = deepcopy(nodes_payload)
+                                self._nodes = self._build_nodes_snapshot(self._nodes_raw)
+                                self._dispatch_nodes(self._nodes)
+                                if sample_updates:
+                                    self._forward_sample_updates(sample_updates)
                             self._update_status("healthy")
                             continue
                         continue
@@ -458,6 +501,156 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         if not auth:
             raise RuntimeError("missing Authorization")
         return auth.split(" ", 1)[1]
+
+    def _collect_sample_updates(
+        self, nodes: Mapping[str, Mapping[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        """Collect heater sample updates from the websocket payload."""
+
+        sample_updates: dict[str, dict[str, Any]] = {}
+        for node_type, payload in nodes.items():
+            if not isinstance(node_type, str) or not isinstance(payload, Mapping):
+                continue
+            samples = payload.get("samples")
+            if not isinstance(samples, Mapping):
+                continue
+            bucket: dict[str, Any] = {}
+            for addr, sample_payload in samples.items():
+                normalised_addr = normalize_node_addr(addr)
+                if not normalised_addr:
+                    continue
+                bucket[normalised_addr] = sample_payload
+            if bucket:
+                sample_updates[node_type] = bucket
+        return sample_updates
+
+    def _forward_sample_updates(self, updates: Mapping[str, Mapping[str, Any]]) -> None:
+        """Relay websocket heater sample updates to the energy coordinator."""
+
+        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
+        if not isinstance(record, Mapping):
+            return
+        energy_coordinator = record.get("energy_coordinator")
+        handler = getattr(energy_coordinator, "handle_ws_samples", None)
+        if not callable(handler):
+            return
+        try:
+            handler(
+                self.dev_id,
+                {node_type: dict(section) for node_type, section in updates.items()},
+            )
+        except Exception:  # pragma: no cover - defensive logging only
+            _LOGGER.debug("WS (ducaheat): forwarding heater samples failed", exc_info=True)
+
+    def _translate_path_update(self, payload: Mapping[str, Any]) -> dict[str, Any] | None:
+        """Translate ``{"path": ..., "body": ...}`` frames into node updates."""
+
+        if not isinstance(payload, Mapping):
+            return None
+        if "nodes" in payload:
+            return None
+        path = payload.get("path")
+        body = payload.get("body")
+        if not isinstance(path, str) or body is None:
+            return None
+
+        path = path.split("?", 1)[0]
+        segments = [segment for segment in path.split("/") if segment]
+        if not segments:
+            return None
+
+        try:
+            devs_idx = segments.index("devs")
+        except ValueError:
+            devs_idx = -1
+
+        if devs_idx >= 0:
+            relevant = segments[devs_idx + 1 :]
+            node_type_idx = 1
+            addr_idx = 2
+            section_idx = 3
+            if len(relevant) <= addr_idx:
+                return None
+        else:
+            relevant = segments
+            node_type_idx = 0
+            addr_idx = 1
+            section_idx = 2
+            if len(relevant) <= addr_idx:
+                return None
+
+        node_type = normalize_node_type(relevant[node_type_idx])
+        addr = normalize_node_addr(relevant[addr_idx])
+        if not node_type or not addr:
+            return None
+
+        section = relevant[section_idx] if len(relevant) > section_idx else None
+        remainder = (
+            relevant[section_idx + 1 :]
+            if len(relevant) > section_idx + 1
+            else []
+        )
+
+        target_section, nested_key = self._resolve_update_section(section)
+        if target_section is None:
+            return None
+
+        payload_body: Any = body
+        for segment in reversed(remainder):
+            payload_body = {segment: payload_body}
+        if nested_key:
+            payload_body = {nested_key: payload_body}
+
+        return {node_type: {target_section: {addr: payload_body}}}
+
+    @staticmethod
+    def _resolve_update_section(section: str | None) -> tuple[str | None, str | None]:
+        """Map a websocket path segment to the node bucket name."""
+
+        if not section:
+            return None, None
+
+        lowered = section.lower()
+        if lowered in {"status", "samples", "settings", "advanced"}:
+            return lowered, None
+        if lowered in {"advanced_setup"}:
+            return "advanced", "advanced_setup"
+        if lowered in {"setup", "prog", "prog_temps", "capabilities"}:
+            return "settings", lowered
+        return "settings", lowered
+
+    @staticmethod
+    def _build_nodes_snapshot(nodes: dict[str, Any]) -> dict[str, Any]:
+        """Normalise the nodes payload for downstream consumers."""
+
+        nodes_copy = deepcopy(nodes)
+        nodes_by_type: dict[str, Any] = {
+            node_type: payload
+            for node_type, payload in nodes_copy.items()
+            if isinstance(payload, dict)
+        }
+        snapshot: dict[str, Any] = {
+            "nodes": nodes_copy,
+            "nodes_by_type": nodes_by_type,
+        }
+        snapshot.update(nodes_by_type)
+        if "htr" in nodes_by_type:
+            snapshot.setdefault("htr", nodes_by_type["htr"])
+        return snapshot
+
+    @staticmethod
+    def _merge_nodes(target: dict[str, Any], source: Mapping[str, Any]) -> None:
+        """Deep-merge incremental updates into the cached snapshot."""
+
+        for key, value in source.items():
+            if isinstance(value, Mapping):
+                existing = target.get(key)
+                if isinstance(existing, dict):
+                    DucaheatWSClient._merge_nodes(existing, value)
+                else:
+                    target[key] = deepcopy(value)
+            else:
+                target[key] = value
 
 
 __all__ = ["DucaheatWSClient"]
