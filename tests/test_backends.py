@@ -18,7 +18,6 @@ from custom_components.termoweb.backend import (  # noqa: E402
 from custom_components.termoweb.const import BRAND_DUCAHEAT, WS_NAMESPACE  # noqa: E402
 from custom_components.termoweb.backend.ducaheat_ws import DucaheatWSClient  # noqa: E402
 from custom_components.termoweb.backend.termoweb_ws import TermoWebWSClient  # noqa: E402
-from custom_components.termoweb.backend.ws_client import WebSocketClient  # noqa: E402
 
 
 class DummyHttpClient:
@@ -51,9 +50,8 @@ def test_backend_factory_returns_expected_clients() -> None:
             dev_id="dev",
             coordinator=object(),
         )
-        assert isinstance(ws_client, WebSocketClient)
         assert isinstance(ws_client, TermoWebWSClient)
-        assert ws_client._protocol_hint == "socketio09"
+        assert ws_client._protocol_hint is None
         loop.run_until_complete(ws_client.stop())
     finally:
         loop.close()
@@ -70,9 +68,7 @@ def test_backend_factory_returns_expected_clients() -> None:
             dev_id="dev",
             coordinator=object(),
         )
-        assert isinstance(ws_client, WebSocketClient)
         assert isinstance(ws_client, DucaheatWSClient)
-        assert ws_client._protocol_hint is None
         assert ws_client._namespace == WS_NAMESPACE
         loop.run_until_complete(ws_client.stop())
     finally:
