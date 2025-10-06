@@ -1127,6 +1127,25 @@ class FakeCoordinator:
             "expires_at": time.time() + max(ttl, 0.0),
         }
 
+    def resolve_boost_end(
+        self,
+        boost_end_day: Any,
+        boost_end_min: Any,
+        *,
+        now: dt.datetime | None = None,
+    ) -> tuple[dt.datetime | None, int | None]:
+        """Mirror coordinator helper for translating boost end fields."""
+
+        from custom_components.termoweb.coordinator import (
+            resolve_boost_end_from_fields,
+        )
+
+        return resolve_boost_end_from_fields(
+            boost_end_day,
+            boost_end_min,
+            now=now,
+        )
+
 
 def pytest_runtest_setup(item: Any) -> None:  # pragma: no cover - ensure isolation
     _install_stubs()
