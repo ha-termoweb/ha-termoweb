@@ -243,6 +243,28 @@ def test_async_setup_entry_creates_entities() -> None:
     asyncio.run(_run())
 
 
+def test_accumulator_preferred_boost_defaults_without_hass() -> None:
+    """Ensure accumulators fall back to the default boost duration offline."""
+
+    _reset_environment()
+    hass = HomeAssistant()
+    dev_id = "dev-acc"
+    record = {"nodes": {}, "htr": {"settings": {}}, "nodes_by_type": {}}
+    coordinator = _make_coordinator(hass, dev_id, record)
+
+    entity = climate_module.AccumulatorClimateEntity(
+        coordinator,
+        "entry-acc",
+        dev_id,
+        "01",
+        "Accumulator",
+        node_type="acm",
+    )
+
+    entity.hass = None
+    assert entity._preferred_boost_minutes() == DEFAULT_BOOST_DURATION
+
+
 def test_async_setup_entry_default_names_and_invalid_nodes(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
