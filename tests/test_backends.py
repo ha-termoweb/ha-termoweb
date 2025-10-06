@@ -16,11 +16,9 @@ from custom_components.termoweb.backend import (  # noqa: E402
     create_backend,
 )
 from custom_components.termoweb.const import BRAND_DUCAHEAT, WS_NAMESPACE  # noqa: E402
-from custom_components.termoweb.ws_client import (  # noqa: E402
-    DucaheatWSClient,
-    TermoWebWSClient,
-    WebSocketClient,
-)
+from custom_components.termoweb.backend.ducaheat_ws import DucaheatWSClient  # noqa: E402
+from custom_components.termoweb.backend.termoweb_ws import TermoWebWSClient  # noqa: E402
+from custom_components.termoweb.backend.ws_client import WebSocketClient  # noqa: E402
 
 
 class DummyHttpClient:

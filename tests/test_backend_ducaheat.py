@@ -12,7 +12,8 @@ from custom_components.termoweb.backend.ducaheat import (
     _redact_log_value,
 )
 from custom_components.termoweb.const import WS_NAMESPACE
-from custom_components.termoweb.ws_client import DucaheatWSClient, WebSocketClient
+from custom_components.termoweb.backend.ducaheat_ws import DucaheatWSClient
+from custom_components.termoweb.backend.ws_client import WebSocketClient
 
 
 class DummyClient:

@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
-import custom_components.termoweb.ws_client as module
+from custom_components.termoweb.backend import ws_client as module
 from custom_components.termoweb.installation import InstallationSnapshot
 
 
