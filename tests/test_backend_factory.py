@@ -13,10 +13,8 @@ from custom_components.termoweb.backend import termoweb as termoweb_backend
 from custom_components.termoweb.backend.ducaheat import DucaheatBackend
 from custom_components.termoweb.backend.termoweb import TermoWebBackend
 from custom_components.termoweb.const import BRAND_DUCAHEAT
-from custom_components.termoweb.ws_client import (
-    WebSocketClient,
-    TermoWebWSClient,
-)
+from custom_components.termoweb.backend.termoweb_ws import TermoWebWSClient
+from custom_components.termoweb.backend.ws_client import WebSocketClient
 
 
 class DummyHttpClient:
@@ -213,7 +211,7 @@ def test_termoweb_backend_resolve_ws_missing_attr(
     monkeypatch.setitem(termoweb_backend.sys.modules, module.__name__, module)
     monkeypatch.setitem(termoweb_backend.sys.modules, init_module.__name__, init_module)
 
-    ws_module = ModuleType("custom_components.termoweb.ws_client")
+    ws_module = ModuleType("custom_components.termoweb.backend.termoweb_ws")
     monkeypatch.setattr(termoweb_backend, "import_module", lambda name: ws_module)
     resolved = backend._resolve_ws_client_cls()
     assert resolved is WebSocketClient

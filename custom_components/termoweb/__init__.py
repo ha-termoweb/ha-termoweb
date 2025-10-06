@@ -80,8 +80,8 @@ _statistics_during_period_compat = (
 _get_last_statistics_compat = energy_module._get_last_statistics_compat  # noqa: SLF001
 _clear_statistics_compat = energy_module._clear_statistics_compat  # noqa: SLF001
 
-# Re-export legacy WS client for backward compatibility (tests may patch it).
-from .ws_client import TermoWebWSClient  # noqa: F401,E402
+# Re-export the websocket client for backward compatibility (tests may patch it).
+from .backend.ws_client import TermoWebWSClient  # noqa: F401,E402
 
 _LOGGER = logging.getLogger(__name__)
 

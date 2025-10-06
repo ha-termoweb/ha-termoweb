@@ -12,7 +12,7 @@ from aiohttp import ClientResponseError
 from ..api import RESTClient
 from ..const import BRAND_DUCAHEAT, WS_NAMESPACE
 from ..nodes import NodeDescriptor
-from ..ws_client import DucaheatWSClient
+from .ducaheat_ws import DucaheatWSClient
 from .base import Backend, WsClientProto
 
 _LOGGER = logging.getLogger(__name__)

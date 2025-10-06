@@ -6,7 +6,7 @@ operations flow through brand-specific REST clients, while push updates and
 connection health are maintained through websocket clients that the backend
 constructs for each gateway. Home Assistant maintains per-installation caches of
 nodes, coordinates REST polling, merges websocket deltas, and exposes entity
-state and energy statistics to the rest of the platform.【F:custom_components/termoweb/__init__.py†L140-L233】【F:custom_components/termoweb/ws_client.py†L760-L833】【F:custom_components/termoweb/energy.py†L421-L512】
+state and energy statistics to the rest of the platform.【F:custom_components/termoweb/__init__.py†L140-L233】【F:custom_components/termoweb/backend/ws_client.py†L77-L193】【F:custom_components/termoweb/backend/ducaheat_ws.py†L188-L386】【F:custom_components/termoweb/energy.py†L421-L512】
 
 ## Key components
 
@@ -40,7 +40,7 @@ state and energy statistics to the rest of the platform.【F:custom_components/t
 - **Websocket layer** – `WebSocketClient` negotiates the correct Socket.IO or
   Engine.IO handshake, keeps per-device health metrics, updates coordinator
   caches, and broadcasts dispatcher signals. `DucaheatWSClient` layers brand-
-  specific logging atop the shared implementation.【F:custom_components/termoweb/ws_client.py†L40-L104】【F:custom_components/termoweb/ws_client.py†L760-L833】【F:custom_components/termoweb/ws_client.py†L1580-L1637】【F:custom_components/termoweb/ws_client.py†L1856-L1896】
+  specific logging atop the shared implementation.【F:custom_components/termoweb/backend/ws_client.py†L40-L193】【F:custom_components/termoweb/backend/ducaheat_ws.py†L188-L386】
 - **Energy services** – the energy helper enforces a shared rate limiter for
   historical sample queries, performs targeted imports based on entity
   selection, and registers the `import_energy_history` service only once per

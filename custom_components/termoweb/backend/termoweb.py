@@ -6,7 +6,7 @@ import sys
 from types import ModuleType
 from typing import Any
 
-from custom_components.termoweb.ws_client import WebSocketClient
+from .ws_client import WebSocketClient
 
 from .base import Backend, WsClientProto
 
@@ -37,7 +37,7 @@ class TermoWebBackend(Backend):
         if not saw_real_module:
             return WebSocketClient
         try:
-            ws_module = import_module("custom_components.termoweb.ws_client")
+            ws_module = import_module("custom_components.termoweb.backend.termoweb_ws")
         except ImportError:
             return WebSocketClient
         ws_cls = getattr(ws_module, "TermoWebWSClient", None)
