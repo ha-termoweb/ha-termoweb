@@ -152,6 +152,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._latest_nodes: Mapping[str, Any] | None = None
         self._nodes_raw: dict[str, Any] | None = None
         self._subscription_paths: set[str] = set()
+        self._pending_dev_data = False
 
     def start(self) -> asyncio.Task:
         if self._task and not self._task.done():
@@ -319,7 +320,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
 
         await self._ws.send_str(f"40{self._namespace}")
         _LOGGER.debug("WS (ducaheat): -> 40%s", self._namespace)
-        await self._emit_sio("dev_data")
+        self._pending_dev_data = True
         _LOGGER.debug("WS (ducaheat): -> 42 dev_data")
         self._update_status("connected")
 
@@ -338,6 +339,29 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                         continue
                     if not data.startswith("4"):
                         continue
+                    if data.startswith("40"):
+                        ns_payload = data[2:]
+                        if ns_payload:
+                            namespace, _, _ = ns_payload.partition(",")
+                            if namespace and namespace != self._namespace:
+                                _LOGGER.debug(
+                                    "WS (ducaheat): <- SIO 40 for unexpected namespace %s",
+                                    namespace,
+                                )
+                                continue
+                        _LOGGER.debug("WS (ducaheat): <- SIO 40 (namespace ack)")
+                        self._update_status("healthy")
+                        if self._pending_dev_data:
+                            self._pending_dev_data = False
+                            try:
+                                await self._emit_sio("dev_data")
+                                await self._replay_subscription_paths()
+                            except Exception:  # noqa: BLE001  # pragma: no cover - defensive
+                                _LOGGER.debug(
+                                    "WS (ducaheat): failed to emit dev_data or replay subscriptions",
+                                    exc_info=True,
+                                )
+                        continue
                     payload = data[1:]
                     if payload == "2" or payload.startswith("2/"):
                         if payload == "2":
@@ -347,11 +371,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                             ns = payload[1:].split(",", 1)[0]
                             _LOGGER.debug("WS (ducaheat): <- SIO 2%s (ping) -> SIO 3%s (pong)", ns, ns)
                             await ws.send_str("3" + ns)
-                        continue
-
-                    if payload.startswith("40"):
-                        _LOGGER.debug("WS (ducaheat): <- SIO 40 (namespace ack)")
-                        self._update_status("healthy")
                         continue
 
                     if payload.startswith("42"):
@@ -652,6 +671,19 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._subscription_paths = paths
         return len(paths)
 
+    async def _replay_subscription_paths(self) -> None:
+        """Replay cached subscription paths after a reconnect."""
+
+        if not self._subscription_paths:
+            return
+        for path in sorted(self._subscription_paths):
+            try:
+                await self._emit_sio("subscribe", path)
+            except Exception:  # noqa: BLE001  # pragma: no cover - defensive logging
+                _LOGGER.debug(
+                    "WS (ducaheat): replay subscribe failed for path %s", path, exc_info=True
+                )
+
     async def _disconnect(self, reason: str) -> None:
         if self._ws:
             try:
@@ -662,6 +694,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             except Exception:  # pragma: no cover - defensive
                 _LOGGER.debug("WS (ducaheat): close failed", exc_info=True)
             self._ws = None
+        self._pending_dev_data = False
 
     async def _get_token(self) -> str:
         headers = await self._client.authed_headers()
