@@ -544,8 +544,6 @@ class DucaheatRESTClient(RESTClient):
         mode_value: str | None = None
         if mode is not None:
             mode_value = str(mode).lower()
-            if mode_value == "heat":
-                mode_value = "manual"
 
         status_payload: dict[str, str] = {}
         status_includes_mode = False

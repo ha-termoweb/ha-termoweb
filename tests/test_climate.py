@@ -392,7 +392,7 @@ def test_async_setup_entry_creates_accumulator_entity() -> None:
         dev_id = "dev-acm"
         nodes = {"nodes": [{"type": "acm", "addr": "7", "name": "Store"}]}
         settings = {
-            "mode": "manual",
+            "mode": "boost",
             "state": "idle",
             "mtemp": "19.0",
             "stemp": "21.0",
@@ -452,6 +452,8 @@ def test_async_setup_entry_creates_accumulator_entity() -> None:
         assert acc._attr_unique_id == f"{DOMAIN}:{dev_id}:acm:7:climate"
         assert acc.available
         assert acc.device_info["model"] == "Accumulator"
+        assert "boost" in acc._attr_hvac_modes
+        assert acc.hvac_mode == "boost"
 
         prog = [0, 1, 2] * 56
         await acc.async_set_schedule(list(prog))

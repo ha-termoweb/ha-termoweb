@@ -189,13 +189,13 @@ async def test_ducaheat_rest_set_node_settings_acm_mode_heat(
     monkeypatch.setattr(ducaheat_rest_client, "_authed_headers", fake_headers)
     monkeypatch.setattr(ducaheat_rest_client, "_request", fake_request)
 
-    await ducaheat_rest_client.set_node_settings("dev", ("acm", "3"), mode="heat")
+    await ducaheat_rest_client.set_node_settings("dev", ("acm", "3"), mode="boost")
 
     assert calls == [
         (
             "POST",
             "/api/v2/devs/dev/acm/3/mode",
-            {"headers": {"Authorization": "Bearer"}, "json": {"mode": "manual"}},
+            {"headers": {"Authorization": "Bearer"}, "json": {"mode": "boost"}},
         )
     ]
 
@@ -238,7 +238,7 @@ async def test_ducaheat_post_acm_endpoint_rethrows_server_error(
 
     with pytest.raises(ClientResponseError):
         await ducaheat_rest_client._post_acm_endpoint(
-            "/api/v2/devs/dev/acm/3/status", {}, {"mode": "manual"}
+            "/api/v2/devs/dev/acm/3/status", {}, {"mode": "boost"}
         )
 
 

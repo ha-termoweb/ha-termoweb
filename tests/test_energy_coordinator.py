@@ -872,7 +872,7 @@ def test_async_update_data_skips_non_dict_sections() -> None:
         coord.data = {
             "dev": {
                 "nodes_by_type": {
-                    "acm": {"addrs": ["B"], "settings": {"B": {"mode": "manual"}}}
+                    "acm": {"addrs": ["B"], "settings": {"B": {"mode": "auto"}}}
                 },
                 "misc": "invalid",
             }

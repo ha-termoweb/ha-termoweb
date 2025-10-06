@@ -58,7 +58,7 @@ def _setup_client(
     [
         (HVACMode.AUTO, "auto"),
         (HVACMode.OFF, "off"),
-        (HVACMode.HEAT, "manual"),
+        ("boost", "boost"),
         ("manual", "manual"),
     ],
 )
@@ -189,7 +189,7 @@ def test_ducaheat_acm_request_error(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(client, "_request", fake_request)
 
         with pytest.raises(DucaheatRequestError) as exc:
-            await client.set_node_settings("dev", ("acm", "1"), mode="manual")
+            await client.set_node_settings("dev", ("acm", "1"), mode="boost")
 
         assert "malformed" in str(exc.value)
 
