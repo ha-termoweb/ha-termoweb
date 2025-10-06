@@ -1042,6 +1042,52 @@ async def test_namespace_ack_processes_embedded_event(
 
 
 @pytest.mark.asyncio
+async def test_namespace_ack_skips_unexpected_namespace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unexpected namespaces should be skipped while replaying embedded events."""
+
+    client = _make_client(monkeypatch)
+
+    class UnexpectedNamespaceWS:
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def send_str(self, payload: str) -> None:
+            return None
+
+        def __aiter__(self) -> Any:
+            async def _iterator() -> Any:
+                yield SimpleNamespace(
+                    type=aiohttp.WSMsgType.TEXT,
+                    data=(
+                        "40/wrong,42/api/v2/socket_io,"
+                        "[\"dev_data\",{\"nodes\":{\"htr\":{\"status\":{\"1\":{}}}}}]"
+                    ),
+                )
+
+            return _iterator()
+
+    client._ws = UnexpectedNamespaceWS()  # type: ignore[assignment]
+    client._pending_dev_data = False
+
+    monkeypatch.setattr(client, "_log_nodes_summary", lambda nodes: None)
+    monkeypatch.setattr(client, "_normalise_nodes_payload", lambda nodes: nodes)
+    monkeypatch.setattr(client, "_build_nodes_snapshot", lambda nodes: {"nodes": nodes})
+    dispatch = MagicMock()
+    monkeypatch.setattr(client, "_dispatch_nodes", dispatch)
+    subscribe_mock = AsyncMock(return_value=0)
+    monkeypatch.setattr(client, "_subscribe_feeds", subscribe_mock)
+    monkeypatch.setattr(client, "_update_status", lambda status: None)
+
+    await client._read_loop_ws()
+
+    dispatch.assert_called_once()
+    subscribe_mock.assert_awaited_once()
+    assert client._latest_nodes == {"htr": {"status": {"1": {}}}}
+
+
+@pytest.mark.asyncio
 async def test_namespace_ack_ignores_unexpected_namespace(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
