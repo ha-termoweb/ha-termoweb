@@ -802,7 +802,36 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 class AccumulatorClimateEntity(HeaterClimateEntity):
     """HA climate entity for TermoWeb accumulator nodes."""
 
-    _attr_hvac_modes: list[HVACMode | str] = [HVACMode.OFF, HVACMode.AUTO, "boost"]
+    _attr_hvac_modes: list[HVACMode] = [HVACMode.OFF, HVACMode.AUTO]
+    _attr_supported_features = (
+        HeaterClimateEntity._attr_supported_features
+        | ClimateEntityFeature.PRESET_MODE
+    )
+    _attr_preset_modes = ["none", "boost"]
+
+    def __init__(
+        self,
+        coordinator,
+        entry_id: str,
+        dev_id: str,
+        addr: str,
+        name: str,
+        unique_id: str | None = None,
+        *,
+        node_type: str | None = None,
+    ) -> None:
+        """Initialise the accumulator climate entity."""
+
+        super().__init__(
+            coordinator,
+            entry_id,
+            dev_id,
+            addr,
+            name,
+            unique_id,
+            node_type=node_type,
+        )
+        self._boost_resume_mode: HVACMode | None = None
 
     def _default_mode_for_setpoint(self) -> HVACMode | str | None:
         """Accumulators keep their current mode when updating setpoints."""
@@ -819,20 +848,8 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
 
         return True
 
-    def _hvac_mode_to_backend(self, hvac_mode: HVACMode | str) -> str:
-        """Translate supported accumulator modes to backend values."""
-
-        mode_normalised = str(hvac_mode).lower()
-        if mode_normalised == "boost":
-            return "boost"
-        if mode_normalised == HVACMode.OFF:
-            return "off"
-        if mode_normalised == HVACMode.AUTO:
-            return "auto"
-        return super()._hvac_mode_to_backend(hvac_mode)
-
     @property  # type: ignore[override]
-    def hvac_mode(self) -> HVACMode | str:
+    def hvac_mode(self) -> HVACMode:
         """Return the current accumulator HVAC mode."""
 
         s = self.heater_settings() or {}
@@ -842,19 +859,19 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         if mode == "auto":
             return HVACMode.AUTO
         if mode == "boost":
-            return "boost"
+            return HVACMode.AUTO
         return super().hvac_mode
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode | str) -> None:
-        """Handle accumulator HVAC modes, keeping boost unimplemented."""
+        """Handle accumulator HVAC modes, delegating boost to presets."""
 
         if isinstance(hvac_mode, HVACMode):
             value = hvac_mode.value.lower()
         else:
             value = str(hvac_mode).lower()
         if value == "boost":
-            _LOGGER.info(
-                "Boost HVAC mode not yet implemented for accumulators addr=%s",
+            _LOGGER.error(
+                "Boost is exposed as a preset_mode for accumulators addr=%s",
                 self._addr,
             )
             return
@@ -862,6 +879,45 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
             _LOGGER.error("Unsupported hvac_mode=%s for accumulator", hvac_mode)
             return
         await super().async_set_hvac_mode(hvac_mode)
+
+    @property
+    def preset_mode(self) -> str:
+        """Return the active preset mode."""
+
+        s = self.heater_settings() or {}
+        if (s.get("mode") or "").lower() == "boost":
+            return "boost"
+        return "none"
+
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
+        """Set the accumulator preset mode."""
+
+        value = (preset_mode or "").lower()
+        if value not in self._attr_preset_modes:
+            _LOGGER.error("Unsupported preset_mode=%s for accumulator", preset_mode)
+            return
+
+        current_preset = self.preset_mode
+        if value == current_preset:
+            return
+
+        if value == "boost":
+            self._boost_resume_mode = self.hvac_mode
+
+            def _apply(cur: dict[str, Any]) -> None:
+                cur["mode"] = "boost"
+
+            await self._commit_write(
+                log_context="Preset mode write",
+                write_kwargs={"mode": "boost"},
+                apply_fn=_apply,
+                success_details={"preset_mode": "boost"},
+            )
+            return
+
+        resume_mode = self._boost_resume_mode or self.hvac_mode
+        self._boost_resume_mode = None
+        await super().async_set_hvac_mode(resume_mode)
 
     async def _async_submit_settings(  # type: ignore[override]
         self,

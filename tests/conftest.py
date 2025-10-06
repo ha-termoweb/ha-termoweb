@@ -900,6 +900,7 @@ def _install_stubs() -> None:
         def __init__(self) -> None:
             self.hass: Any | None = None
             self._on_remove: Callable[[], None] | None = None
+            self._attr_preset_modes: list[str] | None = None
 
         async def async_added_to_hass(self) -> None:
             return None
@@ -917,8 +918,13 @@ def _install_stubs() -> None:
         def async_write_ha_state(self) -> None:
             return None
 
+        @property
+        def preset_modes(self) -> list[str] | None:
+            return self._attr_preset_modes
+
     class ClimateEntityFeature(enum.IntFlag):
         TARGET_TEMPERATURE = 1
+        PRESET_MODE = 2
 
     class HVACMode(str, enum.Enum):
         OFF = "off"
