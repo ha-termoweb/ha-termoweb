@@ -641,6 +641,59 @@ async def test_disconnect_closes_websocket(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.asyncio
+async def test_subscribe_feeds_reuses_cached_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cached inventory should populate subscriptions when nodes are omitted."""
+
+    client = _make_client(monkeypatch)
+    client._latest_nodes = {"htr": {"samples": {"1": {}}}}
+
+    emissions: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        client,
+        "_emit_sio",
+        AsyncMock(side_effect=lambda evt, path: emissions.append((evt, path))),
+    )
+
+    count = await client._subscribe_feeds(None)
+
+    assert count == 2
+    assert {path for _evt, path in emissions} == {"/htr/1/samples", "/htr/1/status"}
+    bucket = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
+    assert bucket["nodes"] == client._latest_nodes
+
+
+@pytest.mark.asyncio
+async def test_subscribe_feeds_handles_missing_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When no subscription targets exist the helper should no-op."""
+
+    client = _make_client(monkeypatch)
+    monkeypatch.setattr(
+        ducaheat_ws,
+        "collect_heater_sample_addresses",
+        lambda *_args, **_kwargs: ([], {}, {}),
+    )
+    monkeypatch.setattr(
+        ducaheat_ws,
+        "normalize_heater_addresses",
+        lambda mapping: (mapping, {}),
+    )
+    monkeypatch.setattr(
+        ducaheat_ws,
+        "heater_sample_subscription_targets",
+        lambda mapping: [],
+    )
+    emit_mock = AsyncMock()
+    monkeypatch.setattr(client, "_emit_sio", emit_mock)
+
+    count = await client._subscribe_feeds({})
+
+    assert count == 0
+    emit_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_get_token_requires_authorization(monkeypatch: pytest.MonkeyPatch) -> None:
     """Missing Authorization header should raise a runtime error."""
 
