@@ -1920,7 +1920,7 @@ def test_ducaheat_set_acm_settings_client_error(monkeypatch) -> None:
         monkeypatch.setattr(client, "_authed_headers", fake_headers)
 
         with pytest.raises(DucaheatRequestError) as exc:
-            await client.set_node_settings("dev", ("acm", "5"), mode="manual")
+            await client.set_node_settings("dev", ("acm", "5"), mode="boost")
 
         assert "bad request" in str(exc.value)
 

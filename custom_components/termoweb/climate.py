@@ -186,7 +186,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         self._refresh_fallback: asyncio.Task | None = None
 
         # pending write aggregation
-        self._pending_mode: HVACMode | None = None
+        self._pending_mode: HVACMode | str | None = None
         self._pending_stemp: float | None = None
         self._write_task: asyncio.Task | None = None
 
@@ -542,21 +542,52 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
         t = max(5.0, min(30.0, t))
         self._pending_stemp = t
-        self._pending_mode = (
-            HVACMode.HEAT
-        )  # required by backend for setpoint acceptance
+        default_mode = self._default_mode_for_setpoint()
+        if default_mode is not None:
+            self._pending_mode = default_mode
         _LOGGER.info(
             "Queue write: addr=%s stemp=%.1f mode=%s (batching %.1fs)",
             self._addr,
             t,
-            HVACMode.HEAT,
+            default_mode if default_mode is not None else "<unchanged>",
             _WRITE_DEBOUNCE,
         )
         await self._ensure_write_task()
 
-    async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
+    def _default_mode_for_setpoint(self) -> HVACMode | str | None:
+        """Return the mode enforced when sending a bare setpoint."""
+
+        return HVACMode.HEAT
+
+    def _requires_setpoint_with_mode(self, hvac_mode: HVACMode | str) -> bool:
+        """Return whether the backend needs a target temperature for the mode."""
+
+        return hvac_mode == HVACMode.HEAT
+
+    def _allows_setpoint_in_mode(self, hvac_mode: HVACMode | str) -> bool:
+        """Return whether a mode already supports standalone setpoint writes."""
+
+        return hvac_mode == HVACMode.HEAT
+
+    def _hvac_mode_to_backend(self, hvac_mode: HVACMode | str) -> str:
+        """Translate an HA HVAC mode to the backend string representation."""
+
+        mapping: dict[HVACMode | str, str] = {
+            HVACMode.OFF: "off",
+            HVACMode.AUTO: "auto",
+            HVACMode.HEAT: "manual",
+        }
+        return mapping.get(hvac_mode, str(hvac_mode))
+
+    async def async_set_hvac_mode(self, hvac_mode: HVACMode | str) -> None:
         """Post off/auto/manual."""
-        if hvac_mode == HVACMode.OFF:
+        if isinstance(hvac_mode, HVACMode):
+            hvac_mode_value = hvac_mode.value
+        else:
+            hvac_mode_value = str(hvac_mode)
+        hvac_mode_norm = hvac_mode_value.lower()
+
+        if hvac_mode_norm == HVACMode.OFF:
             self._pending_mode = HVACMode.OFF
             _LOGGER.info(
                 "Queue write: addr=%s mode=%s (batching %.1fs)",
@@ -567,7 +598,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             await self._ensure_write_task()
             return
 
-        if hvac_mode == HVACMode.AUTO:
+        if hvac_mode_norm == HVACMode.AUTO:
             self._pending_mode = HVACMode.AUTO
             _LOGGER.info(
                 "Queue write: addr=%s mode=%s (batching %.1fs)",
@@ -578,7 +609,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             await self._ensure_write_task()
             return
 
-        if hvac_mode == HVACMode.HEAT:
+        if hvac_mode_norm == HVACMode.HEAT:
             self._pending_mode = HVACMode.HEAT
             if self._pending_stemp is None:
                 cur = self.target_temperature
@@ -613,12 +644,18 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         self._pending_mode = None
         self._pending_stemp = None
 
-        # Normalize to backend rules:
-        # - If stemp present but mode is not, force manual.
-        # - If mode=manual but stemp missing, include current target.
-        if stemp is not None and (mode is None or mode != HVACMode.HEAT):
-            mode = HVACMode.HEAT
-        if mode == HVACMode.HEAT and stemp is None:
+        # Normalize to backend rules using subclass hooks so accumulators can
+        # avoid forcing an unsupported manual mode.
+        if stemp is not None:
+            if mode is None:
+                default_mode = self._default_mode_for_setpoint()
+                if default_mode is not None:
+                    mode = default_mode
+            elif not self._allows_setpoint_in_mode(mode):
+                fallback_mode = self._default_mode_for_setpoint()
+                if fallback_mode is not None:
+                    mode = fallback_mode
+        if mode is not None and stemp is None and self._requires_setpoint_with_mode(mode):
             current = self.target_temperature
             if current is not None:
                 stemp = float(current)
@@ -628,11 +665,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
         mode_api = None
         if mode is not None:
-            mode_api = {
-                HVACMode.OFF: "off",
-                HVACMode.AUTO: "auto",
-                HVACMode.HEAT: "manual",
-            }.get(mode, str(mode))
+            mode_api = self._hvac_mode_to_backend(mode)
         _LOGGER.info(
             "POST %s settings addr=%s mode=%s stemp=%s",
             self._node_type,
@@ -768,6 +801,67 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
 class AccumulatorClimateEntity(HeaterClimateEntity):
     """HA climate entity for TermoWeb accumulator nodes."""
+
+    _attr_hvac_modes: list[HVACMode | str] = [HVACMode.OFF, HVACMode.AUTO, "boost"]
+
+    def _default_mode_for_setpoint(self) -> HVACMode | str | None:
+        """Accumulators keep their current mode when updating setpoints."""
+
+        return None
+
+    def _requires_setpoint_with_mode(self, hvac_mode: HVACMode | str) -> bool:
+        """Boost does not rely on manual setpoint semantics."""
+
+        return False
+
+    def _allows_setpoint_in_mode(self, hvac_mode: HVACMode | str) -> bool:
+        """Accumulators accept setpoints without forcing a manual mode."""
+
+        return True
+
+    def _hvac_mode_to_backend(self, hvac_mode: HVACMode | str) -> str:
+        """Translate supported accumulator modes to backend values."""
+
+        mode_normalised = str(hvac_mode).lower()
+        if mode_normalised == "boost":
+            return "boost"
+        if mode_normalised == HVACMode.OFF:
+            return "off"
+        if mode_normalised == HVACMode.AUTO:
+            return "auto"
+        return super()._hvac_mode_to_backend(hvac_mode)
+
+    @property  # type: ignore[override]
+    def hvac_mode(self) -> HVACMode | str:
+        """Return the current accumulator HVAC mode."""
+
+        s = self.heater_settings() or {}
+        mode = (s.get("mode") or "").lower()
+        if mode == "off":
+            return HVACMode.OFF
+        if mode == "auto":
+            return HVACMode.AUTO
+        if mode == "boost":
+            return "boost"
+        return super().hvac_mode
+
+    async def async_set_hvac_mode(self, hvac_mode: HVACMode | str) -> None:
+        """Handle accumulator HVAC modes, keeping boost unimplemented."""
+
+        if isinstance(hvac_mode, HVACMode):
+            value = hvac_mode.value.lower()
+        else:
+            value = str(hvac_mode).lower()
+        if value == "boost":
+            _LOGGER.info(
+                "Boost HVAC mode not yet implemented for accumulators addr=%s",
+                self._addr,
+            )
+            return
+        if value == str(HVACMode.HEAT):
+            _LOGGER.error("Unsupported hvac_mode=%s for accumulator", hvac_mode)
+            return
+        await super().async_set_hvac_mode(hvac_mode)
 
     async def _async_submit_settings(  # type: ignore[override]
         self,
