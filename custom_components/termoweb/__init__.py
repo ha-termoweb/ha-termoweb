@@ -85,7 +85,7 @@ from .backend.ws_client import TermoWebWSClient  # noqa: F401,E402
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["button", "binary_sensor", "climate", "sensor"]
+PLATFORMS = ["button", "binary_sensor", "climate", "select", "sensor"]
 
 reset_samples_rate_limit_state()
 
@@ -250,6 +250,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "version": version,
         "brand": brand,
         "debug": debug_enabled,
+        "boost_runtime": {},
     }
 
     async def _async_handle_hass_stop(_event: Any) -> None:

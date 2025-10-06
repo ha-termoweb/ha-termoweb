@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 import logging
-from typing import Any
+from typing import Any, Final
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import dispatcher
@@ -26,6 +26,159 @@ from .nodes import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+_BOOST_RUNTIME_KEY: Final = "boost_runtime"
+BOOST_DURATION_OPTIONS: Final[tuple[int, ...]] = (30, 60, 120)
+DEFAULT_BOOST_DURATION: Final = 60
+
+
+def _coerce_boost_minutes(value: Any) -> int | None:
+    """Return ``value`` as a positive integer minute count when possible."""
+
+    if value is None or isinstance(value, bool):
+        return None
+
+    candidate: int | None
+    try:
+        if isinstance(value, (int, float)):
+            candidate = int(value)
+        else:
+            text = str(value).strip()
+            if not text:
+                return None
+            candidate = int(float(text))
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        return None
+
+    if candidate is None or candidate <= 0:
+        return None
+
+    return candidate
+
+
+def _boost_runtime_store(
+    entry_data: MutableMapping[str, Any] | None,
+    *,
+    create: bool,
+) -> dict[str, dict[str, int]]:
+    """Return the mutable boost runtime store for ``entry_data``."""
+
+    if not isinstance(entry_data, MutableMapping):
+        return {}
+
+    store = entry_data.get(_BOOST_RUNTIME_KEY)
+    if isinstance(store, dict):
+        return store
+
+    if not create:
+        return {}
+
+    new_store: dict[str, dict[str, int]] = {}
+    entry_data[_BOOST_RUNTIME_KEY] = new_store
+    return new_store
+
+
+def get_boost_runtime_minutes(
+    hass: HomeAssistant,
+    entry_id: str,
+    node_type: str,
+    addr: str,
+) -> int | None:
+    """Return the stored boost runtime for the specified node."""
+
+    domain_data = hass.data.get(DOMAIN)
+    if not isinstance(domain_data, MutableMapping):
+        return None
+
+    entry_data = domain_data.get(entry_id)
+    if not isinstance(entry_data, MutableMapping):
+        return None
+
+    node_type_norm = normalize_node_type(
+        node_type,
+        use_default_when_falsey=True,
+    )
+    addr_norm = normalize_node_addr(
+        addr,
+        use_default_when_falsey=True,
+    )
+    if not node_type_norm or not addr_norm:
+        return None
+
+    store = _boost_runtime_store(entry_data, create=False)
+    bucket = store.get(node_type_norm)
+    if not isinstance(bucket, MutableMapping):
+        return None
+
+    stored = bucket.get(addr_norm)
+    minutes = _coerce_boost_minutes(stored)
+    if minutes is None:
+        return None
+
+    return minutes
+
+
+def set_boost_runtime_minutes(
+    hass: HomeAssistant,
+    entry_id: str,
+    node_type: str,
+    addr: str,
+    minutes: int | None,
+) -> None:
+    """Persist ``minutes`` as the preferred boost runtime for ``node``."""
+
+    domain_data = hass.data.get(DOMAIN)
+    if not isinstance(domain_data, MutableMapping):
+        return
+
+    entry_data = domain_data.get(entry_id)
+    if not isinstance(entry_data, MutableMapping):
+        return
+
+    node_type_norm = normalize_node_type(
+        node_type,
+        use_default_when_falsey=True,
+    )
+    addr_norm = normalize_node_addr(
+        addr,
+        use_default_when_falsey=True,
+    )
+    if not node_type_norm or not addr_norm:
+        return
+
+    store = _boost_runtime_store(entry_data, create=True)
+
+    if minutes is None:
+        bucket = store.get(node_type_norm)
+        if isinstance(bucket, MutableMapping):
+            bucket.pop(addr_norm, None)
+            if not bucket:
+                store.pop(node_type_norm, None)
+        return
+
+    validated = _coerce_boost_minutes(minutes)
+    if validated is None:
+        return
+
+    bucket = store.setdefault(node_type_norm, {})
+    bucket[addr_norm] = validated
+
+
+def resolve_boost_runtime_minutes(
+    hass: HomeAssistant,
+    entry_id: str,
+    node_type: str,
+    addr: str,
+    *,
+    default: int = DEFAULT_BOOST_DURATION,
+) -> int:
+    """Return the preferred boost runtime or ``default`` when unset."""
+
+    stored = get_boost_runtime_minutes(hass, entry_id, node_type, addr)
+    if stored is not None:
+        return stored
+    return default
 
 
 class DispatcherSubscriptionHelper:

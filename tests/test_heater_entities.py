@@ -9,6 +9,8 @@ from conftest import _install_stubs, make_ws_payload
 _install_stubs()
 
 from custom_components.termoweb import heater as heater_module
+from custom_components.termoweb.const import DOMAIN
+from homeassistant.core import HomeAssistant
 
 HeaterNodeBase = heater_module.HeaterNodeBase
 
@@ -55,3 +57,46 @@ def test_heater_node_base_payload_matching_normalizes_address(
     assert not heater._payload_matches_heater(make_ws_payload("dev", "02"))
     assert not heater._payload_matches_heater(make_ws_payload("dev", "  "))
     assert calls == [(" 01 ", {}), (" 01 ", {}), ("02", {}), ("  ", {})]
+
+
+def test_boost_runtime_storage_roundtrip() -> None:
+    """Ensure boost runtime helpers normalise addresses and defaults."""
+
+    hass = HomeAssistant()
+    entry_id = "entry-store"
+    hass.data = {DOMAIN: {entry_id: {}}}
+
+    assert (
+        heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01")
+        is None
+    )
+
+    heater_module.set_boost_runtime_minutes(hass, entry_id, "acm", "01", 120)
+    assert (
+        heater_module.get_boost_runtime_minutes(hass, entry_id, "ACM", " 01 ")
+        == 120
+    )
+    assert (
+        heater_module.resolve_boost_runtime_minutes(
+            hass,
+            entry_id,
+            "ACM",
+            "01",
+        )
+        == 120
+    )
+
+    heater_module.set_boost_runtime_minutes(hass, entry_id, "acm", "01", None)
+    assert (
+        heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01")
+        is None
+    )
+    assert (
+        heater_module.resolve_boost_runtime_minutes(
+            hass,
+            entry_id,
+            "acm",
+            "01",
+        )
+        == heater_module.DEFAULT_BOOST_DURATION
+    )
