@@ -4,6 +4,8 @@ Control your **TermoWeb** or **Ducaheat** electric heaters in **Home Assistant**
 
 [![Open in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ha-termoweb&repository=ha-termoweb&category=integration)
 [![Open your Home Assistant instance and start setting up the integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=termoweb)
+[![Tests](https://github.com/ha-termoweb/ha-termoweb/actions/workflows/tests.yml/badge.svg)](https://github.com/ha-termoweb/ha-termoweb/actions/workflows/tests.yml)
+![Coverage](docs/badges/coverage.svg)
 
 > You must install the integration first (via HACS or manual copy) before the “Add integration” button will work.
 
