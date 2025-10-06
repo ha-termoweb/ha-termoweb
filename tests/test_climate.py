@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
-import time
 from collections import deque
 from collections.abc import Coroutine
 import types
@@ -825,11 +824,15 @@ def test_async_setup_entry_rebuilds_inventory_when_missing() -> None:
     asyncio.run(_run())
 
 
-def test_refresh_fallback_logs_skip(caplog: pytest.LogCaptureFixture) -> None:
+def test_refresh_fallback_skips_when_hass_inactive(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
     async def _run() -> None:
         _reset_environment()
 
         hass = HomeAssistant()
+        hass.is_stopping = True
+        hass.is_running = True
         entry_id = "entry"
         dev_id = "dev"
         addr = "A"
@@ -855,13 +858,34 @@ def test_refresh_fallback_logs_skip(caplog: pytest.LogCaptureFixture) -> None:
         heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
         await heater.async_added_to_hass()
 
+        async def fast_sleep(_delay: float) -> None:
+            return None
+
+        monkeypatch.setattr(climate_module.asyncio, "sleep", fast_sleep)
+
         caplog.clear()
         with caplog.at_level(logging.DEBUG):
             heater._schedule_refresh_fallback()
-
+            task = heater._refresh_fallback
+            assert task is not None
+            await task
         coordinator.async_refresh_heater.assert_not_awaited()
         assert heater._refresh_fallback is None
-        assert "Skipping refresh fallback" in caplog.text
+        assert "hass stopping" in caplog.text
+
+        hass.is_stopping = False
+        hass.is_running = False
+        coordinator.async_refresh_heater.reset_mock()
+
+        caplog.clear()
+        with caplog.at_level(logging.DEBUG):
+            heater._schedule_refresh_fallback()
+            task = heater._refresh_fallback
+            assert task is not None
+            await task
+        coordinator.async_refresh_heater.assert_not_awaited()
+        assert heater._refresh_fallback is None
+        assert "hass not running" in caplog.text
 
     asyncio.run(_run())
 
@@ -969,8 +993,9 @@ def test_heater_additional_cancelled_edges(
         coordinator.async_refresh_heater = AsyncMock(side_effect=SentinelCancelled())
         heater._refresh_fallback = None
         heater._schedule_refresh_fallback()
-        assert heater._refresh_fallback is None
-        coordinator.async_refresh_heater.assert_not_awaited()
+        assert heater._refresh_fallback is not None
+        with pytest.raises(SentinelCancelled):
+            await heater._refresh_fallback
 
     asyncio.run(_run())
 
@@ -1237,7 +1262,6 @@ def test_heater_write_paths_and_errors(
         write_waiters: Deque[asyncio.Future[None]] = deque()
         write_block = False
         real_sleep = asyncio.sleep
-        fallback_delay = getattr(climate_module, "_WS_ECHO_FALLBACK_REFRESH", None)
 
         async def fake_sleep(delay: float) -> None:
             if delay == climate_module._WRITE_DEBOUNCE:
@@ -1248,7 +1272,7 @@ def test_heater_write_paths_and_errors(
                     await fut
                     return None
                 return None
-            if fallback_delay is not None and delay == fallback_delay:
+            if delay == climate_module._WS_ECHO_FALLBACK_REFRESH:
                 loop = asyncio.get_running_loop()
                 fut: asyncio.Future[None] = loop.create_future()
                 fallback_waiters.append(fut)
@@ -1267,12 +1291,12 @@ def test_heater_write_paths_and_errors(
             created_tasks.append(task)
             return task
 
-        async def _pop_waiter() -> asyncio.Future[None] | None:
+        async def _pop_waiter() -> asyncio.Future[None]:
             for _ in range(10):
                 if fallback_waiters:
                     return fallback_waiters.popleft()
                 await real_sleep(0)
-            return None
+            raise AssertionError("fallback waiter not created")
 
         async def _pop_write_waiter() -> asyncio.Future[None]:
             for _ in range(10):
@@ -1284,13 +1308,12 @@ def test_heater_write_paths_and_errors(
         async def _complete_fallback_once() -> None:
             waiter = await _pop_waiter()
             task = heater._refresh_fallback
-            if waiter is None or task is None:
-                coordinator.async_refresh_heater.assert_not_awaited()
-                assert heater._refresh_fallback is None
-                return
+            assert task is not None
+            assert coordinator.async_refresh_heater.await_count == 0
             waiter.set_result(None)
             await task
-            coordinator.async_refresh_heater.assert_not_awaited()
+            coordinator.async_refresh_heater.assert_awaited_once_with(("htr", addr))
+            coordinator.async_refresh_heater.reset_mock()
             assert heater._refresh_fallback is None
 
         class RaisingMapping:
@@ -1319,7 +1342,7 @@ def test_heater_write_paths_and_errors(
         settings_after = coordinator.data[dev_id]["htr"]["settings"][addr]
         assert settings_after["prog"] == list(base_prog)
 
-        assert heater._refresh_fallback is None
+        assert heater._refresh_fallback is not None
         await _complete_fallback_once()
 
         client.set_htr_settings.reset_mock()
@@ -1366,11 +1389,12 @@ def test_heater_write_paths_and_errors(
         assert "Optimistic update failed" in caplog.text
         waiter = await _pop_waiter()
         task = heater._refresh_fallback
+        assert task is not None
         coordinator.data = old_data
-        if waiter is not None and task is not None:
-            waiter.set_result(None)
-            await task
-        coordinator.async_refresh_heater.assert_not_awaited()
+        waiter.set_result(None)
+        await task
+        coordinator.async_refresh_heater.assert_awaited_once_with(("htr", addr))
+        coordinator.async_refresh_heater.reset_mock()
         assert heater._refresh_fallback is None
         client.set_htr_settings.reset_mock()
 
@@ -1434,11 +1458,12 @@ def test_heater_write_paths_and_errors(
         assert "Optimistic update failed" in caplog.text
         waiter = await _pop_waiter()
         task = heater._refresh_fallback
+        assert task is not None
         coordinator.data = old_data
-        if waiter is not None and task is not None:
-            waiter.set_result(None)
-            await task
-        coordinator.async_refresh_heater.assert_not_awaited()
+        waiter.set_result(None)
+        await task
+        coordinator.async_refresh_heater.assert_awaited_once_with(("htr", addr))
+        coordinator.async_refresh_heater.reset_mock()
         assert heater._refresh_fallback is None
         client.set_htr_settings.reset_mock()
 
@@ -1549,22 +1574,43 @@ def test_heater_write_paths_and_errors(
 
         # -------------------- _schedule_refresh_fallback behaviour --------
         heater._schedule_refresh_fallback()
-        assert heater._refresh_fallback is None
-        coordinator.async_refresh_heater.assert_not_awaited()
+        task_a = heater._refresh_fallback
+        waiter_a = await _pop_waiter()
+        heater._schedule_refresh_fallback()
+        task_b = heater._refresh_fallback
+        waiter_b = await _pop_waiter()
+
+        assert task_a is not None and task_b is not None and task_a is not task_b
+        with pytest.raises(asyncio.CancelledError):
+            await task_a
+        if not waiter_a.done():
+            waiter_a.cancel()
+
+        assert coordinator.async_refresh_heater.await_count == 0
+
+        waiter_b.set_result(None)
+        await task_b
+        coordinator.async_refresh_heater.assert_awaited_once_with(("htr", addr))
+        coordinator.async_refresh_heater.reset_mock()
 
         caplog.clear()
         coordinator.async_refresh_heater.side_effect = RuntimeError("refresh boom")
         heater._schedule_refresh_fallback()
-        assert heater._refresh_fallback is None
-        assert "Skipping refresh fallback" in caplog.text
+        waiter_err = await _pop_waiter()
+        task_err = heater._refresh_fallback
+        assert task_err is not None
+        waiter_err.set_result(None)
+        await task_err
+        assert "Refresh fallback failed" in caplog.text
         coordinator.async_refresh_heater.side_effect = None
         coordinator.async_refresh_heater.reset_mock()
+        assert not fallback_waiters
 
         # -------------------- WS healthy suppresses fallback --------------
         hass.data[DOMAIN][entry_id]["ws_state"][dev_id] = {
             "status": "healthy",
             "last_event_at": 0,
-            "last_payload_at": time.time(),
+            "last_payload_at": climate_module.time.time(),
             "idle_restart_pending": False,
         }
         client.set_htr_settings.reset_mock()
@@ -1576,31 +1622,31 @@ def test_heater_write_paths_and_errors(
         assert not fallback_waiters
         client.set_htr_settings.reset_mock()
 
-        # -------------------- WS healthy but stale payload still relies on WS ----
+        # -------------------- WS healthy but stale payload triggers fallback ----
         hass.data[DOMAIN][entry_id]["ws_state"][dev_id] = {
             "status": "healthy",
             "last_event_at": 0,
-            "last_payload_at": time.time() - 60,
+            "last_payload_at": climate_module.time.time() - 60,
             "idle_restart_pending": False,
         }
         await heater.async_set_temperature(**{ATTR_TEMPERATURE: 21.5})
         assert heater._write_task is not None
         await heater._write_task
         assert client.set_htr_settings.await_count == 1
-        assert heater._refresh_fallback is None
+        assert heater._refresh_fallback is not None
         await _complete_fallback_once()
         client.set_htr_settings.reset_mock()
 
-        # -------------------- WS status missing keeps fallback disabled ----
+        # -------------------- WS status missing triggers fallback ---------
         hass.data[DOMAIN][entry_id]["ws_state"].pop(dev_id, None)
         await heater.async_set_temperature(**{ATTR_TEMPERATURE: 24.5})
         assert heater._write_task is not None
         await heater._write_task
-        assert heater._refresh_fallback is None
+        assert heater._refresh_fallback is not None
         await _complete_fallback_once()
         client.set_htr_settings.reset_mock()
 
-        # -------------------- WS down still relies on websocket updates ---
+        # -------------------- WS down restores fallback -------------------
         hass.data[DOMAIN][entry_id]["ws_state"][dev_id] = {
             "status": "disconnected",
             "last_event_at": None,
@@ -1608,7 +1654,7 @@ def test_heater_write_paths_and_errors(
         await heater.async_set_temperature(**{ATTR_TEMPERATURE: 23.5})
         assert heater._write_task is not None
         await heater._write_task
-        assert heater._refresh_fallback is None
+        assert heater._refresh_fallback is not None
         await _complete_fallback_once()
         client.set_htr_settings.reset_mock()
 
@@ -1785,8 +1831,11 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
 
         coordinator.async_refresh_heater = AsyncMock(side_effect=failing_refresh)
         heater._schedule_refresh_fallback()
+        task = heater._refresh_fallback
+        assert task is not None
+        await task
+        coordinator.async_refresh_heater.assert_awaited_once_with(("htr", addr))
         assert heater._refresh_fallback is None
-        coordinator.async_refresh_heater.assert_not_awaited()
 
     asyncio.run(_run())
 
@@ -1907,7 +1956,10 @@ def test_heater_cancelled_paths_propagate(
             side_effect=asyncio.CancelledError()
         )
         heater._schedule_refresh_fallback()
+        task = heater._refresh_fallback
+        assert task is not None
+        with pytest.raises(asyncio.CancelledError):
+            await task
         assert heater._refresh_fallback is None
-        coordinator.async_refresh_heater.assert_not_awaited()
 
     asyncio.run(_run())
