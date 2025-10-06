@@ -14,6 +14,6 @@ Key observations from traffic captures:
 - The `units` field is **always uppercase** (`"C"` or `"F"`); lowercase variants fail validation.
 - Some operations require a `select: true` POST before the substantive write and `select: false`
   afterwards. Keep the claim short-lived to avoid stepping on app sessions.
-- Boost, lock, and similar toggles are literal booleans; do not send quoted values.
+- Boost (accumulators only), lock, and similar toggles are literal booleans; do not send quoted values.
 
 These semantics apply to both heater (`htr`) and accumulator (`acm`) nodes within the Ducaheat API.

@@ -106,7 +106,7 @@ components:
           type: string
         node_type:
           type: string
-          example: htr
+          example: acm
         addr:
           type: integer
         status:
@@ -127,6 +127,7 @@ components:
               example: C
             boost_active:
               type: boolean
+              description: Accumulator boost session currently active
         setup:
           type: object
           additionalProperties: true
@@ -141,7 +142,7 @@ components:
                   example: 60
                 boost_temp:
                   type: string
-                  description: Temperature applied during boost, if distinct from `stemp`
+                  description: Temperature applied during accumulator boost, if distinct from `stemp`
                   example: "22.0"
             operational_mode:
               type: integer
@@ -225,7 +226,7 @@ components:
           additionalProperties: false
     HeaterStatusWrite:
       type: object
-      description: Write status for a heater
+      description: Write status for a heater or accumulator
       properties:
         mode:
           type: string
@@ -241,7 +242,7 @@ components:
           example: C
         boost:
           type: boolean
-          description: Start/stop an immediate Boost (runback) session
+          description: Start/stop an immediate Boost (runback) session (accumulators only)
       additionalProperties: false
     HeaterModeWrite:
       type: object
@@ -435,7 +436,7 @@ paths:
   /api/v2/devs/{dev_id}/{node_type}/{addr}/status:
     post:
       tags: [ThermalNodes]
-      summary: Set mode/setpoint/units and optionally trigger Boost
+      summary: Set mode/setpoint/units; accumulators may also trigger Boost
       parameters:
         - name: dev_id
           in: path
@@ -447,6 +448,7 @@ paths:
           schema:
             type: string
             enum: [htr, acm]
+            description: Use `acm` when sending boost-related writes
         - name: addr
           in: path
           required: true
@@ -466,6 +468,7 @@ paths:
               boost_now:
                 value:
                   boost: true
+                summary: Valid only when node_type is acm
       responses:
         "201":
           description: Accepted
