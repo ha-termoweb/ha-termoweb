@@ -321,7 +321,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         await self._ws.send_str(f"40{self._namespace}")
         _LOGGER.debug("WS (ducaheat): -> 40%s", self._namespace)
         self._pending_dev_data = True
-        _LOGGER.debug("WS (ducaheat): -> 42 dev_data")
+        _LOGGER.debug("WS (ducaheat): dev_data pending until namespace ack")
         self._update_status("connected")
 
     async def _read_loop_ws(self) -> None:
@@ -470,7 +470,15 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             raise RuntimeError("websocket not connected")
         arr = [event, *args]
         payload = json.dumps(arr, separators=(",", ":"), default=str)
-        await self._ws.send_str(f"42{DUCAHEAT_NAMESPACE}," + payload)
+        frame = f"42{self._namespace}," + payload
+        await self._ws.send_str(frame)
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            summary = ""
+            if event in {"subscribe", "unsubscribe"} and args:
+                summary = f" path={args[0]}"
+            elif args:
+                summary = f" args={args}"
+            _LOGGER.debug("WS (ducaheat): -> 42 %s%s", event, summary)
 
     def _normalise_nodes_payload(self, nodes: Mapping[str, Any]) -> Any:
         """Normalise websocket node payloads via the REST client helper."""

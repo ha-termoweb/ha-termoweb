@@ -173,6 +173,28 @@ async def test_connect_once_performs_full_handshake(monkeypatch: pytest.MonkeyPa
     assert client._ws.sent.count("3") == 0  # handshake should not issue pong during setup
 
 
+@pytest.mark.asyncio
+async def test_emit_sio_logs_subscribe(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """Debug logging should include subscription path summaries."""
+
+    client = _make_client(monkeypatch)
+    client._ws = StubWebSocket()
+    caplog.set_level(logging.DEBUG, logger="custom_components.termoweb.backend.ducaheat_ws")
+
+    await client._emit_sio("subscribe", "/htr/1/status")
+    await client._emit_sio("message", "pong")
+
+    assert client._ws.sent == [
+        '42/api/v2/socket_io,["subscribe","/htr/1/status"]',
+        '42/api/v2/socket_io,["message","pong"]',
+    ]
+    assert any(
+        "-> 42 subscribe" in record.message and "path=/htr/1/status" in record.message
+        for record in caplog.records
+    )
+    assert any("-> 42 message" in record.message and "args=('pong',)" in record.message for record in caplog.records)
+
+
 def test_rand_t_token_format() -> None:
     """Random polling tokens should be eight alphanumeric characters with a P prefix."""
 
