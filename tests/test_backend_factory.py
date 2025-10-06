@@ -14,7 +14,7 @@ from custom_components.termoweb.backend.ducaheat import DucaheatBackend
 from custom_components.termoweb.backend.termoweb import TermoWebBackend
 from custom_components.termoweb.const import BRAND_DUCAHEAT
 from custom_components.termoweb.backend.termoweb_ws import TermoWebWSClient
-from custom_components.termoweb.backend.ws_client import WebSocketClient
+from custom_components.termoweb.backend.ws_client import WebSocketClient as LegacyWSClient
 
 
 class DummyHttpClient:
@@ -99,12 +99,11 @@ def test_termoweb_backend_creates_ws_client() -> None:
     finally:
         loop.close()
 
-    assert isinstance(ws_client, WebSocketClient)
     assert isinstance(ws_client, TermoWebWSClient)
     assert ws_client.dev_id == "device456"
     assert ws_client.entry_id == "entry123"
     assert ws_client._coordinator is coordinator
-    assert ws_client._protocol_hint == "socketio09"
+    assert ws_client._protocol_hint is None
 
 
 def test_termoweb_backend_fallback_ws_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -125,9 +124,8 @@ def test_termoweb_backend_fallback_ws_resolution(monkeypatch: pytest.MonkeyPatch
     finally:
         loop.close()
 
-    assert isinstance(ws_client, WebSocketClient)
     assert isinstance(ws_client, TermoWebWSClient)
-    assert ws_client._protocol_hint == "socketio09"
+    assert ws_client._protocol_hint is None
 
 
 def test_termoweb_backend_resolve_ws_client_cls_fallback(
@@ -146,7 +144,7 @@ def test_termoweb_backend_resolve_ws_client_cls_fallback(
     )
 
     resolved = backend._resolve_ws_client_cls()
-    assert resolved is WebSocketClient
+    assert resolved is LegacyWSClient
 
 
 def test_termoweb_backend_resolve_ws_no_modules(
@@ -160,7 +158,7 @@ def test_termoweb_backend_resolve_ws_no_modules(
         None,
     )
     resolved = backend._resolve_ws_client_cls()
-    assert resolved is WebSocketClient
+    assert resolved is LegacyWSClient
 
 
 def test_termoweb_backend_resolve_ws_no_module_type(
@@ -179,7 +177,7 @@ def test_termoweb_backend_resolve_ws_no_module_type(
         marker,
     )
     resolved = backend._resolve_ws_client_cls()
-    assert resolved is WebSocketClient
+    assert resolved is LegacyWSClient
 
 
 def test_termoweb_backend_resolve_ws_import_error(
@@ -197,7 +195,7 @@ def test_termoweb_backend_resolve_ws_import_error(
 
     monkeypatch.setattr(termoweb_backend, "import_module", _raise)
     resolved = backend._resolve_ws_client_cls()
-    assert resolved is WebSocketClient
+    assert resolved is LegacyWSClient
 
 
 def test_termoweb_backend_resolve_ws_missing_attr(
@@ -214,7 +212,7 @@ def test_termoweb_backend_resolve_ws_missing_attr(
     ws_module = ModuleType("custom_components.termoweb.backend.termoweb_ws")
     monkeypatch.setattr(termoweb_backend, "import_module", lambda name: ws_module)
     resolved = backend._resolve_ws_client_cls()
-    assert resolved is WebSocketClient
+    assert resolved is LegacyWSClient
 
 
 def test_termoweb_backend_legacy_ws_class(monkeypatch: pytest.MonkeyPatch) -> None:

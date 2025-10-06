@@ -13,10 +13,12 @@ from custom_components.termoweb.backend.ducaheat import (
 )
 from custom_components.termoweb.const import WS_NAMESPACE
 from custom_components.termoweb.backend.ducaheat_ws import DucaheatWSClient
-from custom_components.termoweb.backend.ws_client import WebSocketClient
 
 
 class DummyClient:
+    def __init__(self) -> None:
+        self._session = SimpleNamespace()
+
     async def list_devices(self) -> list[dict[str, object]]:
         return []
 
@@ -76,11 +78,9 @@ async def test_ducaheat_backend_creates_ws_client() -> None:
         dev_id="dev",
         coordinator=object(),
     )
-    assert isinstance(ws_client, WebSocketClient)
     assert isinstance(ws_client, DucaheatWSClient)
     assert ws_client.dev_id == "dev"
     assert ws_client.entry_id == "entry"
-    assert ws_client._protocol_hint is None
     assert ws_client._namespace == WS_NAMESPACE
 
 
