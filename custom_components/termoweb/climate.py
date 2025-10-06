@@ -35,7 +35,7 @@ _LOGGER = logging.getLogger(__name__)
 # Small debounce so multiple UI events coalesce
 _WRITE_DEBOUNCE = 0.2
 # If WS echo doesn't arrive quickly after a successful write, force a refresh
-_WS_ECHO_FALLBACK_REFRESH = 2.0
+_WS_ECHO_FALLBACK_REFRESH = 4.0
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
