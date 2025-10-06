@@ -16,6 +16,7 @@ from conftest import FakeCoordinator, _install_stubs
 _install_stubs()
 
 from custom_components.termoweb import climate as climate_module
+from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
 from custom_components.termoweb.const import (
     BRAND_DUCAHEAT,
     BRAND_TERMOWEB,
@@ -477,6 +478,218 @@ def test_async_setup_entry_creates_accumulator_entity() -> None:
         assert call.kwargs["ptemp"] == [18.5, 19.5, 20.5]
         assert call.kwargs["units"] == "C"
         assert client.set_htr_settings.await_count == 0
+
+    asyncio.run(_run())
+
+
+def test_accumulator_hvac_mode_reporting() -> None:
+    """Ensure accumulator HVAC mode normalisation covers all branches."""
+
+    _reset_environment()
+    hass = HomeAssistant()
+    entry_id = "entry-acm-hvac"
+    dev_id = "dev-acm-hvac"
+    addr = "7"
+    settings: dict[str, Any] = {"mode": "off", "units": "C"}
+    coordinator = _make_coordinator(
+        hass,
+        dev_id,
+        {
+            "nodes": {},
+            "nodes_by_type": {"acm": {"settings": {addr: settings}}},
+            "htr": {"settings": {}},
+        },
+    )
+    hass.data = {
+        DOMAIN: {
+            entry_id: {
+                "coordinator": coordinator,
+                "dev_id": dev_id,
+                "client": AsyncMock(),
+                "brand": BRAND_TERMOWEB,
+            }
+        }
+    }
+
+    entity = climate_module.AccumulatorClimateEntity(
+        coordinator,
+        entry_id,
+        dev_id,
+        addr,
+        "Accumulator",
+        node_type="acm",
+    )
+    entity.hass = hass
+
+    assert entity._default_mode_for_setpoint() is None
+    assert entity._requires_setpoint_with_mode(HVACMode.AUTO) is False
+    assert entity._allows_setpoint_in_mode(HVACMode.AUTO) is True
+    assert entity._hvac_mode_to_backend("boost") == "boost"
+    assert entity._hvac_mode_to_backend("off") == "off"
+    assert entity._hvac_mode_to_backend("auto") == "auto"
+    assert entity._hvac_mode_to_backend(HVACMode.OFF) == "off"
+    assert entity._hvac_mode_to_backend(HVACMode.AUTO) == "auto"
+    assert entity._hvac_mode_to_backend(HVACMode.HEAT) == "manual"
+    assert entity._hvac_mode_to_backend("eco") == "eco"
+
+    assert entity.hvac_mode == HVACMode.OFF
+    settings["mode"] = "auto"
+    assert entity.hvac_mode == HVACMode.AUTO
+    settings["mode"] = "boost"
+    assert entity.hvac_mode == "boost"
+    settings["mode"] = "manual"
+    assert entity.hvac_mode == HVACMode.HEAT
+    settings["mode"] = "unexpected"
+    assert entity.hvac_mode == HVACMode.HEAT
+
+
+def test_accumulator_async_set_hvac_mode_paths(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Exercise accumulator HVAC mode writes including boost and heat paths."""
+
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry_id = "entry-acm-async"
+        dev_id = "dev-acm-async"
+        addr = "9"
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            {
+                "nodes": {},
+                "nodes_by_type": {"acm": {"settings": {addr: {"mode": "auto"}}}},
+                "htr": {"settings": {}},
+            },
+        )
+        hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "coordinator": coordinator,
+                    "dev_id": dev_id,
+                    "client": AsyncMock(),
+                    "brand": BRAND_TERMOWEB,
+                }
+            }
+        }
+
+        entity = climate_module.AccumulatorClimateEntity(
+            coordinator,
+            entry_id,
+            dev_id,
+            addr,
+            "Accumulator",
+            node_type="acm",
+        )
+        entity.hass = hass
+
+        super_mock = AsyncMock()
+        monkeypatch.setattr(
+            climate_module.HeaterClimateEntity,
+            "async_set_hvac_mode",
+            super_mock,
+        )
+
+        caplog.set_level(logging.INFO, logger=climate_module._LOGGER.name)
+        await entity.async_set_hvac_mode("boost")
+        assert super_mock.await_count == 0
+        assert "Boost HVAC mode not yet implemented" in caplog.text
+
+        error_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+        def _record_error(*args: Any, **kwargs: Any) -> None:
+            error_calls.append((args, kwargs))
+
+        monkeypatch.setattr(climate_module._LOGGER, "error", _record_error)
+
+        class _FakeHeat:
+            def __str__(self) -> str:
+                class _HeatString(str):
+                    def lower(self) -> str:  # type: ignore[override]
+                        return str(HVACMode.HEAT)
+
+                return _HeatString("HVACMode.HEAT")
+
+        await entity.async_set_hvac_mode(_FakeHeat())
+        assert error_calls
+        assert super_mock.await_count == 0
+        super_mock.reset_mock()
+
+        caplog.clear()
+        await entity.async_set_hvac_mode(HVACMode.AUTO)
+        super_mock.assert_awaited_once_with(HVACMode.AUTO)
+
+    asyncio.run(_run())
+
+
+def test_accumulator_submit_settings_brand_switch() -> None:
+    """Verify accumulator writes use Ducaheat client when the brand matches."""
+
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry_id = "entry-acm-submit"
+        dev_id = "dev-acm-submit"
+        addr = "11"
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            {
+                "nodes": {},
+                "nodes_by_type": {"acm": {"settings": {addr: {"mode": "auto"}}}},
+                "htr": {"settings": {}},
+            },
+        )
+        hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "coordinator": coordinator,
+                    "dev_id": dev_id,
+                    "client": AsyncMock(),
+                    "brand": BRAND_DUCAHEAT,
+                }
+            }
+        }
+
+        entity = climate_module.AccumulatorClimateEntity(
+            coordinator,
+            entry_id,
+            dev_id,
+            addr,
+            "Accumulator",
+            node_type="acm",
+        )
+        entity.hass = hass
+
+        ducaheat_client = AsyncMock(spec=DucaheatRESTClient)
+        await entity._async_submit_settings(
+            ducaheat_client,
+            mode="auto",
+            stemp=21.0,
+            prog=None,
+            ptemp=None,
+            units="C",
+        )
+        call = ducaheat_client.set_node_settings.await_args
+        assert call.args == (dev_id, ("acm", addr))
+        assert call.kwargs["mode"] == "auto"
+
+        hass.data[DOMAIN][entry_id]["brand"] = BRAND_TERMOWEB
+
+        generic_client = AsyncMock()
+        generic_client.set_node_settings = AsyncMock()
+        await entity._async_submit_settings(
+            generic_client,
+            mode="manual",
+            stemp=19.0,
+            prog=[0] * 168,
+            ptemp=[18.0, 19.0, 20.0],
+            units="C",
+        )
+        call = generic_client.set_node_settings.await_args
+        assert call.args == (dev_id, ("acm", addr))
+        assert call.kwargs["ptemp"] == [18.0, 19.0, 20.0]
 
     asyncio.run(_run())
 
