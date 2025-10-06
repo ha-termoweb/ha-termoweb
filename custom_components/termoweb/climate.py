@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Mapping
 import logging
-import time
 from typing import Any, cast
 
 from homeassistant.components.climate import (
@@ -34,9 +33,6 @@ _LOGGER = logging.getLogger(__name__)
 
 # Small debounce so multiple UI events coalesce
 _WRITE_DEBOUNCE = 0.2
-# If WS echo doesn't arrive quickly after a successful write, force a refresh
-_WS_ECHO_FALLBACK_REFRESH = 2.0
-
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Discover heater nodes and create climate entities."""
@@ -425,7 +421,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         apply_fn: Callable[[dict[str, Any]], None],
         success_details: Mapping[str, Any] | None = None,
     ) -> None:
-        """Submit a heater write, update cached state, and schedule fallback."""
+        """Submit a heater write and update cached state."""
         success = await self._async_write_settings(
             log_context=log_context,
             **dict(write_kwargs),
@@ -724,78 +720,18 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             stemp,
         )
 
-        # Expect WS echo; schedule refresh if it doesn't arrive soon.
+        # Expect a websocket echo to confirm the update.
         self._schedule_refresh_fallback()
 
     def _schedule_refresh_fallback(self) -> None:
-        """Schedule a refresh if the websocket echo does not arrive."""
-        if self._refresh_fallback:
-            if not self._refresh_fallback.done():
-                self._refresh_fallback.cancel()
-            self._refresh_fallback = None
-
-        ws_record = (
-            self.hass.data.get(DOMAIN, {}).get(self._entry_id, {}).get("ws_state")
-        )
-        if isinstance(ws_record, dict):
-            ws_state = ws_record.get(self._dev_id)
-            if isinstance(ws_state, dict):
-                status = str(ws_state.get("status") or "").lower()
-                if status in {"connected", "healthy"}:
-                    last_payload_at = ws_state.get("last_payload_at")
-                    idle_restart_pending = bool(
-                        ws_state.get("idle_restart_pending")
-                    )
-                    recent_payload = False
-                    if isinstance(last_payload_at, (int, float)):
-                        recent_payload = (time.time() - last_payload_at) <= (
-                            _WS_ECHO_FALLBACK_REFRESH
-                        )
-                    if idle_restart_pending or recent_payload:
-                        _LOGGER.debug(
-                            "Skipping refresh fallback addr=%s ws_status=%s",
-                            self._addr,
-                            status,
-                        )
-                        return
-
-        async def _fallback() -> None:
-            """Force a heater refresh after the fallback delay."""
-            task = asyncio.current_task()
-            await asyncio.sleep(_WS_ECHO_FALLBACK_REFRESH)
-            try:
-                hass = self.hass
-                is_stopping = getattr(hass, "is_stopping", False)
-                is_running = getattr(hass, "is_running", True)
-                if is_stopping or not is_running:
-                    reason = "stopping" if is_stopping else "not running"
-                    _LOGGER.debug(
-                        "Skipping refresh fallback addr=%s: hass %s",
-                        self._addr,
-                        reason,
-                    )
-                    return
-
-                await self.coordinator.async_refresh_heater(
-                    (self._node_type, self._addr)
-                )
-                if task and self._refresh_fallback is task:
-                    self._refresh_fallback = None
-                    return
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                _LOGGER.error(
-                    "Refresh fallback failed addr=%s: %s",
-                    self._addr,
-                    str(e),
-                )
-            finally:
-                if task and self._refresh_fallback is task:
-                    self._refresh_fallback = None
-
-        self._refresh_fallback = asyncio.create_task(
-            _fallback(), name=f"termoweb-fallback-{self._dev_id}-{self._addr}"
+        """Reset any pending refresh fallback task."""
+        if self._refresh_fallback and not self._refresh_fallback.done():
+            self._refresh_fallback.cancel()
+        self._refresh_fallback = None
+        _LOGGER.debug(
+            "Skipping refresh fallback type=%s addr=%s: websocket echo expected",
+            self._node_type,
+            self._addr,
         )
 
 

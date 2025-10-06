@@ -2533,12 +2533,8 @@ def test_refresh_fallback_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
         )
         heater.hass = HomeAssistant()
         heater._schedule_refresh_fallback()
-        task = heater._refresh_fallback
-        assert task is not None
-        await asyncio.sleep(0)
+        assert heater._refresh_fallback is None
         await heater.async_will_remove_from_hass()
-        await asyncio.sleep(0)
-        assert task.cancelled()
         assert heater._refresh_fallback is None
 
     asyncio.run(_run())
