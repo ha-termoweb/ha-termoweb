@@ -789,6 +789,200 @@ def test_accumulator_extra_state_attributes_fallbacks() -> None:
     assert attrs["program_setpoint"] == pytest.approx(15.0)
 
 
+def test_accumulator_extra_state_attributes_handles_resolver_fallbacks() -> None:
+    """Edge cases in boost metadata should handle resolver failures gracefully."""
+
+    _reset_environment()
+    hass = HomeAssistant()
+    entry_id = "entry-acm-resolver"
+    dev_id = "dev-acm-resolver"
+    addr = "7"
+
+    class RaiseOnStr:
+        def __str__(self) -> str:
+            raise RuntimeError("boom")
+
+    settings = {
+        "mode": "Boost",
+        "units": "C",
+        "prog": [0] * 168,
+        "boost_active": None,
+        "boost": RaiseOnStr(),
+        "boost_end_day": 12,
+        "boost_end_min": 90,
+        "boost_end": {"day": 14, "minute": 150},
+        "boost_remaining": True,
+    }
+
+    coordinator = _make_coordinator(
+        hass,
+        dev_id,
+        {
+            "nodes": {},
+            "nodes_by_type": {"acm": {"settings": {addr: settings}}},
+            "htr": {"settings": {}},
+        },
+    )
+
+    class FlakyResolver:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(
+            self, day: Any, minute: Any
+        ) -> tuple[dt.datetime | None, int | None]:
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("resolver failure")
+            return (
+                dt.datetime(2024, 1, 1, 3, 0, tzinfo=dt.timezone.utc),
+                None,
+            )
+
+    coordinator.resolve_boost_end = FlakyResolver()  # type: ignore[assignment]
+
+    hass.data = {
+        DOMAIN: {
+            entry_id: {
+                "coordinator": coordinator,
+                "dev_id": dev_id,
+                "client": AsyncMock(),
+                "brand": BRAND_TERMOWEB,
+            }
+        }
+    }
+
+    entity = climate_module.AccumulatorClimateEntity(
+        coordinator,
+        entry_id,
+        dev_id,
+        addr,
+        "Accumulator",
+        node_type="acm",
+    )
+    entity.hass = hass
+
+    original_now = dt_util.NOW
+    try:
+        dt_util.NOW = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
+        attrs = entity.extra_state_attributes
+    finally:
+        dt_util.NOW = original_now
+
+    assert attrs["boost_active"] is True
+    assert attrs["boost_minutes_remaining"] is None
+    assert attrs["boost_end"] == "2024-01-01T03:00:00+00:00"
+
+
+def test_accumulator_extra_state_attributes_varied_inputs() -> None:
+    """Accumulator boost metadata should normalise a range of inputs."""
+
+    _reset_environment()
+    hass = HomeAssistant()
+    entry_id = "entry-acm-variants"
+    dev_id = "dev-acm-variants"
+    addr = "8"
+    settings = {
+        "mode": "auto",
+        "units": "C",
+        "prog": [0] * 168,
+        "boost_active": 1,
+        "boost_end_day": 2,
+        "boost_end_min": 60,
+        "boost_end": None,
+        "boost_remaining": None,
+    }
+
+    coordinator = _make_coordinator(
+        hass,
+        dev_id,
+        {
+            "nodes": {},
+            "nodes_by_type": {"acm": {"settings": {addr: settings}}},
+            "htr": {"settings": {}},
+        },
+    )
+
+    hass.data = {
+        DOMAIN: {
+            entry_id: {
+                "coordinator": coordinator,
+                "dev_id": dev_id,
+                "client": AsyncMock(),
+                "brand": BRAND_TERMOWEB,
+            }
+        }
+    }
+
+    entity = climate_module.AccumulatorClimateEntity(
+        coordinator,
+        entry_id,
+        dev_id,
+        addr,
+        "Accumulator",
+        node_type="acm",
+    )
+    entity.hass = hass
+
+    class BrokenDateTime(dt.datetime):
+        def isoformat(self, *args: Any, **kwargs: Any) -> str:
+            raise RuntimeError("bad isoformat")
+
+    def _resolver(day: Any, minute: Any) -> tuple[dt.datetime, int | None]:
+        return (
+            BrokenDateTime(2024, 1, 1, 1, 0, tzinfo=dt.timezone.utc),
+            None,
+        )
+
+    coordinator.resolve_boost_end = _resolver  # type: ignore[assignment]
+
+    original_now = dt_util.NOW
+    try:
+        dt_util.NOW = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
+        attrs = entity.extra_state_attributes
+    finally:
+        dt_util.NOW = original_now
+
+    assert attrs["boost_active"] is True
+    assert attrs["boost_minutes_remaining"] == 60
+    assert attrs["boost_end"] == "2024-01-01T01:00:00+00:00"
+
+    class RaisingResolver:
+        def __call__(self, day: Any, minute: Any) -> tuple[dt.datetime | None, int | None]:
+            raise ValueError("resolver error")
+
+    settings["boost_active"] = " OFF "
+    settings["boost_end_day"] = None
+    settings["boost_end_min"] = None
+    settings["boost_end"] = {"day": 10, "minute": 15}
+    settings["boost_remaining"] = ""
+    coordinator.resolve_boost_end = RaisingResolver()  # type: ignore[assignment]
+
+    attrs = entity.extra_state_attributes
+    assert attrs["boost_active"] is False
+    assert attrs["boost_minutes_remaining"] is None
+    assert attrs["boost_end"] is None
+
+    settings["boost_active"] = " maybe "
+    settings["boost"] = None
+    settings["mode"] = "auto"
+    settings["boost_end"] = None
+    settings["boost_remaining"] = None
+    coordinator.resolve_boost_end = None  # type: ignore[assignment]
+
+    attrs = entity.extra_state_attributes
+    assert attrs["boost_active"] is False
+
+    settings["boost_active"] = 0
+    settings["boost_end"] = None
+    settings["boost_remaining"] = 7.5
+    coordinator.resolve_boost_end = None  # type: ignore[assignment]
+
+    attrs = entity.extra_state_attributes
+    assert attrs["boost_active"] is False
+    assert attrs["boost_minutes_remaining"] == 7
+    assert attrs["boost_end"] == "2024-01-01T00:07:00+00:00"
+
 def test_accumulator_submit_settings_brand_switch() -> None:
     """Verify accumulator writes use Ducaheat client when the brand matches."""
 
