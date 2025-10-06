@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from typing import Any
+
 import pytest
 
 from conftest import _install_stubs, make_ws_payload
@@ -97,6 +99,77 @@ def test_boost_runtime_storage_roundtrip() -> None:
             entry_id,
             "acm",
             "01",
+        )
+        == heater_module.DEFAULT_BOOST_DURATION
+    )
+
+
+def test_coerce_boost_minutes_edge_cases() -> None:
+    """Exercise defensive conversions for boost duration inputs."""
+
+    coerce = heater_module._coerce_boost_minutes
+    assert coerce(None) is None
+    assert coerce(True) is None
+    assert coerce(0) is None
+    assert coerce(-5) is None
+    assert coerce("   ") is None
+    assert coerce("invalid") is None
+    assert coerce("90") == 90
+    assert coerce(120.7) == 120
+
+
+def test_boost_runtime_store_handles_non_mapping() -> None:
+    """Verify boost runtime store creation tolerates unexpected inputs."""
+
+    assert heater_module._boost_runtime_store(None, create=False) == {}
+    entry_data: dict[str, Any] = {}
+    assert heater_module._boost_runtime_store(entry_data, create=False) == {}
+    created = heater_module._boost_runtime_store(entry_data, create=True)
+    assert created == {}
+    assert entry_data[heater_module._BOOST_RUNTIME_KEY] is created
+
+
+def test_boost_runtime_helpers_guard_invalid_structures() -> None:
+    """Ensure get/set helpers short-circuit when data is malformed."""
+
+    hass = HomeAssistant()
+    entry_id = "entry-invalid"
+
+    # Domain data missing prevents persistence.
+    heater_module.set_boost_runtime_minutes(hass, entry_id, "acm", "01", 30)
+    assert (
+        heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01")
+        is None
+    )
+
+    # Non-mapping entry data is ignored for get/set operations.
+    hass.data = {DOMAIN: {entry_id: []}}
+    assert (
+        heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01")
+        is None
+    )
+    heater_module.set_boost_runtime_minutes(hass, entry_id, "acm", "01", 45)
+
+    # Missing identifiers or invalid minutes are ignored.
+    hass.data[DOMAIN][entry_id] = {}
+    heater_module.set_boost_runtime_minutes(hass, entry_id, "", "01", 45)
+    heater_module.set_boost_runtime_minutes(hass, entry_id, "acm", "", 45)
+    heater_module.set_boost_runtime_minutes(hass, entry_id, "acm", "01", -10)
+
+    # Stored garbage values should not be returned.
+    hass.data[DOMAIN][entry_id][heater_module._BOOST_RUNTIME_KEY] = {
+        "acm": {"01": "oops"}
+    }
+    assert (
+        heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01")
+        is None
+    )
+    assert (
+        heater_module.resolve_boost_runtime_minutes(
+            hass,
+            entry_id,
+            "",
+            "",
         )
         == heater_module.DEFAULT_BOOST_DURATION
     )

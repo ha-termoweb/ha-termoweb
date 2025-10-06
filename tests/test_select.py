@@ -15,6 +15,7 @@ from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.heater import (
     DEFAULT_BOOST_DURATION,
     get_boost_runtime_minutes,
+    set_boost_runtime_minutes,
 )
 from homeassistant.core import HomeAssistant
 
@@ -181,5 +182,88 @@ def test_select_restores_last_state(monkeypatch: pytest.MonkeyPatch) -> None:
             get_boost_runtime_minutes(hass, entry.entry_id, "acm", node.addr)
             == DEFAULT_BOOST_DURATION
         )
+
+    asyncio.run(_run())
+
+
+def test_select_filters_nodes_and_handles_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify setup skips unsupported nodes and applies default persistence."""
+
+    async def _run() -> None:
+        hass = HomeAssistant()
+        entry = types.SimpleNamespace(entry_id="entry-fallback")
+        dev_id = "dev-fallback"
+
+        non_acm = types.SimpleNamespace(addr="01", type="htr")
+        disabled_acm = types.SimpleNamespace(addr="02", type="acm", supports_boost=lambda: False)
+        enabled_acm = _make_node("03")
+
+        record = {
+            "nodes": {},
+            "nodes_by_type": {"acm": {"settings": {enabled_acm.addr: {}}}},
+            "htr": {"settings": {}},
+        }
+        coordinator = FakeCoordinator(
+            hass,
+            dev_id=dev_id,
+            dev=record,
+            data={dev_id: record},
+        )
+        hass.data = {
+            DOMAIN: {
+                entry.entry_id: {
+                    "coordinator": coordinator,
+                    "dev_id": dev_id,
+                    "boost_runtime": {},
+                }
+            }
+        }
+
+        def fake_prepare(entry_data, default_name_simple):
+            return (
+                [non_acm, disabled_acm, enabled_acm],
+                {"htr": [non_acm], "acm": [disabled_acm, enabled_acm]},
+                {"acm": [disabled_acm.addr, enabled_acm.addr]},
+                lambda *_: "Accumulator 3",
+            )
+
+        monkeypatch.setattr(select_module, "prepare_heater_platform_data", fake_prepare)
+
+        added: list[AccumulatorBoostDurationSelect] = []
+
+        def _add_entities(entities):
+            for entity in entities:
+                entity.hass = hass
+                entity.async_write_ha_state = MagicMock()
+                added.append(entity)
+
+        await async_setup_entry(hass, entry, _add_entities)
+
+        assert len(added) == 1
+        entity = added[0]
+        assert isinstance(entity, AccumulatorBoostDurationSelect)
+
+        # Numeric string with decimals should normalise to a supported option.
+        assert entity._option_to_minutes("60.0") == 60
+
+        set_boost_runtime_minutes(hass, entry.entry_id, "acm", entity._addr, 45)
+        entity._attr_current_option = "invalid"
+        entity.hass = hass
+        assert entity._current_minutes() == 45
+
+        # Force fallback branch when option mapping is missing.
+        entity._REVERSE_OPTION_MAP = {}
+        entity._apply_minutes(75, persist=False)
+        assert entity.current_option == str(DEFAULT_BOOST_DURATION)
+        del entity._REVERSE_OPTION_MAP
+
+        entity.heater_settings = lambda: {"boost_time": "120"}
+        assert entity._initial_minutes_from_settings() == 120
+        assert entity._option_to_minutes("999") is None
+        assert entity._validate_minutes(None) == DEFAULT_BOOST_DURATION
+
+        entity._attr_current_option = "invalid"
+        entity.hass = None
+        assert entity._current_minutes() == DEFAULT_BOOST_DURATION
 
     asyncio.run(_run())
