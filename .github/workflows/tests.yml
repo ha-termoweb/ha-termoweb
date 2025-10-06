@@ -1,0 +1,53 @@
+name: Tests
+
+on:
+  push:
+    branches: [$default-branch]
+  pull_request:
+    branches: [$default-branch]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install Python requirement
+        run: uv python install
+
+      - name: Install project dependencies
+        run: uv pip install --system -e .[test]
+
+      - name: Run tests
+        run: |
+          set -o pipefail
+          uv run pytest --cov=custom_components.termoweb --cov-report=term-missing | tee coverage-report.txt
+
+      - name: Enforce coverage threshold
+        run: uv run coverage report --fail-under=100
+
+      - name: Generate coverage XML
+        run: uv run coverage xml
+
+      - name: Prepare badge directory
+        run: mkdir -p docs/badges
+
+      - name: Generate coverage badge
+        uses: tj-actions/coverage-badge-py@v2
+        with:
+          output: docs/badges/coverage.svg
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-artifacts
+          path: |
+            coverage-report.txt
+            coverage.xml
+            docs/badges/coverage.svg
