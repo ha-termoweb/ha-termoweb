@@ -127,16 +127,122 @@ connectivity drops.
 
 ## WebSocket (Socket.IO)
 
-**Path:** `/socket.io?token=<access_token>&dev_id=<dev_id>` (handshake may be redirected to a session identifier URL fragment).
-**Namespace:** `/api/v2/socket_io`.
+The Ducaheat app speaks **Engine.IO v3 + Socket.IO v2**. The mobile capture shows that the backend is strict about the upgrade
+sequence, namespace, and heartbeat cadence; mirroring the flow below keeps the session alive indefinitely.
 
-The app listens for at least these events:
-- `dev_handshake` — initial device list / permissions (not observed in this capture but present in prior reverse engineering).
-- `dev_data` — full gateway snapshot (see above).
-- `update` — incremental node changes. The payload contains `path` (e.g., `/acm/2/status`) and `body` matching the corresponding
-  REST resource. Clients should route updates by node type and address using the `path` components.
-- App heartbeat: the backend emits `"message"` events with payload `"ping"`. Reply with `"pong"` to avoid the server pausing
-  updates after a few minutes.
+### Endpoint & headers
+
+- **HTTP host:** `https://api-tevolve.termoweb.net`
+- **Handshake path:** `/socket.io?token=<access_token>&dev_id=<dev_id>`
+- **Namespace:** `/api/v2/socket_io`
+- **Mandatory headers:**
+  - `User-Agent: Ducaheat/<app-version>`
+  - `X-Requested-With: net.termoweb.ducaheat.app`
+  - `Origin: https://localhost` (even though no page lives at that URL; omit only if the integration can tolerate stricter
+    CORS policies in the future).
+  - Copy the app’s `Accept-Language` and `Accept` headers if available. The capture shows `Accept: */*`.
+
+### Engine.IO handshake
+
+1. **GET polling open** – `transport=polling&EIO=3&t=<random>`.
+   - Expect HTTP `200` with a payload that contains multiple Engine.IO packets. The first packet is `0{"sid":"<sid>","upgrades":["websocket"],"pingInterval":<ms>,"pingTimeout":<ms>}`.
+   - Persist the `sid`, `pingInterval`, and `pingTimeout`. The capture shows `pingInterval=25000` ms and `pingTimeout=50000` ms,
+     but the client must trust the values returned by the server at runtime.
+   - The HTTP response includes `Set-Cookie: io=<sid>` and `Set-Cookie: server_id=…`. Keep the same HTTP client session for all
+     follow-up requests so those cookies are resent automatically.
+   - Raw body example (101 bytes, no gzip):
+
+     ```
+     0{"sid":"f17Ht9TSWZcSC1Y1Vow7","upgrades":["websocket"],"pingInterval":25000,"pingTimeout":50000}
+     ```
+2. **POST namespace join (polling)** – repeat the query parameters above plus `sid=<sid>` and POST `40/api/v2/socket_io` as the
+   body (content type `text/plain;charset=UTF-8`). This registers the namespace while still on HTTP long-polling.
+   - Engine.IO polling frames must include a length prefix. The POST body in the capture is the ASCII text `18:40/api/v2/socket_io`.
+   - Expect HTTP `200` with a 2-byte body (`ok`). Cookies from the GET are echoed back.
+3. **GET polling drain** – GET once more with the same query (new `t` value). The server usually responds with a no-op packet.
+   - Continue to send the `sid` query parameter. Skipping this step leaves unread packets queued on the polling transport.
+
+> **Captured request headers:**
+> ```
+> GET /socket.io/?token=<token>&dev_id=<dev>&EIO=3&transport=polling&t=PcpSY7k HTTP/2
+> Origin: https://localhost
+> User-Agent: Mozilla/5.0 (Linux; Android 15; …)
+> X-Requested-With: net.termoweb.ducaheat.app
+> Accept: */*
+> Accept-Language: en-US,en;q=0.9
+> Accept-Encoding: gzip, deflate, br, zstd
+> ```
+>
+> The POST uses the same header set plus `Content-Type: text/plain;charset=UTF-8` and the polling body described above.
+
+### Upgrade to WebSocket
+
+4. **WebSocket connect** – switch `transport=websocket` and reuse the `sid`. Re-send the headers listed above except for
+   hop-by-hop values (drop `Connection`, `Accept-Encoding`, etc.).
+   - The upgrade request mirrors the capture:
+
+     ```
+     GET /socket.io/?…&transport=websocket&sid=f17Ht9TSWZcSC1Y1Vow7 HTTP/1.1
+     Connection: Upgrade
+     Upgrade: websocket
+     Sec-WebSocket-Version: 13
+     Sec-WebSocket-Key: <base64>
+     Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
+     ```
+   - The server answers `101 Switching Protocols`, reissues the `io` and `server_id` cookies, and enables permessage-deflate. Do
+     not set an Engine.IO heartbeat on the client socket; the server controls ping cadence.
+5. **Probe** – immediately send the Engine.IO probe string `2probe` and wait for `3probe`.
+6. **Upgrade confirm** – send `5` to finalize the upgrade. The server will reply with `40/api/v2/socket_io` to acknowledge the
+   namespace. Treat absence of the `40` ack as a fatal error.
+7. **Namespace enter (redundant but required)** – send `40/api/v2/socket_io` once more after the upgrade. The capture shows the
+   mobile app doing this; reproducing it avoids sporadic “unknown namespace” errors on reconnect.
+
+### Initial payloads & subscriptions
+
+8. **Request snapshot** – send a Socket.IO event `42/api/v2/socket_io,["dev_data"]` immediately after the namespace join. The
+   server responds with `42/api/v2/socket_io,["dev_data",{...}]` containing the full gateway state described earlier.
+9. **Sample subscriptions** – for every heater or accumulator that exposes energy samples, emit `42/api/v2/socket_io,["subscribe","/<node_type>/<addr>/samples"]`. The backend acknowledges silently; subsequent `update` events carry sampled values.
+
+### Runtime events
+
+The active session surfaces the following Socket.IO events (all scoped to `/api/v2/socket_io`):
+
+- `dev_handshake` — initial device permissions. Rare in recent builds but historically emitted before the first `dev_data`.
+- `dev_data` — complete gateway snapshot. Treat the body as authoritative and refresh caches when received.
+- `update` — incremental node delta. The payload is an object with:
+  - `path` — e.g., `/htr/2/status` or `/acm/1/prog`
+  - `body` — JSON structure matching the REST endpoint for that resource.
+- `message` — vendor heartbeat. Payload `"ping"` must be answered with `"pong"` by sending `42/api/v2/socket_io,["message","pong"]`.
+- `samples` — optional stream of historical datapoints for subscribed nodes. Payloads match the REST `/samples` response for
+  that node type.
+
+### Heartbeats & timeouts
+
+Engine.IO and Socket.IO layer pings are independent, and both are mandatory:
+
+| Incoming frame | Meaning | Required response |
+| --- | --- | --- |
+| `2` | Engine.IO ping | Reply `3` immediately. Failure triggers a disconnect after `pingTimeout`.
+| `4` frame whose payload is `"2"` | Socket.IO ping (global namespace) | Reply with a bare `3` frame (Socket.IO pong).
+| `4` frame whose payload starts with `"2/"` | Socket.IO ping (namespace) | Reply `3/<namespace>` (e.g., `3/api/v2/socket_io`).
+| `42/api/v2/socket_io,["message","ping"]` | Application keep-alive | Respond with `42/api/v2/socket_io,["message","pong"]` within the Engine.IO interval.
+
+Timers:
+
+- Use the `pingInterval` from the handshake as the maximum idle period between Engine.IO pings. Start a watchdog at 80% of that
+  value (e.g., 20s if the server advertises 25s). If no ping arrives within the watchdog window, proactively reconnect.
+- Treat `pingTimeout` as the grace period to deliver the pong. The capture shows the server closing the socket roughly 5 s after
+  the timeout elapses if the client stays silent.
+- Expect a fresh Socket.IO ping every other Engine.IO cycle. Missing a namespace pong does not immediately drop the socket, but
+  subsequent events stall until the pong is received.
+
+### Session lifecycle
+
+- The server does not emit an explicit “welcome” beyond the `40` ack. Consider the socket healthy only after receiving either
+  `dev_data` or `update` with a non-empty body.
+- On reconnect, redo the full polling + upgrade dance with a new token. Reusing an expired `sid` results in HTTP 400 responses
+  from the polling endpoints.
+- Send `close` frames with code `1001` (`GOING_AWAY`) when shutting down to match the app’s behavior.
 
 ---
 
