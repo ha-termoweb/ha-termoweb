@@ -16,6 +16,7 @@ from conftest import FakeCoordinator, _install_stubs
 _install_stubs()
 
 from custom_components.termoweb import climate as climate_module
+from custom_components.termoweb.heater import DEFAULT_BOOST_DURATION
 from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
 from custom_components.termoweb.const import (
     BRAND_DUCAHEAT,
@@ -725,6 +726,7 @@ def test_accumulator_extra_state_attributes_include_boost_metadata() -> None:
     assert attrs["boost_active"] is True
     assert attrs["boost_minutes_remaining"] == 150
     assert attrs["boost_end"] == "2024-01-01T02:30:00+00:00"
+    assert attrs["preferred_boost_minutes"] == DEFAULT_BOOST_DURATION
 
 
 def test_accumulator_extra_state_attributes_fallbacks() -> None:
@@ -787,6 +789,7 @@ def test_accumulator_extra_state_attributes_fallbacks() -> None:
     assert attrs["boost_end"] == "2024-01-01T00:30:00+00:00"
     assert attrs["program_slot"] == "cold"
     assert attrs["program_setpoint"] == pytest.approx(15.0)
+    assert attrs["preferred_boost_minutes"] == DEFAULT_BOOST_DURATION
 
 
 def test_accumulator_submit_settings_brand_switch() -> None:

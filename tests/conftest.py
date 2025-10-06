@@ -439,6 +439,9 @@ def _install_stubs() -> None:
     update_coordinator_mod = sys.modules.get(
         "homeassistant.helpers.update_coordinator"
     ) or types.ModuleType("homeassistant.helpers.update_coordinator")
+    restore_state_mod = sys.modules.get(
+        "homeassistant.helpers.restore_state"
+    ) or types.ModuleType("homeassistant.helpers.restore_state")
     components_mod = sys.modules.get("homeassistant.components") or types.ModuleType(
         "homeassistant.components"
     )
@@ -450,6 +453,9 @@ def _install_stubs() -> None:
     )
     sensor_mod = sys.modules.get("homeassistant.components.sensor") or types.ModuleType(
         "homeassistant.components.sensor"
+    )
+    select_mod = sys.modules.get("homeassistant.components.select") or types.ModuleType(
+        "homeassistant.components.select"
     )
     climate_mod = sys.modules.get(
         "homeassistant.components.climate"
@@ -470,12 +476,14 @@ def _install_stubs() -> None:
     sys.modules["homeassistant.helpers.entity_registry"] = entity_registry_mod
     sys.modules["homeassistant.helpers.dispatcher"] = dispatcher_mod
     sys.modules["homeassistant.helpers.update_coordinator"] = update_coordinator_mod
+    sys.modules["homeassistant.helpers.restore_state"] = restore_state_mod
     sys.modules["homeassistant.helpers.entity_platform"] = entity_platform_mod
     sys.modules["homeassistant.loader"] = loader_mod
     sys.modules["homeassistant.components"] = components_mod
     sys.modules["homeassistant.components.binary_sensor"] = binary_sensor_mod
     sys.modules["homeassistant.components.button"] = button_mod
     sys.modules["homeassistant.components.sensor"] = sensor_mod
+    sys.modules["homeassistant.components.select"] = select_mod
     sys.modules["homeassistant.components.climate"] = climate_mod
 
     homeassistant_pkg.config_entries = config_entries_mod
@@ -499,9 +507,11 @@ def _install_stubs() -> None:
     helpers_mod.entity_registry = entity_registry_mod
     helpers_mod.dispatcher = dispatcher_mod
     helpers_mod.update_coordinator = update_coordinator_mod
+    helpers_mod.restore_state = restore_state_mod
     components_mod.binary_sensor = binary_sensor_mod
     components_mod.button = button_mod
     components_mod.sensor = sensor_mod
+    components_mod.select = select_mod
 
     const_mod.EVENT_HOMEASSISTANT_STARTED = "homeassistant_started"
 
@@ -778,6 +788,7 @@ def _install_stubs() -> None:
                 self.coordinator = coordinator
                 self.hass = getattr(coordinator, "hass", None)
                 self._remove_callbacks: list[Callable[[], None]] = []
+                self._attr_unique_id: str | None = None
 
             async def async_added_to_hass(self) -> None:
                 return None
@@ -787,6 +798,10 @@ def _install_stubs() -> None:
 
             def schedule_update_ha_state(self) -> None:
                 return None
+
+            @property
+            def unique_id(self) -> str | None:
+                return getattr(self, "_attr_unique_id", None)
 
             @classmethod
             def __class_getitem__(cls, _item: Any) -> type:
@@ -871,7 +886,13 @@ def _install_stubs() -> None:
     class DeviceInfo(dict):
         pass
 
+    class EntityCategory(str, enum.Enum):
+        CONFIG = "config"
+        DIAGNOSTIC = "diagnostic"
+        SYSTEM = "system"
+
     entity_mod.DeviceInfo = DeviceInfo
+    entity_mod.EntityCategory = EntityCategory
 
     class EntityPlatform:
         def __init__(self) -> None:
@@ -1018,6 +1039,37 @@ def _install_stubs() -> None:
             return None
 
     button_mod.ButtonEntity = ButtonEntity
+
+    class SelectEntity:
+        def __init__(self) -> None:
+            self.hass: Any | None = None
+
+        async def async_added_to_hass(self) -> None:
+            return None
+
+        async def async_will_remove_from_hass(self) -> None:
+            return None
+
+        def schedule_update_ha_state(self) -> None:
+            return None
+
+        def async_write_ha_state(self) -> None:
+            return None
+
+        @property
+        def current_option(self) -> Any:
+            return getattr(self, "_attr_current_option", None)
+
+    select_mod.SelectEntity = SelectEntity
+
+    class RestoreEntity:
+        async def async_added_to_hass(self) -> None:
+            return None
+
+        async def async_get_last_state(self) -> Any:
+            return None
+
+    restore_state_mod.RestoreEntity = RestoreEntity
 
     class _StubIntegration:
         def __init__(self, domain: str) -> None:

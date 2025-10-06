@@ -22,11 +22,13 @@ import voluptuous as vol
 from .backend.ducaheat import DucaheatRESTClient
 from .const import BRAND_DUCAHEAT, DOMAIN
 from .heater import (
+    DEFAULT_BOOST_DURATION,
     HeaterNodeBase,
     iter_heater_maps,
     iter_heater_nodes,
     log_skipped_nodes,
     prepare_heater_platform_data,
+    resolve_boost_runtime_minutes,
 )
 from .nodes import HeaterNode, normalize_node_type
 from .utils import float_or_none
@@ -848,6 +850,19 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
 
         return True
 
+    def _preferred_boost_minutes(self) -> int:
+        """Return the configured boost duration in minutes."""
+
+        hass = getattr(self, "hass", None)
+        if hass is None:
+            return DEFAULT_BOOST_DURATION
+        return resolve_boost_runtime_minutes(
+            hass,
+            self._entry_id,
+            self._node_type,
+            self._addr,
+        )
+
     @property  # type: ignore[override]
     def hvac_mode(self) -> HVACMode:
         """Return the current accumulator HVAC mode."""
@@ -1007,19 +1022,18 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
                 boost_end_iso = boost_end_dt.isoformat()
             except Exception:  # noqa: BLE001 - defensive
                 boost_end_iso = None
-        else:
-            if isinstance(raw_end, str):
-                boost_end_iso = raw_end
-            elif isinstance(raw_end, Mapping):
-                day = raw_end.get("day")
-                minute = raw_end.get("minute")
-                if callable(resolver) and day is not None and minute is not None:
-                    try:
-                        derived_dt, _ = resolver(day, minute)
-                    except Exception:  # noqa: BLE001 - defensive
-                        derived_dt = None
-                    if derived_dt is not None:
-                        boost_end_iso = derived_dt.isoformat()
+        elif isinstance(raw_end, str):
+            boost_end_iso = raw_end
+        elif isinstance(raw_end, Mapping):
+            day = raw_end.get("day")
+            minute = raw_end.get("minute")
+            if callable(resolver) and day is not None and minute is not None:
+                try:
+                    derived_dt, _ = resolver(day, minute)
+                except Exception:  # noqa: BLE001 - defensive
+                    derived_dt = None
+                if derived_dt is not None:
+                    boost_end_iso = derived_dt.isoformat()
 
         if boost_end_iso is None and boost_minutes is not None:
             boost_end_iso = (
@@ -1029,6 +1043,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         attrs["boost_active"] = boost_active
         attrs["boost_minutes_remaining"] = boost_minutes
         attrs["boost_end"] = boost_end_iso
+        attrs["preferred_boost_minutes"] = self._preferred_boost_minutes()
 
         return attrs
 
