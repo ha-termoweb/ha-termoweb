@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import gzip
 import json
 import logging
@@ -29,6 +30,8 @@ from ..nodes import (
     collect_heater_sample_addresses,
     heater_sample_subscription_targets,
     normalize_heater_addresses,
+    normalize_node_addr,
+    normalize_node_type,
 )
 from .ws_client import (
     DUCAHEAT_NAMESPACE,
@@ -147,6 +150,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._stats = WSStats()
         self._latest_nodes: Mapping[str, Any] | None = None
+        self._nodes_raw: dict[str, Any] | None = None
         self._subscription_paths: set[str] = set()
 
     def start(self) -> asyncio.Task:
@@ -375,7 +379,14 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                             if isinstance(nodes, dict):
                                 self._latest_nodes = nodes
                                 self._log_nodes_summary(nodes)
-                                self._dispatch_nodes({"nodes": nodes})
+                                normalised = self._normalise_nodes_payload(nodes)
+                                if isinstance(normalised, dict):
+                                    self._nodes_raw = deepcopy(normalised)
+                                    snapshot = self._build_nodes_snapshot(self._nodes_raw)
+                                else:
+                                    self._nodes_raw = None
+                                    snapshot = {"nodes": nodes}
+                                self._dispatch_nodes(snapshot)
                                 subs = await self._subscribe_feeds(nodes)
                                 _LOGGER.info(
                                     "WS (ducaheat): subscribed %d feeds", subs
@@ -384,7 +395,21 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                             continue
 
                         if evt == "update" and args:
-                            self._log_update_brief(args[0])
+                            payload_body = args[0]
+                            self._log_update_brief(payload_body)
+                            translated = self._translate_path_update(payload_body)
+                            if translated:
+                                normalised_update = self._normalise_nodes_payload(translated)
+                                if isinstance(normalised_update, dict) and normalised_update:
+                                    sample_updates = self._collect_sample_updates(normalised_update)
+                                    if self._nodes_raw is None:
+                                        self._nodes_raw = deepcopy(normalised_update)
+                                    else:
+                                        self._merge_nodes(self._nodes_raw, normalised_update)
+                                    snapshot = self._build_nodes_snapshot(self._nodes_raw)
+                                    self._dispatch_nodes(snapshot)
+                                    if sample_updates:
+                                        self._forward_sample_updates(sample_updates)
                             self._update_status("healthy")
                             continue
                         continue
@@ -427,6 +452,168 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         arr = [event, *args]
         payload = json.dumps(arr, separators=(",", ":"), default=str)
         await self._ws.send_str(f"42{DUCAHEAT_NAMESPACE}," + payload)
+
+    def _normalise_nodes_payload(self, nodes: Mapping[str, Any]) -> Any:
+        """Normalise websocket node payloads via the REST client helper."""
+
+        normaliser = getattr(self._client, "normalise_ws_nodes", None)
+        snapshot: Any = deepcopy(nodes) if isinstance(nodes, Mapping) else nodes
+        if isinstance(snapshot, Mapping) and not isinstance(snapshot, dict):
+            snapshot = dict(snapshot)
+        if callable(normaliser):
+            try:
+                resolved = normaliser(snapshot)  # type: ignore[arg-type]
+                if isinstance(resolved, Mapping) and not isinstance(resolved, dict):
+                    return dict(resolved)
+                return resolved
+            except Exception:  # noqa: BLE001  # pragma: no cover - defensive logging
+                _LOGGER.debug("WS (ducaheat): normalise_ws_nodes failed", exc_info=True)
+                return snapshot
+        return snapshot
+
+    @staticmethod
+    def _build_nodes_snapshot(nodes: dict[str, Any]) -> dict[str, Any]:
+        """Return a snapshot structure with ``nodes`` and ``nodes_by_type`` buckets."""
+
+        nodes_copy = deepcopy(nodes)
+        nodes_by_type = {
+            node_type: payload
+            for node_type, payload in nodes_copy.items()
+            if isinstance(payload, dict)
+        }
+        snapshot: dict[str, Any] = {"nodes": nodes_copy, "nodes_by_type": nodes_by_type}
+        snapshot.update(nodes_by_type)
+        return snapshot
+
+    @staticmethod
+    def _merge_nodes(target: dict[str, Any], source: Mapping[str, Any]) -> None:
+        """Deep merge ``source`` updates into ``target`` in place."""
+
+        for key, value in source.items():
+            if isinstance(value, Mapping):
+                existing = target.get(key)
+                if isinstance(existing, dict):
+                    DucaheatWSClient._merge_nodes(existing, value)
+                else:
+                    target[key] = deepcopy(value)
+            else:
+                target[key] = deepcopy(value)
+
+    @staticmethod
+    def _collect_sample_updates(nodes: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+        """Extract heater sample updates from a websocket payload."""
+
+        updates: dict[str, dict[str, Any]] = {}
+        for node_type, type_payload in nodes.items():
+            if not isinstance(node_type, str) or not isinstance(type_payload, Mapping):
+                continue
+            samples = type_payload.get("samples")
+            if not isinstance(samples, Mapping):
+                continue
+            bucket: dict[str, Any] = {}
+            for addr, payload in samples.items():
+                normalised_addr = normalize_node_addr(addr)
+                if not normalised_addr:
+                    continue
+                bucket[normalised_addr] = payload
+            if bucket:
+                updates[node_type] = bucket
+        return updates
+
+    def _translate_path_update(self, payload: Any) -> dict[str, Any] | None:
+        """Translate ``{"path": ..., "body": ...}`` websocket frames into nodes."""
+
+        if not isinstance(payload, Mapping):
+            return None
+        if "nodes" in payload:
+            return None
+        path = payload.get("path")
+        body = payload.get("body")
+        if not isinstance(path, str) or body is None:
+            return None
+
+        path = path.split("?", 1)[0]
+        segments = [segment for segment in path.split("/") if segment]
+        if not segments:
+            return None
+
+        try:
+            devs_idx = segments.index("devs")
+        except ValueError:
+            devs_idx = -1
+
+        if devs_idx >= 0:
+            relevant = segments[devs_idx + 1 :]
+            node_type_idx = 1
+            addr_idx = 2
+            section_idx = 3
+            if len(relevant) <= addr_idx:
+                return None
+        else:
+            relevant = segments
+            node_type_idx = 0
+            addr_idx = 1
+            section_idx = 2
+            if len(relevant) <= addr_idx:
+                return None
+
+        node_type = normalize_node_type(relevant[node_type_idx])
+        addr = normalize_node_addr(relevant[addr_idx])
+        if not node_type or not addr:
+            return None
+
+        section = relevant[section_idx] if len(relevant) > section_idx else None
+        remainder = (
+            relevant[section_idx + 1 :]
+            if len(relevant) > section_idx + 1
+            else []
+        )
+
+        target_section, nested_key = self._resolve_update_section(section)
+        if target_section is None:
+            return None
+
+        payload_body: Any = body
+        for segment in reversed(remainder):
+            payload_body = {segment: payload_body}
+        if nested_key:
+            payload_body = {nested_key: payload_body}
+
+        return {node_type: {target_section: {addr: payload_body}}}
+
+    @staticmethod
+    def _resolve_update_section(section: str | None) -> tuple[str | None, str | None]:
+        """Map a websocket path segment to the node section bucket."""
+
+        if not section:
+            return None, None
+
+        lowered = section.lower()
+        if lowered in {"status", "samples", "settings", "advanced"}:
+            return lowered, None
+        if lowered == "advanced_setup":
+            return "advanced", "advanced_setup"
+        if lowered in {"setup", "prog", "prog_temps", "capabilities"}:
+            return "settings", lowered
+        return "settings", lowered
+
+    def _forward_sample_updates(self, updates: Mapping[str, Mapping[str, Any]]) -> None:
+        """Forward websocket heater sample updates to the energy coordinator."""
+
+        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
+        if not isinstance(record, Mapping):
+            return
+        energy_coordinator = record.get("energy_coordinator")
+        handler = getattr(energy_coordinator, "handle_ws_samples", None)
+        if not callable(handler):
+            return
+        try:
+            handler(
+                self.dev_id,
+                {node_type: dict(section) for node_type, section in updates.items()},
+            )
+        except Exception:  # noqa: BLE001  # pragma: no cover - defensive logging
+            _LOGGER.debug("WS (ducaheat): forwarding heater samples failed", exc_info=True)
 
     async def _subscribe_feeds(self, nodes: Mapping[str, Any] | None) -> int:
         """Subscribe to heater status and sample feeds."""
