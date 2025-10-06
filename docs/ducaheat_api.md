@@ -66,8 +66,8 @@ Applies to heater (`htr`) and accumulator (`acm`) nodes. The response is a conso
   - `factory_options` describing hardware capabilities (`resistor_available`, `ventilation_available`, `ventilation_type`).
 - `status` contains real-time telemetry, all keyed as strings or booleans where appropriate. Observed keys: `mode`, `heating`,
   `ventilation`, `charging`, `ice_temp`, `eco_temp`, `comf_temp`, `units`, `stemp`, `mtemp`, `pcb_temp`, `power`, `locked`,
-  `window_open`, `true_radiant`, `presence`, `current_charge_per`, `target_charge_per`, `boost`, `boost_end_day`,
-  `boost_end_min`, and `error_code`.
+  `window_open`, `true_radiant`, `presence`, `current_charge_per`, `target_charge_per`, and `error_code`. Accumulators also
+  expose `boost`, `boost_end_day`, and `boost_end_min`.
 - `version` enumerates firmware and hardware revisions (`hw_version`, `fw_version`, `pid`, `uid`).
 
 ---
@@ -79,7 +79,7 @@ Unlike TermoWeb’s consolidated `/settings` endpoint, Ducaheat exposes discrete
 
 | Endpoint | Purpose | Example body | Value types / notes |
 | --- | --- | --- | --- |
-| `POST /api/v2/devs/{dev_id}/{node_type}/{addr}/status` | Change operating mode, setpoint, boost flag, and display units. | `{ "mode": "manual", "stemp": "22.0", "units": "C" }`<br>`{ "boost": true }` | Temperatures must be strings with one decimal place (`"22.0"`). Units are uppercase (`"C"` / `"F"`). Boolean toggles (`boost`, etc.) are literal booleans. Returns `201 {}`. |
+| `POST /api/v2/devs/{dev_id}/{node_type}/{addr}/status` | Change operating mode, setpoint, boost flag, and display units. | `{ "mode": "manual", "stemp": "22.0", "units": "C" }`<br>`{ "boost": true }` | Temperatures must be strings with one decimal place (`"22.0"`). Units are uppercase (`"C"` / `"F"`). Boolean toggles (for example `select`, `lock`) are literal booleans. Boost writes are valid only when `node_type` is `"acm"`. Returns `201 {}`. |
 | `POST /api/v2/devs/{dev_id}/{node_type}/{addr}/mode` | Explicitly set the operating mode when no setpoint change is required. | `{ "mode": "manual" }` | Use when the app issues a mode-only write. |
 | `POST /api/v2/devs/{dev_id}/{node_type}/{addr}/prog` | Persist the weekly program definition. | *(mirrors GET payload)* | Send the `prog` object echoed by the read call; structure varies by model. |
 | `POST /api/v2/devs/{dev_id}/{node_type}/{addr}/prog_temps` | Update named preset temperatures. | `{ "comfort": "21.0", "eco": "18.0", "antifrost": "7.0" }` | All temperature values are one-decimal strings in uppercase units context. |
@@ -116,7 +116,7 @@ connectivity drops.
 
 ## Boost / Runback behavior
 
-- Timed override that runs at a boost setpoint for a fixed duration, then reverts.  
+- Timed override (accumulators only) that runs at a boost setpoint for a fixed duration, then reverts.
 - Activation paths:
   - Immediate: `POST …/status { "boost": true }`
   - Defaults: set via `POST …/setup { "extra_options": { "boost_time": 60, "boost_temp": "22.0" } }`
@@ -252,23 +252,23 @@ Timers:
 # 1) Token
 TOK=$(curl -sS -u '5c49dce977510351506c42db:tevolve'   -d 'grant_type=password&username=EMAIL&password=PASS'   https://api-tevolve.termoweb.net/client/token | jq -r .access_token)
 
-# 2) Read heater 2
-curl -sS -H "Authorization: Bearer $TOK"   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/htr/2
+# 2) Read accumulator 2
+curl -sS -H "Authorization: Bearer $TOK"   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/acm/2
 
 # 3) (Optional) Select before write
-curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"   -d '{"select": true}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/htr/2/select
+curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"   -d '{"select": true}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/acm/2/select
 
 # 4) Set manual 22.0°C
-curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"   -d '{"mode":"manual","stemp":"22.0","units":"C"}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/htr/2/status
+curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"   -d '{"mode":"manual","stemp":"22.0","units":"C"}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/acm/2/status
 
 # 5) Start Boost now
-curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"   -d '{"boost": true}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/htr/2/status
+curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"   -d '{"boost": true}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/acm/2/status
 
 # 6) Configure default Boost time
-curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"   -d '{"extra_options":{"boost_time":60,"boost_temp":"22.0"}}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/htr/2/setup
+curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"   -d '{"extra_options":{"boost_time":60,"boost_temp":"22.0"}}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/acm/2/setup
 
 # 7) De-select after write
-curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"   -d '{"select": false}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/htr/2/select
+curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"   -d '{"select": false}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/acm/2/select
 ```
 
 ---
@@ -278,4 +278,4 @@ curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"   -
 - REST and websocket calls include `User-Agent: Ducaheat/...` plus `X-Requested-With: net.termoweb.ducaheat.app` (and `Origin: https://localhost` for Socket.IO) to match the Android hybrid app environment.
 - Treat unknown keys as forward‑compatible; the app is tolerant of additional fields.
 - Program payload (`/prog`) structure varies by model/firmware. Capture the GET shape first and write it back unchanged after edits.
-- Some deployments may accept `/htr/{addr}/boost` as a synonym for boosting, but `/status` with `{ "boost": true }` is consistently present in the app bundle.
+- Some deployments may accept `/acm/{addr}/boost` as a synonym for boosting, but `/status` with `{ "boost": true }` is consistently present in the app bundle.
