@@ -146,6 +146,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._task: asyncio.Task | None = None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._stats = WSStats()
+        self._latest_nodes: Mapping[str, Any] | None = None
+        self._subscription_paths: set[str] = set()
 
     def start(self) -> asyncio.Task:
         if self._task and not self._task.done():
@@ -315,9 +317,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         _LOGGER.debug("WS (ducaheat): -> 40%s", self._namespace)
         await self._emit_sio("dev_data")
         _LOGGER.debug("WS (ducaheat): -> 42 dev_data")
-
-        subs = await self._subscribe_samples()
-        _LOGGER.info("WS (ducaheat): subscribed %d sample targets", subs)
         self._update_status("connected")
 
     async def _read_loop_ws(self) -> None:
@@ -374,8 +373,13 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                         if evt == "dev_data" and args and isinstance(args[0], dict):
                             nodes = args[0].get("nodes") if isinstance(args[0], dict) else None
                             if isinstance(nodes, dict):
+                                self._latest_nodes = nodes
                                 self._log_nodes_summary(nodes)
                                 self._dispatch_nodes({"nodes": nodes})
+                                subs = await self._subscribe_feeds(nodes)
+                                _LOGGER.info(
+                                    "WS (ducaheat): subscribed %d feeds", subs
+                                )
                                 self._update_status("healthy")
                             continue
 
@@ -424,22 +428,42 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         payload = json.dumps(arr, separators=(",", ":"), default=str)
         await self._ws.send_str(f"42{DUCAHEAT_NAMESPACE}," + payload)
 
-    async def _subscribe_samples(self) -> int:
-        count = 0
+    async def _subscribe_feeds(self, nodes: Mapping[str, Any] | None) -> int:
+        """Subscribe to heater status and sample feeds."""
+
+        resolved_nodes: Mapping[str, Any] | None = nodes if isinstance(nodes, Mapping) else None
+        if resolved_nodes is None and isinstance(self._latest_nodes, Mapping):
+            resolved_nodes = self._latest_nodes
+
+        paths: set[str] = set()
         try:
-            record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-            inventory, normalized_map, _ = collect_heater_sample_addresses(
+            domain_bucket = self.hass.data.setdefault(DOMAIN, {})
+            entry_bucket = domain_bucket.setdefault(self.entry_id, {})
+            if isinstance(entry_bucket, dict) and isinstance(resolved_nodes, Mapping):
+                entry_bucket["nodes"] = resolved_nodes
+
+            record = domain_bucket.get(self.entry_id)
+            _, normalized_map, _ = collect_heater_sample_addresses(
                 record,
                 coordinator=self._coordinator,
             )
             normalized_map, _ = normalize_heater_addresses(normalized_map)
             targets = list(heater_sample_subscription_targets(normalized_map))
             for node_type, addr in targets:
-                await self._emit_sio("subscribe", f"/{node_type}/{addr}/samples")
-            count = len(targets)
+                paths.add(f"/{node_type}/{addr}/status")
+                paths.add(f"/{node_type}/{addr}/samples")
         except Exception:  # pragma: no cover - defensive
             _LOGGER.debug("WS (ducaheat): subscribe failed", exc_info=True)
-        return count
+            return 0
+
+        if not paths:
+            return 0
+
+        for path in sorted(paths):
+            await self._emit_sio("subscribe", path)
+
+        self._subscription_paths = paths
+        return len(paths)
 
     async def _disconnect(self, reason: str) -> None:
         if self._ws:
