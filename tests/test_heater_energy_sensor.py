@@ -306,6 +306,8 @@ def test_sensor_async_setup_entry_defaults_and_skips_invalid(
             getattr(ent, "_attr_name", getattr(ent, "name", None)) for ent in added
         )
         assert names == [
+            "Accumulator 2 Boost End",
+            "Accumulator 2 Boost Minutes Remaining",
             "Accumulator 2 Energy",
             "Accumulator 2 Power",
             "Accumulator 2 Temperature",
@@ -379,6 +381,65 @@ def test_sensor_async_setup_entry_ignores_blank_addresses(
     asyncio.run(_run())
 
 
+def test_sensor_async_setup_entry_handles_boolean_boost_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        hass = HomeAssistant()
+        entry = types.SimpleNamespace(entry_id="entry-boost-bool")
+        dev_id = "dev-boost-bool"
+        coordinator = types.SimpleNamespace(hass=hass, data={dev_id: {}})
+
+        hass.data = {
+            DOMAIN: {
+                entry.entry_id: {
+                    "coordinator": coordinator,
+                    "client": types.SimpleNamespace(),
+                    "dev_id": dev_id,
+                    "energy_coordinator": types.SimpleNamespace(
+                        update_addresses=lambda addrs: None
+                    ),
+                }
+            }
+        }
+
+        boost_node = types.SimpleNamespace(addr="4", supports_boost=True)
+
+        def fake_prepare(*args: Any, **kwargs: Any) -> tuple[Any, Any, Any, Any]:
+            return (
+                [],
+                {"acm": [boost_node]},
+                {"acm": ["4"]},
+                lambda *_: "Accumulator 4",
+            )
+
+        monkeypatch.setattr(
+            sensor_module, "prepare_heater_platform_data", fake_prepare
+        )
+
+        added: list[Any] = []
+
+        def _add_entities(entities: list[Any]) -> None:
+            added.extend(entities)
+
+        await async_setup_sensor_entry(hass, entry, _add_entities)
+
+        names = sorted(
+            getattr(entity, "_attr_name", getattr(entity, "name", None))
+            for entity in added
+        )
+        assert names == [
+            "Accumulator 4 Boost End",
+            "Accumulator 4 Boost Minutes Remaining",
+            "Accumulator 4 Energy",
+            "Accumulator 4 Power",
+            "Accumulator 4 Temperature",
+            "Total Energy",
+        ]
+
+    asyncio.run(_run())
+
+
 def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> None:
     async def _run() -> None:
         hass = HomeAssistant()
@@ -438,6 +499,8 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
             "Bedroom Temperature",
             "Bedroom Energy",
             "Bedroom Power",
+            "Accumulator Boost End",
+            "Accumulator Boost Minutes Remaining",
             "Accumulator Temperature",
             "Accumulator Energy",
             "Accumulator Power",
@@ -460,7 +523,9 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
             assert refresh_mock.await_count == 1
 
             heater_addrs = energy_coord._addresses_by_type
-            expected_count = sum(len(addrs) for addrs in heater_addrs.values()) * 3 + 1
+            base_count = sum(len(addrs) for addrs in heater_addrs.values()) * 3
+            boost_count = len(heater_addrs.get("acm", [])) * 2
+            expected_count = base_count + boost_count + 1
             assert len(add_calls) == 1
             assert len(add_calls[0]) == expected_count
             assert len(added_entities) == expected_count
@@ -474,13 +539,23 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
             for name in names:
                 if name == "Total Energy":
                     continue
-                base, _, measurement = name.rpartition(" ")
+                if " Boost " in name:
+                    base, _, suffix = name.partition(" Boost ")
+                    measurement = f"Boost {suffix}"
+                else:
+                    base, _, measurement = name.rpartition(" ")
                 per_node.setdefault(base, set()).add(measurement)
 
             assert per_node == {
                 "Living Room": {"Temperature", "Energy", "Power"},
                 "Bedroom": {"Temperature", "Energy", "Power"},
-                "Accumulator": {"Temperature", "Energy", "Power"},
+                "Accumulator": {
+                    "Temperature",
+                    "Energy",
+                    "Power",
+                    "Boost End",
+                    "Boost Minutes Remaining",
+                },
             }
             logger_mock.debug.assert_called_once_with(
                 "Adding %d TermoWeb sensors", expected_count
@@ -506,13 +581,23 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
             for name in names_second:
                 if name == "Total Energy":
                     continue
-                base, _, measurement = name.rpartition(" ")
+                if " Boost " in name:
+                    base, _, suffix = name.partition(" Boost ")
+                    measurement = f"Boost {suffix}"
+                else:
+                    base, _, measurement = name.rpartition(" ")
                 per_node_second.setdefault(base, set()).add(measurement)
 
             assert per_node_second == {
                 "Living Room": {"Temperature", "Energy", "Power"},
                 "Bedroom": {"Temperature", "Energy", "Power"},
-                "Accumulator": {"Temperature", "Energy", "Power"},
+                "Accumulator": {
+                    "Temperature",
+                    "Energy",
+                    "Power",
+                    "Boost End",
+                    "Boost Minutes Remaining",
+                },
             }
             logger_mock.debug.assert_called_once_with(
                 "Adding %d TermoWeb sensors", expected_count

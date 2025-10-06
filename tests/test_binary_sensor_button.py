@@ -379,3 +379,42 @@ def test_state_refresh_button_direct_press_and_info() -> None:
         coordinator.async_request_refresh.assert_awaited_once()
 
     asyncio.run(_run())
+
+def test_binary_sensor_setup_adds_boost_entities(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        hass = HomeAssistant()
+        entry = types.SimpleNamespace(entry_id="entry-boost-binary")
+        dev_id = "device-boost"
+        coordinator = types.SimpleNamespace(hass=hass, data={})
+
+        hass.data = {DOMAIN: {entry.entry_id: {"coordinator": coordinator, "dev_id": dev_id}}}
+
+        boost_node = types.SimpleNamespace(addr="4", supports_boost=lambda: True)
+        skip_node = types.SimpleNamespace(addr="5", supports_boost=False)
+
+        def fake_prepare(entry_data, *, default_name_simple):  # type: ignore[unused-argument]
+            return (
+                [],
+                {"acm": [boost_node, skip_node]},
+                {},
+                lambda node_type, addr: f"{node_type.upper()} {addr}",
+            )
+
+        monkeypatch.setattr(
+            binary_sensor_module, "prepare_heater_platform_data", fake_prepare
+        )
+
+        added: list = []
+
+        def _add_entities(entities: list) -> None:
+            added.extend(entities)
+
+        await async_setup_binary_sensor_entry(hass, entry, _add_entities)
+
+        assert len(added) == 2
+        gateway, boost = added
+        assert isinstance(gateway, GatewayOnlineBinarySensor)
+        assert isinstance(boost, binary_sensor_module.HeaterBoostActiveBinarySensor)
+        assert boost._attr_name == "ACM 4 Boost Active"  # pylint: disable=protected-access
+
+    asyncio.run(_run())
