@@ -13,5 +13,5 @@
     "custom_components.termoweb"
   ],
   "requirements": ["python-socketio==5.13.0"],
-  "version": "1.11.17"
+  "version": "1.11.18"
 }
