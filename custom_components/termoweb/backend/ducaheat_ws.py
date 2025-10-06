@@ -1,21 +1,23 @@
-# -*- coding: utf-8 -*-
 """Ducaheat specific websocket client."""
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
+from contextlib import suppress
+from copy import deepcopy
 import gzip
 import json
 import logging
 import random
 import string
-from typing import Any, Mapping
+from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import aiohttp
 from homeassistant.core import HomeAssistant
 
-from ..api import RESTClient
-from ..const import (
+from custom_components.termoweb.api import RESTClient
+from custom_components.termoweb.const import (
     ACCEPT_LANGUAGE,
     API_BASE,
     BRAND_DUCAHEAT,
@@ -25,11 +27,14 @@ from ..const import (
     get_brand_requested_with,
     get_brand_user_agent,
 )
-from ..nodes import (
+from custom_components.termoweb.nodes import (
     collect_heater_sample_addresses,
     heater_sample_subscription_targets,
     normalize_heater_addresses,
+    normalize_node_addr,
+    normalize_node_type,
 )
+
 from .ws_client import (
     DUCAHEAT_NAMESPACE,
     HandshakeError,
@@ -59,10 +64,8 @@ def _decode_polling_packets(body: bytes) -> list[str]:
 
     buf = body
     if len(buf) >= 2 and buf[:2] == b"\x1f\x8b":
-        try:
+        with suppress(Exception):
             buf = gzip.decompress(buf)
-        except Exception:
-            pass
     out: list[str] = []
     i, n = 0, len(buf)
     while i < n:
@@ -89,7 +92,7 @@ def _decode_polling_packets(body: bytes) -> list[str]:
         i = end
         try:
             pkt = payload.decode("utf-8", errors="ignore")
-        except Exception:
+        except Exception:  # noqa: BLE001 - defensive decoding
             pkt = ""
         if pkt:
             out.append(pkt)
@@ -127,6 +130,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         session: aiohttp.ClientSession | None = None,
         namespace: str | None = None,
     ) -> None:
+        """Initialise the websocket client for a Ducaheat gateway."""
         _WsLeaseMixin.__init__(self)
         self.hass = hass
         self.entry_id = entry_id
@@ -146,35 +150,47 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._task: asyncio.Task | None = None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._stats = WSStats()
+        self._nodes: dict[str, Any] = {}
+        self._nodes_raw: dict[str, Any] = {}
 
     def start(self) -> asyncio.Task:
+        """Start the websocket listener task if needed."""
+
         if self._task and not self._task.done():
             return self._task
         self._task = self._loop.create_task(self._runner(), name=f"termoweb-ws-{self.dev_id}")
         return self._task
 
     async def stop(self) -> None:
+        """Stop the websocket listener and clean up resources."""
+
         await self._disconnect("stop")
         if self._task:
             self._task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
             self._task = None
 
     def is_running(self) -> bool:
+        """Return ``True`` when the websocket task is active."""
+
         return bool(self._task and not self._task.done())
 
     def _base_host(self) -> str:
+        """Return the base URL for websocket interactions."""
+
         base = get_brand_api_base(self._brand).rstrip("/")
         parsed = urlsplit(base if base else API_BASE)
         return urlunsplit((parsed.scheme or "https", parsed.netloc or parsed.path, "", "", ""))
 
     def _path(self) -> str:
+        """Return the websocket endpoint path."""
+
         return "/socket.io/"
 
     async def ws_url(self) -> str:
+        """Return the websocket polling URL for the current gateway."""
+
         token = await self._get_token()
         params = {
             "token": token,
@@ -186,6 +202,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         return urlunsplit(urlsplit(self._base_host())._replace(path=self._path(), query=urlencode(params)))
 
     async def _runner(self) -> None:
+        """Run the websocket lifecycle until cancelled."""
+
         self._update_status("starting")
         try:
             while True:
@@ -194,7 +212,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     await self._read_loop_ws()
                 except asyncio.CancelledError:
                     break
-                except Exception as exc:  # pragma: no cover - defensive
+                except Exception as exc:  # noqa: BLE001 - defensive logging  # pragma: no cover - defensive path
                     _LOGGER.debug("WS (ducaheat): error %s", exc, exc_info=True)
                     await asyncio.sleep(self._next_backoff())
                 finally:
@@ -204,6 +222,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             self._update_status("stopped")
 
     async def _connect_once(self) -> None:
+        """Perform a single websocket handshake and upgrade."""
+
         token = await self._get_token()
         headers = _brand_headers(self._ua, self._xrw)
 
@@ -321,77 +341,127 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._update_status("connected")
 
     async def _read_loop_ws(self) -> None:
+        """Consume websocket messages until the connection closes."""
+
         ws = self._ws
         if ws is None:
             return
         try:
             async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
-                    data = msg.data
-                    self._stats.frames_total += 1
-                    if data == "2":
-                        _LOGGER.debug("WS (ducaheat): <- EIO 2 (ping) -> EIO 3 (pong)")
-                        await ws.send_str("3")
-                        continue
-                    if not data.startswith("4"):
-                        continue
-                    payload = data[1:]
-                    if payload == "2" or payload.startswith("2/"):
-                        if payload == "2":
-                            _LOGGER.debug("WS (ducaheat): <- SIO 2 (ping) -> SIO 3 (pong)")
-                            await ws.send_str("3")
-                        else:
-                            ns = payload[1:].split(",", 1)[0]
-                            _LOGGER.debug("WS (ducaheat): <- SIO 2%s (ping) -> SIO 3%s (pong)", ns, ns)
-                            await ws.send_str("3" + ns)
-                        continue
-
-                    if payload.startswith("40"):
-                        _LOGGER.debug("WS (ducaheat): <- SIO 40 (namespace ack)")
-                        self._update_status("healthy")
-                        continue
-
-                    if payload.startswith("42"):
-                        content = payload[2:]
-                        if content.startswith("/"):
-                            _ns, sep, content = content.partition(",")
-                            if sep != ",":
-                                continue
-                        try:
-                            arr = json.loads(content)
-                        except Exception:
-                            continue
-                        if not isinstance(arr, list) or not arr:
-                            continue
-                        evt, *args = arr
-                        _LOGGER.debug("WS (ducaheat): <- SIO 42 event=%s args_len=%d", evt, len(args))
-
-                        if evt == "message" and args and args[0] == "ping":
-                            _LOGGER.debug("WS (ducaheat): app ping -> pong")
-                            await self._emit_sio("message", "pong")
-                            continue
-
-                        if evt == "dev_data" and args and isinstance(args[0], dict):
-                            nodes = args[0].get("nodes") if isinstance(args[0], dict) else None
-                            if isinstance(nodes, dict):
-                                self._log_nodes_summary(nodes)
-                                self._dispatch_nodes({"nodes": nodes})
-                                self._update_status("healthy")
-                            continue
-
-                        if evt == "update" and args:
-                            self._log_update_brief(args[0])
-                            self._update_status("healthy")
-                            continue
-                        continue
-                elif msg.type == aiohttp.WSMsgType.ERROR:
+                    await self._handle_text_frame(ws, msg.data)
+                    continue
+                if msg.type == aiohttp.WSMsgType.ERROR:
                     raise RuntimeError(f"websocket error: {ws.exception()}")
-                elif msg.type in {aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED}:
+                if msg.type in {aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED}:
                     raise RuntimeError("websocket closed")
         finally:
             _LOGGER.debug("WS (ducaheat): read loop ended (ws closed or error)")
 
+    async def _handle_text_frame(
+        self,
+        ws: aiohttp.ClientWebSocketResponse,
+        data: str,
+    ) -> None:
+        """Handle a single text frame from the websocket server."""
+
+        self._stats.frames_total += 1
+        if data == "2":
+            _LOGGER.debug("WS (ducaheat): <- EIO 2 (ping) -> EIO 3 (pong)")
+            await ws.send_str("3")
+            return
+        if not data.startswith("4"):
+            return
+        payload = data[1:]
+        if payload == "2" or payload.startswith("2/"):
+            if payload == "2":
+                _LOGGER.debug("WS (ducaheat): <- SIO 2 (ping) -> SIO 3 (pong)")
+                await ws.send_str("3")
+            else:
+                ns = payload[1:].split(",", 1)[0]
+                _LOGGER.debug("WS (ducaheat): <- SIO 2%s (ping) -> SIO 3%s (pong)", ns, ns)
+                await ws.send_str("3" + ns)
+            return
+
+        if payload.startswith("40"):
+            _LOGGER.debug("WS (ducaheat): <- SIO 40 (namespace ack)")
+            self._update_status("healthy")
+            return
+
+        if not payload.startswith("42"):
+            return
+
+        content = payload[2:]
+        if content.startswith("/"):
+            _ns, sep, content = content.partition(",")
+            if sep != ",":
+                return
+        try:
+            arr = json.loads(content)
+        except Exception:  # noqa: BLE001 - defensive parsing
+            return
+        if not isinstance(arr, list) or not arr:
+            return
+        evt, *args = arr
+        _LOGGER.debug("WS (ducaheat): <- SIO 42 event=%s args_len=%d", evt, len(args))
+
+        if evt == "message" and args and args[0] == "ping":
+            _LOGGER.debug("WS (ducaheat): app ping -> pong")
+            await self._emit_sio("message", "pong")
+            return
+
+        if evt == "dev_data" and args and isinstance(args[0], dict):
+            nodes = args[0].get("nodes") if isinstance(args[0], dict) else None
+            if isinstance(nodes, dict):
+                self._log_nodes_summary(nodes)
+                normaliser = getattr(self._client, "normalise_ws_nodes", None)
+                if callable(normaliser):
+                    try:
+                        nodes = normaliser(nodes)  # type: ignore[arg-type]
+                    except Exception:  # noqa: BLE001 - defensive logging only  # pragma: no cover - defensive path
+                        _LOGGER.debug(
+                            "WS (ducaheat): normalise_ws_nodes failed; using raw snapshot",
+                            exc_info=True,
+                        )
+                self._nodes_raw = deepcopy(nodes)
+                self._nodes = self._build_nodes_snapshot(self._nodes_raw)
+                self._dispatch_nodes(self._nodes)
+                self._update_status("healthy")
+            return
+
+        if evt == "update" and args:
+            payload_body = args[0]
+            self._log_update_brief(payload_body)
+            nodes_payload: dict[str, Any] | None = None
+            if isinstance(payload_body, Mapping):
+                nodes_field = payload_body.get("nodes")
+                if isinstance(nodes_field, Mapping):
+                    nodes_payload = nodes_field
+                else:
+                    nodes_payload = self._translate_path_update(payload_body)
+            if nodes_payload:
+                normaliser = getattr(self._client, "normalise_ws_nodes", None)
+                if callable(normaliser):
+                    try:
+                        nodes_payload = normaliser(nodes_payload)  # type: ignore[arg-type]
+                    except Exception:  # noqa: BLE001 - defensive logging only  # pragma: no cover - defensive path
+                        _LOGGER.debug(
+                            "WS (ducaheat): normalise_ws_nodes failed; using raw update",
+                            exc_info=True,
+                        )
+                sample_updates = self._collect_sample_updates(nodes_payload)
+                if self._nodes_raw:
+                    self._merge_nodes(self._nodes_raw, nodes_payload)
+                else:
+                    self._nodes_raw = deepcopy(nodes_payload)
+                self._nodes = self._build_nodes_snapshot(self._nodes_raw)
+                self._dispatch_nodes(self._nodes)
+                if sample_updates:
+                    self._forward_sample_updates(sample_updates)
+            self._update_status("healthy")
     def _log_nodes_summary(self, nodes: Mapping[str, Any]) -> None:
+        """Log a summary of the node payload at INFO level."""
+
         if not _LOGGER.isEnabledFor(logging.INFO):
             return
         kinds = []
@@ -401,11 +471,13 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 for section in ("settings", "samples", "status", "advanced"):
                     sec = value.get(section)
                     if isinstance(sec, Mapping):
-                        addrs.update(addr for addr in sec.keys() if isinstance(addr, str))
+                        addrs.update(addr for addr in sec if isinstance(addr, str))
                 kinds.append(f"{key}={len(addrs) if addrs else 0}")
         _LOGGER.info("WS (ducaheat): dev_data nodes: %s", " ".join(kinds) if kinds else "(no nodes)")
 
     def _log_update_brief(self, body: Any) -> None:
+        """Log the essentials of an incremental update at DEBUG level."""
+
         if not _LOGGER.isEnabledFor(logging.DEBUG):
             return
         path = None
@@ -418,6 +490,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         _LOGGER.debug("WS (ducaheat): update path=%s keys=%s", path, keys)
 
     async def _emit_sio(self, event: str, *args: Any) -> None:
+        """Send a Socket.IO event payload to the server."""
+
         if not self._ws or self._ws.closed:
             raise RuntimeError("websocket not connected")
         arr = [event, *args]
@@ -425,6 +499,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         await self._ws.send_str(f"42{DUCAHEAT_NAMESPACE}," + payload)
 
     async def _subscribe_samples(self) -> int:
+        """Subscribe to live heater sample updates for all known nodes."""
+
         count = 0
         try:
             record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
@@ -437,27 +513,181 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             for node_type, addr in targets:
                 await self._emit_sio("subscribe", f"/{node_type}/{addr}/samples")
             count = len(targets)
-        except Exception:  # pragma: no cover - defensive
+        except Exception:  # noqa: BLE001 - defensive logging only  # pragma: no cover - defensive path
             _LOGGER.debug("WS (ducaheat): subscribe failed", exc_info=True)
         return count
 
     async def _disconnect(self, reason: str) -> None:
+        """Close the websocket connection if it is open."""
+
         if self._ws:
             try:
                 await self._ws.close(
                     code=aiohttp.WSCloseCode.GOING_AWAY,
                     message=reason.encode(),
                 )
-            except Exception:  # pragma: no cover - defensive
+            except Exception:  # noqa: BLE001 - defensive logging only  # pragma: no cover - defensive path
                 _LOGGER.debug("WS (ducaheat): close failed", exc_info=True)
             self._ws = None
 
     async def _get_token(self) -> str:
+        """Extract the bearer token for websocket authentication."""
+
         headers = await self._client.authed_headers()
         auth = headers.get("Authorization") if isinstance(headers, dict) else None
         if not auth:
             raise RuntimeError("missing Authorization")
         return auth.split(" ", 1)[1]
+
+    def _collect_sample_updates(
+        self, nodes: Mapping[str, Mapping[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        """Collect heater sample updates from the websocket payload."""
+
+        sample_updates: dict[str, dict[str, Any]] = {}
+        for node_type, payload in nodes.items():
+            if not isinstance(node_type, str) or not isinstance(payload, Mapping):
+                continue
+            samples = payload.get("samples")
+            if not isinstance(samples, Mapping):
+                continue
+            bucket: dict[str, Any] = {}
+            for addr, sample_payload in samples.items():
+                normalised_addr = normalize_node_addr(addr)
+                if not normalised_addr:
+                    continue
+                bucket[normalised_addr] = sample_payload
+            if bucket:
+                sample_updates[node_type] = bucket
+        return sample_updates
+
+    def _forward_sample_updates(self, updates: Mapping[str, Mapping[str, Any]]) -> None:
+        """Relay websocket heater sample updates to the energy coordinator."""
+
+        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
+        if not isinstance(record, Mapping):
+            return
+        energy_coordinator = record.get("energy_coordinator")
+        handler = getattr(energy_coordinator, "handle_ws_samples", None)
+        if not callable(handler):
+            return
+        try:
+            handler(
+                self.dev_id,
+                {node_type: dict(section) for node_type, section in updates.items()},
+            )
+        except Exception:  # noqa: BLE001 - defensive logging only  # pragma: no cover - defensive path
+            _LOGGER.debug("WS (ducaheat): forwarding heater samples failed", exc_info=True)
+
+    def _translate_path_update(self, payload: Mapping[str, Any]) -> dict[str, Any] | None:
+        """Translate ``{"path": ..., "body": ...}`` frames into node updates."""
+
+        if not isinstance(payload, Mapping):
+            return None
+        if "nodes" in payload:
+            return None
+        path = payload.get("path")
+        body = payload.get("body")
+        if not isinstance(path, str) or body is None:
+            return None
+
+        path = path.split("?", 1)[0]
+        segments = [segment for segment in path.split("/") if segment]
+        if not segments:
+            return None
+
+        try:
+            devs_idx = segments.index("devs")
+        except ValueError:
+            devs_idx = -1
+
+        if devs_idx >= 0:
+            relevant = segments[devs_idx + 1 :]
+            node_type_idx = 1
+            addr_idx = 2
+            section_idx = 3
+            if len(relevant) <= addr_idx:
+                return None
+        else:
+            relevant = segments
+            node_type_idx = 0
+            addr_idx = 1
+            section_idx = 2
+            if len(relevant) <= addr_idx:
+                return None
+
+        node_type = normalize_node_type(relevant[node_type_idx])
+        addr = normalize_node_addr(relevant[addr_idx])
+        if not node_type or not addr:
+            return None
+
+        section = relevant[section_idx] if len(relevant) > section_idx else None
+        remainder = (
+            relevant[section_idx + 1 :]
+            if len(relevant) > section_idx + 1
+            else []
+        )
+
+        target_section, nested_key = self._resolve_update_section(section)
+        if target_section is None:
+            return None
+
+        payload_body: Any = body
+        for segment in reversed(remainder):
+            payload_body = {segment: payload_body}
+        if nested_key:
+            payload_body = {nested_key: payload_body}
+
+        return {node_type: {target_section: {addr: payload_body}}}
+
+    @staticmethod
+    def _resolve_update_section(section: str | None) -> tuple[str | None, str | None]:
+        """Map a websocket path segment to the node bucket name."""
+
+        if not section:
+            return None, None
+
+        lowered = section.lower()
+        if lowered in {"status", "samples", "settings", "advanced"}:
+            return lowered, None
+        if lowered in {"advanced_setup"}:
+            return "advanced", "advanced_setup"
+        if lowered in {"setup", "prog", "prog_temps", "capabilities"}:
+            return "settings", lowered
+        return "settings", lowered
+
+    @staticmethod
+    def _build_nodes_snapshot(nodes: dict[str, Any]) -> dict[str, Any]:
+        """Normalise the nodes payload for downstream consumers."""
+
+        nodes_copy = deepcopy(nodes)
+        nodes_by_type: dict[str, Any] = {
+            node_type: payload
+            for node_type, payload in nodes_copy.items()
+            if isinstance(payload, dict)
+        }
+        snapshot: dict[str, Any] = {
+            "nodes": nodes_copy,
+            "nodes_by_type": nodes_by_type,
+        }
+        snapshot.update(nodes_by_type)
+        if "htr" in nodes_by_type:
+            snapshot.setdefault("htr", nodes_by_type["htr"])
+        return snapshot
+
+    @staticmethod
+    def _merge_nodes(target: dict[str, Any], source: Mapping[str, Any]) -> None:
+        """Deep-merge incremental updates into the cached snapshot."""
+
+        for key, value in source.items():
+            if isinstance(value, Mapping):
+                existing = target.get(key)
+                if isinstance(existing, dict):
+                    DucaheatWSClient._merge_nodes(existing, value)
+                else:
+                    target[key] = deepcopy(value)
+            else:
+                target[key] = value
 
 
 __all__ = ["DucaheatWSClient"]

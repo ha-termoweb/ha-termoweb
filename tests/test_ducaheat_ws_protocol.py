@@ -470,13 +470,21 @@ async def test_read_loop_handles_close(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.asyncio
 async def test_read_loop_processes_update_event(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Update events should invoke the brief logger and mark the connection healthy."""
+    """Update events should merge nodes, forward samples, and stay healthy."""
 
     client = _make_client(monkeypatch)
     log_calls: list[Any] = []
     monkeypatch.setattr(client, "_log_update_brief", lambda body: log_calls.append(body))
     statuses: list[str] = []
     monkeypatch.setattr(client, "_update_status", lambda status: statuses.append(status))
+    dispatch_mock = MagicMock()
+    monkeypatch.setattr(client, "_dispatch_nodes", dispatch_mock)
+    normalised_nodes = {"htr": {"samples": {"1": {"power": 5}}}}
+    client._client.normalise_ws_nodes = MagicMock(return_value=normalised_nodes)  # type: ignore[attr-defined]
+    sample_calls: list[Any] = []
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"]["energy_coordinator"] = SimpleNamespace(
+        handle_ws_samples=lambda dev_id, updates: sample_calls.append((dev_id, updates))
+    )
 
     class UpdateWS:
         def __init__(self) -> None:
@@ -486,7 +494,10 @@ async def test_read_loop_processes_update_event(monkeypatch: pytest.MonkeyPatch)
             async def _iterate() -> AsyncIterator[Any]:
                 yield SimpleNamespace(
                     type=aiohttp.WSMsgType.TEXT,
-                    data="442[\"update\",{\"body\":{\"temp\":1},\"path\":\"/path\"}]",
+                    data=(
+                        "442[\"update\",{\"body\":{\"power\":5},"
+                        "\"path\":\"/api/v2/devs/device/htr/1/samples\"}]"
+                    ),
                 )
             return _iterate()
 
@@ -494,8 +505,82 @@ async def test_read_loop_processes_update_event(monkeypatch: pytest.MonkeyPatch)
 
     await client._read_loop_ws()
 
-    assert log_calls and log_calls[0]["body"]["temp"] == 1
+    assert log_calls and log_calls[0]["body"]["power"] == 5
     assert statuses and statuses[-1] == "healthy"
+    client._client.normalise_ws_nodes.assert_called_once()  # type: ignore[attr-defined]
+    dispatch_mock.assert_called_once()
+    dispatched = dispatch_mock.call_args.args[0]
+    assert dispatched["nodes"]["htr"]["samples"]["1"]["power"] == 5
+    assert client._nodes_raw["htr"]["samples"]["1"]["power"] == 5
+    assert sample_calls == [("device", {"htr": {"1": {"power": 5}}})]
+
+
+@pytest.mark.asyncio
+async def test_read_loop_processes_dev_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dev data snapshots should normalise nodes and update state."""
+
+    client = _make_client(monkeypatch)
+    dispatch_mock = MagicMock()
+    monkeypatch.setattr(client, "_dispatch_nodes", dispatch_mock)
+    normalised = {"htr": {"settings": {"1": {"temp": 19}}}}
+    client._client.normalise_ws_nodes = MagicMock(return_value=normalised)  # type: ignore[attr-defined]
+
+    class DevDataWS:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def __aiter__(self) -> Any:
+            async def _iterate() -> AsyncIterator[Any]:
+                yield SimpleNamespace(
+                    type=aiohttp.WSMsgType.TEXT,
+                    data=(
+                        "442[\"dev_data\",{\"nodes\":{\"htr\":{\"settings\":{\"1\":{\"temp\":19}}}}}]"
+                    ),
+                )
+
+            return _iterate()
+
+    client._ws = DevDataWS()  # type: ignore[assignment]
+
+    await client._read_loop_ws()
+
+    client._client.normalise_ws_nodes.assert_called_once()  # type: ignore[attr-defined]
+    dispatch_mock.assert_called_once()
+    dispatched = dispatch_mock.call_args.args[0]
+    assert dispatched["nodes"]["htr"]["settings"]["1"]["temp"] == 19
+    assert client._nodes_raw["htr"]["settings"]["1"]["temp"] == 19
+
+
+@pytest.mark.asyncio
+async def test_read_loop_update_with_nodes_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Update events with explicit nodes payloads should merge snapshots."""
+
+    client = _make_client(monkeypatch)
+    client._nodes_raw = {"htr": {"samples": {"1": {"power": 2}}}}
+    dispatch_mock = MagicMock()
+    monkeypatch.setattr(client, "_dispatch_nodes", dispatch_mock)
+
+    class UpdateWS:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def __aiter__(self) -> Any:
+            async def _iterate() -> AsyncIterator[Any]:
+                yield SimpleNamespace(
+                    type=aiohttp.WSMsgType.TEXT,
+                    data="442[\"update\",{\"nodes\":{\"htr\":{\"samples\":{\"1\":{\"power\":3}}}}}]",
+                )
+
+            return _iterate()
+
+    client._ws = UpdateWS()  # type: ignore[assignment]
+
+    await client._read_loop_ws()
+
+    dispatch_mock.assert_called_once()
+    payload = dispatch_mock.call_args.args[0]
+    assert payload["nodes"]["htr"]["samples"]["1"]["power"] == 3
+    assert client._nodes_raw["htr"]["samples"]["1"]["power"] == 3
 
 
 def test_log_nodes_summary_branches(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
@@ -525,6 +610,149 @@ def test_log_update_brief_variants(monkeypatch: pytest.MonkeyPatch, caplog: pyte
         client._log_update_brief("not a mapping")
 
     assert "path=/x" in caplog.text
+
+
+def test_collect_sample_updates_filters(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sample update collection should normalise addresses and skip invalid entries."""
+
+    client = _make_client(monkeypatch)
+    nodes = {
+        "htr": {
+            "samples": {
+                "1": {"power": 5},
+                "": {"power": 0},
+            },
+            "status": {},
+        },
+        "thm": {"samples": []},
+        "misc": "ignored",
+    }
+
+    updates = client._collect_sample_updates(nodes)
+
+    assert updates == {"htr": {"1": {"power": 5}}}
+
+
+def test_forward_sample_updates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Forwarding sample updates should invoke the energy coordinator handler."""
+
+    client = _make_client(monkeypatch)
+    record = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
+    calls: list[Any] = []
+    record["energy_coordinator"] = SimpleNamespace(
+        handle_ws_samples=lambda dev_id, updates: calls.append((dev_id, updates))
+    )
+
+    client._forward_sample_updates({"htr": {"1": {"power": 7}}})
+
+    assert calls == [("device", {"htr": {"1": {"power": 7}}})]
+
+    record.pop("energy_coordinator")
+    client._forward_sample_updates({"htr": {"1": {"power": 8}}})
+
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"] = None
+    client._forward_sample_updates({"htr": {"1": {"power": 9}}})
+
+    assert calls == [("device", {"htr": {"1": {"power": 7}}})]
+
+
+def test_translate_path_update_variants(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Path translation should handle namespace-prefixed and root paths."""
+
+    client = _make_client(monkeypatch)
+
+    payload_one = {
+        "path": "/api/v2/devs/device/htr/1/settings/setup",
+        "body": {"mode": "eco"},
+    }
+    translated_one = client._translate_path_update(payload_one)
+    assert translated_one == {"htr": {"settings": {"1": {"setup": {"mode": "eco"}}}}}
+
+    payload_two = {
+        "path": "/pmo/2/status/state",
+        "body": 1,
+    }
+    translated_two = client._translate_path_update(payload_two)
+    assert translated_two == {"pmo": {"status": {"2": {"state": 1}}}}
+
+    payload_three = {"path": "/invalid", "body": {}}
+    assert client._translate_path_update(payload_three) is None
+
+    payload_four = {
+        "path": "/api/v2/devs/device/htr/1/setup",
+        "body": {"mode": "comfort"},
+    }
+    translated_four = client._translate_path_update(payload_four)
+    assert translated_four == {"htr": {"settings": {"1": {"setup": {"mode": "comfort"}}}}}
+
+
+def test_translate_path_update_nodes_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Payloads containing an explicit nodes key should be ignored."""
+
+    client = _make_client(monkeypatch)
+
+    assert (
+        client._translate_path_update({"path": "/htr/1/samples", "body": {}, "nodes": {}})
+        is None
+    )
+
+
+def test_translate_path_update_invalid_cases(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Invalid path payloads should return ``None``."""
+
+    client = _make_client(monkeypatch)
+
+    assert client._translate_path_update({"path": "/api", "body": None}) is None
+    assert client._translate_path_update("not a mapping") is None
+    assert client._translate_path_update({"path": "", "body": {}}) is None
+    assert (
+        client._translate_path_update({"path": "/api/v2/devs/device/htr", "body": {}})
+        is None
+    )
+    assert (
+        client._translate_path_update({"path": "/api/v2/devs/device/foo/1/samples", "body": {}})
+        == {"foo": {"samples": {"1": {}}}}
+    )
+    assert client._translate_path_update({"path": "/htr/ ", "body": {}}) is None
+    assert (
+        client._translate_path_update({"path": "/htr/1", "body": {}})
+        is None
+    )
+    monkeypatch.setattr(client, "_resolve_update_section", lambda section: (None, None))
+    assert client._translate_path_update({"path": "/htr/1/some", "body": {}}) is None
+    assert client._translate_path_update({"path": "/htr/1/samples", "body": {}, "nodes": {}}) is None
+
+
+def test_resolve_update_section_variants() -> None:
+    """Section resolution should map known aliases to buckets."""
+
+    assert ducaheat_ws.DucaheatWSClient._resolve_update_section(None) == (None, None)
+    assert ducaheat_ws.DucaheatWSClient._resolve_update_section("STATUS") == ("status", None)
+    assert ducaheat_ws.DucaheatWSClient._resolve_update_section("advanced_setup") == (
+        "advanced",
+        "advanced_setup",
+    )
+    assert ducaheat_ws.DucaheatWSClient._resolve_update_section("setup") == (
+        "settings",
+        "setup",
+    )
+    assert ducaheat_ws.DucaheatWSClient._resolve_update_section("other") == (
+        "settings",
+        "other",
+    )
+
+
+def test_merge_nodes_handles_new_and_scalar() -> None:
+    """Merging nodes should deep-copy mappings and assign scalars."""
+
+    target: dict[str, Any] = {}
+    ducaheat_ws.DucaheatWSClient._merge_nodes(
+        target,
+        {"htr": {"samples": {"1": {"power": 1}}}, "flag": 1},
+    )
+
+    assert target["htr"]["samples"]["1"]["power"] == 1
+    assert target["flag"] == 1
 
 
 @pytest.mark.asyncio
