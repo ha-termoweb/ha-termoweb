@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime as dt
+
 from types import MappingProxyType
 from typing import Any, Mapping
 from unittest.mock import AsyncMock
@@ -10,6 +12,53 @@ from homeassistant.core import HomeAssistant
 
 from custom_components.termoweb import coordinator as coord_module
 from custom_components.termoweb.nodes import HeaterNode
+
+
+def test_coerce_int_variants() -> None:
+    """_coerce_int should normalise primitives and guard against errors."""
+
+    class BadString:
+        def __str__(self) -> str:
+            raise RuntimeError("boom")
+
+    assert coord_module._coerce_int(None) is None
+    assert coord_module._coerce_int(True) == 1
+    assert coord_module._coerce_int(False) == 0
+    assert coord_module._coerce_int(5.7) == 5
+    assert coord_module._coerce_int(float("inf")) is None
+    assert coord_module._coerce_int(BadString()) is None
+    assert coord_module._coerce_int("   ") is None
+    assert coord_module._coerce_int(" 7.2 ") == 7
+
+
+def test_resolve_boost_end_from_fields_variants() -> None:
+    """Boost end resolver should validate ranges and return offsets."""
+
+    base_now = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
+
+    dt_value, minutes = coord_module.resolve_boost_end_from_fields(None, 10)
+    assert dt_value is None and minutes is None
+
+    dt_value, minutes = coord_module.resolve_boost_end_from_fields(-5, 10, now=base_now)
+    assert dt_value is None and minutes is None
+
+    dt_value, minutes = coord_module.resolve_boost_end_from_fields(2, 60, now=base_now)
+    assert isinstance(dt_value, dt.datetime)
+    assert minutes == 1500
+
+    hass = HomeAssistant()
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device={},
+        nodes={},
+    )
+
+    derived_dt, derived_minutes = coordinator.resolve_boost_end(2, 60, now=base_now)
+    assert isinstance(derived_dt, dt.datetime)
+    assert derived_minutes == 1500
 
 
 def test_device_display_name_helper() -> None:

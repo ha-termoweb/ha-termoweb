@@ -424,7 +424,10 @@ async def test_on_connect_schedules_idle_monitor(monkeypatch: pytest.MonkeyPatch
     created: list[asyncio.Task] = []
 
     def create_task(coro: Any, **_: Any) -> asyncio.Task:
-        task = loop.create_task(asyncio.sleep(0))
+        if isinstance(coro, asyncio.Task):
+            task = coro
+        else:
+            task = loop.create_task(coro)
         created.append(task)
         return task
 
