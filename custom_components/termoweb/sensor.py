@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 import logging
 import math
 from typing import Any
@@ -12,6 +13,14 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import UnitOfTemperature
+
+try:  # pragma: no cover - fallback for older Home Assistant stubs
+    from homeassistant.const import UnitOfTime
+except ImportError:  # pragma: no cover - fallback for older Home Assistant stubs
+    class UnitOfTime:  # type: ignore[override]
+        """Fallback UnitOfTime namespace with minute granularity."""
+
+        MINUTES = "min"
 from homeassistant.core import callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -116,7 +125,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         energy_coordinator.update_addresses(addrs_by_type)
 
     new_entities: list[SensorEntity] = []
-    for node_type, _node, addr_str, base_name in iter_heater_nodes(
+    for node_type, node, addr_str, base_name in iter_heater_nodes(
         nodes_by_type, resolve_name
     ):
         energy_unique_id = build_heater_energy_unique_id(dev_id, node_type, addr_str)
@@ -134,6 +143,27 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 node_type=node_type,
             )
         )
+        supports_boost = getattr(node, "supports_boost", None)
+        supported = False
+        if callable(supports_boost):
+            try:
+                supported = bool(supports_boost())
+            except Exception:  # noqa: BLE001 - defensive  # pragma: no cover
+                supported = False
+        elif isinstance(supports_boost, bool):
+            supported = supports_boost
+        if supported:
+            new_entities.extend(
+                _create_boost_sensors(
+                    coordinator,
+                    entry.entry_id,
+                    dev_id,
+                    addr_str,
+                    base_name,
+                    uid_prefix,
+                    node_type=node_type,
+                )
+            )
 
     log_skipped_nodes("sensor", nodes_by_type, logger=_LOGGER)
 
@@ -287,6 +317,58 @@ class HeaterPowerSensor(HeaterEnergyBase):
     _metric_key = "power"
 
 
+class HeaterBoostMinutesRemainingSensor(HeaterNodeBase, SensorEntity):
+    """Sensor exposing the remaining minutes for the active boost."""
+
+    _attr_device_class = getattr(SensorDeviceClass, "DURATION", "duration")
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the remaining boost duration in minutes."""
+
+        state = self.boost_state()
+        return state.minutes_remaining
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return metadata about the boost session."""
+
+        state = self.boost_state()
+        return {
+            "dev_id": self._dev_id,
+            "addr": self._addr,
+            "boost_active": state.active,
+            "boost_end": state.end_iso,
+        }
+
+
+class HeaterBoostEndSensor(HeaterNodeBase, SensorEntity):
+    """Sensor exposing the expected end timestamp for the active boost."""
+
+    _attr_device_class = getattr(SensorDeviceClass, "TIMESTAMP", "timestamp")
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the boost end timestamp."""
+
+        state = self.boost_state()
+        return state.end_datetime
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return metadata about the boost session."""
+
+        state = self.boost_state()
+        return {
+            "dev_id": self._dev_id,
+            "addr": self._addr,
+            "boost_active": state.active,
+            "boost_minutes_remaining": state.minutes_remaining,
+        }
+
+
 def _create_heater_sensors(
     coordinator: Any,
     energy_coordinator: EnergyStateCoordinator,
@@ -340,6 +422,48 @@ def _create_heater_sensors(
     )
 
     return (temperature, energy, power)
+
+
+def _create_boost_sensors(
+    coordinator: Any,
+    entry_id: str,
+    dev_id: str,
+    addr: str,
+    base_name: str,
+    uid_prefix: str,
+    *,
+    node_type: str | None = None,
+    minutes_cls: type[HeaterBoostMinutesRemainingSensor] = HeaterBoostMinutesRemainingSensor,
+    end_cls: type[HeaterBoostEndSensor] = HeaterBoostEndSensor,
+) -> tuple[
+    HeaterBoostMinutesRemainingSensor,
+    HeaterBoostEndSensor,
+]:
+    """Create the boost-related sensors for a heater node."""
+
+    boost_prefix = f"{uid_prefix}:boost"
+    minutes = minutes_cls(
+        coordinator,
+        entry_id,
+        dev_id,
+        addr,
+        f"{base_name} Boost Minutes Remaining",
+        f"{boost_prefix}:minutes_remaining",
+        device_name=base_name,
+        node_type=node_type,
+    )
+    end = end_cls(
+        coordinator,
+        entry_id,
+        dev_id,
+        addr,
+        f"{base_name} Boost End",
+        f"{boost_prefix}:end",
+        device_name=base_name,
+        node_type=node_type,
+    )
+
+    return (minutes, end)
 
 
 class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):

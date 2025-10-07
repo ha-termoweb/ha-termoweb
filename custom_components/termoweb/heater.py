@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 import logging
 from typing import Any, Final
 
@@ -12,6 +14,7 @@ from homeassistant.helpers import dispatcher
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, signal_ws_data
 from .installation import InstallationSnapshot, ensure_snapshot
@@ -33,7 +36,7 @@ BOOST_DURATION_OPTIONS: Final[tuple[int, ...]] = (30, 60, 120)
 DEFAULT_BOOST_DURATION: Final = 60
 
 
-def _coerce_boost_minutes(value: Any) -> int | None:
+def _coerce_boost_remaining_minutes(value: Any) -> int | None:
     """Return ``value`` as a positive integer minute count when possible."""
 
     if value is None or isinstance(value, bool):
@@ -179,6 +182,153 @@ def resolve_boost_runtime_minutes(
     if stored is not None:
         return stored
     return default
+
+
+def _coerce_boost_bool(value: Any) -> bool | None:
+    """Return ``value`` as a boolean when possible."""
+
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if value == 1:
+            return True
+        if value == 0:
+            return False
+    try:
+        text = str(value).strip().lower()
+    except Exception:  # noqa: BLE001 - defensive
+        return None
+    if text in {"true", "1", "yes", "on"}:
+        return True
+    if text in {"false", "0", "no", "off"}:
+        return False
+    return None
+
+
+def _coerce_boost_minutes(value: Any) -> int | None:
+    """Return ``value`` as non-negative minutes when possible."""
+
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        if isinstance(value, (int, float)):
+            minutes = int(value)
+        else:
+            text = str(value).strip()
+            if not text:
+                return None
+            minutes = int(float(text))
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        return None
+    return minutes if minutes >= 0 else None
+
+
+@dataclass(slots=True)
+class BoostState:
+    """Derived boost metadata for a heater node."""
+
+    active: bool | None
+    minutes_remaining: int | None
+    end_datetime: datetime | None
+    end_iso: str | None
+
+
+def derive_boost_state(
+    settings: Mapping[str, Any] | None, coordinator: Any
+) -> BoostState:
+    """Return derived boost metadata for ``settings`` using ``coordinator``."""
+
+    source = settings if isinstance(settings, Mapping) else {}
+
+    boost_active = _coerce_boost_bool(source.get("boost_active"))
+    if boost_active is None:
+        boost_active = _coerce_boost_bool(source.get("boost"))
+    if boost_active is None:
+        mode = source.get("mode")
+        if isinstance(mode, str):
+            boost_active = mode.strip().lower() == "boost"
+        else:
+            boost_active = False
+
+    boost_day: Any = source.get("boost_end_day")
+    boost_minute: Any = source.get("boost_end_min")
+    raw_end = source.get("boost_end")
+    if isinstance(raw_end, Mapping):
+        if boost_day is None:
+            boost_day = raw_end.get("day")
+        if boost_minute is None:
+            boost_minute = raw_end.get("minute")
+
+    boost_end_dt: datetime | None = None
+    boost_minutes: int | None = None
+    resolver = getattr(coordinator, "resolve_boost_end", None)
+    if (
+        callable(resolver)
+        and boost_day is not None
+        and boost_minute is not None
+    ):
+        try:
+            boost_end_dt, boost_minutes = resolver(boost_day, boost_minute)
+        except Exception:  # noqa: BLE001 - defensive
+            boost_end_dt = None
+            boost_minutes = None
+
+    if boost_minutes is None:
+        boost_minutes = _coerce_boost_remaining_minutes(source.get("boost_remaining"))
+
+    if boost_minutes is None and boost_end_dt is not None:
+        delta_seconds = (boost_end_dt - dt_util.now()).total_seconds()
+        boost_minutes = int(max(0.0, delta_seconds) // 60)
+
+    boost_end_iso: str | None = None
+    if boost_end_dt is not None:
+        try:
+            boost_end_iso = boost_end_dt.isoformat()
+        except Exception:  # noqa: BLE001 - defensive
+            boost_end_iso = None
+    elif isinstance(raw_end, str):
+        boost_end_iso = raw_end
+    elif isinstance(raw_end, Mapping):
+        day = raw_end.get("day")
+        minute = raw_end.get("minute")
+        if callable(resolver) and day is not None and minute is not None:
+            try:
+                derived_dt, _ = resolver(day, minute)
+            except Exception:  # noqa: BLE001 - defensive
+                derived_dt = None
+            if derived_dt is not None:
+                boost_end_dt = derived_dt
+                boost_end_iso = derived_dt.isoformat()
+
+    if boost_end_iso is None and boost_minutes is not None:
+        try:
+            boost_end_dt = dt_util.now() + timedelta(minutes=boost_minutes)
+            boost_end_iso = boost_end_dt.isoformat()
+        except Exception:  # noqa: BLE001 - defensive
+            boost_end_dt = None
+            boost_end_iso = None
+
+    if boost_end_dt is None and isinstance(boost_end_iso, str):
+        parsed: datetime | None = None
+        parser = getattr(dt_util, "parse_datetime", None)
+        if callable(parser):
+            parsed = parser(boost_end_iso)
+        if parsed is None:
+            try:
+                parsed = datetime.fromisoformat(boost_end_iso)
+            except ValueError:  # pragma: no cover - defensive
+                parsed = None
+        if parsed is not None:
+            boost_end_dt = parsed
+
+    return BoostState(
+        active=boost_active,
+        minutes_remaining=boost_minutes,
+        end_datetime=boost_end_dt,
+        end_iso=boost_end_iso,
+    )
 
 
 class DispatcherSubscriptionHelper:
@@ -663,6 +813,12 @@ class HeaterNodeBase(CoordinatorEntity):
             return None
         settings = settings_map.get(self._addr)
         return settings if isinstance(settings, dict) else None
+
+    def boost_state(self) -> BoostState:
+        """Return derived boost metadata for this heater."""
+
+        settings = self.heater_settings() or {}
+        return derive_boost_state(settings, self.coordinator)
 
     def _client(self) -> Any:
         """Return the REST client used for write operations."""
