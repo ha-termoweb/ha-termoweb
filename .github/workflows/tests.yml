@@ -19,10 +19,13 @@ jobs:
           enable-cache: true
 
       - name: Install Python requirement
-        run: uv python install
+        run: uv python install 3.13.2
+
+      - name: Create virtual environment
+        run: uv venv
 
       - name: Install project dependencies
-        run: uv pip install --system -e .[test]
+        run: uv pip install -e .[test]
 
       - name: Run tests
         run: |
