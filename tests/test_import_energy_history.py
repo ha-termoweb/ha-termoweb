@@ -269,6 +269,12 @@ async def _load_module(
 
     monkeypatch.setattr(ws_module, "TermoWebWSClient", _FakeWSClient)
     monkeypatch.setattr(termoweb_ws_module, "TermoWebWSClient", _FakeWSClient)
+    backend_module = importlib.import_module(
+        "custom_components.termoweb.backend.termoweb"
+    )
+    monkeypatch.setattr(
+        backend_module, "TermoWebWSClient", _FakeWSClient, raising=False
+    )
 
     energy_module = importlib.reload(
         importlib.import_module("custom_components.termoweb.energy")

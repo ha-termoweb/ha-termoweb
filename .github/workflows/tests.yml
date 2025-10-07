@@ -53,10 +53,14 @@ jobs:
 
       - name: Commit updated coverage badge
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "docs: update coverage badge"
-          file_pattern: docs/badges/coverage.svg
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/badges/coverage.svg
+          if ! git diff --cached --quiet; then
+            git commit -m "docs: update coverage badge"
+            git push origin HEAD:main
+          fi
 
       - name: Upload coverage artifacts
         uses: actions/upload-artifact@v4
