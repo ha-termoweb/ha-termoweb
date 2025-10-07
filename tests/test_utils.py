@@ -216,6 +216,16 @@ def test_build_gateway_device_info_uses_brand_and_version() -> None:
     assert info["sw_version"] == "7"
 
 
+def test_build_gateway_device_info_ignores_non_mapping_coordinator_data() -> None:
+    hass = types.SimpleNamespace(
+        data={DOMAIN: {"entry": {"coordinator": types.SimpleNamespace(data=[1, 2, 3])}}}
+    )
+
+    info = build_gateway_device_info(hass, "entry", "dev")
+
+    assert info["model"] == "Gateway/Controller"
+
+
 def test_normalize_heater_addresses_with_none() -> None:
     mapping, aliases = normalize_heater_addresses(None)
 
