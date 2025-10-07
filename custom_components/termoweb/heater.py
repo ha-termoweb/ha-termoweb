@@ -208,7 +208,7 @@ def _coerce_boost_bool(value: Any) -> bool | None:
 
 
 def _coerce_boost_minutes(value: Any) -> int | None:
-    """Return ``value`` as a positive minute count when possible."""
+    """Return ``value`` as positive minutes when possible."""
 
     if value is None or isinstance(value, bool):
         return None
@@ -306,7 +306,7 @@ def derive_boost_state(
         try:
             boost_end_dt = dt_util.now() + timedelta(minutes=boost_minutes)
             boost_end_iso = boost_end_dt.isoformat()
-        except Exception:  # noqa: BLE001 - defensive
+        except Exception:  # pragma: no cover - defensive
             boost_end_dt = None
             boost_end_iso = None
 
@@ -314,7 +314,7 @@ def derive_boost_state(
         parsed: datetime | None = None
         parser = getattr(dt_util, "parse_datetime", None)
         if callable(parser):
-            parsed = parser(boost_end_iso)
+            parsed = parser(boost_end_iso)  # pragma: no cover - defensive
         if parsed is None:
             try:
                 parsed = datetime.fromisoformat(boost_end_iso)

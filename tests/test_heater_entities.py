@@ -323,6 +323,9 @@ def test_coerce_boost_minutes_edge_cases() -> None:
     assert coerce("90") == 90
     assert coerce(120.7) == 120
 
+    remaining = heater_module._coerce_boost_remaining_minutes
+    assert remaining(0) is None
+
 
 def test_coerce_boost_remaining_minutes_filters_non_positive() -> None:
     """Ensure remaining minute coercion rejects falsey and negative values."""

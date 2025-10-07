@@ -31,8 +31,7 @@ from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 
-# How many heater settings to fetch per device per cycle (keep gentle)
-HTR_SETTINGS_PER_CYCLE = 1
+# TTL for pending heater setting confirmations.
 _PENDING_SETTINGS_TTL = 10.0
 _SETPOINT_TOLERANCE = 0.05
 
@@ -201,7 +200,6 @@ class StateCoordinator(
         self.client = client
         self._base_interval = max(base_interval, MIN_POLL_INTERVAL)
         self._backoff = 0  # seconds
-        self._rr_index: dict[str, int] = {}
         self._dev_id = dev_id
         self._device = device or {}
         self._nodes: dict[str, Any] = {}
@@ -711,7 +709,7 @@ class StateCoordinator(
             )
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
-        """Fetch heater settings for a subset of addresses on each poll."""
+        """Fetch the latest settings for every known node on each poll."""
         dev_id = self._dev_id
         self._ensure_inventory()
         addr_map = dict(self._nodes_by_type)
@@ -761,25 +759,30 @@ class StateCoordinator(
             }
 
             if addrs:
-                start_index = self._rr_index.get(dev_id, 0) % len(addrs)
-                count = min(HTR_SETTINGS_PER_CYCLE, len(addrs))
-                for k in range(count):
-                    idx = (start_index + k) % len(addrs)
-                    addr = addrs[idx]
-                    addr_types = reverse.get(addr)
-                    node_type = next(iter(addr_types)) if addr_types else "htr"
-                    js = await self.client.get_node_settings(dev_id, (node_type, addr))
-                    if isinstance(js, dict):
-                        if self._should_defer_pending_setting(node_type, addr, js):
+                for node_type, addrs_for_type in addr_map.items():
+                    for addr in addrs_for_type:
+                        addr_types = reverse.get(addr)
+                        resolved_type = (
+                            node_type
+                            if node_type in (addr_types or {node_type})
+                            else next(iter(addr_types))
+                            if addr_types
+                            else node_type
+                        )
+                        js = await self.client.get_node_settings(
+                            dev_id, (resolved_type, addr)
+                        )
+                        if not isinstance(js, dict):
+                            continue
+                        if self._should_defer_pending_setting(resolved_type, addr, js):
                             _LOGGER.debug(
                                 "Deferring poll merge for pending settings type=%s addr=%s",
-                                node_type,
+                                resolved_type,
                                 addr,
                             )
                             continue
-                        bucket = settings_by_type.setdefault(node_type, {})
+                        bucket = settings_by_type.setdefault(resolved_type, {})
                         bucket[addr] = js
-                self._rr_index[dev_id] = (start_index + count) % len(addrs)
 
             dev_name = _device_display_name(self._device, dev_id)
 
