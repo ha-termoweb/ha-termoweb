@@ -293,3 +293,28 @@ def test_termoweb_backend_legacy_ws_class(monkeypatch: pytest.MonkeyPatch) -> No
 
     assert isinstance(ws_client, LegacyWS)
     assert "protocol" not in ws_client.kwargs
+
+
+def test_backend_lazy_exports_are_cached() -> None:
+    """Lazy backend exports should populate module attributes once resolved."""
+
+    import importlib
+
+    backend_module = importlib.import_module("custom_components.termoweb.backend")
+
+    # Clear any cached attributes to exercise the lazy loader anew.
+    backend_module.__dict__.pop("DucaheatBackend", None)
+    backend_module.__dict__.pop("DucaheatRESTClient", None)
+    backend_module.__dict__.pop("TermoWebBackend", None)
+
+    ducaheat_cls = getattr(backend_module, "DucaheatBackend")
+    rest_cls = getattr(backend_module, "DucaheatRESTClient")
+    termoweb_cls = getattr(backend_module, "TermoWebBackend")
+
+    assert backend_module.DucaheatBackend is ducaheat_cls
+    assert backend_module.DucaheatRESTClient is rest_cls
+    assert backend_module.TermoWebBackend is termoweb_cls
+    # Attributes should remain cached for subsequent attribute checks.
+    assert "DucaheatBackend" in backend_module.__dict__
+    assert "DucaheatRESTClient" in backend_module.__dict__
+    assert "TermoWebBackend" in backend_module.__dict__

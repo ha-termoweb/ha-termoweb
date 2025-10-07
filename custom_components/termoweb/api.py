@@ -9,6 +9,12 @@ from typing import Any
 
 import aiohttp
 
+from .backend.sanitize import (
+    build_acm_boost_payload,
+    mask_identifier,
+    redact_text,
+    validate_boost_minutes,
+)
 from .const import (
     ACCEPT_LANGUAGE,
     API_BASE,
@@ -40,18 +46,6 @@ class BackendAuthError(Exception):
 
 class BackendRateLimitError(Exception):
     """Server rate-limited the client (HTTP 429)."""
-
-
-def _redact_bearer(text: str | None) -> str:
-    """Remove Bearer tokens from an arbitrary string (defensive)."""
-    if not text:
-        return ""
-    # Very defensive scrubbing for 'Bearer <opaque>' and long hex strings.
-    return (
-        text.replace("Bearer ", "Bearer ***REDACTED*** ")
-        .replace("authorization", "auth")
-        .replace("Authorization", "Auth")
-    )
 
 
 class RESTClient:
@@ -138,7 +132,7 @@ class RESTClient:
                             method,
                             url,
                             resp.status,
-                            _redact_bearer(body_text),
+                            redact_text(body_text),
                         )
                     elif API_LOG_PREVIEW:
                         _LOGGER.debug(
@@ -146,7 +140,7 @@ class RESTClient:
                             url,
                             resp.status,
                             ctype,
-                            (_redact_bearer(body_text) or "")[:200],
+                            (redact_text(body_text) or "")[:200],
                         )
                     else:
                         _LOGGER.debug(
@@ -193,7 +187,7 @@ class RESTClient:
                         "Request %s %s failed (sanitized): %s",
                         method,
                         url,
-                        _redact_bearer(str(e)),
+                        redact_text(str(e)),
                     )
                 raise
             except asyncio.CancelledError:
@@ -203,7 +197,7 @@ class RESTClient:
                     "Request %s %s failed (sanitized): %s",
                     method,
                     url,
-                    _redact_bearer(str(e)),
+                    redact_text(str(e)),
                 )
                 raise
         raise BackendAuthError("Unauthorized")
@@ -564,13 +558,8 @@ class RESTClient:
         """Return a validated payload for accumulator extra options."""
 
         extra: dict[str, Any] = {}
-        if boost_time is not None:
-            try:
-                minutes = int(boost_time)
-            except (TypeError, ValueError) as err:
-                raise ValueError(f"Invalid boost_time value: {boost_time!r}") from err
-            if minutes <= 0:
-                raise ValueError("boost_time must be a positive integer")
+        minutes = validate_boost_minutes(boost_time)
+        if minutes is not None:
             extra["boost_time"] = minutes
         if boost_temp is not None:
             try:
@@ -580,24 +569,6 @@ class RESTClient:
         if not extra:
             raise ValueError("boost_time or boost_temp must be provided")
         return {"extra_options": extra}
-
-    def _build_acm_boost_payload(
-        self,
-        boost: bool,
-        boost_time: int | None,
-    ) -> dict[str, Any]:
-        """Return a validated payload for accumulator boost writes."""
-
-        payload: dict[str, Any] = {"boost": bool(boost)}
-        if boost_time is not None:
-            try:
-                minutes = int(boost_time)
-            except (TypeError, ValueError) as err:
-                raise ValueError(f"Invalid boost_time value: {boost_time!r}") from err
-            if minutes <= 0:
-                raise ValueError("boost_time must be a positive integer")
-            payload["boost_time"] = minutes
-        return payload
 
     async def set_acm_extra_options(
         self,
@@ -642,7 +613,7 @@ class RESTClient:
         """Start or stop an accumulator boost session."""
 
         node_type, addr_str = self._resolve_node_descriptor(("acm", addr))
-        payload = self._build_acm_boost_payload(boost, boost_time)
+        payload = build_acm_boost_payload(boost, boost_time)
 
         headers = await self._authed_headers()
         path = f"/api/v2/devs/{dev_id}/{node_type}/{addr_str}/status"
@@ -751,10 +722,10 @@ class RESTClient:
         _LOGGER.debug(
             "%s node %s/%s (%s) payload: %s",
             stage,
-            dev_id,
-            addr,
+            mask_identifier(dev_id),
+            mask_identifier(addr),
             node_type,
-            _redact_bearer(repr(payload)),
+            redact_text(repr(payload)),
         )
 
     def normalise_ws_nodes(self, nodes: dict[str, Any]) -> dict[str, Any]:

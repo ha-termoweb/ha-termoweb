@@ -15,25 +15,16 @@ from ..const import BRAND_DUCAHEAT, WS_NAMESPACE
 from ..nodes import NodeDescriptor
 from .base import Backend, WsClientProto
 from .ducaheat_ws import DucaheatWSClient
+from .sanitize import (
+    build_acm_boost_payload,
+    mask_identifier,
+    redact_text,
+    validate_boost_minutes,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 _DAY_ORDER = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
-
-
-_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-_BEARER_RE = re.compile(r"Bearer\s+[A-Za-z0-9\-._~+/]+=*", re.IGNORECASE)
-_TOKEN_QUERY_RE = re.compile(r"(?i)(token|refresh_token|access_token)=([^&\s]+)")
-
-
-def _redact_log_value(value: str) -> str:
-    """Redact bearer tokens and email addresses from log strings."""
-
-    if not value:
-        return ""
-    redacted = _BEARER_RE.sub("Bearer ***", value)
-    redacted = _EMAIL_RE.sub("***@***", redacted)
-    return _TOKEN_QUERY_RE.sub(lambda match: f"{match.group(1)}=***", redacted)
 
 class DucaheatRequestError(Exception):
     """Raised when the Ducaheat API returns a client error."""
@@ -41,8 +32,8 @@ class DucaheatRequestError(Exception):
     def __init__(self, *, status: int, path: str, body: str) -> None:
         """Initialise error metadata for logging and diagnostics."""
 
-        clean_body = _redact_log_value(body)
-        clean_path = _redact_log_value(path)
+        clean_body = redact_text(body)
+        clean_path = redact_text(path)
         super().__init__(
             f"Ducaheat request failed ({status}) for {clean_path}: {clean_body}"
         )
@@ -103,10 +94,10 @@ class DucaheatRESTClient(RESTClient):
             body_keys = ("<non-mapping>",)
         _LOGGER.debug(
             "POST %s (node_type=%s dev=%s addr=%s) body_keys=%s",
-            _redact_log_value(path),
+            redact_text(path),
             node_type,
-            _redact_log_value(dev_id),
-            _redact_log_value(addr),
+            mask_identifier(dev_id),
+            mask_identifier(addr),
             body_keys,
         )
 
@@ -632,13 +623,13 @@ class DucaheatRESTClient(RESTClient):
         if mode_value is not None and not status_includes_mode:
             mode_payload: dict[str, Any] = {"mode": mode_value}
             if mode_value == "boost":
-                boost_minutes = self._validate_boost_minutes(boost_time)
+                boost_minutes = validate_boost_minutes(boost_time)
                 if boost_minutes is not None:
                     mode_payload["boost_time"] = boost_minutes
                 _LOGGER.info(
                     "ACM boost mode write dev=%s addr=%s minutes=%s",
-                    _redact_log_value(dev_id),
-                    _redact_log_value(addr),
+                    mask_identifier(dev_id),
+                    mask_identifier(addr),
                     boost_minutes,
                 )
             else:
@@ -648,8 +639,8 @@ class DucaheatRESTClient(RESTClient):
                     )
                 _LOGGER.info(
                     "ACM mode write dev=%s addr=%s mode=%s (boost cancel)",
-                    _redact_log_value(dev_id),
-                    _redact_log_value(addr),
+                    mask_identifier(dev_id),
+                    mask_identifier(addr),
                     mode_value,
                 )
             segment_plan.append(("mode", mode_payload))
@@ -685,19 +676,6 @@ class DucaheatRESTClient(RESTClient):
 
         return responses
 
-    def _validate_boost_minutes(self, value: int | None) -> int | None:
-        """Return a validated boost duration in minutes."""
-
-        if value is None:
-            return None
-        try:
-            minutes = int(value)
-        except (TypeError, ValueError) as err:
-            raise ValueError(f"Invalid boost_time value: {value!r}") from err
-        if minutes <= 0:
-            raise ValueError("boost_time must be a positive integer")
-        return minutes
-
     async def _collect_boost_metadata(
         self,
         dev_id: str,
@@ -715,8 +693,8 @@ class DucaheatRESTClient(RESTClient):
         except Exception as err:  # noqa: BLE001 - defensive logging
             _LOGGER.debug(
                 "RTC fetch failed after boost write dev=%s addr=%s: %s",
-                _redact_log_value(dev_id),
-                _redact_log_value(addr),
+                mask_identifier(dev_id),
+                mask_identifier(addr),
                 err,
                 exc_info=err,
             )
@@ -734,8 +712,8 @@ class DucaheatRESTClient(RESTClient):
         if rtc_dt is None:
             _LOGGER.debug(
                 "RTC payload invalid after boost write dev=%s addr=%s: %s",
-                _redact_log_value(dev_id),
-                _redact_log_value(addr),
+                mask_identifier(dev_id),
+                mask_identifier(addr),
                 rtc_payload,
             )
             if boost_active and minutes is not None:
@@ -860,21 +838,21 @@ class DucaheatRESTClient(RESTClient):
 
         node_type, addr_str = self._resolve_node_descriptor(("acm", addr))
         headers = await self._authed_headers()
-        payload = self._build_acm_boost_payload(boost, boost_time)
+        payload = build_acm_boost_payload(boost, boost_time)
         if boost:
-            minutes = self._validate_boost_minutes(boost_time)
+            minutes = validate_boost_minutes(boost_time)
             _LOGGER.info(
                 "ACM boost start dev=%s addr=%s minutes=%s",
-                _redact_log_value(dev_id),
-                _redact_log_value(addr_str),
+                mask_identifier(dev_id),
+                mask_identifier(addr_str),
                 minutes,
             )
         else:
             minutes = 0
             _LOGGER.info(
                 "ACM boost cancel dev=%s addr=%s",
-                _redact_log_value(dev_id),
-                _redact_log_value(addr_str),
+                mask_identifier(dev_id),
+                mask_identifier(addr_str),
             )
 
         response = await self._post_acm_endpoint(
