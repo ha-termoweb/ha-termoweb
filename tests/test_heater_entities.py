@@ -11,7 +11,7 @@ from conftest import _install_stubs, make_ws_payload
 
 _install_stubs()
 
-from custom_components.termoweb import heater as heater_module
+from custom_components.termoweb import boost as boost_module, heater as heater_module
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.binary_sensor import HeaterBoostActiveBinarySensor
 from custom_components.termoweb.sensor import (
@@ -334,7 +334,7 @@ def test_boost_entities_handle_missing_data() -> None:
 def test_coerce_boost_minutes_edge_cases() -> None:
     """Exercise defensive conversions for boost duration inputs."""
 
-    coerce = heater_module._coerce_boost_minutes
+    coerce = boost_module.coerce_boost_minutes
     assert coerce(None) is None
     assert coerce(True) is None
     assert coerce(0) is None
@@ -344,14 +344,14 @@ def test_coerce_boost_minutes_edge_cases() -> None:
     assert coerce("90") == 90
     assert coerce(120.7) == 120
 
-    remaining = heater_module._coerce_boost_remaining_minutes
+    remaining = boost_module.coerce_boost_remaining_minutes
     assert remaining(0) is None
 
 
 def test_coerce_boost_remaining_minutes_filters_non_positive() -> None:
     """Ensure remaining minute coercion rejects falsey and negative values."""
 
-    coerce = heater_module._coerce_boost_remaining_minutes
+    coerce = boost_module.coerce_boost_remaining_minutes
     assert coerce(None) is None
     assert coerce(False) is None
     assert coerce(0) is None
@@ -363,7 +363,7 @@ def test_coerce_boost_remaining_minutes_filters_non_positive() -> None:
 def test_coerce_boost_remaining_minutes_non_positive() -> None:
     """Ensure boost remaining coercion rejects non-positive values."""
 
-    coerce = heater_module._coerce_boost_remaining_minutes
+    coerce = boost_module.coerce_boost_remaining_minutes
     assert coerce(None) is None
     assert coerce(False) is None
     assert coerce(0) is None

@@ -11,25 +11,25 @@ import pytest
 
 from homeassistant.core import HomeAssistant
 
-from custom_components.termoweb import coordinator as coord_module
+from custom_components.termoweb import boost as boost_module, coordinator as coord_module
 from custom_components.termoweb.nodes import AccumulatorNode, HeaterNode
 
 
 def test_coerce_int_variants() -> None:
-    """_coerce_int should normalise primitives and guard against errors."""
+    """``coerce_int`` should normalise primitives and guard against errors."""
 
     class BadString:
         def __str__(self) -> str:
             raise RuntimeError("boom")
 
-    assert coord_module._coerce_int(None) is None
-    assert coord_module._coerce_int(True) == 1
-    assert coord_module._coerce_int(False) == 0
-    assert coord_module._coerce_int(5.7) == 5
-    assert coord_module._coerce_int(float("inf")) is None
-    assert coord_module._coerce_int(BadString()) is None
-    assert coord_module._coerce_int("   ") is None
-    assert coord_module._coerce_int(" 7.2 ") == 7
+    assert boost_module.coerce_int(None) is None
+    assert boost_module.coerce_int(True) == 1
+    assert boost_module.coerce_int(False) == 0
+    assert boost_module.coerce_int(5.7) == 5
+    assert boost_module.coerce_int(float("inf")) is None
+    assert boost_module.coerce_int(BadString()) is None
+    assert boost_module.coerce_int("   ") is None
+    assert boost_module.coerce_int(" 7.2 ") == 7
 
 
 def test_resolve_boost_end_from_fields_variants() -> None:
@@ -37,13 +37,13 @@ def test_resolve_boost_end_from_fields_variants() -> None:
 
     base_now = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
 
-    dt_value, minutes = coord_module.resolve_boost_end_from_fields(None, 10)
+    dt_value, minutes = boost_module.resolve_boost_end_from_fields(None, 10)
     assert dt_value is None and minutes is None
 
-    dt_value, minutes = coord_module.resolve_boost_end_from_fields(-5, 10, now=base_now)
+    dt_value, minutes = boost_module.resolve_boost_end_from_fields(-5, 10, now=base_now)
     assert dt_value is None and minutes is None
 
-    dt_value, minutes = coord_module.resolve_boost_end_from_fields(2, 60, now=base_now)
+    dt_value, minutes = boost_module.resolve_boost_end_from_fields(2, 60, now=base_now)
     assert isinstance(dt_value, dt.datetime)
     assert minutes == 1500
 

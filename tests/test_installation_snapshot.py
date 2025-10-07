@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from typing import Any
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from custom_components.termoweb.installation import InstallationSnapshot, ensure_snapshot
+from custom_components.termoweb.heater_inventory import build_heater_inventory_details
 from custom_components.termoweb.nodes import (
     build_node_inventory,
     heater_sample_subscription_targets,
@@ -36,6 +37,14 @@ def test_snapshot_properties_and_inventory_cache() -> None:
     assert snapshot.dev_id == "dev"
     assert snapshot.raw_nodes == {"nodes": nodes}
     assert [node.addr for node in snapshot.inventory] == ["1"]
+
+    details = build_heater_inventory_details(snapshot.inventory)
+    assert snapshot.nodes_by_type == details.nodes_by_type
+    assert snapshot.explicit_heater_names == details.explicit_name_pairs
+    assert snapshot.heater_address_map == (
+        details.address_map,
+        details.reverse_address_map,
+    )
 
 
 def test_snapshot_sample_targets_and_name_map_caching() -> None:

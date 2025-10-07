@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -16,12 +15,17 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
+from .boost import (
+    coerce_boost_bool,
+    coerce_boost_minutes,
+    coerce_boost_remaining_minutes,
+)
 from .const import DOMAIN, signal_ws_data
+from .heater_inventory import build_heater_inventory_details
 from .installation import InstallationSnapshot, ensure_snapshot
 from .nodes import (
     HEATER_NODE_TYPES,
     Node,
-    build_heater_address_map,
     build_node_inventory,
     ensure_node_inventory,
     normalize_node_addr,
@@ -54,30 +58,6 @@ BOOST_BUTTON_METADATA: Final[tuple[BoostButtonMetadata, ...]] = (
 BOOST_DURATION_OPTIONS: Final[tuple[int, ...]] = tuple(
     option.minutes for option in BOOST_BUTTON_METADATA if option.minutes is not None
 )
-
-
-def _coerce_boost_remaining_minutes(value: Any) -> int | None:
-    """Return ``value`` as a positive integer minute count when possible."""
-
-    if value is None or isinstance(value, bool):
-        return None
-
-    candidate: int | None
-    try:
-        if isinstance(value, (int, float)):
-            candidate = int(value)
-        else:
-            text = str(value).strip()
-            if not text:
-                return None
-            candidate = int(float(text))
-    except (TypeError, ValueError):  # pragma: no cover - defensive
-        return None
-
-    if candidate is None or candidate <= 0:
-        return None
-
-    return candidate
 
 
 def _boost_runtime_store(
@@ -135,7 +115,7 @@ def get_boost_runtime_minutes(
         return None
 
     stored = bucket.get(addr_norm)
-    minutes = _coerce_boost_minutes(stored)
+    minutes = coerce_boost_minutes(stored)
     if minutes is None:
         return None
 
@@ -180,7 +160,7 @@ def set_boost_runtime_minutes(
                 store.pop(node_type_norm, None)
         return
 
-    validated = _coerce_boost_minutes(minutes)
+    validated = coerce_boost_minutes(minutes)
     if validated is None:
         return
 
@@ -230,52 +210,11 @@ def supports_boost(node: Any) -> bool:
             )
             return False
 
-    result = _coerce_boost_bool(candidate)
+    result = coerce_boost_bool(candidate)
     if result is not None:
         return result
 
     return False
-
-
-def _coerce_boost_bool(value: Any) -> bool | None:
-    """Return ``value`` as a boolean when possible."""
-
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return None
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        if value == 1:
-            return True
-        if value == 0:
-            return False
-    try:
-        text = str(value).strip().lower()
-    except Exception:  # noqa: BLE001 - defensive
-        return None
-    if text in {"true", "1", "yes", "on"}:
-        return True
-    if text in {"false", "0", "no", "off"}:
-        return False
-    return None
-
-
-def _coerce_boost_minutes(value: Any) -> int | None:
-    """Return ``value`` as positive minutes when possible."""
-
-    if value is None or isinstance(value, bool):
-        return None
-    try:
-        if isinstance(value, (int, float)):
-            minutes = int(value)
-        else:
-            text = str(value).strip()
-            if not text:
-                return None
-            minutes = int(float(text))
-    except (TypeError, ValueError):  # pragma: no cover - defensive
-        return None
-    return minutes if minutes > 0 else None
 
 
 @dataclass(slots=True)
@@ -286,8 +225,7 @@ class BoostState:
     minutes_remaining: int | None
     end_datetime: datetime | None
     end_iso: str | None
-
-
+# ruff: noqa: C901
 def derive_boost_state(
     settings: Mapping[str, Any] | None, coordinator: Any
 ) -> BoostState:
@@ -295,9 +233,9 @@ def derive_boost_state(
 
     source = settings if isinstance(settings, Mapping) else {}
 
-    boost_active = _coerce_boost_bool(source.get("boost_active"))
+    boost_active = coerce_boost_bool(source.get("boost_active"))
     if boost_active is None:
-        boost_active = _coerce_boost_bool(source.get("boost"))
+        boost_active = coerce_boost_bool(source.get("boost"))
     if boost_active is None:
         mode = source.get("mode")
         if isinstance(mode, str):
@@ -319,7 +257,7 @@ def derive_boost_state(
     if isinstance(derived_dt, datetime):
         boost_end_dt = derived_dt
 
-    boost_minutes: int | None = _coerce_boost_minutes(
+    boost_minutes: int | None = coerce_boost_minutes(
         source.get("boost_minutes_delta")
     )
     resolver = getattr(coordinator, "resolve_boost_end", None)
@@ -340,7 +278,7 @@ def derive_boost_state(
             boost_minutes = resolved_minutes
 
     if boost_minutes is None:
-        boost_minutes = _coerce_boost_remaining_minutes(source.get("boost_remaining"))
+        boost_minutes = coerce_boost_remaining_minutes(source.get("boost_remaining"))
 
     if boost_minutes is None and boost_end_dt is not None:
         delta_seconds = (boost_end_dt - dt_util.now()).total_seconds()
@@ -370,7 +308,7 @@ def derive_boost_state(
         try:
             boost_end_dt = dt_util.now() + timedelta(minutes=boost_minutes)
             boost_end_iso = boost_end_dt.isoformat()
-        except Exception:  # pragma: no cover - defensive
+        except Exception:  # noqa: BLE001 - defensive
             boost_end_dt = None
             boost_end_iso = None
 
@@ -393,6 +331,8 @@ def derive_boost_state(
         end_datetime=boost_end_dt,
         end_iso=boost_end_iso,
     )
+
+# ruff: enable=C901
 
 
 class DispatcherSubscriptionHelper:
@@ -525,7 +465,7 @@ def iter_heater_maps(
     elif isinstance(node_types, bytes):  # pragma: no cover - defensive
         try:  # pragma: no cover - defensive
             decoded = node_types.decode()
-        except Exception:  # pragma: no cover - defensive
+        except Exception:  # noqa: BLE001 - defensive
             decoded = node_types.decode(errors="ignore")
         types = [decoded]  # pragma: no cover - defensive
     else:
@@ -672,18 +612,10 @@ def prepare_heater_platform_data(
         nodes = entry_data.get("nodes")
         inventory = ensure_node_inventory(entry_data, nodes=nodes)
 
-        nodes_by_type = defaultdict(list)
-        explicit_names = set()
-        for node in inventory:
-            node_type = normalize_node_type(getattr(node, "type", ""))
-            if not node_type:
-                continue
-            nodes_by_type[node_type].append(node)
-            addr = normalize_node_addr(getattr(node, "addr", ""))
-            if addr and getattr(node, "name", "").strip():
-                explicit_names.add((node_type, addr))
-
-        type_to_addresses, _reverse_lookup = build_heater_address_map(inventory)
+        details = build_heater_inventory_details(inventory)
+        nodes_by_type = dict(details.nodes_by_type)
+        explicit_names = set(details.explicit_name_pairs)
+        type_to_addresses = details.address_map
 
         addrs_by_type = {
             node_type: list(type_to_addresses.get(node_type, []))

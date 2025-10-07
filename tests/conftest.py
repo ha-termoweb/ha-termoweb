@@ -1216,9 +1216,7 @@ class FakeCoordinator:
     ) -> tuple[dt.datetime | None, int | None]:
         """Mirror coordinator helper for translating boost end fields."""
 
-        from custom_components.termoweb.coordinator import (
-            resolve_boost_end_from_fields,
-        )
+        from custom_components.termoweb.boost import resolve_boost_end_from_fields
 
         return resolve_boost_end_from_fields(
             boost_end_day,
