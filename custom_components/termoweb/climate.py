@@ -1088,23 +1088,14 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
 
         if value == "boost":
             self._boost_resume_mode = self.hvac_mode
-
-            def _apply(cur: dict[str, Any]) -> None:
-                cur["mode"] = "boost"
-
-            await self._commit_write(
-                log_context="Preset mode write",
-                write_kwargs={
-                    "mode": "boost",
-                    "boost_time": self._preferred_boost_minutes(),
-                },
-                apply_fn=_apply,
-                success_details={"preset_mode": "boost"},
+            await self.async_start_boost(
+                minutes=self._preferred_boost_minutes()
             )
             return
 
         resume_mode = self._boost_resume_mode or self.hvac_mode
         self._boost_resume_mode = None
+        await self.async_cancel_boost()
         await super().async_set_hvac_mode(resume_mode)
 
     @property  # type: ignore[override]
