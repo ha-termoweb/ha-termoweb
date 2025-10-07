@@ -2202,6 +2202,66 @@ def test_ducaheat_normalise_settings_acm_status_boost() -> None:
     assert result["boost_active"] is True
 
 
+def test_ducaheat_normalise_settings_acm_boost_metadata() -> None:
+    client = DucaheatRESTClient(
+        FakeSession(),
+        "user",
+        "pass",
+        api_base="https://api.termoweb.fake",
+    )
+    payload = {
+        "status": {
+            "boost": True,
+            "boost_end": {"day": 2, "minute": 45},
+        },
+        "setup": {
+            "extra_options": {"boost_end_min": 150},
+        },
+    }
+
+    result = client._normalise_settings(payload, node_type="acm")
+    assert result["boost"] is True
+    assert result["boost_end"] == {"day": 2, "minute": 45}
+    assert result["boost_end_day"] == 2
+    assert result["boost_end_min"] == 45
+
+
+def test_ducaheat_normalise_settings_acm_boost_metadata_fallback() -> None:
+    client = DucaheatRESTClient(
+        FakeSession(),
+        "user",
+        "pass",
+        api_base="https://api.termoweb.fake",
+    )
+    payload = {
+        "status": {},
+        "setup": {
+            "extra_options": {"boost_end_min": 180},
+            "boost_end": {"day": 4},
+        },
+    }
+
+    result = client._normalise_settings(payload, node_type="acm")
+    assert result["boost_end_day"] == 4
+    assert result["boost_end_min"] == 180
+
+
+def test_ducaheat_merge_boost_metadata_defensive() -> None:
+    client = DucaheatRESTClient(
+        FakeSession(),
+        "user",
+        "pass",
+        api_base="https://api.termoweb.fake",
+    )
+
+    target: dict[str, Any] = {"boost": True, "boost_end": None}
+
+    client._merge_boost_metadata(target, None)
+    client._merge_boost_metadata(target, {"boost_end": None}, prefer_existing=True)
+
+    assert target == {"boost": True, "boost_end": None}
+
+
 def test_ducaheat_normalise_settings_handles_half_hour_prog() -> None:
     client = DucaheatRESTClient(
         FakeSession(),

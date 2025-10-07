@@ -62,3 +62,23 @@ def test_ducaheat_rest_normalise_ws_nodes_mixed_settings_types() -> None:
     # Original payload should remain unchanged for mapping coercions.
     assert len(payload["htr"]["settings"]["01"]["prog"]["prog"]["1"]) == 48
     assert len(payload["acm"]["settings"]["03"]["prog"]["days"]["1"]) == 24
+
+
+def test_ducaheat_rest_normalise_ws_settings_boost_fields() -> None:
+    """Websocket settings should expose boost end metadata consistently."""
+
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+
+    payload = {
+        "boost": False,
+        "boost_end": {"day": 6, "minute": 15},
+        "boost_end_day": 3,
+    }
+
+    result = client._normalise_ws_settings(payload)
+
+    assert result["boost"] is False
+    assert result["boost_end"] == {"day": 6, "minute": 15}
+    # Direct fields should take precedence over derived values.
+    assert result["boost_end_day"] == 3
+    assert result["boost_end_min"] == 15

@@ -286,7 +286,52 @@ class DucaheatRESTClient(RESTClient):
         if normalised_prog is not None:
             settings["prog"] = normalised_prog
 
+        self._merge_boost_metadata(settings, settings)
+
         return settings
+
+    def _merge_boost_metadata(
+        self,
+        target: dict[str, Any],
+        source: Mapping[str, Any] | None,
+        *,
+        prefer_existing: bool = False,
+    ) -> None:
+        """Copy boost metadata from ``source`` into ``target`` safely."""
+
+        if not isinstance(source, Mapping):
+            return
+
+        def _assign(
+            key: str,
+            value: Any,
+            *,
+            prefer: bool | None = None,
+            allow_none: bool = False,
+        ) -> None:
+            """Assign a metadata value while respecting preference rules."""
+
+            if value is None and not allow_none:
+                return
+
+            prefer_flag = prefer_existing if prefer is None else prefer
+            if prefer_flag and key in target and target[key] is not None:
+                return
+            if prefer_flag and key in target and target[key] is None and value is None:
+                return
+
+            target[key] = value
+
+        for key in ("boost", "boost_end_day", "boost_end_min"):
+            if key in source:
+                _assign(key, source[key])
+
+        if "boost_end" in source:
+            boost_end = source["boost_end"]
+            _assign("boost_end", boost_end, allow_none=True)
+            if isinstance(boost_end, Mapping):
+                _assign("boost_end_day", boost_end.get("day"), prefer=True)
+                _assign("boost_end_min", boost_end.get("minute"), prefer=True)
 
     def _normalise_settings(
         self, payload: Any, *, node_type: str = "htr"
@@ -358,6 +403,8 @@ class DucaheatRESTClient(RESTClient):
                 flattened[extra_key] = status_dict[extra_key]
 
         if include_boost:
+            self._merge_boost_metadata(flattened, status_dict)
+
             extra = setup_dict.get("extra_options")
             if isinstance(extra, dict):
                 if "boost_time" in extra:
@@ -366,6 +413,10 @@ class DucaheatRESTClient(RESTClient):
                     formatted = self._safe_temperature(extra["boost_temp"])
                     if formatted is not None:
                         flattened["boost_temp"] = formatted
+
+                self._merge_boost_metadata(flattened, extra, prefer_existing=True)
+
+            self._merge_boost_metadata(flattened, setup_dict, prefer_existing=True)
 
             if "boost_temp" not in flattened:
                 boost_temp = status_dict.get("boost_temp")
