@@ -552,6 +552,113 @@ class RESTClient:
         )
         return response
 
+    def _build_acm_extra_options_payload(
+        self,
+        boost_time: int | None,
+        boost_temp: float | None,
+    ) -> dict[str, Any]:
+        """Return a validated payload for accumulator extra options."""
+
+        extra: dict[str, Any] = {}
+        if boost_time is not None:
+            try:
+                minutes = int(boost_time)
+            except (TypeError, ValueError) as err:
+                raise ValueError(f"Invalid boost_time value: {boost_time!r}") from err
+            if minutes <= 0:
+                raise ValueError("boost_time must be a positive integer")
+            extra["boost_time"] = minutes
+        if boost_temp is not None:
+            try:
+                extra["boost_temp"] = self._ensure_temperature(boost_temp)
+            except ValueError as err:
+                raise ValueError(f"Invalid boost_temp value: {boost_temp!r}") from err
+        if not extra:
+            raise ValueError("boost_time or boost_temp must be provided")
+        return {"extra_options": extra}
+
+    def _build_acm_boost_payload(
+        self,
+        boost: bool,
+        boost_time: int | None,
+    ) -> dict[str, Any]:
+        """Return a validated payload for accumulator boost writes."""
+
+        payload: dict[str, Any] = {"boost": bool(boost)}
+        if boost_time is not None:
+            try:
+                minutes = int(boost_time)
+            except (TypeError, ValueError) as err:
+                raise ValueError(f"Invalid boost_time value: {boost_time!r}") from err
+            if minutes <= 0:
+                raise ValueError("boost_time must be a positive integer")
+            payload["boost_time"] = minutes
+        return payload
+
+    async def set_acm_extra_options(
+        self,
+        dev_id: str,
+        addr: str | int,
+        *,
+        boost_time: int | None = None,
+        boost_temp: float | None = None,
+    ) -> Any:
+        """Write default boost settings for an accumulator."""
+
+        node_type, addr_str = self._resolve_node_descriptor(("acm", addr))
+        payload = self._build_acm_extra_options_payload(boost_time, boost_temp)
+
+        headers = await self._authed_headers()
+        path = f"/api/v2/devs/{dev_id}/{node_type}/{addr_str}/setup"
+        self._log_non_htr_payload(
+            node_type=node_type,
+            dev_id=dev_id,
+            addr=addr_str,
+            stage="POST boost setup",
+            payload=payload,
+        )
+        response = await self._request("POST", path, headers=headers, json=payload)
+        self._log_non_htr_payload(
+            node_type=node_type,
+            dev_id=dev_id,
+            addr=addr_str,
+            stage="POST boost setup response",
+            payload=response,
+        )
+        return response
+
+    async def set_acm_boost_state(
+        self,
+        dev_id: str,
+        addr: str | int,
+        *,
+        boost: bool,
+        boost_time: int | None = None,
+    ) -> Any:
+        """Start or stop an accumulator boost session."""
+
+        node_type, addr_str = self._resolve_node_descriptor(("acm", addr))
+        payload = self._build_acm_boost_payload(boost, boost_time)
+
+        headers = await self._authed_headers()
+        path = f"/api/v2/devs/{dev_id}/{node_type}/{addr_str}/status"
+        self._log_non_htr_payload(
+            node_type=node_type,
+            dev_id=dev_id,
+            addr=addr_str,
+            stage="POST boost",
+            payload=payload,
+        )
+        response = await self._request("POST", path, headers=headers, json=payload)
+        self._log_non_htr_payload(
+            node_type=node_type,
+            dev_id=dev_id,
+            addr=addr_str,
+            stage="POST boost response",
+            payload=response,
+        )
+        return response
+
     async def get_node_samples(
         self,
         dev_id: str,

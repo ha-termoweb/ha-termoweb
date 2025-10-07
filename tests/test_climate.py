@@ -201,7 +201,13 @@ def test_async_setup_entry_creates_entities() -> None:
         assert names["C3"] == "Basement Accumulator"
 
         registered = [name for name, _, _ in platform.registered]
-        assert registered == ["set_schedule", "set_preset_temperatures"]
+        assert registered == [
+            "set_schedule",
+            "set_preset_temperatures",
+            "set_acm_preset",
+            "start_boost",
+            "cancel_boost",
+        ]
 
         for entity in added:
             info = entity.device_info
@@ -239,6 +245,42 @@ def test_async_setup_entry_creates_entities() -> None:
         second.async_set_preset_temperatures.assert_awaited_once_with(
             cold=15.0, night=18.0, day=20.0
         )
+
+        acm_entity = entities_by_addr["C3"]
+        _, _, acm_preset_handler = platform.registered[2]
+        _, _, start_boost_handler = platform.registered[3]
+        _, _, cancel_boost_handler = platform.registered[4]
+
+        acm_entity.async_set_acm_preset = AsyncMock()
+        await acm_preset_handler(
+            acm_entity,
+            ServiceCall({"minutes": 75, "temperature": 22.5}),
+        )
+        acm_entity.async_set_acm_preset.assert_awaited_once_with(
+            minutes=75,
+            temperature=22.5,
+        )
+
+        acm_entity.async_start_boost = AsyncMock()
+        await start_boost_handler(acm_entity, ServiceCall({"minutes": 30}))
+        acm_entity.async_start_boost.assert_awaited_once_with(minutes=30)
+
+        acm_entity.async_cancel_boost = AsyncMock()
+        await cancel_boost_handler(acm_entity, ServiceCall({}))
+        acm_entity.async_cancel_boost.assert_awaited_once()
+
+        heater_entity = entities_by_addr["A1"]
+        heater_entity.async_set_acm_preset = AsyncMock()
+        await acm_preset_handler(heater_entity, ServiceCall({}))
+        heater_entity.async_set_acm_preset.assert_not_called()
+
+        heater_entity.async_start_boost = AsyncMock()
+        await start_boost_handler(heater_entity, ServiceCall({}))
+        heater_entity.async_start_boost.assert_not_called()
+
+        heater_entity.async_cancel_boost = AsyncMock()
+        await cancel_boost_handler(heater_entity, ServiceCall({}))
+        heater_entity.async_cancel_boost.assert_not_called()
 
     asyncio.run(_run())
 
@@ -812,6 +854,236 @@ def test_accumulator_extra_state_attributes_fallbacks() -> None:
     assert attrs["program_slot"] == "cold"
     assert attrs["program_setpoint"] == pytest.approx(15.0)
     assert attrs["preferred_boost_minutes"] == DEFAULT_BOOST_DURATION
+
+
+def test_accumulator_service_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry_id = "entry-acm-services"
+        dev_id = "dev-acm-services"
+        addr = "3"
+        settings = {"mode": "auto", "boost_time": 60, "boost_temp": "20.0"}
+        record = {
+            "nodes": {},
+            "nodes_by_type": {"acm": {"settings": {addr: dict(settings)}}},
+            "htr": {"settings": {}},
+        }
+        coordinator = _make_coordinator(hass, dev_id, record)
+        client = types.SimpleNamespace(
+            set_acm_extra_options=AsyncMock(return_value=None),
+            set_acm_boost_state=AsyncMock(return_value=None),
+        )
+
+        hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "coordinator": coordinator,
+                    "dev_id": dev_id,
+                    "client": client,
+                    "brand": BRAND_TERMOWEB,
+                }
+            }
+        }
+
+        entity = climate_module.AccumulatorClimateEntity(
+            coordinator,
+            entry_id,
+            dev_id,
+            addr,
+            "Accumulator",
+            node_type="acm",
+        )
+        entity.hass = hass
+
+        fallback_calls = 0
+
+        def _fake_fallback() -> None:
+            nonlocal fallback_calls
+            fallback_calls += 1
+
+        monkeypatch.setattr(entity, "_schedule_refresh_fallback", _fake_fallback)
+
+        await entity.async_set_acm_preset(minutes=90, temperature=21.2)
+        client.set_acm_extra_options.assert_awaited_once_with(
+            dev_id,
+            addr,
+            boost_time=90,
+            boost_temp=21.2,
+        )
+        settings_map = (
+            coordinator.data[dev_id]["nodes_by_type"]["acm"]["settings"][addr]
+        )
+        assert settings_map["boost_time"] == 90
+        assert settings_map["boost_temp"] == "21.2"
+        assert fallback_calls == 1
+
+        client.set_acm_extra_options.reset_mock()
+        fallback_calls = 0
+        await entity.async_set_acm_preset(minutes=0)
+        client.set_acm_extra_options.assert_not_called()
+        assert fallback_calls == 0
+
+        client.set_acm_boost_state.reset_mock()
+        fallback_calls = 0
+        await entity.async_start_boost(minutes=45)
+        client.set_acm_boost_state.assert_awaited_once_with(
+            dev_id,
+            addr,
+            boost=True,
+            boost_time=45,
+        )
+        assert settings_map["mode"] == "boost"
+        assert settings_map["boost_active"] is True
+        assert settings_map["boost_remaining"] == 45
+        assert fallback_calls == 1
+
+        client.set_acm_boost_state.reset_mock()
+        fallback_calls = 0
+        monkeypatch.setattr(
+            entity,
+            "_preferred_boost_minutes",
+            lambda: 75,
+        )
+        settings_map["mode"] = "auto"
+        await entity.async_start_boost()
+        client.set_acm_boost_state.assert_awaited_with(
+            dev_id,
+            addr,
+            boost=True,
+            boost_time=75,
+        )
+        assert settings_map["boost_remaining"] == 75
+        assert fallback_calls == 1
+
+        client.set_acm_boost_state.reset_mock()
+        fallback_calls = 0
+        settings_map["mode"] = "boost"
+        settings_map["boost_active"] = True
+        settings_map["boost_remaining"] = 30
+        settings_map["boost_end"] = "2024-01-01T01:00:00+00:00"
+        await entity.async_cancel_boost()
+        client.set_acm_boost_state.assert_awaited_once_with(
+            dev_id,
+            addr,
+            boost=False,
+        )
+        assert settings_map["boost_active"] is False
+        assert "boost_remaining" not in settings_map
+        assert settings_map.get("boost_end") is None
+        assert settings_map["mode"] == "auto"
+        assert fallback_calls == 1
+
+    asyncio.run(_run())
+
+
+def test_accumulator_service_error_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry_id = "entry-acm-errors"
+        dev_id = "dev-acm-errors"
+        addr = "4"
+        settings = {"mode": "auto", "boost_time": 60}
+        record = {
+            "nodes": {},
+            "nodes_by_type": {"acm": {"settings": {addr: dict(settings)}}},
+            "htr": {"settings": {}},
+        }
+        client = types.SimpleNamespace(
+            set_acm_extra_options=AsyncMock(return_value=None),
+            set_acm_boost_state=AsyncMock(return_value=None),
+        )
+        coordinator = _make_coordinator(hass, dev_id, record)
+        hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "coordinator": coordinator,
+                    "dev_id": dev_id,
+                    "client": client,
+                    "brand": BRAND_TERMOWEB,
+                }
+            }
+        }
+
+        entity = climate_module.AccumulatorClimateEntity(
+            coordinator,
+            entry_id,
+            dev_id,
+            addr,
+            "Accumulator",
+            node_type="acm",
+        )
+        entity.hass = hass
+
+        fallback_calls = 0
+
+        def _fake_fallback() -> None:
+            nonlocal fallback_calls
+            fallback_calls += 1
+
+        monkeypatch.setattr(entity, "_schedule_refresh_fallback", _fake_fallback)
+
+        # Invalid minutes type
+        await entity.async_set_acm_preset(minutes="bad")
+        client.set_acm_extra_options.assert_not_called()
+        assert fallback_calls == 0
+
+        # Missing parameters
+        await entity.async_set_acm_preset()
+        client.set_acm_extra_options.assert_not_called()
+
+        # Invalid boost temperature
+        await entity.async_set_acm_preset(minutes=60, temperature="oops")
+        client.set_acm_extra_options.assert_not_called()
+
+        # Backend failure
+        client.set_acm_extra_options.side_effect = ValueError("boom")
+        await entity.async_set_acm_preset(minutes=80)
+        client.set_acm_extra_options.assert_awaited_once_with(
+            dev_id,
+            addr,
+            boost_time=80,
+            boost_temp=None,
+        )
+        assert fallback_calls == 0
+        client.set_acm_extra_options.side_effect = None
+        client.set_acm_extra_options.reset_mock()
+
+        # Invalid start boost minutes
+        await entity.async_start_boost(minutes="bad")
+        client.set_acm_boost_state.assert_not_called()
+        client.set_acm_boost_state.reset_mock()
+
+        # Backend failure while starting boost
+        client.set_acm_boost_state.side_effect = ValueError("oops")
+        await entity.async_start_boost(minutes=20)
+        client.set_acm_boost_state.assert_awaited_once_with(
+            dev_id,
+            addr,
+            boost=True,
+            boost_time=20,
+        )
+        assert fallback_calls == 0
+        client.set_acm_boost_state.side_effect = None
+        client.set_acm_boost_state.reset_mock()
+
+        # Backend failure while cancelling boost
+        client.set_acm_boost_state.side_effect = ValueError("stop")
+        settings_map = (
+            coordinator.data[dev_id]["nodes_by_type"]["acm"]["settings"][addr]
+        )
+        settings_map["boost_active"] = True
+        await entity.async_cancel_boost()
+        client.set_acm_boost_state.assert_awaited_once_with(
+            dev_id,
+            addr,
+            boost=False,
+        )
+        assert settings_map["boost_active"] is True
+        assert fallback_calls == 0
+
+    asyncio.run(_run())
 
 
 def test_accumulator_extra_state_attributes_handles_resolver_fallbacks() -> None:

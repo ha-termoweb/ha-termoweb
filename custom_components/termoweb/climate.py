@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 import logging
 import time
 from typing import Any, cast
@@ -135,6 +135,86 @@ async def async_setup_entry(hass, entry, async_add_entities):
         _svc_set_preset_temperatures,
     )
 
+    async def _svc_set_acm_preset(
+        entity: HeaterClimateEntity, call: ServiceCall
+    ) -> None:
+        """Handle accumulator preset updates."""
+
+        if not isinstance(entity, AccumulatorClimateEntity):
+            _LOGGER.error(
+                "termoweb.set_acm_preset only applies to accumulator entities"
+            )
+            return
+
+        _LOGGER.info(
+            "entity-service termoweb.set_acm_preset -> %s minutes=%s temperature=%s",
+            getattr(entity, "entity_id", "<no-entity-id>"),
+            call.data.get("minutes"),
+            call.data.get("temperature"),
+        )
+        await entity.async_set_acm_preset(
+            minutes=call.data.get("minutes"),
+            temperature=call.data.get("temperature"),
+        )
+
+    async def _svc_start_boost(
+        entity: HeaterClimateEntity, call: ServiceCall
+    ) -> None:
+        """Handle accumulator boost start service."""
+
+        if not isinstance(entity, AccumulatorClimateEntity):
+            _LOGGER.error(
+                "termoweb.start_boost only applies to accumulator entities"
+            )
+            return
+
+        _LOGGER.info(
+            "entity-service termoweb.start_boost -> %s minutes=%s",
+            getattr(entity, "entity_id", "<no-entity-id>"),
+            call.data.get("minutes"),
+        )
+        await entity.async_start_boost(minutes=call.data.get("minutes"))
+
+    async def _svc_cancel_boost(entity: HeaterClimateEntity, call: ServiceCall) -> None:
+        """Handle accumulator boost cancellation service."""
+
+        if not isinstance(entity, AccumulatorClimateEntity):
+            _LOGGER.error(
+                "termoweb.cancel_boost only applies to accumulator entities"
+            )
+            return
+
+        _LOGGER.info(
+            "entity-service termoweb.cancel_boost -> %s",
+            getattr(entity, "entity_id", "<no-entity-id>"),
+        )
+        await entity.async_cancel_boost()
+
+    acm_preset_schema = {
+        vol.Optional("minutes"): vol.All(vol.Coerce(int), vol.Range(min=1, max=120)),
+        vol.Optional("temperature"): vol.Coerce(float),
+    }
+    platform.async_register_entity_service(
+        "set_acm_preset",
+        acm_preset_schema,
+        _svc_set_acm_preset,
+    )
+
+    start_boost_schema = {
+        vol.Optional("minutes"): vol.All(vol.Coerce(int), vol.Range(min=1, max=120))
+    }
+    platform.async_register_entity_service(
+        "start_boost",
+        start_boost_schema,
+        _svc_start_boost,
+    )
+
+    platform.async_register_entity_service(
+        "cancel_boost",
+        {},
+        _svc_cancel_boost,
+    )
+
 
 class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
     """HA climate entity representing a single TermoWeb heater."""
@@ -261,6 +341,26 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         ptemp: list[float] | None = None,
     ) -> bool:
         """Submit a settings update to the TermoWeb API."""
+        async def _submit(client: Any) -> None:
+            await self._async_submit_settings(
+                client,
+                mode=mode,
+                stemp=stemp,
+                prog=prog,
+                ptemp=ptemp,
+                units=self._units(),
+            )
+
+        return await self._async_client_call(log_context=log_context, call=_submit)
+
+    async def _async_client_call(
+        self,
+        *,
+        log_context: str,
+        call: Callable[[Any], Awaitable[Any]],
+    ) -> bool:
+        """Call a backend helper while applying standard error handling."""
+
         client = self._client()
         if client is None:
             _LOGGER.error(
@@ -272,14 +372,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             return False
 
         try:
-            await self._async_submit_settings(
-                client,
-                mode=mode,
-                stemp=stemp,
-                prog=prog,
-                ptemp=ptemp,
-                units=self._units(),
-            )
+            await call(client)
         except asyncio.CancelledError:
             raise
         except Exception as err:
@@ -296,7 +389,6 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 (str(body)[:200] if body else ""),
             )
             return False
-
         return True
 
     async def _async_submit_settings(
@@ -948,6 +1040,170 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         attrs["preferred_boost_minutes"] = self._preferred_boost_minutes()
 
         return attrs
+
+    def _validate_boost_minutes(self, minutes: int | None) -> int | None:
+        """Return a validated boost duration or ``None`` when absent."""
+
+        if minutes is None:
+            return None
+        try:
+            value = int(minutes)
+        except (TypeError, ValueError):
+            _LOGGER.error(
+                "Invalid boost minutes for type=%s addr=%s: %s",
+                self._node_type,
+                self._addr,
+                minutes,
+            )
+            return None
+        if value <= 0 or value > 120:
+            _LOGGER.error(
+                "Boost duration must be between 1 and 120 minutes for type=%s addr=%s: %s",
+                self._node_type,
+                self._addr,
+                value,
+            )
+            return None
+        return value
+
+    async def async_set_acm_preset(
+        self,
+        *,
+        minutes: int | None = None,
+        temperature: float | None = None,
+    ) -> None:
+        """Update the default boost duration and/or temperature."""
+
+        if minutes is None and temperature is None:
+            _LOGGER.error(
+                "Accumulator preset update requires minutes and/or temperature"
+            )
+            return
+
+        validated_minutes = self._validate_boost_minutes(minutes)
+        if minutes is not None and validated_minutes is None:
+            return
+
+        temp_value: float | None = None
+        if temperature is not None:
+            try:
+                temp_value = float(temperature)
+            except (TypeError, ValueError):
+                _LOGGER.error(
+                    "Invalid boost temperature for type=%s addr=%s: %s",
+                    self._node_type,
+                    self._addr,
+                    temperature,
+                )
+                return
+
+        async def _call(client: Any) -> None:
+            await client.set_acm_extra_options(
+                self._dev_id,
+                self._addr,
+                boost_time=validated_minutes,
+                boost_temp=temp_value,
+            )
+
+        success = await self._async_client_call(
+            log_context="Boost preset write",
+            call=_call,
+        )
+        if not success:
+            return
+
+        def _apply(cur: dict[str, Any]) -> None:
+            if validated_minutes is not None:
+                cur["boost_time"] = validated_minutes
+            if temp_value is not None:
+                cur["boost_temp"] = f"{float(temp_value):.1f}"
+
+        self._optimistic_update(_apply)
+        detail_parts = []
+        if validated_minutes is not None:
+            detail_parts.append(f"minutes={validated_minutes}")
+        if temp_value is not None:
+            detail_parts.append(f"temperature={temp_value:.1f}")
+        suffix = f" ({', '.join(detail_parts)})" if detail_parts else ""
+        _LOGGER.debug(
+            "Boost preset write OK type=%s addr=%s%s",
+            self._node_type,
+            self._addr,
+            suffix,
+        )
+        self._schedule_refresh_fallback()
+
+    async def async_start_boost(self, *, minutes: int | None = None) -> None:
+        """Start an accumulator boost session."""
+
+        validated_minutes = self._validate_boost_minutes(minutes)
+        if minutes is not None and validated_minutes is None:
+            return
+        if validated_minutes is None:
+            validated_minutes = self._preferred_boost_minutes()
+
+        async def _call(client: Any) -> None:
+            await client.set_acm_boost_state(
+                self._dev_id,
+                self._addr,
+                boost=True,
+                boost_time=validated_minutes,
+            )
+
+        success = await self._async_client_call(
+            log_context="Boost start",
+            call=_call,
+        )
+        if not success:
+            return
+
+        def _apply(cur: dict[str, Any]) -> None:
+            cur["boost_active"] = True
+            cur["boost_remaining"] = validated_minutes
+            cur["mode"] = "boost"
+
+        self._optimistic_update(_apply)
+        _LOGGER.debug(
+            "Boost start OK type=%s addr=%s minutes=%s",
+            self._node_type,
+            self._addr,
+            validated_minutes,
+        )
+        self._schedule_refresh_fallback()
+
+    async def async_cancel_boost(self) -> None:
+        """Cancel the active accumulator boost session."""
+
+        async def _call(client: Any) -> None:
+            await client.set_acm_boost_state(
+                self._dev_id,
+                self._addr,
+                boost=False,
+            )
+
+        success = await self._async_client_call(
+            log_context="Boost cancel",
+            call=_call,
+        )
+        if not success:
+            return
+
+        def _apply(cur: dict[str, Any]) -> None:
+            cur["boost_active"] = False
+            cur.pop("boost_remaining", None)
+            cur.pop("boost_end_day", None)
+            cur.pop("boost_end_min", None)
+            cur["boost_end"] = None
+            if cur.get("mode") == "boost":
+                cur["mode"] = "auto"
+
+        self._optimistic_update(_apply)
+        _LOGGER.debug(
+            "Boost cancel OK type=%s addr=%s",
+            self._node_type,
+            self._addr,
+        )
+        self._schedule_refresh_fallback()
 
     async def _async_submit_settings(  # type: ignore[override]
         self,
