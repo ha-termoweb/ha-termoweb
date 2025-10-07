@@ -49,6 +49,60 @@ set_preset_temperatures:
       description: Temperature for the day preset (°C or °F).
       example: 20.0
 
+set_acm_preset:
+  name: Configure accumulator boost preset
+  description: >-
+    Update the default boost duration and/or temperature for a TermoWeb
+    accumulator. Minutes are capped at 120; omit a field to keep the existing
+    value.
+  target:
+    entity:
+      domain: climate
+      integration: termoweb
+  fields:
+    minutes:
+      name: Default boost duration
+      description: Number of minutes the boost should run when no override is provided.
+      example: 90
+      selector:
+        number:
+          min: 1
+          max: 120
+          unit_of_measurement: minutes
+    temperature:
+      name: Boost temperature
+      description: Optional boost setpoint to apply during the boost session (°C or °F).
+      example: 22.5
+
+start_boost:
+  name: Start accumulator boost
+  description: >-
+    Trigger an immediate boost on a TermoWeb accumulator. Provide a duration to
+    override the default (maximum 120 minutes), or omit it to use the stored
+    preset.
+  target:
+    entity:
+      domain: climate
+      integration: termoweb
+  fields:
+    minutes:
+      name: Boost duration
+      description: Duration of the boost session in minutes (1–120). Optional.
+      example: 60
+      selector:
+        number:
+          min: 1
+          max: 120
+          unit_of_measurement: minutes
+
+cancel_boost:
+  name: Cancel accumulator boost
+  description: Cancel the active boost session on a TermoWeb accumulator.
+  target:
+    entity:
+      domain: climate
+      integration: termoweb
+
 import_energy_history:
   name: Import energy history
   description: >-

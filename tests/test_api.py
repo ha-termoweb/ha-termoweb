@@ -1793,6 +1793,75 @@ def test_ducaheat_set_htr_settings_prog_only(monkeypatch) -> None:
     asyncio.run(_run())
 
 
+def test_rest_set_acm_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(
+                200, {"ok": True}, headers={"Content-Type": "application/json"}
+            ),
+            MockResponse(
+                200, {"ok": True}, headers={"Content-Type": "application/json"}
+            ),
+        )
+
+        client = RESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        result = await client.set_acm_extra_options(
+            "dev",
+            "4",
+            boost_time=90,
+            boost_temp=22.5,
+        )
+        assert result == {"ok": True}
+        path, kwargs = session.request_calls[0][1:3]
+        assert path == "https://api.termoweb.fake/api/v2/devs/dev/acm/4/setup"
+        assert kwargs["json"] == {
+            "extra_options": {"boost_time": 90, "boost_temp": "22.5"}
+        }
+
+        result = await client.set_acm_boost_state(
+            "dev",
+            "4",
+            boost=True,
+            boost_time=45,
+        )
+        assert result == {"ok": True}
+        path2, kwargs2 = session.request_calls[1][1:3]
+        assert path2 == "https://api.termoweb.fake/api/v2/devs/dev/acm/4/status"
+        assert kwargs2["json"] == {"boost": True, "boost_time": 45}
+
+        with pytest.raises(ValueError):
+            await client.set_acm_extra_options("dev", "4")
+
+        with pytest.raises(ValueError):
+            await client.set_acm_extra_options("dev", "4", boost_time="bad")
+
+        with pytest.raises(ValueError):
+            await client.set_acm_extra_options("dev", "4", boost_temp="bad")
+
+        with pytest.raises(ValueError):
+            await client.set_acm_extra_options("dev", "4", boost_time=0)
+
+        with pytest.raises(ValueError):
+            await client.set_acm_boost_state("dev", "4", boost=True, boost_time=0)
+
+        with pytest.raises(ValueError):
+            await client.set_acm_boost_state("dev", "4", boost=True, boost_time="bad")
+
+    asyncio.run(_run())
+
+
 def test_ducaheat_set_acm_settings_segmented(monkeypatch) -> None:
     async def _run() -> None:
         session = FakeSession()
@@ -1867,6 +1936,53 @@ def test_ducaheat_set_acm_settings_segmented(monkeypatch) -> None:
             assert headers["X-SerialId"] == "15"
             assert headers["X-Requested-With"] == "ducaheat-app"
             assert headers["User-Agent"].startswith("Ducaheat/")
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_acm_boost_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(
+                200, {"setup": True}, headers={"Content-Type": "application/json"}
+            ),
+            MockResponse(
+                200, {"boost": True}, headers={"Content-Type": "application/json"}
+            ),
+        )
+
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        result = await client.set_acm_extra_options(
+            "dev",
+            "7",
+            boost_time=60,
+        )
+        assert result == {"setup": True}
+        path, kwargs = session.request_calls[0][1:3]
+        assert path == "https://api.termoweb.fake/api/v2/devs/dev/acm/7/setup"
+        assert kwargs["json"] == {"extra_options": {"boost_time": 60}}
+
+        result = await client.set_acm_boost_state(
+            "dev",
+            "7",
+            boost=False,
+        )
+        assert result == {"boost": True}
+        path2, kwargs2 = session.request_calls[1][1:3]
+        assert path2 == "https://api.termoweb.fake/api/v2/devs/dev/acm/7/status"
+        assert kwargs2["json"] == {"boost": False}
 
     asyncio.run(_run())
 

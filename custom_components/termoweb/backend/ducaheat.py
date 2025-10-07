@@ -12,8 +12,8 @@ from aiohttp import ClientResponseError
 from ..api import RESTClient
 from ..const import BRAND_DUCAHEAT, WS_NAMESPACE
 from ..nodes import NodeDescriptor
-from .ducaheat_ws import DucaheatWSClient
 from .base import Backend, WsClientProto
+from .ducaheat_ws import DucaheatWSClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -619,6 +619,48 @@ class DucaheatRESTClient(RESTClient):
                     body=str(message or ""),
                 ) from err
             raise
+
+    async def set_acm_extra_options(
+        self,
+        dev_id: str,
+        addr: str | int,
+        *,
+        boost_time: int | None = None,
+        boost_temp: float | None = None,
+    ) -> Any:
+        """Write default boost configuration using segmented endpoints."""
+
+        node_type, addr_str = self._resolve_node_descriptor(("acm", addr))
+        headers = await self._authed_headers()
+        payload = self._build_acm_extra_options_payload(boost_time, boost_temp)
+        return await self._post_acm_endpoint(
+            f"/api/v2/devs/{dev_id}/{node_type}/{addr_str}/setup",
+            headers,
+            payload,
+            dev_id=dev_id,
+            addr=addr_str,
+        )
+
+    async def set_acm_boost_state(
+        self,
+        dev_id: str,
+        addr: str | int,
+        *,
+        boost: bool,
+        boost_time: int | None = None,
+    ) -> Any:
+        """Toggle an accumulator boost session via segmented endpoints."""
+
+        node_type, addr_str = self._resolve_node_descriptor(("acm", addr))
+        headers = await self._authed_headers()
+        payload = self._build_acm_boost_payload(boost, boost_time)
+        return await self._post_acm_endpoint(
+            f"/api/v2/devs/{dev_id}/{node_type}/{addr_str}/status",
+            headers,
+            payload,
+            dev_id=dev_id,
+            addr=addr_str,
+        )
 
     def _format_temp(self, value: float | str) -> str:
         """Format temperatures using one decimal precision."""
