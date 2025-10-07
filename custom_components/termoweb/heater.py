@@ -738,7 +738,11 @@ class HeaterNodeBase(CoordinatorEntity):
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to websocket updates once the entity is added to hass."""
-        await super().async_added_to_hass()
+        coordinator = getattr(self, "coordinator", None)
+        if hasattr(coordinator, "async_add_listener"):
+            await super().async_added_to_hass()
+        else:
+            setattr(self, "_async_unsub_coordinator_update", None)
         hass = self._hass_for_runtime()
         if hass is None:
             return
@@ -749,7 +753,16 @@ class HeaterNodeBase(CoordinatorEntity):
     async def async_will_remove_from_hass(self) -> None:
         """Tidy up websocket listeners before the entity is removed."""
         self._ws_subscription.unsubscribe()
-        await super().async_will_remove_from_hass()
+        coordinator = getattr(self, "coordinator", None)
+        if hasattr(coordinator, "async_add_listener"):
+            await super().async_will_remove_from_hass()
+        else:
+            unsub = getattr(self, "_async_unsub_coordinator_update", None)
+            if callable(unsub):
+                try:
+                    unsub()
+                finally:
+                    setattr(self, "_async_unsub_coordinator_update", None)
 
     @callback
     def _handle_ws_message(self, payload: dict) -> None:
@@ -781,12 +794,18 @@ class HeaterNodeBase(CoordinatorEntity):
     def _handle_ws_event(self, _payload: dict) -> None:
         """Schedule a state refresh after a websocket update."""
 
+        if getattr(self, "_removed", False):
+            return
+
+        callback = getattr(self, "schedule_update_ha_state", None)
+        if not callable(callback):
+            return
+
         hass = self._hass_for_runtime()
-        callback = getattr(self, "schedule_update_ha_state")
-        if (
-            getattr(hass, "loop", None) is None
-            and not hasattr(callback, "call_count")
-        ):
+        loop = getattr(hass, "loop", None)
+        if loop and loop.is_closed():
+            return
+        if loop is None and not hasattr(callback, "call_count"):
             return
         callback()
 
