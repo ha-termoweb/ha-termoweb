@@ -144,6 +144,12 @@ def termoweb_init(monkeypatch: pytest.MonkeyPatch) -> Any:
     )
     monkeypatch.setattr(ws_module, "TermoWebWSClient", FakeWSClient)
     monkeypatch.setattr(ws_client_module, "TermoWebWSClient", FakeWSClient, raising=False)
+    backend_module = importlib.import_module(
+        "custom_components.termoweb.backend.termoweb"
+    )
+    monkeypatch.setattr(
+        backend_module, "TermoWebWSClient", FakeWSClient, raising=False
+    )
     module._test_helpers = SimpleNamespace(
         fake_coordinator=FakeCoordinator,
         get_record=lambda hass, entry: hass.data[module.DOMAIN][entry.entry_id],
@@ -892,6 +898,12 @@ def test_coordinator_listener_starts_new_ws(
     )
     monkeypatch.setattr(ws_module, "TermoWebWSClient", SlowWSClient)
     monkeypatch.setattr(ws_client_module, "TermoWebWSClient", SlowWSClient, raising=False)
+    backend_module = importlib.import_module(
+        "custom_components.termoweb.backend.termoweb"
+    )
+    monkeypatch.setattr(
+        backend_module, "TermoWebWSClient", SlowWSClient, raising=False
+    )
     entry = ConfigEntry("listener", data={"username": "user", "password": "pw"})
     stub_hass.config_entries.add(entry)
 

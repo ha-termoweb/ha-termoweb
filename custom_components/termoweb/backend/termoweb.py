@@ -1,14 +1,19 @@
 """TermoWeb backend implementation."""
 from __future__ import annotations
 
-from importlib import import_module
-import sys
-from types import ModuleType
-from typing import Any
-
-from .ws_client import WebSocketClient
+from typing import Any, cast
 
 from .base import Backend, WsClientProto
+from .ws_client import WebSocketClient
+
+try:  # pragma: no cover - exercised via backend tests
+    from custom_components.termoweb.backend.termoweb_ws import (
+        TermoWebWSClient as _TermoWebWSClient,
+    )
+except ImportError:  # pragma: no cover - exercised via backend tests
+    _TermoWebWSClient = cast(type[Any], WebSocketClient)
+
+TermoWebWSClient = _TermoWebWSClient
 
 
 class TermoWebBackend(Backend):
@@ -17,32 +22,8 @@ class TermoWebBackend(Backend):
     def _resolve_ws_client_cls(self) -> type[Any]:
         """Return the websocket client class compatible with this backend."""
 
-        saw_any_module = False
-        saw_real_module = False
-        for module_name in (
-            "custom_components.termoweb.__init__",
-            "custom_components.termoweb",
-        ):
-            module = sys.modules.get(module_name)
-            if module is None:
-                continue
-            saw_any_module = True
-            if isinstance(module, ModuleType):
-                saw_real_module = True
-            ws_cls = getattr(module, "TermoWebWSClient", None)
-            if isinstance(ws_cls, type):
-                return ws_cls
-        if not saw_any_module:
-            return WebSocketClient
-        if not saw_real_module:
-            return WebSocketClient
-        try:
-            ws_module = import_module("custom_components.termoweb.backend.termoweb_ws")
-        except ImportError:
-            return WebSocketClient
-        ws_cls = getattr(ws_module, "TermoWebWSClient", None)
-        if isinstance(ws_cls, type):
-            return ws_cls
+        if isinstance(TermoWebWSClient, type):
+            return TermoWebWSClient
         return WebSocketClient
 
     def create_ws_client(
