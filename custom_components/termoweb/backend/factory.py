@@ -13,6 +13,6 @@ def create_backend(*, brand: str, client: HttpClientProto) -> Backend:
         from .ducaheat import DucaheatBackend
 
         return DucaheatBackend(brand=brand, client=client)
-    from .termoweb import TermoWebBackend
+    from . import TermoWebBackend
 
     return TermoWebBackend(brand=brand, client=client)

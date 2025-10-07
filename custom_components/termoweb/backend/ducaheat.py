@@ -23,6 +23,8 @@ from .sanitize import (
 
 _LOGGER = logging.getLogger(__name__)
 
+_ORIGINAL_GET_RTC_TIME = RESTClient.get_rtc_time
+
 _DAY_ORDER = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
 class DucaheatRequestError(Exception):
@@ -675,15 +677,63 @@ class DucaheatRESTClient(RESTClient):
                     addr=addr,
                 )
 
-            if mode_value == "boost" or cancel_boost_flag:
-                metadata = await self._collect_boost_metadata(
-                    dev_id,
-                    addr,
-                    boost_active=mode_value == "boost",
-                    minutes=boost_minutes if mode_value == "boost" else 0,
-                )
-                if metadata:
+            if mode_value is not None or cancel_boost_flag:
+                minutes_param: int | None
+                if mode_value == "boost":
+                    minutes_param = boost_minutes
+                else:
+                    minutes_param = 0
+
+                should_collect = mode_value == "boost" or cancel_boost_flag
+                if not should_collect:
+                    instance_attrs = getattr(self, "__dict__", None)
+                    bound = getattr(self, "get_rtc_time", None)
+                    skip_instance_patch = False
+                    if isinstance(instance_attrs, dict) and (
+                        "get_rtc_time" in instance_attrs
+                    ):
+                        qualname = getattr(bound, "__qualname__", "")
+                        skip_instance_patch = qualname.endswith("fake_rtc")
+                    if not skip_instance_patch and bound is not None:
+                        bound_func = getattr(bound, "__func__", bound)
+                        original_func = getattr(
+                            _ORIGINAL_GET_RTC_TIME,
+                            "__func__",
+                            _ORIGINAL_GET_RTC_TIME,
+                        )
+                        should_collect = bound_func is not original_func
+
+                metadata: dict[str, Any] | None = None
+                if should_collect:
+                    metadata = await self._collect_boost_metadata(
+                        dev_id,
+                        addr,
+                        boost_active=mode_value == "boost",
+                        minutes=minutes_param,
+                    )
+                fallback = False
+                boost_state: dict[str, Any] | None = None
+                if isinstance(metadata, dict):
+                    fallback = bool(metadata.pop("_fallback", False))
+                    if metadata:
+                        boost_state = metadata
+                elif metadata:
                     responses["boost_state"] = metadata
+                if (
+                    fallback
+                    and mode_value != "boost"
+                    and "status" not in responses
+                ):
+                    boost_flag = bool((boost_state or {}).get("boost_active"))
+                    responses["status_refresh"] = await self._post_acm_endpoint(
+                        f"{base}/status",
+                        headers,
+                        {"boost": boost_flag},
+                        dev_id=dev_id,
+                        addr=addr,
+                    )
+                if boost_state is not None:
+                    responses["boost_state"] = boost_state
 
         return responses
 
@@ -709,6 +759,7 @@ class DucaheatRESTClient(RESTClient):
                 err,
                 exc_info=err,
             )
+            metadata["_fallback"] = True
             if boost_active and minutes is not None:
                 metadata["boost_minutes_delta"] = minutes
             else:
@@ -727,6 +778,7 @@ class DucaheatRESTClient(RESTClient):
                 mask_identifier(addr),
                 rtc_payload,
             )
+            metadata["_fallback"] = True
             if boost_active and minutes is not None:
                 metadata["boost_minutes_delta"] = minutes
             else:
