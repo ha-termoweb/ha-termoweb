@@ -185,6 +185,50 @@ def test_existing_nodes_map_handles_non_mapping_input() -> None:
     assert _existing_nodes_map({"nodes_by_type": []}) == {}
 
 
+def test_iter_snapshot_sections_skips_invalid_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: set[tuple[str, str]] = set()
+    sections = {
+        1: MappingProxyType({"settings": {}}),
+        "  ": {"settings": {}},
+        "acm": {"settings": {}},
+    }
+
+    monkeypatch.setattr(
+        nodes_module,
+        "_iter_snapshot_section",
+        lambda node_type, section: ({"addr": 5}, {"addr": None}),
+    )
+
+    assert list(nodes_module._iter_snapshot_sections(sections, seen)) == []
+
+
+def test_collect_snapshot_addresses_handles_mixed_values() -> None:
+    section = {
+        "addrs": [None, "1"],
+        "settings": {"1": {"name": "Living"}, "  ": {"name": "Ignored"}},
+        "extra": {"2": {"label": "Garage"}, "3": "Loft"},
+    }
+
+    addresses = nodes_module._collect_snapshot_addresses(section)
+
+    assert sorted(addresses) == ["1", "2", "3", "None"]
+    assert addresses["1"][0]["name"] == "Living"
+    assert addresses["2"][0]["label"] == "Garage"
+    assert addresses["3"][0] == {"name": "Loft"}
+    assert addresses["None"] == []
+
+
+def test_extract_snapshot_name_handles_repeated_payloads() -> None:
+    shared: dict[str, Any] = {}
+    payloads = [shared, shared, {"title": "Kitchen"}]
+
+    result = nodes_module._extract_snapshot_name(payloads)
+
+    assert result == "Kitchen"
+
+
 def test_build_node_inventory_handles_mixed_types(caplog: pytest.LogCaptureFixture) -> None:
     payload = {
         "nodes": [
