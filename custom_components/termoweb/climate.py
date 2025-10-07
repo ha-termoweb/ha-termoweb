@@ -1094,7 +1094,10 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
 
             await self._commit_write(
                 log_context="Preset mode write",
-                write_kwargs={"mode": "boost"},
+                write_kwargs={
+                    "mode": "boost",
+                    "boost_time": self._preferred_boost_minutes(),
+                },
                 apply_fn=_apply,
                 success_details={"preset_mode": "boost"},
             )

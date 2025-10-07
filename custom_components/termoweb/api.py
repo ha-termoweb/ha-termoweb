@@ -480,6 +480,7 @@ class RESTClient:
         ptemp: list[float]
         | None = None,  # preset temperatures [cold, night, day] (in current units)
         units: str = "C",
+        boost_time: int | None = None,
     ) -> Any:
         """Update heater settings.
 
@@ -500,6 +501,9 @@ class RESTClient:
         The payload will only include keys for the parameters passed by the caller, to avoid
         overwriting unrelated settings on the device.
         """
+
+        if boost_time is not None:
+            raise ValueError("boost_time is not supported for this node type")
 
         node_type, addr = self._resolve_node_descriptor(node)
 

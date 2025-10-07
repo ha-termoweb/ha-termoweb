@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from aiohttp import ClientResponseError
@@ -189,15 +190,24 @@ async def test_ducaheat_rest_set_node_settings_acm_mode_heat(
     monkeypatch.setattr(ducaheat_rest_client, "_authed_headers", fake_headers)
     monkeypatch.setattr(ducaheat_rest_client, "_request", fake_request)
 
-    await ducaheat_rest_client.set_node_settings("dev", ("acm", "3"), mode="boost")
+    rtc_mock = AsyncMock(return_value={"y": 2024, "n": 1, "d": 1, "h": 0, "m": 0, "s": 0})
+    monkeypatch.setattr(ducaheat_rest_client, "get_rtc_time", rtc_mock)
+
+    await ducaheat_rest_client.set_node_settings(
+        "dev", ("acm", "3"), mode="boost", boost_time=30
+    )
 
     assert calls == [
         (
             "POST",
             "/api/v2/devs/dev/acm/3/mode",
-            {"headers": {"Authorization": "Bearer"}, "json": {"mode": "boost"}},
+            {
+                "headers": {"Authorization": "Bearer"},
+                "json": {"mode": "boost", "boost_time": 30},
+            },
         )
     ]
+    rtc_mock.assert_awaited_once_with("dev")
 
 
 @pytest.mark.asyncio
