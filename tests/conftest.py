@@ -1,14 +1,15 @@
 # ruff: noqa: D100,D101,D102,D103,D104,D105,D106,D107,INP001,E402
 from __future__ import annotations
 
-import asyncio
-import inspect
 import datetime as dt
 import enum
+import asyncio
+import inspect
 import time
 from pathlib import Path
 import sys
 import types
+import threading
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping
 from unittest.mock import AsyncMock
 
@@ -22,6 +23,28 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from custom_components.termoweb.const import DOMAIN
+
+_frame_module: Any | None = None
+
+
+def _setup_frame_for_hass(hass: Any) -> None:
+    """Ensure frame helpers are initialised for a HomeAssistant instance."""
+
+    frame_mod = _frame_module
+    if frame_mod is None:
+        return
+    setup = getattr(frame_mod, "async_setup", None)
+    if setup is None:
+        return
+    result = setup(hass)
+    if inspect.isawaitable(result):
+        loop = getattr(hass, "loop", None)
+        if loop is None:
+            return
+        if loop.is_running():
+            loop.create_task(result)
+        else:
+            loop.run_until_complete(result)
 
 if TYPE_CHECKING:
     from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
@@ -448,6 +471,19 @@ def _install_stubs() -> None:
     helpers_mod = sys.modules.get("homeassistant.helpers") or types.ModuleType(
         "homeassistant.helpers"
     )
+    try:
+        from homeassistant.helpers import frame as frame_mod  # type: ignore[import-not-found]
+    except Exception:  # pragma: no cover - fallback when HA not installed
+        frame_mod = sys.modules.get(
+            "homeassistant.helpers.frame"
+        ) or types.ModuleType("homeassistant.helpers.frame")
+
+        async def async_setup(_hass: Any) -> None:
+            return None
+
+        frame_mod.async_setup = async_setup  # type: ignore[attr-defined]
+    else:  # pragma: no cover - use existing module when available
+        frame_mod = frame_mod
     aiohttp_client_mod = sys.modules.get(
         "homeassistant.helpers.aiohttp_client"
     ) or types.ModuleType("homeassistant.helpers.aiohttp_client")
@@ -500,6 +536,7 @@ def _install_stubs() -> None:
     sys.modules["homeassistant.core"] = core_mod
     sys.modules["homeassistant.exceptions"] = exceptions_mod
     sys.modules["homeassistant.helpers"] = helpers_mod
+    sys.modules["homeassistant.helpers.frame"] = frame_mod
     sys.modules["homeassistant.helpers.aiohttp_client"] = aiohttp_client_mod
     sys.modules["homeassistant.data_entry_flow"] = data_entry_flow_mod
     sys.modules["homeassistant.helpers.entity"] = entity_mod
@@ -521,6 +558,9 @@ def _install_stubs() -> None:
     homeassistant_pkg.core = core_mod
     homeassistant_pkg.exceptions = exceptions_mod
     homeassistant_pkg.helpers = helpers_mod
+    helpers_mod.frame = frame_mod
+    global _frame_module
+    _frame_module = frame_mod
     homeassistant_pkg.data_entry_flow = data_entry_flow_mod
     homeassistant_pkg.components = components_mod
     homeassistant_pkg.loader = loader_mod
@@ -664,7 +704,14 @@ def _install_stubs() -> None:
         def __init__(self) -> None:
             self.config_entries = _SimpleConfigEntries()
             self.dispatcher_connections: list[tuple[str, Callable[[Any], None]]] = []
-            self.data: dict[str, Any] = {}
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            self.loop = loop
+            self.loop_thread_id = threading.get_ident()
+            self.data: dict[str, Any] = {"integrations": {}}
             self.integration_requests: list[str] = []
             self.is_running = True
             self.is_stopping = False
@@ -672,11 +719,15 @@ def _install_stubs() -> None:
             self.services = _ServiceRegistry()
             self.bus = _EventBus()
             self.tasks: list[asyncio.Task[Any]] = []
+            _setup_frame_for_hass(self)
 
         def async_create_task(self, coro: Any) -> asyncio.Task[Any]:
             task = asyncio.create_task(coro)
             self.tasks.append(task)
             return task
+
+        def verify_event_loop_thread(self, what: str) -> None:
+            return None
 
     class ConfigFlow:
         def __init_subclass__(cls, *, domain: str | None = None, **kwargs: Any) -> None:
