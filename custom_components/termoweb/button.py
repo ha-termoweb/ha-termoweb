@@ -27,6 +27,7 @@ from .heater import (
     iter_heater_nodes,
     log_skipped_nodes,
     prepare_heater_platform_data,
+    supports_boost,
 )
 from .utils import build_gateway_device_info
 
@@ -58,8 +59,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     ):
         if node_type != "acm":
             continue
-        supports_boost = getattr(node, "supports_boost", None)
-        if callable(supports_boost) and not supports_boost():
+        if not supports_boost(node):
             continue
 
         unique_prefix = f"{DOMAIN}:{dev_id}:{node_type}:{addr_str}:boost"
