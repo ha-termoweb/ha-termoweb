@@ -72,6 +72,7 @@ class AccumulatorBoostDurationSelect(RestoreEntity, HeaterNodeBase, SelectEntity
     _attr_entity_category = EntityCategory.CONFIG
     _attr_has_entity_name = True
     _attr_icon = "mdi:timer-cog-outline"
+    _attr_translation_key = "accumulator_boost_duration"
 
     _OPTION_MAP = {str(option): option for option in BOOST_DURATION_OPTIONS}
     _REVERSE_OPTION_MAP = {value: key for key, value in _OPTION_MAP.items()}

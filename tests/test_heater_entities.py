@@ -39,9 +39,7 @@ def test_heater_node_base_normalizes_address(monkeypatch: pytest.MonkeyPatch) ->
     heater = HeaterNodeBase(coordinator, "entry", "dev", " 01 ", " Heater 01 ")
 
     assert heater._addr == "01"
-    assert heater.device_info["identifiers"] == {
-        (heater_module.DOMAIN, "dev", "01")
-    }
+    assert heater.device_info["identifiers"] == {(heater_module.DOMAIN, "dev", "01")}
     assert heater._attr_unique_id == f"{heater_module.DOMAIN}:dev:htr:01"
     assert calls == [(" 01 ", {})]
 
@@ -75,16 +73,10 @@ def test_boost_runtime_storage_roundtrip() -> None:
     entry_id = "entry-store"
     hass.data = {DOMAIN: {entry_id: {}}}
 
-    assert (
-        heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01")
-        is None
-    )
+    assert heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01") is None
 
     heater_module.set_boost_runtime_minutes(hass, entry_id, "acm", "01", 120)
-    assert (
-        heater_module.get_boost_runtime_minutes(hass, entry_id, "ACM", " 01 ")
-        == 120
-    )
+    assert heater_module.get_boost_runtime_minutes(hass, entry_id, "ACM", " 01 ") == 120
     assert (
         heater_module.resolve_boost_runtime_minutes(
             hass,
@@ -96,10 +88,7 @@ def test_boost_runtime_storage_roundtrip() -> None:
     )
 
     heater_module.set_boost_runtime_minutes(hass, entry_id, "acm", "01", None)
-    assert (
-        heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01")
-        is None
-    )
+    assert heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01") is None
     assert (
         heater_module.resolve_boost_runtime_minutes(
             hass,
@@ -147,6 +136,24 @@ def test_derive_boost_state_from_remaining(monkeypatch: pytest.MonkeyPatch) -> N
     assert state.end_datetime == base_now + timedelta(minutes=15)
 
 
+def test_derive_boost_state_handles_now_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure defensive handling when ``dt_util.now`` raises."""
+
+    def _failing_now() -> datetime:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(dt_util, "now", _failing_now)
+
+    settings = {"boost_remaining": 10}
+    state = heater_module.derive_boost_state(settings, SimpleNamespace())
+
+    assert state.minutes_remaining == 10
+    assert state.end_datetime is None
+    assert state.end_iso is None
+
+
 def test_derive_boost_state_parses_string_end(monkeypatch: pytest.MonkeyPatch) -> None:
     """Boost metadata should parse ISO formatted end timestamps."""
 
@@ -161,6 +168,32 @@ def test_derive_boost_state_parses_string_end(monkeypatch: pytest.MonkeyPatch) -
     assert state.minutes_remaining is None
     assert state.end_iso == iso
     assert state.end_datetime == datetime(2024, 1, 1, 0, 30, tzinfo=timezone.utc)
+
+
+def test_derive_boost_state_prefers_parse_datetime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure ``parse_datetime`` is used when available."""
+
+    base_now = datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(dt_util, "now", lambda: base_now)
+
+    iso = "2024-01-01T00:45:00+00:00"
+    parsed_result = datetime(2024, 1, 1, 0, 45, tzinfo=timezone.utc)
+    calls: list[str] = []
+
+    def _fake_parse(value: str) -> datetime:
+        calls.append(value)
+        return parsed_result
+
+    monkeypatch.setattr(dt_util, "parse_datetime", _fake_parse, raising=False)
+
+    settings = {"boost_end": iso}
+    state = heater_module.derive_boost_state(settings, SimpleNamespace())
+
+    assert calls == [iso]
+    assert state.end_iso == iso
+    assert state.end_datetime == parsed_result
 
 
 def test_boost_entities_expose_state(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -219,7 +252,9 @@ def test_boost_entities_expose_state(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert boost_binary.extra_state_attributes["boost_minutes_remaining"] == 30
     assert boost_binary.extra_state_attributes["boost_end"] == expected_end.isoformat()
-    assert minutes_sensor.extra_state_attributes["boost_end"] == expected_end.isoformat()
+    assert (
+        minutes_sensor.extra_state_attributes["boost_end"] == expected_end.isoformat()
+    )
     assert end_sensor.extra_state_attributes["boost_minutes_remaining"] == 30
 
 
@@ -273,6 +308,8 @@ def test_boost_entities_handle_missing_data() -> None:
     assert boost_binary.extra_state_attributes["boost_end"] is None
     assert minutes_sensor.extra_state_attributes["boost_end"] is None
     assert end_sensor.extra_state_attributes["boost_minutes_remaining"] is None
+
+
 def test_coerce_boost_minutes_edge_cases() -> None:
     """Exercise defensive conversions for boost duration inputs."""
 
@@ -285,6 +322,18 @@ def test_coerce_boost_minutes_edge_cases() -> None:
     assert coerce("invalid") is None
     assert coerce("90") == 90
     assert coerce(120.7) == 120
+
+
+def test_coerce_boost_remaining_minutes_non_positive() -> None:
+    """Ensure boost remaining coercion rejects non-positive values."""
+
+    coerce = heater_module._coerce_boost_remaining_minutes
+    assert coerce(None) is None
+    assert coerce(False) is None
+    assert coerce(0) is None
+    assert coerce(-3) is None
+    assert coerce(" ") is None
+    assert coerce(45) == 45
 
 
 def test_boost_runtime_store_handles_non_mapping() -> None:
@@ -306,17 +355,11 @@ def test_boost_runtime_helpers_guard_invalid_structures() -> None:
 
     # Domain data missing prevents persistence.
     heater_module.set_boost_runtime_minutes(hass, entry_id, "acm", "01", 30)
-    assert (
-        heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01")
-        is None
-    )
+    assert heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01") is None
 
     # Non-mapping entry data is ignored for get/set operations.
     hass.data = {DOMAIN: {entry_id: []}}
-    assert (
-        heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01")
-        is None
-    )
+    assert heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01") is None
     heater_module.set_boost_runtime_minutes(hass, entry_id, "acm", "01", 45)
 
     # Missing identifiers or invalid minutes are ignored.
@@ -329,10 +372,7 @@ def test_boost_runtime_helpers_guard_invalid_structures() -> None:
     hass.data[DOMAIN][entry_id][heater_module._BOOST_RUNTIME_KEY] = {
         "acm": {"01": "oops"}
     }
-    assert (
-        heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01")
-        is None
-    )
+    assert heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01") is None
     assert (
         heater_module.resolve_boost_runtime_minutes(
             hass,

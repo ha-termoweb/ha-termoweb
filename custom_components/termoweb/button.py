@@ -16,6 +16,8 @@ except ImportError:  # pragma: no cover - executed in unit test stubs
 
     class ServiceNotFound(HomeAssistantError):
         """Fallback service lookup error used in unit tests."""
+
+
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -117,6 +119,7 @@ class StateRefreshButton(CoordinatorEntity, ButtonEntity):
 
     _attr_name = "Force refresh"
     _attr_has_entity_name = True
+    _attr_translation_key = "force_refresh"
 
     def __init__(self, coordinator, entry_id: str, dev_id: str) -> None:
         """Initialise the force-refresh button entity."""
@@ -223,6 +226,7 @@ class AccumulatorBoostButton(AccumulatorBoostButtonBase):
     """Button that starts an accumulator boost for a fixed duration."""
 
     _attr_icon = "mdi:timer-play"
+    _attr_translation_key = "accumulator_boost_minutes"
 
     def __init__(
         self,
@@ -256,11 +260,18 @@ class AccumulatorBoostButton(AccumulatorBoostButtonBase):
 
         return self._minutes
 
+    @property
+    def translation_placeholders(self) -> dict[str, str]:
+        """Expose the configured boost duration for translations."""
+
+        return {"minutes": str(self._minutes)}
+
 
 class AccumulatorBoostCancelButton(AccumulatorBoostButtonBase):
     """Button that stops the active accumulator boost session."""
 
     _attr_icon = "mdi:timer-off"
+    _attr_translation_key = "accumulator_boost_cancel"
 
     def __init__(
         self,
@@ -285,4 +296,3 @@ class AccumulatorBoostCancelButton(AccumulatorBoostButtonBase):
             label="Cancel boost",
             node_type=node_type,
         )
-

@@ -208,7 +208,7 @@ def _coerce_boost_bool(value: Any) -> bool | None:
 
 
 def _coerce_boost_minutes(value: Any) -> int | None:
-    """Return ``value`` as non-negative minutes when possible."""
+    """Return ``value`` as positive minutes when possible."""
 
     if value is None or isinstance(value, bool):
         return None
@@ -222,7 +222,9 @@ def _coerce_boost_minutes(value: Any) -> int | None:
             minutes = int(float(text))
     except (TypeError, ValueError):  # pragma: no cover - defensive
         return None
-    return minutes if minutes >= 0 else None
+    if minutes <= 0:
+        return None
+    return minutes
 
 
 @dataclass(slots=True)
@@ -264,11 +266,7 @@ def derive_boost_state(
     boost_end_dt: datetime | None = None
     boost_minutes: int | None = None
     resolver = getattr(coordinator, "resolve_boost_end", None)
-    if (
-        callable(resolver)
-        and boost_day is not None
-        and boost_minute is not None
-    ):
+    if callable(resolver) and boost_day is not None and boost_minute is not None:
         try:
             boost_end_dt, boost_minutes = resolver(boost_day, boost_minute)
         except Exception:  # noqa: BLE001 - defensive
