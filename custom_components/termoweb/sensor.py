@@ -34,6 +34,7 @@ from .heater import (
     iter_heater_nodes,
     log_skipped_nodes,
     prepare_heater_platform_data,
+    supports_boost,
 )
 from .nodes import build_heater_energy_unique_id
 from .utils import build_gateway_device_info, float_or_none
@@ -143,16 +144,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 node_type=node_type,
             )
         )
-        supports_boost = getattr(node, "supports_boost", None)
-        supported = False
-        if callable(supports_boost):
-            try:
-                supported = bool(supports_boost())
-            except Exception:  # noqa: BLE001 - defensive  # pragma: no cover
-                supported = False
-        elif isinstance(supports_boost, bool):
-            supported = supports_boost
-        if supported:
+        if supports_boost(node):
             new_entities.extend(
                 _create_boost_sensors(
                     coordinator,

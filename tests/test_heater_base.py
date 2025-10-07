@@ -494,3 +494,25 @@ def test_heater_settings_missing_mapping() -> None:
     heater = _make_heater(coordinator)
 
     assert heater.heater_settings() is None
+
+
+def test_supports_boost_helper_handles_variants(caplog: pytest.LogCaptureFixture) -> None:
+    """Verify the boost helper supports callables, booleans, and errors."""
+
+    true_node = SimpleNamespace(supports_boost=True)
+    assert heater_module.supports_boost(true_node) is True
+
+    callable_node = SimpleNamespace(supports_boost=lambda: " yes ")
+    assert heater_module.supports_boost(callable_node) is True
+
+    false_node = SimpleNamespace(supports_boost=False)
+    assert heater_module.supports_boost(false_node) is False
+
+    class RaisingSupports:
+        def __call__(self) -> bool:
+            raise RuntimeError("boom")
+
+    caplog.set_level("DEBUG")
+    error_node = SimpleNamespace(supports_boost=RaisingSupports(), addr="boom")
+    assert heater_module.supports_boost(error_node) is False
+    assert "boost support probe failure" in caplog.text
