@@ -24,24 +24,19 @@ AccumulatorBoostDurationSelect = select_module.AccumulatorBoostDurationSelect
 async_setup_entry = select_module.async_setup_entry
 
 
-def _make_node(addr: str) -> types.SimpleNamespace:
-    """Return a simple accumulator node stub."""
-
-    return types.SimpleNamespace(
-        addr=addr,
-        type="acm",
-        supports_boost=lambda: True,
-    )
-
-
-def test_select_setup_and_selection(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_select_setup_and_selection(
+    monkeypatch: pytest.MonkeyPatch,
+    heater_node_factory,
+    boost_runtime_store,
+    heater_hass_data,
+) -> None:
     """Verify setup creates entities and persists selections."""
 
     async def _run() -> None:
         hass = HomeAssistant()
         entry = types.SimpleNamespace(entry_id="entry-select")
         dev_id = "dev-select"
-        node = _make_node("07")
+        node = heater_node_factory("07")
         settings = {"boost_time": 120, "prog": [0] * 168}
         record = {
             "nodes": {},
@@ -54,15 +49,13 @@ def test_select_setup_and_selection(monkeypatch: pytest.MonkeyPatch) -> None:
             dev=record,
             data={dev_id: record},
         )
-        hass.data = {
-            DOMAIN: {
-                entry.entry_id: {
-                    "coordinator": coordinator,
-                    "dev_id": dev_id,
-                    "boost_runtime": {"acm": {node.addr: 30}},
-                }
-            }
-        }
+        heater_hass_data(
+            hass,
+            entry.entry_id,
+            dev_id,
+            coordinator,
+            boost_runtime=boost_runtime_store("acm", node.addr, 30),
+        )
 
         def fake_prepare(entry_data, default_name_simple):
             return ([node], {"acm": [node]}, {"acm": [node.addr]}, lambda *_: "Accumulator 7")
@@ -114,14 +107,18 @@ def test_select_setup_and_selection(monkeypatch: pytest.MonkeyPatch) -> None:
     asyncio.run(_run())
 
 
-def test_select_restores_last_state(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_select_restores_last_state(
+    monkeypatch: pytest.MonkeyPatch,
+    heater_node_factory,
+    heater_hass_data,
+) -> None:
     """Ensure stored state restoration takes precedence over defaults."""
 
     async def _run() -> None:
         hass = HomeAssistant()
         entry = types.SimpleNamespace(entry_id="entry-restore")
         dev_id = "dev-restore"
-        node = _make_node("09")
+        node = heater_node_factory("09")
         record = {
             "nodes": {},
             "nodes_by_type": {"acm": {"settings": {node.addr: {"boost_time": 90}}}},
@@ -133,15 +130,13 @@ def test_select_restores_last_state(monkeypatch: pytest.MonkeyPatch) -> None:
             dev=record,
             data={dev_id: record},
         )
-        hass.data = {
-            DOMAIN: {
-                entry.entry_id: {
-                    "coordinator": coordinator,
-                    "dev_id": dev_id,
-                    "boost_runtime": {},
-                }
-            }
-        }
+        heater_hass_data(
+            hass,
+            entry.entry_id,
+            dev_id,
+            coordinator,
+            boost_runtime={},
+        )
 
         def fake_prepare(entry_data, default_name_simple):
             return ([node], {"acm": [node]}, {"acm": [node.addr]}, lambda *_: "Accumulator 9")
@@ -194,7 +189,11 @@ def test_select_restores_last_state(monkeypatch: pytest.MonkeyPatch) -> None:
     asyncio.run(_run())
 
 
-def test_select_filters_nodes_and_handles_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_select_filters_nodes_and_handles_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    heater_node_factory,
+    heater_hass_data,
+) -> None:
     """Verify setup skips unsupported nodes and applies default persistence."""
 
     async def _run() -> None:
@@ -202,9 +201,9 @@ def test_select_filters_nodes_and_handles_fallback(monkeypatch: pytest.MonkeyPat
         entry = types.SimpleNamespace(entry_id="entry-fallback")
         dev_id = "dev-fallback"
 
-        non_acm = types.SimpleNamespace(addr="01", type="htr")
-        disabled_acm = types.SimpleNamespace(addr="02", type="acm", supports_boost=lambda: False)
-        enabled_acm = _make_node("03")
+        non_acm = heater_node_factory("01", node_type="htr")
+        disabled_acm = heater_node_factory("02", supports_boost=False)
+        enabled_acm = heater_node_factory("03")
 
         record = {
             "nodes": {},
@@ -217,15 +216,13 @@ def test_select_filters_nodes_and_handles_fallback(monkeypatch: pytest.MonkeyPat
             dev=record,
             data={dev_id: record},
         )
-        hass.data = {
-            DOMAIN: {
-                entry.entry_id: {
-                    "coordinator": coordinator,
-                    "dev_id": dev_id,
-                    "boost_runtime": {},
-                }
-            }
-        }
+        heater_hass_data(
+            hass,
+            entry.entry_id,
+            dev_id,
+            coordinator,
+            boost_runtime={},
+        )
 
         def fake_prepare(entry_data, default_name_simple):
             return (

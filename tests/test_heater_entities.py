@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-
 from typing import Any
 
 import pytest
@@ -66,12 +65,18 @@ def test_heater_node_base_payload_matching_normalizes_address(
     assert calls == [(" 01 ", {}), (" 01 ", {}), ("02", {}), ("  ", {})]
 
 
-def test_boost_runtime_storage_roundtrip() -> None:
+def test_boost_runtime_storage_roundtrip(heater_hass_data) -> None:
     """Ensure boost runtime helpers normalise addresses and defaults."""
 
     hass = HomeAssistant()
     entry_id = "entry-store"
-    hass.data = {DOMAIN: {entry_id: {}}}
+    heater_hass_data(
+        hass,
+        entry_id,
+        "dev-store",
+        SimpleNamespace(),
+        boost_runtime={},
+    )
 
     assert heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01") is None
 

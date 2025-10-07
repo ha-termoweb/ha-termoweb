@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from conftest import FakeCoordinator
+
 from homeassistant.components.button import ButtonEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -26,14 +28,17 @@ AccumulatorBoostButton = button_module.AccumulatorBoostButton
 AccumulatorBoostCancelButton = button_module.AccumulatorBoostCancelButton
 
 
-def test_binary_sensor_setup_and_dispatch() -> None:
+def test_binary_sensor_setup_and_dispatch(
+    heater_hass_data,
+) -> None:
     async def _run() -> None:
         hass = HomeAssistant()
         entry = types.SimpleNamespace(entry_id="entry-1")
         dev_id = "device-123"
 
-        coordinator = types.SimpleNamespace(
-            hass=hass,
+        coordinator = FakeCoordinator(
+            hass,
+            dev_id=dev_id,
             data={
                 dev_id: {
                     "name": "Living Room",  # attributes
@@ -43,29 +48,27 @@ def test_binary_sensor_setup_and_dispatch() -> None:
             },
         )
 
-        hass.data = {
-            DOMAIN: {
-                entry.entry_id: {
-                    "coordinator": coordinator,
-                    "dev_id": dev_id,
-                    "version": "2.1.0",
-                    "ws_state": {
-                        dev_id: {
-                            "status": "healthy",
-                            "last_event_at": "2024-05-01T12:00:00Z",
-                            "healthy_minutes": 42,
-                        }
-                    },
+        heater_hass_data(
+            hass,
+            entry.entry_id,
+            dev_id,
+            coordinator,
+            ws_state={
+                dev_id: {
+                    "status": "healthy",
+                    "last_event_at": "2024-05-01T12:00:00Z",
+                    "healthy_minutes": 42,
                 }
-            }
-        }
+            },
+            extra={"version": "2.1.0"},
+        )
 
         added: list = []
 
         def _add_entities(entities):
             added.extend(entities)
 
-        guard_coordinator = types.SimpleNamespace(hass=None, data={})
+        guard_coordinator = FakeCoordinator(None, data={})
         guard_entity = GatewayOnlineBinarySensor(
             guard_coordinator,
             "guard-entry",
@@ -117,7 +120,7 @@ def test_binary_sensor_setup_and_dispatch() -> None:
     asyncio.run(_run())
 
 
-def test_refresh_button_device_info_and_press() -> None:
+def test_refresh_button_device_info_and_press(heater_hass_data) -> None:
     async def _run() -> None:
         hass = HomeAssistant()
         entry = types.SimpleNamespace(entry_id="entry-button")
@@ -127,9 +130,12 @@ def test_refresh_button_device_info_and_press() -> None:
             async_request_refresh=AsyncMock(),
         )
 
-        hass.data = {
-            DOMAIN: {entry.entry_id: {"coordinator": coordinator, "dev_id": dev_id}}
-        }
+        heater_hass_data(
+            hass,
+            entry.entry_id,
+            dev_id,
+            coordinator,
+        )
 
         added: list = []
         seen_ids: set[str] = set()
@@ -173,6 +179,8 @@ def test_refresh_button_device_info_and_press() -> None:
 
 def test_button_setup_adds_accumulator_entities(
     monkeypatch: pytest.MonkeyPatch,
+    heater_hass_data,
+    heater_node_factory,
 ) -> None:
     async def _run() -> None:
         hass = HomeAssistant()
@@ -180,18 +188,16 @@ def test_button_setup_adds_accumulator_entities(
         dev_id = "device-boost"
         coordinator = types.SimpleNamespace(hass=hass, data={})
 
-        hass.data = {
-            DOMAIN: {
-                entry.entry_id: {
-                    "coordinator": coordinator,
-                    "dev_id": dev_id,
-                }
-            }
-        }
+        heater_hass_data(
+            hass,
+            entry.entry_id,
+            dev_id,
+            coordinator,
+        )
 
-        acm_node = types.SimpleNamespace(addr="5")
-        acm_skip = types.SimpleNamespace(addr="6")
-        htr_node = types.SimpleNamespace(addr="3")
+        acm_node = heater_node_factory("5", node_type="acm")
+        acm_skip = heater_node_factory("6", node_type="acm")
+        htr_node = heater_node_factory("3", node_type="htr", supports_boost=False)
 
         calls: list[str | None] = []
 
@@ -375,6 +381,7 @@ def test_accumulator_boost_button_handles_missing_hass() -> None:
 
 def test_accumulator_boost_button_logs_service_errors(
     caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def _run() -> None:
         caplog.set_level(logging.ERROR)
@@ -383,6 +390,12 @@ def test_accumulator_boost_button_logs_service_errors(
         dev_id = "device-errors"
         coordinator = types.SimpleNamespace(hass=hass, data={})
         hass.services = types.SimpleNamespace(async_call=AsyncMock())
+
+        monkeypatch.setattr(
+            "homeassistant.helpers.translation.async_get_exception_message",
+            lambda *args, **kwargs: "service_not_found",
+            raising=False,
+        )
 
         button = AccumulatorBoostButton(
             coordinator,
