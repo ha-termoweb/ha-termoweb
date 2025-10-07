@@ -17,6 +17,7 @@ from conftest import FakeCoordinator, _install_stubs
 _install_stubs()
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import entity_registry as entity_registry_mod
@@ -135,7 +136,14 @@ def termoweb_init(monkeypatch: pytest.MonkeyPatch) -> Any:
     module = importlib.import_module("custom_components.termoweb.__init__")
     module = importlib.reload(module)
     monkeypatch.setattr(module, "StateCoordinator", FakeCoordinator)
-    monkeypatch.setattr(module, "TermoWebWSClient", FakeWSClient)
+    ws_module = importlib.import_module(
+        "custom_components.termoweb.backend.termoweb_ws"
+    )
+    ws_client_module = importlib.import_module(
+        "custom_components.termoweb.backend.ws_client"
+    )
+    monkeypatch.setattr(ws_module, "TermoWebWSClient", FakeWSClient)
+    monkeypatch.setattr(ws_client_module, "TermoWebWSClient", FakeWSClient, raising=False)
     module._test_helpers = SimpleNamespace(
         fake_coordinator=FakeCoordinator,
         get_record=lambda hass, entry: hass.data[module.DOMAIN][entry.entry_id],
@@ -630,7 +638,7 @@ def test_async_setup_entry_defers_until_started(
         callback = next(
             cb
             for event, cb in stub_hass.bus.listeners
-            if event == termoweb_init.EVENT_HOMEASSISTANT_STARTED
+            if event == EVENT_HOMEASSISTANT_STARTED
         )
         await callback(None)
         await _drain_tasks(stub_hass)
@@ -643,8 +651,9 @@ def test_import_energy_history_service_invocation(
     termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     registry = StubEntityRegistry()
+    energy_module = importlib.import_module("custom_components.termoweb.energy")
     monkeypatch.setattr(
-        termoweb_init.er, "async_get", lambda hass: registry, raising=False
+        energy_module.er, "async_get", lambda hass: registry, raising=False
     )
     monkeypatch.setattr(
         entity_registry_mod, "async_get", lambda hass: registry, raising=False
@@ -875,7 +884,14 @@ def test_coordinator_listener_starts_new_ws(
             return [{"dev_id": "dev-1"}]
 
     monkeypatch.setattr(termoweb_init, "RESTClient", ListenerClient)
-    monkeypatch.setattr(termoweb_init, "TermoWebWSClient", SlowWSClient)
+    ws_module = importlib.import_module(
+        "custom_components.termoweb.backend.termoweb_ws"
+    )
+    ws_client_module = importlib.import_module(
+        "custom_components.termoweb.backend.ws_client"
+    )
+    monkeypatch.setattr(ws_module, "TermoWebWSClient", SlowWSClient)
+    monkeypatch.setattr(ws_client_module, "TermoWebWSClient", SlowWSClient, raising=False)
     entry = ConfigEntry("listener", data={"username": "user", "password": "pw"})
     stub_hass.config_entries.add(entry)
 
@@ -920,8 +936,9 @@ def test_import_energy_history_service_error_logging(
     termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     registry = StubEntityRegistry()
+    energy_module = importlib.import_module("custom_components.termoweb.energy")
     monkeypatch.setattr(
-        termoweb_init.er, "async_get", lambda hass: registry, raising=False
+        energy_module.er, "async_get", lambda hass: registry, raising=False
     )
     monkeypatch.setattr(
         entity_registry_mod, "async_get", lambda hass: registry, raising=False
@@ -1113,8 +1130,9 @@ def test_import_energy_history_service_handles_string_ids_and_cancelled(
     termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     registry = StubEntityRegistry()
+    energy_module = importlib.import_module("custom_components.termoweb.energy")
     monkeypatch.setattr(
-        termoweb_init.er, "async_get", lambda hass: registry, raising=False
+        energy_module.er, "async_get", lambda hass: registry, raising=False
     )
     monkeypatch.setattr(
         entity_registry_mod, "async_get", lambda hass: registry, raising=False
