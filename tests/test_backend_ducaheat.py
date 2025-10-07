@@ -176,7 +176,14 @@ async def test_ducaheat_rest_set_node_settings_routes_non_special(
     assert captured["args"] == (
         "dev",
         ("pmo", "4"),
-        {"mode": "auto", "stemp": 20.5, "prog": None, "ptemp": None, "units": "C"},
+        {
+            "mode": "auto",
+            "stemp": 20.5,
+            "prog": None,
+            "ptemp": None,
+            "units": "C",
+            "cancel_boost": False,
+        },
     )
 
 

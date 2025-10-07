@@ -51,14 +51,14 @@ def test_ducaheat_acm_mode_boost_includes_duration_and_metadata(
     asyncio.run(_run())
 
 
-def test_ducaheat_acm_mode_cancel_posts_status(
+def test_ducaheat_acm_mode_cancel_when_boost_active(
     ducaheat_rest_harness: Callable[..., Any]
 ) -> None:
     async def _run() -> None:
         harness = ducaheat_rest_harness(responses=[{"ok": True}])
 
         result = await harness.client.set_node_settings(
-            "dev", ("acm", "9"), mode=HVACMode.AUTO
+            "dev", ("acm", "9"), mode=HVACMode.AUTO, cancel_boost=True
         )
 
         assert harness.requests == [
@@ -92,6 +92,36 @@ def test_ducaheat_acm_mode_cancel_posts_status(
         assert boost_state["boost_active"] is False
         assert boost_state["boost_end"] is None
         assert boost_state["boost_minutes_delta"] == 0
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_acm_mode_change_without_boost_skips_status(
+    ducaheat_rest_harness: Callable[..., Any]
+) -> None:
+    async def _run() -> None:
+        harness = ducaheat_rest_harness(responses=[{"ok": True}])
+
+        result = await harness.client.set_node_settings(
+            "dev", ("acm", "9"), mode=HVACMode.AUTO
+        )
+
+        assert harness.requests == [
+            (
+                "POST",
+                "/api/v2/devs/dev/acm/9/mode",
+                {
+                    "headers": {
+                        "Authorization": "Bearer token",
+                        "X-SerialId": "15",
+                        "User-Agent": get_brand_user_agent(BRAND_DUCAHEAT),
+                    },
+                    "json": {"mode": "auto"},
+                },
+            ),
+        ]
+        assert harness.rtc_calls == []
+        assert result == {"mode": {"ok": True}}
 
     asyncio.run(_run())
 
