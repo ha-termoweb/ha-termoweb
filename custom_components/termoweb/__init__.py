@@ -85,7 +85,7 @@ from .backend.ws_client import TermoWebWSClient  # noqa: F401,E402
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["button", "binary_sensor", "climate", "select", "sensor"]
+PLATFORMS = ["button", "binary_sensor", "climate", "number", "select", "sensor"]
 
 reset_samples_rate_limit_state()
 
@@ -215,7 +215,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if node_inventory:
         type_counts = Counter(node.type for node in node_inventory)
-        summary = ", ".join(f"{node_type}:{count}" for node_type, count in sorted(type_counts.items()))
+        summary = ", ".join(
+            f"{node_type}:{count}" for node_type, count in sorted(type_counts.items())
+        )
     else:
         summary = "none"
     _LOGGER.info("%s: discovered node types: %s", dev_id, summary)
@@ -228,7 +230,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         dev,
         nodes,
         node_inventory,
-
     )
 
     debug_enabled = bool(entry.options.get("debug", entry.data.get("debug", False)))
@@ -493,9 +494,7 @@ async def _async_shutdown_entry(rec: MutableMapping[str, Any]) -> None:
                 try:
                     cancel()
                 except Exception:  # pragma: no cover - defensive logging
-                    _LOGGER.exception(
-                        "WS task for %s raised during cancel", dev_id
-                    )
+                    _LOGGER.exception("WS task for %s raised during cancel", dev_id)
                     continue
             if hasattr(task, "__await__"):
                 try:
@@ -503,9 +502,7 @@ async def _async_shutdown_entry(rec: MutableMapping[str, Any]) -> None:
                 except asyncio.CancelledError:
                     pass
                 except Exception:  # pragma: no cover - defensive logging
-                    _LOGGER.exception(
-                        "WS task for %s failed to cancel cleanly", dev_id
-                    )
+                    _LOGGER.exception("WS task for %s failed to cancel cleanly", dev_id)
 
     ws_clients = rec.get("ws_clients")
     if isinstance(ws_clients, Mapping):

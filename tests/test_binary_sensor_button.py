@@ -17,9 +17,7 @@ import custom_components.termoweb.button as button_module
 from custom_components.termoweb.const import DOMAIN, signal_ws_status
 from custom_components.termoweb.utils import build_gateway_device_info
 
-GatewayOnlineBinarySensor = (
-    binary_sensor_module.GatewayOnlineBinarySensor
-)
+GatewayOnlineBinarySensor = binary_sensor_module.GatewayOnlineBinarySensor
 async_setup_binary_sensor_entry = binary_sensor_module.async_setup_entry
 StateRefreshButton = button_module.StateRefreshButton
 async_setup_button_entry = button_module.async_setup_entry
@@ -103,9 +101,13 @@ def test_binary_sensor_setup_and_dispatch() -> None:
         }
 
         entity.schedule_update_ha_state = MagicMock()
-        async_dispatcher_send(hass, signal_ws_status(entry.entry_id), {"dev_id": "other"})
+        async_dispatcher_send(
+            hass, signal_ws_status(entry.entry_id), {"dev_id": "other"}
+        )
         entity.schedule_update_ha_state.assert_not_called()
-        async_dispatcher_send(hass, signal_ws_status(entry.entry_id), {"dev_id": dev_id})
+        async_dispatcher_send(
+            hass, signal_ws_status(entry.entry_id), {"dev_id": dev_id}
+        )
         entity.schedule_update_ha_state.assert_called_once_with()
 
         await entity.async_will_remove_from_hass()
@@ -124,7 +126,9 @@ def test_refresh_button_device_info_and_press() -> None:
             async_request_refresh=AsyncMock(),
         )
 
-        hass.data = {DOMAIN: {entry.entry_id: {"coordinator": coordinator, "dev_id": dev_id}}}
+        hass.data = {
+            DOMAIN: {entry.entry_id: {"coordinator": coordinator, "dev_id": dev_id}}
+        }
 
         added: list = []
         seen_ids: set[str] = set()
@@ -166,7 +170,9 @@ def test_refresh_button_device_info_and_press() -> None:
         coordinator.async_request_refresh.assert_awaited_once()
 
 
-def test_button_setup_adds_accumulator_entities(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_button_setup_adds_accumulator_entities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     async def _run() -> None:
         hass = HomeAssistant()
         entry = types.SimpleNamespace(entry_id="entry-boost")
@@ -217,7 +223,10 @@ def test_button_setup_adds_accumulator_entities(monkeypatch: pytest.MonkeyPatch)
             "Boost 120 minutes",
             "Cancel boost",
         ]
-        icons = [getattr(entity, "icon", getattr(entity, "_attr_icon", None)) for entity in boost_entities]
+        icons = [
+            getattr(entity, "icon", getattr(entity, "_attr_icon", None))
+            for entity in boost_entities
+        ]
         assert icons == [
             "mdi:timer-play",
             "mdi:timer-play",
@@ -247,6 +256,8 @@ def test_accumulator_boost_button_triggers_service() -> None:
             node_type="acm",
         )
         button.hass = hass
+
+        assert button.translation_placeholders == {"minutes": "60"}
 
         await button.async_press()
 
@@ -327,7 +338,9 @@ def test_accumulator_boost_button_handles_missing_hass() -> None:
     asyncio.run(_run())
 
 
-def test_accumulator_boost_button_logs_service_errors(caplog: pytest.LogCaptureFixture) -> None:
+def test_accumulator_boost_button_logs_service_errors(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     async def _run() -> None:
         caplog.set_level(logging.ERROR)
         hass = HomeAssistant()
@@ -348,7 +361,9 @@ def test_accumulator_boost_button_logs_service_errors(caplog: pytest.LogCaptureF
         )
         button.hass = hass
 
-        hass.services.async_call.side_effect = button_module.ServiceNotFound("termoweb", "boost")
+        hass.services.async_call.side_effect = button_module.ServiceNotFound(
+            "termoweb", "boost"
+        )
         await button.async_press()
         assert "Boost helper service unavailable" in caplog.text
 
@@ -380,14 +395,19 @@ def test_state_refresh_button_direct_press_and_info() -> None:
 
     asyncio.run(_run())
 
-def test_binary_sensor_setup_adds_boost_entities(monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_binary_sensor_setup_adds_boost_entities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     async def _run() -> None:
         hass = HomeAssistant()
         entry = types.SimpleNamespace(entry_id="entry-boost-binary")
         dev_id = "device-boost"
         coordinator = types.SimpleNamespace(hass=hass, data={})
 
-        hass.data = {DOMAIN: {entry.entry_id: {"coordinator": coordinator, "dev_id": dev_id}}}
+        hass.data = {
+            DOMAIN: {entry.entry_id: {"coordinator": coordinator, "dev_id": dev_id}}
+        }
 
         boost_node = types.SimpleNamespace(addr="4", supports_boost=lambda: True)
         skip_node = types.SimpleNamespace(addr="5", supports_boost=False)

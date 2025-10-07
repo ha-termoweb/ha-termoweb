@@ -30,5 +30,92 @@
         }
       }
     }
+  },
+  "entity": {
+    "button": {
+      "force_refresh": {
+        "name": "Force refresh"
+      },
+      "accumulator_boost_minutes": {
+        "name": "Boost {minutes} minutes"
+      },
+      "accumulator_boost_cancel": {
+        "name": "Cancel boost"
+      }
+    },
+    "select": {
+      "accumulator_boost_duration": {
+        "name": "Boost duration"
+      }
+    }
+  },
+  "services": {
+    "set_schedule": {
+      "name": "Set weekly schedule",
+      "description": "Set the 7×24 weekly program for a TermoWeb heater. The program is a list of 168 integers, where each value corresponds to one hour of the week starting Monday 00:00. Use 0 for the cold preset, 1 for the night preset and 2 for the day preset.",
+      "fields": {
+        "prog": {
+          "name": "Program",
+          "description": "A list of 168 integers (0, 1 or 2) representing the heater’s weekly schedule. Index 0 is Monday 00:00, index 1 is Monday 01:00, and so on.",
+          "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
+        }
+      }
+    },
+    "set_preset_temperatures": {
+      "name": "Set preset temperatures",
+      "description": "Set the cold, night and day preset temperatures for a TermoWeb heater. You can either provide all three temperatures as a single list (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "fields": {
+        "ptemp": {
+          "name": "Preset temperatures",
+          "description": "A list of three temperatures [cold, night, day] in the same units as the heater (°C or °F). If provided, this will override individual cold, night and day values.",
+          "example": "[10.0, 16.0, 20.0]"
+        },
+        "cold": {
+          "name": "Cold preset",
+          "description": "Temperature for the cold preset (°C or °F).",
+          "example": "10.0"
+        },
+        "night": {
+          "name": "Night preset",
+          "description": "Temperature for the night preset (°C or °F).",
+          "example": "16.0"
+        },
+        "day": {
+          "name": "Day preset",
+          "description": "Temperature for the day preset (°C or °F).",
+          "example": "20.0"
+        }
+      }
+    },
+    "import_energy_history": {
+      "name": "Import energy history",
+      "description": "Import historical hourly energy counters for TermoWeb heaters up to one year ago into Home Assistant statistics.",
+      "fields": {
+        "reset_progress": {
+          "name": "Reset progress",
+          "description": "Clear stored progress and re-import history from scratch."
+        },
+        "max_history_retrieval": {
+          "name": "Max history days",
+          "description": "Number of days of history to retrieve. Overrides the configured default for this import only."
+        }
+      }
+    },
+    "ws_debug_probe": {
+      "name": "Emit websocket debug probe",
+      "description": "Request an immediate ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update`` frame sizes. Enable the debug option in the integration settings before using this helper.",
+      "fields": {
+        "entry_id": {
+          "name": "Config entry ID",
+          "description": "Restrict the probe to a single TermoWeb config entry.",
+          "example": "abcd1234deadbeef"
+        },
+        "dev_id": {
+          "name": "Device ID",
+          "description": "Restrict the probe to a single gateway device.",
+          "example": "0000abcd"
+        }
+      }
+    }
   }
 }

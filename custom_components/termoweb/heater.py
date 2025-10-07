@@ -264,11 +264,7 @@ def derive_boost_state(
     boost_end_dt: datetime | None = None
     boost_minutes: int | None = None
     resolver = getattr(coordinator, "resolve_boost_end", None)
-    if (
-        callable(resolver)
-        and boost_day is not None
-        and boost_minute is not None
-    ):
+    if callable(resolver) and boost_day is not None and boost_minute is not None:
         try:
             boost_end_dt, boost_minutes = resolver(boost_day, boost_minute)
         except Exception:  # noqa: BLE001 - defensive
