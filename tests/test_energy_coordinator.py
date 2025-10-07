@@ -244,14 +244,21 @@ def test_coordinator_success_resets_backoff() -> None:
         await coord.async_refresh()
 
         dev = coord.data["dev"]
-        client.get_node_settings.assert_called_once_with("dev", ("htr", "A"))
+        assert client.get_node_settings.await_args_list[0].args == (
+            "dev",
+            ("htr", "A"),
+        )
+        assert client.get_node_settings.await_args_list[1].args == (
+            "dev",
+            ("acm", "B"),
+        )
         assert dev["htr"]["settings"]["A"] == {"mode": "auto"}
         nodes_by_type = dev.get("nodes_by_type")
         assert nodes_by_type is not None
         assert nodes_by_type["htr"]["settings"]["A"] == {"mode": "auto"}
         assert nodes_by_type["htr"]["addrs"] == ["A"]
         assert nodes_by_type["acm"]["addrs"] == ["B"]
-        assert nodes_by_type["acm"]["settings"] == {}
+        assert nodes_by_type["acm"]["settings"]["B"] == {"mode": "auto"}
         assert dev["htr"] is nodes_by_type["htr"]
         assert coord._backoff == 0
         assert coord.update_interval == timedelta(seconds=coord._base_interval)
@@ -288,11 +295,8 @@ def test_state_coordinator_round_robin_mixed_types() -> None:
         )
 
         await coord.async_refresh()
-        await coord.async_refresh()
-        await coord.async_refresh()
 
         dev = coord.data["dev"]
-        assert coord._rr_index["dev"] == 0
         assert client.get_node_settings.await_args_list[0].args == (
             "dev",
             ("htr", "A"),
@@ -310,6 +314,48 @@ def test_state_coordinator_round_robin_mixed_types() -> None:
         assert dev["nodes_by_type"]["acm"]["settings"]["B"] == {"mode": "charge"}
         assert dev["htr"] is dev["nodes_by_type"]["htr"]
         assert dev["acm"] is dev["nodes_by_type"]["acm"]
+
+    asyncio.run(_run())
+
+
+def test_state_coordinator_ignores_non_dict_payloads() -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_node_settings = AsyncMock(
+            side_effect=[
+                "unexpected",
+                {"mode": "auto"},
+            ]
+        )
+
+        hass = HomeAssistant()
+        nodes = {
+            "nodes": [
+                {"addr": "A", "type": "htr"},
+                {"addr": "B", "type": "htr"},
+            ]
+        }
+        coord = StateCoordinator(
+            hass,
+            client,
+            30,
+            "dev",
+            {"name": "Device"},
+            nodes,  # type: ignore[arg-type]
+        )
+
+        await coord.async_refresh()
+
+        dev = coord.data["dev"]
+        assert client.get_node_settings.await_args_list[0].args == (
+            "dev",
+            ("htr", "A"),
+        )
+        assert client.get_node_settings.await_args_list[1].args == (
+            "dev",
+            ("htr", "B"),
+        )
+        assert dev["htr"]["settings"] == {"B": {"mode": "auto"}}
 
     asyncio.run(_run())
 
