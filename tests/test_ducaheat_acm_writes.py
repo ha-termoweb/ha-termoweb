@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Callable
 from unittest.mock import AsyncMock
 
 import pytest
@@ -17,64 +17,17 @@ from custom_components.termoweb.const import BRAND_DUCAHEAT, get_brand_user_agen
 from homeassistant.components.climate import HVACMode
 
 
-def _setup_client(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    responses: list[dict[str, Any] | None] | None = None,
-) -> tuple[
-    DucaheatRESTClient,
-    list[tuple[str, str, dict[str, Any]]],
-    list[str],
-]:
-    """Create a REST client with fake request handling."""
-
-    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
-    responses = list(responses or [])
-    calls: list[tuple[str, str, dict[str, Any]]] = []
-    rtc_calls: list[str] = []
-
-    headers = {
-        "Authorization": "Bearer token",
-        "X-SerialId": "15",
-        "User-Agent": get_brand_user_agent(BRAND_DUCAHEAT),
-    }
-
-    def _hvac_mode_str(self: HVACMode) -> str:
-        """Return the enum value for consistent serialization."""
-
-        return str(self.value)
-
-    monkeypatch.setattr(HVACMode, "__str__", _hvac_mode_str, raising=False)
-
-    async def fake_headers() -> dict[str, str]:
-        return dict(headers)
-
-    async def fake_request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
-        calls.append((method, path, kwargs))
-        if responses:
-            return responses.pop(0) or {}
-        return {}
-
-    async def fake_rtc(dev_id: str) -> dict[str, Any]:
-        rtc_calls.append(dev_id)
-        return {"y": 2024, "n": 1, "d": 1, "h": 0, "m": 0, "s": 0}
-    monkeypatch.setattr(client, "_authed_headers", fake_headers)
-    monkeypatch.setattr(client, "_request", fake_request)
-    monkeypatch.setattr(client, "get_rtc_time", fake_rtc)
-    return client, calls, rtc_calls
-
-
 def test_ducaheat_acm_mode_boost_includes_duration_and_metadata(
-    monkeypatch: pytest.MonkeyPatch,
+    ducaheat_rest_harness: Callable[..., Any],
 ) -> None:
     async def _run() -> None:
-        client, calls, rtc_calls = _setup_client(monkeypatch, responses=[{"ok": True}])
+        harness = ducaheat_rest_harness(responses=[{"ok": True}])
 
-        result = await client.set_node_settings(
+        result = await harness.client.set_node_settings(
             "dev", ("acm", "9"), mode="boost", boost_time=45
         )
 
-        assert calls == [
+        assert harness.requests == [
             (
                 "POST",
                 "/api/v2/devs/dev/acm/9/mode",
@@ -88,7 +41,7 @@ def test_ducaheat_acm_mode_boost_includes_duration_and_metadata(
                 },
             )
         ]
-        assert rtc_calls == ["dev"]
+        assert harness.rtc_calls == ["dev"]
         boost_state = result.get("boost_state")
         assert boost_state["boost_active"] is True
         assert boost_state["boost_minutes_delta"] == 45
@@ -98,13 +51,17 @@ def test_ducaheat_acm_mode_boost_includes_duration_and_metadata(
     asyncio.run(_run())
 
 
-def test_ducaheat_acm_mode_cancel_posts_status(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ducaheat_acm_mode_cancel_posts_status(
+    ducaheat_rest_harness: Callable[..., Any]
+) -> None:
     async def _run() -> None:
-        client, calls, rtc_calls = _setup_client(monkeypatch, responses=[{"ok": True}])
+        harness = ducaheat_rest_harness(responses=[{"ok": True}])
 
-        result = await client.set_node_settings("dev", ("acm", "9"), mode=HVACMode.AUTO)
+        result = await harness.client.set_node_settings(
+            "dev", ("acm", "9"), mode=HVACMode.AUTO
+        )
 
-        assert calls == [
+        assert harness.requests == [
             (
                 "POST",
                 "/api/v2/devs/dev/acm/9/status",
@@ -130,7 +87,7 @@ def test_ducaheat_acm_mode_cancel_posts_status(monkeypatch: pytest.MonkeyPatch) 
                 },
             ),
         ]
-        assert rtc_calls == ["dev"]
+        assert harness.rtc_calls == ["dev"]
         boost_state = result.get("boost_state")
         assert boost_state["boost_active"] is False
         assert boost_state["boost_end"] is None
@@ -139,15 +96,17 @@ def test_ducaheat_acm_mode_cancel_posts_status(monkeypatch: pytest.MonkeyPatch) 
     asyncio.run(_run())
 
 
-def test_ducaheat_acm_set_temperature(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ducaheat_acm_set_temperature(
+    ducaheat_rest_harness: Callable[..., Any]
+) -> None:
     async def _run() -> None:
-        client, calls, rtc_calls = _setup_client(
-            monkeypatch, responses=[{"status": "ok"}]
+        harness = ducaheat_rest_harness(responses=[{"status": "ok"}])
+
+        await harness.client.set_node_settings(
+            "dev", ("acm", "2"), stemp=19.5, units="c"
         )
 
-        await client.set_node_settings("dev", ("acm", "2"), stemp=19.5, units="c")
-
-        assert calls == [
+        assert harness.requests == [
             (
                 "POST",
                 "/api/v2/devs/dev/acm/2/status",
@@ -161,21 +120,21 @@ def test_ducaheat_acm_set_temperature(monkeypatch: pytest.MonkeyPatch) -> None:
                 },
             )
         ]
-        assert rtc_calls == []
+        assert harness.rtc_calls == []
 
     asyncio.run(_run())
 
 
-def test_ducaheat_acm_program_write(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ducaheat_acm_program_write(
+    ducaheat_rest_harness: Callable[..., Any]
+) -> None:
     async def _run() -> None:
-        client, calls, rtc_calls = _setup_client(
-            monkeypatch, responses=[{"saved": True}]
-        )
+        harness = ducaheat_rest_harness(responses=[{"saved": True}])
         prog = [0, 1, 2] * 56
 
-        await client.set_node_settings("dev", ("acm", "4"), prog=list(prog))
+        await harness.client.set_node_settings("dev", ("acm", "4"), prog=list(prog))
 
-        assert calls == [
+        assert harness.requests == [
             (
                 "POST",
                 "/api/v2/devs/dev/acm/4/prog",
@@ -189,25 +148,27 @@ def test_ducaheat_acm_program_write(monkeypatch: pytest.MonkeyPatch) -> None:
                 },
             )
         ]
-        assert rtc_calls == []
+        assert harness.rtc_calls == []
 
         with pytest.raises(ValueError):
-            await client.set_node_settings("dev", ("acm", "4"), prog=[0] * 24)
+            await harness.client.set_node_settings(
+                "dev", ("acm", "4"), prog=[0] * 24
+            )
 
     asyncio.run(_run())
 
 
-def test_ducaheat_acm_program_temps(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ducaheat_acm_program_temps(
+    ducaheat_rest_harness: Callable[..., Any]
+) -> None:
     async def _run() -> None:
-        client, calls, rtc_calls = _setup_client(
-            monkeypatch, responses=[{"saved": True}]
-        )
+        harness = ducaheat_rest_harness(responses=[{"saved": True}])
 
-        await client.set_node_settings(
+        await harness.client.set_node_settings(
             "dev", ("acm", "8"), ptemp=[18.0, 20.0, 22.0]
         )
 
-        assert calls == [
+        assert harness.requests == [
             (
                 "POST",
                 "/api/v2/devs/dev/acm/8/prog_temps",
@@ -221,7 +182,7 @@ def test_ducaheat_acm_program_temps(monkeypatch: pytest.MonkeyPatch) -> None:
                 },
             )
         ]
-        assert rtc_calls == []
+        assert harness.rtc_calls == []
 
     asyncio.run(_run())
 
@@ -259,24 +220,28 @@ def test_ducaheat_acm_request_error(monkeypatch: pytest.MonkeyPatch) -> None:
     asyncio.run(_run())
 
 
-def test_ducaheat_acm_mode_invalid_boost_time(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ducaheat_acm_mode_invalid_boost_time(
+    ducaheat_rest_harness: Callable[..., Any]
+) -> None:
     async def _run() -> None:
-        client, _, _ = _setup_client(monkeypatch)
+        harness = ducaheat_rest_harness()
 
         with pytest.raises(ValueError):
-            await client.set_node_settings(
+            await harness.client.set_node_settings(
                 "dev", ("acm", "2"), mode="auto", boost_time=15
             )
 
     asyncio.run(_run())
 
 
-def test_ducaheat_acm_mode_boost_invalid_minutes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ducaheat_acm_mode_boost_invalid_minutes(
+    ducaheat_rest_harness: Callable[..., Any]
+) -> None:
     async def _run() -> None:
-        client, _, _ = _setup_client(monkeypatch)
+        harness = ducaheat_rest_harness()
 
         with pytest.raises(ValueError):
-            await client.set_node_settings(
+            await harness.client.set_node_settings(
                 "dev", ("acm", "2"), mode="boost", boost_time=0
             )
 
@@ -284,13 +249,13 @@ def test_ducaheat_acm_mode_boost_invalid_minutes(monkeypatch: pytest.MonkeyPatch
 
 
 def test_ducaheat_acm_mode_boost_invalid_minutes_type(
-    monkeypatch: pytest.MonkeyPatch,
+    ducaheat_rest_harness: Callable[..., Any],
 ) -> None:
     async def _run() -> None:
-        client, _, _ = _setup_client(monkeypatch)
+        harness = ducaheat_rest_harness()
 
         with pytest.raises(ValueError):
-            await client.set_node_settings(
+            await harness.client.set_node_settings(
                 "dev", ("acm", "2"), mode="boost", boost_time="abc"
             )
 
@@ -299,19 +264,18 @@ def test_ducaheat_acm_mode_boost_invalid_minutes_type(
 
 def test_ducaheat_collect_boost_metadata_rtc_failure(
     monkeypatch: pytest.MonkeyPatch,
+    ducaheat_rest_harness: Callable[..., Any],
 ) -> None:
     async def _run() -> None:
-        client, calls, _ = _setup_client(
-            monkeypatch, responses=[{"ok": True}, {"ok": True}]
-        )
+        harness = ducaheat_rest_harness(responses=[{"ok": True}, {"ok": True}])
 
         async def failing_rtc(dev_id: str) -> dict[str, Any]:
             raise RuntimeError("boom")
 
-        monkeypatch.setattr(client, "get_rtc_time", failing_rtc)
+        monkeypatch.setattr(harness.client, "get_rtc_time", failing_rtc)
 
-        result = await client.set_node_settings("dev", ("acm", "9"), mode="auto")
-        assert len(calls) == 2
+        result = await harness.client.set_node_settings("dev", ("acm", "9"), mode="auto")
+        assert len(harness.requests) == 2
         metadata = result["boost_state"]
         assert metadata["boost_active"] is False
         assert metadata["boost_end"] is None
@@ -322,19 +286,20 @@ def test_ducaheat_collect_boost_metadata_rtc_failure(
 
 def test_ducaheat_collect_boost_metadata_invalid_payload(
     monkeypatch: pytest.MonkeyPatch,
+    ducaheat_rest_harness: Callable[..., Any],
 ) -> None:
     async def _run() -> None:
-        client, calls, _ = _setup_client(
-            monkeypatch, responses=[{"ok": True}, {"ok": True}]
-        )
+        harness = ducaheat_rest_harness(responses=[{"ok": True}, {"ok": True}])
 
         async def bad_rtc(dev_id: str) -> dict[str, Any]:
             return {"y": "bad"}
 
-        monkeypatch.setattr(client, "get_rtc_time", bad_rtc)
+        monkeypatch.setattr(harness.client, "get_rtc_time", bad_rtc)
 
-        result = await client.set_node_settings("dev", ("acm", "9"), mode="auto")
-        assert len(calls) == 2
+        result = await harness.client.set_node_settings(
+            "dev", ("acm", "9"), mode="auto"
+        )
+        assert len(harness.requests) == 2
         metadata = result["boost_state"]
         assert metadata["boost_end"] is None
         assert metadata["boost_minutes_delta"] == 0
@@ -480,21 +445,20 @@ async def test_ducaheat_set_acm_boost_state_client_error(
 
 def test_ducaheat_collect_boost_metadata_rtc_failure_active(
     monkeypatch: pytest.MonkeyPatch,
+    ducaheat_rest_harness: Callable[..., Any],
 ) -> None:
     async def _run() -> None:
-        client, calls, _ = _setup_client(
-            monkeypatch, responses=[{"ok": True}]
-        )
+        harness = ducaheat_rest_harness(responses=[{"ok": True}])
 
         async def failing_rtc(dev_id: str) -> dict[str, Any]:
             raise RuntimeError("boom")
 
-        monkeypatch.setattr(client, "get_rtc_time", failing_rtc)
+        monkeypatch.setattr(harness.client, "get_rtc_time", failing_rtc)
 
-        result = await client.set_node_settings(
+        result = await harness.client.set_node_settings(
             "dev", ("acm", "9"), mode="boost", boost_time=30
         )
-        assert calls == [
+        assert harness.requests == [
             (
                 "POST",
                 "/api/v2/devs/dev/acm/9/mode",
@@ -517,21 +481,20 @@ def test_ducaheat_collect_boost_metadata_rtc_failure_active(
 
 def test_ducaheat_collect_boost_metadata_invalid_payload_active(
     monkeypatch: pytest.MonkeyPatch,
+    ducaheat_rest_harness: Callable[..., Any],
 ) -> None:
     async def _run() -> None:
-        client, calls, _ = _setup_client(
-            monkeypatch, responses=[{"ok": True}]
-        )
+        harness = ducaheat_rest_harness(responses=[{"ok": True}])
 
         async def bad_rtc(dev_id: str) -> Any:
             return "bad"
 
-        monkeypatch.setattr(client, "get_rtc_time", bad_rtc)
+        monkeypatch.setattr(harness.client, "get_rtc_time", bad_rtc)
 
-        result = await client.set_node_settings(
+        result = await harness.client.set_node_settings(
             "dev", ("acm", "9"), mode="boost", boost_time=30
         )
-        assert calls == [
+        assert harness.requests == [
             (
                 "POST",
                 "/api/v2/devs/dev/acm/9/mode",
@@ -554,21 +517,20 @@ def test_ducaheat_collect_boost_metadata_invalid_payload_active(
 
 def test_ducaheat_collect_boost_metadata_invalid_datetime_active(
     monkeypatch: pytest.MonkeyPatch,
+    ducaheat_rest_harness: Callable[..., Any],
 ) -> None:
     async def _run() -> None:
-        client, calls, _ = _setup_client(
-            monkeypatch, responses=[{"ok": True}]
-        )
+        harness = ducaheat_rest_harness(responses=[{"ok": True}])
 
         async def bad_rtc(dev_id: str) -> dict[str, Any]:
             return {"y": 2024, "n": 13, "d": 1, "h": 0, "m": 0, "s": 0}
 
-        monkeypatch.setattr(client, "get_rtc_time", bad_rtc)
+        monkeypatch.setattr(harness.client, "get_rtc_time", bad_rtc)
 
-        result = await client.set_node_settings(
+        result = await harness.client.set_node_settings(
             "dev", ("acm", "9"), mode="boost", boost_time=30
         )
-        assert calls == [
+        assert harness.requests == [
             (
                 "POST",
                 "/api/v2/devs/dev/acm/9/mode",
