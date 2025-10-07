@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -363,6 +364,118 @@ async def test_ducaheat_set_acm_boost_state_non_dict_response(
     assert result["response"] == "ok"
     assert result["boost_state"]["boost_active"] is False
     rtc_mock.assert_awaited_once_with("dev")
+
+
+@pytest.mark.parametrize(
+    ("boost", "boost_time", "expected_payload"),
+    [
+        (True, 45, {"boost": True, "boost_time": 45}),
+        (False, None, {"boost": False}),
+    ],
+)
+@pytest.mark.asyncio
+async def test_ducaheat_set_acm_boost_state_posts_expected_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    boost: bool,
+    boost_time: int | None,
+    expected_payload: dict[str, Any],
+) -> None:
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+    headers = {
+        "Authorization": "Bearer token",
+        "X-SerialId": "15",
+        "User-Agent": get_brand_user_agent(BRAND_DUCAHEAT),
+    }
+    headers_mock = AsyncMock(return_value=headers)
+    monkeypatch.setattr(client, "_authed_headers", headers_mock)
+
+    post_mock = AsyncMock(return_value={"ok": True})
+    monkeypatch.setattr(client, "_post_acm_endpoint", post_mock)
+
+    base_rtc = {"y": 2024, "n": 5, "d": 10, "h": 12, "m": 0, "s": 0}
+    rtc_mock = AsyncMock(return_value=base_rtc)
+    monkeypatch.setattr(client, "get_rtc_time", rtc_mock)
+
+    result = await client.set_acm_boost_state(
+        "dev", 5, boost=boost, boost_time=boost_time
+    )
+
+    post_mock.assert_awaited_once_with(
+        "/api/v2/devs/dev/acm/5/status",
+        headers,
+        expected_payload,
+        dev_id="dev",
+        addr="5",
+    )
+    headers_mock.assert_awaited_once()
+    rtc_mock.assert_awaited_once_with("dev")
+
+    metadata = result["boost_state"]
+    assert metadata["boost_active"] is boost
+
+    if boost:
+        assert boost_time is not None
+        assert metadata["boost_minutes_delta"] == boost_time
+        expected_end = datetime(2024, 5, 10, 12, 0) + timedelta(minutes=boost_time)
+        assert metadata["boost_end_day"] == expected_end.timetuple().tm_yday
+        assert metadata["boost_end_min"] == expected_end.hour * 60 + expected_end.minute
+        assert metadata["boost_end"] == {
+            "day": expected_end.timetuple().tm_yday,
+            "minute": expected_end.hour * 60 + expected_end.minute,
+        }
+        assert metadata["boost_end_timestamp"] == expected_end.isoformat()
+    else:
+        assert metadata["boost_minutes_delta"] == 0
+        assert metadata["boost_end"] is None
+        assert metadata["boost_end_day"] is None
+        assert metadata["boost_end_min"] is None
+        assert metadata["boost_end_timestamp"] is None
+
+
+@pytest.mark.parametrize(
+    ("boost", "boost_time"),
+    [
+        (True, 30),
+        (False, None),
+    ],
+)
+@pytest.mark.asyncio
+async def test_ducaheat_set_acm_boost_state_client_error(
+    monkeypatch: pytest.MonkeyPatch,
+    boost: bool,
+    boost_time: int | None,
+) -> None:
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+
+    headers = {
+        "Authorization": "Bearer token",
+        "X-SerialId": "15",
+        "User-Agent": get_brand_user_agent(BRAND_DUCAHEAT),
+    }
+    headers_mock = AsyncMock(return_value=headers)
+    monkeypatch.setattr(client, "_authed_headers", headers_mock)
+
+    async def failing_post_segmented(*args: Any, **kwargs: Any) -> Any:
+        raise ClientResponseError(
+            request_info=None,
+            history=(),
+            status=422,
+            message="bad request",
+        )
+
+    monkeypatch.setattr(client, "_post_segmented", failing_post_segmented)
+
+    rtc_mock = AsyncMock(return_value={"ignored": True})
+    monkeypatch.setattr(client, "get_rtc_time", rtc_mock)
+
+    with pytest.raises(DucaheatRequestError) as exc:
+        await client.set_acm_boost_state(
+            "dev", 7, boost=boost, boost_time=boost_time
+        )
+
+    assert exc.value.status == 422
+    assert "bad request" in str(exc.value)
+    rtc_mock.assert_not_awaited()
 
 
 def test_ducaheat_collect_boost_metadata_rtc_failure_active(
