@@ -7,8 +7,6 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import logging
-import sys
-import time
 from typing import Any, cast
 
 from homeassistant.config_entries import ConfigEntry
@@ -26,6 +24,11 @@ from .nodes import (
     normalize_heater_addresses,
     parse_heater_energy_unique_id,
 )
+from .throttle import (
+    MonotonicRateLimiter,
+    default_samples_rate_limit_state,
+    reset_samples_rate_limit_state,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,94 +37,6 @@ OPTION_ENERGY_HISTORY_PROGRESS = "energy_history_progress"
 OPTION_MAX_HISTORY_RETRIEVED = "max_history_retrieved"
 
 DEFAULT_MAX_HISTORY_DAYS = 7
-
-
-def _integration_attr(name: str, default: Any) -> Any:
-    """Return attribute ``name`` from the integration module if available."""
-
-    module = sys.modules.get(f"{__package__}.__init__")
-    if module is None:  # pragma: no cover - defensive fallback
-        return default
-    return getattr(module, name, default)
-
-
-@dataclass(slots=True)
-class _IntegrationDependencies:
-    """Cache integration-level helpers resolved via ``_integration_attr``."""
-
-    logger: logging.Logger
-    async_mod: Any
-    datetime_mod: Any
-    time_mod: Any
-    ensure_inventory: Callable[..., Any]
-    build_map: Callable[..., Any]
-    normalize: Callable[..., Any]
-    registry_mod: Any
-    store_stats: Callable[..., Any]
-    set_factory: Callable[..., Any]
-    stats_period: Callable[..., Any]
-    last_stats_fn: Callable[..., Any]
-    clear_stats_fn: Callable[..., Any]
-
-
-_INTEGRATION_DEPS: _IntegrationDependencies | None = None
-
-
-def _resolve_integration_dependencies() -> _IntegrationDependencies:
-    """Return freshly resolved integration helpers."""
-
-    return _IntegrationDependencies(
-        logger=_integration_attr("_LOGGER", _LOGGER),
-        async_mod=_integration_attr("asyncio", asyncio),
-        datetime_mod=_integration_attr("datetime", datetime),
-        time_mod=_integration_attr("time", time),
-        ensure_inventory=_integration_attr(
-            "ensure_node_inventory", ensure_node_inventory
-        ),
-        build_map=_integration_attr(
-            "build_heater_address_map", build_heater_address_map
-        ),
-        normalize=_integration_attr(
-            "normalize_heater_addresses", normalize_heater_addresses
-        ),
-        registry_mod=_integration_attr("er", er),
-        store_stats=_integration_attr("_store_statistics", _store_statistics),
-        set_factory=_integration_attr("set", set),
-        stats_period=_integration_attr(
-            "_statistics_during_period_compat", _statistics_during_period_compat
-        ),
-        last_stats_fn=_integration_attr(
-            "_get_last_statistics_compat", _get_last_statistics_compat
-        ),
-        clear_stats_fn=_integration_attr(
-            "_clear_statistics_compat", _clear_statistics_compat
-        ),
-    )
-
-
-def _get_integration_dependencies() -> _IntegrationDependencies:
-    """Return cached integration helpers, resolving them on first use."""
-
-    global _INTEGRATION_DEPS
-    if _INTEGRATION_DEPS is None:
-        _INTEGRATION_DEPS = _resolve_integration_dependencies()
-    return _INTEGRATION_DEPS
-
-
-def _reset_integration_dependencies_cache() -> None:
-    """Reset the cached integration helpers (primarily for tests)."""
-
-    global _INTEGRATION_DEPS
-    _INTEGRATION_DEPS = None
-
-
-@dataclass
-class RateLimitState:
-    """Track rate limit state for hourly sample queries."""
-
-    lock: asyncio.Lock
-    get_last_query: Callable[[], float]
-    set_last_query: Callable[[float], None]
 
 
 @dataclass(slots=True)
@@ -143,37 +58,6 @@ class _RecorderModuleImports:
 
 
 _RECORDER_IMPORTS: _RecorderModuleImports | None = None
-_SAMPLES_QUERY_LOCK = asyncio.Lock()
-_LAST_SAMPLES_QUERY = 0.0
-
-
-def _get_last_samples_query() -> float:
-    """Return the timestamp of the last samples query."""
-
-    return _LAST_SAMPLES_QUERY
-
-
-def _set_last_samples_query(value: float) -> None:
-    """Persist the timestamp of the last samples query."""
-
-    global _LAST_SAMPLES_QUERY
-    _LAST_SAMPLES_QUERY = value
-
-
-def default_samples_rate_limit_state() -> RateLimitState:
-    """Return the shared rate limiter for heater samples queries."""
-
-    return RateLimitState(
-        lock=_SAMPLES_QUERY_LOCK,
-        get_last_query=_get_last_samples_query,
-        set_last_query=_set_last_samples_query,
-    )
-
-
-def reset_samples_rate_limit_state() -> None:
-    """Reset the shared rate limiter tracking to its initial state."""
-
-    _set_last_samples_query(0.0)
 
 
 def _resolve_recorder_imports() -> _RecorderModuleImports:
@@ -249,8 +133,7 @@ def _resolve_statistics_helpers(
 def _iso_date(ts: int) -> str:
     """Convert unix timestamp to ISO date."""
 
-    datetime_mod = _integration_attr("datetime", datetime)
-    return datetime_mod.fromtimestamp(ts, UTC).date().isoformat()
+    return datetime.fromtimestamp(ts, UTC).date().isoformat()
 
 
 def _store_statistics(
@@ -425,25 +308,21 @@ async def async_import_energy_history(
     *,
     reset_progress: bool = False,
     max_days: int | None = None,
-    rate_limit: RateLimitState,
+    rate_limit: MonotonicRateLimiter,
 ) -> None:
     """Fetch historical hourly samples and insert statistics."""
 
-    deps = _get_integration_dependencies()
-
-    logger = deps.logger
-    async_mod = deps.async_mod
-    datetime_mod = deps.datetime_mod
-    time_mod = deps.time_mod
-    ensure_inventory = deps.ensure_inventory
-    build_map = deps.build_map
-    normalize = deps.normalize
-    registry_mod = deps.registry_mod
-    store_stats = deps.store_stats
-    set_factory: Callable[..., set[Any]] = deps.set_factory
-    stats_period = deps.stats_period
-    last_stats_fn = deps.last_stats_fn
-    clear_stats_fn = deps.clear_stats_fn
+    logger = _LOGGER
+    async_mod = asyncio
+    datetime_mod = datetime
+    ensure_inventory = ensure_node_inventory
+    build_map = build_heater_address_map
+    normalize = normalize_heater_addresses
+    registry_mod = er
+    store_stats = _store_statistics
+    stats_period = _statistics_during_period_compat
+    last_stats_fn = _get_last_statistics_compat
+    clear_stats_fn = _clear_statistics_compat
 
     rec = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if not rec:
@@ -465,14 +344,14 @@ async def async_import_energy_history(
     selected_map: dict[str, list[str]] = {}
     if requested_map:
         available_sets: dict[str, set[str]] = {
-            node_type: set_factory(addrs) for node_type, addrs in by_type.items()
+            node_type: set(addrs) for node_type, addrs in by_type.items()
         }
         for req_type, addr_list in requested_map.items():
             if not addr_list:  # pragma: no cover - defensive guard
                 continue
             if req_type == "htr":
                 for addr in addr_list:
-                    for actual_type in reverse_lookup.get(addr, set_factory()):
+                    for actual_type in reverse_lookup.get(addr, set()):
                         selected_map.setdefault(actual_type, []).append(addr)
             else:
                 available = available_sets.get(req_type)
@@ -562,19 +441,17 @@ async def async_import_energy_history(
     async def _rate_limited_fetch(
         node_type: str, addr: str, start: int, stop: int
     ) -> list[dict[str, Any]]:
-        async with rate_limit.lock:
-            now = time_mod.monotonic()
-            wait = 1 - (now - rate_limit.get_last_query())
-            if wait > 0:
-                logger.debug(
-                    "%s:%s/%s: sleeping %.2fs before query",
-                    node_type,
-                    addr,
-                    _iso_date(start),
-                    wait,
-                )
-                await async_mod.sleep(wait)
-            rate_limit.set_last_query(time_mod.monotonic())
+
+        def _log_wait(wait: float) -> None:
+            logger.debug(
+                "%s:%s/%s: sleeping %.2fs before query",
+                node_type,
+                addr,
+                _iso_date(start),
+                wait,
+            )
+
+        await rate_limit.async_throttle(on_wait=_log_wait)
         logger.debug(
             "%s:%s: requesting samples %s-%s",
             node_type,
@@ -854,12 +731,10 @@ async def async_register_import_energy_history_service(
     if hass.services.has_service(DOMAIN, "import_energy_history"):
         return
 
-    deps = _get_integration_dependencies()
-
-    logger = deps.logger
-    async_mod = deps.async_mod
-    build_map = deps.build_map
-    registry_mod = deps.registry_mod
+    logger = _LOGGER
+    async_mod = asyncio
+    build_map = build_heater_address_map
+    registry_mod = er
 
     async def _service_import_energy_history(call) -> None:
         """Handle the import_energy_history service call."""
@@ -971,8 +846,7 @@ def async_schedule_initial_energy_import(
     if entry.options.get(OPTION_ENERGY_HISTORY_IMPORTED):
         return
 
-    logger = _integration_attr("_LOGGER", _LOGGER)
-    logger.debug("%s: scheduling initial energy import", entry.entry_id)
+    _LOGGER.debug("%s: scheduling initial energy import", entry.entry_id)
 
     async def _schedule_import(_event: Any | None = None) -> None:
         await import_fn(hass, entry)
