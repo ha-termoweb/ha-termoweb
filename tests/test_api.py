@@ -16,6 +16,7 @@ from custom_components.termoweb.backend.ducaheat import (
     DucaheatRESTClient,
     DucaheatRequestError,
 )
+from custom_components.termoweb.backend.sanitize import mask_identifier
 from custom_components.termoweb.const import (
     BRAND_DUCAHEAT,
     BRAND_TERMOWEB,
@@ -967,9 +968,12 @@ def test_get_node_settings_acm_logs(
         data = await client.get_node_settings("dev", node)
 
         assert data["status"]["mode"] == "auto"
+        expected = (
+            f"GET settings node {mask_identifier('dev')}/{mask_identifier('7')}"
+            " (acm) payload"
+        )
         assert any(
-            "GET settings node dev/7 (acm) payload" in record.getMessage()
-            for record in caplog.records
+            expected in record.getMessage() for record in caplog.records
         )
 
     asyncio.run(_run())
@@ -1001,9 +1005,12 @@ def test_get_node_samples_logs_for_unknown_type(
         samples = await client.get_node_samples("dev", ("pmo", "4"), 0, 5)
 
         assert samples == []
+        expected = (
+            f"GET samples node {mask_identifier('dev')}/{mask_identifier('4')}"
+            " (pmo) payload"
+        )
         assert any(
-            "GET samples node dev/4 (pmo) payload" in record.getMessage()
-            for record in caplog.records
+            expected in record.getMessage() for record in caplog.records
         )
 
     asyncio.run(_run())
@@ -1073,7 +1080,7 @@ def test_request_generic_exception_logs(caplog: pytest.LogCaptureFixture) -> Non
     asyncio.run(_run())
 
     assert "Request GET" in caplog.text
-    assert "Bearer ***REDACTED***" in caplog.text
+    assert "Bearer ***" in caplog.text
 
 
 def test_request_final_auth_error_after_retries(monkeypatch) -> None:

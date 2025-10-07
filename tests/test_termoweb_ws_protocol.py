@@ -12,6 +12,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from custom_components.termoweb.backend import termoweb_ws as module
+from custom_components.termoweb.backend.sanitize import (
+    mask_identifier,
+    redact_token_fragment,
+)
 from custom_components.termoweb.installation import InstallationSnapshot
 
 
@@ -1104,15 +1108,15 @@ def test_header_sanitizers(monkeypatch: pytest.MonkeyPatch) -> None:
     assert headers["User-Agent"] == "agent"
     assert headers["Accept-Language"] == module.ACCEPT_LANGUAGE
 
-    assert client._redact_value("   ") == ""
-    assert client._redact_value("") == ""
-    assert client._redact_value("abc") == "***"
-    assert client._redact_value("abcdefgh") == "ab***gh"
-    assert client._redact_value("abcdefghijklmnop") == "abcd...mnop"
+    assert redact_token_fragment("   ") == ""
+    assert redact_token_fragment("") == ""
+    assert redact_token_fragment("abc") == "***"
+    assert redact_token_fragment("abcdefgh") == "ab***gh"
+    assert redact_token_fragment("abcdefghijklmnop") == "abcd...mnop"
 
-    assert client._mask_identifier("abcd") == "***"
-    assert client._mask_identifier("abcdefgh") == "ab...gh"
-    assert client._mask_identifier("abcdefghijklmnop") == "abcdef...mnop"
+    assert mask_identifier("abcd") == "***"
+    assert mask_identifier("abcdefgh") == "ab...gh"
+    assert mask_identifier("abcdefghijklmnop") == "abcdef...mnop"
 
     sanitised = client._sanitise_headers(
         {
@@ -1139,12 +1143,12 @@ def test_header_sanitizers(monkeypatch: pytest.MonkeyPatch) -> None:
     assert client._sanitise_url("http://[::1") == "http://[::1"
 
 
-def test_redact_value_handles_whitespace(monkeypatch: pytest.MonkeyPatch) -> None:
-    """_redact_value should treat whitespace as empty."""
+def test_redaction_helpers_handle_whitespace(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Token and identifier masking should treat whitespace as empty."""
 
-    client, _sio, _ = _make_client(monkeypatch)
-    assert client._redact_value("   ") == ""
-    assert client._mask_identifier("   ") == ""
+    _make_client(monkeypatch)
+    assert redact_token_fragment("   ") == ""
+    assert mask_identifier("   ") == ""
 
 
 @pytest.mark.asyncio
