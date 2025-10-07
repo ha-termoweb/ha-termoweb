@@ -1,5 +1,12 @@
 # Developer notes
 
+## Backend factory API change
+
+The `create_backend` helper in `custom_components.termoweb.backend.factory` no longer accepts a
+`ws_impl` keyword argument. Custom tooling that previously passed this placeholder parameter must
+drop it and rely on the default websocket implementation that ships with the integration. Future
+overrides, if needed, will be exposed through a different configuration surface.
+
 ## Ducaheat accumulator write semantics
 
 Ducaheat accumulators (and heaters served by the same backend) do not expose a monolithic
