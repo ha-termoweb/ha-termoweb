@@ -20,6 +20,7 @@ from .heater import (
     prepare_heater_platform_data,
     resolve_boost_runtime_minutes,
     set_boost_runtime_minutes,
+    supports_boost,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -43,8 +44,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     ):
         if node_type != "acm":
             continue
-        supports_boost = getattr(node, "supports_boost", None)
-        if callable(supports_boost) and not supports_boost():
+        if not supports_boost(node):
             continue
         unique_id = f"{DOMAIN}:{dev_id}:{node_type}:{addr_str}:boost_duration"
         new_entities.append(

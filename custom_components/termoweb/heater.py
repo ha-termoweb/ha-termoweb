@@ -184,6 +184,33 @@ def resolve_boost_runtime_minutes(
     return default
 
 
+def supports_boost(node: Any) -> bool:
+    """Return ``True`` when ``node`` exposes boost controls."""
+
+    candidate = getattr(node, "supports_boost", None)
+
+    if isinstance(candidate, bool):
+        return candidate
+
+    if callable(candidate):
+        try:
+            candidate = candidate()
+        except Exception:  # noqa: BLE001 - defensive
+            node_ref = getattr(node, "addr", node)
+            _LOGGER.debug(
+                "Ignoring boost support probe failure for node %r",
+                node_ref,
+                exc_info=True,
+            )
+            return False
+
+    result = _coerce_boost_bool(candidate)
+    if result is not None:
+        return result
+
+    return False
+
+
 def _coerce_boost_bool(value: Any) -> bool | None:
     """Return ``value`` as a boolean when possible."""
 
