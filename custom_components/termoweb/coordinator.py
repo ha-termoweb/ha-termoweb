@@ -208,6 +208,8 @@ class StateCoordinator(
         self._addr_lookup: dict[str, set[str]] = {}
         self._pending_settings: dict[tuple[str, str], PendingSetting] = {}
         self._invalid_nodes_logged = False
+        self._rtc_reference: datetime | None = None
+        self._rtc_reference_monotonic: float | None = None
         self.update_nodes(nodes, node_inventory=node_inventory)
 
     def _set_inventory_from_nodes(
@@ -382,11 +384,133 @@ class StateCoordinator(
     ) -> tuple[datetime | None, int | None]:
         """Return boost end metadata derived from cached day/minute fields."""
 
+        reference = now or self._device_now_estimate()
         return resolve_boost_end_from_fields(
             boost_end_day,
             boost_end_min,
+            now=reference,
+        )
+
+    @staticmethod
+    def _rtc_payload_to_datetime(payload: Mapping[str, Any] | None) -> datetime | None:
+        """Return a timezone-aware datetime extracted from RTC payload."""
+
+        if not isinstance(payload, Mapping):
+            return None
+
+        year = _coerce_int(payload.get("y"))
+        month = _coerce_int(payload.get("n"))
+        day = _coerce_int(payload.get("d"))
+        if year is None or month is None or day is None:
+            return None
+
+        hour = _coerce_int(payload.get("h"))
+        minute = _coerce_int(payload.get("m"))
+        second = _coerce_int(payload.get("s"))
+
+        tzinfo = dt_util.now().tzinfo or getattr(dt_util, "UTC", timezone.utc)
+        try:
+            return datetime(
+                year,
+                month,
+                day,
+                hour or 0,
+                minute or 0,
+                second or 0,
+                tzinfo=tzinfo,
+            )
+        except ValueError:
+            return None
+
+    def _device_now_estimate(self) -> datetime | None:
+        """Return the latest hub time reference adjusted by monotonic delta."""
+
+        if self._rtc_reference is None or self._rtc_reference_monotonic is None:
+            return None
+        delta_seconds = time_mod() - self._rtc_reference_monotonic
+        try:
+            return self._rtc_reference + timedelta(seconds=delta_seconds)
+        except OverflowError:  # pragma: no cover - defensive
+            return self._rtc_reference
+
+    async def _async_fetch_rtc_datetime(self) -> datetime | None:
+        """Fetch the hub RTC time and update the cached reference."""
+
+        try:
+            payload = await self.client.get_rtc_time(self._dev_id)
+        except TimeoutError as err:  # pragma: no cover - defensive logging
+            _LOGGER.debug(
+                "RTC fetch timed out for dev %s: %s",
+                self._dev_id,
+                err,
+                exc_info=err,
+            )
+            return None
+        except (ClientError, BackendRateLimitError, BackendAuthError) as err:
+            _LOGGER.debug(
+                "RTC fetch failed for dev %s: %s",
+                self._dev_id,
+                err,
+                exc_info=err,
+            )
+            return None
+
+        rtc_now = self._rtc_payload_to_datetime(payload)
+        if rtc_now is not None:
+            self._rtc_reference = rtc_now
+            self._rtc_reference_monotonic = time_mod()
+        return rtc_now
+
+    @staticmethod
+    def _requires_boost_resolution(payload: Mapping[str, Any] | None) -> bool:
+        """Return True when ``payload`` exposes boost day/min metadata."""
+
+        if not isinstance(payload, Mapping):
+            return False
+        day = _coerce_int(payload.get("boost_end_day"))
+        minute = _coerce_int(payload.get("boost_end_min"))
+        return day is not None or minute is not None
+
+    def _apply_accumulator_boost_metadata(
+        self,
+        payload: MutableMapping[str, Any],
+        *,
+        now: datetime | None,
+    ) -> None:
+        """Store derived boost metadata on ``payload``."""
+
+        derived_dt, minutes = self.resolve_boost_end(
+            payload.get("boost_end_day"),
+            payload.get("boost_end_min"),
             now=now,
         )
+
+        if derived_dt is not None:
+            payload["boost_end_datetime"] = derived_dt
+        else:
+            payload.pop("boost_end_datetime", None)
+
+        if minutes is not None:
+            payload["boost_minutes_delta"] = minutes
+        else:
+            payload.pop("boost_minutes_delta", None)
+
+    def _apply_boost_metadata_for_section(
+        self,
+        section: Mapping[str, Any] | None,
+        *,
+        now: datetime | None,
+    ) -> None:
+        """Apply boost metadata derivation to every settings payload."""
+
+        if not isinstance(section, Mapping):
+            return
+        settings = section.get("settings")
+        if not isinstance(settings, MutableMapping):
+            return
+        for payload in settings.values():
+            if isinstance(payload, MutableMapping):
+                self._apply_accumulator_boost_metadata(payload, now=now)
 
     def _should_defer_pending_setting(
         self,
@@ -620,6 +744,15 @@ class StateCoordinator(
                 )
                 return
 
+            if resolved_type == "acm":
+                now_value: datetime | None = None
+                if self._requires_boost_resolution(payload):
+                    now_value = await self._async_fetch_rtc_datetime()
+                if now_value is None:
+                    now_value = self._device_now_estimate()
+                if isinstance(payload, MutableMapping):
+                    self._apply_accumulator_boost_metadata(payload, now=now_value)
+
             current = self.data or {}
             new_data: dict[str, dict[str, Any]] = dict(current)
             dev_data = dict(new_data.get(dev_id) or {})
@@ -715,6 +848,7 @@ class StateCoordinator(
         addr_map = dict(self._nodes_by_type)
         reverse = {address: set(types) for address, types in self._addr_lookup.items()}
         addrs = [addr for addrs in addr_map.values() for addr in addrs]
+        rtc_now: datetime | None = None
         try:
             self._prune_pending_settings()
             prev_dev = (self.data or {}).get(dev_id, {})
@@ -781,6 +915,15 @@ class StateCoordinator(
                                 addr,
                             )
                             continue
+                        if (
+                            resolved_type == "acm"
+                            and isinstance(js, MutableMapping)
+                        ):
+                            now_value: datetime | None = None
+                            if self._requires_boost_resolution(js) and rtc_now is None:
+                                rtc_now = await self._async_fetch_rtc_datetime()
+                            now_value = rtc_now or self._device_now_estimate()
+                            self._apply_accumulator_boost_metadata(js, now=now_value)
                         bucket = settings_by_type.setdefault(resolved_type, {})
                         bucket[addr] = js
 
@@ -799,6 +942,11 @@ class StateCoordinator(
                 existing_nodes,
                 settings_by_type,
             )
+
+            acm_section = nodes_by_type.get("acm")
+            if isinstance(acm_section, Mapping):
+                now_value = rtc_now or self._device_now_estimate()
+                self._apply_boost_metadata_for_section(acm_section, now=now_value)
 
             heater_section = _ensure_heater_section(
                 nodes_by_type,

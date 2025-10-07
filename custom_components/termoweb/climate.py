@@ -314,13 +314,37 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         """Apply ``mutator`` to cached settings and refresh state if changed."""
         try:
             updated = False
+            boost_changed = False
             for settings_map in self._settings_maps():
                 cur = settings_map.get(self._addr)
                 if isinstance(cur, dict):
+                    before = (
+                        cur.get("boost_active"),
+                        cur.get("boost_remaining"),
+                        cur.get("boost_end"),
+                        cur.get("boost_end_day"),
+                        cur.get("boost_end_min"),
+                    )
                     mutator(cur)
+                    after = (
+                        cur.get("boost_active"),
+                        cur.get("boost_remaining"),
+                        cur.get("boost_end"),
+                        cur.get("boost_end_day"),
+                        cur.get("boost_end_min"),
+                    )
+                    if before != after:
+                        boost_changed = True
+                        cur.pop("boost_end_datetime", None)
+                        cur.pop("boost_minutes_delta", None)
                     updated = True
             if updated:
                 self.async_write_ha_state()
+            if boost_changed:
+                hass = self.hass
+                refresh = getattr(self.coordinator, "async_request_refresh", None)
+                if hass is not None and callable(refresh):
+                    hass.async_create_task(refresh())
         except asyncio.CancelledError:
             raise
         except Exception as err:  # pragma: no cover - defensive

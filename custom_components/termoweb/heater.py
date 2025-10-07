@@ -262,14 +262,29 @@ def derive_boost_state(
             boost_minute = raw_end.get("minute")
 
     boost_end_dt: datetime | None = None
-    boost_minutes: int | None = None
+    derived_dt = source.get("boost_end_datetime")
+    if isinstance(derived_dt, datetime):
+        boost_end_dt = derived_dt
+
+    boost_minutes: int | None = _coerce_boost_minutes(
+        source.get("boost_minutes_delta")
+    )
     resolver = getattr(coordinator, "resolve_boost_end", None)
-    if callable(resolver) and boost_day is not None and boost_minute is not None:
+    if (
+        callable(resolver)
+        and boost_day is not None
+        and boost_minute is not None
+        and (boost_end_dt is None or boost_minutes is None)
+    ):
         try:
-            boost_end_dt, boost_minutes = resolver(boost_day, boost_minute)
+            resolved_dt, resolved_minutes = resolver(boost_day, boost_minute)
         except Exception:  # noqa: BLE001 - defensive
-            boost_end_dt = None
-            boost_minutes = None
+            resolved_dt = None
+            resolved_minutes = None
+        if boost_end_dt is None:
+            boost_end_dt = resolved_dt
+        if boost_minutes is None:
+            boost_minutes = resolved_minutes
 
     if boost_minutes is None:
         boost_minutes = _coerce_boost_remaining_minutes(source.get("boost_remaining"))

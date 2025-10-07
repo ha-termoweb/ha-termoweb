@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import codecs
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping, MutableMapping
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass
@@ -1845,6 +1845,28 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             return False
         value: Any = dict(body) if isinstance(body, Mapping) else body
         section_map[addr] = value
+        if (
+            section == "settings"
+            and normalize_node_type(node_type) == "acm"
+            and isinstance(value, MutableMapping)
+        ):
+            coordinator = getattr(self, "_coordinator", None)
+            apply_helper = getattr(coordinator, "_apply_accumulator_boost_metadata", None)
+            if callable(apply_helper):
+                now = None
+                estimate = getattr(coordinator, "_device_now_estimate", None)
+                if callable(estimate):
+                    now = estimate()
+                try:
+                    apply_helper(value, now=now)
+                except Exception as err:  # pragma: no cover - defensive
+                    _LOGGER.debug(
+                        "WS boost metadata derivation failed for %s/%s: %s",
+                        node_type,
+                        addr,
+                        err,
+                        exc_info=err,
+                    )
         raw_bucket = self._nodes_raw.setdefault(node_type, {})
         raw_section = raw_bucket.setdefault(section, {})
         if isinstance(raw_section, dict):
