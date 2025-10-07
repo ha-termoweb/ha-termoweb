@@ -21,6 +21,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from custom_components.termoweb.const import DOMAIN
+
 if TYPE_CHECKING:
     from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
     from homeassistant.components.climate import HVACMode
@@ -1135,6 +1137,86 @@ def _install_stubs() -> None:
 _install_stubs()
 
 
+@pytest.fixture
+def heater_node_factory() -> Callable[..., SimpleNamespace]:
+    """Return a factory that creates heater node stubs."""
+
+    def _factory(
+        addr: str,
+        *,
+        node_type: str = "acm",
+        supports_boost: bool | None = None,
+        **extra: Any,
+    ) -> SimpleNamespace:
+        flag = True if supports_boost is None else supports_boost
+        node = SimpleNamespace(addr=str(addr), type=node_type, **extra)
+        node._supports_boost_flag = bool(flag)
+        node.supports_boost = lambda: node._supports_boost_flag  # type: ignore[attr-defined]
+        return node
+
+    return _factory
+
+
+@pytest.fixture
+def boost_capable_node(heater_node_factory: Callable[..., SimpleNamespace]) -> SimpleNamespace:
+    """Return a boost-capable accumulator node stub."""
+
+    return heater_node_factory("01", supports_boost=True)
+
+
+@pytest.fixture
+def non_boost_node(heater_node_factory: Callable[..., SimpleNamespace]) -> SimpleNamespace:
+    """Return a node stub without boost support."""
+
+    return heater_node_factory("02", supports_boost=False)
+
+
+@pytest.fixture
+def boost_runtime_store() -> Callable[[str, str, int | None], dict[str, dict[str, int]]]:
+    """Return a factory producing boost runtime store dictionaries."""
+
+    def _factory(node_type: str, addr: str, minutes: int | None = None) -> dict[str, dict[str, int]]:
+        store: dict[str, dict[str, int]] = {node_type: {}}
+        if minutes is not None:
+            store[node_type][str(addr)] = minutes
+        return store
+
+    return _factory
+
+
+@pytest.fixture
+def heater_hass_data() -> Callable[..., dict[str, Any]]:
+    """Return helper to attach TermoWeb domain data to a Home Assistant stub."""
+
+    def _factory(
+        hass: Any,
+        entry_id: str,
+        dev_id: str,
+        coordinator: Any,
+        *,
+        boost_runtime: Mapping[str, Mapping[str, int]] | None = None,
+        ws_state: Mapping[str, Any] | None = None,
+        extra: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        entry_data: dict[str, Any] = {
+            "coordinator": coordinator,
+            "dev_id": dev_id,
+        }
+        if boost_runtime is not None:
+            entry_data["boost_runtime"] = {
+                key: dict(value)
+                for key, value in boost_runtime.items()
+            }
+        if ws_state is not None:
+            entry_data["ws_state"] = dict(ws_state)
+        if extra:
+            entry_data.update(dict(extra))
+        hass.data.setdefault(DOMAIN, {})[entry_id] = entry_data
+        return entry_data
+
+    return _factory
+
+
 class FakeCoordinator:
     """Reusable coordinator stub shared across tests."""
 
@@ -1176,7 +1258,11 @@ class FakeCoordinator:
     async def async_config_entry_first_refresh(self) -> None:
         self.refresh_calls += 1
 
-    def async_add_listener(self, listener: Callable[[], None]) -> None:
+    def async_add_listener(
+        self,
+        listener: Callable[[], None],
+        context: Any | None = None,
+    ) -> None:
         if callable(listener):
             self.listeners.append(listener)
 
