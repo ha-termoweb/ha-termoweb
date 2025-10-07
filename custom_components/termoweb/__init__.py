@@ -85,7 +85,7 @@ from .backend.ws_client import TermoWebWSClient  # noqa: F401,E402
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["button", "binary_sensor", "climate", "number", "select", "sensor"]
+PLATFORMS = ["button", "binary_sensor", "climate", "select", "sensor"]
 
 reset_samples_rate_limit_state()
 
