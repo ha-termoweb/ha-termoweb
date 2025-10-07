@@ -211,51 +211,7 @@ class WebSocketClient(_WsLeaseMixin):
         return ""
 
 
-__all__ = [
-    "ACCEPT_LANGUAGE",
-    "API_BASE",
-    "BRAND_DUCAHEAT",
-    "BRAND_TERMOWEB",
-    "DOMAIN",
-    "DUCAHEAT_NAMESPACE",
-    "DucaheatWSClient",
-    "HandshakeError",
-    "HomeAssistant",
-    "RESTClient",
-    "USER_AGENT",
-    "WS_NAMESPACE",
-    "WSStats",
-    "WebSocketClient",
-    "_WSCommon",
-    "_WsLeaseMixin",
-    "addresses_by_node_type",
-    "aiohttp",
-    "async_dispatcher_send",
-    "asyncio",
-    "collect_heater_sample_addresses",
-    "ensure_node_inventory",
-    "get_brand_api_base",
-    "get_brand_requested_with",
-    "get_brand_user_agent",
-    "gzip",
-    "heater_sample_subscription_targets",
-    "json",
-    "logging",
-    "normalize_heater_addresses",
-    "normalize_node_addr",
-    "normalize_node_type",
-    "random",
-    "signal_ws_data",
-    "signal_ws_status",
-    "socketio",
-    "string",
-    "time",
-    "time_mod",
-    "TermoWebWSClient",
-    "urlencode",
-    "urlsplit",
-    "urlunsplit",
-]
+__all__ = ["DUCAHEAT_NAMESPACE", "HandshakeError", "WSStats", "WebSocketClient"]
 
 time_mod = time.monotonic
 
