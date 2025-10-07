@@ -264,6 +264,9 @@ def test_async_setup_entry_creates_entities() -> None:
         acm_entity.async_start_boost = AsyncMock()
         await start_boost_handler(acm_entity, ServiceCall({"minutes": 30}))
         acm_entity.async_start_boost.assert_awaited_once_with(minutes=30)
+        acm_entity.async_start_boost.reset_mock()
+        await start_boost_handler(acm_entity, ServiceCall({}))
+        acm_entity.async_start_boost.assert_awaited_once_with(minutes=None)
 
         acm_entity.async_cancel_boost = AsyncMock()
         await cancel_boost_handler(acm_entity, ServiceCall({}))
@@ -519,7 +522,11 @@ def test_async_setup_entry_creates_accumulator_entity() -> None:
         assert acc.available
         assert acc.device_info["model"] == "Accumulator"
         assert acc._attr_hvac_modes == [HVACMode.OFF, HVACMode.AUTO]
+        assert "boost" not in {
+            getattr(mode, "value", str(mode)).lower() for mode in acc._attr_hvac_modes
+        }
         assert acc.preset_modes == ["none", "boost"]
+        assert "boost" in acc.preset_modes
         assert acc.hvac_mode == HVACMode.AUTO
         assert acc.preset_mode == "boost"
 
@@ -602,6 +609,133 @@ def test_accumulator_hvac_mode_reporting() -> None:
     settings["mode"] = "unexpected"
     assert entity.hvac_mode == HVACMode.HEAT
     assert entity.preset_mode == "none"
+
+
+def test_accumulator_async_set_preset_mode_transitions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Accumulator preset handling should trigger boost lifecycle correctly."""
+
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry_id = "entry-acm-preset"
+        dev_id = "dev-acm-preset"
+        addr = "11"
+        settings = {"mode": "auto", "units": "C"}
+        record = {
+            "nodes": {},
+            "nodes_by_type": {"acm": {"settings": {addr: dict(settings)}}},
+            "htr": {"settings": {}},
+        }
+        coordinator = _make_coordinator(hass, dev_id, record)
+        client = types.SimpleNamespace(set_acm_boost_state=AsyncMock(return_value=None))
+
+        hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "coordinator": coordinator,
+                    "dev_id": dev_id,
+                    "client": client,
+                    "brand": BRAND_TERMOWEB,
+                }
+            }
+        }
+
+        entity = climate_module.AccumulatorClimateEntity(
+            coordinator,
+            entry_id,
+            dev_id,
+            addr,
+            "Accumulator",
+            node_type="acm",
+        )
+        entity.hass = hass
+
+        monkeypatch.setattr(entity, "_preferred_boost_minutes", lambda: 42)
+        fallback_calls = 0
+
+        def _fake_fallback() -> None:
+            nonlocal fallback_calls
+            fallback_calls += 1
+
+        monkeypatch.setattr(entity, "_schedule_refresh_fallback", _fake_fallback)
+        entity.async_write_ha_state = MagicMock()
+
+        base_set_hvac_mode = AsyncMock()
+        monkeypatch.setattr(
+            climate_module.HeaterClimateEntity,
+            "async_set_hvac_mode",
+            base_set_hvac_mode,
+        )
+
+        settings_map = (
+            coordinator.data[dev_id]["nodes_by_type"]["acm"]["settings"][addr]
+        )
+
+        await entity.async_set_preset_mode("boost")
+        client.set_acm_boost_state.assert_awaited_once_with(
+            dev_id,
+            addr,
+            boost=True,
+            boost_time=42,
+        )
+        assert settings_map["mode"] == "boost"
+        assert settings_map["boost_active"] is True
+        assert settings_map["boost_remaining"] == 42
+        assert entity._boost_resume_mode == HVACMode.AUTO
+        assert fallback_calls == 1
+        entity.async_write_ha_state.assert_called_once()
+
+        client.set_acm_boost_state.reset_mock()
+        fallback_calls = 0
+        entity.async_write_ha_state.reset_mock()
+
+        await entity.async_set_preset_mode("boost")
+        client.set_acm_boost_state.assert_not_called()
+        assert fallback_calls == 0
+        entity.async_write_ha_state.assert_not_called()
+
+        client.set_acm_boost_state.reset_mock()
+        fallback_calls = 0
+        entity.async_write_ha_state.reset_mock()
+        entity._boost_resume_mode = HVACMode.AUTO
+
+        await entity.async_set_preset_mode("none")
+        client.set_acm_boost_state.assert_awaited_once_with(
+            dev_id,
+            addr,
+            boost=False,
+        )
+        assert settings_map["mode"] == "auto"
+        assert settings_map["boost_active"] is False
+        assert "boost_remaining" not in settings_map
+        assert entity._boost_resume_mode is None
+        base_set_hvac_mode.assert_awaited_once_with(HVACMode.AUTO)
+        assert fallback_calls == 1
+        entity.async_write_ha_state.assert_called_once()
+
+        client.set_acm_boost_state.reset_mock()
+        base_set_hvac_mode.reset_mock()
+        fallback_calls = 0
+        entity.async_write_ha_state.reset_mock()
+
+        await entity.async_set_preset_mode("none")
+        client.set_acm_boost_state.assert_not_called()
+        assert base_set_hvac_mode.await_count == 0
+        assert fallback_calls == 0
+        entity.async_write_ha_state.assert_not_called()
+
+        errors: list[tuple[Any, ...]] = []
+
+        def _record_error(*args: Any, **kwargs: Any) -> None:
+            errors.append(args)
+
+        monkeypatch.setattr(climate_module._LOGGER, "error", _record_error)
+        await entity.async_set_preset_mode("eco")
+        assert errors
+
+    asyncio.run(_run())
 
 
 def test_accumulator_async_set_hvac_mode_paths(
