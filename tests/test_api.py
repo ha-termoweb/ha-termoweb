@@ -1896,6 +1896,10 @@ def test_ducaheat_set_acm_settings_segmented(monkeypatch) -> None:
             }
 
         monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        rtc_mock = AsyncMock(
+            return_value={"y": 2024, "n": 1, "d": 1, "h": 0, "m": 0, "s": 0}
+        )
+        monkeypatch.setattr(client, "get_rtc_time", rtc_mock)
 
         prog_list = [0] * 168
         ptemp_list = [5.0, 15.0, 21.0]
@@ -1910,7 +1914,7 @@ def test_ducaheat_set_acm_settings_segmented(monkeypatch) -> None:
             units="f",
         )
 
-        assert set(result) == {"status", "prog", "prog_temps"}
+        assert set(result) == {"status", "prog", "prog_temps", "boost_state"}
 
         urls = [call[1] for call in session.request_calls]
         assert urls == [
@@ -1924,11 +1928,17 @@ def test_ducaheat_set_acm_settings_segmented(monkeypatch) -> None:
             "mode": "manual",
             "stemp": "21.2",
             "units": "F",
+            "boost": False,
         }
         prog_call = session.request_calls[1]
         assert prog_call[2]["json"] == {"prog": [0] * 168}
         temps_call = session.request_calls[2]
         assert temps_call[2]["json"] == {"ptemp": ["5.0", "15.0", "21.0"]}
+
+        boost_state = result["boost_state"]
+        assert boost_state["boost_active"] is False
+        assert boost_state["boost_minutes_delta"] == 0
+        rtc_mock.assert_awaited_once_with("dev")
 
         for _, _, kwargs in session.request_calls:
             headers = kwargs["headers"]
@@ -1950,6 +1960,9 @@ def test_ducaheat_acm_boost_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
             MockResponse(
                 200, {"boost": True}, headers={"Content-Type": "application/json"}
             ),
+            MockResponse(
+                200, {"boost": True}, headers={"Content-Type": "application/json"}
+            ),
         )
 
         client = DucaheatRESTClient(
@@ -1963,6 +1976,10 @@ def test_ducaheat_acm_boost_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
             return {"Authorization": "Bearer token"}
 
         monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        rtc_mock = AsyncMock(
+            return_value={"y": 2024, "n": 1, "d": 1, "h": 0, "m": 0, "s": 0}
+        )
+        monkeypatch.setattr(client, "get_rtc_time", rtc_mock)
 
         result = await client.set_acm_extra_options(
             "dev",
@@ -1979,10 +1996,27 @@ def test_ducaheat_acm_boost_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
             "7",
             boost=False,
         )
-        assert result == {"boost": True}
+        assert result["boost"] is True
+        assert result["boost_state"]["boost_active"] is False
+        assert result["boost_state"]["boost_minutes_delta"] == 0
+        rtc_mock.assert_awaited_once_with("dev")
         path2, kwargs2 = session.request_calls[1][1:3]
         assert path2 == "https://api.termoweb.fake/api/v2/devs/dev/acm/7/status"
         assert kwargs2["json"] == {"boost": False}
+
+        rtc_mock.reset_mock()
+        result_start = await client.set_acm_boost_state(
+            "dev",
+            "7",
+            boost=True,
+            boost_time=30,
+        )
+        assert result_start["boost_state"]["boost_active"] is True
+        assert result_start["boost_state"]["boost_minutes_delta"] == 30
+        rtc_mock.assert_awaited_once_with("dev")
+        path3, kwargs3 = session.request_calls[2][1:3]
+        assert path3 == "https://api.termoweb.fake/api/v2/devs/dev/acm/7/status"
+        assert kwargs3["json"] == {"boost": True, "boost_time": 30}
 
     asyncio.run(_run())
 
@@ -2051,6 +2085,11 @@ def test_ducaheat_set_acm_settings_mode_only(monkeypatch) -> None:
                 200,
                 {"ok": True},
                 headers={"Content-Type": "application/json"},
+            ),
+            MockResponse(
+                200,
+                {"mode": "ok"},
+                headers={"Content-Type": "application/json"},
             )
         )
 
@@ -2065,13 +2104,19 @@ def test_ducaheat_set_acm_settings_mode_only(monkeypatch) -> None:
             return {"Authorization": "Bearer token", "X-SerialId": "15"}
 
         monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        rtc_mock = AsyncMock(
+            return_value={"y": 2024, "n": 1, "d": 1, "h": 0, "m": 0, "s": 0}
+        )
+        monkeypatch.setattr(client, "get_rtc_time", rtc_mock)
 
         result = await client.set_node_settings("dev", ("acm", "3"), mode="auto")
-        assert result == {"mode": {"ok": True}}
-
-        assert len(session.request_calls) == 1
-        call = session.request_calls[0]
-        assert call[1] == "https://api.termoweb.fake/api/v2/devs/dev/acm/3/mode"
+        assert set(result) == {"status", "mode", "boost_state"}
+        status_call, mode_call = session.request_calls
+        assert status_call[1] == "https://api.termoweb.fake/api/v2/devs/dev/acm/3/status"
+        assert status_call[2]["json"] == {"boost": False}
+        assert mode_call[1] == "https://api.termoweb.fake/api/v2/devs/dev/acm/3/mode"
+        assert mode_call[2]["json"] == {"mode": "auto"}
+        rtc_mock.assert_awaited_once_with("dev")
 
     asyncio.run(_run())
 
@@ -2106,6 +2151,31 @@ def test_ducaheat_set_acm_settings_units_only(monkeypatch) -> None:
         call = session.request_calls[0]
         assert call[1] == "https://api.termoweb.fake/api/v2/devs/dev/acm/3/status"
         assert call[2]["json"] == {"units": "F"}
+
+    asyncio.run(_run())
+
+
+def test_rest_client_set_node_settings_rejects_boost_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        client = RESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        with pytest.raises(ValueError):
+            await client.set_node_settings(
+                "dev", ("htr", "3"), boost_time=30
+            )
 
     asyncio.run(_run())
 

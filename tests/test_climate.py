@@ -705,7 +705,11 @@ def test_accumulator_async_set_hvac_mode_paths(
 
         settings_map["mode"] = "auto"
         await entity.async_set_preset_mode("boost")
-        assert commit_calls and commit_calls[0]["write_kwargs"] == {"mode": "boost"}
+        assert commit_calls
+        assert commit_calls[0]["write_kwargs"] == {
+            "mode": "boost",
+            "boost_time": 60,
+        }
         assert settings_map["mode"] == "boost"
         assert entity._boost_resume_mode == HVACMode.AUTO
 
