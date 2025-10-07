@@ -20,6 +20,7 @@ from custom_components.termoweb.nodes import (
 )
 from custom_components.termoweb.utils import (
     _entry_gateway_record,
+    async_get_integration_version,
     build_gateway_device_info,
     float_or_none,
 )
@@ -216,9 +217,47 @@ def test_build_gateway_device_info_uses_brand_and_version() -> None:
     assert info["sw_version"] == "7"
 
 
+def test_build_gateway_device_info_uses_gateway_model_from_coordinator() -> None:
+    hass = types.SimpleNamespace(
+        data={
+            DOMAIN: {
+                "entry": {
+                    "coordinator": types.SimpleNamespace(
+                        data={"dev": {"raw": {"model": "Controller"}}}
+                    )
+                }
+            }
+        }
+    )
+
+    info = build_gateway_device_info(hass, "entry", "dev")
+
+    assert info["model"] == "Controller"
+
+
 def test_build_gateway_device_info_ignores_non_mapping_coordinator_data() -> None:
     hass = types.SimpleNamespace(
         data={DOMAIN: {"entry": {"coordinator": types.SimpleNamespace(data=[1, 2, 3])}}}
+    )
+
+    info = build_gateway_device_info(hass, "entry", "dev")
+
+    assert info["model"] == "Gateway/Controller"
+
+
+def test_build_gateway_device_info_discards_truthy_non_mapping_data() -> None:
+    class TruthyNonMapping:
+        def __bool__(self) -> bool:
+            return True
+
+    hass = types.SimpleNamespace(
+        data={
+            DOMAIN: {
+                "entry": {
+                    "coordinator": types.SimpleNamespace(data=TruthyNonMapping()),
+                }
+            }
+        }
     )
 
     info = build_gateway_device_info(hass, "entry", "dev")
@@ -300,3 +339,11 @@ def test_build_heater_energy_unique_id_requires_components(
 )
 def test_parse_heater_energy_unique_id_invalid(value) -> None:
     assert parse_heater_energy_unique_id(value) is None
+
+
+@pytest.mark.asyncio
+async def test_async_get_integration_version() -> None:
+    hass = types.SimpleNamespace(integration_requests=[])
+
+    assert await async_get_integration_version(hass) == "test-version"
+    assert hass.integration_requests == [DOMAIN]
