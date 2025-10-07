@@ -89,13 +89,11 @@
       "fields": {
         "reset_progress": {
           "name": "Reset progress",
-          "description": "Clear stored progress and re-import history from scratch.",
-          "default": "false"
+          "description": "Clear stored progress and re-import history from scratch."
         },
         "max_history_retrieval": {
           "name": "Max history days",
-          "description": "Number of days of history to retrieve. Overrides the configured default for this import only.",
-          "default": "7"
+          "description": "Number of days of history to retrieve. Overrides the configured default for this import only."
         }
       }
     },
