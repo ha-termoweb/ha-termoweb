@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 from types import MappingProxyType, SimpleNamespace
 from typing import Any
@@ -29,6 +30,34 @@ from custom_components.termoweb.nodes import (
     _existing_nodes_map,
 )
 from homeassistant.core import HomeAssistant
+
+
+@pytest.fixture
+def ducaheat_dev_data() -> dict[str, Any]:
+    """Return a snapshot-style nodes payload produced by Ducaheat websocket."""
+
+    nodes = {
+        "htr": {
+            "addrs": ["1", "2"],
+            "settings": {
+                "1": {"name": "Living Room"},
+                "2": {"setup": {"name": "Bedroom Heater"}},
+            },
+            "samples": {"1": {}, "2": {}},
+        },
+        "acm": {
+            "addrs": ["10", "11"],
+            "settings": {"10": {"setup": {"name": "Storage Tank"}}},
+            "advanced": {"11": {"label": "Garage Reserve"}},
+        },
+    }
+
+    nodes_copy = copy.deepcopy(nodes)
+    snapshot: dict[str, Any] = {"nodes": nodes_copy}
+    nodes_by_type = {key: value for key, value in nodes_copy.items()}
+    snapshot["nodes_by_type"] = nodes_by_type
+    snapshot.update(nodes_by_type)
+    return snapshot
 
 
 def _make_state_coordinator(
@@ -198,6 +227,31 @@ def test_build_node_inventory_skips_none_type() -> None:
     ]
 
     assert build_node_inventory(payload) == []
+
+
+def test_build_node_inventory_handles_ducaheat_snapshot(
+    ducaheat_dev_data: dict[str, Any]
+) -> None:
+    nodes = build_node_inventory(ducaheat_dev_data)
+
+    indexed = {(node.type, node.addr): node for node in nodes}
+
+    assert set(indexed) == {
+        ("htr", "1"),
+        ("htr", "2"),
+        ("acm", "10"),
+        ("acm", "11"),
+    }
+
+    assert isinstance(indexed[("htr", "1")], HeaterNode)
+    assert isinstance(indexed[("htr", "2")], HeaterNode)
+    assert isinstance(indexed[("acm", "10")], AccumulatorNode)
+    assert isinstance(indexed[("acm", "11")], AccumulatorNode)
+
+    assert indexed[("htr", "1")].name == "Living Room"
+    assert indexed[("htr", "2")].name == "Bedroom Heater"
+    assert indexed[("acm", "10")].name == "Storage Tank"
+    assert indexed[("acm", "11")].name == "Garage Reserve"
 
 
 def test_build_node_inventory_tolerates_empty_payload() -> None:

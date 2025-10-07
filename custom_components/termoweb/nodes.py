@@ -85,6 +85,18 @@ _NODE_SECTION_IGNORE_KEYS = frozenset(
     {"dev_id", "name", "raw", "connected", "nodes", "nodes_by_type"}
 )
 
+_SNAPSHOT_NAME_CANDIDATE_KEYS = (
+    "name",
+    "label",
+    "title",
+    "display_name",
+    "device_name",
+    "friendly_name",
+    "heater_name",
+    "alias",
+    "room",
+)
+
 
 def _existing_nodes_map(source: Mapping[str, Any] | None) -> dict[str, dict[str, Any]]:
     """Return a mapping of node type sections extracted from ``source``."""
@@ -107,6 +119,100 @@ def _existing_nodes_map(source: Mapping[str, Any] | None) -> dict[str, dict[str,
             sections.setdefault(key, dict(value))
 
     return sections
+
+
+def _iter_snapshot_sections(
+    sections: Mapping[str, Any],
+    seen: set[tuple[str, str]],
+) -> Iterable[dict[str, Any]]:
+    """Yield node payloads derived from snapshot-style ``sections``."""
+
+    for node_type, payload in sections.items():
+        if not isinstance(node_type, str):
+            continue
+        normalized_type = node_type.strip()
+        if not normalized_type or not isinstance(payload, Mapping):
+            continue
+        for entry in _iter_snapshot_section(normalized_type, payload):
+            addr = entry.get("addr")
+            if not isinstance(addr, str):
+                continue
+            key = (normalized_type, addr)
+            if key in seen:
+                continue
+            seen.add(key)
+            yield entry
+
+
+def _iter_snapshot_section(
+    node_type: str, section: Mapping[str, Any]
+) -> Iterable[dict[str, Any]]:
+    """Yield node dictionaries for a single node type section."""
+
+    addresses = _collect_snapshot_addresses(section)
+    for addr in sorted(addresses):
+        entry: dict[str, Any] = {"type": node_type, "addr": addr}
+        name = _extract_snapshot_name(addresses[addr])
+        if name:
+            entry["name"] = name
+        yield entry
+
+
+def _collect_snapshot_addresses(
+    section: Mapping[str, Any]
+) -> dict[str, list[Mapping[str, Any]]]:
+    """Return mapping of addresses to candidate payloads from ``section``."""
+
+    addresses: dict[str, list[Mapping[str, Any]]] = {}
+
+    addrs = section.get("addrs")
+    if isinstance(addrs, (list, tuple, set)):
+        for candidate in addrs:
+            addr = normalize_node_addr(candidate)
+            if addr:
+                addresses.setdefault(addr, [])
+
+    for value in section.values():
+        if not isinstance(value, Mapping):
+            continue
+        for addr_key, payload in value.items():
+            addr = normalize_node_addr(addr_key)
+            if not addr:
+                continue
+            bucket = addresses.setdefault(addr, [])
+            if isinstance(payload, Mapping):
+                bucket.append(payload)
+            elif isinstance(payload, str):
+                bucket.append({"name": payload})
+
+    return addresses
+
+
+def _extract_snapshot_name(payloads: Iterable[Mapping[str, Any]]) -> str:
+    """Return best candidate name extracted from ``payloads``."""
+
+    queue = [payload for payload in payloads if isinstance(payload, Mapping)]
+    seen: set[int] = set()
+
+    while queue:
+        payload = queue.pop(0)
+        payload_id = id(payload)
+        if payload_id in seen:
+            continue
+        seen.add(payload_id)
+
+        for key in _SNAPSHOT_NAME_CANDIDATE_KEYS:
+            value = payload.get(key)
+            if isinstance(value, str):
+                candidate = value.strip()
+                if candidate:
+                    return candidate
+
+        queue.extend(
+            nested for nested in payload.values() if isinstance(nested, Mapping)
+        )
+
+    return ""
 
 
 class Node:
@@ -253,7 +359,18 @@ def _iter_node_payload(raw_nodes: Any) -> Iterable[dict[str, Any]]:
             for entry in node_list:
                 if isinstance(entry, dict):
                     yield entry
-        return
+            return
+
+        seen: set[tuple[str, str]] = set()
+
+        if isinstance(node_list, Mapping):
+            yield from _iter_snapshot_sections(node_list, seen)
+
+        sections = _existing_nodes_map(raw_nodes)
+        if sections:
+            yield from _iter_snapshot_sections(sections, seen)
+            if seen:
+                return
 
     if isinstance(raw_nodes, list):
         for entry in raw_nodes:

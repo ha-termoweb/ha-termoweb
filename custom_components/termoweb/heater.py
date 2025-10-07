@@ -222,7 +222,7 @@ def _coerce_boost_minutes(value: Any) -> int | None:
             minutes = int(float(text))
     except (TypeError, ValueError):  # pragma: no cover - defensive
         return None
-    return minutes if minutes >= 0 else None
+    return minutes if minutes > 0 else None
 
 
 @dataclass(slots=True)
