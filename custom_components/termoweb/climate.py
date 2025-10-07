@@ -1297,6 +1297,33 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
                     brand = brand_value
 
         if brand == BRAND_DUCAHEAT and self._node_type == "acm":
+            cancel_boost = False
+            boost_state = None
+            try:
+                boost_state = self.boost_state()
+            except Exception as err:  # noqa: BLE001 - defensive
+                _LOGGER.debug(
+                    "Failed to derive boost state for cancel heuristic addr=%s: %s",
+                    self._addr,
+                    err,
+                    exc_info=err,
+                )
+            if boost_state is not None and boost_state.active is not None:
+                cancel_boost = bool(boost_state.active)
+            else:
+                settings = self.heater_settings() or {}
+                boost_flag = settings.get("boost_active")
+                if isinstance(boost_flag, bool):
+                    cancel_boost = boost_flag
+                else:
+                    legacy_flag = settings.get("boost")
+                    if isinstance(legacy_flag, bool):
+                        cancel_boost = legacy_flag
+                    else:
+                        mode_value = settings.get("mode")
+                        if isinstance(mode_value, str):
+                            cancel_boost = mode_value.strip().lower() == "boost"
+
             client_dh = cast(DucaheatRESTClient, client)
             await client_dh.set_node_settings(
                 self._dev_id,
@@ -1306,6 +1333,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
                 prog=prog,
                 ptemp=ptemp,
                 units=units,
+                cancel_boost=cancel_boost,
             )
             return
 

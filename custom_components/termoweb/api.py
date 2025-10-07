@@ -475,6 +475,7 @@ class RESTClient:
         | None = None,  # preset temperatures [cold, night, day] (in current units)
         units: str = "C",
         boost_time: int | None = None,
+        cancel_boost: bool = False,
     ) -> Any:
         """Update heater settings.
 
@@ -491,6 +492,9 @@ class RESTClient:
           [cold, night, day]. These values are formatted to one decimal and sent as strings.
         * ``units`` – either ``"C"`` or ``"F"``. This field is always included and indicates
           whether the numeric temperature values are in Celsius or Fahrenheit.
+        * ``cancel_boost`` – When ``True`` the Ducaheat accumulator adapter will cancel any
+          active boost session before applying the update. The base REST client does not
+          implement this behaviour and therefore rejects ``True``.
 
         The payload will only include keys for the parameters passed by the caller, to avoid
         overwriting unrelated settings on the device.
@@ -498,6 +502,8 @@ class RESTClient:
 
         if boost_time is not None:
             raise ValueError("boost_time is not supported for this node type")
+        if cancel_boost:
+            raise ValueError("cancel_boost is not supported for this node type")
 
         node_type, addr = self._resolve_node_descriptor(node)
 

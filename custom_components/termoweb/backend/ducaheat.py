@@ -5,7 +5,6 @@ from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from datetime import datetime, timedelta
 import logging
-import re
 from typing import Any
 
 from aiohttp import ClientResponseError
@@ -142,6 +141,7 @@ class DucaheatRESTClient(RESTClient):
         ptemp: list[float] | None = None,
         units: str = "C",
         boost_time: int | None = None,
+        cancel_boost: bool = False,
     ) -> dict[str, Any]:
         """Write heater settings using the segmented endpoints."""
 
@@ -207,6 +207,7 @@ class DucaheatRESTClient(RESTClient):
                 ptemp=ptemp,
                 units=units,
                 boost_time=boost_time,
+                cancel_boost=cancel_boost,
             )
 
         return await super().set_node_settings(
@@ -217,6 +218,7 @@ class DucaheatRESTClient(RESTClient):
             prog=prog,
             ptemp=ptemp,
             units=units,
+            cancel_boost=cancel_boost,
         )
 
     async def get_node_samples(
@@ -580,6 +582,7 @@ class DucaheatRESTClient(RESTClient):
         ptemp: list[float] | None,
         units: str,
         boost_time: int | None,
+        cancel_boost: bool,
     ) -> dict[str, Any]:
         """Apply segmented writes for accumulator nodes."""
 
@@ -593,7 +596,7 @@ class DucaheatRESTClient(RESTClient):
 
         status_payload: dict[str, str] = {}
         status_includes_mode = False
-        cancel_boost = mode_value is not None and mode_value != "boost"
+        cancel_boost_flag = cancel_boost and mode_value != "boost"
         boost_minutes: int | None = None
         if stemp is not None:
             try:
@@ -614,10 +617,10 @@ class DucaheatRESTClient(RESTClient):
 
         segment_plan: list[tuple[str, dict[str, Any]]] = []
         if status_payload:
-            if cancel_boost and "boost" not in status_payload:
+            if cancel_boost_flag and "boost" not in status_payload:
                 status_payload["boost"] = False
             segment_plan.append(("status", status_payload))
-        elif cancel_boost:
+        elif cancel_boost_flag:
             segment_plan.append(("status", {"boost": False}))
 
         if mode_value is not None and not status_includes_mode:
@@ -637,12 +640,20 @@ class DucaheatRESTClient(RESTClient):
                     raise ValueError(
                         "boost_time is only supported when mode is 'boost'"
                     )
-                _LOGGER.info(
-                    "ACM mode write dev=%s addr=%s mode=%s (boost cancel)",
-                    mask_identifier(dev_id),
-                    mask_identifier(addr),
-                    mode_value,
-                )
+                if cancel_boost_flag:
+                    _LOGGER.info(
+                        "ACM mode write dev=%s addr=%s mode=%s (boost cancel)",
+                        mask_identifier(dev_id),
+                        mask_identifier(addr),
+                        mode_value,
+                    )
+                else:
+                    _LOGGER.info(
+                        "ACM mode write dev=%s addr=%s mode=%s",
+                        mask_identifier(dev_id),
+                        mask_identifier(addr),
+                        mode_value,
+                    )
             segment_plan.append(("mode", mode_payload))
 
         if prog is not None:
@@ -664,7 +675,7 @@ class DucaheatRESTClient(RESTClient):
                     addr=addr,
                 )
 
-            if mode_value == "boost" or cancel_boost:
+            if mode_value == "boost" or cancel_boost_flag:
                 metadata = await self._collect_boost_metadata(
                     dev_id,
                     addr,

@@ -31,6 +31,7 @@ class HttpClientProto(Protocol):
         ptemp: list[float] | None = None,
         units: str = "C",
         boost_time: int | None = None,
+        cancel_boost: bool = False,
     ) -> Any:
         """Update node settings for the specified node."""
 

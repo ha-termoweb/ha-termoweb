@@ -1919,6 +1919,7 @@ def test_ducaheat_set_acm_settings_segmented(monkeypatch) -> None:
             prog=prog_list,
             ptemp=ptemp_list,
             units="f",
+            cancel_boost=True,
         )
 
         assert set(result) == {"status", "prog", "prog_temps", "boost_state"}
@@ -2116,7 +2117,9 @@ def test_ducaheat_set_acm_settings_mode_only(monkeypatch) -> None:
         )
         monkeypatch.setattr(client, "get_rtc_time", rtc_mock)
 
-        result = await client.set_node_settings("dev", ("acm", "3"), mode="auto")
+        result = await client.set_node_settings(
+            "dev", ("acm", "3"), mode="auto", cancel_boost=True
+        )
         assert set(result) == {"status", "mode", "boost_state"}
         status_call, mode_call = session.request_calls
         assert status_call[1] == "https://api.termoweb.fake/api/v2/devs/dev/acm/3/status"
