@@ -16,6 +16,10 @@ import sys
 from custom_components.termoweb.backend import ducaheat_ws
 from custom_components.termoweb.backend import termoweb_ws as module
 from custom_components.termoweb.backend import ws_client as base_ws
+from custom_components.termoweb.backend.sanitize import (
+    mask_identifier,
+    redact_token_fragment,
+)
 
 
 class DummyREST:
@@ -398,15 +402,15 @@ def test_termoweb_brand_headers_optional_origin(monkeypatch: pytest.MonkeyPatch)
 def test_termoweb_value_redaction_behaviour(monkeypatch: pytest.MonkeyPatch) -> None:
     """Redaction helpers should mask tokens and identifiers consistently."""
 
-    client = _make_termoweb_client(monkeypatch)
-    assert client._redact_value("  ") == ""
-    assert client._redact_value("abcd") == "***"
-    assert client._redact_value("abcdefgh") == "ab***gh"
-    assert client._redact_value("abcdefghijk") == "abcd...hijk"
-    assert client._mask_identifier("   ") == ""
-    assert client._mask_identifier("xy") == "***"
-    assert client._mask_identifier("abcdefgh") == "ab...gh"
-    assert client._mask_identifier("abcdefghijkl") == "abcdef...ijkl"
+    _make_termoweb_client(monkeypatch)
+    assert redact_token_fragment("  ") == ""
+    assert redact_token_fragment("abcd") == "***"
+    assert redact_token_fragment("abcdefgh") == "ab***gh"
+    assert redact_token_fragment("abcdefghijk") == "abcd...hijk"
+    assert mask_identifier("   ") == ""
+    assert mask_identifier("xy") == "***"
+    assert mask_identifier("abcdefgh") == "ab...gh"
+    assert mask_identifier("abcdefghijkl") == "abcdef...ijkl"
 
 
 def test_termoweb_sanitise_helpers(monkeypatch: pytest.MonkeyPatch) -> None:

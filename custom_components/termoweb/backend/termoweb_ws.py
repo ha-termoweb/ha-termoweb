@@ -24,6 +24,10 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 import socketio
 
 from custom_components.termoweb.api import RESTClient
+from custom_components.termoweb.backend.sanitize import (
+    mask_identifier,
+    redact_token_fragment,
+)
 from custom_components.termoweb.const import (
     ACCEPT_LANGUAGE,
     API_BASE,
@@ -214,32 +218,6 @@ class WebSocketClient:
             headers["Origin"] = origin
         return headers
 
-    def _redact_value(self, value: str) -> str:
-        """Return a redacted representation of sensitive values."""
-
-        trimmed = value.strip()
-        if not trimmed:
-            return ""
-        if len(trimmed) <= 4:
-            return "***"
-        if len(trimmed) <= 8:
-            return f"{trimmed[:2]}***{trimmed[-2:]}"
-        return f"{trimmed[:4]}...{trimmed[-4:]}"
-
-    def _mask_identifier(self, value: str) -> str:
-        """Return a partially masked identifier for log output."""
-
-        trimmed = value.strip()
-        if not trimmed:
-            return ""
-        if len(trimmed) <= 4:
-            return "***"
-        if len(trimmed) <= 8:
-            return f"{trimmed[:2]}...{trimmed[-2:]}"
-        prefix = trimmed[:6]
-        suffix = trimmed[-4:]
-        return f"{prefix}...{suffix}"
-
     def _sanitise_headers(self, headers: Mapping[str, Any]) -> dict[str, Any]:
         """Redact sensitive header values for logging."""
 
@@ -253,11 +231,11 @@ class WebSocketClient:
             if key.lower() == "authorization":
                 prefix, _, token = text.partition(" ")
                 if token:
-                    text = f"{prefix} {self._redact_value(token)}".strip()
+                    text = f"{prefix} {redact_token_fragment(token)}".strip()
                 else:
-                    text = self._redact_value(text)
+                    text = redact_token_fragment(text)
             elif key.lower() in {"cookie", "set-cookie"}:
-                text = self._redact_value(text)
+                text = redact_token_fragment(text)
             sanitised[key] = text
         return sanitised
 
@@ -267,9 +245,9 @@ class WebSocketClient:
         sanitised: dict[str, str] = {}
         for key, value in params.items():
             if key == "token":
-                sanitised[key] = self._redact_value(str(value))
+                sanitised[key] = redact_token_fragment(str(value))
             elif key == "dev_id":
-                sanitised[key] = self._mask_identifier(str(value))
+                sanitised[key] = mask_identifier(str(value))
             else:
                 sanitised[key] = value
         return sanitised
@@ -285,9 +263,9 @@ class WebSocketClient:
         sanitised_pairs = [
             (
                 key,
-                self._redact_value(value)
+                redact_token_fragment(value)
                 if key == "token"
-                else self._mask_identifier(value)
+                else mask_identifier(value)
                 if key == "dev_id"
                 else value,
             )

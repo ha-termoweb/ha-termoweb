@@ -10,7 +10,13 @@ from custom_components.termoweb.api import RESTClient
 from custom_components.termoweb.backend.ducaheat import (
     DucaheatBackend,
     DucaheatRESTClient,
-    _redact_log_value,
+)
+from custom_components.termoweb.backend.sanitize import (
+    build_acm_boost_payload,
+    mask_identifier,
+    redact_text,
+    redact_token_fragment,
+    validate_boost_minutes,
 )
 from custom_components.termoweb.const import WS_NAMESPACE
 from custom_components.termoweb.backend.ducaheat_ws import DucaheatWSClient
@@ -311,15 +317,49 @@ def test_ducaheat_rest_normalise_ws_nodes_passthrough() -> None:
     assert normalised["htr"]["settings"]["01"] == 5
 
 
-def test_ducaheat_redact_log_value_masks_sensitive_tokens() -> None:
-    assert _redact_log_value("") == ""
+def test_sanitize_helpers_mask_sensitive_tokens() -> None:
+    assert redact_text("") == ""
     sample = "Bearer abc token=secret user@example.com"
-    redacted = _redact_log_value(sample)
+    redacted = redact_text(sample)
     assert "secret" not in redacted
     assert "user@example.com" not in redacted
     assert "Bearer ***" in redacted
     assert "token=***" in redacted
     assert "***@***" in redacted
+
+    assert redact_token_fragment("   ") == ""
+    assert redact_token_fragment("abcd") == "***"
+    assert redact_token_fragment("abcdefgh") == "ab***gh"
+
+    assert mask_identifier("   ") == ""
+    assert mask_identifier("abcd") == "***"
+    assert mask_identifier("abcdefgh") == "ab...gh"
+    assert mask_identifier("abcdefghijklmnop") == "abcdef...mnop"
+
+    class _Blank:
+        def __bool__(self) -> bool:
+            return True
+
+        def __str__(self) -> str:
+            return ""
+
+    assert redact_text(_Blank()) == ""
+    assert redact_token_fragment(None) == ""
+    assert mask_identifier(None) == ""
+
+
+def test_validate_boost_minutes_and_payload() -> None:
+    assert validate_boost_minutes(None) is None
+    assert validate_boost_minutes(15) == 15
+    assert build_acm_boost_payload(True, None) == {"boost": True}
+    assert build_acm_boost_payload(False, 30) == {"boost": False, "boost_time": 30}
+
+    with pytest.raises(ValueError):
+        validate_boost_minutes(0)
+    with pytest.raises(ValueError):
+        validate_boost_minutes("bad")
+    with pytest.raises(ValueError):
+        build_acm_boost_payload(True, 0)
 
 
 def test_ducaheat_log_segmented_post_handles_non_mapping(
@@ -337,7 +377,7 @@ def test_ducaheat_log_segmented_post_handles_non_mapping(
     )
     assert "<non-mapping>" in caplog.text
     assert "token=***" in caplog.text
-    assert "***@***" in caplog.text
+    assert "device....com" in caplog.text
     caplog.clear()
     ducaheat_rest_client._log_segmented_post(
         path="https://example.invalid/path?token=abc",
