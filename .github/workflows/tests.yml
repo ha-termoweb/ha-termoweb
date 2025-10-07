@@ -1,5 +1,8 @@
 name: Tests
 
+permissions:
+  contents: write
+
 on:
   push:
     branches: [main]
@@ -12,6 +15,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v6
@@ -45,6 +50,13 @@ jobs:
         uses: tj-actions/coverage-badge-py@v2
         with:
           output: docs/badges/coverage.svg
+
+      - name: Commit updated coverage badge
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: docs: update coverage badge
+          file_pattern: docs/badges/coverage.svg
 
       - name: Upload coverage artifacts
         uses: actions/upload-artifact@v4
