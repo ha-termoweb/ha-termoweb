@@ -188,4 +188,5 @@ class HeaterBoostActiveBinarySensor(HeaterNodeBase, BinarySensorEntity):
             "addr": self._addr,
             "boost_minutes_remaining": state.minutes_remaining,
             "boost_end": state.end_iso,
+            "boost_end_label": state.end_label,
         }

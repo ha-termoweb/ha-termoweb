@@ -124,6 +124,7 @@ def test_derive_boost_state_uses_resolver(monkeypatch: pytest.MonkeyPatch) -> No
     assert state.minutes_remaining == 60
     assert state.end_datetime == expected_end
     assert state.end_iso == expected_end.isoformat()
+    assert state.end_label is None
 
 
 def test_derive_boost_state_from_remaining(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -139,6 +140,7 @@ def test_derive_boost_state_from_remaining(monkeypatch: pytest.MonkeyPatch) -> N
     assert state.minutes_remaining == 15
     assert state.end_iso == (base_now + timedelta(minutes=15)).isoformat()
     assert state.end_datetime == base_now + timedelta(minutes=15)
+    assert state.end_label is None
 
 
 def test_derive_boost_state_handles_now_failure(
@@ -157,6 +159,7 @@ def test_derive_boost_state_handles_now_failure(
     assert state.minutes_remaining == 10
     assert state.end_datetime is None
     assert state.end_iso is None
+    assert state.end_label == "Never"
 
 
 def test_derive_boost_state_parses_string_end(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -173,6 +176,7 @@ def test_derive_boost_state_parses_string_end(monkeypatch: pytest.MonkeyPatch) -
     assert state.minutes_remaining is None
     assert state.end_iso == iso
     assert state.end_datetime == datetime(2024, 1, 1, 0, 30, tzinfo=timezone.utc)
+    assert state.end_label is None
 
 
 def test_derive_boost_state_handles_now_failure(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -189,6 +193,30 @@ def test_derive_boost_state_handles_now_failure(monkeypatch: pytest.MonkeyPatch)
     assert state.minutes_remaining == 30
     assert state.end_datetime is None
     assert state.end_iso is None
+    assert state.end_label == "Never"
+
+
+def test_derive_boost_state_normalises_epoch_placeholder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Epoch placeholders should become a "Never" label without timestamps."""
+
+    base_now = datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(dt_util, "now", lambda: base_now)
+
+    def _resolver(day: int, minute: int, *, now=None):
+        return boost_module.resolve_boost_end_from_fields(day, minute, now=base_now)
+
+    coordinator = SimpleNamespace(resolve_boost_end=_resolver)
+    settings = {"boost": False, "boost_end_day": 0, "boost_end_min": 0}
+
+    state = heater_module.derive_boost_state(settings, coordinator)
+
+    assert state.active is False
+    assert state.minutes_remaining is None
+    assert state.end_datetime is None
+    assert state.end_iso is None
+    assert state.end_label == "Never"
 
 
 def test_derive_boost_state_uses_parse_datetime(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -275,13 +303,17 @@ def test_boost_entities_expose_state(monkeypatch: pytest.MonkeyPatch) -> None:
     assert boost_binary.is_on is True
     assert minutes_sensor.native_value == 30
     assert end_sensor.native_value == expected_end
+    assert end_sensor.state == expected_end.isoformat()
 
     assert boost_binary.extra_state_attributes["boost_minutes_remaining"] == 30
     assert boost_binary.extra_state_attributes["boost_end"] == expected_end.isoformat()
+    assert boost_binary.extra_state_attributes["boost_end_label"] is None
     assert (
         minutes_sensor.extra_state_attributes["boost_end"] == expected_end.isoformat()
     )
+    assert minutes_sensor.extra_state_attributes["boost_end_label"] is None
     assert end_sensor.extra_state_attributes["boost_minutes_remaining"] == 30
+    assert end_sensor.extra_state_attributes["boost_end_label"] is None
 
 
 def test_boost_entities_handle_missing_data() -> None:
@@ -331,9 +363,13 @@ def test_boost_entities_handle_missing_data() -> None:
     assert boost_binary.is_on is False
     assert minutes_sensor.native_value is None
     assert end_sensor.native_value is None
+    assert end_sensor.state == "Never"
     assert boost_binary.extra_state_attributes["boost_end"] is None
+    assert boost_binary.extra_state_attributes["boost_end_label"] == "Never"
     assert minutes_sensor.extra_state_attributes["boost_end"] is None
+    assert minutes_sensor.extra_state_attributes["boost_end_label"] == "Never"
     assert end_sensor.extra_state_attributes["boost_minutes_remaining"] is None
+    assert end_sensor.extra_state_attributes["boost_end_label"] == "Never"
 
 
 def test_coerce_boost_minutes_edge_cases() -> None:
