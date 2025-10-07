@@ -21,6 +21,7 @@ from .heater import (
     iter_heater_nodes,
     log_skipped_nodes,
     prepare_heater_platform_data,
+    supports_boost,
 )
 from .utils import build_gateway_device_info
 
@@ -43,16 +44,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     for node_type, node, addr_str, base_name in iter_heater_nodes(
         nodes_by_type, resolve_name
     ):
-        supports_boost = getattr(node, "supports_boost", None)
-        supported = False
-        if callable(supports_boost):
-            try:
-                supported = bool(supports_boost())
-            except Exception:  # pragma: no cover - defensive
-                supported = False
-        elif isinstance(supports_boost, bool):
-            supported = supports_boost
-        if not supported:
+        if not supports_boost(node):
             continue
         unique_id = f"{DOMAIN}:{dev_id}:{node_type}:{addr_str}:boost_active"
         boost_entities.append(

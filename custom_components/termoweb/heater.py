@@ -32,8 +32,28 @@ _LOGGER = logging.getLogger(__name__)
 
 
 _BOOST_RUNTIME_KEY: Final = "boost_runtime"
-BOOST_DURATION_OPTIONS: Final[tuple[int, ...]] = (30, 60, 120)
 DEFAULT_BOOST_DURATION: Final = 60
+
+
+@dataclass(frozen=True, slots=True)
+class BoostButtonMetadata:
+    """Metadata describing an accumulator boost helper button."""
+
+    minutes: int | None
+    unique_suffix: str
+    label: str
+    icon: str
+
+
+BOOST_BUTTON_METADATA: Final[tuple[BoostButtonMetadata, ...]] = (
+    BoostButtonMetadata(30, "30", "Boost 30 minutes", "mdi:timer-play"),
+    BoostButtonMetadata(60, "60", "Boost 60 minutes", "mdi:timer-play"),
+    BoostButtonMetadata(120, "120", "Boost 120 minutes", "mdi:timer-play"),
+    BoostButtonMetadata(None, "cancel", "Cancel boost", "mdi:timer-off"),
+)
+BOOST_DURATION_OPTIONS: Final[tuple[int, ...]] = tuple(
+    option.minutes for option in BOOST_BUTTON_METADATA if option.minutes is not None
+)
 
 
 def _coerce_boost_remaining_minutes(value: Any) -> int | None:
@@ -182,6 +202,12 @@ def resolve_boost_runtime_minutes(
     if stored is not None:
         return stored
     return default
+
+
+def iter_boost_button_metadata() -> Iterator[BoostButtonMetadata]:
+    """Yield the metadata describing boost helper buttons."""
+
+    yield from BOOST_BUTTON_METADATA
 
 
 def supports_boost(node: Any) -> bool:

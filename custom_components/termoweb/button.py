@@ -23,7 +23,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .heater import (
+    BoostButtonMetadata,
     HeaterNodeBase,
+    iter_boost_button_metadata,
     iter_heater_nodes,
     log_skipped_nodes,
     prepare_heater_platform_data,
@@ -62,49 +64,15 @@ async def async_setup_entry(hass, entry, async_add_entities):
         if not supports_boost(node):
             continue
 
-        unique_prefix = f"{DOMAIN}:{dev_id}:{node_type}:{addr_str}:boost"
         boost_entities.extend(
-            [
-                AccumulatorBoostButton(
-                    coordinator,
-                    entry.entry_id,
-                    dev_id,
-                    addr_str,
-                    base_name,
-                    f"{unique_prefix}_30",
-                    minutes=30,
-                    node_type=node_type,
-                ),
-                AccumulatorBoostButton(
-                    coordinator,
-                    entry.entry_id,
-                    dev_id,
-                    addr_str,
-                    base_name,
-                    f"{unique_prefix}_60",
-                    minutes=60,
-                    node_type=node_type,
-                ),
-                AccumulatorBoostButton(
-                    coordinator,
-                    entry.entry_id,
-                    dev_id,
-                    addr_str,
-                    base_name,
-                    f"{unique_prefix}_120",
-                    minutes=120,
-                    node_type=node_type,
-                ),
-                AccumulatorBoostCancelButton(
-                    coordinator,
-                    entry.entry_id,
-                    dev_id,
-                    addr_str,
-                    base_name,
-                    f"{unique_prefix}_cancel",
-                    node_type=node_type,
-                ),
-            ]
+            _create_boost_button_entities(
+                coordinator,
+                entry.entry_id,
+                dev_id,
+                addr_str,
+                base_name,
+                node_type,
+            )
         )
 
     if boost_entities:
@@ -239,6 +207,8 @@ class AccumulatorBoostButton(AccumulatorBoostButtonBase):
         *,
         minutes: int,
         node_type: str | None = None,
+        label: str | None = None,
+        icon: str | None = None,
     ) -> None:
         """Initialise the boost helper button for a fixed duration."""
 
@@ -250,9 +220,11 @@ class AccumulatorBoostButton(AccumulatorBoostButtonBase):
             addr,
             base_name,
             unique_id,
-            label=f"Boost {minutes} minutes",
+            label=label or f"Boost {minutes} minutes",
             node_type=node_type,
         )
+        if icon is not None:
+            self._attr_icon = icon
 
     @property
     def _service_minutes(self) -> int | None:
@@ -283,6 +255,8 @@ class AccumulatorBoostCancelButton(AccumulatorBoostButtonBase):
         unique_id: str,
         *,
         node_type: str | None = None,
+        label: str | None = None,
+        icon: str | None = None,
     ) -> None:
         """Initialise the helper button that cancels an active boost."""
 
@@ -293,6 +267,74 @@ class AccumulatorBoostCancelButton(AccumulatorBoostButtonBase):
             addr,
             base_name,
             unique_id,
-            label="Cancel boost",
+            label=label or "Cancel boost",
             node_type=node_type,
         )
+        if icon is not None:
+            self._attr_icon = icon
+
+
+def _create_boost_button_entities(
+    coordinator,
+    entry_id: str,
+    dev_id: str,
+    addr: str,
+    base_name: str,
+    node_type: str,
+) -> list[ButtonEntity]:
+    """Return boost helper buttons described by shared metadata."""
+
+    unique_prefix = f"{DOMAIN}:{dev_id}:{node_type}:{addr}:boost"
+    return [
+        _build_boost_button(
+            metadata,
+            coordinator,
+            entry_id,
+            dev_id,
+            addr,
+            base_name,
+            node_type,
+            unique_prefix,
+        )
+        for metadata in iter_boost_button_metadata()
+    ]
+
+
+def _build_boost_button(
+    metadata: BoostButtonMetadata,
+    coordinator,
+    entry_id: str,
+    dev_id: str,
+    addr: str,
+    base_name: str,
+    node_type: str,
+    unique_prefix: str,
+) -> ButtonEntity:
+    """Instantiate a boost helper button for ``metadata``."""
+
+    unique_id = f"{unique_prefix}_{metadata.unique_suffix}"
+    if metadata.minutes is None:
+        return AccumulatorBoostCancelButton(
+            coordinator,
+            entry_id,
+            dev_id,
+            addr,
+            base_name,
+            unique_id,
+            node_type=node_type,
+            label=metadata.label,
+            icon=metadata.icon,
+        )
+
+    return AccumulatorBoostButton(
+        coordinator,
+        entry_id,
+        dev_id,
+        addr,
+        base_name,
+        unique_id,
+        minutes=metadata.minutes,
+        node_type=node_type,
+        label=metadata.label,
+        icon=metadata.icon,
+    )
