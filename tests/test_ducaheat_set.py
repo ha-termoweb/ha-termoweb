@@ -3,59 +3,11 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Callable
 
 import pytest
 
 from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
-
-
-def _make_rest_client(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    side_effects: dict[str, Exception] | None = None,
-) -> tuple[DucaheatRESTClient, list[dict[str, Any]]]:
-    """Create a Ducaheat REST client that records segmented POST calls."""
-
-    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
-    calls: list[dict[str, Any]] = []
-    effects = dict(side_effects or {})
-
-    async def fake_headers() -> dict[str, str]:
-        """Return static authentication headers for tests."""
-
-        return {"Authorization": "Bearer token"}
-
-    async def fake_post_segmented(
-        path: str,
-        *,
-        headers: dict[str, str],
-        payload: Mapping[str, Any],
-        dev_id: str,
-        addr: str,
-        node_type: str,
-        ignore_statuses: tuple[int, ...] | None = None,
-    ) -> dict[str, Any]:
-        """Record POST calls instead of sending them to the backend."""
-
-        record = {
-            "path": path,
-            "payload": dict(payload),
-            "dev_id": dev_id,
-            "addr": addr,
-            "node_type": node_type,
-            "ignore_statuses": tuple(ignore_statuses or ()),
-            "headers": dict(headers),
-        }
-        calls.append(record)
-        effect = effects.get(path)
-        if effect is not None:
-            raise effect
-        return {"ok": True}
-
-    monkeypatch.setattr(client, "_authed_headers", fake_headers)
-    monkeypatch.setattr(client, "_post_segmented", fake_post_segmented)
-    return client, calls
 
 
 def _assert_mode_only(
@@ -157,34 +109,36 @@ def _assert_prog_only(
     ],
 )
 def test_ducaheat_heater_segment_plan(
-    monkeypatch: pytest.MonkeyPatch, kwargs: dict[str, Any], validator
+    ducaheat_rest_harness: Callable[..., Any], kwargs: dict[str, Any], validator
 ) -> None:
     """Verify segmented heater writes use the minimal endpoint set."""
 
     async def _run() -> None:
         """Execute the asynchronous body for the heater write test."""
 
-        client, calls = _make_rest_client(monkeypatch)
-        await client.set_node_settings("dev", ("htr", "1"), **kwargs)
-        validator(client, calls, kwargs)
+        harness = ducaheat_rest_harness()
+        await harness.client.set_node_settings("dev", ("htr", "1"), **kwargs)
+        validator(harness.client, harness.segmented_calls, kwargs)
 
     asyncio.run(_run())
 
 
-def test_ducaheat_acm_ptemp_only(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ducaheat_acm_ptemp_only(
+    ducaheat_rest_harness: Callable[..., Any]
+) -> None:
     """Validate ACM segmented writes for preset temperatures."""
 
     async def _run() -> None:
         """Execute the asynchronous body for the ACM write test."""
 
-        client, calls = _make_rest_client(monkeypatch)
-        await client.set_node_settings(
+        harness = ducaheat_rest_harness()
+        await harness.client.set_node_settings(
             "dev", ("acm", "3"), ptemp=[18.0, 20.0, 22.0]
         )
-        assert [call["path"] for call in calls] == [
+        assert [call["path"] for call in harness.segmented_calls] == [
             "/api/v2/devs/dev/acm/3/prog_temps",
         ]
-        assert calls[0]["payload"] == {
+        assert harness.segmented_calls[0]["payload"] == {
             "ptemp": ["18.0", "20.0", "22.0"],
         }
 
