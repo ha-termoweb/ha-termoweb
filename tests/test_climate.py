@@ -2497,6 +2497,101 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
     asyncio.run(_run())
 
 
+def test_ducaheat_snapshot_cancels_refresh_fallback() -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry_id = "entry"
+        dev_id = "dev"
+        addr = "2"
+        record = {
+            "nodes": {},
+            "htr": {"settings": {addr: {"mode": "auto", "stemp": "20.0"}}},
+        }
+        coordinator = _make_coordinator(hass, dev_id, record)
+        heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
+        heater.hass = hass
+
+        loop = asyncio.get_running_loop()
+
+        fallback = loop.create_future()
+        heater._refresh_fallback = fallback
+        payload = {
+            "dev_id": dev_id,
+            "nodes": {"htr": {"settings": {addr: {"mode": "auto"}}}},
+            "addr_map": {"htr": [addr]},
+        }
+        heater._handle_ws_event(payload)
+        assert heater._refresh_fallback is None
+        assert fallback.cancelled()
+
+        fallback = loop.create_future()
+        heater._refresh_fallback = fallback
+        payload_int_addr = {
+            "dev_id": dev_id,
+            "nodes": {"htr": {"settings": {addr: {"mode": "auto"}}}},
+            "addr_map": {"htr": [2]},
+        }
+        heater._handle_ws_event(payload_int_addr)
+        assert heater._refresh_fallback is None
+        assert fallback.cancelled()
+
+        fallback = loop.create_future()
+        heater._refresh_fallback = fallback
+        payload_no_map = {
+            "dev_id": dev_id,
+            "nodes": {"htr": {"status": {"0002": {"mode": "auto"}}}},
+        }
+        heater._handle_ws_event(payload_no_map)
+        assert heater._refresh_fallback is None
+        assert fallback.cancelled()
+
+        fallback = loop.create_future()
+        heater._refresh_fallback = fallback
+        payload_mixed_sections = {
+            "dev_id": dev_id,
+            "nodes": {"htr": {"settings": [], "status": {addr: {"mode": "auto"}}}},
+        }
+        heater._handle_ws_event(payload_mixed_sections)
+        assert heater._refresh_fallback is None
+        assert fallback.cancelled()
+
+        fallback = loop.create_future()
+        heater._refresh_fallback = fallback
+        unrelated_payload = {
+            "dev_id": dev_id,
+            "nodes": {"acm": {"settings": {"3": {"mode": "auto"}}}},
+            "addr_map": {"acm": ["3"]},
+        }
+        heater._handle_ws_event(unrelated_payload)
+        assert heater._refresh_fallback is fallback
+        assert not fallback.cancelled()
+
+        fallback = loop.create_future()
+        heater._refresh_fallback = fallback
+        mismatched_payload = {
+            "dev_id": dev_id,
+            "nodes": {"htr": {"settings": {"3": {"mode": "auto"}}}},
+            "addr_map": {"htr": ["3"]},
+        }
+        heater._handle_ws_event(mismatched_payload)
+        assert heater._refresh_fallback is fallback
+        assert not fallback.cancelled()
+
+        fallback = loop.create_future()
+        heater._refresh_fallback = fallback
+        none_payload = {
+            "dev_id": dev_id,
+            "nodes": {"htr": {"settings": {}}},
+            "addr_map": {"htr": [None]},
+        }
+        heater._handle_ws_event(none_payload)
+        assert heater._refresh_fallback is fallback
+        assert not fallback.cancelled()
+
+    asyncio.run(_run())
+
+
 def test_heater_cancelled_paths_propagate(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:

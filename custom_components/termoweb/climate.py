@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 import logging
 import time
 from typing import Any, cast
@@ -30,7 +30,7 @@ from .heater import (
     prepare_heater_platform_data,
     resolve_boost_runtime_minutes,
 )
-from .nodes import HeaterNode, normalize_node_type
+from .nodes import HeaterNode, normalize_node_addr, normalize_node_type
 from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
@@ -444,11 +444,65 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         kind = payload.get("kind")
         addr = payload.get("addr")
         expected_kind = f"{self._node_type}_settings"
-        if kind == expected_kind and addr is not None and self._refresh_fallback:
+        cancel_fallback = False
+        if kind == expected_kind:
+            cancel_fallback = addr is None or (
+                normalize_node_addr(addr) == self._addr if addr is not None else False
+            )
+        elif self._refresh_fallback and self._payload_mentions_heater(payload):
+            cancel_fallback = True
+
+        if cancel_fallback and self._refresh_fallback:
             if not self._refresh_fallback.done():
                 self._refresh_fallback.cancel()
             self._refresh_fallback = None
         super()._handle_ws_event(payload)
+
+    def _payload_mentions_heater(self, payload: Mapping[str, Any]) -> bool:
+        """Return True when a websocket payload references this heater."""
+
+        node_type = self._node_type
+        addr = self._addr
+        addr_core = addr.lstrip("0") or addr
+
+        def _matches(candidate: Any) -> bool:
+            normalized = normalize_node_addr(candidate)
+            candidates: list[str] = []
+            if normalized:
+                candidates.append(normalized)
+            if isinstance(candidate, str):
+                stripped = candidate.strip()
+                if stripped:
+                    candidates.append(stripped)
+            else:
+                candidate_str = str(candidate)
+                if candidate_str:
+                    candidates.append(candidate_str)
+            for candidate_str in candidates:
+                if candidate_str == addr or candidate_str.lstrip("0") == addr_core:
+                    return True
+            return False
+
+        addr_map = payload.get("addr_map") if isinstance(payload, Mapping) else None
+        if isinstance(addr_map, Mapping):
+            addresses = addr_map.get(node_type)
+            if isinstance(addresses, Iterable) and not isinstance(addresses, (str, bytes)):
+                for candidate in addresses:
+                    if _matches(candidate):
+                        return True
+
+        nodes_section = payload.get("nodes") if isinstance(payload, Mapping) else None
+        if isinstance(nodes_section, Mapping):
+            node_payload = nodes_section.get(node_type)
+            if isinstance(node_payload, Mapping):
+                for section in node_payload.values():
+                    if not isinstance(section, Mapping):
+                        continue
+                    for candidate in section.keys():
+                        if _matches(candidate):
+                            return True
+
+        return False
 
     @property
     def hvac_mode(self) -> HVACMode:
