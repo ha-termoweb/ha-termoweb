@@ -15,6 +15,7 @@ from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.heater import (
     DEFAULT_BOOST_DURATION,
     get_boost_runtime_minutes,
+    iter_boost_button_metadata,
     set_boost_runtime_minutes,
 )
 from homeassistant.core import HomeAssistant
@@ -82,6 +83,13 @@ def test_select_setup_and_selection(monkeypatch: pytest.MonkeyPatch) -> None:
         entity = added[0]
         assert isinstance(entity, AccumulatorBoostDurationSelect)
         assert entity.unique_id == f"{DOMAIN}:{dev_id}:acm:{node.addr}:boost_duration"
+        expected_options = [
+            str(item.minutes)
+            for item in iter_boost_button_metadata()
+            if item.minutes is not None
+        ]
+        options = getattr(entity, "options", getattr(entity, "_attr_options", []))
+        assert options == expected_options
 
         await entity.async_added_to_hass()
         assert entity.async_write_ha_state.called

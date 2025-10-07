@@ -14,6 +14,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 import custom_components.termoweb.binary_sensor as binary_sensor_module
 import custom_components.termoweb.button as button_module
+import custom_components.termoweb.heater as heater_module
 from custom_components.termoweb.const import DOMAIN, signal_ws_status
 from custom_components.termoweb.utils import build_gateway_device_info
 
@@ -188,9 +189,41 @@ def test_button_setup_adds_accumulator_entities(
             }
         }
 
-        acm_node = types.SimpleNamespace(addr="5", supports_boost=lambda: True)
-        acm_skip = types.SimpleNamespace(addr="6", supports_boost=lambda: False)
+        acm_node = types.SimpleNamespace(addr="5")
+        acm_skip = types.SimpleNamespace(addr="6")
         htr_node = types.SimpleNamespace(addr="3")
+
+        calls: list[str | None] = []
+
+        def fake_supports(node):
+            calls.append(getattr(node, "addr", None))
+            return getattr(node, "addr", None) == acm_node.addr
+
+        monkeypatch.setattr(button_module, "supports_boost", fake_supports)
+
+        custom_metadata = (
+            heater_module.BoostButtonMetadata(
+                15,
+                "15",
+                "Quick boost",
+                "mdi:flash",
+            ),
+            heater_module.BoostButtonMetadata(
+                None,
+                "stop",
+                "Stop boost",
+                "mdi:flash-off",
+            ),
+        )
+
+        def fake_iter():
+            yield from custom_metadata
+
+        monkeypatch.setattr(
+            button_module,
+            "iter_boost_button_metadata",
+            fake_iter,
+        )
 
         def fake_prepare(entry_data, *, default_name_simple):  # type: ignore[unused-argument]
             return (
@@ -211,28 +244,30 @@ def test_button_setup_adds_accumulator_entities(
 
         await async_setup_button_entry(hass, entry, _add_entities)
 
-        assert len(added) == 5
+        assert len(added) == 1 + len(custom_metadata)
+        assert calls == [acm_node.addr, acm_skip.addr]
         assert isinstance(added[0], StateRefreshButton)
 
         boost_entities = added[1:]
         assert all(isinstance(entity, ButtonEntity) for entity in boost_entities)
         names = [getattr(entity, "_attr_name", None) for entity in boost_entities]
-        assert names == [
-            "Boost 30 minutes",
-            "Boost 60 minutes",
-            "Boost 120 minutes",
-            "Cancel boost",
-        ]
         icons = [
             getattr(entity, "icon", getattr(entity, "_attr_icon", None))
             for entity in boost_entities
         ]
-        assert icons == [
-            "mdi:timer-play",
-            "mdi:timer-play",
-            "mdi:timer-play",
-            "mdi:timer-off",
+        unique_ids = [
+            getattr(entity, "unique_id", getattr(entity, "_attr_unique_id", None))
+            for entity in boost_entities
         ]
+        expected_names = [item.label for item in custom_metadata]
+        expected_icons = [item.icon for item in custom_metadata]
+        expected_unique_ids = [
+            f"{DOMAIN}:{dev_id}:acm:{acm_node.addr}:boost_{item.unique_suffix}"
+            for item in custom_metadata
+        ]
+        assert names == expected_names
+        assert icons == expected_icons
+        assert unique_ids == expected_unique_ids
 
     asyncio.run(_run())
 
@@ -409,8 +444,16 @@ def test_binary_sensor_setup_adds_boost_entities(
             DOMAIN: {entry.entry_id: {"coordinator": coordinator, "dev_id": dev_id}}
         }
 
-        boost_node = types.SimpleNamespace(addr="4", supports_boost=lambda: True)
-        skip_node = types.SimpleNamespace(addr="5", supports_boost=False)
+        boost_node = types.SimpleNamespace(addr="4")
+        skip_node = types.SimpleNamespace(addr="5")
+
+        calls: list[str | None] = []
+
+        def fake_supports(node):
+            calls.append(getattr(node, "addr", None))
+            return getattr(node, "addr", None) == boost_node.addr
+
+        monkeypatch.setattr(binary_sensor_module, "supports_boost", fake_supports)
 
         def fake_prepare(entry_data, *, default_name_simple):  # type: ignore[unused-argument]
             return (
@@ -432,6 +475,7 @@ def test_binary_sensor_setup_adds_boost_entities(
         await async_setup_binary_sensor_entry(hass, entry, _add_entities)
 
         assert len(added) == 2
+        assert calls == [boost_node.addr, skip_node.addr]
         gateway, boost = added
         assert isinstance(gateway, GatewayOnlineBinarySensor)
         assert isinstance(boost, binary_sensor_module.HeaterBoostActiveBinarySensor)
