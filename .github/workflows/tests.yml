@@ -55,7 +55,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: docs: update coverage badge
+          commit_message: "docs: update coverage badge"
           file_pattern: docs/badges/coverage.svg
 
       - name: Upload coverage artifacts
