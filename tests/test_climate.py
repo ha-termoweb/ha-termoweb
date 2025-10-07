@@ -913,6 +913,7 @@ def test_accumulator_extra_state_attributes_include_boost_metadata() -> None:
     assert attrs["boost_active"] is True
     assert attrs["boost_minutes_remaining"] == 150
     assert attrs["boost_end"] == "2024-01-01T02:30:00+00:00"
+    assert attrs["boost_end_label"] is None
     assert attrs["preferred_boost_minutes"] == DEFAULT_BOOST_DURATION
 
 
@@ -974,6 +975,7 @@ def test_accumulator_extra_state_attributes_fallbacks() -> None:
     assert attrs["boost_active"] is False
     assert attrs["boost_minutes_remaining"] == 30
     assert attrs["boost_end"] == "2024-01-01T00:30:00+00:00"
+    assert attrs["boost_end_label"] is None
     assert attrs["program_slot"] == "cold"
     assert attrs["program_setpoint"] == pytest.approx(15.0)
     assert attrs["preferred_boost_minutes"] == DEFAULT_BOOST_DURATION
@@ -1292,6 +1294,7 @@ def test_accumulator_extra_state_attributes_handles_resolver_fallbacks() -> None
     assert attrs["boost_active"] is True
     assert attrs["boost_minutes_remaining"] is None
     assert attrs["boost_end"] == "2024-01-01T03:00:00+00:00"
+    assert attrs["boost_end_label"] is None
 
 
 def test_accumulator_extra_state_attributes_varied_inputs() -> None:
@@ -1366,6 +1369,7 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
     assert attrs["boost_active"] is True
     assert attrs["boost_minutes_remaining"] == 60
     assert attrs["boost_end"] == "2024-01-01T01:00:00+00:00"
+    assert attrs["boost_end_label"] is None
 
     class RaisingResolver:
         def __call__(self, day: Any, minute: Any) -> tuple[dt.datetime | None, int | None]:
@@ -1380,8 +1384,10 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
 
     attrs = entity.extra_state_attributes
     assert attrs["boost_active"] is False
+    assert attrs["boost_end_label"] == "Never"
     assert attrs["boost_minutes_remaining"] is None
     assert attrs["boost_end"] is None
+    assert attrs["boost_end_label"] == "Never"
 
     settings["boost_active"] = " maybe "
     settings["boost"] = None
@@ -1402,6 +1408,7 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
     assert attrs["boost_active"] is False
     assert attrs["boost_minutes_remaining"] == 7
     assert attrs["boost_end"] == "2024-01-01T00:07:00+00:00"
+    assert attrs["boost_end_label"] is None
 
 def test_accumulator_submit_settings_brand_switch() -> None:
     """Verify accumulator writes use Ducaheat client when the brand matches."""

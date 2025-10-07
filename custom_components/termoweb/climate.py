@@ -907,9 +907,16 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 self._refresh_fallback.cancel()
             self._refresh_fallback = None
 
-        ws_record = (
-            self.hass.data.get(DOMAIN, {}).get(self._entry_id, {}).get("ws_state")
-        )
+        hass = self._hass_for_runtime()
+        ws_record = None
+        if hass is not None:
+            domain_bucket = getattr(hass, "data", None)
+            if isinstance(domain_bucket, dict):
+                entry_bucket = domain_bucket.get(DOMAIN, {})
+                if isinstance(entry_bucket, dict):
+                    entry_record = entry_bucket.get(self._entry_id, {})
+                    if isinstance(entry_record, dict):
+                        ws_record = entry_record.get("ws_state")
         if isinstance(ws_record, dict):
             ws_state = ws_record.get(self._dev_id)
             if isinstance(ws_state, dict):
@@ -937,7 +944,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             task = asyncio.current_task()
             await asyncio.sleep(_WS_ECHO_FALLBACK_REFRESH)
             try:
-                hass = self.hass
+                hass = self._hass_for_runtime()
                 is_stopping = getattr(hass, "is_stopping", False)
                 is_running = getattr(hass, "is_running", True)
                 if is_stopping or not is_running:
@@ -1109,6 +1116,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         attrs["boost_active"] = boost_state.active
         attrs["boost_minutes_remaining"] = boost_state.minutes_remaining
         attrs["boost_end"] = boost_state.end_iso
+        attrs["boost_end_label"] = boost_state.end_label
         attrs["preferred_boost_minutes"] = self._preferred_boost_minutes()
 
         return attrs

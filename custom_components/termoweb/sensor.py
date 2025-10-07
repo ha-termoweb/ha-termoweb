@@ -12,7 +12,7 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.const import UnitOfTemperature
+from homeassistant.const import STATE_UNKNOWN, UnitOfTemperature
 
 try:  # pragma: no cover - fallback for older Home Assistant stubs
     from homeassistant.const import UnitOfTime
@@ -22,6 +22,7 @@ except ImportError:  # pragma: no cover - fallback for older Home Assistant stub
 
         MINUTES = "min"
 from homeassistant.core import callback
+from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -333,6 +334,7 @@ class HeaterBoostMinutesRemainingSensor(HeaterNodeBase, SensorEntity):
             "addr": self._addr,
             "boost_active": state.active,
             "boost_end": state.end_iso,
+            "boost_end_label": state.end_label,
         }
 
 
@@ -349,6 +351,22 @@ class HeaterBoostEndSensor(HeaterNodeBase, SensorEntity):
         return state.end_datetime
 
     @property
+    def state(self) -> StateType:  # type: ignore[override]
+        """Return the Home Assistant state value for the boost end sensor."""
+
+        ha_state = super().state
+        state = self.boost_state()
+        if ha_state in (STATE_UNKNOWN, None):
+            if state.end_datetime is not None:
+                try:
+                    return state.end_datetime.isoformat()
+                except Exception:  # pragma: no cover - defensive
+                    return ha_state
+            if state.end_label:
+                return state.end_label
+        return ha_state
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return metadata about the boost session."""
 
@@ -358,6 +376,7 @@ class HeaterBoostEndSensor(HeaterNodeBase, SensorEntity):
             "addr": self._addr,
             "boost_active": state.active,
             "boost_minutes_remaining": state.minutes_remaining,
+            "boost_end_label": state.end_label,
         }
 
 

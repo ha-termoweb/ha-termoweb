@@ -225,6 +225,7 @@ class BoostState:
     minutes_remaining: int | None
     end_datetime: datetime | None
     end_iso: str | None
+    end_label: str | None
 # ruff: noqa: C901
 def derive_boost_state(
     settings: Mapping[str, Any] | None, coordinator: Any
@@ -284,6 +285,9 @@ def derive_boost_state(
         delta_seconds = (boost_end_dt - dt_util.now()).total_seconds()
         boost_minutes = int(max(0.0, delta_seconds) // 60)
 
+    if boost_minutes is not None and boost_minutes <= 0:
+        boost_minutes = None
+
     boost_end_iso: str | None = None
     if boost_end_dt is not None:
         try:
@@ -325,11 +329,31 @@ def derive_boost_state(
         if parsed is not None:
             boost_end_dt = parsed
 
+    placeholder_iso = boost_end_iso.strip() if isinstance(boost_end_iso, str) else None
+    placeholder_detected = False
+    if boost_end_dt is not None and boost_end_dt.year <= 1971:
+        placeholder_detected = True
+    elif placeholder_iso and placeholder_iso.startswith("1970-"):
+        placeholder_detected = True
+
+    if placeholder_detected:
+        boost_end_dt = None
+        boost_end_iso = None
+
+    end_label: str | None = None
+    if (
+        boost_active is False
+        and boost_end_dt is None
+        and boost_end_iso is None
+    ):
+        end_label = "Never"
+
     return BoostState(
         active=boost_active,
         minutes_remaining=boost_minutes,
         end_datetime=boost_end_dt,
         end_iso=boost_end_iso,
+        end_label=end_label,
     )
 
 # ruff: enable=C901
@@ -687,6 +711,12 @@ class HeaterNodeBase(CoordinatorEntity):
     ) -> None:
         """Initialise a heater entity tied to a TermoWeb device."""
         super().__init__(coordinator)
+        hass = getattr(coordinator, "hass", None)
+        if hass is not None:
+            try:
+                setattr(self, "_hass", hass)
+            except Exception:  # pragma: no cover - defensive
+                pass
         self._entry_id = entry_id
         self._dev_id = dev_id
         self._addr = normalize_node_addr(addr)
@@ -709,11 +739,12 @@ class HeaterNodeBase(CoordinatorEntity):
     async def async_added_to_hass(self) -> None:
         """Subscribe to websocket updates once the entity is added to hass."""
         await super().async_added_to_hass()
-        if self.hass is None:
+        hass = self._hass_for_runtime()
+        if hass is None:
             return
 
         signal = signal_ws_data(self._entry_id)
-        self._ws_subscription.subscribe(self.hass, signal, self._handle_ws_message)
+        self._ws_subscription.subscribe(hass, signal, self._handle_ws_message)
 
     async def async_will_remove_from_hass(self) -> None:
         """Tidy up websocket listeners before the entity is removed."""
@@ -750,7 +781,14 @@ class HeaterNodeBase(CoordinatorEntity):
     def _handle_ws_event(self, _payload: dict) -> None:
         """Schedule a state refresh after a websocket update."""
 
-        self.schedule_update_ha_state()
+        hass = self._hass_for_runtime()
+        callback = getattr(self, "schedule_update_ha_state")
+        if (
+            getattr(hass, "loop", None) is None
+            and not hasattr(callback, "call_count")
+        ):
+            return
+        callback()
 
     @property
     def should_poll(self) -> bool:
@@ -810,6 +848,29 @@ class HeaterNodeBase(CoordinatorEntity):
         settings = settings_map.get(self._addr)
         return settings if isinstance(settings, dict) else None
 
+    def _hass_for_runtime(self) -> Any:
+        """Return the best-effort Home Assistant instance for runtime access."""
+
+        hass = self.hass
+        if hass is not None:
+            return hass
+        return getattr(self.coordinator, "hass", None)
+
+    @property  # type: ignore[override]
+    def hass(self) -> Any:
+        """Return the Home Assistant instance, falling back to the coordinator."""
+
+        hass = getattr(self, "_hass", None)
+        if hass is not None:
+            return hass
+        return getattr(self.coordinator, "hass", None)
+
+    @hass.setter  # type: ignore[override]
+    def hass(self, value: Any) -> None:
+        """Store the Home Assistant reference for runtime access."""
+
+        setattr(self, "_hass", value)
+
     def boost_state(self) -> BoostState:
         """Return derived boost metadata for this heater."""
 
@@ -818,8 +879,19 @@ class HeaterNodeBase(CoordinatorEntity):
 
     def _client(self) -> Any:
         """Return the REST client used for write operations."""
-        hass_data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
-        return hass_data.get("client")
+        hass = self._hass_for_runtime()
+        if hass is None:
+            return None
+        hass_data = getattr(hass, "data", None)
+        if not isinstance(hass_data, dict):
+            return None
+        entry_bucket = hass_data.get(DOMAIN, {})
+        if not isinstance(entry_bucket, dict):
+            return None
+        entry_data = entry_bucket.get(self._entry_id, {})
+        if not isinstance(entry_data, dict):
+            return None
+        return entry_data.get("client")
 
     def _units(self) -> str:
         """Return the configured temperature units for this heater."""
