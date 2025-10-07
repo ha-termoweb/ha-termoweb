@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import types
 
-from custom_components.termoweb.energy import (
-    RateLimitState,
+import pytest
+
+from custom_components.termoweb.throttle import (
+    MonotonicRateLimiter,
     default_samples_rate_limit_state,
     reset_samples_rate_limit_state,
 )
@@ -14,18 +17,37 @@ from custom_components.termoweb.energy import (
 def test_default_samples_rate_limit_state_round_trip() -> None:
     """Shared rate limiter should reuse the same lock and manage timestamps."""
 
+    current = 0.4
+
+    def fake_monotonic() -> float:
+        return current
+
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        nonlocal current
+        sleep_calls.append(delay)
+        current += delay
+
+    time_module = types.SimpleNamespace(monotonic=fake_monotonic)
+
+    reset_samples_rate_limit_state(time_module=time_module, sleep=fake_sleep)
+
+    limiter = default_samples_rate_limit_state()
+    assert isinstance(limiter, MonotonicRateLimiter)
+    assert isinstance(limiter.lock, asyncio.Lock)
+
+    same_limiter = default_samples_rate_limit_state()
+    assert limiter is same_limiter
+
+    asyncio.run(limiter.async_throttle())
+    assert sleep_calls == [pytest.approx(0.6)]
+    assert limiter.last_timestamp() == pytest.approx(1.0)
+
+    current = 1.8
+    asyncio.run(limiter.async_throttle())
+    assert sleep_calls == [pytest.approx(0.6), pytest.approx(0.2)]
+    assert limiter.last_timestamp() == pytest.approx(2.0)
+
     reset_samples_rate_limit_state()
-
-    state1 = default_samples_rate_limit_state()
-    assert isinstance(state1, RateLimitState)
-    assert isinstance(state1.lock, asyncio.Lock)
-
-    state2 = default_samples_rate_limit_state()
-    assert state1.lock is state2.lock
-
-    state1.set_last_query(123.45)
-    assert state1.get_last_query() == 123.45
-    assert state2.get_last_query() == 123.45
-
-    reset_samples_rate_limit_state()
-    assert state1.get_last_query() == 0.0
+    assert limiter.last_timestamp() == 0.0

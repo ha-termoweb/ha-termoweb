@@ -638,22 +638,18 @@ custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._extract_sam
     Extract ``(timestamp, counter)`` from websocket sample payloads.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.handle_ws_samples
     Update cached heater metrics from websocket ``samples`` payloads.
-custom_components/termoweb/energy.py :: _integration_attr
-    Return attribute ``name`` from the integration module if available.
-custom_components/termoweb/energy.py :: _resolve_integration_dependencies
-    Return freshly resolved integration helpers.
-custom_components/termoweb/energy.py :: _get_integration_dependencies
-    Return cached integration helpers, resolving them on first use.
-custom_components/termoweb/energy.py :: _reset_integration_dependencies_cache
-    Reset the cached integration helpers (primarily for tests).
-custom_components/termoweb/energy.py :: _get_last_samples_query
-    Return the timestamp of the last samples query.
-custom_components/termoweb/energy.py :: _set_last_samples_query
-    Persist the timestamp of the last samples query.
-custom_components/termoweb/energy.py :: default_samples_rate_limit_state
-    Return the shared rate limiter for heater samples queries.
-custom_components/termoweb/energy.py :: reset_samples_rate_limit_state
-    Reset the shared rate limiter tracking to its initial state.
+custom_components/termoweb/throttle.py :: MonotonicRateLimiter.async_throttle
+    Sleep if required to honour ``min_interval`` seconds between calls.
+custom_components/termoweb/throttle.py :: MonotonicRateLimiter.reset
+    Reset the stored timestamp so the next call executes immediately.
+custom_components/termoweb/throttle.py :: MonotonicRateLimiter.last_timestamp
+    Return the timestamp of the most recent throttled call.
+custom_components/termoweb/throttle.py :: MonotonicRateLimiter.set_last_timestamp
+    Update the stored timestamp for the last throttled call.
+custom_components/termoweb/throttle.py :: default_samples_rate_limit_state
+    Return the shared rate limiter for heater samples requests.
+custom_components/termoweb/throttle.py :: reset_samples_rate_limit_state
+    Reset the shared samples rate limiter to its initial state.
 custom_components/termoweb/energy.py :: _resolve_recorder_imports
     Return cached recorder helper imports.
 custom_components/termoweb/energy.py :: _resolve_statistics_helpers

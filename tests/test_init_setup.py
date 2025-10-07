@@ -1034,7 +1034,8 @@ def test_import_energy_history_service_logs_global_task_errors(
 
     monkeypatch.setattr(termoweb_init, "RESTClient", ServiceClient)
     monkeypatch.setattr(termoweb_init, "_async_import_energy_history", failing_import)
-    monkeypatch.setattr(termoweb_init._LOGGER, "exception", capture_exception)
+    energy_mod = importlib.import_module("custom_components.termoweb.energy")
+    monkeypatch.setattr(energy_mod._LOGGER, "exception", capture_exception)
 
     entry = ConfigEntry("svc-global", data={"username": "user", "password": "pw"})
     stub_hass.config_entries.add(entry)
