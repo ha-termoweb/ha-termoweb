@@ -170,30 +170,41 @@ def test_derive_boost_state_parses_string_end(monkeypatch: pytest.MonkeyPatch) -
     assert state.end_datetime == datetime(2024, 1, 1, 0, 30, tzinfo=timezone.utc)
 
 
-def test_derive_boost_state_prefers_parse_datetime(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Ensure ``parse_datetime`` is used when available."""
+def test_derive_boost_state_handles_now_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure boost end derivation tolerates errors from ``dt_util.now``."""
 
-    base_now = datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)
-    monkeypatch.setattr(dt_util, "now", lambda: base_now)
+    def _raise_now() -> datetime:
+        raise RuntimeError("boom")
 
-    iso = "2024-01-01T00:45:00+00:00"
-    parsed_result = datetime(2024, 1, 1, 0, 45, tzinfo=timezone.utc)
+    monkeypatch.setattr(dt_util, "now", _raise_now)
+
+    coordinator = SimpleNamespace(resolve_boost_end=None)
+    state = heater_module.derive_boost_state({"boost_remaining": "30"}, coordinator)
+
+    assert state.minutes_remaining == 30
+    assert state.end_datetime is None
+    assert state.end_iso is None
+
+
+def test_derive_boost_state_uses_parse_datetime(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify ``dt_util.parse_datetime`` is leveraged when available."""
+
+    iso_value = "2024-01-02T03:04:05+00:00"
+    parsed = datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
     calls: list[str] = []
 
     def _fake_parse(value: str) -> datetime:
         calls.append(value)
-        return parsed_result
+        return parsed
 
     monkeypatch.setattr(dt_util, "parse_datetime", _fake_parse, raising=False)
 
-    settings = {"boost_end": iso}
-    state = heater_module.derive_boost_state(settings, SimpleNamespace())
+    coordinator = SimpleNamespace(resolve_boost_end=None)
+    state = heater_module.derive_boost_state({"boost_end": iso_value}, coordinator)
 
-    assert calls == [iso]
-    assert state.end_iso == iso
-    assert state.end_datetime == parsed_result
+    assert calls == [iso_value]
+    assert state.end_datetime == parsed
+    assert state.end_iso == iso_value
 
 
 def test_boost_entities_expose_state(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -322,6 +333,21 @@ def test_coerce_boost_minutes_edge_cases() -> None:
     assert coerce("invalid") is None
     assert coerce("90") == 90
     assert coerce(120.7) == 120
+
+    remaining = heater_module._coerce_boost_remaining_minutes
+    assert remaining(0) is None
+
+
+def test_coerce_boost_remaining_minutes_filters_non_positive() -> None:
+    """Ensure remaining minute coercion rejects falsey and negative values."""
+
+    coerce = heater_module._coerce_boost_remaining_minutes
+    assert coerce(None) is None
+    assert coerce(False) is None
+    assert coerce(0) is None
+    assert coerce(-1) is None
+    assert coerce(" ") is None
+    assert coerce("15") == 15
 
 
 def test_coerce_boost_remaining_minutes_non_positive() -> None:
