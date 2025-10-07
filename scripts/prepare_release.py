@@ -64,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     run("git", "tag", version)
     run("git", "push")
     run("git", "push", "--tags")
-    run("gh", "release", "create", version, "--generate-notes")
+    run("gh", "release", "create", version, "-d --generate-notes")
     return 0
 
 
