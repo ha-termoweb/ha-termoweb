@@ -252,6 +252,9 @@ async def _load_module(
     ws_module = importlib.import_module(
         "custom_components.termoweb.backend.ws_client"
     )
+    termoweb_ws_module = importlib.import_module(
+        "custom_components.termoweb.backend.termoweb_ws"
+    )
 
     class _FakeWSClient:
         def __init__(self, hass: Any, dev_id: str, *args: Any, **kwargs: Any) -> None:
@@ -265,6 +268,7 @@ async def _load_module(
             return None
 
     monkeypatch.setattr(ws_module, "TermoWebWSClient", _FakeWSClient)
+    monkeypatch.setattr(termoweb_ws_module, "TermoWebWSClient", _FakeWSClient)
 
     energy_module = importlib.reload(
         importlib.import_module("custom_components.termoweb.energy")
@@ -289,18 +293,17 @@ async def _load_module(
     init_module = importlib.reload(
         importlib.import_module("custom_components.termoweb.__init__")
     )
-    monkeypatch.setattr(init_module, "TermoWebWSClient", _FakeWSClient)
 
     compat_last = AsyncMock(return_value={})
     compat_period = AsyncMock(return_value={})
     compat_clear = AsyncMock(return_value="delete")
 
     if patch_compat:
-        monkeypatch.setattr(init_module, "_get_last_statistics_compat", compat_last)
+        monkeypatch.setattr(energy_module, "_get_last_statistics_compat", compat_last)
         monkeypatch.setattr(
-            init_module, "_statistics_during_period_compat", compat_period
+            energy_module, "_statistics_during_period_compat", compat_period
         )
-        monkeypatch.setattr(init_module, "_clear_statistics_compat", compat_clear)
+        monkeypatch.setattr(energy_module, "_clear_statistics_compat", compat_clear)
     else:
         compat_last = None
         compat_period = None
@@ -311,6 +314,7 @@ async def _load_module(
 
     return (
         init_module,
+        energy_module,
         const_module,
         import_stats,
         update_meta,
@@ -341,6 +345,7 @@ def test_store_statistics_prefers_internal_import(
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             _const,
             import_stats,
             _update_meta,
@@ -360,7 +365,7 @@ def test_store_statistics_prefers_internal_import(
         metadata = {"statistic_id": "sensor.test_energy", "source": "recorder"}
         stats = [{"sum": 1.23}]
 
-        mod._store_statistics(hass, metadata, stats)
+        energy_mod._store_statistics(hass, metadata, stats)
 
         import_stats.assert_called_once_with(hass, metadata, stats)
         external.assert_not_called()
@@ -372,6 +377,7 @@ def test_store_statistics_external_fallback(monkeypatch: pytest.MonkeyPatch) -> 
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             _const,
             import_stats,
             _update_meta,
@@ -398,7 +404,7 @@ def test_store_statistics_external_fallback(monkeypatch: pytest.MonkeyPatch) -> 
         }
         stats = [{"sum": 2.34}]
 
-        mod._store_statistics(hass, metadata, stats)
+        energy_mod._store_statistics(hass, metadata, stats)
 
         import_stats.assert_not_called()
         external.assert_called_once()
@@ -419,6 +425,7 @@ def test_async_import_energy_history_missing_record(
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             _import_stats,
             _update_meta,
@@ -439,7 +446,7 @@ def test_async_import_energy_history_missing_record(
             "1",
             options={
                 "sentinel": True,
-                mod.OPTION_ENERGY_HISTORY_PROGRESS: {"A": 1},
+                energy_mod.OPTION_ENERGY_HISTORY_PROGRESS: {"A": 1},
             },
         )
         original_options = copy.deepcopy(entry.options)
@@ -460,6 +467,7 @@ def test_integration_dependency_cache_reused(monkeypatch: pytest.MonkeyPatch) ->
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             _import_stats,
             _update_meta,
@@ -516,6 +524,7 @@ def test_async_import_energy_history_rebuilds_missing_inventory(
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             _import_stats,
             _update_meta,
@@ -532,7 +541,7 @@ def test_async_import_energy_history_rebuilds_missing_inventory(
 
         entry = ConfigEntry(
             "1",
-            options={mod.OPTION_ENERGY_HISTORY_IMPORTED: True},
+            options={energy_mod.OPTION_ENERGY_HISTORY_IMPORTED: True},
         )
 
         nodes_payload = {"nodes": [{"addr": "A", "type": "htr"}]}
@@ -561,6 +570,7 @@ def test_async_import_energy_history_already_imported(
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             _import_stats,
             _update_meta,
@@ -579,8 +589,8 @@ def test_async_import_energy_history_already_imported(
         entry = ConfigEntry(
             "1",
             options={
-                mod.OPTION_ENERGY_HISTORY_IMPORTED: True,
-                mod.OPTION_ENERGY_HISTORY_PROGRESS: {"A": 123},
+                energy_mod.OPTION_ENERGY_HISTORY_IMPORTED: True,
+                energy_mod.OPTION_ENERGY_HISTORY_PROGRESS: {"A": 123},
             },
         )
 
@@ -603,7 +613,7 @@ def test_async_import_energy_history_already_imported(
 
         client.get_node_samples.assert_not_awaited()
         update_entry.assert_not_called()
-        assert entry.options[mod.OPTION_ENERGY_HISTORY_PROGRESS] == {"A": 123}
+        assert entry.options[energy_mod.OPTION_ENERGY_HISTORY_PROGRESS] == {"A": 123}
 
     asyncio.run(_run())
 
@@ -616,6 +626,7 @@ def test_async_import_energy_history_handles_partial_options(
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             _import_stats,
             _update_meta,
@@ -639,8 +650,8 @@ def test_async_import_energy_history_handles_partial_options(
         entry = ConfigEntry(
             "1",
             options={
-                mod.OPTION_MAX_HISTORY_RETRIEVED: None,
-                mod.OPTION_ENERGY_HISTORY_PROGRESS: None,
+                energy_mod.OPTION_MAX_HISTORY_RETRIEVED: None,
+                energy_mod.OPTION_ENERGY_HISTORY_PROGRESS: None,
             },
         )
 
@@ -665,8 +676,8 @@ def test_async_import_energy_history_handles_partial_options(
 
         client.get_node_samples.assert_not_awaited()
         assert updates
-        assert updates[0].get(mod.OPTION_ENERGY_HISTORY_PROGRESS) == {}
-        assert mod.OPTION_ENERGY_HISTORY_IMPORTED not in updates[0]
+        assert updates[0].get(energy_mod.OPTION_ENERGY_HISTORY_PROGRESS) == {}
+        assert energy_mod.OPTION_ENERGY_HISTORY_IMPORTED not in updates[0]
 
     asyncio.run(_run())
 
@@ -677,6 +688,7 @@ def test_async_import_energy_history_waits_between_queries(
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             _import_stats,
             _update_meta,
@@ -695,7 +707,7 @@ def test_async_import_energy_history_waits_between_queries(
 
         entry = ConfigEntry(
             "1",
-            options={mod.OPTION_MAX_HISTORY_RETRIEVED: 1},
+            options={energy_mod.OPTION_MAX_HISTORY_RETRIEVED: 1},
         )
 
         client = types.SimpleNamespace()
@@ -711,7 +723,7 @@ def test_async_import_energy_history_waits_between_queries(
             }
         }
 
-        monkeypatch.setattr(mod.energy_module, "_LAST_SAMPLES_QUERY", 10.0)
+        monkeypatch.setattr(energy_mod, "_LAST_SAMPLES_QUERY", 10.0)
 
         monotonic_values = iter([10.4, 11.4, 11.4])
 
@@ -722,7 +734,7 @@ def test_async_import_energy_history_waits_between_queries(
                 return 11.4
 
         monkeypatch.setattr(
-            mod,
+            energy_mod,
             "time",
             types.SimpleNamespace(monotonic=fake_monotonic, time=lambda: 0.0),
         )
@@ -748,7 +760,7 @@ def test_async_import_energy_history_waits_between_queries(
             def now(cls, tz=None):
                 return super().fromtimestamp(fake_now, tz)
 
-        monkeypatch.setattr(mod, "datetime", FakeDateTime)
+        monkeypatch.setattr(energy_mod, "datetime", FakeDateTime)
 
         await mod._async_import_energy_history(hass, entry)
 
@@ -765,6 +777,7 @@ def test_async_import_energy_history_skips_invalid_samples(
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             _import_stats,
             _update_meta,
@@ -787,7 +800,7 @@ def test_async_import_energy_history_skips_invalid_samples(
 
         entry = ConfigEntry(
             "1",
-            options={mod.OPTION_MAX_HISTORY_RETRIEVED: 1},
+            options={energy_mod.OPTION_MAX_HISTORY_RETRIEVED: 1},
         )
 
         client = types.SimpleNamespace()
@@ -826,11 +839,11 @@ def test_async_import_energy_history_skips_invalid_samples(
         ent_reg.add("sensor.dev_D_energy", "sensor", const.DOMAIN, uid_d, "D energy")
 
         store = Mock()
-        monkeypatch.setattr(mod, "_store_statistics", store)
+        monkeypatch.setattr(energy_mod, "_store_statistics", store)
 
-        monkeypatch.setattr(mod.energy_module, "_LAST_SAMPLES_QUERY", 0.0)
+        monkeypatch.setattr(energy_mod, "_LAST_SAMPLES_QUERY", 0.0)
         monkeypatch.setattr(
-            mod,
+            energy_mod,
             "time",
             types.SimpleNamespace(monotonic=lambda: 100.0, time=lambda: 5 * 86_400),
         )
@@ -841,7 +854,7 @@ def test_async_import_energy_history_skips_invalid_samples(
             def now(cls, tz=None):
                 return super().fromtimestamp(fake_now, tz)
 
-        monkeypatch.setattr(mod, "datetime", FakeDateTime)
+        monkeypatch.setattr(energy_mod, "datetime", FakeDateTime)
 
         await mod._async_import_energy_history(hass, entry)
 
@@ -855,6 +868,7 @@ def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             _import_stats,
             _update_meta,
@@ -895,7 +909,7 @@ def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
         fake_now = 4 * 86_400
         monotonic_counter = itertools.count(start=1, step=2)
         monkeypatch.setattr(
-            mod,
+            energy_mod,
             "time",
             types.SimpleNamespace(
                 time=lambda: fake_now, monotonic=lambda: next(monotonic_counter)
@@ -907,11 +921,11 @@ def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
             def now(cls, tz=None):
                 return super().fromtimestamp(fake_now, tz)
 
-        monkeypatch.setattr(mod, "datetime", FakeDateTime)
+        monkeypatch.setattr(energy_mod, "datetime", FakeDateTime)
 
         captured: dict = {}
         monkeypatch.setattr(
-            mod,
+            energy_mod,
             "_store_statistics",
             lambda _h, m, s: captured.update(meta=m, stats=s),
         )
@@ -937,8 +951,8 @@ def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
             pytest.approx(0.002),
             pytest.approx(0.003),
         ]
-        assert entry.options[mod.OPTION_ENERGY_HISTORY_IMPORTED] is True
-        assert entry.options[mod.OPTION_ENERGY_HISTORY_PROGRESS] == {"htr:A": 172_799}
+        assert entry.options[energy_mod.OPTION_ENERGY_HISTORY_IMPORTED] is True
+        assert entry.options[energy_mod.OPTION_ENERGY_HISTORY_PROGRESS] == {"htr:A": 172_799}
         assert entry.options["max_history_retrieved"] == 2
 
     asyncio.run(_run())
@@ -950,6 +964,7 @@ def test_import_energy_history_with_existing_stats(
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             import_stats,
             update_meta,
@@ -990,7 +1005,7 @@ def test_import_energy_history_with_existing_stats(
         fake_now = 4 * 86_400
         monotonic_counter = itertools.count(start=1, step=2)
         monkeypatch.setattr(
-            mod,
+            energy_mod,
             "time",
             types.SimpleNamespace(
                 time=lambda: fake_now, monotonic=lambda: next(monotonic_counter)
@@ -1002,7 +1017,7 @@ def test_import_energy_history_with_existing_stats(
             def now(cls, tz=None):
                 return super().fromtimestamp(fake_now, tz)
 
-        monkeypatch.setattr(mod, "datetime", FakeDateTime)
+        monkeypatch.setattr(energy_mod, "datetime", FakeDateTime)
 
         start_prev = FakeDateTime.fromtimestamp(86_400, timezone.utc)
         get_period.return_value = {
@@ -1013,7 +1028,7 @@ def test_import_energy_history_with_existing_stats(
 
         captured: dict = {}
         monkeypatch.setattr(
-            mod,
+            energy_mod,
             "_store_statistics",
             lambda _h, m, s: captured.update(meta=m, stats=s),
         )
@@ -1042,6 +1057,7 @@ def test_import_energy_history_clears_overlap(monkeypatch: pytest.MonkeyPatch) -
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             import_stats,
             update_meta,
@@ -1081,7 +1097,7 @@ def test_import_energy_history_clears_overlap(monkeypatch: pytest.MonkeyPatch) -
 
         fake_now = 4 * 86_400
         monkeypatch.setattr(
-            mod,
+            energy_mod,
             "time",
             types.SimpleNamespace(time=lambda: fake_now, monotonic=lambda: fake_now),
         )
@@ -1091,7 +1107,7 @@ def test_import_energy_history_clears_overlap(monkeypatch: pytest.MonkeyPatch) -
             def now(cls, tz=None):
                 return super().fromtimestamp(fake_now, tz)
 
-        monkeypatch.setattr(mod, "datetime", FakeDateTime)
+        monkeypatch.setattr(energy_mod, "datetime", FakeDateTime)
 
         before_start = FakeDateTime.fromtimestamp(86_400, timezone.utc)
         overlap_start = FakeDateTime.fromtimestamp(259_200, timezone.utc)
@@ -1104,7 +1120,7 @@ def test_import_energy_history_clears_overlap(monkeypatch: pytest.MonkeyPatch) -
 
         captured: dict = {}
         monkeypatch.setattr(
-            mod,
+            energy_mod,
             "_store_statistics",
             lambda _h, m, s: captured.update(meta=m, stats=s),
         )
@@ -1141,6 +1157,7 @@ def test_import_energy_history_legacy(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             add_stats,
             _,
@@ -1178,7 +1195,7 @@ def test_import_energy_history_legacy(monkeypatch: pytest.MonkeyPatch) -> None:
         fake_now = 2 * 86_400
         monotonic_counter = itertools.count(start=1, step=2)
         monkeypatch.setattr(
-            mod,
+            energy_mod,
             "time",
             types.SimpleNamespace(
                 time=lambda: fake_now, monotonic=lambda: next(monotonic_counter)
@@ -1187,7 +1204,7 @@ def test_import_energy_history_legacy(monkeypatch: pytest.MonkeyPatch) -> None:
 
         captured: dict = {}
         monkeypatch.setattr(
-            mod,
+            energy_mod,
             "_store_statistics",
             lambda _h, m, s: captured.update(meta=m, stats=s),
         )
@@ -1213,6 +1230,7 @@ def test_import_history_uses_last_stats_and_clears_overlap(
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             import_stats,
             update_meta,
@@ -1230,7 +1248,7 @@ def test_import_history_uses_last_stats_and_clears_overlap(
             async_update_entry=lambda entry, *, options: entry.options.update(options)
         )
 
-        entry = ConfigEntry("import", options={mod.OPTION_MAX_HISTORY_RETRIEVED: 1})
+        entry = ConfigEntry("import", options={energy_mod.OPTION_MAX_HISTORY_RETRIEVED: 1})
 
         client = types.SimpleNamespace()
         sample_list = [
@@ -1257,14 +1275,14 @@ def test_import_history_uses_last_stats_and_clears_overlap(
             def now(cls, tz=None):
                 return super().fromtimestamp(fake_now, tz)
 
-        monkeypatch.setattr(mod, "datetime", FakeDateTime)
+        monkeypatch.setattr(energy_mod, "datetime", FakeDateTime)
         monkeypatch.setattr(
-            mod,
+            energy_mod,
             "time",
             types.SimpleNamespace(time=lambda: fake_now, monotonic=lambda: 10.0),
         )
 
-        import_start_dt = mod.datetime.fromtimestamp(
+        import_start_dt = datetime.fromtimestamp(
             sample_list[0]["t"], timezone.utc
         ).replace(minute=0, second=0, microsecond=0)
         before_start = import_start_dt - timedelta(hours=1)
@@ -1285,7 +1303,7 @@ def test_import_history_uses_last_stats_and_clears_overlap(
         def capture_stats(_hass, metadata, stats):
             captured.update(meta=metadata, stats=stats)
 
-        monkeypatch.setattr(mod, "_store_statistics", capture_stats)
+        monkeypatch.setattr(energy_mod, "_store_statistics", capture_stats)
 
         await mod._async_import_energy_history(hass, entry)
 
@@ -1309,6 +1327,7 @@ def test_import_history_uses_sync_recorder_helpers(
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             import_stats,
             update_meta,
@@ -1328,7 +1347,7 @@ def test_import_history_uses_sync_recorder_helpers(
 
         entry = ConfigEntry(
             "sync",
-            options={mod.OPTION_MAX_HISTORY_RETRIEVED: 1},
+            options={energy_mod.OPTION_MAX_HISTORY_RETRIEVED: 1},
         )
 
         client = types.SimpleNamespace()
@@ -1356,9 +1375,9 @@ def test_import_history_uses_sync_recorder_helpers(
             def now(cls, tz=None):
                 return super().fromtimestamp(fake_now, tz)
 
-        monkeypatch.setattr(mod, "datetime", FakeDateTime)
+        monkeypatch.setattr(energy_mod, "datetime", FakeDateTime)
         monkeypatch.setattr(
-            mod,
+            energy_mod,
             "time",
             types.SimpleNamespace(time=lambda: fake_now, monotonic=lambda: 10.0),
         )
@@ -1407,6 +1426,7 @@ def test_import_energy_history_reset_and_subset(
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             import_stats,
             update_meta,
@@ -1427,8 +1447,8 @@ def test_import_energy_history_reset_and_subset(
         entry = ConfigEntry(
             "1",
             options={
-                mod.OPTION_ENERGY_HISTORY_IMPORTED: True,
-                mod.OPTION_ENERGY_HISTORY_PROGRESS: {"A": 0, "B": 0},
+                energy_mod.OPTION_ENERGY_HISTORY_IMPORTED: True,
+                energy_mod.OPTION_ENERGY_HISTORY_PROGRESS: {"A": 0, "B": 0},
                 "max_history_retrieved": 1,
             },
         )
@@ -1450,7 +1470,7 @@ def test_import_energy_history_reset_and_subset(
         fake_now = 2 * 86_400
         monotonic_counter = itertools.count(start=1, step=2)
         monkeypatch.setattr(
-            mod,
+            energy_mod,
             "time",
             types.SimpleNamespace(
                 time=lambda: fake_now, monotonic=lambda: next(monotonic_counter)
@@ -1462,7 +1482,7 @@ def test_import_energy_history_reset_and_subset(
             def now(cls, tz=None):
                 return super().fromtimestamp(fake_now, tz)
 
-        monkeypatch.setattr(mod, "datetime", FakeDateTime)
+        monkeypatch.setattr(energy_mod, "datetime", FakeDateTime)
 
         await mod._async_import_energy_history(hass, entry, ["A"], reset_progress=True)
 
@@ -1470,9 +1490,9 @@ def test_import_energy_history_reset_and_subset(
             "dev", ("htr", "A"), 86_399, 172_799
         )
         last_stats.assert_called_once()
-        progress = entry.options[mod.OPTION_ENERGY_HISTORY_PROGRESS]
+        progress = entry.options[energy_mod.OPTION_ENERGY_HISTORY_PROGRESS]
         assert progress == {"htr:A": 86_399, "B": 0}
-        assert entry.options[mod.OPTION_ENERGY_HISTORY_IMPORTED] is True
+        assert entry.options[energy_mod.OPTION_ENERGY_HISTORY_IMPORTED] is True
 
     asyncio.run(_run())
 
@@ -1483,6 +1503,7 @@ def test_import_energy_history_reset_all_progress(
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             _import_stats,
             _update_meta,
@@ -1511,9 +1532,9 @@ def test_import_energy_history_reset_all_progress(
         entry = ConfigEntry(
             "1",
             options={
-                mod.OPTION_ENERGY_HISTORY_IMPORTED: True,
-                mod.OPTION_ENERGY_HISTORY_PROGRESS: {"A": 1, "B": 2},
-                mod.OPTION_MAX_HISTORY_RETRIEVED: 1,
+                energy_mod.OPTION_ENERGY_HISTORY_IMPORTED: True,
+                energy_mod.OPTION_ENERGY_HISTORY_PROGRESS: {"A": 1, "B": 2},
+                energy_mod.OPTION_MAX_HISTORY_RETRIEVED: 1,
             },
         )
 
@@ -1563,7 +1584,7 @@ def test_import_energy_history_reset_all_progress(
         fake_now = 5 * 86_400
         monotonic_counter = itertools.count(start=1, step=2)
         monkeypatch.setattr(
-            mod,
+            energy_mod,
             "time",
             types.SimpleNamespace(
                 time=lambda: fake_now, monotonic=lambda: next(monotonic_counter)
@@ -1575,7 +1596,7 @@ def test_import_energy_history_reset_all_progress(
             def now(cls, tz=None):
                 return super().fromtimestamp(fake_now, tz)
 
-        monkeypatch.setattr(mod, "datetime", FakeDateTime)
+        monkeypatch.setattr(energy_mod, "datetime", FakeDateTime)
 
         await mod._async_import_energy_history(
             hass,
@@ -1595,23 +1616,23 @@ def test_import_energy_history_reset_all_progress(
             ("dev", "htr", "B", 172_799, 259_199),
         ]
         assert len(updates) == client.get_node_samples.await_count + 2
-        assert all(mod.OPTION_ENERGY_HISTORY_PROGRESS in update for update in updates)
-        assert mod.OPTION_ENERGY_HISTORY_IMPORTED not in updates[0]
+        assert all(energy_mod.OPTION_ENERGY_HISTORY_PROGRESS in update for update in updates)
+        assert energy_mod.OPTION_ENERGY_HISTORY_IMPORTED not in updates[0]
         assert all(
-            mod.OPTION_ENERGY_HISTORY_IMPORTED not in update for update in updates[1:-1]
+            energy_mod.OPTION_ENERGY_HISTORY_IMPORTED not in update for update in updates[1:-1]
         )
-        assert updates[0][mod.OPTION_ENERGY_HISTORY_PROGRESS] == {}
+        assert updates[0][energy_mod.OPTION_ENERGY_HISTORY_PROGRESS] == {}
         final_update = updates[-1]
-        assert final_update[mod.OPTION_ENERGY_HISTORY_PROGRESS] == {
+        assert final_update[energy_mod.OPTION_ENERGY_HISTORY_PROGRESS] == {
             "htr:A": 172_799,
             "htr:B": 172_799,
         }
-        assert final_update[mod.OPTION_ENERGY_HISTORY_IMPORTED] is True
+        assert final_update[energy_mod.OPTION_ENERGY_HISTORY_IMPORTED] is True
 
-        progress = entry.options[mod.OPTION_ENERGY_HISTORY_PROGRESS]
+        progress = entry.options[energy_mod.OPTION_ENERGY_HISTORY_PROGRESS]
         assert progress == {"htr:A": 172_799, "htr:B": 172_799}
-        assert entry.options[mod.OPTION_MAX_HISTORY_RETRIEVED] == 1
-        assert entry.options[mod.OPTION_ENERGY_HISTORY_IMPORTED] is True
+        assert entry.options[energy_mod.OPTION_MAX_HISTORY_RETRIEVED] == 1
+        assert entry.options[energy_mod.OPTION_ENERGY_HISTORY_IMPORTED] is True
         assert last_stats.await_count == 2
 
     asyncio.run(_run())
@@ -1623,6 +1644,7 @@ def test_import_energy_history_requested_map_filters(
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             _import_stats,
             _update_meta,
@@ -1643,7 +1665,7 @@ def test_import_energy_history_requested_map_filters(
         entry = ConfigEntry(
             "req-map",
             options={
-                mod.OPTION_ENERGY_HISTORY_PROGRESS: {},
+                energy_mod.OPTION_ENERGY_HISTORY_PROGRESS: {},
                 "max_history_retrieved": 1,
             },
         )
@@ -1679,7 +1701,7 @@ def test_import_energy_history_requested_map_filters(
                     "known_types": None if known_types is None else set(known_types),
                 }
             )
-            assert known_types == mod.HEATER_NODE_TYPES
+            assert known_types == nodes_module.HEATER_NODE_TYPES
             return (
                 {"htr": ["A"], "acm": ["B"], "pmo": ["ignored"]},
                 set(),
@@ -1689,13 +1711,15 @@ def test_import_energy_history_requested_map_filters(
             nodes_module, "addresses_by_node_type", fake_addresses_by_node_type
         )
 
-        original_normalize = mod.normalize_heater_addresses
+        original_normalize = energy_mod.normalize_heater_addresses
 
         def fake_normalize(addrs: Any) -> tuple[dict[str, list[str]], dict[str, str]]:
             normalize_calls.append(addrs)
             return original_normalize(addrs)
 
-        monkeypatch.setattr(mod, "normalize_heater_addresses", fake_normalize)
+        monkeypatch.setattr(
+            energy_mod, "normalize_heater_addresses", fake_normalize
+        )
 
         uid_a = nodes_module.build_heater_energy_unique_id("dev", "htr", "A")
         uid_b_legacy = nodes_module.build_heater_energy_unique_id("dev", "htr", "B")
@@ -1725,14 +1749,14 @@ def test_import_energy_history_requested_map_filters(
                 return super().fromtimestamp(fake_now, tz)
 
         monkeypatch.setattr(
-            mod,
+            energy_mod,
             "time",
             types.SimpleNamespace(
                 monotonic=lambda: next(monotonic_counter),
                 time=lambda: fake_now,
             ),
         )
-        monkeypatch.setattr(mod, "datetime", FakeDateTime)
+        monkeypatch.setattr(energy_mod, "datetime", FakeDateTime)
 
         await mod._async_import_energy_history(
             hass,
@@ -1747,10 +1771,10 @@ def test_import_energy_history_requested_map_filters(
         )
 
         assert client.get_node_samples.await_count >= 2
-        progress = entry.options[mod.OPTION_ENERGY_HISTORY_PROGRESS]
+        progress = entry.options[energy_mod.OPTION_ENERGY_HISTORY_PROGRESS]
         assert set(progress) >= {"htr:A", "acm:B"}
         assert helper_calls
-        assert helper_calls[0]["known_types"] == mod.HEATER_NODE_TYPES
+        assert helper_calls[0]["known_types"] == nodes_module.HEATER_NODE_TYPES
         assert normalize_calls
 
     asyncio.run(_run())
@@ -1762,6 +1786,7 @@ def test_import_energy_history_ignores_unavailable_requested_nodes(
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             _import_stats,
             _update_meta,
@@ -1784,7 +1809,7 @@ def test_import_energy_history_ignores_unavailable_requested_nodes(
 
         entry = ConfigEntry(
             "1",
-            options={mod.OPTION_MAX_HISTORY_RETRIEVED: 0},
+            options={energy_mod.OPTION_MAX_HISTORY_RETRIEVED: 0},
         )
 
         client = types.SimpleNamespace(
@@ -1815,6 +1840,7 @@ def test_import_energy_history_resets_requested_progress(
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             _import_stats,
             _update_meta,
@@ -1835,7 +1861,7 @@ def test_import_energy_history_resets_requested_progress(
         entry = ConfigEntry(
             "reset-map",
             options={
-                mod.OPTION_ENERGY_HISTORY_PROGRESS: {
+                energy_mod.OPTION_ENERGY_HISTORY_PROGRESS: {
                     "htr:X": 123,
                     "X": 456,
                 }
@@ -1860,7 +1886,7 @@ def test_import_energy_history_resets_requested_progress(
                     "known_types": None if known_types is None else set(known_types),
                 }
             )
-            assert known_types == mod.HEATER_NODE_TYPES
+            assert known_types == nodes_module.HEATER_NODE_TYPES
             return ({"pmo": ["X"]}, set())
 
         monkeypatch.setattr(
@@ -1875,14 +1901,14 @@ def test_import_energy_history_resets_requested_progress(
                 return super().fromtimestamp(fake_now, tz)
 
         monkeypatch.setattr(
-            mod,
+            energy_mod,
             "time",
             types.SimpleNamespace(
                 monotonic=lambda: 0.0,
                 time=lambda: fake_now,
             ),
         )
-        monkeypatch.setattr(mod, "datetime", FakeDateTime)
+        monkeypatch.setattr(energy_mod, "datetime", FakeDateTime)
 
         await mod._async_import_energy_history(
             hass,
@@ -1891,9 +1917,9 @@ def test_import_energy_history_resets_requested_progress(
             reset_progress=True,
         )
 
-        assert entry.options[mod.OPTION_ENERGY_HISTORY_PROGRESS] == {}
+        assert entry.options[energy_mod.OPTION_ENERGY_HISTORY_PROGRESS] == {}
         assert helper_calls
-        assert helper_calls[0]["known_types"] == mod.HEATER_NODE_TYPES
+        assert helper_calls[0]["known_types"] == nodes_module.HEATER_NODE_TYPES
 
     asyncio.run(_run())
 
@@ -1902,6 +1928,7 @@ def test_energy_polling_matches_import(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         (
             _mod,
+            _energy_mod,
             _const,
             _import_stats,
             _update_meta,
@@ -1982,6 +2009,7 @@ def test_setup_defers_import_until_started(monkeypatch: pytest.MonkeyPatch) -> N
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             import_stats,
             update_meta,
@@ -2043,7 +2071,7 @@ def test_setup_defers_import_until_started(monkeypatch: pytest.MonkeyPatch) -> N
         import_mock.assert_not_called()
 
         start_listeners = [
-            cb for event, cb in listeners if event == mod.EVENT_HOMEASSISTANT_STARTED
+            cb for event, cb in listeners if event == energy_mod.EVENT_HOMEASSISTANT_STARTED
         ]
         assert len(start_listeners) == 1
         cb = start_listeners[0]
@@ -2061,6 +2089,7 @@ def test_service_dispatches_import_tasks(monkeypatch: pytest.MonkeyPatch) -> Non
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             _import_stats,
             _update_meta,
@@ -2104,7 +2133,7 @@ def test_service_dispatches_import_tasks(monkeypatch: pytest.MonkeyPatch) -> Non
         entry = ConfigEntry(
             "entry-1",
             data={"username": "u", "password": "p"},
-            options={mod.OPTION_ENERGY_HISTORY_IMPORTED: True},
+            options={energy_mod.OPTION_ENERGY_HISTORY_IMPORTED: True},
         )
 
         entries = {entry.entry_id: entry}
@@ -2184,6 +2213,7 @@ def test_service_filters_invalid_entities(monkeypatch: pytest.MonkeyPatch) -> No
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             _import_stats,
             _update_meta,
@@ -2227,7 +2257,7 @@ def test_service_filters_invalid_entities(monkeypatch: pytest.MonkeyPatch) -> No
         entry = ConfigEntry(
             "entry-valid",
             data={"username": "u", "password": "p"},
-            options={mod.OPTION_ENERGY_HISTORY_IMPORTED: True},
+            options={energy_mod.OPTION_ENERGY_HISTORY_IMPORTED: True},
         )
 
         entries = {entry.entry_id: entry}
@@ -2341,6 +2371,7 @@ def test_service_uses_snapshot_inventory(monkeypatch: pytest.MonkeyPatch) -> Non
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             _import_stats,
             _update_meta,
@@ -2384,7 +2415,7 @@ def test_service_uses_snapshot_inventory(monkeypatch: pytest.MonkeyPatch) -> Non
         entry = ConfigEntry(
             "entry-1",
             data={"username": "u", "password": "p"},
-            options={mod.OPTION_ENERGY_HISTORY_IMPORTED: True},
+            options={energy_mod.OPTION_ENERGY_HISTORY_IMPORTED: True},
         )
 
         entries = {entry.entry_id: entry}
@@ -2432,6 +2463,7 @@ def test_service_uses_cached_inventory_without_snapshot(
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             _import_stats,
             _update_meta,
@@ -2475,7 +2507,7 @@ def test_service_uses_cached_inventory_without_snapshot(
         entry = ConfigEntry(
             "entry-2",
             data={"username": "user", "password": "pass"},
-            options={mod.OPTION_ENERGY_HISTORY_IMPORTED: True},
+            options={energy_mod.OPTION_ENERGY_HISTORY_IMPORTED: True},
         )
 
         entries = {entry.entry_id: entry}
@@ -2503,7 +2535,7 @@ def test_service_uses_cached_inventory_without_snapshot(
         args, kwargs = import_mock.await_args
         assert args[2] == {"htr": ["A"]}
         assert kwargs["reset_progress"] is False
-        assert kwargs["max_days"] in (None, mod.DEFAULT_MAX_HISTORY_DAYS)
+        assert kwargs["max_days"] in (None, energy_mod.DEFAULT_MAX_HISTORY_DAYS)
 
         if tasks:
             await asyncio.gather(*tasks)
@@ -2515,6 +2547,7 @@ def test_refresh_fallback_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             _import_stats,
             _update_meta,
@@ -2548,6 +2581,7 @@ def test_async_unload_entry_cleans_up(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         (
             mod,
+            energy_mod,
             const,
             _import_stats,
             _update_meta,

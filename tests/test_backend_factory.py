@@ -141,9 +141,12 @@ def test_termoweb_backend_sets_protocol_for_websocket_client(monkeypatch: pytest
 
 
 def test_termoweb_backend_fallback_ws_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
-    import custom_components.termoweb as init_module
+    import custom_components.termoweb.backend.termoweb_ws as termoweb_ws_module
 
-    monkeypatch.setattr(init_module, "TermoWebWSClient", None)
+    class StubWS(TermoWebWSClient):
+        pass
+
+    monkeypatch.setattr(termoweb_ws_module, "TermoWebWSClient", StubWS)
     client = DummyHttpClient()
     backend = TermoWebBackend(brand="termoweb", client=client)
     loop = asyncio.new_event_loop()
@@ -158,7 +161,7 @@ def test_termoweb_backend_fallback_ws_resolution(monkeypatch: pytest.MonkeyPatch
     finally:
         loop.close()
 
-    assert isinstance(ws_client, TermoWebWSClient)
+    assert isinstance(ws_client, StubWS)
     assert ws_client._protocol_hint is None
 
 

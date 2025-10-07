@@ -5,9 +5,8 @@ from __future__ import annotations
 import asyncio
 from collections import Counter
 from collections.abc import Awaitable, Iterable, Mapping, MutableMapping
-from datetime import datetime as _datetime, timedelta
+from datetime import timedelta
 import logging
-import time as _time
 from typing import Any
 
 from aiohttp import ClientError
@@ -17,7 +16,6 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
-from . import energy as energy_module
 from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend import Backend, DucaheatRESTClient, WsClientProto, create_backend
 from .const import (
@@ -34,10 +32,6 @@ from .const import (
 )
 from .coordinator import StateCoordinator
 from .energy import (
-    DEFAULT_MAX_HISTORY_DAYS as ENERGY_DEFAULT_MAX_HISTORY_DAYS,
-    OPTION_ENERGY_HISTORY_IMPORTED as ENERGY_OPTION_ENERGY_HISTORY_IMPORTED,
-    OPTION_ENERGY_HISTORY_PROGRESS as ENERGY_OPTION_ENERGY_HISTORY_PROGRESS,
-    OPTION_MAX_HISTORY_RETRIEVED as ENERGY_OPTION_MAX_HISTORY_RETRIEVED,
     async_import_energy_history as _async_import_energy_history_impl,
     async_register_import_energy_history_service,
     async_schedule_initial_energy_import,
@@ -45,13 +39,7 @@ from .energy import (
     reset_samples_rate_limit_state,
 )
 from .installation import InstallationSnapshot
-from .nodes import (
-    HEATER_NODE_TYPES as _HEATER_NODE_TYPES,
-    build_heater_address_map as _build_heater_address_map,
-    build_node_inventory,
-    ensure_node_inventory as _ensure_node_inventory,
-    normalize_heater_addresses as _normalize_heater_addresses,
-)
+from .nodes import build_node_inventory
 from .utils import async_get_integration_version as _async_get_integration_version
 
 try:  # pragma: no cover - fallback for test stubs
@@ -59,38 +47,11 @@ try:  # pragma: no cover - fallback for test stubs
 except ImportError:  # pragma: no cover - tests provide a minimal const module
     EVENT_HOMEASSISTANT_STOP = "homeassistant_stop"
 
-HEATER_NODE_TYPES = _HEATER_NODE_TYPES
-
-OPTION_ENERGY_HISTORY_IMPORTED = ENERGY_OPTION_ENERGY_HISTORY_IMPORTED
-OPTION_ENERGY_HISTORY_PROGRESS = ENERGY_OPTION_ENERGY_HISTORY_PROGRESS
-OPTION_MAX_HISTORY_RETRIEVED = ENERGY_OPTION_MAX_HISTORY_RETRIEVED
-DEFAULT_MAX_HISTORY_DAYS = ENERGY_DEFAULT_MAX_HISTORY_DAYS
-
-build_heater_address_map = _build_heater_address_map
-ensure_node_inventory = _ensure_node_inventory
-normalize_heater_addresses = _normalize_heater_addresses
-
-EVENT_HOMEASSISTANT_STARTED = energy_module.EVENT_HOMEASSISTANT_STARTED
-er = energy_module.er
-_iso_date = energy_module._iso_date  # noqa: SLF001
-_store_statistics = energy_module._store_statistics  # noqa: SLF001
-_statistics_during_period_compat = (
-    energy_module._statistics_during_period_compat  # noqa: SLF001
-)
-_get_last_statistics_compat = energy_module._get_last_statistics_compat  # noqa: SLF001
-_clear_statistics_compat = energy_module._clear_statistics_compat  # noqa: SLF001
-
-# Re-export the websocket client for backward compatibility (tests may patch it).
-from .backend.ws_client import TermoWebWSClient  # noqa: F401,E402
-
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["button", "binary_sensor", "climate", "select", "sensor"]
 
 reset_samples_rate_limit_state()
-
-datetime = _datetime
-time = _time
 
 
 def create_rest_client(
