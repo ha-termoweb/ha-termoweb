@@ -13,6 +13,7 @@ import aiohttp
 import pytest
 
 from custom_components.termoweb.backend import ducaheat_ws
+from homeassistant.core import HomeAssistant
 
 
 class DummyREST:
@@ -113,13 +114,10 @@ class StubSession:
 def _make_client(monkeypatch: pytest.MonkeyPatch) -> ducaheat_ws.DucaheatWSClient:
     """Create a websocket client with deterministic helpers."""
 
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
     ws = StubWebSocket()
     session = StubSession(ws)
-    hass = SimpleNamespace(loop=loop, data={ducaheat_ws.DOMAIN: {"entry": {}}})
+    hass = HomeAssistant()
+    hass.data.setdefault(ducaheat_ws.DOMAIN, {})["entry"] = {}
     client = ducaheat_ws.DucaheatWSClient(
         hass,
         entry_id="entry",

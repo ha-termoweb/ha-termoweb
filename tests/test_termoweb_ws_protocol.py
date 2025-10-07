@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import asyncio
 import logging
+import threading
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -17,6 +17,7 @@ from custom_components.termoweb.backend.sanitize import (
     redact_token_fragment,
 )
 from custom_components.termoweb.installation import InstallationSnapshot
+from homeassistant.core import HomeAssistant
 
 
 class DummyREST:
@@ -122,9 +123,13 @@ def _make_client(
         hass_loop = SimpleNamespace(
             create_task=lambda coro, **_: SimpleNamespace(done=lambda: False),
             call_soon_threadsafe=lambda cb, *args: cb(*args),
+            is_running=lambda: False,
         )
 
-    hass = SimpleNamespace(loop=hass_loop, data={module.DOMAIN: {"entry": {}}})
+    hass = HomeAssistant()
+    hass.loop = hass_loop
+    hass.loop_thread_id = threading.get_ident()
+    hass.data.setdefault(module.DOMAIN, {})["entry"] = {}
     coordinator = SimpleNamespace(update_nodes=MagicMock(), data={})
     client = module.WebSocketClient(
         hass,
