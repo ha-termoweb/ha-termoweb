@@ -214,7 +214,17 @@ def test_boost_entities_expose_state(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(dt_util, "now", lambda: base_now)
 
     expected_end = base_now + timedelta(minutes=30)
-    settings = {"mode": "boost", "boost_end_day": 1, "boost_end_min": 30}
+    settings = {
+        "mode": "boost",
+        "boost_end_day": 1,
+        "boost_end_min": 30,
+        "boost_end_datetime": expected_end,
+        "boost_minutes_delta": 30,
+    }
+
+    def _resolver(day: int, minute: int, *, now=None) -> tuple[datetime, int]:
+        raise AssertionError("resolver should not be used when derived metadata present")
+
     coordinator = SimpleNamespace(
         data={
             "dev": {
@@ -223,7 +233,7 @@ def test_boost_entities_expose_state(monkeypatch: pytest.MonkeyPatch) -> None:
                 }
             }
         },
-        resolve_boost_end=lambda day, minute, *, now=None: (expected_end, 30),
+        resolve_boost_end=_resolver,
     )
 
     boost_binary = HeaterBoostActiveBinarySensor(

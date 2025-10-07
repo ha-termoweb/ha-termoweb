@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 
+from aiohttp import ClientError
 from types import MappingProxyType
 from typing import Any, Mapping
 from unittest.mock import AsyncMock
@@ -11,7 +12,7 @@ import pytest
 from homeassistant.core import HomeAssistant
 
 from custom_components.termoweb import coordinator as coord_module
-from custom_components.termoweb.nodes import HeaterNode
+from custom_components.termoweb.nodes import AccumulatorNode, HeaterNode
 
 
 def test_coerce_int_variants() -> None:
@@ -59,6 +60,177 @@ def test_resolve_boost_end_from_fields_variants() -> None:
     derived_dt, derived_minutes = coordinator.resolve_boost_end(2, 60, now=base_now)
     assert isinstance(derived_dt, dt.datetime)
     assert derived_minutes == 1500
+
+
+def test_rtc_payload_to_datetime(monkeypatch: pytest.MonkeyPatch) -> None:
+    """RTC payload helper should construct timezone-aware datetimes."""
+
+    base_now = dt.datetime(2024, 5, 1, 12, 0, tzinfo=dt.timezone.utc)
+    monkeypatch.setattr(coord_module.dt_util, "now", lambda: base_now)
+
+    payload = {"y": 2024, "n": 5, "d": 1, "h": 13, "m": 15, "s": 30}
+    dt_value = coord_module.StateCoordinator._rtc_payload_to_datetime(payload)
+    assert dt_value == dt.datetime(2024, 5, 1, 13, 15, 30, tzinfo=dt.timezone.utc)
+
+    assert coord_module.StateCoordinator._rtc_payload_to_datetime(None) is None
+    invalid_month = {"y": 2024, "n": 13, "d": 1, "h": 0, "m": 0, "s": 0}
+    assert coord_module.StateCoordinator._rtc_payload_to_datetime(invalid_month) is None
+    assert coord_module.StateCoordinator._rtc_payload_to_datetime({}) is None
+
+
+@pytest.mark.asyncio
+async def test_async_fetch_rtc_datetime_updates_reference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fetching RTC time should update the cached reference."""
+
+    hass = HomeAssistant()
+    client = AsyncMock()
+    base_now = dt.datetime(2024, 5, 1, 12, 0, tzinfo=dt.timezone.utc)
+    monkeypatch.setattr(coord_module.dt_util, "now", lambda: base_now)
+
+    client.get_rtc_time = AsyncMock(
+        return_value={"y": 2024, "n": 5, "d": 1, "h": 12, "m": 5, "s": 0}
+    )
+
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=client,
+        base_interval=30,
+        dev_id="dev",
+        device={},
+        nodes={},
+    )
+
+    result = await coordinator._async_fetch_rtc_datetime()
+    assert result == dt.datetime(2024, 5, 1, 12, 5, 0, tzinfo=dt.timezone.utc)
+    assert coordinator._device_now_estimate() is not None
+
+
+@pytest.mark.asyncio
+async def test_async_fetch_rtc_datetime_handles_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RTC fetch helper should swallow client errors and keep reference unset."""
+
+    hass = HomeAssistant()
+    client = AsyncMock()
+    base_now = dt.datetime(2024, 5, 1, 12, 0, tzinfo=dt.timezone.utc)
+    monkeypatch.setattr(coord_module.dt_util, "now", lambda: base_now)
+
+    client.get_rtc_time = AsyncMock(side_effect=ClientError("boom"))
+
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=client,
+        base_interval=30,
+        dev_id="dev",
+        device={},
+        nodes={},
+    )
+
+    result = await coordinator._async_fetch_rtc_datetime()
+    assert result is None
+    assert coordinator._device_now_estimate() is None
+
+
+def test_boost_helpers_guard_against_invalid_sections() -> None:
+    """Derived metadata helpers should ignore unsupported payload shapes."""
+
+    hass = HomeAssistant()
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device={},
+        nodes={},
+    )
+
+    calls: list[tuple[Mapping[str, Any], datetime | None]] = []
+
+    def _record(payload: Mapping[str, Any], *, now: datetime | None) -> None:
+        calls.append((payload, now))
+
+    coordinator._apply_accumulator_boost_metadata = _record  # type: ignore[assignment]
+    coordinator._apply_boost_metadata_for_section(None, now=None)
+    coordinator._apply_boost_metadata_for_section({"settings": []}, now=None)
+
+    assert calls == []
+    assert coord_module.StateCoordinator._requires_boost_resolution(None) is False
+
+
+@pytest.mark.asyncio
+async def test_async_update_data_adds_boost_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Accumulator settings should expose derived boost metadata."""
+
+    hass = HomeAssistant()
+    client = AsyncMock()
+    base_now = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
+    monkeypatch.setattr(coord_module.dt_util, "now", lambda: base_now)
+
+    inventory = [AccumulatorNode(name="Accumulator 1", addr="1")]
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=client,
+        base_interval=30,
+        dev_id="dev",
+        device={},
+        nodes={},
+        node_inventory=inventory,
+    )
+
+    client.get_node_settings = AsyncMock(
+        return_value={"mode": "boost", "boost_end_day": 1, "boost_end_min": 90}
+    )
+    client.get_rtc_time = AsyncMock(
+        return_value={"y": 2024, "n": 1, "d": 1, "h": 0, "m": 0, "s": 0}
+    )
+
+    result = await coordinator._async_update_data()
+    settings = result["dev"]["nodes_by_type"]["acm"]["settings"]["1"]
+    derived_dt = settings.get("boost_end_datetime")
+    derived_minutes = settings.get("boost_minutes_delta")
+
+    assert isinstance(derived_dt, dt.datetime)
+    assert derived_dt == dt.datetime(2024, 1, 1, 1, 30, tzinfo=dt.timezone.utc)
+    assert derived_minutes == 90
+    client.get_rtc_time.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_async_refresh_heater_fetches_rtc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Refreshing an accumulator should resolve boost metadata using RTC."""
+
+    hass = HomeAssistant()
+    client = AsyncMock()
+    base_now = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
+    monkeypatch.setattr(coord_module.dt_util, "now", lambda: base_now)
+
+    inventory = [AccumulatorNode(name="Accumulator 1", addr="1")]
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=client,
+        base_interval=30,
+        dev_id="dev",
+        device={},
+        nodes={},
+        node_inventory=inventory,
+    )
+
+    client.get_node_settings = AsyncMock(
+        return_value={"boost_end_day": 1, "boost_end_min": 30}
+    )
+    client.get_rtc_time = AsyncMock(
+        return_value={"y": 2024, "n": 1, "d": 1, "h": 0, "m": 0, "s": 0}
+    )
+
+    await coordinator.async_refresh_heater(("acm", "1"))
+    client.get_rtc_time.assert_awaited_once()
 
 
 def test_device_display_name_helper() -> None:
