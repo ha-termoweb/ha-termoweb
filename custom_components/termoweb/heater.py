@@ -23,8 +23,8 @@ from .boost import (
 from .const import DOMAIN, signal_ws_data
 from .installation import InstallationSnapshot, ensure_snapshot
 from .inventory import (
+    Inventory,
     Node,
-    build_heater_inventory_details,
     build_node_inventory,
     normalize_node_addr,
     normalize_node_type,
@@ -640,7 +640,7 @@ def prepare_heater_platform_data(
     *,
     default_name_simple: Callable[[str], str],
 ) -> tuple[
-    list[Node],
+    tuple[Node, ...],
     dict[str, list[Node]],
     dict[str, list[str]],
     Callable[[str, str], str],
@@ -663,12 +663,17 @@ def prepare_heater_platform_data(
         name_map = snapshot.heater_name_map(default_name_simple)
     else:
         nodes = entry_data.get("nodes")
-        inventory = ensure_node_inventory(entry_data, nodes=nodes)
+        inventory_nodes = ensure_node_inventory(entry_data, nodes=nodes)
+        inventory_container = Inventory(
+            str(entry_data.get("dev_id", "")),
+            nodes,
+            inventory_nodes,
+        )
+        inventory = inventory_container.nodes
 
-        details = build_heater_inventory_details(inventory)
-        nodes_by_type = dict(details.nodes_by_type)
-        explicit_names = set(details.explicit_name_pairs)
-        type_to_addresses = details.address_map
+        nodes_by_type = inventory_container.nodes_by_type
+        explicit_names = inventory_container.explicit_heater_names
+        type_to_addresses, _reverse_lookup = inventory_container.heater_address_map
 
         addrs_by_type = {
             node_type: list(type_to_addresses.get(node_type, []))

@@ -6,9 +6,8 @@ from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
 from .inventory import (
-    HeaterInventoryDetails,
+    Inventory,
     Node,
-    build_heater_inventory_details,
     build_node_inventory,
     heater_sample_subscription_targets,
     normalize_heater_addresses,
@@ -21,7 +20,6 @@ class InstallationSnapshot:
     __slots__ = (
         "_compat_aliases",
         "_dev_id",
-        "_heater_details",
         "_inventory",
         "_name_map_cache",
         "_name_map_factories",
@@ -41,8 +39,11 @@ class InstallationSnapshot:
 
         self._dev_id = str(dev_id)
         self._raw_nodes = raw_nodes
-        self._inventory = list(node_inventory) if node_inventory is not None else None
-        self._heater_details: HeaterInventoryDetails | None = None
+        self._inventory: Inventory | None = (
+            Inventory(self._dev_id, self._raw_nodes, node_inventory)
+            if node_inventory is not None
+            else None
+        )
         self._sample_address_map: dict[str, list[str]] | None = None
         self._compat_aliases: dict[str, str] | None = None
         self._sample_targets: list[tuple[str, str]] | None = None
@@ -67,61 +68,56 @@ class InstallationSnapshot:
         """Update cached payload data and invalidate derived caches."""
 
         self._raw_nodes = raw_nodes
-        self._inventory = list(node_inventory) if node_inventory is not None else None
+        self._inventory = (
+            Inventory(self._dev_id, self._raw_nodes, node_inventory)
+            if node_inventory is not None
+            else None
+        )
         self._invalidate_caches()
 
     def _invalidate_caches(self) -> None:
         """Reset derived cache state so it can be lazily recomputed."""
 
-        self._heater_details = None
         self._sample_address_map = None
         self._compat_aliases = None
         self._sample_targets = None
         self._name_map_cache.clear()
         self._name_map_factories.clear()
 
-    def _ensure_inventory(self) -> list[Node]:
-        """Return the cached node inventory, rebuilding if required."""
+    def _ensure_inventory(self) -> Inventory:
+        """Return the cached node inventory container, rebuilding if required."""
 
         if self._inventory is None:
-            self._inventory = build_node_inventory(self._raw_nodes)
+            nodes = build_node_inventory(self._raw_nodes)
+            self._inventory = Inventory(self._dev_id, self._raw_nodes, nodes)
         return self._inventory
 
     @property
-    def inventory(self) -> list[Node]:
+    def inventory(self) -> tuple[Node, ...]:
         """Expose the normalised node inventory for the installation."""
 
-        return self._ensure_inventory()
-
-    def _ensure_heater_details(self) -> HeaterInventoryDetails:
-        """Return cached heater metadata derived from the inventory."""
-
-        if self._heater_details is None:
-            self._heater_details = build_heater_inventory_details(self._ensure_inventory())
-        return self._heater_details
+        return self._ensure_inventory().nodes
 
     @property
     def nodes_by_type(self) -> dict[str, list[Node]]:
         """Return a mapping of node type to ``Node`` instances."""
 
-        details = self._ensure_heater_details()
-        return {k: list(v) for k, v in details.nodes_by_type.items()}
+        inventory = self._ensure_inventory()
+        return inventory.nodes_by_type
 
     @property
     def explicit_heater_names(self) -> set[tuple[str, str]]:
         """Return node type/address pairs with explicit names."""
 
-        details = self._ensure_heater_details()
-        return set(details.explicit_name_pairs)
+        inventory = self._ensure_inventory()
+        return inventory.explicit_heater_names
 
     @property
     def heater_address_map(self) -> tuple[dict[str, list[str]], dict[str, set[str]]]:
         """Return forward and reverse heater address maps."""
 
-        details = self._ensure_heater_details()
-        forward = {k: list(v) for k, v in details.address_map.items()}
-        reverse = {addr: set(types) for addr, types in details.reverse_address_map.items()}
-        return forward, reverse
+        inventory = self._ensure_inventory()
+        return inventory.heater_address_map
 
     def _ensure_sample_addresses(self) -> None:
         """Calculate canonical heater sample address data."""
@@ -183,7 +179,7 @@ class InstallationSnapshot:
             build_heater_name_map as _build_heater_name_map,
         )
 
-        mapping = _build_heater_name_map(self._ensure_inventory(), default_factory)
+        mapping = _build_heater_name_map(self._ensure_inventory().nodes, default_factory)
         self._name_map_cache[key] = mapping
         self._name_map_factories[key] = default_factory
         return mapping
