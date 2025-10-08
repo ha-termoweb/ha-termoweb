@@ -92,26 +92,93 @@ class _WsLeaseMixin:
         return self._backoff[idx]
 
 
-class _WSCommon:
+class _WSStatusMixin:
+    """Provide shared websocket status helpers."""
+
+    hass: HomeAssistant
+    entry_id: str
+    dev_id: str
+
+    def _status_should_reset_health(self, status: str) -> bool:
+        """Return True when a status should clear healthy tracking."""
+
+        return False
+
+    def _ws_state_bucket(self) -> dict[str, Any]:
+        """Return the websocket state bucket for the current device."""
+
+        ws_state = getattr(self, "_ws_state", None)
+        if isinstance(ws_state, dict):
+            return ws_state
+
+        hass_data = getattr(self.hass, "data", None)
+        if hass_data is None:
+            hass_data = {}
+            setattr(self.hass, "data", hass_data)  # type: ignore[attr-defined]
+
+        domain_bucket = hass_data.setdefault(DOMAIN, {})
+        entry_bucket = domain_bucket.setdefault(self.entry_id, {})
+        ws_bucket = entry_bucket.setdefault("ws_state", {})
+        ws_state = ws_bucket.setdefault(self.dev_id, {})
+        setattr(self, "_ws_state", ws_state)
+        return ws_state
+
+    def _update_status(self, status: str) -> None:
+        """Publish websocket status updates to Home Assistant listeners."""
+
+        current = getattr(self, "_status", None)
+        if status == current and status not in {"healthy", "connected"}:
+            return
+
+        now = time.time()
+        if status == "healthy":
+            healthy_since = getattr(self, "_healthy_since", None)
+            if healthy_since is None:
+                last_event = getattr(self, "_last_event_at", None)
+                stats = getattr(self, "_stats", None)
+                if last_event is None and stats is not None:
+                    last_event = getattr(stats, "last_event_ts", None)
+                setattr(self, "_healthy_since", last_event or now)
+        elif self._status_should_reset_health(status):
+            setattr(self, "_healthy_since", None)
+
+        setattr(self, "_status", status)
+
+        stats = getattr(self, "_stats", None)
+        last_event_ts = getattr(stats, "last_event_ts", None) if stats else None
+        last_event_at = getattr(self, "_last_event_at", None)
+        healthy_since = getattr(self, "_healthy_since", None)
+
+        state = self._ws_state_bucket()
+        state["status"] = status
+        state["last_event_at"] = last_event_ts or last_event_at or None
+        state["healthy_since"] = healthy_since
+        state["healthy_minutes"] = (
+            int((now - healthy_since) / 60) if healthy_since else 0
+        )
+        state["frames_total"] = getattr(stats, "frames_total", 0) if stats else 0
+        state["events_total"] = getattr(stats, "events_total", 0) if stats else 0
+
+        dispatcher = getattr(self, "_dispatcher_mock", None)
+        if dispatcher is None:
+            dispatcher = getattr(self, "_dispatcher", None)
+        if dispatcher is None:
+            dispatcher = async_dispatcher_send
+
+        dispatcher(
+            self.hass,
+            signal_ws_status(self.entry_id),
+            {"dev_id": self.dev_id, "status": status},
+        )
+
+
+class _WSCommon(_WSStatusMixin):
     """Shared helpers for websocket clients."""
 
     hass: HomeAssistant
     entry_id: str
     dev_id: str
     _coordinator: Any
-
-    def _ws_state_bucket(self) -> dict[str, Any]:
-        domain_bucket = self.hass.data.setdefault(DOMAIN, {})
-        entry_bucket = domain_bucket.setdefault(self.entry_id, {})
-        ws_state = entry_bucket.setdefault("ws_state", {})
-        return ws_state.setdefault(self.dev_id, {})
-
-    def _update_status(self, status: str) -> None:
-        async_dispatcher_send(
-            self.hass,
-            signal_ws_status(self.entry_id),
-            {"dev_id": self.dev_id, "status": status},
-        )
 
     def _dispatch_nodes(self, payload: dict[str, Any]) -> None:
         raw_nodes = payload.get("nodes") if "nodes" in payload else payload
@@ -137,7 +204,7 @@ class _WSCommon:
         async_dispatcher_send(self.hass, signal_ws_data(self.entry_id), payload_copy)
 
 
-class WebSocketClient(_WsLeaseMixin):
+class WebSocketClient(_WsLeaseMixin, _WSStatusMixin):
     """Delegate to the correct backend websocket client."""
 
     def __init__(

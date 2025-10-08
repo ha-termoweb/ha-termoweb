@@ -63,6 +63,7 @@ from custom_components.termoweb.nodes import (
     normalize_node_addr,
     normalize_node_type,
 )
+from .ws_client import _WSStatusMixin
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -98,7 +99,7 @@ class HandshakeError(RuntimeError):
         self.body_snippet = body_snippet
 
 
-class WebSocketClient:
+class WebSocketClient(_WSStatusMixin):
     """Unified websocket client wrapping ``socketio.AsyncClient``."""
 
     def __init__(
@@ -120,6 +121,7 @@ class WebSocketClient:
         self.dev_id = dev_id
         self._client = api_client
         self._coordinator = coordinator
+        self._dispatcher = async_dispatcher_send
         self._session = session or getattr(api_client, "_session", None)
         self._protocol_hint = protocol
         self._loop = getattr(hass, "loop", None) or asyncio.get_event_loop()
@@ -1121,42 +1123,6 @@ class WebSocketClient:
             else:
                 target[key] = value
 
-    # ------------------------------------------------------------------
-    # Helpers shared across implementations
-    # ------------------------------------------------------------------
-    def _ws_state_bucket(self) -> dict[str, Any]:
-        """Return the websocket state bucket for this device."""
-        if self._ws_state is None:
-            if not hasattr(self.hass, "data") or self.hass.data is None:  # type: ignore[attr-defined]
-                setattr(self.hass, "data", {})  # type: ignore[attr-defined]
-            domain_bucket = self.hass.data.setdefault(DOMAIN, {})  # type: ignore[attr-defined]
-            entry_bucket = domain_bucket.setdefault(self.entry_id, {})
-            ws_state = entry_bucket.setdefault("ws_state", {})
-            self._ws_state = ws_state.setdefault(self.dev_id, {})
-        return self._ws_state
-
-    def _update_status(self, status: str) -> None:
-        """Publish the websocket status to Home Assistant listeners."""
-        if status == self._status and status not in {"healthy", "connected"}:
-            return
-        self._status = status
-        now = time.time()
-        state = self._ws_state_bucket()
-        last_event = self._stats.last_event_ts or self._last_event_at
-        state["status"] = status
-        state["last_event_at"] = last_event or None
-        state["healthy_since"] = self._healthy_since
-        state["healthy_minutes"] = (
-            int((now - self._healthy_since) / 60) if self._healthy_since else 0
-        )
-        state["frames_total"] = self._stats.frames_total
-        state["events_total"] = self._stats.events_total
-        async_dispatcher_send(
-            self.hass,
-            signal_ws_status(self.entry_id),
-            {"dev_id": self.dev_id, "status": status},
-        )
-
     def _mark_event(
         self, *, paths: list[str] | None, count_event: bool = False
     ) -> None:
@@ -1268,6 +1234,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self.dev_id = dev_id
         self._client = api_client
         self._coordinator = coordinator
+        self._dispatcher = async_dispatcher_send
         self._session = session or getattr(api_client, "_session", None)
         if self._session is None:
             raise RuntimeError("aiohttp session required for websocket client")

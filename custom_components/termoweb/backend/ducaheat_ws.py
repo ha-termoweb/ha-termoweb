@@ -26,7 +26,6 @@ from ..const import (
     get_brand_api_base,
     get_brand_requested_with,
     get_brand_user_agent,
-    signal_ws_status,
 )
 from ..nodes import (
     collect_heater_sample_addresses,
@@ -138,6 +137,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self.dev_id = dev_id
         self._client = api_client
         self._coordinator = coordinator
+        self._dispatcher = async_dispatcher_send
         self._session = session or getattr(api_client, "_session", None)
         if self._session is None:
             raise RuntimeError("aiohttp session required")
@@ -161,6 +161,11 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._status: str = "stopped"
         self._healthy_since: float | None = None
         self._last_event_at: float | None = None
+
+    def _status_should_reset_health(self, status: str) -> bool:
+        """Return True when a status transition should reset health."""
+
+        return status != "healthy"
 
     def start(self) -> asyncio.Task:
         if self._task and not self._task.done():
@@ -825,37 +830,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._pending_dev_data = False
         self._ping_interval = None
         self._ping_timeout = None
-
-    def _update_status(self, status: str) -> None:
-        """Record websocket status transitions and dispatch signals."""
-
-        if status == self._status and status not in {"healthy", "connected"}:
-            return
-
-        now = time.time()
-        if status == "healthy":
-            if self._healthy_since is None:
-                self._healthy_since = self._last_event_at or now
-        else:
-            self._healthy_since = None
-
-        self._status = status
-        state = self._ws_state_bucket()
-        last_event = self._stats.last_event_ts or self._last_event_at
-        state["status"] = status
-        state["last_event_at"] = last_event or None
-        state["healthy_since"] = self._healthy_since
-        state["healthy_minutes"] = (
-            int((now - self._healthy_since) / 60) if self._healthy_since else 0
-        )
-        state["frames_total"] = self._stats.frames_total
-        state["events_total"] = self._stats.events_total
-
-        async_dispatcher_send(
-            self.hass,
-            signal_ws_status(self.entry_id),
-            {"dev_id": self.dev_id, "status": status},
-        )
 
     async def _get_token(self) -> str:
         headers = await self._client.authed_headers()
