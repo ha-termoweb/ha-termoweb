@@ -31,7 +31,7 @@ sys.modules["homeassistant.components.diagnostics"] = diagnostics_stub
 from custom_components.termoweb.const import BRAND_DUCAHEAT, CONF_BRAND, DOMAIN
 from custom_components.termoweb.diagnostics import async_get_config_entry_diagnostics
 from custom_components.termoweb.installation import InstallationSnapshot
-from custom_components.termoweb.nodes import Node
+from custom_components.termoweb.inventory import Node
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 

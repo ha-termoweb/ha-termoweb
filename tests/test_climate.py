@@ -24,7 +24,8 @@ from custom_components.termoweb.const import (
     DOMAIN,
     signal_ws_data,
 )
-from custom_components.termoweb.nodes import HeaterNode, build_node_inventory
+from custom_components.termoweb.inventory import HeaterNode
+from custom_components.termoweb.nodes import build_node_inventory
 from homeassistant.components.climate import HVACAction, HVACMode
 from homeassistant.const import ATTR_TEMPERATURE
 from homeassistant.core import HomeAssistant, ServiceCall

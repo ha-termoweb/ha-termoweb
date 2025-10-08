@@ -29,7 +29,7 @@ from .const import (
     get_brand_requested_with,
     get_brand_user_agent,
 )
-from .nodes import Node, NodeDescriptor, normalize_node_addr, normalize_node_type
+from .inventory import Node, NodeDescriptor, normalize_node_addr, normalize_node_type
 
 _LOGGER = logging.getLogger(__name__)
 

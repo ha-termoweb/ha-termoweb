@@ -13,7 +13,8 @@ from homeassistant.core import HomeAssistant
 
 from .const import CONF_BRAND, DEFAULT_BRAND, DOMAIN, get_brand_label
 from .installation import ensure_snapshot
-from .nodes import Node, ensure_node_inventory
+from .inventory import Node
+from .nodes import ensure_node_inventory
 from .utils import async_get_integration_version
 
 SENSITIVE_FIELDS: Final = {

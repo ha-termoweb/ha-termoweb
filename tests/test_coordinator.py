@@ -12,7 +12,7 @@ import pytest
 from homeassistant.core import HomeAssistant
 
 from custom_components.termoweb import boost as boost_module, coordinator as coord_module
-from custom_components.termoweb.nodes import AccumulatorNode, HeaterNode
+from custom_components.termoweb.inventory import AccumulatorNode, HeaterNode
 
 
 def test_coerce_int_variants() -> None:

@@ -195,21 +195,52 @@ def test_async_ensure_diagnostics_platform_registers(
     assert diagnostics_calls == [
         ("sync", stub_hass, termoweb_init.DOMAIN, diagnostics_platform)
     ]
-    diagnostics_calls.clear()
 
-    stub_hass.data.clear()
-    asyncio.run(termoweb_init._async_ensure_diagnostics_platform(stub_hass))
-    assert diagnostics_calls == []
 
-    stub_hass.data[diagnostics_module.DOMAIN] = SimpleNamespace(platforms=None)
-    asyncio.run(termoweb_init._async_ensure_diagnostics_platform(stub_hass))
-    assert diagnostics_calls == []
+def test_async_ensure_diagnostics_platform_guard_paths(
+    termoweb_init: Any,
+    stub_hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    diagnostics_calls: list[tuple[str, HomeAssistant, str, types.ModuleType]] = []
 
-    stub_hass.data[diagnostics_module.DOMAIN] = SimpleNamespace(
-        platforms={termoweb_init.DOMAIN: object()}
+    diagnostics_module = types.ModuleType("diagnostics_guard_stub")
+    diagnostics_module.DOMAIN = "diagnostics"
+    diagnostics_module.async_redact_data = lambda data, fields: data
+
+    def _sync_register(
+        hass: HomeAssistant, domain: str, platform: types.ModuleType
+    ) -> None:
+        diagnostics_calls.append(("sync", hass, domain, platform))
+
+    diagnostics_module._register_diagnostics_platform = _sync_register
+    diagnostics_module._DIAGNOSTICS_DATA = "diag_key"
+
+    monkeypatch.setitem(
+        sys.modules, "homeassistant.components.diagnostics", diagnostics_module
     )
+
+    platform = importlib.import_module("custom_components.termoweb.diagnostics")
+
+    stub_hass.data = {}
     asyncio.run(termoweb_init._async_ensure_diagnostics_platform(stub_hass))
     assert diagnostics_calls == []
+
+    stub_hass.data = {
+        diagnostics_module._DIAGNOSTICS_DATA: SimpleNamespace(platforms=None)
+    }
+    asyncio.run(termoweb_init._async_ensure_diagnostics_platform(stub_hass))
+    assert diagnostics_calls == []
+
+    stub_hass.data = {
+        diagnostics_module._DIAGNOSTICS_DATA: SimpleNamespace(
+            platforms={termoweb_init.DOMAIN: platform}
+        )
+    }
+    asyncio.run(termoweb_init._async_ensure_diagnostics_platform(stub_hass))
+    assert diagnostics_calls == []
+
+
 async def _drain_tasks(hass: HomeAssistant) -> None:
     if hass.tasks:
         await asyncio.gather(*hass.tasks, return_exceptions=True)

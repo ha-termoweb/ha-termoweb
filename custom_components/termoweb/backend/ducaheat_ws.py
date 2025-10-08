@@ -27,12 +27,11 @@ from ..const import (
     get_brand_requested_with,
     get_brand_user_agent,
 )
+from ..inventory import normalize_node_addr, normalize_node_type
 from ..nodes import (
     collect_heater_sample_addresses,
     heater_sample_subscription_targets,
     normalize_heater_addresses,
-    normalize_node_addr,
-    normalize_node_type,
 )
 from .ws_client import (
     DUCAHEAT_NAMESPACE,

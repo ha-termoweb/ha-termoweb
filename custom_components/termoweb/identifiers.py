@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import nodes as nodes_module
 from .const import DOMAIN
+from .inventory import normalize_node_addr, normalize_node_type
 
 
 def build_heater_unique_id(
@@ -17,9 +17,9 @@ def build_heater_unique_id(
 ) -> str:
     """Return the canonical unique ID for a heater node."""
 
-    dev = nodes_module.normalize_node_addr(dev_id)
-    node = nodes_module.normalize_node_type(node_type)
-    address = nodes_module.normalize_node_addr(addr)
+    dev = normalize_node_addr(dev_id)
+    node = normalize_node_type(node_type)
+    address = normalize_node_addr(addr)
     if not dev or not node or not address:
         raise ValueError("dev_id, node_type and addr must be provided")
 
