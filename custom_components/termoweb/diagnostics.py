@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import inspect
 import platform
 from typing import Any, Final
 
@@ -93,4 +94,7 @@ async def async_get_config_entry_diagnostics(
     if time_zone_str is not None:
         diagnostics["home_assistant"]["time_zone"] = time_zone_str
 
-    return await async_redact_data(diagnostics, SENSITIVE_FIELDS)
+    redacted = async_redact_data(diagnostics, SENSITIVE_FIELDS)
+    if inspect.isawaitable(redacted):
+        redacted = await redacted
+    return redacted
