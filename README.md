@@ -113,10 +113,6 @@ logger:
     custom_components.termoweb: debug
 ```
 
-### Diagnostics export
-
-You can now download an anonymised diagnostics bundle from **Settings → Devices & Services → TermoWeb → ⋮ → Download diagnostics**. Share this file with the maintainers when you open a support issue so we can understand your setup without exposing passwords or device identifiers.
-
 ---
 
 ## Tips
