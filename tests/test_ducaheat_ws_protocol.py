@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+import json
 from types import MappingProxyType, SimpleNamespace
 from typing import Any, AsyncIterator, Mapping
 from unittest.mock import AsyncMock, MagicMock
@@ -510,6 +511,47 @@ async def test_read_loop_marks_healthy_on_engineio_pong(
     await client._read_loop_ws()
 
     assert statuses and statuses[-1] == "healthy"
+
+
+@pytest.mark.asyncio
+async def test_read_loop_updates_ws_state_on_dev_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Processing dev_data payloads should mark the websocket healthy."""
+
+    client = _make_client(monkeypatch)
+    hass = client.hass
+    client._coordinator.update_nodes = MagicMock()
+    monkeypatch.setattr(client, "_subscribe_feeds", AsyncMock(return_value=0))
+
+    base_ts = 1_234.0
+    monkeypatch.setattr(ducaheat_ws.time, "time", lambda: base_ts)
+
+    payload = json.dumps(
+        ["dev_data", {"nodes": {"htr": {"status": {"1": {"power": 1}}}}}],
+        separators=(",", ":"),
+    )
+
+    class DevDataWS:
+        def __init__(self, frame: str) -> None:
+            self._frame = frame
+            self.closed = False
+
+        def __aiter__(self) -> Any:
+            async def _iterate() -> AsyncIterator[Any]:
+                yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data=self._frame)
+
+            return _iterate()
+
+    frame = f"42{client._namespace},{payload}"
+    client._ws = DevDataWS(frame)  # type: ignore[assignment]
+
+    await client._read_loop_ws()
+
+    ws_state = hass.data[ducaheat_ws.DOMAIN]["entry"]["ws_state"][client.dev_id]
+    assert ws_state["status"] == "healthy"
+    assert ws_state["healthy_since"] == base_ts
+    assert ws_state["last_event_at"] == base_ts
 
 
 @pytest.mark.asyncio

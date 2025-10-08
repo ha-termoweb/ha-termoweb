@@ -346,6 +346,17 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._update_status("connected")
         self._start_keepalive()
 
+    def _record_frame(self, *, timestamp: float | None = None) -> None:
+        """Update cached websocket frame statistics and timestamps."""
+
+        now = timestamp or time.time()
+        self._stats.last_event_ts = now
+        self._last_event_at = now
+        state = self._ws_state_bucket()
+        state["last_event_at"] = now
+        state["frames_total"] = self._stats.frames_total
+        state["events_total"] = self._stats.events_total
+
     async def _read_loop_ws(self) -> None:
         ws = self._ws
         if ws is None:
@@ -356,8 +367,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     data = msg.data
                     self._stats.frames_total += 1
                     now = time.time()
-                    self._stats.last_event_ts = now
-                    self._last_event_at = now
+                    self._record_frame(timestamp=now)
                     while data:
                         if data == "2":
                             _LOGGER.debug("WS (ducaheat): <- EIO 2 (ping) -> EIO 3 (pong)")
@@ -441,6 +451,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                             break
                         evt, *args = arr
                         self._stats.events_total += 1
+                        self._record_frame(timestamp=now)
                         _LOGGER.debug("WS (ducaheat): <- SIO 42 event=%s args_len=%d", evt, len(args))
 
                         if evt == "message" and args and args[0] == "ping":
@@ -830,9 +841,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
 
         self._status = status
         state = self._ws_state_bucket()
-        last_event = self._last_event_at or self._stats.last_event_ts or None
+        last_event = self._stats.last_event_ts or self._last_event_at
         state["status"] = status
-        state["last_event_at"] = last_event
+        state["last_event_at"] = last_event or None
         state["healthy_since"] = self._healthy_since
         state["healthy_minutes"] = (
             int((now - self._healthy_since) / 60) if self._healthy_since else 0
