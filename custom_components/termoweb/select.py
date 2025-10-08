@@ -9,6 +9,7 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.restore_state import RestoreEntity
 
+from .boost import coerce_boost_minutes
 from .const import DOMAIN
 from .heater import (
     BOOST_DURATION_OPTIONS,
@@ -185,21 +186,19 @@ class AccumulatorBoostDurationSelect(RestoreEntity, HeaterNodeBase, SelectEntity
     def _option_to_minutes(self, value: Any) -> int | None:
         """Translate ``value`` into a supported minute option."""
 
+        candidate: int | None
         if isinstance(value, str):
             text = value.strip()
             if text in self._OPTION_MAP:
                 return self._OPTION_MAP[text]
-            try:
-                numeric = int(float(text))
-            except (TypeError, ValueError):  # pragma: no cover - defensive
-                return None
-            if numeric in self._REVERSE_OPTION_MAP:
-                return numeric
+            candidate = coerce_boost_minutes(text)
+        else:
+            candidate = coerce_boost_minutes(value)
+
+        if candidate is None:
             return None
-        if isinstance(value, (int, float)):
-            numeric = int(value)
-            if numeric in self._REVERSE_OPTION_MAP:
-                return numeric
+        if candidate in self._REVERSE_OPTION_MAP:
+            return candidate
         return None
 
     def _validate_minutes(self, minutes: int | None) -> int:
