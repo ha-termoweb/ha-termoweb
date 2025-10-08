@@ -73,15 +73,19 @@ def _resolve_recorder_imports() -> _RecorderModuleImports:
     try:
         from homeassistant.components.recorder import (
             get_instance as _get_instance,
-            statistics as statistics_mod,
+            statistics as _statistics_module,
         )
     except (ImportError, AttributeError):  # pragma: no cover - defensive
         try:
-            from homeassistant.components.recorder import statistics as statistics_mod
+            from homeassistant.components.recorder import (
+                statistics as _statistics_module,
+            )
         except (ImportError, AttributeError):  # pragma: no cover - defensive
-            statistics_mod = None
+            _statistics_module = None
     else:
         get_instance = _get_instance
+
+    statistics_mod = _statistics_module
 
     _RECORDER_IMPORTS = _RecorderModuleImports(
         get_instance=get_instance,
@@ -141,11 +145,18 @@ def _store_statistics(
 ) -> None:
     """Insert statistics using recorder helpers."""
 
+    _import_stats: Callable[[HomeAssistant, Mapping[str, Any], list[dict[str, Any]]], None] | None
+
     try:
         from homeassistant.components.recorder.statistics import (
-            async_import_statistics as _import_stats,
+            async_import_statistics as _async_import_statistics,
         )
     except ImportError:
+        _async_import_statistics = None
+
+    if _async_import_statistics is not None:
+        _import_stats = _async_import_statistics
+    else:
         _import_stats = None
 
     if _import_stats:
