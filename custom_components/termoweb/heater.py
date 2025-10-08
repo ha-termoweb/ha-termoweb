@@ -21,16 +21,15 @@ from .boost import (
     coerce_boost_remaining_minutes,
 )
 from .const import DOMAIN, signal_ws_data
-from .heater_inventory import build_heater_inventory_details
 from .installation import InstallationSnapshot, ensure_snapshot
-from .nodes import (
-    HEATER_NODE_TYPES,
+from .inventory import (
     Node,
+    build_heater_inventory_details,
     build_node_inventory,
-    ensure_node_inventory,
     normalize_node_addr,
     normalize_node_type,
 )
+from .nodes import HEATER_NODE_TYPES, ensure_node_inventory
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,8 +58,6 @@ BOOST_BUTTON_METADATA: Final[tuple[BoostButtonMetadata, ...]] = (
 BOOST_DURATION_OPTIONS: Final[tuple[int, ...]] = tuple(
     option.minutes for option in BOOST_BUTTON_METADATA if option.minutes is not None
 )
-
-
 def _boost_runtime_store(
     entry_data: MutableMapping[str, Any] | None,
     *,
@@ -216,6 +213,37 @@ def supports_boost(node: Any) -> bool:
         return result
 
     return False
+
+
+def iter_boostable_heater_nodes(
+    nodes_by_type: Mapping[str, Iterable[Node] | None],
+    resolve_name: Callable[[str, str], str],
+    *,
+    node_types: Iterable[str] | None = None,
+    accumulators_only: bool = False,
+) -> Iterator[tuple[str, Node, str, str]]:
+    """Yield heater nodes that expose boost functionality."""
+
+    filtered_types: Iterable[str] | None = node_types
+
+    if accumulators_only:
+        accumulator_types: tuple[str, ...] = ("acm",)
+        if filtered_types is None:
+            filtered_types = accumulator_types
+        else:
+            filtered_types = [
+                node_type for node_type in filtered_types if node_type in accumulator_types
+            ]
+            if not filtered_types:
+                return
+
+    for node_type, node, addr_str, base_name in iter_heater_nodes(
+        nodes_by_type,
+        resolve_name,
+        node_types=filtered_types,
+    ):
+        if supports_boost(node):
+            yield node_type, node, addr_str, base_name
 
 
 @dataclass(slots=True)

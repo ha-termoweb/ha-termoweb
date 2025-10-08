@@ -19,6 +19,7 @@ from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
 from .backend.ducaheat import DucaheatRESTClient
+from .boost import coerce_boost_minutes
 from .const import BRAND_DUCAHEAT, DOMAIN
 from .heater import (
     DEFAULT_BOOST_DURATION,
@@ -30,7 +31,8 @@ from .heater import (
     prepare_heater_platform_data,
     resolve_boost_runtime_minutes,
 )
-from .nodes import HeaterNode, normalize_node_addr, normalize_node_type
+from .identifiers import build_heater_entity_unique_id
+from .inventory import HeaterNode, normalize_node_addr, normalize_node_type
 from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
@@ -55,7 +57,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
     for node_type, _node, addr_str, resolved_name in iter_heater_nodes(
         nodes_by_type, resolve_name
     ):
-        unique_id = f"{DOMAIN}:{dev_id}:{node_type}:{addr_str}:climate"
+        unique_id = build_heater_entity_unique_id(
+            dev_id,
+            node_type,
+            addr_str,
+            ":climate",
+        )
         entity_cls: type[HeaterClimateEntity]
         if node_type == "acm":
             entity_cls = AccumulatorClimateEntity
@@ -1128,9 +1135,8 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
 
         if minutes is None:
             return None
-        try:
-            value = int(minutes)
-        except (TypeError, ValueError):
+        value = coerce_boost_minutes(minutes)
+        if value is None:
             _LOGGER.error(
                 "Invalid boost minutes for type=%s addr=%s: %s",
                 self._node_type,
@@ -1138,7 +1144,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
                 minutes,
             )
             return None
-        if value <= 0 or value > 120:
+        if value > 120:
             _LOGGER.error(
                 "Boost duration must be between 1 and 120 minutes for type=%s addr=%s: %s",
                 self._node_type,

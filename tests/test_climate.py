@@ -24,7 +24,8 @@ from custom_components.termoweb.const import (
     DOMAIN,
     signal_ws_data,
 )
-from custom_components.termoweb.nodes import HeaterNode, build_node_inventory
+from custom_components.termoweb.inventory import HeaterNode
+from custom_components.termoweb.inventory import build_node_inventory
 from homeassistant.components.climate import HVACAction, HVACMode
 from homeassistant.const import ATTR_TEMPERATURE
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -1209,6 +1210,91 @@ def test_accumulator_service_error_paths(monkeypatch: pytest.MonkeyPatch) -> Non
         assert fallback_calls == 0
 
     asyncio.run(_run())
+
+
+def _make_accumulator_for_validation() -> climate_module.AccumulatorClimateEntity:
+    hass = HomeAssistant()
+    entry_id = "entry-acm-validate"
+    dev_id = "dev-acm-validate"
+    addr = "9"
+    record = {
+        "nodes": {},
+        "nodes_by_type": {"acm": {"settings": {addr: {"mode": "auto"}}}},
+        "htr": {"settings": {}},
+    }
+    coordinator = _make_coordinator(hass, dev_id, record)
+    entity = climate_module.AccumulatorClimateEntity(
+        coordinator,
+        entry_id,
+        dev_id,
+        addr,
+        "Accumulator",
+        node_type="acm",
+    )
+    entity.hass = hass
+    return entity
+
+
+def test_validate_boost_minutes_uses_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    _reset_environment()
+    entity = _make_accumulator_for_validation()
+
+    calls: list[Any] = []
+
+    def _fake(value: Any) -> int:
+        calls.append(value)
+        return 45
+
+    monkeypatch.setattr(climate_module, "coerce_boost_minutes", _fake)
+
+    result = entity._validate_boost_minutes(60)
+
+    assert result == 45
+    assert calls == [60]
+
+
+def test_validate_boost_minutes_invalid_logs_error(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _reset_environment()
+    entity = _make_accumulator_for_validation()
+
+    calls: list[Any] = []
+
+    def _fake(value: Any) -> int | None:
+        calls.append(value)
+        return None
+
+    monkeypatch.setattr(climate_module, "coerce_boost_minutes", _fake)
+    caplog.set_level(logging.ERROR)
+
+    result = entity._validate_boost_minutes("bad")
+
+    assert result is None
+    assert calls == ["bad"]
+    assert any("Invalid boost minutes" in record.message for record in caplog.records)
+
+
+def test_validate_boost_minutes_enforces_upper_limit(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _reset_environment()
+    entity = _make_accumulator_for_validation()
+
+    calls: list[Any] = []
+
+    def _fake(value: Any) -> int:
+        calls.append(value)
+        return 130
+
+    monkeypatch.setattr(climate_module, "coerce_boost_minutes", _fake)
+    caplog.set_level(logging.ERROR)
+
+    result = entity._validate_boost_minutes(130)
+
+    assert result is None
+    assert calls == [130]
+    assert any("Boost duration must be between 1 and 120" in record.message for record in caplog.records)
 
 
 def test_accumulator_extra_state_attributes_handles_resolver_fallbacks() -> None:

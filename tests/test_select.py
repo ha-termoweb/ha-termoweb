@@ -18,10 +18,27 @@ from custom_components.termoweb.heater import (
     iter_boost_button_metadata,
     set_boost_runtime_minutes,
 )
+from custom_components.termoweb.identifiers import build_heater_entity_unique_id
 from homeassistant.core import HomeAssistant
 
 AccumulatorBoostDurationSelect = select_module.AccumulatorBoostDurationSelect
 async_setup_entry = select_module.async_setup_entry
+
+
+def _make_select_entity() -> AccumulatorBoostDurationSelect:
+    """Create a selector instance for direct method testing."""
+
+    hass = HomeAssistant()
+    coordinator = FakeCoordinator(hass, dev_id="dev-select-test")
+    return AccumulatorBoostDurationSelect(
+        coordinator,
+        "entry-select-test",
+        "dev-select-test",
+        "01",
+        "Accumulator 1",
+        "test-uid",
+        node_type="acm",
+    )
 
 
 def test_select_setup_and_selection(
@@ -75,7 +92,12 @@ def test_select_setup_and_selection(
         assert len(added) == 1
         entity = added[0]
         assert isinstance(entity, AccumulatorBoostDurationSelect)
-        assert entity.unique_id == f"{DOMAIN}:{dev_id}:acm:{node.addr}:boost_duration"
+        assert entity.unique_id == build_heater_entity_unique_id(
+            dev_id,
+            "acm",
+            node.addr,
+            ":boost_duration",
+        )
         expected_options = [
             str(item.minutes)
             for item in iter_boost_button_metadata()
@@ -105,6 +127,57 @@ def test_select_setup_and_selection(
         assert entity.current_option == "120"
 
     asyncio.run(_run())
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("30", 30),
+        (" 60 ", 60),
+        ("060", 60),
+        ("120.0", 120),
+        (60, 60),
+        (60.0, 60),
+    ],
+)
+def test_option_to_minutes_accepts_valid_values(
+    value: object, expected: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ensure valid inputs resolve to supported boost durations."""
+
+    calls: list[object] = []
+    real_coerce = select_module.coerce_boost_minutes
+
+    def fake_coerce(candidate: object) -> int | None:
+        calls.append(candidate)
+        return real_coerce(candidate)
+
+    monkeypatch.setattr(select_module, "coerce_boost_minutes", fake_coerce)
+
+    entity = _make_select_entity()
+    assert entity._option_to_minutes(value) == expected
+    if not (isinstance(value, str) and value.strip() in entity._OPTION_MAP):
+        assert calls == [value]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        "",
+        "invalid",
+        0,
+        -30,
+        45,
+        "45",
+        True,
+    ],
+)
+def test_option_to_minutes_rejects_invalid_values(value: object) -> None:
+    """Ensure invalid values are rejected by the coercion helper."""
+
+    entity = _make_select_entity()
+    assert entity._option_to_minutes(value) is None
 
 
 def test_select_restores_last_state(
@@ -173,7 +246,12 @@ def test_select_restores_last_state(
             dev_id,
             node.addr,
             "Accumulator 9",
-            f"{DOMAIN}:{dev_id}:acm:{node.addr}:boost_duration",
+            build_heater_entity_unique_id(
+                dev_id,
+                "acm",
+                node.addr,
+                ":boost_duration",
+            ),
             node_type="acm",
         )
         entity2.hass = hass

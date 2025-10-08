@@ -28,16 +28,16 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_data
 from .coordinator import EnergyStateCoordinator
+from .entity import GatewayDispatcherEntity
 from .heater import (
-    DispatcherSubscriptionHelper,
     HeaterNodeBase,
+    iter_boostable_heater_nodes,
     iter_heater_maps,
     iter_heater_nodes,
     log_skipped_nodes,
     prepare_heater_platform_data,
-    supports_boost,
 )
-from .nodes import build_heater_energy_unique_id
+from .identifiers import build_heater_energy_unique_id
 from .utils import build_gateway_device_info, float_or_none
 
 _WH_TO_KWH = 1 / 1000.0
@@ -145,18 +145,22 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 node_type=node_type,
             )
         )
-        if supports_boost(node):
-            new_entities.extend(
-                _create_boost_sensors(
-                    coordinator,
-                    entry.entry_id,
-                    dev_id,
-                    addr_str,
-                    base_name,
-                    uid_prefix,
-                    node_type=node_type,
-                )
+    for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
+        nodes_by_type, resolve_name
+    ):
+        energy_unique_id = build_heater_energy_unique_id(dev_id, node_type, addr_str)
+        uid_prefix = energy_unique_id.rsplit(":", 1)[0]
+        new_entities.extend(
+            _create_boost_sensors(
+                coordinator,
+                entry.entry_id,
+                dev_id,
+                addr_str,
+                base_name,
+                uid_prefix,
+                node_type=node_type,
             )
+        )
 
     log_skipped_nodes("sensor", nodes_by_type, logger=_LOGGER)
 
@@ -477,7 +481,9 @@ def _create_boost_sensors(
     return (minutes, end)
 
 
-class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
+class InstallationTotalEnergySensor(
+    GatewayDispatcherEntity, CoordinatorEntity, SensorEntity
+):
     """Total energy consumption across all heaters."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
@@ -498,22 +504,12 @@ class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
         self._dev_id = dev_id
         self._attr_name = name
         self._attr_unique_id = unique_id
-        self._ws_subscription = DispatcherSubscriptionHelper(self)
 
-    async def async_added_to_hass(self) -> None:
-        """Register websocket callbacks once the entity is added."""
-        await super().async_added_to_hass()
-        if self.hass is None:  # pragma: no cover - defensive guard
-            return
-        self._ws_subscription.subscribe(
-            self.hass, signal_ws_data(self._entry_id), self._on_ws_data
-        )
+    @property
+    def gateway_signal(self) -> str:
+        """Return the dispatcher signal for gateway websocket data."""
 
-    async def async_will_remove_from_hass(self) -> None:  # pragma: no cover - cleanup
-        """Tidy up websocket listeners prior to entity removal."""
-
-        self._ws_subscription.unsubscribe()
-        await super().async_will_remove_from_hass()
+        return signal_ws_data(self._entry_id)
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -521,7 +517,7 @@ class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
         return build_gateway_device_info(self.hass, self._entry_id, self._dev_id)
 
     @callback
-    def _on_ws_data(self, payload: dict) -> None:
+    def _handle_gateway_dispatcher(self, payload: dict[str, Any]) -> None:
         """Handle websocket payloads that may update the totals."""
         if payload.get("dev_id") != self._dev_id:
             return

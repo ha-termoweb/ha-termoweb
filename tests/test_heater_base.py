@@ -12,11 +12,12 @@ from conftest import _install_stubs, make_ws_payload
 _install_stubs()
 
 from custom_components.termoweb import heater as heater_module
+from custom_components.termoweb import identifiers as identifiers_module
 from custom_components.termoweb import installation as installation_module
 from custom_components.termoweb.installation import InstallationSnapshot
-from custom_components.termoweb.heater_inventory import build_heater_inventory_details
-from custom_components.termoweb.nodes import (
+from custom_components.termoweb.inventory import (
     HeaterNode,
+    build_heater_inventory_details,
     build_node_inventory,
 )
 from homeassistant.core import HomeAssistant
@@ -24,7 +25,31 @@ from homeassistant.core import HomeAssistant
 HeaterNodeBase = heater_module.HeaterNodeBase
 build_heater_name_map = heater_module.build_heater_name_map
 iter_heater_nodes = heater_module.iter_heater_nodes
+iter_boostable_heater_nodes = heater_module.iter_boostable_heater_nodes
 prepare_heater_platform_data = heater_module.prepare_heater_platform_data
+
+
+def test_build_heater_entity_unique_id_normalises_inputs() -> None:
+    """Helper should normalise identifiers and enforce required fields."""
+
+    uid = identifiers_module.build_heater_entity_unique_id(
+        " 0A1B ",
+        " ACM ",
+        " 07 ",
+        "boost",
+    )
+    assert uid == "termoweb:0A1B:acm:07:boost"
+
+    uid_with_colon = identifiers_module.build_heater_entity_unique_id(
+        "0a1b",
+        "acm",
+        "07",
+        ":boost",
+    )
+    assert uid_with_colon == "termoweb:0a1b:acm:07:boost"
+
+    with pytest.raises(ValueError):
+        identifiers_module.build_heater_entity_unique_id("", "acm", "07")
 
 
 def _make_heater(coordinator: SimpleNamespace) -> HeaterNodeBase:
@@ -350,6 +375,44 @@ def test_iter_heater_nodes_filters_addresses() -> None:
     assert list(
         iter_heater_nodes(nodes_by_type, fake_resolve, node_types=["", "acm"])
     ) == [("acm", nodes_by_type["acm"][0], "2", "acm-2")]
+
+
+def test_iter_boostable_heater_nodes_filters_support_and_types() -> None:
+    nodes_by_type = {
+        "htr": [
+            SimpleNamespace(addr="1", supports_boost=True),
+            SimpleNamespace(addr="2", supports_boost=False),
+        ],
+        "acm": [SimpleNamespace(addr="3", supports_boost=lambda: True)],
+        "thm": [SimpleNamespace(addr="4", supports_boost=True)],
+    }
+
+    def resolve(node_type: str, addr: str) -> str:
+        return f"{node_type}-{addr}"
+
+    yielded = list(iter_boostable_heater_nodes(nodes_by_type, resolve))
+    assert sorted((node_type, addr) for node_type, _node, addr, _ in yielded) == sorted(
+        [("htr", "1"), ("acm", "3")]
+    )
+
+    accumulators_only = list(
+        iter_boostable_heater_nodes(nodes_by_type, resolve, accumulators_only=True)
+    )
+    assert [(node_type, addr) for node_type, _node, addr, _ in accumulators_only] == [
+        ("acm", "3")
+    ]
+
+    assert (
+        list(
+            iter_boostable_heater_nodes(
+                nodes_by_type,
+                resolve,
+                node_types=["htr"],
+                accumulators_only=True,
+            )
+        )
+        == []
+    )
 
 
 def test_iter_heater_maps_deduplicates_sections() -> None:

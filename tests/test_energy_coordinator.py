@@ -20,7 +20,7 @@ from custom_components.termoweb.const import (
     HTR_ENERGY_UPDATE_INTERVAL,
     signal_ws_data,
 )
-from custom_components.termoweb.nodes import normalize_heater_addresses
+from custom_components.termoweb.inventory import normalize_heater_addresses
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_connect, dispatcher_send
 from homeassistant.helpers.update_coordinator import UpdateFailed

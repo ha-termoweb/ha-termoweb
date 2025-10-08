@@ -16,14 +16,14 @@ from homeassistant.helpers import entity_registry as er
 
 from .api import RESTClient
 from .const import DOMAIN
+from .identifiers import build_heater_energy_unique_id
 from .installation import ensure_snapshot
-from .nodes import (
+from .inventory import (
     build_heater_address_map,
-    build_heater_energy_unique_id,
-    ensure_node_inventory,
     normalize_heater_addresses,
     parse_heater_energy_unique_id,
 )
+from .nodes import ensure_node_inventory
 from .throttle import (
     MonotonicRateLimiter,
     default_samples_rate_limit_state,

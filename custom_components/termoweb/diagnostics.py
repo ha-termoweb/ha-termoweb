@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import inspect
+import logging
 import platform
 from typing import Any, Final
 
@@ -13,8 +14,11 @@ from homeassistant.core import HomeAssistant
 
 from .const import CONF_BRAND, DEFAULT_BRAND, DOMAIN, get_brand_label
 from .installation import ensure_snapshot
-from .nodes import Node, ensure_node_inventory
+from .inventory import Node
+from .nodes import ensure_node_inventory
 from .utils import async_get_integration_version
+
+_LOGGER = logging.getLogger(__name__)
 
 SENSITIVE_FIELDS: Final = {
     "access_token",
@@ -41,10 +45,13 @@ async def async_get_config_entry_diagnostics(
             record = candidate
 
     snapshot = ensure_snapshot(record or {})
+    inventory_source_label = "fallback"
     if snapshot is not None:
         inventory_source = list(snapshot.inventory)
+        inventory_source_label = "snapshot"
     elif record is not None:
-        inventory_source = ensure_node_inventory(record)
+        inventory_source = list(ensure_node_inventory(record))
+        inventory_source_label = "cached inventory"
     else:
         inventory_source = []
 
@@ -94,7 +101,21 @@ async def async_get_config_entry_diagnostics(
     if time_zone_str is not None:
         diagnostics["home_assistant"]["time_zone"] = time_zone_str
 
-    redacted = async_redact_data(diagnostics, SENSITIVE_FIELDS)
-    if inspect.isawaitable(redacted):
-        redacted = await redacted
+    _LOGGER.debug(
+        "Diagnostics inventory source for %s: %s (raw=%d, filtered=%d)",
+        entry.entry_id,
+        inventory_source_label,
+        len(inventory_source),
+        len(node_inventory),
+    )
+
+    try:
+        redacted = async_redact_data(diagnostics, SENSITIVE_FIELDS)
+        if inspect.isawaitable(redacted):
+            redacted = await redacted
+    except Exception:  # pragma: no cover - defensive  # noqa: BLE001
+        _LOGGER.exception(
+            "Failed to redact diagnostics payload for %s", entry.entry_id
+        )
+        raise
     return redacted

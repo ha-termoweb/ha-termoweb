@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import types
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -17,6 +17,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 import custom_components.termoweb.binary_sensor as binary_sensor_module
 import custom_components.termoweb.button as button_module
 import custom_components.termoweb.heater as heater_module
+from custom_components.termoweb import identifiers as identifiers_module
 from custom_components.termoweb.const import DOMAIN, signal_ws_status
 from custom_components.termoweb.utils import build_gateway_device_info
 
@@ -75,7 +76,9 @@ def test_binary_sensor_setup_and_dispatch(
             "guard-device",
         )
         await guard_entity.async_added_to_hass()
-        assert not guard_entity._ws_subscription.is_connected  # pylint: disable=protected-access
+        assert (
+            not guard_entity._gateway_dispatcher.is_connected
+        )  # pylint: disable=protected-access
 
         await async_setup_binary_sensor_entry(hass, entry, _add_entities)
 
@@ -84,10 +87,23 @@ def test_binary_sensor_setup_and_dispatch(
         assert isinstance(entity, GatewayOnlineBinarySensor)
 
         entity.hass = hass
-        await entity.async_added_to_hass()
+        with patch.object(
+            entity._gateway_dispatcher,
+            "subscribe",
+            wraps=entity._gateway_dispatcher.subscribe,
+        ) as mock_subscribe:
+            await entity.async_added_to_hass()
+
+        mock_subscribe.assert_called_once()
+        _, call_signal, call_handler = mock_subscribe.call_args[0]
+        assert call_signal == signal_ws_status(entry.entry_id)
+        assert getattr(call_handler, "__self__", None) is entity
+        assert getattr(call_handler, "__func__", None) is getattr(
+            entity._handle_gateway_dispatcher, "__func__", None
+        )
 
         assert entity.is_on is True
-        assert entity._ws_subscription.is_connected  # pylint: disable=protected-access
+        assert entity._gateway_dispatcher.is_connected  # pylint: disable=protected-access
 
         info = entity.device_info
         expected_info = build_gateway_device_info(hass, entry.entry_id, dev_id)
@@ -115,7 +131,9 @@ def test_binary_sensor_setup_and_dispatch(
         entity.schedule_update_ha_state.assert_called_once_with()
 
         await entity.async_will_remove_from_hass()
-        assert not entity._ws_subscription.is_connected  # pylint: disable=protected-access
+        assert (
+            not entity._gateway_dispatcher.is_connected
+        )  # pylint: disable=protected-access
 
     asyncio.run(_run())
 
@@ -201,11 +219,26 @@ def test_button_setup_adds_accumulator_entities(
 
         calls: list[str | None] = []
 
-        def fake_supports(node):
-            calls.append(getattr(node, "addr", None))
-            return getattr(node, "addr", None) == acm_node.addr
+        def fake_iter_boostable(
+            nodes_by_type,
+            resolve_name,
+            *,
+            node_types=None,
+            accumulators_only=False,
+        ):
+            assert accumulators_only is True
+            assert node_types is None
+            for node in nodes_by_type.get("acm", []):
+                addr = getattr(node, "addr", None)
+                calls.append(addr)
+                if addr == acm_node.addr:
+                    yield "acm", node, addr, resolve_name("acm", addr)
 
-        monkeypatch.setattr(button_module, "supports_boost", fake_supports)
+        monkeypatch.setattr(
+            button_module,
+            "iter_boostable_heater_nodes",
+            fake_iter_boostable,
+        )
 
         custom_metadata = (
             heater_module.BoostButtonMetadata(
@@ -268,7 +301,15 @@ def test_button_setup_adds_accumulator_entities(
         expected_names = [item.label for item in custom_metadata]
         expected_icons = [item.icon for item in custom_metadata]
         expected_unique_ids = [
-            f"{DOMAIN}:{dev_id}:acm:{acm_node.addr}:boost_{item.unique_suffix}"
+            "{}_{}".format(
+                identifiers_module.build_heater_entity_unique_id(
+                    dev_id,
+                    "acm",
+                    acm_node.addr,
+                    ":boost",
+                ),
+                item.unique_suffix,
+            )
             for item in custom_metadata
         ]
         assert names == expected_names
@@ -462,11 +503,26 @@ def test_binary_sensor_setup_adds_boost_entities(
 
         calls: list[str | None] = []
 
-        def fake_supports(node):
-            calls.append(getattr(node, "addr", None))
-            return getattr(node, "addr", None) == boost_node.addr
+        def fake_iter_boostable(
+            nodes_by_type,
+            resolve_name,
+            *,
+            node_types=None,
+            accumulators_only=False,
+        ):
+            assert accumulators_only is False
+            assert node_types is None
+            for node in nodes_by_type.get("acm", []):
+                addr = getattr(node, "addr", None)
+                calls.append(addr)
+                if addr == boost_node.addr:
+                    yield "acm", node, addr, resolve_name("acm", addr)
 
-        monkeypatch.setattr(binary_sensor_module, "supports_boost", fake_supports)
+        monkeypatch.setattr(
+            binary_sensor_module,
+            "iter_boostable_heater_nodes",
+            fake_iter_boostable,
+        )
 
         def fake_prepare(entry_data, *, default_name_simple):  # type: ignore[unused-argument]
             return (

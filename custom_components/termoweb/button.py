@@ -26,11 +26,11 @@ from .heater import (
     BoostButtonMetadata,
     HeaterNodeBase,
     iter_boost_button_metadata,
-    iter_heater_nodes,
+    iter_boostable_heater_nodes,
     log_skipped_nodes,
     prepare_heater_platform_data,
-    supports_boost,
 )
+from .identifiers import build_heater_entity_unique_id
 from .utils import build_gateway_device_info
 
 _LOGGER = logging.getLogger(__name__)
@@ -55,14 +55,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
     )
 
     boost_entities: list[ButtonEntity] = []
-    for node_type, node, addr_str, base_name in iter_heater_nodes(
+    for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
         nodes_by_type,
         resolve_name,
+        accumulators_only=True,
     ):
-        if node_type != "acm":
-            continue
-        if not supports_boost(node):
-            continue
 
         boost_entities.extend(
             _create_boost_button_entities(
@@ -284,7 +281,12 @@ def _create_boost_button_entities(
 ) -> list[ButtonEntity]:
     """Return boost helper buttons described by shared metadata."""
 
-    unique_prefix = f"{DOMAIN}:{dev_id}:{node_type}:{addr}:boost"
+    unique_prefix = build_heater_entity_unique_id(
+        dev_id,
+        node_type,
+        addr,
+        ":boost",
+    )
     return [
         _build_boost_button(
             metadata,

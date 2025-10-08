@@ -23,7 +23,7 @@ from custom_components.termoweb.const import (
     get_brand_requested_with,
     get_brand_user_agent,
 )
-from custom_components.termoweb.nodes import AccumulatorNode
+from custom_components.termoweb.inventory import AccumulatorNode
 
 RESTClient = api.RESTClient
 

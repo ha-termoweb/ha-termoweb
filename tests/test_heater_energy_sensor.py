@@ -17,10 +17,8 @@ from aiohttp import ClientError
 from custom_components.termoweb import coordinator as coordinator_module
 from custom_components.termoweb import sensor as sensor_module
 from custom_components.termoweb import const as const_module
-from custom_components.termoweb.nodes import (
-    build_heater_energy_unique_id,
-    build_node_inventory,
-)
+from custom_components.termoweb.identifiers import build_heater_energy_unique_id
+from custom_components.termoweb.inventory import build_node_inventory
 from custom_components.termoweb.utils import build_gateway_device_info
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import UnitOfTemperature
@@ -818,9 +816,9 @@ def test_total_energy_sensor() -> None:
         )
         total_sensor.hass = hass
         with patch.object(
-            total_sensor._ws_subscription,
+            total_sensor._gateway_dispatcher,
             "subscribe",
-            wraps=total_sensor._ws_subscription.subscribe,
+            wraps=total_sensor._gateway_dispatcher.subscribe,
         ) as mock_subscribe:
             await total_sensor.async_added_to_hass()
 
@@ -844,9 +842,11 @@ def test_total_energy_sensor() -> None:
 
         signal = signal_ws_data("entry")
         mock_subscribe.assert_called_once_with(
-            hass, signal, total_sensor._on_ws_data
+            hass,
+            signal,
+            total_sensor._handle_gateway_dispatcher,
         )
-        assert total_sensor._ws_subscription.is_connected
+        assert total_sensor._gateway_dispatcher.is_connected
         total_sensor.schedule_update_ha_state = MagicMock()
 
         coord.data["1"]["htr"]["energy"]["A"] = 0.0015
@@ -860,14 +860,17 @@ def test_total_energy_sensor() -> None:
 
         total_sensor.schedule_update_ha_state.reset_mock()
         with patch.object(
-            total_sensor._ws_subscription,
+            total_sensor._gateway_dispatcher,
             "unsubscribe",
-            wraps=total_sensor._ws_subscription.unsubscribe,
+            wraps=total_sensor._gateway_dispatcher.unsubscribe,
         ) as mock_total_unsub:
             await total_sensor.async_will_remove_from_hass()
         mock_total_unsub.assert_called_once()
-        assert not total_sensor._ws_subscription.is_connected
-        assert total_sensor._on_ws_data not in dispatch_map.get(signal, [])
+        assert not total_sensor._gateway_dispatcher.is_connected
+        assert (
+            total_sensor._handle_gateway_dispatcher
+            not in dispatch_map.get(signal, [])
+        )
         dispatcher_send(signal, {"dev_id": "1", "addr": "B"})
         total_sensor.schedule_update_ha_state.assert_not_called()
 
@@ -950,7 +953,7 @@ def test_energy_and_power_sensor_properties() -> None:
     assert total_sensor.native_value == pytest.approx(1.5)
     assert total_sensor.extra_state_attributes == {"dev_id": "dev"}
 
-    total_sensor._on_ws_data({"dev_id": "other"})
+    total_sensor._handle_gateway_dispatcher({"dev_id": "other"})
 
     coordinator.data = {"dev": {"htr": {"energy": {}}}}
     assert total_sensor.native_value is None

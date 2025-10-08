@@ -15,14 +15,14 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_status
 from .coordinator import StateCoordinator
+from .entity import GatewayDispatcherEntity
 from .heater import (
-    DispatcherSubscriptionHelper,
     HeaterNodeBase,
-    iter_heater_nodes,
+    iter_boostable_heater_nodes,
     log_skipped_nodes,
     prepare_heater_platform_data,
-    supports_boost,
 )
+from .identifiers import build_heater_entity_unique_id
 from .utils import build_gateway_device_info
 
 _LOGGER = logging.getLogger(__name__)
@@ -41,12 +41,15 @@ async def async_setup_entry(hass, entry, async_add_entities):
     )
 
     boost_entities: list[BinarySensorEntity] = []
-    for node_type, node, addr_str, base_name in iter_heater_nodes(
+    for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
         nodes_by_type, resolve_name
     ):
-        if not supports_boost(node):
-            continue
-        unique_id = f"{DOMAIN}:{dev_id}:{node_type}:{addr_str}:boost_active"
+        unique_id = build_heater_entity_unique_id(
+            dev_id,
+            node_type,
+            addr_str,
+            ":boost_active",
+        )
         boost_entities.append(
             HeaterBoostActiveBinarySensor(
                 coord,
@@ -70,7 +73,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
 
 class GatewayOnlineBinarySensor(
-    CoordinatorEntity[StateCoordinator], BinarySensorEntity
+    GatewayDispatcherEntity,
+    CoordinatorEntity[StateCoordinator],
+    BinarySensorEntity,
 ):
     """Connectivity sensor for the TermoWeb hub (gateway)."""
 
@@ -86,21 +91,12 @@ class GatewayOnlineBinarySensor(
         self._dev_id = str(dev_id)
         self._attr_name = "TermoWeb Gateway Online"
         self._attr_unique_id = f"{self._dev_id}_online"
-        self._ws_subscription = DispatcherSubscriptionHelper(self)
 
-    async def async_added_to_hass(self) -> None:
-        """Subscribe to websocket status updates when added to hass."""
-        await super().async_added_to_hass()
-        if self.hass is None:
-            return
+    @property
+    def gateway_signal(self) -> str:
+        """Return the dispatcher signal for gateway websocket status."""
 
-        signal = signal_ws_status(self._entry_id)
-        self._ws_subscription.subscribe(self.hass, signal, self._on_ws_status)
-
-    async def async_will_remove_from_hass(self) -> None:
-        """Unsubscribe from websocket updates before removal."""
-        self._ws_subscription.unsubscribe()
-        await super().async_will_remove_from_hass()
+        return signal_ws_status(self._entry_id)
 
     def _ws_state(self) -> dict[str, Any]:
         """Return the latest websocket status payload for this device."""
@@ -134,7 +130,7 @@ class GatewayOnlineBinarySensor(
         }
 
     @callback
-    def _on_ws_status(self, payload: dict) -> None:
+    def _handle_gateway_dispatcher(self, payload: dict[str, Any]) -> None:
         """Handle websocket status broadcasts from the integration."""
         if payload.get("dev_id") != self._dev_id:
             return

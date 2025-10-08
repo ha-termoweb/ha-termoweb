@@ -5,9 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
-from .heater_inventory import HeaterInventoryDetails, build_heater_inventory_details
-from .nodes import (
+from .inventory import (
+    HeaterInventoryDetails,
     Node,
+    build_heater_inventory_details,
     build_node_inventory,
     heater_sample_subscription_targets,
     normalize_heater_addresses,

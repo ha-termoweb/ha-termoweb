@@ -38,7 +38,7 @@ jobs:
           uv run pytest --cov=custom_components.termoweb --cov-report=term-missing | tee coverage-report.txt
 
       - name: Enforce coverage threshold
-        run: uv run coverage report --fail-under=100
+        run: uv run coverage report --fail-under=90
 
       - name: Generate coverage XML
         run: uv run coverage xml

@@ -7,12 +7,19 @@ import importlib
 from collections import Counter
 from collections.abc import Awaitable, Iterable, Mapping, MutableMapping
 from datetime import timedelta
+import importlib
+import inspect
 import logging
 import sys
 from typing import Any, Final
 
 from aiohttp import ClientError
-from homeassistant.config_entries import ConfigEntry
+try:  # pragma: no cover - compatibility shim for older Home Assistant cores
+    from homeassistant.config_entries import ConfigEntry, SupportsDiagnostics
+except ImportError:  # pragma: no cover - tests provide stubbed config entries
+    from homeassistant.config_entries import ConfigEntry  # type: ignore[misc]
+
+    SupportsDiagnostics = None  # type: ignore[assignment]
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client
@@ -45,7 +52,7 @@ from .energy import (
     reset_samples_rate_limit_state,
 )
 from .installation import InstallationSnapshot
-from .nodes import build_node_inventory
+from .inventory import build_node_inventory
 from .utils import async_get_integration_version as _async_get_integration_version
 
 try:  # pragma: no cover - fallback for test stubs
@@ -182,6 +189,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         )
     )
     brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
+
+    await _async_ensure_diagnostics_platform(hass)
+
+    if SupportsDiagnostics is not None and hasattr(entry, "supports_diagnostics"):
+        entry.supports_diagnostics = SupportsDiagnostics.YES
 
     version = await _async_get_integration_version(hass)
 
@@ -501,6 +513,53 @@ async def async_register_ws_debug_probe_service(hass: HomeAssistant) -> None:
         "ws_debug_probe",
         _async_ws_debug_probe,
     )
+
+
+async def _async_ensure_diagnostics_platform(hass: HomeAssistant) -> None:
+    """Ensure the diagnostics integration knows about the TermoWeb platform."""
+
+    try:
+        diagnostics = importlib.import_module("homeassistant.components.diagnostics")
+    except ImportError:  # pragma: no cover - diagnostics integration unavailable
+        _LOGGER.debug("Diagnostics integration is unavailable; skipping registration")
+        return
+
+    platform = importlib.import_module("custom_components.termoweb.diagnostics")
+
+    register_async = getattr(diagnostics, "async_register_diagnostics_platform", None)
+    if callable(register_async):
+        result = register_async(hass, DOMAIN, platform)
+        if inspect.isawaitable(result):
+            await result
+        return
+
+    register_sync = getattr(diagnostics, "_register_diagnostics_platform", None)
+    if not callable(register_sync):
+        return
+
+    diagnostics_data = None
+    for key_name in (
+        "DIAGNOSTICS_DATA",
+        "_DIAGNOSTICS_DATA",
+        "DATA_DIAGNOSTICS",
+        "DOMAIN",
+    ):
+        data_key = getattr(diagnostics, key_name, None)
+        if data_key is None:
+            continue
+        diagnostics_data = hass.data.get(data_key)
+        if diagnostics_data is not None:
+            break
+    if diagnostics_data is None:
+        return
+
+    platforms = getattr(diagnostics_data, "platforms", None)
+    if not isinstance(platforms, dict):
+        return
+    if DOMAIN in platforms:
+        return
+
+    register_sync(hass, DOMAIN, platform)
 
 
 async def _async_shutdown_entry(rec: MutableMapping[str, Any]) -> None:
