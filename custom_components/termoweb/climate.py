@@ -24,6 +24,7 @@ from .const import BRAND_DUCAHEAT, DOMAIN
 from .heater import (
     DEFAULT_BOOST_DURATION,
     HeaterNodeBase,
+    build_heater_entity_unique_id,
     derive_boost_state,
     iter_heater_maps,
     iter_heater_nodes,
@@ -56,7 +57,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
     for node_type, _node, addr_str, resolved_name in iter_heater_nodes(
         nodes_by_type, resolve_name
     ):
-        unique_id = f"{DOMAIN}:{dev_id}:{node_type}:{addr_str}:climate"
+        unique_id = build_heater_entity_unique_id(
+            dev_id,
+            node_type,
+            addr_str,
+            ":climate",
+        )
         entity_cls: type[HeaterClimateEntity]
         if node_type == "acm":
             entity_cls = AccumulatorClimateEntity

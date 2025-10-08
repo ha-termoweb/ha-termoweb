@@ -28,6 +28,29 @@ iter_boostable_heater_nodes = heater_module.iter_boostable_heater_nodes
 prepare_heater_platform_data = heater_module.prepare_heater_platform_data
 
 
+def test_build_heater_entity_unique_id_normalises_inputs() -> None:
+    """Helper should normalise identifiers and enforce required fields."""
+
+    uid = heater_module.build_heater_entity_unique_id(
+        " 0A1B ",
+        " ACM ",
+        " 07 ",
+        "boost",
+    )
+    assert uid == "termoweb:0A1B:acm:07:boost"
+
+    uid_with_colon = heater_module.build_heater_entity_unique_id(
+        "0a1b",
+        "acm",
+        "07",
+        ":boost",
+    )
+    assert uid_with_colon == "termoweb:0a1b:acm:07:boost"
+
+    with pytest.raises(ValueError):
+        heater_module.build_heater_entity_unique_id("", "acm", "07")
+
+
 def _make_heater(coordinator: SimpleNamespace) -> HeaterNodeBase:
     return HeaterNodeBase(coordinator, "entry", "dev", "A", "Heater A")
 

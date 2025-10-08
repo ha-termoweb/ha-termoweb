@@ -61,6 +61,28 @@ BOOST_DURATION_OPTIONS: Final[tuple[int, ...]] = tuple(
 )
 
 
+def build_heater_entity_unique_id(
+    dev_id: Any,
+    node_type: Any,
+    addr: Any,
+    suffix: str | None = None,
+) -> str:
+    """Return the canonical unique ID for a heater entity."""
+
+    dev = normalize_node_addr(dev_id)
+    node = normalize_node_type(node_type)
+    address = normalize_node_addr(addr)
+    if not dev or not node or not address:
+        raise ValueError("dev_id, node_type and addr must be provided")
+
+    suffix_str = ""
+    if suffix:
+        suffix_clean = str(suffix)
+        suffix_str = suffix_clean if suffix_clean.startswith(":") else f":{suffix_clean}"
+
+    return f"{DOMAIN}:{dev}:{node}:{address}{suffix_str}"
+
+
 def _boost_runtime_store(
     entry_data: MutableMapping[str, Any] | None,
     *,

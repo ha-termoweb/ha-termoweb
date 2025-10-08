@@ -300,7 +300,15 @@ def test_button_setup_adds_accumulator_entities(
         expected_names = [item.label for item in custom_metadata]
         expected_icons = [item.icon for item in custom_metadata]
         expected_unique_ids = [
-            f"{DOMAIN}:{dev_id}:acm:{acm_node.addr}:boost_{item.unique_suffix}"
+            "{}_{}".format(
+                heater_module.build_heater_entity_unique_id(
+                    dev_id,
+                    "acm",
+                    acm_node.addr,
+                    ":boost",
+                ),
+                item.unique_suffix,
+            )
             for item in custom_metadata
         ]
         assert names == expected_names
