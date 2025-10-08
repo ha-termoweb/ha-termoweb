@@ -6,6 +6,7 @@ import asyncio
 import gzip
 from types import ModuleType, SimpleNamespace
 from typing import Any, Mapping
+from urllib.parse import parse_qsl, urlsplit
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -432,16 +433,25 @@ def test_termoweb_sanitise_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     params = {
         "token": "secrettoken",
         "dev_id": "device123456",
+        "sid": "session123",
         "other": "keep",
     }
     sanitised_params = client._sanitise_params(params)
-    assert sanitised_params["token"].startswith("secr")
-    assert "..." in sanitised_params["token"]
-    assert sanitised_params["dev_id"].startswith("device")
-    url = "wss://example/ws?token=abc123456&dev_id=device123456&flag=1"
+    assert sanitised_params["token"] == "{token}"
+    assert sanitised_params["dev_id"] == "{dev_id}"
+    assert sanitised_params["sid"] == "{sid}"
+    url = "wss://example/ws?token=abc123456&dev_id=device123456&flag=1&sid=session123"
     sanitised_url = client._sanitise_url(url)
-    assert "token=abc1" in sanitised_url and "..." in sanitised_url
-    assert "dev_id=device" in sanitised_url and "..." in sanitised_url
+    sanitised_query = dict(parse_qsl(urlsplit(sanitised_url).query))
+    assert sanitised_query["token"] == "{token}"
+    assert sanitised_query["dev_id"] == "{dev_id}"
+    assert sanitised_query["sid"] == "{sid}"
+    ws_url = "wss://example/socket.io/1/websocket/session123?sid=session123"
+    sanitised_ws_url = client._sanitise_url(ws_url)
+    parsed_ws_url = urlsplit(sanitised_ws_url)
+    ws_query = dict(parse_qsl(parsed_ws_url.query))
+    assert parsed_ws_url.path.endswith("/socket.io/1/websocket/{sid}")
+    assert ws_query["sid"] == "{sid}"
     assert client._sanitise_url("://bad url") == "://bad url"
 
 
