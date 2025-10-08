@@ -13,8 +13,9 @@ from aiohttp import ClientError
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from homeassistant.helpers import aiohttp_client
+from homeassistant.helpers import aiohttp_client, integration_platform
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.typing import ConfigType
 
 from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend import Backend, DucaheatRESTClient, WsClientProto, create_backend
@@ -52,6 +53,13 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["button", "binary_sensor", "climate", "select", "sensor"]
 
 reset_samples_rate_limit_state()
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register integration platforms."""
+
+    await integration_platform.async_process_integration_platforms(hass, DOMAIN)
+    return True
 
 
 def create_rest_client(
@@ -106,7 +114,7 @@ async def _async_import_energy_history(
     )
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  # noqa: C901
     """Set up the TermoWeb integration for a config entry."""
     username = entry.data["username"]
     password = entry.data["password"]

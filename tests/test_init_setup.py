@@ -82,6 +82,26 @@ class BaseFakeClient:
         return {}
 
 
+def test_async_setup_registers_integration_platform(
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[HomeAssistant, str]] = []
+
+    async def fake_process(hass: HomeAssistant, domain: str) -> None:
+        calls.append((hass, domain))
+
+    monkeypatch.setattr(
+        termoweb_init.integration_platform,
+        "async_process_integration_platforms",
+        fake_process,
+    )
+
+    result = asyncio.run(termoweb_init.async_setup(stub_hass, {}))
+
+    assert result is True
+    assert calls == [(stub_hass, termoweb_init.DOMAIN)]
+
+
 def test_create_rest_client_selects_brand(
     termoweb_init: Any,
     stub_hass: HomeAssistant,
