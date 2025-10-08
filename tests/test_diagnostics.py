@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import platform
 import sys
 import types
@@ -50,7 +51,7 @@ def _flatten(data: Any) -> list[str]:
     return []
 
 
-def test_diagnostics_with_cached_inventory() -> None:
+def test_diagnostics_with_cached_inventory(caplog: pytest.LogCaptureFixture) -> None:
     """Diagnostics return cached inventory and redact sensitive keys."""
 
     hass = HomeAssistant()
@@ -76,7 +77,8 @@ def test_diagnostics_with_cached_inventory() -> None:
         "username": "user@example.com",
     }
 
-    diagnostics = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
+    with caplog.at_level(logging.DEBUG):
+        diagnostics = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
 
     assert diagnostics["integration"]["version"] == "1.2.3"
     assert diagnostics["integration"]["brand"] == "Ducaheat"
@@ -92,8 +94,15 @@ def test_diagnostics_with_cached_inventory() -> None:
     assert "dev_id" not in flattened
     assert "username" not in flattened
 
+    assert (
+        "Diagnostics inventory source for entry-one: cached inventory (raw=2, filtered=2)"
+        in caplog.text
+    )
 
-def test_diagnostics_uses_snapshot_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_diagnostics_uses_snapshot_fallback(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """Diagnostics fall back to snapshot inventory and helper version."""
 
     hass = HomeAssistant()
@@ -114,7 +123,8 @@ def test_diagnostics_uses_snapshot_fallback(monkeypatch: pytest.MonkeyPatch) -> 
         "snapshot": snapshot,
     }
 
-    diagnostics = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
+    with caplog.at_level(logging.DEBUG):
+        diagnostics = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
 
     assert hass.integration_requests == [DOMAIN]
     assert diagnostics["integration"]["version"] == "test-version"
@@ -125,14 +135,22 @@ def test_diagnostics_uses_snapshot_fallback(monkeypatch: pytest.MonkeyPatch) -> 
     assert "dev_id" not in _flatten(diagnostics)
     assert "time_zone" not in diagnostics["home_assistant"]
 
+    assert (
+        "Diagnostics inventory source for entry-two: snapshot (raw=1, filtered=1)"
+        in caplog.text
+    )
 
-def test_diagnostics_without_record(monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_diagnostics_without_record(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """Diagnostics handle missing registry records with safe defaults."""
 
     hass = HomeAssistant()
     entry = ConfigEntry("entry-three", data={})
 
-    diagnostics = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
+    with caplog.at_level(logging.DEBUG):
+        diagnostics = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
 
     assert hass.integration_requests == [DOMAIN]
     assert diagnostics["integration"]["version"] == "test-version"
@@ -140,3 +158,8 @@ def test_diagnostics_without_record(monkeypatch: pytest.MonkeyPatch) -> None:
     assert diagnostics["home_assistant"]["version"] == "unknown"
     assert "time_zone" not in diagnostics["home_assistant"]
     assert diagnostics["installation"]["node_inventory"] == []
+
+    assert (
+        "Diagnostics inventory source for entry-three: fallback (raw=0, filtered=0)"
+        in caplog.text
+    )
