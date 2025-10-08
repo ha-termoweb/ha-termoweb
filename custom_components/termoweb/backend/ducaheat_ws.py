@@ -539,7 +539,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     continue
                 try:
                     await ws.send_str("2")
-                    _LOGGER.debug("WS (ducaheat): -> 2 (keepalive ping)")
+                    #_LOGGER.debug("WS (ducaheat): -> 2 (keepalive ping)")
                 except Exception:  # noqa: BLE001 - defensive logging
                     _LOGGER.debug(
                         "WS (ducaheat): keepalive ping failed", exc_info=True
