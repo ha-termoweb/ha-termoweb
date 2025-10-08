@@ -31,6 +31,26 @@ def _make_heater(coordinator: SimpleNamespace) -> HeaterNodeBase:
     return HeaterNodeBase(coordinator, "entry", "dev", "A", "Heater A")
 
 
+def test_heater_hass_accessors_fall_back_to_coordinator() -> None:
+    """Heater nodes should defer hass references to the coordinator when unset."""
+
+    hass = HomeAssistant()
+    coordinator = SimpleNamespace(hass=hass)
+    heater = _make_heater(coordinator)
+
+    if hasattr(heater, "_hass"):
+        delattr(heater, "_hass")
+
+    assert heater.hass is hass
+    assert heater._hass_for_runtime() is hass
+
+    override = object()
+    heater.hass = override
+
+    assert heater.hass is override
+    assert heater._hass_for_runtime() is override
+
+
 def test_prepare_heater_platform_data_groups_nodes() -> None:
     raw_nodes = {
         "nodes": [

@@ -523,3 +523,17 @@ async def test_poll_skips_pending_settings_merge(
     assert client.get_node_settings.await_count == 2
     settings_second = result_second["dev"]["nodes_by_type"]["htr"]["settings"]["1"]
     assert settings_second == {"mode": "manual", "stemp": "21.0"}
+
+
+def test_wrap_logger_proxies_missing_helpers() -> None:
+    """Ensure logger proxies expose inner attributes and ``isEnabledFor``."""
+
+    class DummyLogger:
+        def __init__(self) -> None:
+            self.value = "logger"
+
+    proxy = coord_module._wrap_logger(DummyLogger())
+
+    assert proxy.value == "logger"
+    assert proxy.isEnabledFor(10) is False
+
