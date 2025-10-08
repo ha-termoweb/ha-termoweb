@@ -11,7 +11,7 @@ import logging
 import random
 import string
 import time
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping, MutableMapping
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import aiohttp
@@ -63,6 +63,56 @@ class WSStats:
     events_total: int = 0
     last_event_ts: float = 0.0
     last_paths: list[str] | None = None
+
+
+@dataclass
+class PreparedNodesDispatch:
+    """Capture reusable node dispatch preparation data."""
+
+    inventory: Any
+    addr_map: dict[str, list[str]]
+    unknown_types: set[str]
+    snapshot: InstallationSnapshot | None
+    record: MutableMapping[str, Any] | None
+
+
+def _prepare_nodes_dispatch(
+    hass: HomeAssistant, entry_id: str, raw_nodes: Any
+) -> PreparedNodesDispatch:
+    """Return snapshot and inventory data for node dispatching."""
+
+    record = hass.data.get(DOMAIN, {}).get(entry_id)
+    snapshot_obj = ensure_snapshot(record)
+    record_bucket: MutableMapping[str, Any] | None
+    if isinstance(record, MutableMapping):
+        record_bucket = record
+    else:
+        record_bucket = None
+
+    if isinstance(snapshot_obj, InstallationSnapshot):
+        snapshot_obj.update_nodes(raw_nodes)
+        inventory = snapshot_obj.inventory
+        if record_bucket is not None:
+            record_bucket["node_inventory"] = list(inventory)
+    else:
+        record_map: Mapping[str, Any]
+        if isinstance(record, Mapping):
+            record_map = record
+        else:
+            record_map = {}
+        inventory = ensure_node_inventory(record_map, nodes=raw_nodes)
+
+    addr_map, unknown_types = addresses_by_node_type(
+        inventory, known_types=NODE_CLASS_BY_TYPE
+    )
+
+    return PreparedNodesDispatch(
+        inventory=inventory,
+        addr_map=addr_map,
+        unknown_types=unknown_types,
+        snapshot=snapshot_obj if isinstance(snapshot_obj, InstallationSnapshot) else None,
+        record=record_bucket,
+    )
 
 
 class HandshakeError(RuntimeError):
@@ -183,17 +233,9 @@ class _WSCommon(_WSStatusMixin):
 
     def _dispatch_nodes(self, payload: dict[str, Any]) -> None:
         raw_nodes = payload.get("nodes") if "nodes" in payload else payload
-        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-        snapshot_obj = ensure_snapshot(record)
-        if isinstance(snapshot_obj, InstallationSnapshot):
-            snapshot_obj.update_nodes(raw_nodes)
-            inventory = snapshot_obj.inventory
-            if isinstance(record, dict):
-                record["node_inventory"] = list(inventory)
-        else:
-            record_map: Mapping[str, Any] = record if isinstance(record, Mapping) else {}
-            inventory = ensure_node_inventory(record_map, nodes=raw_nodes)
-        addr_map, _ = addresses_by_node_type(inventory, known_types=NODE_CLASS_BY_TYPE)
+        prepared = _prepare_nodes_dispatch(self.hass, self.entry_id, raw_nodes)
+        addr_map = prepared.addr_map
+        inventory = prepared.inventory
         if hasattr(self._coordinator, "update_nodes"):
             self._coordinator.update_nodes(raw_nodes, inventory)
         payload_copy = {

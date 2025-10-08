@@ -52,21 +52,25 @@ from custom_components.termoweb.installation import (
     ensure_snapshot,
 )
 from custom_components.termoweb.nodes import (
-    NODE_CLASS_BY_TYPE,
-    addresses_by_node_type,
+    addresses_by_node_type as _addresses_by_node_type,
     build_node_inventory as _build_node_inventory,
     collect_heater_sample_addresses,
-    ensure_node_inventory,
     heater_sample_subscription_targets,
     normalize_heater_addresses,
     normalize_node_addr,
     normalize_node_type,
 )
-from .ws_client import WSStats, _WSStatusMixin
+from .ws_client import (
+    WSStats,
+    _WSStatusMixin,
+    PreparedNodesDispatch,
+    _prepare_nodes_dispatch,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 build_node_inventory = _build_node_inventory  # re-exported for tests
+addresses_by_node_type = _addresses_by_node_type  # legacy test hook
 
 
 _SENSITIVE_PLACEHOLDERS: Mapping[str, tuple[str, Callable[[str | None], str]]] = {
@@ -909,25 +913,13 @@ class WebSocketClient(_WSStatusMixin):
             raw_nodes = payload
             snapshot = {"nodes": deepcopy(raw_nodes), "nodes_by_type": {}}
 
-        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-        snapshot_obj = ensure_snapshot(record)
-        if isinstance(snapshot_obj, InstallationSnapshot):
-            snapshot_obj.update_nodes(raw_nodes)
-            inventory = snapshot_obj.inventory
-            if isinstance(record, dict):
-                record["node_inventory"] = list(inventory)
-        else:
-            record_map: Mapping[str, Any]
-            if isinstance(record, Mapping):
-                record_map = record
-            else:
-                record_map = {}  # pragma: no cover - defensive default
-
-            inventory = ensure_node_inventory(record_map, nodes=raw_nodes)
-
-        addr_map, unknown_types = addresses_by_node_type(
-            inventory, known_types=NODE_CLASS_BY_TYPE
+        prepared: PreparedNodesDispatch = _prepare_nodes_dispatch(
+            self.hass, self.entry_id, raw_nodes
         )
+        inventory = prepared.inventory
+        addr_map = prepared.addr_map
+        unknown_types = prepared.unknown_types
+        snapshot_obj = prepared.snapshot
         if unknown_types:  # pragma: no cover - diagnostic branch
             _LOGGER.debug(
                 "WS: unknown node types in inventory: %s",
@@ -949,7 +941,8 @@ class WebSocketClient(_WSStatusMixin):
         if hasattr(self._coordinator, "update_nodes"):
             self._coordinator.update_nodes(raw_nodes, inventory)
 
-        if isinstance(record, dict) and snapshot_obj is None:
+        record = prepared.record
+        if isinstance(record, MutableMapping) and snapshot_obj is None:
             record["nodes"] = raw_nodes
             record["node_inventory"] = inventory
 
