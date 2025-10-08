@@ -23,12 +23,13 @@ from .boost import (
 from .const import DOMAIN, signal_ws_data
 from .heater_inventory import build_heater_inventory_details
 from .installation import InstallationSnapshot, ensure_snapshot
-from .inventory import Node, normalize_node_addr, normalize_node_type
-from .nodes import (
-    HEATER_NODE_TYPES,
+from .inventory import (
+    Node,
     build_node_inventory,
-    ensure_node_inventory,
+    normalize_node_addr,
+    normalize_node_type,
 )
+from .nodes import HEATER_NODE_TYPES, ensure_node_inventory
 
 _LOGGER = logging.getLogger(__name__)
 

@@ -12,12 +12,12 @@ from custom_components.termoweb.identifiers import build_heater_energy_unique_id
 from custom_components.termoweb.nodes import (
     HEATER_NODE_TYPES,
     addresses_by_node_type,
-    build_node_inventory,
     ensure_node_inventory,
     normalize_heater_addresses,
     parse_heater_energy_unique_id,
 )
 from custom_components.termoweb.inventory import (
+    build_node_inventory,
     normalize_node_addr,
     normalize_node_type,
 )
