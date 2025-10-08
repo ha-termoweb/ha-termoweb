@@ -17,7 +17,7 @@ from custom_components.termoweb import installation as installation_module
 from custom_components.termoweb.installation import InstallationSnapshot
 from custom_components.termoweb.inventory import (
     HeaterNode,
-    build_heater_inventory_details,
+    Inventory,
     build_node_inventory,
 )
 from homeassistant.core import HomeAssistant
@@ -112,9 +112,8 @@ def test_prepare_heater_platform_data_groups_nodes() -> None:
     assert [node.addr for node in acm_nodes] == ["2", "2"]
     assert addrs_by_type["acm"] == ["2"]
     assert len(addrs_by_type["acm"]) == len(set(addrs_by_type["acm"]))
-    details = build_heater_inventory_details(inventory)
-    helper_map = details.address_map
-    helper_reverse = details.reverse_address_map
+    reference = Inventory("dev", raw_nodes, inventory)
+    helper_map, helper_reverse = reference.heater_address_map
     assert addrs_by_type == {
         node_type: helper_map.get(node_type, [])
         for node_type in heater_module.HEATER_NODE_TYPES
@@ -128,7 +127,7 @@ def test_prepare_heater_platform_data_groups_nodes() -> None:
         {"node_inventory": list(inventory)},
         default_name_simple=lambda addr: f"Heater {addr}",
     )
-    assert cached_inventory == list(inventory)
+    assert cached_inventory == inventory
 
     legacy_entry = {
         "nodes": {"nodes": [{"type": "htr", "addr": "9", "name": " Kitchen "}]},
@@ -169,8 +168,8 @@ def test_prepare_heater_platform_data_skips_blank_types(
 
     assert [node.addr for node in nodes_by_type.get("htr", [])] == ["6"]
     assert addrs_by_type["htr"] == ["6"]
-    details = build_heater_inventory_details(inventory)
-    helper_map = details.address_map
+    reference = Inventory("dev", {"nodes": []}, inventory)
+    helper_map, _ = reference.heater_address_map
     assert helper_map == {"htr": ["6"]}
 
 

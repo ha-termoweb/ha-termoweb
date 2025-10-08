@@ -7,7 +7,7 @@ import pytest
 
 from custom_components.termoweb.installation import InstallationSnapshot, ensure_snapshot
 from custom_components.termoweb.inventory import (
-    build_heater_inventory_details,
+    Inventory,
     build_node_inventory,
     heater_sample_subscription_targets,
 )
@@ -38,13 +38,10 @@ def test_snapshot_properties_and_inventory_cache() -> None:
     assert snapshot.raw_nodes == {"nodes": nodes}
     assert [node.addr for node in snapshot.inventory] == ["1"]
 
-    details = build_heater_inventory_details(snapshot.inventory)
-    assert snapshot.nodes_by_type == details.nodes_by_type
-    assert snapshot.explicit_heater_names == details.explicit_name_pairs
-    assert snapshot.heater_address_map == (
-        details.address_map,
-        details.reverse_address_map,
-    )
+    reference = Inventory(snapshot.dev_id, snapshot.raw_nodes, snapshot.inventory)
+    assert snapshot.nodes_by_type == reference.nodes_by_type
+    assert snapshot.explicit_heater_names == reference.explicit_heater_names
+    assert snapshot.heater_address_map == reference.heater_address_map
 
 
 def test_snapshot_sample_targets_and_name_map_caching() -> None:

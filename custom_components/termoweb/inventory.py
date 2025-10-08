@@ -67,6 +67,12 @@ class Inventory:
     _dev_id: str
     _payload: RawNodePayload
     _nodes: tuple[PrebuiltNode, ...]
+    _nodes_by_type_cache: dict[str, tuple[PrebuiltNode, ...]] | None
+    _heater_nodes_cache: tuple[PrebuiltNode, ...] | None
+    _explicit_name_pairs_cache: frozenset[tuple[str, str]] | None
+    _heater_address_map_cache: (
+        tuple[dict[str, tuple[str, ...]], dict[str, frozenset[str]]] | None
+    )
 
     def __init__(
         self,
@@ -79,6 +85,10 @@ class Inventory:
         object.__setattr__(self, "_dev_id", dev_id)
         object.__setattr__(self, "_payload", payload)
         object.__setattr__(self, "_nodes", tuple(nodes))
+        object.__setattr__(self, "_nodes_by_type_cache", None)
+        object.__setattr__(self, "_heater_nodes_cache", None)
+        object.__setattr__(self, "_explicit_name_pairs_cache", None)
+        object.__setattr__(self, "_heater_address_map_cache", None)
 
     @property
     def dev_id(self) -> str:
@@ -97,6 +107,93 @@ class Inventory:
         """Get the immutable tuple of node objects."""
 
         return self._nodes
+
+    def _ensure_nodes_by_type_cache(self) -> dict[str, tuple[PrebuiltNode, ...]]:
+        """Return cached node groupings keyed by normalised type."""
+
+        cached = self._nodes_by_type_cache
+        if cached is not None:
+            return cached
+
+        grouped: dict[str, list[PrebuiltNode]] = defaultdict(list)
+        for node in self._nodes:
+            node_type = normalize_node_type(getattr(node, "type", ""))
+            if not node_type:
+                continue
+            grouped[node_type].append(node)
+
+        normalised = {key: tuple(values) for key, values in grouped.items()}
+        object.__setattr__(self, "_nodes_by_type_cache", normalised)
+        return normalised
+
+    @property
+    def nodes_by_type(self) -> dict[str, list[PrebuiltNode]]:
+        """Return mapping of node type to node instances."""
+
+        cached = self._ensure_nodes_by_type_cache()
+        return {key: list(values) for key, values in cached.items()}
+
+    @property
+    def heater_nodes(self) -> tuple[PrebuiltNode, ...]:
+        """Return tuple of nodes belonging to heater-compatible types."""
+
+        cached = self._heater_nodes_cache
+        if cached is None:
+            grouped = self._ensure_nodes_by_type_cache()
+            heater_list: list[PrebuiltNode] = []
+            for node_type in HEATER_NODE_TYPES:
+                heater_list.extend(grouped.get(node_type, ()))
+            cached = tuple(heater_list)
+            object.__setattr__(self, "_heater_nodes_cache", cached)
+        return cached
+
+    @property
+    def explicit_heater_names(self) -> set[tuple[str, str]]:
+        """Return node type/address pairs that have explicit user-defined names."""
+
+        cached = self._explicit_name_pairs_cache
+        if cached is None:
+            pairs: set[tuple[str, str]] = set()
+            grouped = self._ensure_nodes_by_type_cache()
+            for node_type, nodes in grouped.items():
+                if node_type not in HEATER_NODE_TYPES:
+                    continue
+                for node in nodes:
+                    addr = normalize_node_addr(getattr(node, "addr", ""))
+                    if not addr:
+                        continue
+                    raw_name = getattr(node, "name", "")
+                    if isinstance(raw_name, str) and raw_name.strip():
+                        pairs.add((node_type, addr))
+            cached = frozenset(pairs)
+            object.__setattr__(self, "_explicit_name_pairs_cache", cached)
+        return set(cached)
+
+    @property
+    def heater_address_map(self) -> tuple[dict[str, list[str]], dict[str, set[str]]]:
+        """Return forward and reverse heater address mappings."""
+
+        cached = self._heater_address_map_cache
+        if cached is None:
+            forward_raw, reverse_raw = build_heater_address_map(self._nodes)
+            filtered_forward = {
+                node_type: tuple(addresses)
+                for node_type, addresses in forward_raw.items()
+                if node_type in HEATER_NODE_TYPES and addresses
+            }
+            filtered_reverse = {
+                addr: frozenset(node_types)
+                for addr, node_types in reverse_raw.items()
+                if node_types
+            }
+            cached = (filtered_forward, filtered_reverse)
+            object.__setattr__(self, "_heater_address_map_cache", cached)
+
+        forward_cache, reverse_cache = cached
+        return (
+            {node_type: list(addresses) for node_type, addresses in forward_cache.items()},
+            {addr: set(node_types) for addr, node_types in reverse_cache.items()},
+        )
 
 
 def _normalize_node_identifier(
@@ -273,36 +370,13 @@ def build_heater_inventory_details(
 ) -> HeaterInventoryDetails:
     """Return derived heater metadata for ``nodes``."""
 
-    inventory = list(nodes)
-
-    nodes_by_type: dict[str, list[Node]] = defaultdict(list)
-    explicit_names: set[tuple[str, str]] = set()
-
-    for node in inventory:
-        node_type = normalize_node_type(getattr(node, "type", ""))
-        if not node_type:
-            continue
-        nodes_by_type[node_type].append(node)
-        addr = normalize_node_addr(getattr(node, "addr", ""))
-        if addr and getattr(node, "name", "").strip():
-            explicit_names.add((node_type, addr))
-
-    forward, reverse = build_heater_address_map(inventory)
-
-    filtered_forward = {
-        node_type: list(addresses)
-        for node_type, addresses in forward.items()
-        if node_type in HEATER_NODE_TYPES and addresses
-    }
-
-    filtered_reverse = {
-        addr: set(node_types)
-        for addr, node_types in reverse.items()
-        if node_types
-    }
+    inventory = Inventory("", {}, nodes)
+    nodes_by_type = inventory.nodes_by_type
+    explicit_names = inventory.explicit_heater_names
+    filtered_forward, filtered_reverse = inventory.heater_address_map
 
     return HeaterInventoryDetails(
-        nodes_by_type={k: list(v) for k, v in nodes_by_type.items()},
+        nodes_by_type=nodes_by_type,
         explicit_name_pairs=explicit_names,
         address_map=filtered_forward,
         reverse_address_map=filtered_reverse,
