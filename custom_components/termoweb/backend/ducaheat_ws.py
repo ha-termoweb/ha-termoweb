@@ -194,6 +194,13 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
     def _path(self) -> str:
         return "/socket.io/"
 
+    def _build_handshake_url(self, params: Mapping[str, Any]) -> str:
+        """Return a handshake URL with the provided query parameters."""
+
+        parsed = urlsplit(self._base_host())
+        query = urlencode(list(params.items()))
+        return urlunsplit(parsed._replace(path=self._path(), query=query))
+
     async def ws_url(self) -> str:
         token = await self._get_token()
         params = {
@@ -203,7 +210,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             "transport": "polling",
             "t": _rand_t(),
         }
-        return urlunsplit(urlsplit(self._base_host())._replace(path=self._path(), query=urlencode(params)))
+        return self._build_handshake_url(params)
 
     async def _runner(self) -> None:
         self._update_status("starting")
@@ -234,7 +241,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             "transport": "polling",
             "t": _rand_t(),
         }
-        open_url = urlunsplit(urlsplit(self._base_host())._replace(path=self._path(), query=urlencode(open_params)))
+        open_url = self._build_handshake_url(open_params)
         _LOGGER.debug("WS (ducaheat): OPEN GET %s", open_url.replace(token, "…"))
         async with asyncio.timeout(15):
             async with self._session.get(open_url, headers=headers) as resp:
@@ -278,7 +285,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             "t": _rand_t(),
             "sid": sid,
         }
-        post_url = urlunsplit(urlsplit(self._base_host())._replace(path=self._path(), query=urlencode(post_params)))
+        post_url = self._build_handshake_url(post_params)
         payload = _encode_polling_packet(f"40{self._namespace}")
         _LOGGER.debug("WS (ducaheat): POST 40/ns %s", post_url.replace(token, "…"))
         async with asyncio.timeout(15):
@@ -298,7 +305,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
 
         drain_params = dict(post_params)
         drain_params["t"] = _rand_t()
-        drain_url = urlunsplit(urlsplit(self._base_host())._replace(path=self._path(), query=urlencode(drain_params)))
+        drain_url = self._build_handshake_url(drain_params)
         _LOGGER.debug("WS (ducaheat): DRAIN GET %s", drain_url.replace(token, "…"))
         async with asyncio.timeout(15):
             async with self._session.get(drain_url, headers=headers) as resp:
@@ -318,7 +325,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             "transport": "websocket",
             "sid": sid,
         }
-        ws_url = urlunsplit(urlsplit(self._base_host())._replace(path=self._path(), query=urlencode(ws_params)))
+        ws_url = self._build_handshake_url(ws_params)
         ws_headers = {k: v for k, v in headers.items() if k.lower() not in ("connection", "accept-encoding")}
         _LOGGER.debug("WS (ducaheat): upgrading WS %s", ws_url.replace(token, "…"))
         self._ws = await self._session.ws_connect(
