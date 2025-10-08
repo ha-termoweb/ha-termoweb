@@ -6,6 +6,8 @@ import asyncio
 from collections import Counter
 from collections.abc import Awaitable, Iterable, Mapping, MutableMapping
 from datetime import timedelta
+import importlib
+import inspect
 import logging
 from typing import Any
 
@@ -115,6 +117,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         )
     )
     brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
+
+    await _async_ensure_diagnostics_platform(hass)
 
     version = await _async_get_integration_version(hass)
 
@@ -433,6 +437,45 @@ async def async_register_ws_debug_probe_service(hass: HomeAssistant) -> None:
         "ws_debug_probe",
         _async_ws_debug_probe,
     )
+
+
+async def _async_ensure_diagnostics_platform(hass: HomeAssistant) -> None:
+    """Ensure the diagnostics integration knows about the TermoWeb platform."""
+
+    try:
+        diagnostics = importlib.import_module("homeassistant.components.diagnostics")
+    except ImportError:  # pragma: no cover - diagnostics integration unavailable
+        _LOGGER.debug("Diagnostics integration is unavailable; skipping registration")
+        return
+
+    platform = importlib.import_module("custom_components.termoweb.diagnostics")
+
+    register_async = getattr(diagnostics, "async_register_diagnostics_platform", None)
+    if callable(register_async):
+        result = register_async(hass, DOMAIN, platform)
+        if inspect.isawaitable(result):
+            await result
+        return
+
+    register_sync = getattr(diagnostics, "_register_diagnostics_platform", None)
+    if not callable(register_sync):
+        return
+
+    data_key = getattr(diagnostics, "_DIAGNOSTICS_DATA", None)
+    diagnostics_data = hass.data.get(data_key) if data_key is not None else None
+    if diagnostics_data is None:
+        legacy_key = getattr(diagnostics, "DOMAIN", None)
+        diagnostics_data = hass.data.get(legacy_key) if legacy_key is not None else None
+    if diagnostics_data is None:
+        return
+
+    platforms = getattr(diagnostics_data, "platforms", None)
+    if not isinstance(platforms, dict):
+        return
+    if DOMAIN in platforms:
+        return
+
+    register_sync(hass, DOMAIN, platform)
 
 
 async def _async_shutdown_entry(rec: MutableMapping[str, Any]) -> None:
