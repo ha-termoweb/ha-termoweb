@@ -1,9 +1,9 @@
 # ruff: noqa: D100,D101,D102,D103,D104,D105,D106,D107,INP001,E402
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import enum
-import asyncio
 import inspect
 import time
 from pathlib import Path
@@ -18,11 +18,10 @@ from types import SimpleNamespace
 
 import pytest
 
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-
-from custom_components.termoweb.const import DOMAIN
 
 _frame_module: Any | None = None
 
@@ -496,6 +495,9 @@ def _install_stubs() -> None:
     entity_mod = sys.modules.get("homeassistant.helpers.entity") or types.ModuleType(
         "homeassistant.helpers.entity"
     )
+    translation_mod = sys.modules.get(
+        "homeassistant.helpers.translation"
+    ) or types.ModuleType("homeassistant.helpers.translation")
     loader_mod = sys.modules.get("homeassistant.loader") or types.ModuleType(
         "homeassistant.loader"
     )
@@ -511,6 +513,9 @@ def _install_stubs() -> None:
     components_mod = sys.modules.get("homeassistant.components") or types.ModuleType(
         "homeassistant.components"
     )
+    http_mod = sys.modules.get(
+        "homeassistant.components.http"
+    ) or types.ModuleType("homeassistant.components.http")
     binary_sensor_mod = sys.modules.get(
         "homeassistant.components.binary_sensor"
     ) or types.ModuleType("homeassistant.components.binary_sensor")
@@ -542,11 +547,13 @@ def _install_stubs() -> None:
     sys.modules["homeassistant.helpers.entity"] = entity_mod
     sys.modules["homeassistant.helpers.entity_registry"] = entity_registry_mod
     sys.modules["homeassistant.helpers.dispatcher"] = dispatcher_mod
+    sys.modules["homeassistant.helpers.translation"] = translation_mod
     sys.modules["homeassistant.helpers.update_coordinator"] = update_coordinator_mod
     sys.modules["homeassistant.helpers.restore_state"] = restore_state_mod
     sys.modules["homeassistant.helpers.entity_platform"] = entity_platform_mod
     sys.modules["homeassistant.loader"] = loader_mod
     sys.modules["homeassistant.components"] = components_mod
+    sys.modules["homeassistant.components.http"] = http_mod
     sys.modules["homeassistant.components.binary_sensor"] = binary_sensor_mod
     sys.modules["homeassistant.components.button"] = button_mod
     sys.modules["homeassistant.components.sensor"] = sensor_mod
@@ -576,14 +583,60 @@ def _install_stubs() -> None:
     helpers_mod.entity = entity_mod
     helpers_mod.entity_registry = entity_registry_mod
     helpers_mod.dispatcher = dispatcher_mod
+    helpers_mod.translation = translation_mod
     helpers_mod.update_coordinator = update_coordinator_mod
     helpers_mod.restore_state = restore_state_mod
+    components_mod.http = http_mod
     components_mod.binary_sensor = binary_sensor_mod
     components_mod.button = button_mod
     components_mod.sensor = sensor_mod
     components_mod.select = select_mod
 
     const_mod.EVENT_HOMEASSISTANT_STARTED = "homeassistant_started"
+    const_mod.STATE_UNKNOWN = "unknown"
+    state_unknown_value = const_mod.STATE_UNKNOWN
+
+    if not hasattr(translation_mod, "async_get_exception_message"):
+
+        async def async_get_exception_message(*_: Any, **__: Any) -> str:
+            return "unknown_error"
+
+        translation_mod.async_get_exception_message = async_get_exception_message
+
+    if not hasattr(const_mod, "UnitOfTemperature"):
+
+        class UnitOfTemperature(str, enum.Enum):
+            CELSIUS = "°C"
+
+        const_mod.UnitOfTemperature = UnitOfTemperature
+
+    else:
+        UnitOfTemperature = const_mod.UnitOfTemperature
+
+    if not hasattr(http_mod, "HomeAssistantApplication"):
+
+        class HomeAssistantApplication(dict):
+            """Lightweight aiohttp-style application used in tests."""
+
+            def __init__(
+                self,
+                *args: Any,
+                middlewares: Iterable[Any] | None = None,
+                **kwargs: Any,
+            ) -> None:
+                super().__init__()
+                self.on_cleanup: list[Callable[..., Any]] = []
+                self.on_shutdown: list[Callable[..., Any]] = []
+                self.cleanup_ctx: list[Callable[..., Any]] = []
+                self.middlewares = list(middlewares or [])
+
+            def freeze(self) -> None:
+                return None
+
+        http_mod.HomeAssistantApplication = HomeAssistantApplication
+
+    else:
+        HomeAssistantApplication = http_mod.HomeAssistantApplication
 
     class FlowResult(dict):
         pass
@@ -881,14 +934,24 @@ def _install_stubs() -> None:
                 self.update_interval = update_interval
                 self.data: Any = None
                 self._listeners: list[Callable[[], None]] = []
+                self.last_update_success = True
+                self.last_exception: Exception | None = None
 
             async def _async_update_data(self) -> Any:
                 raise NotImplementedError
 
             async def async_refresh(self) -> None:
-                self.data = await self._async_update_data()
-                for listener in list(self._listeners):
-                    listener()
+                try:
+                    result = await self._async_update_data()
+                except Exception as exc:
+                    self.last_update_success = False
+                    self.last_exception = exc
+                else:
+                    self.data = result
+                    self.last_update_success = True
+                    self.last_exception = None
+                    for listener in list(self._listeners):
+                        listener()
 
             async def async_config_entry_first_refresh(self) -> None:
                 await self.async_refresh()
@@ -1135,10 +1198,37 @@ def _install_stubs() -> None:
         def native_unit_of_measurement(self) -> str | None:
             return getattr(self, "_attr_native_unit_of_measurement", None)
 
+        @property
+        def native_value(self) -> Any:
+            return getattr(self, "_attr_native_value", None)
+
+        @property
+        def state(self) -> Any:
+            if hasattr(self, "_attr_state"):
+                return getattr(self, "_attr_state")
+
+            value = self.native_value
+            device_class = self.device_class
+            if value is None:
+                return None
+
+            timestamp_class = getattr(SensorDeviceClass, "TIMESTAMP", "timestamp")
+            if device_class == timestamp_class and isinstance(value, dt.datetime):
+                if value.tzinfo is not None and value.tzinfo != dt.timezone.utc:
+                    value = value.astimezone(dt.timezone.utc)
+                return state_unknown_value
+
+            date_class = getattr(SensorDeviceClass, "DATE", "date")
+            if device_class == date_class and isinstance(value, dt.date):
+                return value.isoformat()
+
+            return value
+
     class SensorDeviceClass:
         ENERGY = "energy"
         POWER = "power"
         TEMPERATURE = "temperature"
+        TIMESTAMP = "timestamp"
 
     class SensorStateClass:
         MEASUREMENT = "measurement"
@@ -1241,6 +1331,9 @@ def _install_stubs() -> None:
 
 
 _install_stubs()
+
+
+from custom_components.termoweb.const import DOMAIN  # noqa: E402
 
 
 @pytest.fixture
