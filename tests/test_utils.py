@@ -5,8 +5,9 @@ from typing import Any
 
 import pytest
 
-from custom_components.termoweb import nodes as nodes_module
+from custom_components.termoweb import inventory as inventory_module, nodes as nodes_module
 from custom_components.termoweb.const import DOMAIN
+import custom_components.termoweb.identifiers as identifiers_module
 from custom_components.termoweb.identifiers import build_heater_energy_unique_id
 from custom_components.termoweb.nodes import (
     HEATER_NODE_TYPES,
@@ -14,9 +15,11 @@ from custom_components.termoweb.nodes import (
     build_node_inventory,
     ensure_node_inventory,
     normalize_heater_addresses,
+    parse_heater_energy_unique_id,
+)
+from custom_components.termoweb.inventory import (
     normalize_node_addr,
     normalize_node_type,
-    parse_heater_energy_unique_id,
 )
 from custom_components.termoweb.utils import (
     _entry_gateway_record,
@@ -283,8 +286,8 @@ def test_build_heater_energy_unique_id_round_trip(
 ) -> None:
     calls: list[tuple[str, object, dict[str, Any]]] = []
 
-    original_normalize_type = nodes_module.normalize_node_type
-    original_normalize_addr = nodes_module.normalize_node_addr
+    original_normalize_type = inventory_module.normalize_node_type
+    original_normalize_addr = inventory_module.normalize_node_addr
 
     def _record_type(value, **kwargs):
         calls.append(("type", value, kwargs))
@@ -294,6 +297,10 @@ def test_build_heater_energy_unique_id_round_trip(
         calls.append(("addr", value, kwargs))
         return original_normalize_addr(value, **kwargs)
 
+    monkeypatch.setattr(inventory_module, "normalize_node_type", _record_type)
+    monkeypatch.setattr(inventory_module, "normalize_node_addr", _record_addr)
+    monkeypatch.setattr(identifiers_module, "normalize_node_type", _record_type)
+    monkeypatch.setattr(identifiers_module, "normalize_node_addr", _record_addr)
     monkeypatch.setattr(nodes_module, "normalize_node_type", _record_type)
     monkeypatch.setattr(nodes_module, "normalize_node_addr", _record_addr)
 

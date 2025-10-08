@@ -36,15 +36,13 @@ from ..const import (
     signal_ws_status,
 )
 from ..installation import InstallationSnapshot, ensure_snapshot
+from ..inventory import NODE_CLASS_BY_TYPE, normalize_node_addr, normalize_node_type
 from ..nodes import (
-    NODE_CLASS_BY_TYPE,
     addresses_by_node_type,
     collect_heater_sample_addresses,
     ensure_node_inventory,
     heater_sample_subscription_targets,
     normalize_heater_addresses,
-    normalize_node_addr,
-    normalize_node_type,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only

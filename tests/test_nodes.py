@@ -17,16 +17,18 @@ _install_stubs()
 import custom_components.termoweb.coordinator as coordinator_module
 import custom_components.termoweb.installation as installation_module
 import custom_components.termoweb.nodes as nodes_module
-from custom_components.termoweb.nodes import (
+from custom_components.termoweb.inventory import (
     AccumulatorNode,
     HeaterNode,
     Node,
     PowerMonitorNode,
     ThermostatNode,
-    build_node_inventory,
-    heater_sample_subscription_targets,
     normalize_node_addr,
     normalize_node_type,
+)
+from custom_components.termoweb.nodes import (
+    build_node_inventory,
+    heater_sample_subscription_targets,
     _existing_nodes_map,
 )
 from homeassistant.core import HomeAssistant

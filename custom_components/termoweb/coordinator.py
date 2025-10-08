@@ -18,14 +18,12 @@ from homeassistant.util import dt as dt_util
 from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .boost import coerce_int, resolve_boost_end_from_fields
 from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
+from .inventory import Node, normalize_node_addr, normalize_node_type
 from .nodes import (
-    Node,
     _existing_nodes_map,
     build_heater_address_map,
     build_node_inventory,
     normalize_heater_addresses,
-    normalize_node_addr,
-    normalize_node_type,
 )
 from .utils import float_or_none
 
