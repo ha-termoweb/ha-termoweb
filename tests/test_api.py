@@ -2482,6 +2482,18 @@ def test_extract_samples_handles_list_payload() -> None:
     assert samples == [{"t": 2000, "counter": "5.5"}, {"t": 1000, "counter": "3"}]
 
 
+@pytest.mark.asyncio
+async def test_rest_client_rejects_cancel_boost_for_non_acm() -> None:
+    client = RESTClient(FakeSession(), "user", "pass")
+
+    with pytest.raises(ValueError, match="cancel_boost"):
+        await client.set_node_settings(
+            "dev",
+            ("pmo", "1"),
+            cancel_boost=True,
+        )
+
+
 def test_rest_client_header_properties_exposed() -> None:
     client = RESTClient(
         FakeSession(),

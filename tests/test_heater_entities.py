@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from unittest.mock import MagicMock
 
 from conftest import _install_stubs, make_ws_payload
 
@@ -63,6 +65,75 @@ def test_heater_node_base_payload_matching_normalizes_address(
     assert not heater._payload_matches_heater(make_ws_payload("dev", "02"))
     assert not heater._payload_matches_heater(make_ws_payload("dev", "  "))
     assert calls == [(" 01 ", {}), (" 01 ", {}), ("02", {}), ("  ", {})]
+
+
+def test_heater_async_will_remove_without_listener_resets_unsub() -> None:
+    heater = HeaterNodeBase(SimpleNamespace(hass=None), "entry", "dev", "1", "Heater 1")
+    unsub = MagicMock()
+    heater._async_unsub_coordinator_update = unsub
+
+    asyncio.run(heater.async_will_remove_from_hass())
+
+    unsub.assert_called_once_with()
+    assert getattr(heater, "_async_unsub_coordinator_update") is None
+
+
+def test_heater_handle_ws_event_skips_removed_entity() -> None:
+    hass = HomeAssistant()
+    coordinator = SimpleNamespace(hass=hass)
+    heater = HeaterNodeBase(coordinator, "entry", "dev", "1", "Heater 1")
+    heater.hass = hass
+    callback = MagicMock()
+    heater.schedule_update_ha_state = callback  # type: ignore[assignment]
+    heater._removed = True
+
+    heater._handle_ws_event({"dev_id": "dev", "addr": "1", "node_type": "htr"})
+
+    callback.assert_not_called()
+
+
+def test_heater_handle_ws_event_requires_callable_callback() -> None:
+    hass = HomeAssistant()
+    coordinator = SimpleNamespace(hass=hass)
+    heater = HeaterNodeBase(coordinator, "entry", "dev", "1", "Heater 1")
+    heater.hass = hass
+    heater.schedule_update_ha_state = None  # type: ignore[assignment]
+    heater._removed = False
+
+    heater._handle_ws_event({"dev_id": "dev", "addr": "1", "node_type": "htr"})
+
+
+def test_heater_handle_ws_event_requires_loop_or_mock() -> None:
+    hass = SimpleNamespace(loop=None)
+    heater = HeaterNodeBase(SimpleNamespace(hass=hass), "entry", "dev", "1", "Heater 1")
+    heater.hass = hass
+    called = False
+
+    def _callback() -> None:
+        nonlocal called
+        called = True
+
+    heater.schedule_update_ha_state = _callback  # type: ignore[assignment]
+    heater._removed = False
+
+    heater._handle_ws_event({"dev_id": "dev", "addr": "1", "node_type": "htr"})
+
+    assert called is False
+
+
+def test_heater_client_handles_missing_hass_data() -> None:
+    heater = HeaterNodeBase(SimpleNamespace(hass=None), "entry", "dev", "1", "Heater 1")
+
+    assert heater._client() is None
+
+    heater.hass = SimpleNamespace(data=None)
+    assert heater._client() is None
+
+    heater.hass = SimpleNamespace(data={DOMAIN: []})
+    assert heater._client() is None
+
+    heater.hass = SimpleNamespace(data={DOMAIN: {"entry": []}})
+    assert heater._client() is None
 
 
 def test_boost_runtime_storage_roundtrip(heater_hass_data) -> None:
@@ -157,6 +228,42 @@ def test_derive_boost_state_handles_now_failure(
     state = heater_module.derive_boost_state(settings, SimpleNamespace())
 
     assert state.minutes_remaining == 10
+    assert state.end_datetime is None
+    assert state.end_iso is None
+    assert state.end_label == "Never"
+
+
+def test_derive_boost_state_parses_iso_without_parser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fallback ISO parsing should use datetime.fromisoformat when needed."""
+
+    monkeypatch.setattr(dt_util, "parse_datetime", lambda value: None)
+    settings = {
+        "boost_active": True,
+        "boost_end": "2024-01-01T00:30:00+00:00",
+    }
+
+    state = heater_module.derive_boost_state(settings, SimpleNamespace())
+
+    assert state.end_iso == "2024-01-01T00:30:00+00:00"
+    assert state.end_datetime == datetime.fromisoformat("2024-01-01T00:30:00+00:00")
+
+
+def test_derive_boost_state_ignores_placeholder_iso(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Placeholder 1970-era timestamps should be treated as unset."""
+
+    monkeypatch.setattr(dt_util, "parse_datetime", lambda value: None)
+    settings = {
+        "mode": "auto",
+        "boost": False,
+        "boost_end": "1970-01-02T00:00:00UTC",
+    }
+
+    state = heater_module.derive_boost_state(settings, SimpleNamespace())
+
     assert state.end_datetime is None
     assert state.end_iso is None
     assert state.end_label == "Never"
@@ -370,6 +477,35 @@ def test_boost_entities_handle_missing_data() -> None:
     assert minutes_sensor.extra_state_attributes["boost_end_label"] == "Never"
     assert end_sensor.extra_state_attributes["boost_minutes_remaining"] is None
     assert end_sensor.extra_state_attributes["boost_end_label"] == "Never"
+
+
+def test_boost_end_sensor_returns_base_state_when_available() -> None:
+    coordinator = SimpleNamespace(
+        data={"dev": {"nodes_by_type": {"acm": {"settings": {"1": {}}}}}}
+    )
+
+    sensor = HeaterBoostEndSensor(
+        coordinator,
+        "entry",
+        "dev",
+        "1",
+        "Accumulator Boost End",
+        f"{DOMAIN}:dev:acm:1:boost:end",
+        node_type="acm",
+    )
+
+    sensor.boost_state = MagicMock(  # type: ignore[assignment]
+        return_value=heater_module.BoostState(
+            active=None,
+            minutes_remaining=None,
+            end_datetime=None,
+            end_iso=None,
+            end_label=None,
+        )
+    )
+    sensor._attr_state = "ready"
+
+    assert sensor.state == "ready"
 
 
 def test_coerce_boost_minutes_edge_cases() -> None:

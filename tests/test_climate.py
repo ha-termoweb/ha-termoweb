@@ -1481,6 +1481,191 @@ def test_accumulator_submit_settings_brand_switch() -> None:
     asyncio.run(_run())
 
 
+def test_accumulator_submit_settings_handles_boost_state_error() -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry_id = "entry-acm-cancel"
+        dev_id = "dev-acm-cancel"
+        addr = "6"
+        settings = {"boost_active": True, "mode": "auto", "units": "C", "prog": [0] * 168}
+
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            {
+                "nodes": {},
+                "nodes_by_type": {"acm": {"settings": {addr: settings}}},
+                "htr": {"settings": {}},
+            },
+        )
+
+        entity = climate_module.AccumulatorClimateEntity(
+            coordinator,
+            entry_id,
+            dev_id,
+            addr,
+            "Accumulator",
+            node_type="acm",
+        )
+        entity.hass = hass
+
+        hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "coordinator": coordinator,
+                    "dev_id": dev_id,
+                    "client": AsyncMock(),
+                    "brand": BRAND_DUCAHEAT,
+                }
+            }
+        }
+
+        entity.heater_settings = MagicMock(return_value={"boost_active": True})
+
+        def _boom() -> Any:
+            raise RuntimeError("boom")
+
+        entity.boost_state = MagicMock(side_effect=_boom)  # type: ignore[assignment]
+
+        client = types.SimpleNamespace(set_node_settings=AsyncMock())
+        await entity._async_submit_settings(
+            client,
+            mode="auto",
+            stemp=None,
+            prog=None,
+            ptemp=None,
+            units="C",
+        )
+
+        call = client.set_node_settings.await_args
+        assert call.kwargs["cancel_boost"] is True
+
+    asyncio.run(_run())
+
+
+def test_accumulator_submit_settings_legacy_mode_detection() -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry_id = "entry-acm-legacy"
+        dev_id = "dev-acm-legacy"
+        addr = "7"
+        settings = {"mode": "auto", "units": "C", "prog": [0] * 168}
+
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            {
+                "nodes": {},
+                "nodes_by_type": {"acm": {"settings": {addr: settings}}},
+                "htr": {"settings": {}},
+            },
+        )
+
+        entity = climate_module.AccumulatorClimateEntity(
+            coordinator,
+            entry_id,
+            dev_id,
+            addr,
+            "Accumulator",
+            node_type="acm",
+        )
+        entity.hass = hass
+
+        hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "coordinator": coordinator,
+                    "dev_id": dev_id,
+                    "client": AsyncMock(),
+                    "brand": BRAND_DUCAHEAT,
+                }
+            }
+        }
+
+        entity.boost_state = MagicMock(return_value=types.SimpleNamespace(active=None))  # type: ignore[assignment]
+        entity.heater_settings = MagicMock(
+            return_value={"boost_active": "maybe", "boost": "no", "mode": " Boost "}
+        )
+
+        client = types.SimpleNamespace(set_node_settings=AsyncMock())
+        await entity._async_submit_settings(
+            client,
+            mode="auto",
+            stemp=None,
+            prog=None,
+            ptemp=None,
+            units="C",
+        )
+
+        call = client.set_node_settings.await_args
+        assert call.kwargs["cancel_boost"] is True
+
+    asyncio.run(_run())
+
+
+def test_accumulator_submit_settings_legacy_boost_flag() -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry_id = "entry-acm-legacy-flag"
+        dev_id = "dev-acm-legacy-flag"
+        addr = "8"
+        settings = {"mode": "auto", "units": "C", "prog": [0] * 168}
+
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            {
+                "nodes": {},
+                "nodes_by_type": {"acm": {"settings": {addr: settings}}},
+                "htr": {"settings": {}},
+            },
+        )
+
+        entity = climate_module.AccumulatorClimateEntity(
+            coordinator,
+            entry_id,
+            dev_id,
+            addr,
+            "Accumulator",
+            node_type="acm",
+        )
+        entity.hass = hass
+
+        hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "coordinator": coordinator,
+                    "dev_id": dev_id,
+                    "client": AsyncMock(),
+                    "brand": BRAND_DUCAHEAT,
+                }
+            }
+        }
+
+        entity.boost_state = MagicMock(return_value=types.SimpleNamespace(active=None))  # type: ignore[assignment]
+        entity.heater_settings = MagicMock(
+            return_value={"boost_active": None, "boost": True, "mode": "auto"}
+        )
+
+        client = types.SimpleNamespace(set_node_settings=AsyncMock())
+        await entity._async_submit_settings(
+            client,
+            mode="auto",
+            stemp=None,
+            prog=None,
+            ptemp=None,
+            units="C",
+        )
+
+        call = client.set_node_settings.await_args
+        assert call.kwargs["cancel_boost"] is True
+
+    asyncio.run(_run())
+
+
 def test_async_write_settings_without_client_returns_false() -> None:
     async def _run() -> None:
         _reset_environment()
