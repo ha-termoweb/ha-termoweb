@@ -32,7 +32,7 @@ from .heater import (
     resolve_boost_runtime_minutes,
 )
 from .identifiers import build_heater_entity_unique_id
-from .nodes import HeaterNode, normalize_node_addr, normalize_node_type
+from .inventory import HeaterNode, normalize_node_addr, normalize_node_type
 from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)

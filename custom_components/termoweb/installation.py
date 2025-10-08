@@ -6,8 +6,8 @@ from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
 from .heater_inventory import HeaterInventoryDetails, build_heater_inventory_details
+from .inventory import Node
 from .nodes import (
-    Node,
     build_node_inventory,
     heater_sample_subscription_targets,
     normalize_heater_addresses,

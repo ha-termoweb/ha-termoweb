@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from asyncio import Task
 from typing import Any, Protocol
 
-from ..nodes import NodeDescriptor
+from ..inventory import NodeDescriptor
 
 
 class HttpClientProto(Protocol):

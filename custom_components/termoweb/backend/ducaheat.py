@@ -11,7 +11,7 @@ from aiohttp import ClientResponseError
 
 from ..api import RESTClient
 from ..const import BRAND_DUCAHEAT, WS_NAMESPACE
-from ..nodes import NodeDescriptor
+from ..inventory import NodeDescriptor
 from .base import Backend, WsClientProto
 from .ducaheat_ws import DucaheatWSClient
 from .sanitize import (
