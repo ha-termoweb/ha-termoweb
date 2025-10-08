@@ -153,6 +153,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._nodes_raw: dict[str, Any] | None = None
         self._subscription_paths: set[str] = set()
         self._pending_dev_data = False
+        self._keepalive_task: asyncio.Task | None = None
+        self._ping_interval: float | None = None
+        self._ping_timeout: float | None = None
 
     def start(self) -> asyncio.Task:
         if self._task and not self._task.done():
@@ -240,6 +243,14 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             raise HandshakeError(590, open_url, "missing OPEN (0)")
         info = json.loads(open_pkt[1:])
         sid = info.get("sid")
+        ping_interval = info.get("pingInterval")
+        self._ping_interval = (
+            float(ping_interval) / 1000 if isinstance(ping_interval, (int, float)) else None
+        )
+        ping_timeout = info.get("pingTimeout")
+        self._ping_timeout = (
+            float(ping_timeout) / 1000 if isinstance(ping_timeout, (int, float)) else None
+        )
         _LOGGER.info(
             "WS (ducaheat): OPEN decoded sid=%s pingInterval=%s pingTimeout=%s",
             sid,
@@ -323,6 +334,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._pending_dev_data = True
         _LOGGER.debug("WS (ducaheat): dev_data pending until namespace ack")
         self._update_status("connected")
+        self._start_keepalive()
 
     async def _read_loop_ws(self) -> None:
         ws = self._ws
@@ -337,6 +349,10 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                         if data == "2":
                             _LOGGER.debug("WS (ducaheat): <- EIO 2 (ping) -> EIO 3 (pong)")
                             await ws.send_str("3")
+                            break
+                        if data == "3":
+                            _LOGGER.debug("WS (ducaheat): <- 3 (pong)")
+                            self._update_status("healthy")
                             break
                         if not data.startswith("4"):
                             break
@@ -376,6 +392,10 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                         if payload == "2":
                             _LOGGER.debug("WS (ducaheat): <- SIO 2 (ping) -> SIO 3 (pong)")
                             await ws.send_str("3")
+                            break
+                        if payload == "3":
+                            _LOGGER.debug("WS (ducaheat): <- SIO 3 (pong)")
+                            self._update_status("healthy")
                             break
                         if payload.startswith("2/"):
                             ns_payload = payload[1:]
@@ -461,6 +481,49 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     raise RuntimeError("websocket closed")
         finally:
             _LOGGER.debug("WS (ducaheat): read loop ended (ws closed or error)")
+
+    def _start_keepalive(self) -> None:
+        """Launch the keepalive loop when the websocket is connected."""
+
+        if self._keepalive_task and not self._keepalive_task.done():
+            return
+        if self._ping_interval is None or not self._ws or self._ws.closed:
+            return
+        self._keepalive_task = self._loop.create_task(
+            self._keepalive_loop(),
+            name=f"termoweb-ws-keepalive-{self.dev_id}",
+        )
+
+    async def _keepalive_loop(self) -> None:
+        """Send Engine.IO ping frames to keep the websocket alive."""
+
+        task = asyncio.current_task()
+        try:
+            while True:
+                interval = self._ping_interval
+                ws = self._ws
+                if interval is None or ws is None or ws.closed:
+                    break
+                delay = max(0.1, interval * 0.9)
+                await asyncio.sleep(delay)
+                if ws is not self._ws or ws.closed:
+                    continue
+                try:
+                    await ws.send_str("2")
+                    _LOGGER.debug("WS (ducaheat): -> 2 (keepalive ping)")
+                except Exception:  # noqa: BLE001 - defensive logging
+                    _LOGGER.debug(
+                        "WS (ducaheat): keepalive ping failed", exc_info=True
+                    )
+                    break
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # pragma: no cover - defensive
+            _LOGGER.debug("WS (ducaheat): keepalive loop error", exc_info=True)
+        finally:
+            if self._keepalive_task is task:
+                self._keepalive_task = None
+            _LOGGER.debug("WS (ducaheat): keepalive loop stopped")
 
     def _log_nodes_summary(self, nodes: Mapping[str, Any]) -> None:
         if not _LOGGER.isEnabledFor(logging.INFO):
@@ -716,6 +779,15 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 )
 
     async def _disconnect(self, reason: str) -> None:
+        task = self._keepalive_task
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            finally:
+                self._keepalive_task = None
         if self._ws:
             try:
                 await self._ws.close(
@@ -726,6 +798,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 _LOGGER.debug("WS (ducaheat): close failed", exc_info=True)
             self._ws = None
         self._pending_dev_data = False
+        self._ping_interval = None
+        self._ping_timeout = None
 
     async def _get_token(self) -> str:
         headers = await self._client.authed_headers()

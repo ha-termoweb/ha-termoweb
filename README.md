@@ -155,6 +155,13 @@ See instructions in custom_components/termoweb/assets, to install the card and c
 
 ## Development
 
+Setup your environment:
+
+```bash
+uv venv -p 3.13
+uv pip install --all-extras -r pyproject.toml -p 3.13
+```
+
 Run tests with coverage:
 
 ```bash
@@ -165,6 +172,11 @@ See [`docs/developer-notes.md`](docs/developer-notes.md) for backend write seman
 implementation details for contributors.
 
 ---
+
+## Debugging and Logs
+
+See DEBUG.md for information on how to turn on debugging, and download logs and diagnostics.
+
 
 ## Search keywords
 

@@ -169,6 +169,7 @@ async def test_connect_once_performs_full_handshake(monkeypatch: pytest.MonkeyPa
     assert client._pending_dev_data is True
     assert all("dev_data" not in frame for frame in client._ws.sent)
     assert client._ws.sent.count("3") == 0  # handshake should not issue pong during setup
+    await client._disconnect("test")
 
 
 @pytest.mark.asyncio
@@ -394,6 +395,122 @@ async def test_connect_once_probe_warning(monkeypatch: pytest.MonkeyPatch) -> No
 
     assert statuses[-1] == "connected"
     assert any(frame == "5" for frame in client._ws.sent)  # type: ignore[union-attr]
+    await client._disconnect("test")
+
+
+@pytest.mark.asyncio
+async def test_keepalive_loop_sends_engineio_pings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keepalive loop should honour the negotiated ping cadence."""
+
+    original_sleep = asyncio.sleep
+    sleeps: list[float] = []
+
+    async def fast_sleep(delay: float) -> None:
+        sleeps.append(delay)
+        await original_sleep(0)
+
+    client = _make_client(monkeypatch)
+    monkeypatch.setattr(ducaheat_ws.asyncio, "sleep", fast_sleep)
+    monkeypatch.setattr(
+        ducaheat_ws,
+        "_decode_polling_packets",
+        lambda _body: ['0{"sid":"abc","pingInterval":200,"pingTimeout":600}'],
+    )
+
+    await client._connect_once()
+    client._start_keepalive()  # should be a no-op while the loop task is active
+    await original_sleep(0)
+    await original_sleep(0)
+
+    assert any(frame == "2" for frame in client._ws.sent)
+    assert sleeps and pytest.approx(0.18, rel=0.05) == sleeps[0]
+
+    await client._disconnect("test")
+    assert client._keepalive_task is None
+    client._start_keepalive()  # should be a no-op without websocket context
+
+
+@pytest.mark.asyncio
+async def test_read_loop_marks_healthy_on_engineio_pong(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Receiving a pong frame should mark the websocket as healthy."""
+
+    client = _make_client(monkeypatch)
+    statuses: list[str] = []
+    monkeypatch.setattr(client, "_update_status", lambda status: statuses.append(status))
+
+    class PongWS:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def __aiter__(self) -> Any:
+            async def _iterate() -> AsyncIterator[Any]:
+                yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="3")
+                yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="43")
+
+            return _iterate()
+
+    client._ws = PongWS()  # type: ignore[assignment]
+
+    await client._read_loop_ws()
+
+    assert statuses and statuses[-1] == "healthy"
+
+
+@pytest.mark.asyncio
+async def test_keepalive_loop_handles_ws_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keepalive loop should tolerate websocket swaps and errors."""
+
+    original_sleep = asyncio.sleep
+
+    class ErrorWS(StubWebSocket):
+        def __init__(self) -> None:
+            super().__init__()
+            self.closed = False
+            self.raise_error = False
+
+        async def send_str(self, payload: str) -> None:
+            if self.raise_error:
+                raise RuntimeError("boom")
+            await super().send_str(payload)
+
+    client = _make_client(monkeypatch)
+    first_ws = ErrorWS()
+    second_ws = ErrorWS()
+    client._ws = first_ws  # type: ignore[assignment]
+    client._ping_interval = 0.2
+
+    counter = {"count": 0}
+
+    async def fast_sleep(delay: float) -> None:
+        counter["count"] += 1
+        if counter["count"] == 2:
+            client._ws = second_ws  # type: ignore[assignment]
+            second_ws.raise_error = True
+        await original_sleep(0)
+
+    monkeypatch.setattr(ducaheat_ws.asyncio, "sleep", fast_sleep)
+
+    task = asyncio.create_task(client._keepalive_loop())
+    client._keepalive_task = task
+
+    await original_sleep(0)
+    await original_sleep(0)
+    await original_sleep(0)
+
+    assert first_ws.sent.count("2") == 1
+    assert second_ws.raise_error is True
+    await task
+    assert client._keepalive_task is None
+
+    client._ws = second_ws  # type: ignore[assignment]
+    client._ping_interval = None
+    await client._keepalive_loop()
 
 
 @pytest.mark.asyncio
