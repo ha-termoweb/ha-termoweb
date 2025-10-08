@@ -244,15 +244,15 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             "t": _rand_t(),
         }
         open_url = self._build_handshake_url(open_params)
-        _LOGGER.debug("WS (ducaheat): OPEN GET %s", open_url.replace(token, "…"))
+        #_LOGGER.debug("WS (ducaheat): OPEN GET %s", open_url.replace(token, "…"))
         async with asyncio.timeout(15):
             async with self._session.get(open_url, headers=headers) as resp:
                 body = await resp.read()
-                _LOGGER.debug(
-                    "WS (ducaheat): OPEN GET -> %s bytes (status=%s)",
-                    len(body),
-                    resp.status,
-                )
+                #_LOGGER.debug(
+                #    "WS (ducaheat): OPEN GET -> %s bytes (status=%s)",
+                #    len(body),
+                #    resp.status,
+                #)
                 if resp.status != 200:
                     raise HandshakeError(resp.status, open_url, "open GET")
         packets = _decode_polling_packets(body)
@@ -289,7 +289,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         }
         post_url = self._build_handshake_url(post_params)
         payload = _encode_polling_packet(f"40{self._namespace}")
-        _LOGGER.debug("WS (ducaheat): POST 40/ns %s", post_url.replace(token, "…"))
+        #_LOGGER.debug("WS (ducaheat): POST 40/ns %s", post_url.replace(token, "…"))
         async with asyncio.timeout(15):
             async with self._session.post(
                 post_url,
@@ -297,26 +297,26 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 data=payload,
             ) as resp:
                 drain = await resp.read()
-                _LOGGER.debug(
-                    "WS (ducaheat): POST 40/ns -> status=%s len=%s",
-                    resp.status,
-                    len(drain),
-                )
+#                _LOGGER.debug(
+#                    "WS (ducaheat): POST 40/ns -> status=%s len=%s",
+#                    resp.status,
+#                    len(drain),
+#                )
                 if resp.status != 200:
                     raise HandshakeError(resp.status, post_url, "POST 40/ns")
 
         drain_params = dict(post_params)
         drain_params["t"] = _rand_t()
         drain_url = self._build_handshake_url(drain_params)
-        _LOGGER.debug("WS (ducaheat): DRAIN GET %s", drain_url.replace(token, "…"))
+#        _LOGGER.debug("WS (ducaheat): DRAIN GET %s", drain_url.replace(token, "…"))
         async with asyncio.timeout(15):
             async with self._session.get(drain_url, headers=headers) as resp:
                 body = await resp.read()
-                _LOGGER.debug(
-                    "WS (ducaheat): DRAIN GET -> status=%s len=%s",
-                    resp.status,
-                    len(body),
-                )
+#                _LOGGER.debug(
+#                    "WS (ducaheat): DRAIN GET -> status=%s len=%s",
+#                    resp.status,
+#                    len(body),
+#                )
                 if resp.status != 200:
                     raise HandshakeError(resp.status, drain_url, "drain GET")
 
@@ -329,7 +329,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         }
         ws_url = self._build_handshake_url(ws_params)
         ws_headers = {k: v for k, v in headers.items() if k.lower() not in ("connection", "accept-encoding")}
-        _LOGGER.debug("WS (ducaheat): upgrading WS %s", ws_url.replace(token, "…"))
+#        _LOGGER.debug("WS (ducaheat): upgrading WS %s", ws_url.replace(token, "…"))
         self._ws = await self._session.ws_connect(
             ws_url,
             headers=ws_headers,
@@ -337,21 +337,21 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             autoclose=False,
             timeout=aiohttp.ClientTimeout(total=15),
         )
-        _LOGGER.info("WS (ducaheat): upgrade OK")
+#        _LOGGER.info("WS (ducaheat): upgrade OK")
 
         await self._ws.send_str("2probe")
-        _LOGGER.debug("WS (ducaheat): -> 2probe")
+#        _LOGGER.debug("WS (ducaheat): -> 2probe")
         probe = await self._ws.receive_str()
-        _LOGGER.debug("WS (ducaheat): <- %r", probe)
+#        _LOGGER.debug("WS (ducaheat): <- %r", probe)
         if probe != "3probe":
             _LOGGER.debug("WS (ducaheat): unexpected probe ack: %r", probe)
         await self._ws.send_str("5")
-        _LOGGER.debug("WS (ducaheat): -> 5 (upgrade)")
+#        _LOGGER.debug("WS (ducaheat): -> 5 (upgrade)")
 
         await self._ws.send_str(f"40{self._namespace}")
-        _LOGGER.debug("WS (ducaheat): -> 40%s", self._namespace)
+#        _LOGGER.debug("WS (ducaheat): -> 40%s", self._namespace)
         self._pending_dev_data = True
-        _LOGGER.debug("WS (ducaheat): dev_data pending until namespace ack")
+#        _LOGGER.debug("WS (ducaheat): dev_data pending until namespace ack")
         self._healthy_since = None
         self._last_event_at = None
         self._stats.frames_total = 0
@@ -407,7 +407,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                     break
                                 if sep and remainder:
                                     rest_payload = remainder
-                            _LOGGER.debug("WS (ducaheat): <- SIO 40 (namespace ack)")
+#                            _LOGGER.debug("WS (ducaheat): <- SIO 40 (namespace ack)")
                             self._update_status("healthy")
                             if self._pending_dev_data:
                                 self._pending_dev_data = False
@@ -457,7 +457,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                         evt, *args = arr
                         self._stats.events_total += 1
                         self._record_frame(timestamp=now)
-                        _LOGGER.debug("WS (ducaheat): <- SIO 42 event=%s args_len=%d", evt, len(args))
+                        #_LOGGER.debug("WS (ducaheat): <- SIO 42 event=%s args_len=%d", evt, len(args))
 
                         if evt == "message" and args and args[0] == "ping":
                             await self._emit_sio("message", "pong")
@@ -593,7 +593,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 summary = f" path={args[0]}"
             elif args:
                 summary = f" args={args}"
-            _LOGGER.debug("WS (ducaheat): -> 42 %s%s", event, summary)
+#            _LOGGER.debug("WS (ducaheat): -> 42 %s%s", event, summary)
 
     def _normalise_nodes_payload(self, nodes: Mapping[str, Any]) -> Any:
         """Normalise websocket node payloads via the REST client helper."""
