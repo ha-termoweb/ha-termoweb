@@ -152,7 +152,7 @@ async def test_connect_once_performs_full_handshake(monkeypatch: pytest.MonkeyPa
 
     statuses: list[str] = []
     monkeypatch.setattr(
-        ducaheat_ws._WSCommon,
+        ducaheat_ws.DucaheatWSClient,
         "_update_status",
         lambda self, status: statuses.append(status),
     )
@@ -170,6 +170,67 @@ async def test_connect_once_performs_full_handshake(monkeypatch: pytest.MonkeyPa
     assert all("dev_data" not in frame for frame in client._ws.sent)
     assert client._ws.sent.count("3") == 0  # handshake should not issue pong during setup
     await client._disconnect("test")
+
+
+def test_update_status_records_health(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Healthy websocket updates should refresh the shared state bucket."""
+
+    client = _make_client(monkeypatch)
+    hass = client.hass
+
+    first_ts = 1_000.0
+    first_monotonic = 500.0
+    monkeypatch.setattr(ducaheat_ws.time, "time", lambda: first_ts)
+    monkeypatch.setattr(ducaheat_ws.time, "monotonic", lambda: first_monotonic)
+    client._stats.frames_total = 1
+    client._stats.events_total = 1
+    client._stats.last_event_ts = first_ts
+    client._last_event_at = first_ts
+    client._last_event_monotonic = first_monotonic
+
+    client._update_status("healthy")
+
+    ws_state = hass.data[ducaheat_ws.DOMAIN]["entry"]["ws_state"][client.dev_id]
+    assert ws_state["status"] == "healthy"
+    assert ws_state["healthy_since"] == first_ts
+    assert ws_state["healthy_minutes"] == 0
+    assert ws_state["last_event_at"] == first_ts
+
+    later_ts = first_ts + 600
+    later_monotonic = first_monotonic + 600
+    monkeypatch.setattr(ducaheat_ws.time, "time", lambda: later_ts)
+    monkeypatch.setattr(ducaheat_ws.time, "monotonic", lambda: later_monotonic)
+    client._stats.frames_total = 5
+    client._stats.events_total = 3
+    client._stats.last_event_ts = later_ts
+    client._last_event_at = later_ts
+    client._last_event_monotonic = later_monotonic
+
+    client._update_status("healthy")
+
+    ws_state = hass.data[ducaheat_ws.DOMAIN]["entry"]["ws_state"][client.dev_id]
+    assert ws_state["healthy_since"] == first_ts
+    assert ws_state["healthy_minutes"] == 10
+    assert ws_state["frames_total"] == 5
+    assert ws_state["events_total"] == 3
+
+    drop_ts = later_ts + 5
+    drop_monotonic = later_monotonic + 5
+    monkeypatch.setattr(ducaheat_ws.time, "time", lambda: drop_ts)
+    monkeypatch.setattr(ducaheat_ws.time, "monotonic", lambda: drop_monotonic)
+    client._update_status("disconnected")
+
+    ws_state = hass.data[ducaheat_ws.DOMAIN]["entry"]["ws_state"][client.dev_id]
+    assert ws_state["status"] == "disconnected"
+    assert ws_state["healthy_since"] is None
+    assert ws_state["healthy_minutes"] == 0
+
+    monkeypatch.setattr(ducaheat_ws.time, "time", lambda: drop_ts + 30)
+    monkeypatch.setattr(ducaheat_ws.time, "monotonic", lambda: drop_monotonic + 30)
+    client._update_status("disconnected")
+
+    ws_state = hass.data[ducaheat_ws.DOMAIN]["entry"]["ws_state"][client.dev_id]
+    assert ws_state["status"] == "disconnected"
 
 
 @pytest.mark.asyncio
@@ -377,7 +438,7 @@ async def test_connect_once_probe_warning(monkeypatch: pytest.MonkeyPatch) -> No
 
     statuses: list[str] = []
     monkeypatch.setattr(
-        ducaheat_ws._WSCommon,
+        ducaheat_ws.DucaheatWSClient,
         "_update_status",
         lambda self, status: statuses.append(status),
     )
