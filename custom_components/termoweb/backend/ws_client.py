@@ -389,7 +389,14 @@ class WebSocketClient(_WsLeaseMixin, _WSStatusMixin):
         return ""
 
 
-__all__ = ["DUCAHEAT_NAMESPACE", "HandshakeError", "WSStats", "WebSocketClient"]
+__all__ = [
+    "DUCAHEAT_NAMESPACE",
+    "HandshakeError",
+    "WSStats",
+    "forward_ws_sample_updates",
+    "resolve_ws_update_section",
+    "WebSocketClient",
+]
 
 time_mod = time.monotonic
 
