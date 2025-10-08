@@ -1,15 +1,16 @@
 # ruff: noqa: D100,D101,D102,D103,D104,D105,D106,D107,INP001,E402
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import enum
-import asyncio
 import inspect
 import time
 from pathlib import Path
 import sys
 import types
 import threading
+import warnings
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping
 from unittest.mock import AsyncMock
 
@@ -17,6 +18,12 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
+
+warnings.filterwarnings(
+    "ignore",
+    category=DeprecationWarning,
+    message="Inheritance class HomeAssistantApplication from web.Application is discouraged",
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
