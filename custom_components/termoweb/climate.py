@@ -84,7 +84,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     # Explicit callables ensure dispatch and let us add clear logs when invoked.
     async def _svc_set_schedule(entity: HeaterClimateEntity, call: ServiceCall) -> None:
         """Handle the set_schedule entity service."""
-        prog = call.data.get("prog")
+        prog = cast(list[int], call.data["prog"])
         _LOGGER.info(
             "entity-service termoweb.set_schedule -> %s prog_len=%s",
             getattr(entity, "entity_id", "<no-entity-id>"),
