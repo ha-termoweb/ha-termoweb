@@ -337,6 +337,26 @@ def test_ducaheat_collect_boost_metadata_invalid_payload(
     asyncio.run(_run())
 
 
+def test_ducaheat_collect_boost_metadata_non_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+    ducaheat_rest_harness: Callable[..., Any],
+) -> None:
+    async def _run() -> None:
+        harness = ducaheat_rest_harness(responses=[{"ok": True}, {"ok": True}])
+
+        async def fake_collect(*args: Any, **kwargs: Any) -> Any:
+            return "unexpected"
+
+        monkeypatch.setattr(harness.client, "_collect_boost_metadata", fake_collect)
+
+        result = await harness.client.set_node_settings(
+            "dev", ("acm", "9"), mode="boost", boost_time=30
+        )
+        assert result["boost_state"] == "unexpected"
+
+    asyncio.run(_run())
+
+
 @pytest.mark.asyncio
 async def test_ducaheat_set_acm_boost_state_non_dict_response(
     monkeypatch: pytest.MonkeyPatch,
@@ -579,3 +599,30 @@ def test_ducaheat_collect_boost_metadata_invalid_datetime_active(
         assert metadata["boost_minutes_delta"] == 30
 
     asyncio.run(_run())
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_post_acm_endpoint_wraps_client_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+
+    async def fake_post_segmented(*args: Any, **kwargs: Any) -> Any:
+        err = ClientResponseError(None, tuple(), status=404, message=None)
+        err.message = None  # type: ignore[assignment]
+        err.args = ("boom",)
+        raise err
+
+    monkeypatch.setattr(client, "_post_segmented", fake_post_segmented)
+
+    with pytest.raises(DucaheatRequestError) as ctx:
+        await client._post_acm_endpoint(
+            "/api/v2/devs/dev/acm/7/status",
+            {"Authorization": "Bearer"},
+            {"boost": True},
+            dev_id="dev",
+            addr="7",
+        )
+
+    assert ctx.value.status == 404
+    assert ctx.value.body == "boom"
