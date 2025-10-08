@@ -26,10 +26,9 @@ from .heater import (
     BoostButtonMetadata,
     HeaterNodeBase,
     iter_boost_button_metadata,
-    iter_heater_nodes,
+    iter_boostable_heater_nodes,
     log_skipped_nodes,
     prepare_heater_platform_data,
-    supports_boost,
 )
 from .utils import build_gateway_device_info
 
@@ -55,14 +54,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
     )
 
     boost_entities: list[ButtonEntity] = []
-    for node_type, node, addr_str, base_name in iter_heater_nodes(
+    for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
         nodes_by_type,
         resolve_name,
+        accumulators_only=True,
     ):
-        if node_type != "acm":
-            continue
-        if not supports_boost(node):
-            continue
 
         boost_entities.extend(
             _create_boost_button_entities(
