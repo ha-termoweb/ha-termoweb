@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMappin
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import dispatcher
@@ -37,9 +37,6 @@ _LOGGER = logging.getLogger(__name__)
 
 _BOOST_RUNTIME_KEY: Final = "boost_runtime"
 DEFAULT_BOOST_DURATION: Final = 60
-_HASS_UNSET = object()
-
-
 @dataclass(frozen=True, slots=True)
 class BoostButtonMetadata:
     """Metadata describing an accumulator boost helper button."""
@@ -712,12 +709,16 @@ class HeaterNodeBase(CoordinatorEntity):
     ) -> None:
         """Initialise a heater entity tied to a TermoWeb device."""
         super().__init__(coordinator)
+        self._hass: HomeAssistant | None = None
+        self._has_explicit_hass = False
         hass = getattr(coordinator, "hass", None)
         if hass is not None:
             try:
-                setattr(self, "_hass", hass)
+                self._hass = cast(HomeAssistant | None, hass)
+                self._has_explicit_hass = True
             except Exception:  # pragma: no cover - defensive
-                pass
+                self._hass = None
+                self._has_explicit_hass = False
         self._entry_id = entry_id
         self._dev_id = dev_id
         self._addr = normalize_node_addr(addr)
@@ -868,28 +869,29 @@ class HeaterNodeBase(CoordinatorEntity):
         settings = settings_map.get(self._addr)
         return settings if isinstance(settings, dict) else None
 
-    def _hass_for_runtime(self) -> Any:
+    def _hass_for_runtime(self) -> HomeAssistant | None:
         """Return the best-effort Home Assistant instance for runtime access."""
 
-        hass_attr = getattr(self, "_hass", _HASS_UNSET)
-        if hass_attr is not _HASS_UNSET:
-            return hass_attr
-        return getattr(self.coordinator, "hass", None)
+        if self._has_explicit_hass:
+            return self._hass
+        hass_attr = getattr(self.coordinator, "hass", None)
+        return cast(HomeAssistant | None, hass_attr)
 
-    @property  # type: ignore[override]
-    def hass(self) -> Any:
+    @property
+    def hass(self) -> HomeAssistant | None:
         """Return the Home Assistant instance, falling back to the coordinator."""
 
-        hass_attr = getattr(self, "_hass", _HASS_UNSET)
-        if hass_attr is _HASS_UNSET:
-            return getattr(self.coordinator, "hass", None)
-        return hass_attr
+        if self._has_explicit_hass:
+            return self._hass
+        hass_attr = getattr(self.coordinator, "hass", None)
+        return cast(HomeAssistant | None, hass_attr)
 
-    @hass.setter  # type: ignore[override]
-    def hass(self, value: Any) -> None:
+    @hass.setter
+    def hass(self, value: HomeAssistant | None) -> None:
         """Store the Home Assistant reference for runtime access."""
 
-        setattr(self, "_hass", value)
+        self._hass = value
+        self._has_explicit_hass = True
 
     def boost_state(self) -> BoostState:
         """Return derived boost metadata for this heater."""
