@@ -5,6 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 ![Python >=3.13.2](https://img.shields.io/badge/Python-%3E%3D3.13.2-blue.svg)
 ![Home Assistant >=2025.1.0](https://img.shields.io/badge/Home%20Assistant-%3E%3D2025.1.0-41BDF5.svg)
+[![Package manager: uv](https://img.shields.io/badge/Package%20manager-uv-5F45BA?logo=astral&logoColor=white)](https://docs.astral.sh/uv/)
 [![Code style: Ruff](https://img.shields.io/badge/Code%20style-Ruff-4B32C3.svg)](https://docs.astral.sh/ruff/)
 # TermoWeb heaters for Home Assistant
 
