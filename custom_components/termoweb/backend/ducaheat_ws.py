@@ -593,7 +593,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 summary = f" path={args[0]}"
             elif args:
                 summary = f" args={args}"
-#            _LOGGER.debug("WS (ducaheat): -> 42 %s%s", event, summary)
+            _LOGGER.debug("WS (ducaheat): -> 42 %s%s", event, summary)
 
     def _normalise_nodes_payload(self, nodes: Mapping[str, Any]) -> Any:
         """Normalise websocket node payloads via the REST client helper."""
