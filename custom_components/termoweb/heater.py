@@ -866,7 +866,7 @@ class HeaterNodeBase(CoordinatorEntity):
     def _hass_for_runtime(self) -> HomeAssistant | None:
         """Return the best-effort Home Assistant instance for runtime access."""
 
-        hass_attr = self._hass
+        hass_attr = getattr(self, "_hass", _HASS_UNSET)
         if hass_attr is not _HASS_UNSET:
             return hass_attr
         coordinator_hass = getattr(self.coordinator, "hass", None)
@@ -876,7 +876,7 @@ class HeaterNodeBase(CoordinatorEntity):
     def hass(self) -> HomeAssistant | None:
         """Return the Home Assistant instance, falling back to the coordinator."""
 
-        hass_attr = self._hass
+        hass_attr = getattr(self, "_hass", _HASS_UNSET)
         if hass_attr is not _HASS_UNSET:
             return hass_attr
         coordinator_hass = getattr(self.coordinator, "hass", None)

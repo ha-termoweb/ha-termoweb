@@ -52,11 +52,9 @@ from custom_components.termoweb.installation import (
     ensure_snapshot,
 )
 from custom_components.termoweb.nodes import (
-    NODE_CLASS_BY_TYPE,
-    addresses_by_node_type,
+    addresses_by_node_type as _addresses_by_node_type,
     build_node_inventory as _build_node_inventory,
     collect_heater_sample_addresses,
-    ensure_node_inventory,
     heater_sample_subscription_targets,
     normalize_heater_addresses,
     normalize_node_addr,
@@ -65,6 +63,7 @@ from custom_components.termoweb.nodes import (
 from .ws_client import (
     WSStats,
     _WSStatusMixin,
+    _prepare_nodes_dispatch,
     forward_ws_sample_updates,
     resolve_ws_update_section,
 )
@@ -72,6 +71,7 @@ from .ws_client import (
 _LOGGER = logging.getLogger(__name__)
 
 build_node_inventory = _build_node_inventory  # re-exported for tests
+addresses_by_node_type = _addresses_by_node_type  # legacy import hook for tests
 
 
 _SENSITIVE_PLACEHOLDERS: Mapping[str, tuple[str, Callable[[str | None], str]]] = {
@@ -896,27 +896,21 @@ class WebSocketClient(_WSStatusMixin):
             raw_nodes = snapshot.get("nodes")
         else:
             raw_nodes = payload
-            snapshot = {"nodes": deepcopy(raw_nodes), "nodes_by_type": {}}
+            snapshot = {"nodes": None, "nodes_by_type": {}}
 
-        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-        snapshot_obj = ensure_snapshot(record)
-        if isinstance(snapshot_obj, InstallationSnapshot):
-            snapshot_obj.update_nodes(raw_nodes)
-            inventory = snapshot_obj.inventory
-            if isinstance(record, dict):
-                record["node_inventory"] = list(inventory)
-        else:
-            record_map: Mapping[str, Any]
-            if isinstance(record, Mapping):
-                record_map = record
-            else:
-                record_map = {}  # pragma: no cover - defensive default
-
-            inventory = ensure_node_inventory(record_map, nodes=raw_nodes)
-
-        addr_map, unknown_types = addresses_by_node_type(
-            inventory, known_types=NODE_CLASS_BY_TYPE
+        context = _prepare_nodes_dispatch(
+            self.hass,
+            entry_id=self.entry_id,
+            coordinator=self._coordinator,
+            raw_nodes=raw_nodes,
         )
+
+        inventory = context.inventory
+        addr_map = context.addr_map
+        unknown_types = context.unknown_types
+        record = context.record
+        snapshot_obj = context.snapshot
+        raw_nodes_payload = context.raw_nodes if context.raw_nodes is not None else {}
         if unknown_types:  # pragma: no cover - diagnostic branch
             _LOGGER.debug(
                 "WS: unknown node types in inventory: %s",
@@ -931,30 +925,25 @@ class WebSocketClient(_WSStatusMixin):
             snapshot["nodes_by_type"] = nodes_by_type
             if "htr" in nodes_by_type:
                 snapshot.setdefault("htr", nodes_by_type["htr"])
+            snapshot["nodes"] = deepcopy(raw_nodes_payload)
 
-        if raw_nodes is None:  # pragma: no cover - defensive default
-            raw_nodes = {}
-
-        if hasattr(self._coordinator, "update_nodes"):
-            self._coordinator.update_nodes(raw_nodes, inventory)
-
-        if isinstance(record, dict) and snapshot_obj is None:
-            record["nodes"] = raw_nodes
-            record["node_inventory"] = inventory
+        if isinstance(record, MutableMapping) and snapshot_obj is None:
+            record["nodes"] = raw_nodes_payload
+            record["node_inventory"] = list(inventory)
 
         self._apply_heater_addresses(addr_map, inventory=None)
 
         payload_copy = {
             "dev_id": self.dev_id,
             "node_type": None,
-            "nodes": deepcopy(snapshot.get("nodes")),
+            "nodes": deepcopy(snapshot.get("nodes", raw_nodes_payload)),
             "nodes_by_type": deepcopy(snapshot.get("nodes_by_type", {})),
         }
         payload_copy.setdefault(
             "addr_map",
             {node_type: list(addrs) for node_type, addrs in addr_map.items()},
         )
-        if unknown_types:
+        if unknown_types:  # pragma: no cover - diagnostic payload
             payload_copy.setdefault("unknown_types", sorted(unknown_types))
 
         def _send() -> None:
