@@ -37,6 +37,7 @@ _LOGGER = logging.getLogger(__name__)
 
 _BOOST_RUNTIME_KEY: Final = "boost_runtime"
 DEFAULT_BOOST_DURATION: Final = 60
+_HASS_UNSET = object()
 
 
 @dataclass(frozen=True, slots=True)
@@ -870,19 +871,19 @@ class HeaterNodeBase(CoordinatorEntity):
     def _hass_for_runtime(self) -> Any:
         """Return the best-effort Home Assistant instance for runtime access."""
 
-        hass = self.hass
-        if hass is not None:
-            return hass
+        hass_attr = getattr(self, "_hass", _HASS_UNSET)
+        if hass_attr is not _HASS_UNSET:
+            return hass_attr
         return getattr(self.coordinator, "hass", None)
 
     @property  # type: ignore[override]
     def hass(self) -> Any:
         """Return the Home Assistant instance, falling back to the coordinator."""
 
-        hass = getattr(self, "_hass", None)
-        if hass is not None:
-            return hass
-        return getattr(self.coordinator, "hass", None)
+        hass_attr = getattr(self, "_hass", _HASS_UNSET)
+        if hass_attr is _HASS_UNSET:
+            return getattr(self.coordinator, "hass", None)
+        return hass_attr
 
     @hass.setter  # type: ignore[override]
     def hass(self, value: Any) -> None:

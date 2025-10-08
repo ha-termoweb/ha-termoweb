@@ -8,9 +8,16 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.loader import async_get_integration
 
 from .const import DOMAIN
+
+
+async def async_get_integration(*args, **kwargs):
+    """Proxy ``homeassistant.loader.async_get_integration`` for monkeypatching."""
+
+    from homeassistant.loader import async_get_integration as loader_async_get_integration
+
+    return await loader_async_get_integration(*args, **kwargs)
 
 
 async def async_get_integration_version(hass: HomeAssistant) -> str:
