@@ -1169,9 +1169,12 @@ def test_redaction_helpers_handle_whitespace(monkeypatch: pytest.MonkeyPatch) ->
     client, _sio, _ = _make_client(monkeypatch)
     assert redact_token_fragment("   ") == ""
     assert mask_identifier("   ") == ""
-    params = client._sanitise_params({"token": "   ", "dev_id": "   "})
-    assert params["token"] == ""
-    assert params["dev_id"] == ""
+    params = client._sanitise_params(
+        {"token": "   ", "dev_id": "   ", "sid": "   "}
+    )
+    assert params["token"] == "{token}"
+    assert params["dev_id"] == "{dev_id}"
+    assert params["sid"] == "{sid}"
 
 
 @pytest.mark.asyncio

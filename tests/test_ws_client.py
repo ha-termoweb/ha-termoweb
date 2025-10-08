@@ -403,7 +403,7 @@ def test_termoweb_brand_headers_optional_origin(monkeypatch: pytest.MonkeyPatch)
 def test_termoweb_value_redaction_behaviour(monkeypatch: pytest.MonkeyPatch) -> None:
     """Redaction helpers should mask tokens and identifiers consistently."""
 
-    _make_termoweb_client(monkeypatch)
+    client = _make_termoweb_client(monkeypatch)
     assert redact_token_fragment("  ") == ""
     assert redact_token_fragment("abcd") == "***"
     assert redact_token_fragment("abcdefgh") == "ab***gh"
@@ -412,6 +412,11 @@ def test_termoweb_value_redaction_behaviour(monkeypatch: pytest.MonkeyPatch) -> 
     assert mask_identifier("xy") == "***"
     assert mask_identifier("abcdefgh") == "ab...gh"
     assert mask_identifier("abcdefghijkl") == "abcdef...ijkl"
+
+    sanitised = client._sanitise_params({"token": "  ", "dev_id": "  ", "sid": "  "})
+    assert sanitised["token"] == "{token}"
+    assert sanitised["dev_id"] == "{dev_id}"
+    assert sanitised["sid"] == "{sid}"
 
 
 def test_termoweb_sanitise_helpers(monkeypatch: pytest.MonkeyPatch) -> None:

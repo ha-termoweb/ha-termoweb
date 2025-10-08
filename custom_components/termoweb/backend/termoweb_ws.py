@@ -257,9 +257,7 @@ class WebSocketClient(_WSStatusMixin):
             return None
         placeholder, sanitizer = entry
         text = None if value is None else str(value)
-        masked = sanitizer(text)
-        if not masked:
-            return ""
+        sanitizer(text)
         return placeholder
 
     def _sanitise_params(self, params: Mapping[str, str]) -> dict[str, str]:
