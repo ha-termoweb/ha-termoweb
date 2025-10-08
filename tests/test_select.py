@@ -17,6 +17,7 @@ from custom_components.termoweb.heater import (
     get_boost_runtime_minutes,
     iter_boost_button_metadata,
     set_boost_runtime_minutes,
+    build_heater_entity_unique_id,
 )
 from homeassistant.core import HomeAssistant
 
@@ -75,7 +76,12 @@ def test_select_setup_and_selection(
         assert len(added) == 1
         entity = added[0]
         assert isinstance(entity, AccumulatorBoostDurationSelect)
-        assert entity.unique_id == f"{DOMAIN}:{dev_id}:acm:{node.addr}:boost_duration"
+        assert entity.unique_id == build_heater_entity_unique_id(
+            dev_id,
+            "acm",
+            node.addr,
+            ":boost_duration",
+        )
         expected_options = [
             str(item.minutes)
             for item in iter_boost_button_metadata()
@@ -173,7 +179,12 @@ def test_select_restores_last_state(
             dev_id,
             node.addr,
             "Accumulator 9",
-            f"{DOMAIN}:{dev_id}:acm:{node.addr}:boost_duration",
+            build_heater_entity_unique_id(
+                dev_id,
+                "acm",
+                node.addr,
+                ":boost_duration",
+            ),
             node_type="acm",
         )
         entity2.hass = hass

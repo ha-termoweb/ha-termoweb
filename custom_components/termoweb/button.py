@@ -25,6 +25,7 @@ from .const import DOMAIN
 from .heater import (
     BoostButtonMetadata,
     HeaterNodeBase,
+    build_heater_entity_unique_id,
     iter_boost_button_metadata,
     iter_boostable_heater_nodes,
     log_skipped_nodes,
@@ -280,7 +281,12 @@ def _create_boost_button_entities(
 ) -> list[ButtonEntity]:
     """Return boost helper buttons described by shared metadata."""
 
-    unique_prefix = f"{DOMAIN}:{dev_id}:{node_type}:{addr}:boost"
+    unique_prefix = build_heater_entity_unique_id(
+        dev_id,
+        node_type,
+        addr,
+        ":boost",
+    )
     return [
         _build_boost_button(
             metadata,

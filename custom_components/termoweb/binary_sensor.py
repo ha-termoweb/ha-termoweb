@@ -18,6 +18,7 @@ from .coordinator import StateCoordinator
 from .heater import (
     DispatcherSubscriptionHelper,
     HeaterNodeBase,
+    build_heater_entity_unique_id,
     iter_boostable_heater_nodes,
     log_skipped_nodes,
     prepare_heater_platform_data,
@@ -43,7 +44,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
     for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
         nodes_by_type, resolve_name
     ):
-        unique_id = f"{DOMAIN}:{dev_id}:{node_type}:{addr_str}:boost_active"
+        unique_id = build_heater_entity_unique_id(
+            dev_id,
+            node_type,
+            addr_str,
+            ":boost_active",
+        )
         boost_entities.append(
             HeaterBoostActiveBinarySensor(
                 coord,

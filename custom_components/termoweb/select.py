@@ -14,6 +14,7 @@ from .heater import (
     BOOST_DURATION_OPTIONS,
     DEFAULT_BOOST_DURATION,
     HeaterNodeBase,
+    build_heater_entity_unique_id,
     get_boost_runtime_minutes,
     iter_boostable_heater_nodes,
     log_skipped_nodes,
@@ -42,7 +43,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
         resolve_name,
         accumulators_only=True,
     ):
-        unique_id = f"{DOMAIN}:{dev_id}:{node_type}:{addr_str}:boost_duration"
+        unique_id = build_heater_entity_unique_id(
+            dev_id,
+            node_type,
+            addr_str,
+            ":boost_duration",
+        )
         new_entities.append(
             AccumulatorBoostDurationSelect(
                 coordinator,
