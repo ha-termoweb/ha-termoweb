@@ -428,11 +428,11 @@ def build_node_inventory(raw_nodes: Any) -> list[Node]:
         if node_cls is Node:
             _LOGGER.debug("Unsupported node type '%s' encountered", node_type)
 
-        kwargs: dict[str, Any] = {"name": name, "addr": addr}
-        if node_cls is Node:
-            kwargs["node_type"] = node_type
         try:
-            node = node_cls(**kwargs)
+            if node_cls is Node:
+                node = node_cls(name=name, addr=addr, node_type=node_type)
+            else:
+                node = node_cls(name=name, addr=addr)
         except (TypeError, ValueError) as err:  # pragma: no cover - defensive
             _LOGGER.debug("Failed to initialise node %s at index %s: %s", payload, index, err)
             continue
@@ -447,7 +447,11 @@ def ensure_node_inventory(
 ) -> list[Node]:
     """Return cached node inventory, rebuilding and caching when missing."""
 
-    cacheable = isinstance(record, MutableMapping)
+    mutable_record: MutableMapping[str, Any] | None = None
+    if isinstance(record, MutableMapping):
+        mutable_record = record
+
+    cacheable = mutable_record is not None
     cached = record.get("node_inventory")
     if isinstance(cached, list) and cached:
         cached_nodes: list[Node] = []
@@ -460,8 +464,8 @@ def ensure_node_inventory(
                 continue
             cached_nodes.append(cast(Node, node))
         if cached_nodes:
-            if cacheable and len(cached_nodes) != len(cached):
-                record["node_inventory"] = list(cached_nodes)
+            if cacheable and len(cached_nodes) != len(cached) and mutable_record is not None:
+                mutable_record["node_inventory"] = list(cached_nodes)
             return list(cached_nodes)
 
     payloads: list[Any] = []
@@ -479,19 +483,19 @@ def ensure_node_inventory(
         except Exception:  # pragma: no cover - defensive  # noqa: BLE001
             inventory = []
 
-        if cacheable and (inventory or index == last_index):
-            record["node_inventory"] = list(inventory)
+        if cacheable and (inventory or index == last_index) and mutable_record is not None:
+            mutable_record["node_inventory"] = list(inventory)
 
         if inventory:
             return list(inventory)
 
     if isinstance(cached, list):
-        if cacheable and "node_inventory" not in record:
-            record["node_inventory"] = []
+        if cacheable and "node_inventory" not in record and mutable_record is not None:
+            mutable_record["node_inventory"] = []
         return []
 
-    if cacheable and "node_inventory" not in record:
-        record["node_inventory"] = []
+    if cacheable and "node_inventory" not in record and mutable_record is not None:
+        mutable_record["node_inventory"] = []
 
     return []
 
@@ -672,7 +676,7 @@ def collect_heater_sample_addresses(
         cache_record: MutableMapping[str, Any] | None = None
 
         if isinstance(record, MutableMapping):
-            cache_record = record
+            cache_record = cast(MutableMapping[str, Any], record)
             nodes_payload = record.get("nodes")
         elif isinstance(record, Mapping):
             nodes_payload = record.get("nodes")
