@@ -28,8 +28,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_data
 from .coordinator import EnergyStateCoordinator
+from .entity import GatewayDispatcherEntity
 from .heater import (
-    DispatcherSubscriptionHelper,
     HeaterNodeBase,
     iter_boostable_heater_nodes,
     iter_heater_maps,
@@ -481,7 +481,9 @@ def _create_boost_sensors(
     return (minutes, end)
 
 
-class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
+class InstallationTotalEnergySensor(
+    GatewayDispatcherEntity, CoordinatorEntity, SensorEntity
+):
     """Total energy consumption across all heaters."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
@@ -502,22 +504,12 @@ class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
         self._dev_id = dev_id
         self._attr_name = name
         self._attr_unique_id = unique_id
-        self._ws_subscription = DispatcherSubscriptionHelper(self)
 
-    async def async_added_to_hass(self) -> None:
-        """Register websocket callbacks once the entity is added."""
-        await super().async_added_to_hass()
-        if self.hass is None:  # pragma: no cover - defensive guard
-            return
-        self._ws_subscription.subscribe(
-            self.hass, signal_ws_data(self._entry_id), self._on_ws_data
-        )
+    @property
+    def gateway_signal(self) -> str:
+        """Return the dispatcher signal for gateway websocket data."""
 
-    async def async_will_remove_from_hass(self) -> None:  # pragma: no cover - cleanup
-        """Tidy up websocket listeners prior to entity removal."""
-
-        self._ws_subscription.unsubscribe()
-        await super().async_will_remove_from_hass()
+        return signal_ws_data(self._entry_id)
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -525,7 +517,7 @@ class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
         return build_gateway_device_info(self.hass, self._entry_id, self._dev_id)
 
     @callback
-    def _on_ws_data(self, payload: dict) -> None:
+    def _handle_gateway_dispatcher(self, payload: dict[str, Any]) -> None:
         """Handle websocket payloads that may update the totals."""
         if payload.get("dev_id") != self._dev_id:
             return

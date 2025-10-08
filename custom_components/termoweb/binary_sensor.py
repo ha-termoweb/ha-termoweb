@@ -15,8 +15,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_status
 from .coordinator import StateCoordinator
+from .entity import GatewayDispatcherEntity
 from .heater import (
-    DispatcherSubscriptionHelper,
     HeaterNodeBase,
     iter_boostable_heater_nodes,
     log_skipped_nodes,
@@ -67,7 +67,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
 
 class GatewayOnlineBinarySensor(
-    CoordinatorEntity[StateCoordinator], BinarySensorEntity
+    GatewayDispatcherEntity,
+    CoordinatorEntity[StateCoordinator],
+    BinarySensorEntity,
 ):
     """Connectivity sensor for the TermoWeb hub (gateway)."""
 
@@ -83,21 +85,12 @@ class GatewayOnlineBinarySensor(
         self._dev_id = str(dev_id)
         self._attr_name = "TermoWeb Gateway Online"
         self._attr_unique_id = f"{self._dev_id}_online"
-        self._ws_subscription = DispatcherSubscriptionHelper(self)
 
-    async def async_added_to_hass(self) -> None:
-        """Subscribe to websocket status updates when added to hass."""
-        await super().async_added_to_hass()
-        if self.hass is None:
-            return
+    @property
+    def gateway_signal(self) -> str:
+        """Return the dispatcher signal for gateway websocket status."""
 
-        signal = signal_ws_status(self._entry_id)
-        self._ws_subscription.subscribe(self.hass, signal, self._on_ws_status)
-
-    async def async_will_remove_from_hass(self) -> None:
-        """Unsubscribe from websocket updates before removal."""
-        self._ws_subscription.unsubscribe()
-        await super().async_will_remove_from_hass()
+        return signal_ws_status(self._entry_id)
 
     def _ws_state(self) -> dict[str, Any]:
         """Return the latest websocket status payload for this device."""
@@ -131,7 +124,7 @@ class GatewayOnlineBinarySensor(
         }
 
     @callback
-    def _on_ws_status(self, payload: dict) -> None:
+    def _handle_gateway_dispatcher(self, payload: dict[str, Any]) -> None:
         """Handle websocket status broadcasts from the integration."""
         if payload.get("dev_id") != self._dev_id:
             return

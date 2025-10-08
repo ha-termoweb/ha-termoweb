@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import types
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -75,7 +75,9 @@ def test_binary_sensor_setup_and_dispatch(
             "guard-device",
         )
         await guard_entity.async_added_to_hass()
-        assert not guard_entity._ws_subscription.is_connected  # pylint: disable=protected-access
+        assert (
+            not guard_entity._gateway_dispatcher.is_connected
+        )  # pylint: disable=protected-access
 
         await async_setup_binary_sensor_entry(hass, entry, _add_entities)
 
@@ -84,10 +86,23 @@ def test_binary_sensor_setup_and_dispatch(
         assert isinstance(entity, GatewayOnlineBinarySensor)
 
         entity.hass = hass
-        await entity.async_added_to_hass()
+        with patch.object(
+            entity._gateway_dispatcher,
+            "subscribe",
+            wraps=entity._gateway_dispatcher.subscribe,
+        ) as mock_subscribe:
+            await entity.async_added_to_hass()
+
+        mock_subscribe.assert_called_once()
+        _, call_signal, call_handler = mock_subscribe.call_args[0]
+        assert call_signal == signal_ws_status(entry.entry_id)
+        assert getattr(call_handler, "__self__", None) is entity
+        assert getattr(call_handler, "__func__", None) is getattr(
+            entity._handle_gateway_dispatcher, "__func__", None
+        )
 
         assert entity.is_on is True
-        assert entity._ws_subscription.is_connected  # pylint: disable=protected-access
+        assert entity._gateway_dispatcher.is_connected  # pylint: disable=protected-access
 
         info = entity.device_info
         expected_info = build_gateway_device_info(hass, entry.entry_id, dev_id)
@@ -115,7 +130,9 @@ def test_binary_sensor_setup_and_dispatch(
         entity.schedule_update_ha_state.assert_called_once_with()
 
         await entity.async_will_remove_from_hass()
-        assert not entity._ws_subscription.is_connected  # pylint: disable=protected-access
+        assert (
+            not entity._gateway_dispatcher.is_connected
+        )  # pylint: disable=protected-access
 
     asyncio.run(_run())
 
