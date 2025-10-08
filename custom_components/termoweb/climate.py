@@ -1040,8 +1040,8 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
             self._addr,
         )
 
-    @property  # type: ignore[override]
-    def hvac_mode(self) -> HVACMode:
+    @property
+    def hvac_mode(self) -> HVACMode | None:
         """Return the current accumulator HVAC mode."""
 
         s = self.heater_settings() or {}
@@ -1052,7 +1052,8 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
             return HVACMode.AUTO
         if mode == "boost":
             return HVACMode.AUTO
-        return super().hvac_mode
+        fallback = super().hvac_mode
+        return fallback if fallback is not None else None
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode | str) -> None:
         """Handle accumulator HVAC modes, delegating boost to presets."""
@@ -1105,11 +1106,12 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         await self.async_cancel_boost()
         await super().async_set_hvac_mode(resume_mode)
 
-    @property  # type: ignore[override]
-    def extra_state_attributes(self) -> dict[str, Any]:
+    @property
+    def extra_state_attributes(self) -> Mapping[str, Any] | None:
         """Return accumulator attributes including boost metadata."""
 
-        attrs = super().extra_state_attributes
+        base_attrs = super().extra_state_attributes
+        attrs: dict[str, Any] = dict(base_attrs) if base_attrs is not None else {}
         settings = self.heater_settings() or {}
         boost_state = derive_boost_state(settings, self.coordinator)
 
