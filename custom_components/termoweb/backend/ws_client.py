@@ -11,7 +11,7 @@ import logging
 import random
 import string
 import time
-from typing import TYPE_CHECKING, Any, Mapping, MutableMapping
+from typing import TYPE_CHECKING, Any, MutableMapping
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import aiohttp
@@ -34,16 +34,18 @@ from ..const import (
     signal_ws_data,
     signal_ws_status,
 )
-from ..installation import InstallationSnapshot, ensure_snapshot
+from ..installation import InstallationSnapshot, ensure_snapshot as _ensure_snapshot
 from ..nodes import (
     NODE_CLASS_BY_TYPE,
+    Node,
     addresses_by_node_type,
     collect_heater_sample_addresses,
-    ensure_node_inventory,
+    ensure_node_inventory as _ensure_node_inventory,
     heater_sample_subscription_targets,
     normalize_heater_addresses,
     normalize_node_addr,
     normalize_node_type,
+    resolve_node_inventory_context,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -69,11 +71,15 @@ class WSStats:
 class PreparedNodesDispatch:
     """Capture reusable node dispatch preparation data."""
 
-    inventory: Any
+    inventory: list[Node]
     addr_map: dict[str, list[str]]
     unknown_types: set[str]
     snapshot: InstallationSnapshot | None
     record: MutableMapping[str, Any] | None
+
+
+ensure_snapshot = _ensure_snapshot  # legacy test hook
+ensure_node_inventory = _ensure_node_inventory  # legacy test hook
 
 
 def _prepare_nodes_dispatch(
@@ -82,28 +88,18 @@ def _prepare_nodes_dispatch(
     """Return snapshot and inventory data for node dispatching."""
 
     record = hass.data.get(DOMAIN, {}).get(entry_id)
-    snapshot_obj = ensure_snapshot(record)
-    record_bucket: MutableMapping[str, Any] | None
-    if isinstance(record, MutableMapping):
-        record_bucket = record
-    else:
-        record_bucket = None
-
-    if isinstance(snapshot_obj, InstallationSnapshot):
-        snapshot_obj.update_nodes(raw_nodes)
-        inventory = snapshot_obj.inventory
-        if record_bucket is not None:
-            record_bucket["node_inventory"] = list(inventory)
-    else:
-        record_map: Mapping[str, Any]
-        if isinstance(record, Mapping):
-            record_map = record
-        else:
-            record_map = {}
-        inventory = ensure_node_inventory(record_map, nodes=raw_nodes)
+    inventory, snapshot_obj, record_bucket = resolve_node_inventory_context(
+        record,
+        nodes=raw_nodes,
+        update_snapshot=True,
+        cache_result=True,
+        inventory_resolver=ensure_node_inventory,
+        snapshot_resolver=ensure_snapshot,
+    )
 
     addr_map, unknown_types = addresses_by_node_type(
-        inventory, known_types=NODE_CLASS_BY_TYPE
+        inventory,
+        known_types=NODE_CLASS_BY_TYPE,
     )
 
     return PreparedNodesDispatch(

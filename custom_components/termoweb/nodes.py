@@ -654,6 +654,59 @@ def normalize_heater_addresses(
     return cleaned_map, compat_aliases
 
 
+def resolve_node_inventory_context(
+    record: Mapping[str, Any] | MutableMapping[str, Any] | None,
+    *,
+    nodes: Any | None = None,
+    update_snapshot: bool = True,
+    cache_result: bool = True,
+    inventory_resolver: Callable[[Mapping[str, Any], Any | None], Iterable[Node]] | None = None,
+    snapshot_resolver: Callable[[Any], InstallationSnapshot | None] | None = None,
+) -> tuple[list[Node], InstallationSnapshot | None, MutableMapping[str, Any] | None]:
+    """Return inventory, snapshot and cache bucket context for ``record``."""
+
+    from .installation import InstallationSnapshot, ensure_snapshot  # noqa: PLC0415
+
+    resolver_snapshot = snapshot_resolver or ensure_snapshot
+    snapshot_candidate = resolver_snapshot(record)
+    snapshot: InstallationSnapshot | None
+    if isinstance(snapshot_candidate, InstallationSnapshot):
+        snapshot = snapshot_candidate
+    elif snapshot_candidate is not None and hasattr(snapshot_candidate, "update_nodes") and hasattr(snapshot_candidate, "inventory"):
+        snapshot = cast(InstallationSnapshot, snapshot_candidate)
+    else:
+        snapshot = None
+    record_bucket: MutableMapping[str, Any] | None
+    if isinstance(record, MutableMapping):
+        record_bucket = record
+    else:
+        record_bucket = None
+
+    if snapshot is not None:
+        if nodes is not None and update_snapshot:
+            snapshot.update_nodes(nodes)
+        inventory_list = list(snapshot.inventory)
+        if cache_result and record_bucket is not None:
+            record_bucket["node_inventory"] = list(inventory_list)
+        return inventory_list, snapshot, record_bucket
+
+    record_map: Mapping[str, Any]
+    if isinstance(record, Mapping):
+        record_map = record
+    else:
+        record_map = {}
+
+    resolver = inventory_resolver or ensure_node_inventory
+    inventory_raw = resolver(record_map, nodes=nodes)  # type: ignore[arg-type]
+    inventory_list = cast(list[Node], list(inventory_raw))
+    if cache_result and record_bucket is not None:
+        if update_snapshot:
+            record_bucket["nodes"] = nodes
+        record_bucket["node_inventory"] = list(inventory_list)
+
+    return inventory_list, None, record_bucket
+
+
 def collect_heater_sample_addresses(
     record: Mapping[str, Any] | None,
     *,
@@ -661,24 +714,22 @@ def collect_heater_sample_addresses(
 ) -> tuple[list[Node], dict[str, list[str]], dict[str, str]]:
     """Return inventory and canonical heater sample subscription addresses."""
 
-    from .installation import InstallationSnapshot, ensure_snapshot  # noqa: PLC0415
+    from .installation import InstallationSnapshot  # noqa: PLC0415
 
-    snapshot = ensure_snapshot(record)
+    nodes_payload: Any | None = None
+    if isinstance(record, Mapping):
+        nodes_payload = record.get("nodes")
+
+    inventory, snapshot, _ = resolve_node_inventory_context(
+        record,
+        nodes=nodes_payload,
+        update_snapshot=False,
+        cache_result=False,
+    )
+
     if isinstance(snapshot, InstallationSnapshot):
-        inventory = snapshot.inventory
         normalized_map, compat = snapshot.heater_sample_address_map
     else:
-        nodes_payload: Any | None = None
-        cache_record: MutableMapping[str, Any] | None = None
-
-        if isinstance(record, MutableMapping):
-            cache_record = record
-            nodes_payload = record.get("nodes")
-        elif isinstance(record, Mapping):
-            nodes_payload = record.get("nodes")
-
-        inventory = ensure_node_inventory(cache_record or {}, nodes=nodes_payload)
-
         raw_map, _ = addresses_by_node_type(
             inventory,
             known_types=HEATER_NODE_TYPES,
