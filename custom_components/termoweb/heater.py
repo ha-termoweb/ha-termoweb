@@ -37,6 +37,9 @@ _LOGGER = logging.getLogger(__name__)
 
 _BOOST_RUNTIME_KEY: Final = "boost_runtime"
 DEFAULT_BOOST_DURATION: Final = 60
+_HASS_UNSET: Final[HomeAssistant | None] = cast(HomeAssistant | None, object())
+
+
 @dataclass(frozen=True, slots=True)
 class BoostButtonMetadata:
     """Metadata describing an accumulator boost helper button."""
@@ -709,16 +712,7 @@ class HeaterNodeBase(CoordinatorEntity):
     ) -> None:
         """Initialise a heater entity tied to a TermoWeb device."""
         super().__init__(coordinator)
-        self._hass: HomeAssistant | None = None
-        self._has_explicit_hass = False
-        hass = getattr(coordinator, "hass", None)
-        if hass is not None:
-            try:
-                self._hass = cast(HomeAssistant | None, hass)
-                self._has_explicit_hass = True
-            except Exception:  # pragma: no cover - defensive
-                self._hass = None
-                self._has_explicit_hass = False
+        self._hass: HomeAssistant | None = cast(HomeAssistant | None, _HASS_UNSET)
         self._entry_id = entry_id
         self._dev_id = dev_id
         self._addr = normalize_node_addr(addr)
@@ -872,26 +866,30 @@ class HeaterNodeBase(CoordinatorEntity):
     def _hass_for_runtime(self) -> HomeAssistant | None:
         """Return the best-effort Home Assistant instance for runtime access."""
 
-        if self._has_explicit_hass:
-            return self._hass
-        hass_attr = getattr(self.coordinator, "hass", None)
-        return cast(HomeAssistant | None, hass_attr)
+        hass_attr = self._hass
+        if hass_attr is not _HASS_UNSET:
+            return hass_attr
+        coordinator_hass = getattr(self.coordinator, "hass", None)
+        return cast(HomeAssistant | None, coordinator_hass)
 
     @property
     def hass(self) -> HomeAssistant | None:
         """Return the Home Assistant instance, falling back to the coordinator."""
 
-        if self._has_explicit_hass:
-            return self._hass
-        hass_attr = getattr(self.coordinator, "hass", None)
-        return cast(HomeAssistant | None, hass_attr)
+        hass_attr = self._hass
+        if hass_attr is not _HASS_UNSET:
+            return hass_attr
+        coordinator_hass = getattr(self.coordinator, "hass", None)
+        return cast(HomeAssistant | None, coordinator_hass)
 
     @hass.setter
     def hass(self, value: HomeAssistant | None) -> None:
         """Store the Home Assistant reference for runtime access."""
 
+        if value is None:
+            self._hass = None
+            return
         self._hass = value
-        self._has_explicit_hass = True
 
     def boost_state(self) -> BoostState:
         """Return derived boost metadata for this heater."""
