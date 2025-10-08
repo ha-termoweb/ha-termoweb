@@ -7,6 +7,7 @@ import logging
 import threading
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -1137,13 +1138,27 @@ def test_header_sanitizers(monkeypatch: pytest.MonkeyPatch) -> None:
     sanitised = client._sanitise_headers({"Authorization": "token"})
     assert "***" in sanitised["Authorization"]
 
-    params = client._sanitise_params({"token": "abc12345", "dev_id": "dev123", "q": "ok"})
-    assert params["token"].startswith("ab") and params["token"].endswith("45")
-    assert params["dev_id"].startswith("de") and params["dev_id"].endswith("23")
+    params = client._sanitise_params(
+        {"token": "abc12345", "dev_id": "dev123", "sid": "session", "q": "ok"}
+    )
+    assert params["token"] == "{token}"
+    assert params["dev_id"] == "{dev_id}"
+    assert params["sid"] == "{sid}"
 
-    sanitised_url = client._sanitise_url("https://host/socket?token=abc&dev_id=12345")
-    assert "abc" not in sanitised_url
-    assert "12345" not in sanitised_url
+    sanitised_url = client._sanitise_url(
+        "https://host/socket?token=abc&dev_id=12345&sid=session"
+    )
+    sanitised_query = dict(parse_qsl(urlsplit(sanitised_url).query))
+    assert sanitised_query["token"] == "{token}"
+    assert sanitised_query["dev_id"] == "{dev_id}"
+    assert sanitised_query["sid"] == "{sid}"
+    sanitised_ws_url = client._sanitise_url(
+        "https://host/socket.io/1/websocket/abc123?transport=websocket&sid=session"
+    )
+    parsed_ws_url = urlsplit(sanitised_ws_url)
+    ws_query = dict(parse_qsl(parsed_ws_url.query))
+    assert parsed_ws_url.path.endswith("/socket.io/1/websocket/{sid}")
+    assert ws_query["sid"] == "{sid}"
     assert client._sanitise_url("not a url") == "not a url"
     assert client._sanitise_url("http://[::1") == "http://[::1"
 
@@ -1151,9 +1166,12 @@ def test_header_sanitizers(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_redaction_helpers_handle_whitespace(monkeypatch: pytest.MonkeyPatch) -> None:
     """Token and identifier masking should treat whitespace as empty."""
 
-    _make_client(monkeypatch)
+    client, _sio, _ = _make_client(monkeypatch)
     assert redact_token_fragment("   ") == ""
     assert mask_identifier("   ") == ""
+    params = client._sanitise_params({"token": "   ", "dev_id": "   "})
+    assert params["token"] == ""
+    assert params["dev_id"] == ""
 
 
 @pytest.mark.asyncio

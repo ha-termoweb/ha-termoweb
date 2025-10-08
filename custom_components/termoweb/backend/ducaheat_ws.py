@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Ducaheat specific websocket client."""
 from __future__ import annotations
 
@@ -9,11 +8,13 @@ import json
 import logging
 import random
 import string
+import time
 from typing import Any, Mapping
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import aiohttp
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from ..api import RESTClient
 from ..const import (
@@ -25,6 +26,7 @@ from ..const import (
     get_brand_api_base,
     get_brand_requested_with,
     get_brand_user_agent,
+    signal_ws_status,
 )
 from ..nodes import (
     collect_heater_sample_addresses,
@@ -153,6 +155,12 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._nodes_raw: dict[str, Any] | None = None
         self._subscription_paths: set[str] = set()
         self._pending_dev_data = False
+        self._keepalive_task: asyncio.Task | None = None
+        self._ping_interval: float | None = None
+        self._ping_timeout: float | None = None
+        self._status: str = "stopped"
+        self._healthy_since: float | None = None
+        self._last_event_at: float | None = None
 
     def start(self) -> asyncio.Task:
         if self._task and not self._task.done():
@@ -240,6 +248,14 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             raise HandshakeError(590, open_url, "missing OPEN (0)")
         info = json.loads(open_pkt[1:])
         sid = info.get("sid")
+        ping_interval = info.get("pingInterval")
+        self._ping_interval = (
+            float(ping_interval) / 1000 if isinstance(ping_interval, (int, float)) else None
+        )
+        ping_timeout = info.get("pingTimeout")
+        self._ping_timeout = (
+            float(ping_timeout) / 1000 if isinstance(ping_timeout, (int, float)) else None
+        )
         _LOGGER.info(
             "WS (ducaheat): OPEN decoded sid=%s pingInterval=%s pingTimeout=%s",
             sid,
@@ -322,7 +338,13 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         _LOGGER.debug("WS (ducaheat): -> 40%s", self._namespace)
         self._pending_dev_data = True
         _LOGGER.debug("WS (ducaheat): dev_data pending until namespace ack")
+        self._healthy_since = None
+        self._last_event_at = None
+        self._stats.frames_total = 0
+        self._stats.events_total = 0
+        self._stats.last_event_ts = 0.0
         self._update_status("connected")
+        self._start_keepalive()
 
     async def _read_loop_ws(self) -> None:
         ws = self._ws
@@ -333,10 +355,17 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 if msg.type == aiohttp.WSMsgType.TEXT:
                     data = msg.data
                     self._stats.frames_total += 1
+                    now = time.time()
+                    self._stats.last_event_ts = now
+                    self._last_event_at = now
                     while data:
                         if data == "2":
                             _LOGGER.debug("WS (ducaheat): <- EIO 2 (ping) -> EIO 3 (pong)")
                             await ws.send_str("3")
+                            break
+                        if data == "3":
+                            _LOGGER.debug("WS (ducaheat): <- 3 (pong)")
+                            self._update_status("healthy")
                             break
                         if not data.startswith("4"):
                             break
@@ -377,6 +406,10 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                             _LOGGER.debug("WS (ducaheat): <- SIO 2 (ping) -> SIO 3 (pong)")
                             await ws.send_str("3")
                             break
+                        if payload == "3":
+                            _LOGGER.debug("WS (ducaheat): <- SIO 3 (pong)")
+                            self._update_status("healthy")
+                            break
                         if payload.startswith("2/"):
                             ns_payload = payload[1:]
                             ns, sep, body = ns_payload.partition(",")
@@ -407,6 +440,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                         if not isinstance(arr, list) or not arr:
                             break
                         evt, *args = arr
+                        self._stats.events_total += 1
                         _LOGGER.debug("WS (ducaheat): <- SIO 42 event=%s args_len=%d", evt, len(args))
 
                         if evt == "message" and args and args[0] == "ping":
@@ -461,6 +495,49 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     raise RuntimeError("websocket closed")
         finally:
             _LOGGER.debug("WS (ducaheat): read loop ended (ws closed or error)")
+
+    def _start_keepalive(self) -> None:
+        """Launch the keepalive loop when the websocket is connected."""
+
+        if self._keepalive_task and not self._keepalive_task.done():
+            return
+        if self._ping_interval is None or not self._ws or self._ws.closed:
+            return
+        self._keepalive_task = self._loop.create_task(
+            self._keepalive_loop(),
+            name=f"termoweb-ws-keepalive-{self.dev_id}",
+        )
+
+    async def _keepalive_loop(self) -> None:
+        """Send Engine.IO ping frames to keep the websocket alive."""
+
+        task = asyncio.current_task()
+        try:
+            while True:
+                interval = self._ping_interval
+                ws = self._ws
+                if interval is None or ws is None or ws.closed:
+                    break
+                delay = max(0.1, interval * 0.9)
+                await asyncio.sleep(delay)
+                if ws is not self._ws or ws.closed:
+                    continue
+                try:
+                    await ws.send_str("2")
+                    _LOGGER.debug("WS (ducaheat): -> 2 (keepalive ping)")
+                except Exception:  # noqa: BLE001 - defensive logging
+                    _LOGGER.debug(
+                        "WS (ducaheat): keepalive ping failed", exc_info=True
+                    )
+                    break
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # pragma: no cover - defensive
+            _LOGGER.debug("WS (ducaheat): keepalive loop error", exc_info=True)
+        finally:
+            if self._keepalive_task is task:
+                self._keepalive_task = None
+            _LOGGER.debug("WS (ducaheat): keepalive loop stopped")
 
     def _log_nodes_summary(self, nodes: Mapping[str, Any]) -> None:
         if not _LOGGER.isEnabledFor(logging.INFO):
@@ -716,6 +793,15 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 )
 
     async def _disconnect(self, reason: str) -> None:
+        task = self._keepalive_task
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            finally:
+                self._keepalive_task = None
         if self._ws:
             try:
                 await self._ws.close(
@@ -726,6 +812,39 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 _LOGGER.debug("WS (ducaheat): close failed", exc_info=True)
             self._ws = None
         self._pending_dev_data = False
+        self._ping_interval = None
+        self._ping_timeout = None
+
+    def _update_status(self, status: str) -> None:
+        """Record websocket status transitions and dispatch signals."""
+
+        if status == self._status and status not in {"healthy", "connected"}:
+            return
+
+        now = time.time()
+        if status == "healthy":
+            if self._healthy_since is None:
+                self._healthy_since = self._last_event_at or now
+        else:
+            self._healthy_since = None
+
+        self._status = status
+        state = self._ws_state_bucket()
+        last_event = self._last_event_at or self._stats.last_event_ts or None
+        state["status"] = status
+        state["last_event_at"] = last_event
+        state["healthy_since"] = self._healthy_since
+        state["healthy_minutes"] = (
+            int((now - self._healthy_since) / 60) if self._healthy_since else 0
+        )
+        state["frames_total"] = self._stats.frames_total
+        state["events_total"] = self._stats.events_total
+
+        async_dispatcher_send(
+            self.hass,
+            signal_ws_status(self.entry_id),
+            {"dev_id": self.dev_id, "status": status},
+        )
 
     async def _get_token(self) -> str:
         headers = await self._client.authed_headers()

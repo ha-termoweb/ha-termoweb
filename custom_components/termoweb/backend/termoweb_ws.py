@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import codecs
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping, MutableMapping
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Iterable,
+    Mapping,
+    MutableMapping,
+)
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass
@@ -60,6 +67,13 @@ from custom_components.termoweb.nodes import (
 _LOGGER = logging.getLogger(__name__)
 
 build_node_inventory = _build_node_inventory  # re-exported for tests
+
+
+_SENSITIVE_PLACEHOLDERS: Mapping[str, tuple[str, Callable[[str | None], str]]] = {
+    "token": ("{token}", redact_token_fragment),
+    "dev_id": ("{dev_id}", mask_identifier),
+    "sid": ("{sid}", mask_identifier),
+}
 
 
 @dataclass
@@ -239,17 +253,29 @@ class WebSocketClient:
             sanitised[key] = text
         return sanitised
 
+    def _sanitise_placeholder(self, key: str, value: str | None) -> str | None:
+        """Return a placeholder for known sensitive values."""
+
+        entry = _SENSITIVE_PLACEHOLDERS.get(key)
+        if entry is None:
+            return None
+        placeholder, sanitizer = entry
+        text = None if value is None else str(value)
+        masked = sanitizer(text)
+        if not masked:
+            return ""
+        return placeholder
+
     def _sanitise_params(self, params: Mapping[str, str]) -> dict[str, str]:
         """Redact sensitive query parameter values for logging."""
 
         sanitised: dict[str, str] = {}
         for key, value in params.items():
-            if key == "token":
-                sanitised[key] = redact_token_fragment(str(value))
-            elif key == "dev_id":
-                sanitised[key] = mask_identifier(str(value))
-            else:
+            placeholder = self._sanitise_placeholder(key, value)
+            if placeholder is None:
                 sanitised[key] = value
+            else:
+                sanitised[key] = placeholder
         return sanitised
 
     def _sanitise_url(self, url: str) -> str:
@@ -260,19 +286,22 @@ class WebSocketClient:
         except ValueError:
             return url
         query_items = parse_qsl(parsed.query, keep_blank_values=True)
-        sanitised_pairs = [
-            (
-                key,
-                redact_token_fragment(value)
-                if key == "token"
-                else mask_identifier(value)
-                if key == "dev_id"
-                else value,
-            )
-            for key, value in query_items
-        ]
+        sanitised_pairs = []
+        for key, value in query_items:
+            placeholder = self._sanitise_placeholder(key, value)
+            sanitised_pairs.append((key, value if placeholder is None else placeholder))
         sanitised_query = urlencode(sanitised_pairs, doseq=True)
-        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, sanitised_query, parsed.fragment))
+        sanitised_path = parsed.path
+        if sanitised_path:
+            segments = sanitised_path.split("/")
+            if len(segments) >= 2 and segments[-2] == "websocket":
+                placeholder = self._sanitise_placeholder("sid", segments[-1] or None)
+                if placeholder is not None:
+                    segments[-1] = placeholder
+                    sanitised_path = "/".join(segments)
+        return urlunsplit(
+            (parsed.scheme, parsed.netloc, sanitised_path, sanitised_query, parsed.fragment)
+        )
 
 
     # ------------------------------------------------------------------
@@ -348,7 +377,7 @@ class WebSocketClient:
         try:
             await self._sio.emit("dev_data", namespace=self._namespace)
             _LOGGER.debug("WS: debug probe dev_data emitted")
-        except Exception:  # noqa: BLE001
+        except Exception:
             _LOGGER.debug("WS: debug probe dev_data emit failed", exc_info=True)
 
     # ------------------------------------------------------------------
@@ -365,7 +394,7 @@ class WebSocketClient:
                     await self._wait_for_events()
                 except asyncio.CancelledError:
                     raise
-                except Exception as err:  # noqa: BLE001
+                except Exception as err:
                     error = err
                     _LOGGER.info(
                         "WS: connection error (%s: %s); will retry",
@@ -446,7 +475,7 @@ class WebSocketClient:
         if self._sio.connected:
             try:
                 await self._sio.disconnect()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 _LOGGER.debug("WS: disconnect due to %s failed", reason, exc_info=True)
         self._disconnected.set()
 
@@ -492,7 +521,7 @@ class WebSocketClient:
             if self._namespace != "/":
                 await self._sio.emit("join", namespace=self._namespace)
             await self._sio.emit("dev_data", namespace=self._namespace)
-        except Exception:  # noqa: BLE001
+        except Exception:
             _LOGGER.debug("WS: namespace join failed", exc_info=True)
 
     def _register_debug_catch_all(self) -> None:
@@ -597,7 +626,7 @@ class WebSocketClient:
                     await self._refresh_subscription(reason="idle monitor")
                 except asyncio.CancelledError:  # pragma: no cover - task lifecycle
                     raise
-                except Exception:  # noqa: BLE001
+                except Exception:
                     self._schedule_idle_restart(
                         idle_for=idle_for, source="idle monitor refresh failed"
                     )
@@ -613,7 +642,7 @@ class WebSocketClient:
                     await self._refresh_subscription(reason="idle monitor retry")
                 except asyncio.CancelledError:  # pragma: no cover - task lifecycle
                     raise
-                except Exception:  # noqa: BLE001
+                except Exception:
                     self._schedule_idle_restart(
                         idle_for=idle_for, source="idle monitor retry failed"
                     )
@@ -668,7 +697,7 @@ class WebSocketClient:
         if callable(normaliser):
             try:
                 nodes = normaliser(nodes)  # type: ignore[arg-type]
-            except Exception:  # noqa: BLE001  # pragma: no cover - defensive logging only
+            except Exception:  # pragma: no cover - defensive logging only
                 _LOGGER.debug("WS: normalise_ws_nodes failed; using raw payload")
         if _LOGGER.isEnabledFor(logging.DEBUG):
             changed = self._collect_update_addresses(nodes)
@@ -802,7 +831,7 @@ class WebSocketClient:
                 self.dev_id,
                 {node_type: dict(section) for node_type, section in updates.items()},
             )
-        except Exception:  # noqa: BLE001  # pragma: no cover - defensive logging
+        except Exception:  # pragma: no cover - defensive logging
             _LOGGER.debug("WS: forwarding heater samples failed", exc_info=True)
 
     def _extract_nodes(self, data: Any) -> dict[str, Any] | None:
@@ -1058,7 +1087,7 @@ class WebSocketClient:
                 )
         except asyncio.CancelledError:  # pragma: no cover - task lifecycle
             raise
-        except Exception:  # noqa: BLE001 - defensive logging
+        except Exception:
             _LOGGER.debug("WS: sample subscription setup failed", exc_info=True)
 
     @staticmethod
@@ -1348,7 +1377,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                                 asyncio.CancelledError
                             ):  # pragma: no cover - passthrough
                                 raise
-                            except Exception:  # noqa: BLE001 - defensive logging
+                            except Exception:
                                 _LOGGER.debug(
                                     "WS: maybe_restart_after_write failed: %s",
                                     ws_client.dev_id,
@@ -1469,7 +1498,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                     self._sanitise_url(err.url),
                     err.body_snippet,
                 )
-            except Exception as err:  # noqa: BLE001
+            except Exception as err:
                 _LOGGER.info(
                     "WS: connection error (%s: %s); will retry", type(err).__name__, err
                 )
@@ -1614,7 +1643,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                     await self._client.get_rtc_time(self.dev_id)
                 except asyncio.CancelledError:
                     raise
-                except Exception as err:  # noqa: BLE001
+                except Exception as err:
                     if _LOGGER.isEnabledFor(logging.DEBUG):
                         _LOGGER.debug(
                             "WS: RTC keep-alive failed (%s: %s)",
@@ -1624,7 +1653,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 await asyncio.sleep(interval)
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001  # pragma: no cover - defensive best effort
+        except Exception:  # pragma: no cover - defensive best effort
             if _LOGGER.isEnabledFor(logging.DEBUG):
                 _LOGGER.debug(
                     "WS: RTC keep-alive loop stopped unexpectedly", exc_info=True
@@ -1645,7 +1674,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             if data.startswith(f"5::{self._namespace}:"):
                 try:
                     payload = json.loads(data.split(f"5::{self._namespace}:", 1)[1])
-                except Exception:  # noqa: BLE001
+                except Exception:
                     continue
                 self._handle_event(payload)
                 continue
@@ -1941,7 +1970,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             elif msg.type == aiohttp.WSMsgType.BINARY:
                 try:
                     decoded = codecs.decode(msg.data, "utf-8")
-                except Exception:  # noqa: BLE001
+                except Exception:
                     continue
                 self._stats.frames_total += 1
                 yield decoded
@@ -1988,7 +2017,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                     await self._refresh_subscription(reason="idle monitor retry")
                 except asyncio.CancelledError:  # pragma: no cover - task lifecycle
                     raise
-                except Exception:  # noqa: BLE001
+                except Exception:
                     fallback_idle = (
                         idle_for if idle_for is not None else self._payload_idle_window
                     )
@@ -2006,7 +2035,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             await asyncio.sleep(interval)
             try:
                 await send()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 return
 
     def _socket_base(self) -> str:
