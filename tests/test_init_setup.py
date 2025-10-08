@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import types
 import importlib
 import logging
 import sys
@@ -290,6 +291,11 @@ def termoweb_init(monkeypatch: pytest.MonkeyPatch) -> Any:
             "recalc_poll"
         ],
     )
+
+    async def _stub_async_ensure_diagnostics_platform(_hass: Any) -> None:
+        """Stub diagnostics registration during unit tests."""
+
+    module._async_ensure_diagnostics_platform = _stub_async_ensure_diagnostics_platform
     return module
 
 

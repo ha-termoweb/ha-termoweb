@@ -127,6 +127,7 @@ See instructions in custom_components/termoweb/assets, to install the card and c
 
 - **Login fails:** First confirm credentials at the TermoWeb website (control.termoweb.net / control2.termoweb.net).  
 - **No devices found:** Check the **gateway** is powered and online (LEDs), and that the manufacturer app shows heaters online.  
+- **Collect diagnostics:** In **Settings → Devices & Services → TermoWeb → ⋮**, choose **Download diagnostics** to save an anonymised report (integration/Home Assistant versions, backend brand, node inventory). Attach that JSON file when opening an issue so we can reproduce problems faster.  
 - **Need help?** Open a GitHub issue with brand/model and a brief description. **Never share passwords or private info.**
 
 ---
