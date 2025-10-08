@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMappin
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import dispatcher
@@ -367,7 +367,7 @@ class DispatcherSubscriptionHelper:
         """Initialise the helper for the provided entity."""
 
         self._owner = owner
-        self._unsub: dispatcher.DispatcherHandle | None = None
+        self._unsub: Callable[[], None] | None = None
 
     def subscribe(
         self,
@@ -924,7 +924,7 @@ class HeaterNodeBase(CoordinatorEntity):
         """Expose Home Assistant device metadata for the heater."""
         model = "Accumulator" if self._node_type == "acm" else "Heater"
         return DeviceInfo(
-            identifiers={(DOMAIN, self._dev_id, self._addr)},
+            identifiers=cast(set[tuple[str, str]], {(DOMAIN, self._dev_id, self._addr)}),
             name=self._device_name,
             manufacturer="TermoWeb",
             model=model,
