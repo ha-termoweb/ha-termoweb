@@ -52,16 +52,14 @@ from custom_components.termoweb.installation import (
     ensure_snapshot,
 )
 from custom_components.termoweb.inventory import (
+    addresses_by_node_type as _addresses_by_node_type,
     build_node_inventory as _build_node_inventory,
+    heater_sample_subscription_targets,
+    normalize_heater_addresses,
     normalize_node_addr,
     normalize_node_type,
 )
-from custom_components.termoweb.nodes import (
-    addresses_by_node_type as _addresses_by_node_type,
-    collect_heater_sample_addresses,
-    heater_sample_subscription_targets,
-    normalize_heater_addresses,
-)
+from custom_components.termoweb.nodes import collect_heater_sample_addresses
 from .ws_client import (
     WSStats,
     _WSStatusMixin,

@@ -7,8 +7,10 @@ import pytest
 
 from custom_components.termoweb.heater_inventory import build_heater_inventory_details
 from custom_components.termoweb.installation import InstallationSnapshot, ensure_snapshot
-from custom_components.termoweb.inventory import build_node_inventory
-from custom_components.termoweb.nodes import heater_sample_subscription_targets
+from custom_components.termoweb.inventory import (
+    build_node_inventory,
+    heater_sample_subscription_targets,
+)
 
 
 def _make_snapshot(

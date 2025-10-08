@@ -6,8 +6,13 @@ from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from .inventory import Node, normalize_node_addr, normalize_node_type
-from .nodes import HEATER_NODE_TYPES, build_heater_address_map
+from .inventory import (
+    Node,
+    build_heater_address_map,
+    normalize_node_addr,
+    normalize_node_type,
+)
+from .nodes import HEATER_NODE_TYPES
 
 
 @dataclass(slots=True)
