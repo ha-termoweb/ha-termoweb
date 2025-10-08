@@ -384,11 +384,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     self._record_frame(timestamp=now)
                     while data:
                         if data == "2":
-                            _LOGGER.debug("WS (ducaheat): <- EIO 2 (ping) -> EIO 3 (pong)")
                             await ws.send_str("3")
                             break
                         if data == "3":
-                            _LOGGER.debug("WS (ducaheat): <- 3 (pong)")
                             self._update_status("healthy")
                             break
                         if not data.startswith("4"):
@@ -427,22 +425,15 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                             break
                         payload = data[1:]
                         if payload == "2":
-                            _LOGGER.debug("WS (ducaheat): <- SIO 2 (ping) -> SIO 3 (pong)")
                             await ws.send_str("3")
                             break
                         if payload == "3":
-                            _LOGGER.debug("WS (ducaheat): <- SIO 3 (pong)")
                             self._update_status("healthy")
                             break
                         if payload.startswith("2/"):
                             ns_payload = payload[1:]
                             ns, sep, body = ns_payload.partition(",")
                             if not sep or body in {"", "[]", "[\"ping\"]"}:
-                                _LOGGER.debug(
-                                    "WS (ducaheat): <- SIO 2%s (ping) -> SIO 3%s (pong)",
-                                    ns,
-                                    ns,
-                                )
                                 await ws.send_str("3" + ns)
                                 break
 
@@ -469,7 +460,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                         _LOGGER.debug("WS (ducaheat): <- SIO 42 event=%s args_len=%d", evt, len(args))
 
                         if evt == "message" and args and args[0] == "ping":
-                            _LOGGER.debug("WS (ducaheat): app ping -> pong")
                             await self._emit_sio("message", "pong")
                             break
 
