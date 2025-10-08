@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import types
 import importlib
 import logging
 import sys
@@ -80,6 +81,78 @@ class BaseFakeClient:
     async def get_nodes(self, dev_id: str) -> dict[str, Any]:
         self.get_nodes_calls.append(dev_id)
         return {}
+
+
+def test_async_ensure_diagnostics_platform_registers() -> None:
+    """Diagnostics helper registers when the diagnostics component is ready."""
+
+    module = importlib.reload(
+        importlib.import_module("custom_components.termoweb.__init__")
+    )
+
+    async def _exercise() -> None:
+        original_diag = sys.modules.get("homeassistant.components.diagnostics")
+        diag_module = types.ModuleType("homeassistant.components.diagnostics")
+        diag_key = object()
+        captured: dict[str, Any] = {}
+
+        def _register(_hass: Any, domain: str, platform: Any) -> None:
+            captured["domain"] = domain
+            captured["platform"] = platform
+
+        diag_module.DOMAIN = "diagnostics"
+        diag_module._DIAGNOSTICS_DATA = diag_key
+        diag_module._register_diagnostics_platform = _register
+        diag_module.async_redact_data = lambda data, _keys: data
+        components_pkg = sys.modules.setdefault(
+            "homeassistant.components", types.ModuleType("homeassistant.components")
+        )
+        original_pkg_diag = getattr(components_pkg, "diagnostics", None)
+        setattr(components_pkg, "diagnostics", diag_module)
+        sys.modules["homeassistant.components.diagnostics"] = diag_module
+
+        class DummyBus:
+            def __init__(self) -> None:
+                self._listeners: list[Callable[[Any], Any]] = []
+
+            def async_listen(
+                self, _event: str, callback: Callable[[Any], Any]
+            ) -> Callable[[], None]:
+                """Register an event listener."""
+
+                self._listeners.append(callback)
+
+                def _unsubscribe() -> None:
+                    """Remove the previously registered listener."""
+
+                    if callback in self._listeners:
+                        self._listeners.remove(callback)
+
+                return _unsubscribe
+
+        hass = SimpleNamespace(data={diag_key: {}}, bus=DummyBus())
+
+        await module._async_ensure_diagnostics_platform(hass)
+
+        if "domain" not in captured:
+            event = SimpleNamespace(data={module.ATTR_COMPONENT: diag_module.DOMAIN})
+            for listener in list(hass.bus._listeners):
+                await listener(event)
+
+        assert captured["domain"] == module.DOMAIN
+        assert captured["platform"].__name__.endswith("diagnostics")
+
+        if original_pkg_diag is not None:
+            setattr(components_pkg, "diagnostics", original_pkg_diag)
+        elif hasattr(components_pkg, "diagnostics"):
+            delattr(components_pkg, "diagnostics")
+
+        if original_diag is not None:
+            sys.modules["homeassistant.components.diagnostics"] = original_diag
+        else:
+            sys.modules.pop("homeassistant.components.diagnostics", None)
+
+    asyncio.run(_exercise())
 
 def test_create_rest_client_selects_brand(
     termoweb_init: Any,
@@ -162,6 +235,11 @@ def termoweb_init(monkeypatch: pytest.MonkeyPatch) -> Any:
             "recalc_poll"
         ],
     )
+
+    async def _stub_async_ensure_diagnostics_platform(_hass: Any) -> None:
+        """Stub diagnostics registration during unit tests."""
+
+    module._async_ensure_diagnostics_platform = _stub_async_ensure_diagnostics_platform
     return module
 
 

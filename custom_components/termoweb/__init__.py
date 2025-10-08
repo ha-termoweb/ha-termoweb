@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 from collections import Counter
 from collections.abc import Awaitable, Iterable, Mapping, MutableMapping
 from datetime import timedelta
 import logging
-from typing import Any
+import sys
+from typing import Any, Final
 
 from aiohttp import ClientError
 from homeassistant.config_entries import ConfigEntry
@@ -15,6 +17,10 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+try:  # pragma: no cover - fallback for test stubs
+    from homeassistant.setup import ATTR_COMPONENT
+except ImportError:  # pragma: no cover - tests provide minimal attributes
+    ATTR_COMPONENT = "component"
 
 from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend import Backend, DucaheatRESTClient, WsClientProto, create_backend
@@ -43,15 +49,76 @@ from .nodes import build_node_inventory
 from .utils import async_get_integration_version as _async_get_integration_version
 
 try:  # pragma: no cover - fallback for test stubs
-    from homeassistant.const import EVENT_HOMEASSISTANT_STOP
-except ImportError:  # pragma: no cover - tests provide a minimal const module
+    from homeassistant.const import EVENT_COMPONENT_LOADED, EVENT_HOMEASSISTANT_STOP
+except ImportError:  # pragma: no cover - tests provide minimal constants
+    EVENT_COMPONENT_LOADED = "component_loaded"
     EVENT_HOMEASSISTANT_STOP = "homeassistant_stop"
+
+DIAGNOSTICS_HELPER_KEY: Final = f"{DOMAIN}_diagnostics"
+DIAGNOSTICS_REGISTERED_FLAG: Final = "registered"
+DIAGNOSTICS_UNSUB_FLAG: Final = "unsub"
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["button", "binary_sensor", "climate", "select", "sensor"]
 
 reset_samples_rate_limit_state()
+
+
+async def _async_ensure_diagnostics_platform(hass: HomeAssistant) -> None:
+    """Ensure the diagnostics platform registers once the component is ready."""
+
+    state = hass.data.setdefault(DIAGNOSTICS_HELPER_KEY, {})
+    if state.get(DIAGNOSTICS_REGISTERED_FLAG):
+        return
+
+    try:
+        from homeassistant.components import diagnostics as diagnostics_component
+    except ImportError:  # pragma: no cover - diagnostics component unavailable
+        return
+
+    diagnostics_key = getattr(diagnostics_component, "_DIAGNOSTICS_DATA", None)
+    register = getattr(
+        diagnostics_component, "_register_diagnostics_platform", None
+    )
+    if diagnostics_key is None or register is None:  # pragma: no cover - API change
+        return
+
+    module_name = f"{__package__}.diagnostics"
+    diagnostics_module = sys.modules.get(module_name)
+    if diagnostics_module is None:
+        diagnostics_module = importlib.import_module(module_name)
+
+    async def _attempt_register(_event: Any | None = None) -> None:
+        """Register diagnostics when the diagnostics integration is available."""
+
+        if diagnostics_key not in hass.data:
+            return
+        register(hass, DOMAIN, diagnostics_module)
+        state[DIAGNOSTICS_REGISTERED_FLAG] = True
+        unsub = state.pop(DIAGNOSTICS_UNSUB_FLAG, None)
+        if unsub is not None:
+            try:
+                unsub()
+            except Exception:  # pragma: no cover - defensive cleanup
+                _LOGGER.debug("Failed to unsubscribe diagnostics listener", exc_info=True)
+
+    if diagnostics_key in hass.data:
+        await _attempt_register()
+        if state.get(DIAGNOSTICS_REGISTERED_FLAG):
+            return
+
+    async def _handle_component_loaded(event: Any) -> None:
+        """Attempt diagnostics registration when diagnostics loads later."""
+
+        component = getattr(event, "data", {}).get(ATTR_COMPONENT) if event else None
+        if component != diagnostics_component.DOMAIN:
+            return
+        await _attempt_register(event)
+
+    state[DIAGNOSTICS_UNSUB_FLAG] = hass.bus.async_listen(
+        EVENT_COMPONENT_LOADED, _handle_component_loaded
+    )
 
 def create_rest_client(
     hass: HomeAssistant, username: str, password: str, brand: str
@@ -195,6 +262,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     debug_enabled = bool(entry.options.get("debug", entry.data.get("debug", False)))
 
     hass.data.setdefault(DOMAIN, {})
+    await _async_ensure_diagnostics_platform(hass)
     hass.data[DOMAIN][entry.entry_id] = data = {
         "backend": backend,
         "client": backend.client,
@@ -497,6 +565,19 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if ok and domain_data:
         domain_data.pop(entry.entry_id, None)
+
+    if ok and domain_data is not None and not domain_data:
+        diag_state = hass.data.pop(DIAGNOSTICS_HELPER_KEY, None)
+        if diag_state:
+            unsub = diag_state.pop(DIAGNOSTICS_UNSUB_FLAG, None)
+            if callable(unsub):
+                try:
+                    unsub()
+                except Exception:  # pragma: no cover - defensive cleanup
+                    _LOGGER.debug(
+                        "Failed to remove diagnostics listener on unload",
+                        exc_info=True,
+                    )
 
     return ok
 
