@@ -81,7 +81,6 @@ class BaseFakeClient:
         self.get_nodes_calls.append(dev_id)
         return {}
 
-
 def test_create_rest_client_selects_brand(
     termoweb_init: Any,
     stub_hass: HomeAssistant,

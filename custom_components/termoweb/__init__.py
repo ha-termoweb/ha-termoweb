@@ -53,7 +53,6 @@ PLATFORMS = ["button", "binary_sensor", "climate", "select", "sensor"]
 
 reset_samples_rate_limit_state()
 
-
 def create_rest_client(
     hass: HomeAssistant, username: str, password: str, brand: str
 ) -> RESTClient:
@@ -106,7 +105,7 @@ async def _async_import_energy_history(
     )
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  # noqa: C901
     """Set up the TermoWeb integration for a config entry."""
     username = entry.data["username"]
     password = entry.data["password"]
