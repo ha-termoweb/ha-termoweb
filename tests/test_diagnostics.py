@@ -114,21 +114,10 @@ def test_diagnostics_uses_snapshot_fallback(monkeypatch: pytest.MonkeyPatch) -> 
         "snapshot": snapshot,
     }
 
-    recorded: dict[str, Any] = {}
-
-    async def fake_version(_hass: HomeAssistant) -> str:
-        recorded["called"] = True
-        return "9.9.9"
-
-    monkeypatch.setattr(
-        "custom_components.termoweb.diagnostics.async_get_integration_version",
-        fake_version,
-    )
-
     diagnostics = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
 
-    assert recorded["called"] is True
-    assert diagnostics["integration"]["version"] == "9.9.9"
+    assert hass.integration_requests == [DOMAIN]
+    assert diagnostics["integration"]["version"] == "test-version"
     assert diagnostics["integration"]["brand"] == "TermoWeb"
     assert diagnostics["installation"]["node_inventory"] == [
         {"name": "Heater Two", "addr": "5", "type": "htr"},
@@ -143,21 +132,10 @@ def test_diagnostics_without_record(monkeypatch: pytest.MonkeyPatch) -> None:
     hass = HomeAssistant()
     entry = ConfigEntry("entry-three", data={})
 
-    calls: dict[str, int] = {}
-
-    async def fake_version(_hass: HomeAssistant) -> str:
-        calls["count"] = calls.get("count", 0) + 1
-        return "0.0.1"
-
-    monkeypatch.setattr(
-        "custom_components.termoweb.diagnostics.async_get_integration_version",
-        fake_version,
-    )
-
     diagnostics = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
 
-    assert calls["count"] == 1
-    assert diagnostics["integration"]["version"] == "0.0.1"
+    assert hass.integration_requests == [DOMAIN]
+    assert diagnostics["integration"]["version"] == "test-version"
     assert diagnostics["integration"]["brand"] == "TermoWeb"
     assert diagnostics["home_assistant"]["version"] == "unknown"
     assert "time_zone" not in diagnostics["home_assistant"]

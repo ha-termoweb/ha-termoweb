@@ -144,10 +144,15 @@ def test_async_ensure_diagnostics_platform_registers(
     hass_key = object()
     diagnostics_module.async_register_diagnostics_platform = _async_register
     diagnostics_module._register_diagnostics_platform = _sync_register
-    diagnostics_module._DIAGNOSTICS_DATA = hass_key
+    diagnostics_module.DIAGNOSTICS_DATA = hass_key
+
+    platform_module = types.ModuleType("termoweb_diagnostics_stub")
 
     monkeypatch.setitem(
         sys.modules, "homeassistant.components.diagnostics", diagnostics_module
+    )
+    monkeypatch.setitem(
+        sys.modules, "custom_components.termoweb.diagnostics", platform_module
     )
 
     asyncio.run(termoweb_init._async_ensure_diagnostics_platform(stub_hass))
@@ -159,6 +164,7 @@ def test_async_ensure_diagnostics_platform_registers(
 
     diagnostics_calls.clear()
     del diagnostics_module.async_register_diagnostics_platform
+    stub_hass.data.clear()
     stub_hass.data[hass_key] = SimpleNamespace(platforms={})
 
     asyncio.run(termoweb_init._async_ensure_diagnostics_platform(stub_hass))
@@ -167,8 +173,23 @@ def test_async_ensure_diagnostics_platform_registers(
     ]
 
     diagnostics_calls.clear()
-    stub_hass.data = {diagnostics_module.DOMAIN: SimpleNamespace(platforms={})}
-    monkeypatch.delattr(diagnostics_module, "_DIAGNOSTICS_DATA", raising=False)
+    del diagnostics_module.DIAGNOSTICS_DATA
+
+    for key_name in ("DATA_DIAGNOSTICS", "_DIAGNOSTICS_DATA"):
+        key = object()
+        setattr(diagnostics_module, key_name, key)
+        stub_hass.data.clear()
+        stub_hass.data[key] = SimpleNamespace(platforms={})
+
+        asyncio.run(termoweb_init._async_ensure_diagnostics_platform(stub_hass))
+        assert diagnostics_calls == [
+            ("sync", stub_hass, termoweb_init.DOMAIN, diagnostics_platform)
+        ]
+        diagnostics_calls.clear()
+        delattr(diagnostics_module, key_name)
+
+    stub_hass.data.clear()
+    stub_hass.data[diagnostics_module.DOMAIN] = SimpleNamespace(platforms={})
 
     asyncio.run(termoweb_init._async_ensure_diagnostics_platform(stub_hass))
     assert diagnostics_calls == [

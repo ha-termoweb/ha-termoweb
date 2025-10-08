@@ -461,11 +461,19 @@ async def _async_ensure_diagnostics_platform(hass: HomeAssistant) -> None:
     if not callable(register_sync):
         return
 
-    data_key = getattr(diagnostics, "_DIAGNOSTICS_DATA", None)
-    diagnostics_data = hass.data.get(data_key) if data_key is not None else None
-    if diagnostics_data is None:
-        legacy_key = getattr(diagnostics, "DOMAIN", None)
-        diagnostics_data = hass.data.get(legacy_key) if legacy_key is not None else None
+    diagnostics_data = None
+    for key_name in (
+        "DIAGNOSTICS_DATA",
+        "_DIAGNOSTICS_DATA",
+        "DATA_DIAGNOSTICS",
+        "DOMAIN",
+    ):
+        data_key = getattr(diagnostics, key_name, None)
+        if data_key is None:
+            continue
+        diagnostics_data = hass.data.get(data_key)
+        if diagnostics_data is not None:
+            break
     if diagnostics_data is None:
         return
 
