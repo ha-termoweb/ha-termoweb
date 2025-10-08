@@ -16,9 +16,12 @@ _install_stubs()
 
 import custom_components.termoweb.coordinator as coordinator_module
 import custom_components.termoweb.installation as installation_module
+import custom_components.termoweb.inventory as inventory_module
 import custom_components.termoweb.nodes as nodes_module
 from custom_components.termoweb.inventory import (
     AccumulatorNode,
+    _existing_nodes_map,
+    build_node_inventory,
     HeaterNode,
     Node,
     PowerMonitorNode,
@@ -26,11 +29,7 @@ from custom_components.termoweb.inventory import (
     normalize_node_addr,
     normalize_node_type,
 )
-from custom_components.termoweb.nodes import (
-    build_node_inventory,
-    heater_sample_subscription_targets,
-    _existing_nodes_map,
-)
+from custom_components.termoweb.nodes import heater_sample_subscription_targets
 from homeassistant.core import HomeAssistant
 
 
@@ -198,12 +197,12 @@ def test_iter_snapshot_sections_skips_invalid_entries(
     }
 
     monkeypatch.setattr(
-        nodes_module,
+        inventory_module,
         "_iter_snapshot_section",
         lambda node_type, section: ({"addr": 5}, {"addr": None}),
     )
 
-    assert list(nodes_module._iter_snapshot_sections(sections, seen)) == []
+    assert list(inventory_module._iter_snapshot_sections(sections, seen)) == []
 
 
 def test_collect_snapshot_addresses_handles_mixed_values() -> None:
@@ -213,7 +212,7 @@ def test_collect_snapshot_addresses_handles_mixed_values() -> None:
         "extra": {"2": {"label": "Garage"}, "3": "Loft"},
     }
 
-    addresses = nodes_module._collect_snapshot_addresses(section)
+    addresses = inventory_module._collect_snapshot_addresses(section)
 
     assert sorted(addresses) == ["1", "2", "3", "None"]
     assert addresses["1"][0]["name"] == "Living"
@@ -226,7 +225,7 @@ def test_extract_snapshot_name_handles_repeated_payloads() -> None:
     shared: dict[str, Any] = {}
     payloads = [shared, shared, {"title": "Kitchen"}]
 
-    result = nodes_module._extract_snapshot_name(payloads)
+    result = inventory_module._extract_snapshot_name(payloads)
 
     assert result == "Kitchen"
 

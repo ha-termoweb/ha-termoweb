@@ -41,7 +41,7 @@ from .energy import (
     reset_samples_rate_limit_state,
 )
 from .installation import InstallationSnapshot
-from .nodes import build_node_inventory
+from .inventory import build_node_inventory
 from .utils import async_get_integration_version as _async_get_integration_version
 
 try:  # pragma: no cover - fallback for test stubs
