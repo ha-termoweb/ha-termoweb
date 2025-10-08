@@ -11,6 +11,7 @@ import logging
 import random
 import string
 import time
+from collections.abc import MutableMapping
 from typing import TYPE_CHECKING, Any, Mapping
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
@@ -222,6 +223,73 @@ class _WSStatusMixin:
         )
 
 
+@dataclass
+class NodeDispatchContext:
+    """Container for shared node dispatch metadata."""
+
+    raw_nodes: Any
+    inventory: list[Any]
+    addr_map: dict[str, list[str]]
+    unknown_types: set[str]
+    record: MutableMapping[str, Any] | None
+    snapshot: InstallationSnapshot | None
+
+
+def _prepare_nodes_dispatch(
+    hass: HomeAssistant,
+    *,
+    entry_id: str,
+    coordinator: Any,
+    raw_nodes: Any,
+) -> NodeDispatchContext:
+    """Normalise node payload data for downstream websocket dispatch."""
+
+    record_container = hass.data.get(DOMAIN, {})
+    record = record_container.get(entry_id) if isinstance(record_container, dict) else None
+    record_mapping: MutableMapping[str, Any] | None = (
+        record if isinstance(record, MutableMapping) else None
+    )
+
+    snapshot_obj = ensure_snapshot(record)
+    if isinstance(snapshot_obj, InstallationSnapshot):
+        snapshot_obj.update_nodes(raw_nodes)
+        inventory = list(snapshot_obj.inventory)
+        if record_mapping is not None:
+            record_mapping["node_inventory"] = list(inventory)
+    else:
+        source_mapping: Mapping[str, Any] = (
+            record_mapping if record_mapping is not None else {}
+        )
+        inventory = list(ensure_node_inventory(source_mapping, nodes=raw_nodes))
+
+    addr_map_raw, unknown_types = addresses_by_node_type(
+        inventory, known_types=NODE_CLASS_BY_TYPE
+    )
+    addr_map = {node_type: list(addrs) for node_type, addrs in addr_map_raw.items()}
+
+    if hasattr(coordinator, "update_nodes"):
+        coordinator.update_nodes(raw_nodes, inventory)
+
+    normalized_unknown: set[str] = {
+        node_str
+        for node_str in (
+            str(node_type).strip()
+            for node_type in unknown_types
+            if node_type is not None
+        )
+        if node_str
+    }
+
+    return NodeDispatchContext(
+        raw_nodes=raw_nodes,
+        inventory=inventory,
+        addr_map=addr_map,
+        unknown_types=normalized_unknown,
+        record=record_mapping,
+        snapshot=snapshot_obj if isinstance(snapshot_obj, InstallationSnapshot) else None,
+    )
+
+
 class _WSCommon(_WSStatusMixin):
     """Shared helpers for websocket clients."""
 
@@ -232,24 +300,17 @@ class _WSCommon(_WSStatusMixin):
 
     def _dispatch_nodes(self, payload: dict[str, Any]) -> None:
         raw_nodes = payload.get("nodes") if "nodes" in payload else payload
-        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-        snapshot_obj = ensure_snapshot(record)
-        if isinstance(snapshot_obj, InstallationSnapshot):
-            snapshot_obj.update_nodes(raw_nodes)
-            inventory = snapshot_obj.inventory
-            if isinstance(record, dict):
-                record["node_inventory"] = list(inventory)
-        else:
-            record_map: Mapping[str, Any] = record if isinstance(record, Mapping) else {}
-            inventory = ensure_node_inventory(record_map, nodes=raw_nodes)
-        addr_map, _ = addresses_by_node_type(inventory, known_types=NODE_CLASS_BY_TYPE)
-        if hasattr(self._coordinator, "update_nodes"):
-            self._coordinator.update_nodes(raw_nodes, inventory)
+        context = _prepare_nodes_dispatch(
+            self.hass,
+            entry_id=self.entry_id,
+            coordinator=self._coordinator,
+            raw_nodes=raw_nodes,
+        )
         payload_copy = {
             "dev_id": self.dev_id,
             "node_type": None,
-            "nodes": deepcopy(raw_nodes),
-            "addr_map": {t: list(a) for t, a in addr_map.items()},
+            "nodes": deepcopy(context.raw_nodes),
+            "addr_map": {t: list(a) for t, a in context.addr_map.items()},
         }
         async_dispatcher_send(self.hass, signal_ws_data(self.entry_id), payload_copy)
 
