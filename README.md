@@ -102,17 +102,6 @@ ha-termoweb/ha-termoweb
 5) Adjust the **Poll interval** if you want to change how often Home Assistant refreshes data from the cloud (default is fine for most users).
 6) Complete the wizard. Heaters will appear under **Devices**; add them to dashboards or use them in automations.
 
-## Debugging
-
-Add the following lines to your HA's configuration.yaml to have debug messages appear in home-assistant.log:
-
-```
-logger:
-  default: warning
-  logs:
-    custom_components.termoweb: debug
-```
-
 ---
 
 ## Tips
@@ -151,6 +140,13 @@ See instructions in custom_components/termoweb/assets, to install the card and c
 
 ## Development
 
+Setup your environment:
+
+```bash
+uv venv -p 3.13
+uv pip install --all-extras -r pyproject.toml -p 3.13
+```
+
 Run tests with coverage:
 
 ```bash
@@ -161,6 +157,11 @@ See [`docs/developer-notes.md`](docs/developer-notes.md) for backend write seman
 implementation details for contributors.
 
 ---
+
+## Debugging and Logs
+
+See DEBUG.md for information on how to turn on debugging, and download logs and diagnostics.
+
 
 ## Search keywords
 
