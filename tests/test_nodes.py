@@ -29,7 +29,7 @@ from custom_components.termoweb.inventory import (
     normalize_node_addr,
     normalize_node_type,
 )
-from custom_components.termoweb.nodes import heater_sample_subscription_targets
+from custom_components.termoweb.inventory import heater_sample_subscription_targets
 from homeassistant.core import HomeAssistant
 
 

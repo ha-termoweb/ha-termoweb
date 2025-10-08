@@ -9,17 +9,17 @@ from custom_components.termoweb import inventory as inventory_module, nodes as n
 from custom_components.termoweb.const import DOMAIN
 import custom_components.termoweb.identifiers as identifiers_module
 from custom_components.termoweb.identifiers import build_heater_energy_unique_id
-from custom_components.termoweb.nodes import (
-    HEATER_NODE_TYPES,
-    addresses_by_node_type,
-    ensure_node_inventory,
-    normalize_heater_addresses,
-    parse_heater_energy_unique_id,
-)
 from custom_components.termoweb.inventory import (
+    addresses_by_node_type,
     build_node_inventory,
+    normalize_heater_addresses,
     normalize_node_addr,
     normalize_node_type,
+    parse_heater_energy_unique_id,
+)
+from custom_components.termoweb.nodes import (
+    HEATER_NODE_TYPES,
+    ensure_node_inventory,
 )
 from custom_components.termoweb.utils import (
     _entry_gateway_record,

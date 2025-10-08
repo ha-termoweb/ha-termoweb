@@ -16,8 +16,11 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from custom_components.termoweb import identifiers as identifiers_module
-from custom_components.termoweb import nodes as nodes_module
+from custom_components.termoweb import (
+    identifiers as identifiers_module,
+    inventory as inventory_module,
+    nodes as nodes_module,
+)
 from custom_components.termoweb.installation import InstallationSnapshot
 
 from conftest import _install_stubs
@@ -1797,7 +1800,7 @@ def test_import_energy_history_requested_map_filters(
             )
 
         monkeypatch.setattr(
-            nodes_module, "addresses_by_node_type", fake_addresses_by_node_type
+            inventory_module, "addresses_by_node_type", fake_addresses_by_node_type
         )
 
         original_normalize = energy_mod.normalize_heater_addresses
@@ -1983,7 +1986,7 @@ def test_import_energy_history_resets_requested_progress(
             return ({"pmo": ["X"]}, set())
 
         monkeypatch.setattr(
-            nodes_module, "addresses_by_node_type", fake_addresses_by_node_type
+            inventory_module, "addresses_by_node_type", fake_addresses_by_node_type
         )
 
         fake_now = 5 * 86_400
