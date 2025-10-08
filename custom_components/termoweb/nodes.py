@@ -498,19 +498,6 @@ def ensure_node_inventory(
         mutable_record["node_inventory"] = []
 
     return []
-
-
-def build_heater_energy_unique_id(dev_id: Any, node_type: Any, addr: Any) -> str:
-    """Return the canonical unique ID for a heater energy sensor."""
-
-    dev = normalize_node_addr(dev_id)
-    node = normalize_node_type(node_type)
-    address = normalize_node_addr(addr)
-    if not dev or not node or not address:
-        raise ValueError("dev_id, node_type and addr must be provided")
-    return f"{DOMAIN}:{dev}:{node}:{address}:energy"
-
-
 def parse_heater_energy_unique_id(unique_id: str) -> tuple[str, str, str] | None:
     """Parse a heater energy sensor unique ID into its components."""
 

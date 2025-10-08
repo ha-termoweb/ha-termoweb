@@ -14,7 +14,6 @@ from .heater import (
     BOOST_DURATION_OPTIONS,
     DEFAULT_BOOST_DURATION,
     HeaterNodeBase,
-    build_heater_entity_unique_id,
     get_boost_runtime_minutes,
     iter_boostable_heater_nodes,
     log_skipped_nodes,
@@ -22,6 +21,7 @@ from .heater import (
     resolve_boost_runtime_minutes,
     set_boost_runtime_minutes,
 )
+from .identifiers import build_heater_entity_unique_id
 
 _LOGGER = logging.getLogger(__name__)
 

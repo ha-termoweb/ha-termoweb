@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from custom_components.termoweb import identifiers as identifiers_module
 from custom_components.termoweb import nodes as nodes_module
 from custom_components.termoweb.installation import InstallationSnapshot
 
@@ -517,7 +518,7 @@ def test_register_import_service_uses_module_asyncio(
         entry = ConfigEntry("cache-test", options={})
         entries[entry.entry_id] = entry
 
-        uid = nodes_module.build_heater_energy_unique_id("dev", "htr", "A")
+        uid = identifiers_module.build_heater_energy_unique_id("dev", "htr", "A")
         ent_reg.add(
             "sensor.dev_A_energy",
             "sensor",
@@ -869,9 +870,9 @@ def test_async_import_energy_history_skips_invalid_samples(
             }
         }
 
-        uid_c = nodes_module.build_heater_energy_unique_id("dev", "htr", "C")
+        uid_c = identifiers_module.build_heater_energy_unique_id("dev", "htr", "C")
         ent_reg.add("sensor.dev_C_energy", "sensor", const.DOMAIN, uid_c, "C energy")
-        uid_d = nodes_module.build_heater_energy_unique_id("dev", "htr", "D")
+        uid_d = identifiers_module.build_heater_energy_unique_id("dev", "htr", "D")
         ent_reg.add("sensor.dev_D_energy", "sensor", const.DOMAIN, uid_d, "D energy")
 
         store = Mock()
@@ -945,7 +946,7 @@ def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
             "node_inventory": _inventory_for(mod, ["A"]),
             "config_entry": entry,
         }
-        uid = nodes_module.build_heater_energy_unique_id("dev", "htr", "A")
+        uid = identifiers_module.build_heater_energy_unique_id("dev", "htr", "A")
         ent_reg.add("sensor.dev_A_energy", "sensor", const.DOMAIN, uid, "A energy")
 
         fake_now = 4 * 86_400
@@ -1046,7 +1047,7 @@ def test_import_energy_history_with_existing_stats(
             "node_inventory": _inventory_for(mod, ["A"]),
             "config_entry": entry,
         }
-        uid = nodes_module.build_heater_energy_unique_id("dev", "htr", "A")
+        uid = identifiers_module.build_heater_energy_unique_id("dev", "htr", "A")
         ent_reg.add("sensor.dev_A_energy", "sensor", const.DOMAIN, uid, "A energy")
 
         fake_now = 4 * 86_400
@@ -1144,7 +1145,7 @@ def test_import_energy_history_clears_overlap(monkeypatch: pytest.MonkeyPatch) -
             "node_inventory": _inventory_for(mod, ["A"]),
             "config_entry": entry,
         }
-        uid = nodes_module.build_heater_energy_unique_id("dev", "htr", "A")
+        uid = identifiers_module.build_heater_energy_unique_id("dev", "htr", "A")
         ent_reg.add("sensor.dev_A_energy", "sensor", const.DOMAIN, uid, "A energy")
 
         fake_now = 4 * 86_400
@@ -1248,7 +1249,7 @@ def test_import_energy_history_legacy(monkeypatch: pytest.MonkeyPatch) -> None:
             "node_inventory": _inventory_for(mod, ["A"]),
             "config_entry": entry,
         }
-        uid = nodes_module.build_heater_energy_unique_id("dev", "htr", "A")
+        uid = identifiers_module.build_heater_energy_unique_id("dev", "htr", "A")
         ent_reg.add("sensor.dev_A_energy", "sensor", const.DOMAIN, uid, "A energy")
 
         fake_now = 2 * 86_400
@@ -1329,7 +1330,7 @@ def test_import_history_uses_last_stats_and_clears_overlap(
             "config_entry": entry,
         }
 
-        uid = nodes_module.build_heater_energy_unique_id("dev", "htr", "A")
+        uid = identifiers_module.build_heater_energy_unique_id("dev", "htr", "A")
         ent_reg.add("sensor.dev_A_energy", "sensor", const.DOMAIN, uid, "A energy")
 
         fake_now = 5 * 86_400
@@ -1436,7 +1437,7 @@ def test_import_history_uses_sync_recorder_helpers(
             "config_entry": entry,
         }
 
-        uid = nodes_module.build_heater_energy_unique_id("dev", "htr", "A")
+        uid = identifiers_module.build_heater_energy_unique_id("dev", "htr", "A")
         ent_reg.add("sensor.dev_A_energy", "sensor", const.DOMAIN, uid, "A energy")
 
         fake_now = 5 * 86_400
@@ -1540,8 +1541,8 @@ def test_import_energy_history_reset_and_subset(
             "node_inventory": _inventory_for(mod, ["A", "B"]),
             "config_entry": entry,
         }
-        uidA = nodes_module.build_heater_energy_unique_id("dev", "htr", "A")
-        uidB = nodes_module.build_heater_energy_unique_id("dev", "htr", "B")
+        uidA = identifiers_module.build_heater_energy_unique_id("dev", "htr", "A")
+        uidB = identifiers_module.build_heater_energy_unique_id("dev", "htr", "B")
         ent_reg.add("sensor.dev_A_energy", "sensor", const.DOMAIN, uidA, "A energy")
         ent_reg.add("sensor.dev_B_energy", "sensor", const.DOMAIN, uidB, "B energy")
 
@@ -1645,8 +1646,8 @@ def test_import_energy_history_reset_all_progress(
             "config_entry": entry,
         }
 
-        uid_a = nodes_module.build_heater_energy_unique_id("dev", "htr", "A")
-        uid_b = nodes_module.build_heater_energy_unique_id("dev", "htr", "B")
+        uid_a = identifiers_module.build_heater_energy_unique_id("dev", "htr", "A")
+        uid_b = identifiers_module.build_heater_energy_unique_id("dev", "htr", "B")
         ent_reg.add(
             "sensor.dev_A_energy",
             "sensor",
@@ -1809,8 +1810,8 @@ def test_import_energy_history_requested_map_filters(
             energy_mod, "normalize_heater_addresses", fake_normalize
         )
 
-        uid_a = nodes_module.build_heater_energy_unique_id("dev", "htr", "A")
-        uid_b_legacy = nodes_module.build_heater_energy_unique_id("dev", "htr", "B")
+        uid_a = identifiers_module.build_heater_energy_unique_id("dev", "htr", "A")
+        uid_b_legacy = identifiers_module.build_heater_energy_unique_id("dev", "htr", "B")
         ent_reg.add(
             "sensor.dev_A_energy",
             "sensor",
@@ -2248,8 +2249,8 @@ def test_service_dispatches_import_tasks(monkeypatch: pytest.MonkeyPatch) -> Non
         rec = hass.data[const.DOMAIN][entry.entry_id]
         rec["node_inventory"] = _inventory_for(mod, {"htr": ["A"], "acm": ["B"]})
 
-        uid_a = nodes_module.build_heater_energy_unique_id("dev", "htr", "A")
-        uid_b = nodes_module.build_heater_energy_unique_id("dev", "acm", "B")
+        uid_a = identifiers_module.build_heater_energy_unique_id("dev", "htr", "A")
+        uid_b = identifiers_module.build_heater_energy_unique_id("dev", "acm", "B")
         ent_reg.add(
             "sensor.dev_A_energy",
             "sensor",
@@ -2408,7 +2409,7 @@ def test_service_filters_invalid_entities(monkeypatch: pytest.MonkeyPatch) -> No
             "sensor.no_entry",
             "sensor",
             const.DOMAIN,
-            nodes_module.build_heater_energy_unique_id("dev", "htr", "D"),
+            identifiers_module.build_heater_energy_unique_id("dev", "htr", "D"),
             "Missing entry",
             config_entry_id="missing",
         )
@@ -2416,7 +2417,7 @@ def test_service_filters_invalid_entities(monkeypatch: pytest.MonkeyPatch) -> No
             "sensor.no_config",
             "sensor",
             const.DOMAIN,
-            nodes_module.build_heater_energy_unique_id("dev", "htr", "C"),
+            identifiers_module.build_heater_energy_unique_id("dev", "htr", "C"),
             "No config",
         )
 

@@ -7,10 +7,10 @@ import pytest
 
 from custom_components.termoweb import nodes as nodes_module
 from custom_components.termoweb.const import DOMAIN
+from custom_components.termoweb.identifiers import build_heater_energy_unique_id
 from custom_components.termoweb.nodes import (
     HEATER_NODE_TYPES,
     addresses_by_node_type,
-    build_heater_energy_unique_id,
     build_node_inventory,
     ensure_node_inventory,
     normalize_heater_addresses,

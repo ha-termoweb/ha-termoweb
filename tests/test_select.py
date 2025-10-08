@@ -17,8 +17,8 @@ from custom_components.termoweb.heater import (
     get_boost_runtime_minutes,
     iter_boost_button_metadata,
     set_boost_runtime_minutes,
-    build_heater_entity_unique_id,
 )
+from custom_components.termoweb.identifiers import build_heater_entity_unique_id
 from homeassistant.core import HomeAssistant
 
 AccumulatorBoostDurationSelect = select_module.AccumulatorBoostDurationSelect
