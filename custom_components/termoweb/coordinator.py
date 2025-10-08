@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 import logging
 import time
 from time import monotonic as time_mod
-from typing import Any
+from typing import Any, TypeVar
 
 from aiohttp import ClientError
 from homeassistant.core import HomeAssistant
@@ -30,6 +30,20 @@ from .nodes import (
 from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
+
+_DataT = TypeVar("_DataT")
+
+
+class RaiseUpdateFailedCoordinator(DataUpdateCoordinator[_DataT]):
+    """Coordinator that propagates ``UpdateFailed`` to manual refresh callers."""
+
+    async def async_refresh(self) -> None:
+        """Refresh data and raise ``UpdateFailed`` when polling fails."""
+
+        await super().async_refresh()
+        exc = getattr(self, "last_exception", None)
+        if not self.last_update_success and isinstance(exc, UpdateFailed):
+            raise exc
 
 # TTL for pending heater setting confirmations.
 _PENDING_SETTINGS_TTL = 10.0
@@ -91,7 +105,7 @@ def _ensure_heater_section(
 
 
 class StateCoordinator(
-    DataUpdateCoordinator[dict[str, dict[str, Any]]]
+    RaiseUpdateFailedCoordinator[dict[str, dict[str, Any]]]
 ):  # dev_id -> per-device data
     """Polls TermoWeb and exposes a per-device dict used by platforms."""
 
@@ -108,7 +122,7 @@ class StateCoordinator(
         """Initialize the TermoWeb device coordinator."""
         super().__init__(
             hass,
-            logger=_LOGGER,
+            logger=_wrap_logger(_LOGGER),
             name="termoweb",
             update_interval=timedelta(seconds=max(base_interval, MIN_POLL_INTERVAL)),
         )
@@ -909,7 +923,7 @@ class StateCoordinator(
 
 
 class EnergyStateCoordinator(
-    DataUpdateCoordinator[dict[str, dict[str, Any]]]
+    RaiseUpdateFailedCoordinator[dict[str, dict[str, Any]]]
 ):  # dev_id -> per-device data
     """Polls heater energy counters and exposes energy and power per heater."""
 
@@ -923,7 +937,7 @@ class EnergyStateCoordinator(
         """Initialize the heater energy coordinator."""
         super().__init__(
             hass,
-            logger=_LOGGER,
+            logger=_wrap_logger(_LOGGER),
             name="termoweb-htr-energy",
             update_interval=HTR_ENERGY_UPDATE_INTERVAL,
         )
@@ -1225,3 +1239,22 @@ class EnergyStateCoordinator(
 
         if changed:
             dev_data["nodes_by_type"] = nodes_by_type
+def _wrap_logger(logger: Any) -> Any:
+    """Return a logger proxy that exposes ``isEnabledFor`` when missing."""
+
+    if hasattr(logger, "isEnabledFor"):
+        return logger
+
+    class _LoggerProxy:
+        """Proxy that adds ``isEnabledFor`` support for stubbed loggers."""
+
+        def __init__(self, inner: Any) -> None:
+            self._inner = inner
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._inner, name)
+
+        def isEnabledFor(self, _level: int) -> bool:
+            return False
+
+    return _LoggerProxy(logger)

@@ -711,7 +711,12 @@ def _install_stubs() -> None:
                 asyncio.set_event_loop(loop)
             self.loop = loop
             self.loop_thread_id = threading.get_ident()
-            self.data: dict[str, Any] = {"integrations": {}}
+            self._data: dict[str, Any] = {
+                "integrations": {},
+                "components": {},
+                "missing_platforms": {},
+                "preload_platforms": set(),
+            }
             self.integration_requests: list[str] = []
             self.is_running = True
             self.is_stopping = False
@@ -719,6 +724,9 @@ def _install_stubs() -> None:
             self.services = _ServiceRegistry()
             self.bus = _EventBus()
             self.tasks: list[asyncio.Task[Any]] = []
+            self.config = types.SimpleNamespace(
+                recovery_mode=False, safe_mode=False
+            )
             _setup_frame_for_hass(self)
 
         def async_create_task(self, coro: Any) -> asyncio.Task[Any]:
@@ -726,8 +734,55 @@ def _install_stubs() -> None:
             self.tasks.append(task)
             return task
 
+        async def async_add_executor_job(
+            self, func: Callable[..., Any], *args: Any
+        ) -> Any:
+            """Run ``func`` in a background thread for the test harness."""
+
+            return await asyncio.to_thread(func, *args)
+
+        def async_run_hass_job(
+            self, job: Any, *args: Any, background: bool = False
+        ) -> asyncio.Future[Any] | None:
+            """Execute ``job`` immediately, mimicking Home Assistant's scheduler."""
+
+            target = getattr(job, "target", job)
+            result = target(*args)
+            if inspect.isawaitable(result):
+                task = asyncio.tasks.Task(
+                    result,
+                    loop=self.loop,
+                    eager_start=True,  # type: ignore[arg-type]
+                )
+                self.tasks.append(task)
+                return task
+            return None
+
         def verify_event_loop_thread(self, what: str) -> None:
             return None
+
+        @property
+        def data(self) -> dict[str, Any]:
+            """Return the Home Assistant data registry for tests."""
+
+            return self._data
+
+        @data.setter
+        def data(self, value: Any) -> None:
+            """Store core data while preserving required integration caches."""
+
+            base = {
+                "integrations": {},
+                "components": {},
+                "missing_platforms": {},
+                "preload_platforms": set(),
+            }
+            if isinstance(value, dict):
+                merged = dict(base)
+                merged.update(value)
+                self._data = merged
+            else:
+                self._data = value
 
     class ConfigFlow:
         def __init_subclass__(cls, *, domain: str | None = None, **kwargs: Any) -> None:
