@@ -12,7 +12,12 @@ import logging
 from typing import Any
 
 from aiohttp import ClientError
-from homeassistant.config_entries import ConfigEntry
+try:  # pragma: no cover - compatibility shim for older Home Assistant cores
+    from homeassistant.config_entries import ConfigEntry, SupportsDiagnostics
+except ImportError:  # pragma: no cover - tests provide stubbed config entries
+    from homeassistant.config_entries import ConfigEntry  # type: ignore[misc]
+
+    SupportsDiagnostics = None  # type: ignore[assignment]
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client
@@ -119,6 +124,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
 
     await _async_ensure_diagnostics_platform(hass)
+
+    if SupportsDiagnostics is not None and hasattr(entry, "supports_diagnostics"):
+        entry.supports_diagnostics = SupportsDiagnostics.YES
 
     version = await _async_get_integration_version(hass)
 

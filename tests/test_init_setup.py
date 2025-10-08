@@ -80,6 +80,12 @@ class BaseFakeClient:
         self.get_nodes_calls.append(dev_id)
         return {}
 
+
+class DiagnosticsConfigEntry(ConfigEntry):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.supports_diagnostics: Any = None
+
 def test_create_rest_client_selects_brand(
     termoweb_init: Any,
     stub_hass: HomeAssistant,
@@ -506,6 +512,34 @@ def test_async_setup_entry_happy_path(
         termoweb_init.DOMAIN, "import_energy_history"
     )
     import_mock.assert_awaited_once_with(stub_hass, entry)
+
+
+def test_async_setup_entry_sets_supports_diagnostics(
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class DiagnosticsClient(BaseFakeClient):
+        async def list_devices(self) -> list[dict[str, Any]]:
+            return [{"dev_id": "dev-1"}]
+
+    monkeypatch.setattr(termoweb_init, "RESTClient", DiagnosticsClient)
+
+    sentinel = SimpleNamespace(YES=object())
+    monkeypatch.setattr(termoweb_init, "SupportsDiagnostics", sentinel)
+
+    entry = DiagnosticsConfigEntry(
+        "diag", data={"username": "user", "password": "pw"}
+    )
+    stub_hass.config_entries.add(entry)
+
+    assert entry.supports_diagnostics is None
+
+    async def _run() -> bool:
+        result = await termoweb_init.async_setup_entry(stub_hass, entry)
+        await _drain_tasks(stub_hass)
+        return result
+
+    assert asyncio.run(_run()) is True
+    assert entry.supports_diagnostics is sentinel.YES
 
 
 def test_build_heater_address_map_filters_invalid_nodes(termoweb_init: Any) -> None:
