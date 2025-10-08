@@ -14,7 +14,6 @@ from collections.abc import (
 )
 from contextlib import suppress
 from copy import deepcopy
-from dataclasses import dataclass
 from functools import partial, wraps
 import json
 import logging
@@ -63,7 +62,7 @@ from custom_components.termoweb.nodes import (
     normalize_node_addr,
     normalize_node_type,
 )
-from .ws_client import _WSStatusMixin
+from .ws_client import WSStats, _WSStatusMixin
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -75,16 +74,6 @@ _SENSITIVE_PLACEHOLDERS: Mapping[str, tuple[str, Callable[[str | None], str]]] =
     "dev_id": ("{dev_id}", mask_identifier),
     "sid": ("{sid}", mask_identifier),
 }
-
-
-@dataclass
-class WSStats:
-    """Track websocket activity statistics."""
-
-    frames_total: int = 0
-    events_total: int = 0
-    last_event_ts: float = 0.0
-    last_paths: list[str] | None = None
 
 
 class HandshakeError(RuntimeError):
