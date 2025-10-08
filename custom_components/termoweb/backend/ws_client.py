@@ -62,6 +62,7 @@ class WSStats:
     frames_total: int = 0
     events_total: int = 0
     last_event_ts: float = 0.0
+    last_paths: list[str] | None = None
 
 
 class HandshakeError(RuntimeError):
