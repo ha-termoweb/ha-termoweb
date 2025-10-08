@@ -40,6 +40,8 @@ from .ws_client import (
     WSStats,
     _WSCommon,
     _WsLeaseMixin,
+    forward_ws_sample_updates,
+    resolve_ws_update_section,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -735,35 +737,19 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
     def _resolve_update_section(section: str | None) -> tuple[str | None, str | None]:
         """Map a websocket path segment to the node section bucket."""
 
-        if not section:
-            return None, None
-
-        lowered = section.lower()
-        if lowered in {"status", "samples", "settings", "advanced"}:
-            return lowered, None
-        if lowered == "advanced_setup":
-            return "advanced", "advanced_setup"
-        if lowered in {"setup", "prog", "prog_temps", "capabilities"}:
-            return "settings", lowered
-        return "settings", lowered
+        return resolve_ws_update_section(section)
 
     def _forward_sample_updates(self, updates: Mapping[str, Mapping[str, Any]]) -> None:
         """Forward websocket heater sample updates to the energy coordinator."""
 
-        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-        if not isinstance(record, Mapping):
-            return
-        energy_coordinator = record.get("energy_coordinator")
-        handler = getattr(energy_coordinator, "handle_ws_samples", None)
-        if not callable(handler):
-            return
-        try:
-            handler(
-                self.dev_id,
-                {node_type: dict(section) for node_type, section in updates.items()},
-            )
-        except Exception:  # noqa: BLE001  # pragma: no cover - defensive logging
-            _LOGGER.debug("WS (ducaheat): forwarding heater samples failed", exc_info=True)
+        forward_ws_sample_updates(
+            self.hass,
+            self.entry_id,
+            self.dev_id,
+            updates,
+            logger=_LOGGER,
+            log_prefix="WS (ducaheat)",
+        )
 
     async def _subscribe_feeds(self, nodes: Mapping[str, Any] | None) -> int:
         """Subscribe to heater status and sample feeds."""
