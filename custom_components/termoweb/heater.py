@@ -21,10 +21,10 @@ from .boost import (
     coerce_boost_remaining_minutes,
 )
 from .const import DOMAIN, signal_ws_data
-from .heater_inventory import build_heater_inventory_details
 from .installation import InstallationSnapshot, ensure_snapshot
 from .inventory import (
     Node,
+    build_heater_inventory_details,
     build_node_inventory,
     normalize_node_addr,
     normalize_node_type,

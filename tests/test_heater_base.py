@@ -15,9 +15,11 @@ from custom_components.termoweb import heater as heater_module
 from custom_components.termoweb import identifiers as identifiers_module
 from custom_components.termoweb import installation as installation_module
 from custom_components.termoweb.installation import InstallationSnapshot
-from custom_components.termoweb.heater_inventory import build_heater_inventory_details
-from custom_components.termoweb.inventory import HeaterNode
-from custom_components.termoweb.inventory import build_node_inventory
+from custom_components.termoweb.inventory import (
+    HeaterNode,
+    build_heater_inventory_details,
+    build_node_inventory,
+)
 from homeassistant.core import HomeAssistant
 
 HeaterNodeBase = heater_module.HeaterNodeBase
