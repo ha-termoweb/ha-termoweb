@@ -52,6 +52,55 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 _LOGGER = logging.getLogger(__name__)
 
+
+def resolve_ws_update_section(section: str | None) -> tuple[str | None, str | None]:
+    """Map a websocket path segment onto the node section bucket."""
+
+    if not section:
+        return None, None
+
+    lowered = section.lower()
+    if lowered in {"status", "samples", "settings", "advanced"}:
+        return lowered, None
+    if lowered == "advanced_setup":
+        return "advanced", "advanced_setup"
+    if lowered in {"setup", "prog", "prog_temps", "capabilities"}:
+        return "settings", lowered
+    return "settings", lowered
+
+
+def forward_ws_sample_updates(
+    hass: HomeAssistant,
+    entry_id: str,
+    dev_id: str,
+    updates: Mapping[str, Mapping[str, Any]],
+    *,
+    logger: logging.Logger | None = None,
+    log_prefix: str = "WS",
+) -> None:
+    """Relay websocket heater sample updates to the energy coordinator."""
+
+    record = hass.data.get(DOMAIN, {}).get(entry_id)
+    if not isinstance(record, Mapping):
+        return
+    energy_coordinator = record.get("energy_coordinator")
+    handler = getattr(energy_coordinator, "handle_ws_samples", None)
+    if not callable(handler):
+        return
+
+    active_logger = logger or _LOGGER
+    try:
+        handler(
+            dev_id,
+            {node_type: dict(section) for node_type, section in updates.items()},
+        )
+    except Exception:  # pragma: no cover - defensive logging
+        active_logger.debug(
+            "%s: forwarding heater samples failed",
+            log_prefix,
+            exc_info=True,
+        )
+
 DUCAHEAT_NAMESPACE = "/api/v2/socket_io"
 
 
