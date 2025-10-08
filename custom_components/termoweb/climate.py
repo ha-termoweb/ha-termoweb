@@ -19,6 +19,7 @@ from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
 from .backend.ducaheat import DucaheatRESTClient
+from .boost import coerce_boost_minutes
 from .const import BRAND_DUCAHEAT, DOMAIN
 from .heater import (
     DEFAULT_BOOST_DURATION,
@@ -1128,9 +1129,8 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
 
         if minutes is None:
             return None
-        try:
-            value = int(minutes)
-        except (TypeError, ValueError):
+        value = coerce_boost_minutes(minutes)
+        if value is None:
             _LOGGER.error(
                 "Invalid boost minutes for type=%s addr=%s: %s",
                 self._node_type,
@@ -1138,7 +1138,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
                 minutes,
             )
             return None
-        if value <= 0 or value > 120:
+        if value > 120:
             _LOGGER.error(
                 "Boost duration must be between 1 and 120 minutes for type=%s addr=%s: %s",
                 self._node_type,
