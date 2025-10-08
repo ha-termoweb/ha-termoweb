@@ -668,6 +668,26 @@ def test_termoweb_mark_event_without_paths(monkeypatch: pytest.MonkeyPatch) -> N
     client._update_status.assert_called_once_with("healthy")  # type: ignore[attr-defined]
 
 
+def test_termoweb_update_status_prefers_stats_timestamp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Healthy updates should fall back to stats timestamps when available."""
+
+    client = _make_termoweb_client(monkeypatch)
+    client._stats.frames_total = 1  # type: ignore[attr-defined]
+    client._stats.events_total = 1  # type: ignore[attr-defined]
+    client._stats.last_event_ts = 75.0  # type: ignore[attr-defined]
+    client._last_event_at = None
+    monkeypatch.setattr(module.time, "time", lambda: 100.0)
+
+    client._update_status("healthy")
+
+    state = client._ws_state_bucket()
+    assert state["last_event_at"] == 75.0
+    assert state["healthy_since"] == 75.0
+    client._dispatcher_mock.assert_called()  # type: ignore[attr-defined]
+
+
 @pytest.mark.asyncio
 async def test_termoweb_force_refresh_token(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force refreshing tokens should clear cached access tokens."""
