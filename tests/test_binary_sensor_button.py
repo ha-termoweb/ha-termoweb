@@ -201,11 +201,26 @@ def test_button_setup_adds_accumulator_entities(
 
         calls: list[str | None] = []
 
-        def fake_supports(node):
-            calls.append(getattr(node, "addr", None))
-            return getattr(node, "addr", None) == acm_node.addr
+        def fake_iter_boostable(
+            nodes_by_type,
+            resolve_name,
+            *,
+            node_types=None,
+            accumulators_only=False,
+        ):
+            assert accumulators_only is True
+            assert node_types is None
+            for node in nodes_by_type.get("acm", []):
+                addr = getattr(node, "addr", None)
+                calls.append(addr)
+                if addr == acm_node.addr:
+                    yield "acm", node, addr, resolve_name("acm", addr)
 
-        monkeypatch.setattr(button_module, "supports_boost", fake_supports)
+        monkeypatch.setattr(
+            button_module,
+            "iter_boostable_heater_nodes",
+            fake_iter_boostable,
+        )
 
         custom_metadata = (
             heater_module.BoostButtonMetadata(
@@ -462,11 +477,26 @@ def test_binary_sensor_setup_adds_boost_entities(
 
         calls: list[str | None] = []
 
-        def fake_supports(node):
-            calls.append(getattr(node, "addr", None))
-            return getattr(node, "addr", None) == boost_node.addr
+        def fake_iter_boostable(
+            nodes_by_type,
+            resolve_name,
+            *,
+            node_types=None,
+            accumulators_only=False,
+        ):
+            assert accumulators_only is False
+            assert node_types is None
+            for node in nodes_by_type.get("acm", []):
+                addr = getattr(node, "addr", None)
+                calls.append(addr)
+                if addr == boost_node.addr:
+                    yield "acm", node, addr, resolve_name("acm", addr)
 
-        monkeypatch.setattr(binary_sensor_module, "supports_boost", fake_supports)
+        monkeypatch.setattr(
+            binary_sensor_module,
+            "iter_boostable_heater_nodes",
+            fake_iter_boostable,
+        )
 
         def fake_prepare(entry_data, *, default_name_simple):  # type: ignore[unused-argument]
             return (

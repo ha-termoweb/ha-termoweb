@@ -24,6 +24,7 @@ from homeassistant.core import HomeAssistant
 HeaterNodeBase = heater_module.HeaterNodeBase
 build_heater_name_map = heater_module.build_heater_name_map
 iter_heater_nodes = heater_module.iter_heater_nodes
+iter_boostable_heater_nodes = heater_module.iter_boostable_heater_nodes
 prepare_heater_platform_data = heater_module.prepare_heater_platform_data
 
 
@@ -350,6 +351,44 @@ def test_iter_heater_nodes_filters_addresses() -> None:
     assert list(
         iter_heater_nodes(nodes_by_type, fake_resolve, node_types=["", "acm"])
     ) == [("acm", nodes_by_type["acm"][0], "2", "acm-2")]
+
+
+def test_iter_boostable_heater_nodes_filters_support_and_types() -> None:
+    nodes_by_type = {
+        "htr": [
+            SimpleNamespace(addr="1", supports_boost=True),
+            SimpleNamespace(addr="2", supports_boost=False),
+        ],
+        "acm": [SimpleNamespace(addr="3", supports_boost=lambda: True)],
+        "thm": [SimpleNamespace(addr="4", supports_boost=True)],
+    }
+
+    def resolve(node_type: str, addr: str) -> str:
+        return f"{node_type}-{addr}"
+
+    yielded = list(iter_boostable_heater_nodes(nodes_by_type, resolve))
+    assert sorted((node_type, addr) for node_type, _node, addr, _ in yielded) == sorted(
+        [("htr", "1"), ("acm", "3")]
+    )
+
+    accumulators_only = list(
+        iter_boostable_heater_nodes(nodes_by_type, resolve, accumulators_only=True)
+    )
+    assert [(node_type, addr) for node_type, _node, addr, _ in accumulators_only] == [
+        ("acm", "3")
+    ]
+
+    assert (
+        list(
+            iter_boostable_heater_nodes(
+                nodes_by_type,
+                resolve,
+                node_types=["htr"],
+                accumulators_only=True,
+            )
+        )
+        == []
+    )
 
 
 def test_iter_heater_maps_deduplicates_sections() -> None:

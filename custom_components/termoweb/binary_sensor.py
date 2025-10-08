@@ -18,10 +18,9 @@ from .coordinator import StateCoordinator
 from .heater import (
     DispatcherSubscriptionHelper,
     HeaterNodeBase,
-    iter_heater_nodes,
+    iter_boostable_heater_nodes,
     log_skipped_nodes,
     prepare_heater_platform_data,
-    supports_boost,
 )
 from .utils import build_gateway_device_info
 
@@ -41,11 +40,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     )
 
     boost_entities: list[BinarySensorEntity] = []
-    for node_type, node, addr_str, base_name in iter_heater_nodes(
+    for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
         nodes_by_type, resolve_name
     ):
-        if not supports_boost(node):
-            continue
         unique_id = f"{DOMAIN}:{dev_id}:{node_type}:{addr_str}:boost_active"
         boost_entities.append(
             HeaterBoostActiveBinarySensor(

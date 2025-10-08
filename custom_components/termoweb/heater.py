@@ -218,6 +218,37 @@ def supports_boost(node: Any) -> bool:
     return False
 
 
+def iter_boostable_heater_nodes(
+    nodes_by_type: Mapping[str, Iterable[Node] | None],
+    resolve_name: Callable[[str, str], str],
+    *,
+    node_types: Iterable[str] | None = None,
+    accumulators_only: bool = False,
+) -> Iterator[tuple[str, Node, str, str]]:
+    """Yield heater nodes that expose boost functionality."""
+
+    filtered_types: Iterable[str] | None = node_types
+
+    if accumulators_only:
+        accumulator_types: tuple[str, ...] = ("acm",)
+        if filtered_types is None:
+            filtered_types = accumulator_types
+        else:
+            filtered_types = [
+                node_type for node_type in filtered_types if node_type in accumulator_types
+            ]
+            if not filtered_types:
+                return
+
+    for node_type, node, addr_str, base_name in iter_heater_nodes(
+        nodes_by_type,
+        resolve_name,
+        node_types=filtered_types,
+    ):
+        if supports_boost(node):
+            yield node_type, node, addr_str, base_name
+
+
 @dataclass(slots=True)
 class BoostState:
     """Derived boost metadata for a heater node."""

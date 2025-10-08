@@ -31,11 +31,11 @@ from .coordinator import EnergyStateCoordinator
 from .heater import (
     DispatcherSubscriptionHelper,
     HeaterNodeBase,
+    iter_boostable_heater_nodes,
     iter_heater_maps,
     iter_heater_nodes,
     log_skipped_nodes,
     prepare_heater_platform_data,
-    supports_boost,
 )
 from .nodes import build_heater_energy_unique_id
 from .utils import build_gateway_device_info, float_or_none
@@ -145,18 +145,22 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 node_type=node_type,
             )
         )
-        if supports_boost(node):
-            new_entities.extend(
-                _create_boost_sensors(
-                    coordinator,
-                    entry.entry_id,
-                    dev_id,
-                    addr_str,
-                    base_name,
-                    uid_prefix,
-                    node_type=node_type,
-                )
+    for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
+        nodes_by_type, resolve_name
+    ):
+        energy_unique_id = build_heater_energy_unique_id(dev_id, node_type, addr_str)
+        uid_prefix = energy_unique_id.rsplit(":", 1)[0]
+        new_entities.extend(
+            _create_boost_sensors(
+                coordinator,
+                entry.entry_id,
+                dev_id,
+                addr_str,
+                base_name,
+                uid_prefix,
+                node_type=node_type,
             )
+        )
 
     log_skipped_nodes("sensor", nodes_by_type, logger=_LOGGER)
 
