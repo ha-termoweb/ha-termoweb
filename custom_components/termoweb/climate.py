@@ -24,7 +24,6 @@ from .const import BRAND_DUCAHEAT, DOMAIN
 from .heater import (
     DEFAULT_BOOST_DURATION,
     HeaterNodeBase,
-    build_heater_entity_unique_id,
     derive_boost_state,
     iter_heater_maps,
     iter_heater_nodes,
@@ -32,6 +31,7 @@ from .heater import (
     prepare_heater_platform_data,
     resolve_boost_runtime_minutes,
 )
+from .identifiers import build_heater_entity_unique_id
 from .nodes import HeaterNode, normalize_node_addr, normalize_node_type
 from .utils import float_or_none
 

@@ -17,10 +17,8 @@ from aiohttp import ClientError
 from custom_components.termoweb import coordinator as coordinator_module
 from custom_components.termoweb import sensor as sensor_module
 from custom_components.termoweb import const as const_module
-from custom_components.termoweb.nodes import (
-    build_heater_energy_unique_id,
-    build_node_inventory,
-)
+from custom_components.termoweb.identifiers import build_heater_energy_unique_id
+from custom_components.termoweb.nodes import build_node_inventory
 from custom_components.termoweb.utils import build_gateway_device_info
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import UnitOfTemperature

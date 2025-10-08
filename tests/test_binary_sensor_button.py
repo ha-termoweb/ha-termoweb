@@ -17,6 +17,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 import custom_components.termoweb.binary_sensor as binary_sensor_module
 import custom_components.termoweb.button as button_module
 import custom_components.termoweb.heater as heater_module
+from custom_components.termoweb import identifiers as identifiers_module
 from custom_components.termoweb.const import DOMAIN, signal_ws_status
 from custom_components.termoweb.utils import build_gateway_device_info
 
@@ -301,7 +302,7 @@ def test_button_setup_adds_accumulator_entities(
         expected_icons = [item.icon for item in custom_metadata]
         expected_unique_ids = [
             "{}_{}".format(
-                heater_module.build_heater_entity_unique_id(
+                identifiers_module.build_heater_entity_unique_id(
                     dev_id,
                     "acm",
                     acm_node.addr,

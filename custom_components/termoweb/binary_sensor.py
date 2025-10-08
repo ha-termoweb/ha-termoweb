@@ -18,11 +18,11 @@ from .coordinator import StateCoordinator
 from .entity import GatewayDispatcherEntity
 from .heater import (
     HeaterNodeBase,
-    build_heater_entity_unique_id,
     iter_boostable_heater_nodes,
     log_skipped_nodes,
     prepare_heater_platform_data,
 )
+from .identifiers import build_heater_entity_unique_id
 from .utils import build_gateway_device_info
 
 _LOGGER = logging.getLogger(__name__)

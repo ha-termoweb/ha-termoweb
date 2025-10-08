@@ -23,10 +23,8 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import entity_registry as entity_registry_mod
 
-from custom_components.termoweb.nodes import (
-    build_heater_address_map,
-    build_heater_energy_unique_id,
-)
+from custom_components.termoweb.identifiers import build_heater_energy_unique_id
+from custom_components.termoweb.nodes import build_heater_address_map
 
 
 class FakeWSClient:

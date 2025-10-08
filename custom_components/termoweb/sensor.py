@@ -37,7 +37,7 @@ from .heater import (
     log_skipped_nodes,
     prepare_heater_platform_data,
 )
-from .nodes import build_heater_energy_unique_id
+from .identifiers import build_heater_energy_unique_id
 from .utils import build_gateway_device_info, float_or_none
 
 _WH_TO_KWH = 1 / 1000.0
