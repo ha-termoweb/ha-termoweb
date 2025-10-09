@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import timedelta
 import types
-from typing import Any
+from typing import Any, Callable, Iterable, Mapping
 from unittest.mock import AsyncMock
 
 import pytest
@@ -68,18 +68,24 @@ def test_ensure_heater_section_helper() -> None:
     assert nodes_by_type["htr"] == replaced
 
 
-def test_merge_nodes_by_type_appends_new_addresses() -> None:
+def test_merge_nodes_by_type_appends_new_addresses(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
     """Helper should append payload addresses not present in cache."""
 
     client = types.SimpleNamespace(get_node_settings=AsyncMock())
     hass = HomeAssistant()
+    inventory = inventory_builder("dev", {})
     coord = StateCoordinator(
         hass,
         client,
         30,
         "dev",
         {"name": "Device"},
-        {},
+        inventory.payload,
+        inventory=inventory,
     )
 
     cache_map = {"htr": ["A"]}
@@ -92,18 +98,24 @@ def test_merge_nodes_by_type_appends_new_addresses() -> None:
     assert merged["htr"]["settings"]["B"] == {"mode": "auto"}
 
 
-def test_merge_nodes_by_type_skips_invalid_addresses() -> None:
+def test_merge_nodes_by_type_skips_invalid_addresses(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
     """Helper should ignore payload and cache entries without valid addresses."""
 
     client = types.SimpleNamespace(get_node_settings=AsyncMock())
     hass = HomeAssistant()
+    inventory = inventory_builder("dev", {})
     coord = StateCoordinator(
         hass,
         client,
         30,
         "dev",
         {"name": "Device"},
-        {},
+        inventory.payload,
+        inventory=inventory,
     )
 
     cache_map = {"htr": ["", "A"]}
@@ -135,19 +147,25 @@ def test_inventory_addresses_by_type_handles_missing_inventory() -> None:
     assert coord._inventory_addresses_by_type() == {}
 
 
-def test_inventory_addresses_by_type_merges_forward_map() -> None:
+def test_inventory_addresses_by_type_merges_forward_map(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
     """Inventory helper should combine node cache and heater mapping results."""
 
     client = types.SimpleNamespace(get_node_settings=AsyncMock())
     hass = HomeAssistant()
     nodes = {"nodes": [{"addr": "1", "type": "htr"}]}
+    inventory = inventory_builder("dev", nodes)
     coord = StateCoordinator(
         hass,
         client,
         30,
         "dev",
         {"name": "Device"},
-        nodes,  # type: ignore[arg-type]
+        inventory.payload,
+        inventory=inventory,
     )
 
     inventory = coord._inventory
@@ -199,7 +217,7 @@ def test_update_nodes_builds_inventory_from_payload(monkeypatch: pytest.MonkeyPa
     inventory = coord._inventory
     assert isinstance(inventory, coord_module.Inventory)
     assert inventory.nodes == tuple(sentinel)
-    assert coord._nodes == payload
+    assert inventory.payload == payload
 
 
 def test_update_nodes_handles_non_iterable_inventory_hint(
@@ -234,14 +252,18 @@ def test_update_nodes_handles_non_iterable_inventory_hint(
     assert inventory.nodes == tuple(sentinel)
 
 
-def test_update_nodes_accepts_inventory_container() -> None:
+def test_update_nodes_accepts_inventory_container(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
     """Providing an inventory container should be reused directly."""
 
     client = types.SimpleNamespace(get_node_settings=AsyncMock())
     hass = HomeAssistant()
     payload = {"nodes": [{"addr": "3", "type": "acm"}]}
     nodes_list = [AccumulatorNode(name="Accumulator", addr="3")]
-    container = coord_module.Inventory("dev", payload, nodes_list)
+    container = inventory_builder("dev", payload, nodes_list)
 
     coord = StateCoordinator(
         hass,
@@ -249,12 +271,12 @@ def test_update_nodes_accepts_inventory_container() -> None:
         30,
         "dev",
         {"name": "Device"},
-        payload,  # type: ignore[arg-type]
+        container.payload,
         inventory=container,
     )
 
     assert coord._inventory is container
-    assert coord._nodes == payload
+    assert coord._inventory.payload == payload
 
 
 def test_normalise_type_section_cleans_addresses() -> None:
@@ -1659,6 +1681,9 @@ def test_energy_coordinator_uses_heater_alias() -> None:
 
 def test_state_coordinator_update_nodes_rebuilds_inventory(
     monkeypatch: pytest.MonkeyPatch,
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
 ) -> None:
     hass = HomeAssistant()
     client = types.SimpleNamespace()
@@ -1673,13 +1698,15 @@ def test_state_coordinator_update_nodes_rebuilds_inventory(
 
     monkeypatch.setattr(coord_module, "build_node_inventory", fake_build)
 
+    inventory = inventory_builder("dev", {})
     coord = StateCoordinator(
         hass,
         client,
         30,
         "dev",
         {"name": "Device"},
-        {},
+        inventory.payload,
+        inventory=inventory,
     )
 
     coord.update_nodes(nodes)
@@ -1690,26 +1717,32 @@ def test_state_coordinator_update_nodes_rebuilds_inventory(
     assert inventory.nodes == tuple(built_nodes)
 
 
-def test_state_coordinator_update_nodes_uses_provided_inventory() -> None:
+def test_state_coordinator_update_nodes_uses_provided_inventory(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
     hass = HomeAssistant()
     client = types.SimpleNamespace()
     nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
     provided_inventory = [Node(name="Heater", addr="A", node_type="htr")]
 
+    inventory = inventory_builder("dev", {})
     coord = StateCoordinator(
         hass,
         client,
         30,
         "dev",
         {"name": "Device"},
-        {},
+        inventory.payload,
+        inventory=inventory,
     )
 
     coord.update_nodes(nodes, provided_inventory)
 
-    assert coord._nodes == nodes
     inventory = coord._inventory
     assert isinstance(inventory, coord_module.Inventory)
+    assert inventory.payload == nodes
     assert inventory.nodes[0] is provided_inventory[0]
 
 
