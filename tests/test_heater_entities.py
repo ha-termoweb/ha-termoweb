@@ -13,6 +13,7 @@ from conftest import _install_stubs, make_ws_payload
 _install_stubs()
 
 from custom_components.termoweb import boost as boost_module, heater as heater_module
+from custom_components.termoweb.inventory import Inventory, build_node_inventory
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.binary_sensor import HeaterBoostActiveBinarySensor
 from custom_components.termoweb.sensor import (
@@ -558,6 +559,46 @@ def test_boost_runtime_store_handles_non_mapping() -> None:
     created = heater_module._boost_runtime_store(entry_data, create=True)
     assert created == {}
     assert entry_data[heater_module._BOOST_RUNTIME_KEY] is created
+
+
+def test_iter_inventory_heater_metadata_uses_inventory() -> None:
+    """Inventory helper should yield metadata with resolved names."""
+
+    raw_nodes = {
+        "nodes": [
+            {"type": "htr", "addr": "1", "name": " Living "},
+            {"type": "acm", "addr": "2"},
+            {"type": "acm", "addr": "3", "name": " Storage "},
+            {"type": "pmo", "addr": "99"},
+        ]
+    }
+    inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+
+    results = list(
+        boost_module.iter_inventory_heater_metadata(
+            inventory,
+            default_name_simple=lambda addr: f"Heater {addr}",
+        )
+    )
+
+    pairs = sorted((item.node_type, item.addr) for item in results)
+    assert pairs == sorted([
+        ("htr", "1"),
+        ("acm", "2"),
+        ("acm", "3"),
+    ])
+    names = {item.addr: item.name for item in results}
+    assert names["1"] == "Living"
+    assert names["2"] == "Accumulator 2"
+    assert names["3"] == "Storage"
+    supports = {item.addr: item.supports_boost for item in results}
+    assert supports == {"1": False, "2": True, "3": True}
+
+
+def test_iter_inventory_heater_metadata_handles_missing() -> None:
+    """Generator should gracefully handle missing inventory."""
+
+    assert list(boost_module.iter_inventory_heater_metadata(None)) == []
 
 
 def test_boost_runtime_helpers_guard_invalid_structures() -> None:

@@ -24,8 +24,7 @@ from custom_components.termoweb.const import (
     DOMAIN,
     signal_ws_data,
 )
-from custom_components.termoweb.inventory import HeaterNode
-from custom_components.termoweb.inventory import build_node_inventory
+from custom_components.termoweb.inventory import HeaterNode, Inventory, build_node_inventory
 from homeassistant.components.climate import HVACAction, HVACMode
 from homeassistant.const import ATTR_TEMPERATURE
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -67,6 +66,12 @@ def _make_coordinator(
         inventory_nodes=inventory_nodes,
         data={dev_id: record},
     )
+
+
+def _inventory(dev_id: str, raw_nodes: Mapping[str, Any]) -> Inventory:
+    """Create an :class:`Inventory` instance for ``raw_nodes``."""
+
+    return Inventory(dev_id, raw_nodes, build_node_inventory(raw_nodes))
 
 
 # -------------------- Helpers for tests --------------------
@@ -144,6 +149,7 @@ def test_async_setup_entry_creates_entities(
                 {"type": "other", "addr": "X"},
             ]
         }
+        inventory = _inventory(dev_id, nodes)
         coordinator_data = {
             dev_id: {
                 "nodes": nodes,
@@ -171,7 +177,7 @@ def test_async_setup_entry_creates_entities(
             dev_id,
             coordinator_data[dev_id],
             client=AsyncMock(),
-            inventory=coordinator_inventory,
+            node_inventory=inventory,
         )
 
         hass.data = {
@@ -181,7 +187,8 @@ def test_async_setup_entry_creates_entities(
                     "dev_id": dev_id,
                     "client": AsyncMock(),
                     "nodes": nodes,
-                    "node_inventory": build_node_inventory(nodes),
+                    "inventory": inventory,
+                    "node_inventory": list(inventory.nodes),
                     "version": "3.1.4",
                     "brand": BRAND_TERMOWEB,
                 }
@@ -335,11 +342,11 @@ def test_async_setup_entry_default_names_and_invalid_nodes(
                 {"type": "htr", "addr": "1"},
                 {"type": "acm", "addr": "2"},
                 {"type": "pmo", "addr": "P1"},
+                {"type": "  ", "addr": "extra"},
+                {"type": "htr", "addr": " "},
             ]
         }
-        inventory = build_node_inventory(raw_nodes)
-        inventory.append(types.SimpleNamespace(type="  ", addr="extra"))
-        inventory.append(types.SimpleNamespace(type="htr", addr=" "))
+        inventory = _inventory(dev_id, raw_nodes)
 
         coordinator_data = {
             dev_id: {
@@ -362,8 +369,9 @@ def test_async_setup_entry_default_names_and_invalid_nodes(
                     "coordinator": coordinator,
                     "dev_id": dev_id,
                     "client": AsyncMock(),
-                    "nodes": {},
-                    "node_inventory": inventory,
+                    "nodes": raw_nodes,
+                    "inventory": inventory,
+                    "node_inventory": list(inventory.nodes),
                 }
             }
         }
@@ -415,20 +423,26 @@ def test_async_setup_entry_default_names_and_invalid_nodes(
     asyncio.run(_run())
 
 
-def test_async_setup_entry_skips_blank_addresses(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_async_setup_entry_skips_blank_addresses() -> None:
     async def _run() -> None:
         _reset_environment()
         hass = HomeAssistant()
         entry_id = "entry-skip"
         dev_id = "dev-skip"
-        coordinator_data = {"nodes": {}, "htr": {"settings": {}}}
+        raw_nodes = {
+            "nodes": [
+                {"type": "htr", "addr": "  "},
+                {"type": "htr", "addr": "7"},
+            ]
+        }
+        inventory = _inventory(dev_id, raw_nodes)
+        coordinator_data = {"nodes": raw_nodes, "htr": {"settings": {}}}
         coordinator = _make_coordinator(
             hass,
             dev_id,
             coordinator_data,
             client=AsyncMock(),
+            node_inventory=inventory,
         )
 
         hass.data = {
@@ -437,19 +451,12 @@ def test_async_setup_entry_skips_blank_addresses(
                     "coordinator": coordinator,
                     "dev_id": dev_id,
                     "client": AsyncMock(),
+                    "nodes": raw_nodes,
+                    "inventory": inventory,
+                    "node_inventory": list(inventory.nodes),
                 }
             }
         }
-
-        blank_node = types.SimpleNamespace(addr="  ")
-        valid_node = types.SimpleNamespace(addr="7")
-
-        def fake_prepare(*args: Any, **kwargs: Any) -> tuple[Any, Any, Any, Any]:
-            return ([], {"htr": [blank_node, valid_node]}, {}, lambda *_: "Heater")
-
-        monkeypatch.setattr(
-            climate_module, "prepare_heater_platform_data", fake_prepare
-        )
 
         added: list[HeaterClimateEntity] = []
 
@@ -472,6 +479,7 @@ def test_async_setup_entry_creates_accumulator_entity() -> None:
         entry_id = "entry-acm"
         dev_id = "dev-acm"
         nodes = {"nodes": [{"type": "acm", "addr": "7", "name": "Store"}]}
+        inventory = _inventory(dev_id, nodes)
         settings = {
             "mode": "boost",
             "state": "idle",
@@ -495,9 +503,7 @@ def test_async_setup_entry_creates_accumulator_entity() -> None:
             dev_id,
             coordinator_data[dev_id],
             client=AsyncMock(),
-            inventory_nodes=list(
-                coordinator_data[dev_id]["nodes_by_type"]["acm"]["settings"].keys()
-            ),
+            node_inventory=inventory,
         )
 
         client = AsyncMock()
@@ -511,7 +517,8 @@ def test_async_setup_entry_creates_accumulator_entity() -> None:
                     "dev_id": dev_id,
                     "client": client,
                     "nodes": nodes,
-                    "node_inventory": build_node_inventory(nodes),
+                    "inventory": inventory,
+                    "node_inventory": list(inventory.nodes),
                     "brand": BRAND_DUCAHEAT,
                 }
             }
@@ -1889,6 +1896,137 @@ def test_async_setup_entry_rebuilds_inventory_when_missing() -> None:
         assert len(added) == 2
         stored_inventory = hass.data[DOMAIN][entry.entry_id]["node_inventory"]
         assert [node.addr for node in stored_inventory] == ["11", "22"]
+
+    asyncio.run(_run())
+
+
+def test_async_setup_entry_reuses_coordinator_inventory() -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry = types.SimpleNamespace(entry_id="entry-coord")
+        dev_id = "dev-coord"
+        raw_nodes = {"nodes": [{"type": "htr", "addr": "5"}]}
+        inventory = _inventory(dev_id, raw_nodes)
+
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            {"nodes": raw_nodes, "htr": {"settings": {"5": {}}}},
+            client=AsyncMock(),
+            node_inventory=inventory,
+        )
+
+        record: dict[str, Any] = {
+            "coordinator": coordinator,
+            "dev_id": dev_id,
+            "client": AsyncMock(),
+            "nodes": raw_nodes,
+        }
+        hass.data = {DOMAIN: {entry.entry_id: record}}
+
+        added: list[HeaterClimateEntity] = []
+
+        def _async_add_entities(entities: list[HeaterClimateEntity]) -> None:
+            added.extend(entities)
+
+        await async_setup_entry(hass, entry, _async_add_entities)
+
+        assert len(added) == 1
+        stored = hass.data[DOMAIN][entry.entry_id]["inventory"]
+        assert stored is inventory
+
+    asyncio.run(_run())
+
+
+def test_async_setup_entry_builds_inventory_from_node_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry = types.SimpleNamespace(entry_id="entry-list")
+        dev_id = "dev-list"
+        raw_nodes = {"nodes": [{"type": "htr", "addr": "3", "name": "Three"}]}
+        node_list = [types.SimpleNamespace(type="htr", addr="3", name="Three")]
+
+        captured: list[dict[str, Any]] = []
+        original_build = climate_module.build_node_inventory
+
+        def _capture(payload: Any) -> list[HeaterNode]:
+            if isinstance(payload, dict):
+                captured.append(payload)
+            return original_build(payload)
+
+        monkeypatch.setattr(climate_module, "build_node_inventory", _capture)
+
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            {"nodes": {}, "htr": {"settings": {}}},
+            client=AsyncMock(),
+            node_inventory=node_list,
+        )
+
+        record: dict[str, Any] = {
+            "coordinator": coordinator,
+            "dev_id": dev_id,
+            "client": AsyncMock(),
+            "node_inventory": list(node_list),
+        }
+        hass.data = {DOMAIN: {entry.entry_id: record}}
+
+        added: list[HeaterClimateEntity] = []
+
+        def _async_add_entities(entities: list[HeaterClimateEntity]) -> None:
+            added.extend(entities)
+
+        await async_setup_entry(hass, entry, _async_add_entities)
+
+        assert captured
+
+    asyncio.run(_run())
+
+
+def test_async_setup_entry_handles_inventory_build_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry = types.SimpleNamespace(entry_id="entry-error")
+        dev_id = "dev-error"
+        raw_nodes = {"nodes": [{"type": "htr", "addr": "9"}]}
+
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            {"nodes": raw_nodes, "htr": {"settings": {"9": {}}}},
+            client=AsyncMock(),
+        )
+
+        record: dict[str, Any] = {
+            "coordinator": coordinator,
+            "dev_id": dev_id,
+            "client": AsyncMock(),
+            "nodes": raw_nodes,
+        }
+        hass.data = {DOMAIN: {entry.entry_id: record}}
+
+        def _raise(_value: Any) -> list[HeaterNode]:
+            raise ValueError("boom")
+
+        monkeypatch.setattr(climate_module, "build_node_inventory", _raise)
+
+        added: list[HeaterClimateEntity] = []
+
+        def _async_add_entities(entities: list[HeaterClimateEntity]) -> None:
+            added.extend(entities)
+
+        await async_setup_entry(hass, entry, _async_add_entities)
+
+        assert added == []
+        assert "inventory" not in hass.data[DOMAIN][entry.entry_id]
 
     asyncio.run(_run())
 
