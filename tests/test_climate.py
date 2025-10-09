@@ -6,7 +6,7 @@ import logging
 from collections import deque
 from collections.abc import Coroutine
 import types
-from typing import Any, Deque, Iterable, Mapping, cast
+from typing import Any, Callable, Deque, Iterable, Mapping, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -52,7 +52,9 @@ def _make_coordinator(
     record: dict[str, Any],
     *,
     client: Any | None = None,
-    node_inventory: list[Any] | None = None,
+    inventory: Any | None = None,
+    inventory_payload: Mapping[str, Any] | None = None,
+    inventory_nodes: Iterable[Any] | None = None,
 ) -> FakeCoordinator:
     return FakeCoordinator(
         hass,
@@ -60,7 +62,9 @@ def _make_coordinator(
         dev_id=dev_id,
         dev=record,
         nodes=record.get("nodes", {}),
-        node_inventory=node_inventory,
+        inventory=inventory,
+        inventory_payload=inventory_payload,
+        inventory_nodes=inventory_nodes,
         data={dev_id: record},
     )
 
@@ -124,7 +128,9 @@ def test_heater_climate_entity_normalizes_node_type(
     assert calls[1][0] == " ACM "
 
 
-def test_async_setup_entry_creates_entities() -> None:
+def test_async_setup_entry_creates_entities(
+    inventory_builder: Callable[[str, Mapping[str, Any] | None, Iterable[Any] | None], Any]
+) -> None:
     async def _run() -> None:
         _reset_environment()
         hass = HomeAssistant()
@@ -155,12 +161,17 @@ def test_async_setup_entry_creates_entities() -> None:
                 "version": "3.1.4",
             }
         }
+        coordinator_inventory = inventory_builder(
+            dev_id,
+            nodes,
+            build_node_inventory(nodes),
+        )
         coordinator = _make_coordinator(
             hass,
             dev_id,
             coordinator_data[dev_id],
             client=AsyncMock(),
-            node_inventory=coordinator_data[dev_id].get("node_inventory"),
+            inventory=coordinator_inventory,
         )
 
         hass.data = {
@@ -342,7 +353,7 @@ def test_async_setup_entry_default_names_and_invalid_nodes(
             dev_id,
             coordinator_data[dev_id],
             client=AsyncMock(),
-            node_inventory=inventory,
+            inventory_nodes=inventory,
         )
 
         hass.data = {
@@ -484,7 +495,7 @@ def test_async_setup_entry_creates_accumulator_entity() -> None:
             dev_id,
             coordinator_data[dev_id],
             client=AsyncMock(),
-            node_inventory=list(
+            inventory_nodes=list(
                 coordinator_data[dev_id]["nodes_by_type"]["acm"]["settings"].keys()
             ),
         )

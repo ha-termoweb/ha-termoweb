@@ -41,7 +41,93 @@ def _split_inventory_payload(
     return None, list(node_inventory)
 
 
+def _resolve_inventory_container(
+    dev_id: str,
+    inventory: Any,
+    *,
+    payload_override: Mapping[str, Any] | None = None,
+    nodes_override: Iterable[Any] | None = None,
+) -> tuple["Inventory" | None, list[Any]]:
+    """Return normalised inventory container and node list."""
+
+    container, nodes_list = _split_inventory_payload(inventory)
+    if payload_override is None and nodes_override is None:
+        if container is not None:
+            return container, list(nodes_list or [])
+        if nodes_list is not None:
+            return None, list(nodes_list)
+        return None, []
+
+    if container is None and payload_override is None and nodes_override is not None:
+        return None, list(nodes_override)
+
+    try:
+        from custom_components.termoweb.inventory import Inventory as InventoryType
+    except ImportError:
+        InventoryType = None  # type: ignore[assignment]
+
+    if InventoryType is None:
+        if container is not None:
+            return container, list(nodes_list or [])
+        if nodes_override is not None:
+            return None, list(nodes_override)
+        if nodes_list is not None:
+            return None, list(nodes_list)
+        return None, []
+
+    effective_dev_id = getattr(container, "dev_id", dev_id)
+    if payload_override is not None:
+        payload_value: Any = (
+            dict(payload_override)
+            if isinstance(payload_override, Mapping)
+            else payload_override
+        )
+    elif container is not None:
+        payload_source = getattr(container, "payload", {})
+        payload_value = (
+            dict(payload_source) if isinstance(payload_source, Mapping) else payload_source
+        )
+    else:
+        payload_value = {}
+
+    if nodes_override is not None:
+        nodes_value: Iterable[Any] = nodes_override
+    elif container is not None:
+        nodes_value = getattr(container, "nodes", ())
+    elif nodes_list is not None:
+        nodes_value = nodes_list
+    else:
+        nodes_value = ()
+
+    new_container = InventoryType(effective_dev_id, payload_value, list(nodes_value))
+    return new_container, list(new_container.nodes)
+
+
 _frame_module: Any | None = None
+
+
+@pytest.fixture
+def inventory_builder() -> Callable[[str, Mapping[str, Any] | None, Iterable[Any] | None], "Inventory"]:
+    """Return helper to construct Inventory containers for tests."""
+
+    from custom_components.termoweb.inventory import Inventory
+
+    def _factory(
+        dev_id: str,
+        payload: Mapping[str, Any] | None = None,
+        nodes: Iterable[Any] | None = None,
+    ) -> "Inventory":
+        payload_value: Any
+        if payload is None:
+            payload_value = {}
+        elif isinstance(payload, Mapping):
+            payload_value = dict(payload)
+        else:
+            payload_value = payload
+        node_list = list(nodes or [])
+        return Inventory(dev_id, payload_value, node_list)
+
+    return _factory
 
 
 def _setup_frame_for_hass(hass: Any) -> None:
@@ -1454,8 +1540,10 @@ class FakeCoordinator:
         dev_id: str = "dev",
         dev: dict[str, Any] | None = None,
         nodes: dict[str, Any] | None = None,
-        node_inventory: Iterable[Any] | "Inventory" | None = None,
+        inventory: Iterable[Any] | "Inventory" | None = None,
         *,
+        inventory_payload: Mapping[str, Any] | None = None,
+        inventory_nodes: Iterable[Any] | None = None,
         data: dict[str, Any] | None = None,
     ) -> None:
         self.hass = hass
@@ -1464,9 +1552,14 @@ class FakeCoordinator:
         self.dev_id = dev_id
         self.dev = dev or {}
         self.nodes = nodes or {}
-        inventory_obj, nodes_list = _split_inventory_payload(node_inventory)
+        inventory_obj, nodes_list = _resolve_inventory_container(
+            dev_id,
+            inventory,
+            payload_override=inventory_payload,
+            nodes_override=inventory_nodes,
+        )
         self.inventory: "Inventory" | None = inventory_obj
-        self.node_inventory = list(nodes_list or [])
+        self.node_inventory = list(nodes_list)
         self.update_interval = dt.timedelta(seconds=base_interval or 0)
         if data is not None:
             self.data = data
@@ -1495,16 +1588,23 @@ class FakeCoordinator:
     def update_nodes(
         self,
         nodes: dict[str, Any],
-        node_inventory: Iterable[Any] | "Inventory" | None = None,
+        inventory: Iterable[Any] | "Inventory" | None = None,
+        *,
+        inventory_payload: Mapping[str, Any] | None = None,
+        inventory_nodes: Iterable[Any] | None = None,
     ) -> None:
         self.nodes = nodes
-        inventory_obj, nodes_list = _split_inventory_payload(node_inventory)
+        inventory_obj, nodes_list = _resolve_inventory_container(
+            self.dev_id,
+            inventory,
+            payload_override=inventory_payload,
+            nodes_override=inventory_nodes,
+        )
         if inventory_obj is not None:
             self.inventory = inventory_obj
-            self.node_inventory = list(nodes_list or [])
-        elif nodes_list is not None:
+        elif inventory is not None or inventory_payload is not None or inventory_nodes is not None:
             self.inventory = None
-            self.node_inventory = list(nodes_list)
+        self.node_inventory = list(nodes_list)
 
     def register_pending_setting(
         self,
