@@ -21,6 +21,7 @@ from custom_components.termoweb.backend.sanitize import (
     mask_identifier,
     redact_token_fragment,
 )
+from custom_components.termoweb.inventory import Inventory
 
 
 class DummyREST:
@@ -248,10 +249,56 @@ def test_dispatch_nodes_without_snapshot(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert seen["record"] is hass_record
     assert seen["nodes"] is payload["nodes"]
-    coordinator.update_nodes.assert_called_once_with(payload["nodes"], [{"addr": "1", "type": "htr"}])
+    coordinator.update_nodes.assert_called_once()
+    update_args, update_kwargs = coordinator.update_nodes.call_args
+    assert not update_kwargs
+    assert update_args[0] is payload["nodes"]
+    inventory = update_args[1]
+    assert isinstance(inventory, Inventory)
+    assert list(inventory.nodes) == [{"addr": "1", "type": "htr"}]
+    assert inventory.payload is payload["nodes"]
     dispatcher.assert_called_once()
     dispatched_payload = dispatcher.call_args.args[2]
     assert dispatched_payload["addr_map"] == {"htr": ["1"]}
+
+
+def test_dispatch_nodes_uses_empty_record_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When hass data is not a mapping, an empty source mapping should be used."""
+
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": object()}})
+    coordinator = SimpleNamespace(update_nodes=MagicMock())
+    dispatcher = MagicMock()
+    monkeypatch.setattr(base_ws, "async_dispatcher_send", dispatcher)
+    monkeypatch.setattr(base_ws, "ensure_snapshot", lambda record: None)
+
+    seen: dict[str, Any] = {}
+
+    def fake_ensure(record_map: Mapping[str, Any], *, nodes: Any) -> list[dict[str, str]]:
+        seen["record"] = record_map
+        return [{"addr": "1", "type": "htr"}]
+
+    monkeypatch.setattr(base_ws, "ensure_node_inventory", fake_ensure)
+    monkeypatch.setattr(
+        base_ws,
+        "addresses_by_node_type",
+        lambda inventory, **_: ({"htr": ("1",)}, set()),
+    )
+
+    class DummyCommon(base_ws._WSCommon):
+        def __init__(self) -> None:
+            self.hass = hass
+            self.entry_id = "entry"
+            self.dev_id = "device"
+            self._coordinator = coordinator
+
+    payload = {"nodes": {"htr": {"settings": {"1": {"temp": 20}}}}}
+    DummyCommon()._dispatch_nodes(payload)
+
+    assert seen["record"] == {}
+    coordinator.update_nodes.assert_called_once()
+    dispatcher.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -860,8 +907,15 @@ def test_ws_common_dispatch_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
             self._inventory = [("htr", "1")]
             self.updated: Any | None = None
 
-        def update_nodes(self, raw_nodes: Any, *, node_inventory: Any | None = None) -> None:
+        def update_nodes(
+            self,
+            raw_nodes: Any,
+            *,
+            inventory: Any | None = None,
+            node_inventory: Any | None = None,
+        ) -> None:
             self.updated = raw_nodes
+            self.inventory_obj = inventory
             self._inventory = [("htr", "1")]
 
         @property
@@ -888,7 +942,12 @@ def test_ws_common_dispatch_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
     dummy._dispatch_nodes(payload)
 
     assert snapshot.updated == payload["nodes"]
+    assert isinstance(snapshot.inventory_obj, Inventory)
     coordinator.update_nodes.assert_called_once()
+    update_args, update_kwargs = coordinator.update_nodes.call_args
+    assert not update_kwargs
+    assert update_args[0] is payload["nodes"]
+    assert update_args[1] is snapshot.inventory_obj
     dispatcher.assert_called_once()
     record = hass.data[base_ws.DOMAIN]["entry"]
     assert "node_inventory" in record
