@@ -431,6 +431,12 @@ def test_async_setup_entry_happy_path(
     assert isinstance(record["client"], HappyClient)
     assert isinstance(record["coordinator"], FakeCoordinator)
     assert record["coordinator"].refresh_calls == 1
+    assert "inventory" in record
+    inventory_module = importlib.import_module("custom_components.termoweb.inventory")
+    assert isinstance(record["inventory"], inventory_module.Inventory)
+    assert record["inventory"].dev_id == "dev-1"
+    assert record["coordinator"].inventory is record["inventory"]
+    assert list(record["inventory"].nodes) == record["node_inventory"]
     by_type, _ = build_heater_address_map(record["node_inventory"])
     assert by_type == {"htr": ["A"], "acm": ["B"]}
     assert [node.addr for node in record["node_inventory"]] == ["A", "B"]
@@ -481,7 +487,9 @@ def test_async_setup_entry_backfills_diagnostics_marker(
     sentinel = SimpleNamespace(YES=object())
     monkeypatch.setattr(termoweb_init, "SupportsDiagnostics", sentinel)
 
-    entry = DiagnosticsConfigEntry("legacy", data={"username": "user", "password": "pw"})
+    entry = DiagnosticsConfigEntry(
+        "legacy", data={"username": "user", "password": "pw"}
+    )
     stub_hass.config_entries.add(entry)
 
     assert "supports_diagnostics" not in entry.data
@@ -509,7 +517,9 @@ def test_async_setup_entry_updates_via_hass_config_entries(
     sentinel = SimpleNamespace(YES=object())
     monkeypatch.setattr(termoweb_init, "SupportsDiagnostics", sentinel)
 
-    entry = DiagnosticsNoUpdateEntry("fallback", data={"username": "user", "password": "pw"})
+    entry = DiagnosticsNoUpdateEntry(
+        "fallback", data={"username": "user", "password": "pw"}
+    )
     stub_hass.config_entries.add(entry)
 
     assert stub_hass.config_entries.updated_entries == []
@@ -658,9 +668,7 @@ async def test_async_setup_entry_waits_for_delayed_diagnostics(
         attempts.append(True)
         return len(attempts) >= 2
 
-    monkeypatch.setattr(
-        termoweb_init, "_register_diagnostics_platform", fake_register
-    )
+    monkeypatch.setattr(termoweb_init, "_register_diagnostics_platform", fake_register)
 
     diagnostics_module = types.ModuleType("custom_components.termoweb.diagnostics")
     monkeypatch.setitem(
@@ -695,7 +703,9 @@ async def test_async_setup_entry_waits_for_delayed_diagnostics(
     assert len(attempts) == 2
     assert "Diagnostics component not loaded; waiting for setup" in caplog.text
     assert "Diagnostics registration attempt 1 starting" in caplog.text
-    assert "Diagnostics registration attempt 2 finished with success=True" in caplog.text
+    assert (
+        "Diagnostics registration attempt 2 finished with success=True" in caplog.text
+    )
 
 
 def test_diagnostics_component_loaded_checks_sources(
@@ -723,7 +733,10 @@ def test_diagnostics_component_loaded_checks_sources(
 
 @pytest.mark.asyncio
 async def test_async_register_diagnostics_when_ready_component_loaded(
-    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, caplog
+    termoweb_init: Any,
+    stub_hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog,
 ) -> None:
     diagnostics_module = types.ModuleType("custom_components.termoweb.diagnostics")
     monkeypatch.setitem(
@@ -749,7 +762,10 @@ async def test_async_register_diagnostics_when_ready_component_loaded(
 
 @pytest.mark.asyncio
 async def test_async_register_diagnostics_when_ready_without_when_setup(
-    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, caplog
+    termoweb_init: Any,
+    stub_hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog,
 ) -> None:
     diagnostics_module = types.ModuleType("custom_components.termoweb.diagnostics")
     monkeypatch.setitem(
@@ -776,7 +792,10 @@ async def test_async_register_diagnostics_when_ready_without_when_setup(
 
 @pytest.mark.asyncio
 async def test_async_register_diagnostics_when_ready_retries_import(
-    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, caplog
+    termoweb_init: Any,
+    stub_hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog,
 ) -> None:
     diagnostics_module = types.ModuleType("custom_components.termoweb.diagnostics")
 
@@ -813,7 +832,10 @@ async def test_async_register_diagnostics_when_ready_retries_import(
 
 @pytest.mark.asyncio
 async def test_async_register_diagnostics_when_ready_handles_cancelled(
-    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, caplog
+    termoweb_init: Any,
+    stub_hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog,
 ) -> None:
     diagnostics_module = types.ModuleType("custom_components.termoweb.diagnostics")
     monkeypatch.setitem(
@@ -1088,8 +1110,7 @@ def test_async_setup_entry_defers_until_started(
         await _drain_tasks(stub_hass)
         assert import_mock.await_count == 0
         assert all(
-            event != EVENT_HOMEASSISTANT_STARTED
-            for event, _ in stub_hass.bus.listeners
+            event != EVENT_HOMEASSISTANT_STARTED for event, _ in stub_hass.bus.listeners
         )
 
     asyncio.run(_run())

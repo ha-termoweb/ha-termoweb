@@ -45,9 +45,12 @@ class RaiseUpdateFailedCoordinator(DataUpdateCoordinator[_DataT]):
         if not self.last_update_success and isinstance(exc, UpdateFailed):
             raise exc
 
+
 # TTL for pending heater setting confirmations.
 _PENDING_SETTINGS_TTL = 10.0
 _SETPOINT_TOLERANCE = 0.05
+
+
 @dataclass
 class PendingSetting:
     """Track expected heater settings awaiting confirmation."""
@@ -165,7 +168,7 @@ class StateCoordinator(
         dev_id: str,
         device: dict[str, Any],
         nodes: dict[str, Any],
-        node_inventory: list[Node] | None = None,
+        node_inventory: Inventory | Iterable[Node] | None = None,
     ) -> None:
         """Initialize the TermoWeb device coordinator."""
         super().__init__(
@@ -193,11 +196,15 @@ class StateCoordinator(
     def _set_inventory_from_nodes(
         self,
         nodes: Mapping[str, Any] | None,
-        provided: Iterable[Node] | None = None,
+        provided: Inventory | Iterable[Node] | None = None,
     ) -> list[Node]:
         """Populate the cached inventory from ``provided`` or ``nodes``."""
 
-        if provided is not None:
+        container: Inventory | None = None
+        if isinstance(provided, Inventory):
+            inventory = list(provided.nodes)
+            container = provided
+        elif provided is not None:
             inventory = list(provided)
         elif nodes:
             try:
@@ -213,7 +220,9 @@ class StateCoordinator(
             inventory = []
 
         self._node_inventory = inventory
-        if inventory:
+        if container is not None:
+            self._inventory_container = container
+        elif inventory:
             payload = nodes if isinstance(nodes, Mapping) else self._nodes
             self._inventory_container = Inventory(
                 self._dev_id,
@@ -677,7 +686,7 @@ class StateCoordinator(
     def update_nodes(
         self,
         nodes: Mapping[str, Any] | None,
-        node_inventory: list[Node] | None = None,
+        node_inventory: Inventory | Iterable[Node] | None = None,
     ) -> None:
         """Update cached node payload and inventory."""
 
@@ -923,10 +932,7 @@ class StateCoordinator(
                                 addr,
                             )
                             continue
-                        if (
-                            resolved_type == "acm"
-                            and isinstance(js, MutableMapping)
-                        ):
+                        if resolved_type == "acm" and isinstance(js, MutableMapping):
                             now_value: datetime | None = None
                             if self._requires_boost_resolution(js) and rtc_now is None:
                                 rtc_now = await self._async_fetch_rtc_datetime()
@@ -1318,6 +1324,8 @@ class EnergyStateCoordinator(
 
         if changed:
             dev_data["nodes_by_type"] = nodes_by_type
+
+
 def _wrap_logger(logger: Any) -> Any:
     """Return a logger proxy that exposes ``isEnabledFor`` when missing."""
 

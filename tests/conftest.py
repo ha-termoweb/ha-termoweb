@@ -23,6 +23,24 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+
+def _split_inventory_payload(
+    node_inventory: Any,
+) -> tuple["Inventory" | None, list[Any] | None]:
+    """Return the inventory object and node list when ``node_inventory`` is provided."""
+
+    try:
+        from custom_components.termoweb.inventory import Inventory as InventoryType
+    except ImportError:
+        InventoryType = None  # type: ignore[assignment]
+
+    if InventoryType is not None and isinstance(node_inventory, InventoryType):
+        return node_inventory, list(node_inventory.nodes)
+    if node_inventory is None:
+        return None, None
+    return None, list(node_inventory)
+
+
 _frame_module: Any | None = None
 
 
@@ -45,8 +63,10 @@ def _setup_frame_for_hass(hass: Any) -> None:
         else:
             loop.run_until_complete(result)
 
+
 if TYPE_CHECKING:
     from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
+    from custom_components.termoweb.inventory import Inventory
     from homeassistant.components.climate import HVACMode
 
 
@@ -109,11 +129,11 @@ def _install_stubs() -> None:
 
         aiohttp_stub.ClientTimeout = ClientTimeout
 
-    base_client_response_error = getattr(
-        aiohttp_stub, "ClientResponseError", Exception
-    )
+    base_client_response_error = getattr(aiohttp_stub, "ClientResponseError", Exception)
 
-    class ClientResponseError(base_client_response_error):  # pragma: no cover - placeholder
+    class ClientResponseError(
+        base_client_response_error
+    ):  # pragma: no cover - placeholder
         def __init__(
             self,
             request_info: Any,
@@ -473,9 +493,9 @@ def _install_stubs() -> None:
     try:
         from homeassistant.helpers import frame as frame_mod  # type: ignore[import-not-found]
     except Exception:  # pragma: no cover - fallback when HA not installed
-        frame_mod = sys.modules.get(
+        frame_mod = sys.modules.get("homeassistant.helpers.frame") or types.ModuleType(
             "homeassistant.helpers.frame"
-        ) or types.ModuleType("homeassistant.helpers.frame")
+        )
 
         async def async_setup(_hass: Any) -> None:
             return None
@@ -513,9 +533,9 @@ def _install_stubs() -> None:
     components_mod = sys.modules.get("homeassistant.components") or types.ModuleType(
         "homeassistant.components"
     )
-    http_mod = sys.modules.get(
+    http_mod = sys.modules.get("homeassistant.components.http") or types.ModuleType(
         "homeassistant.components.http"
-    ) or types.ModuleType("homeassistant.components.http")
+    )
     binary_sensor_mod = sys.modules.get(
         "homeassistant.components.binary_sensor"
     ) or types.ModuleType("homeassistant.components.binary_sensor")
@@ -777,9 +797,7 @@ def _install_stubs() -> None:
             self.services = _ServiceRegistry()
             self.bus = _EventBus()
             self.tasks: list[asyncio.Task[Any]] = []
-            self.config = types.SimpleNamespace(
-                recovery_mode=False, safe_mode=False
-            )
+            self.config = types.SimpleNamespace(recovery_mode=False, safe_mode=False)
             _setup_frame_for_hass(self)
 
         def async_create_task(self, coro: Any) -> asyncio.Task[Any]:
@@ -1357,24 +1375,32 @@ def heater_node_factory() -> Callable[..., SimpleNamespace]:
 
 
 @pytest.fixture
-def boost_capable_node(heater_node_factory: Callable[..., SimpleNamespace]) -> SimpleNamespace:
+def boost_capable_node(
+    heater_node_factory: Callable[..., SimpleNamespace],
+) -> SimpleNamespace:
     """Return a boost-capable accumulator node stub."""
 
     return heater_node_factory("01", supports_boost=True)
 
 
 @pytest.fixture
-def non_boost_node(heater_node_factory: Callable[..., SimpleNamespace]) -> SimpleNamespace:
+def non_boost_node(
+    heater_node_factory: Callable[..., SimpleNamespace],
+) -> SimpleNamespace:
     """Return a node stub without boost support."""
 
     return heater_node_factory("02", supports_boost=False)
 
 
 @pytest.fixture
-def boost_runtime_store() -> Callable[[str, str, int | None], dict[str, dict[str, int]]]:
+def boost_runtime_store() -> Callable[
+    [str, str, int | None], dict[str, dict[str, int]]
+]:
     """Return a factory producing boost runtime store dictionaries."""
 
-    def _factory(node_type: str, addr: str, minutes: int | None = None) -> dict[str, dict[str, int]]:
+    def _factory(
+        node_type: str, addr: str, minutes: int | None = None
+    ) -> dict[str, dict[str, int]]:
         store: dict[str, dict[str, int]] = {node_type: {}}
         if minutes is not None:
             store[node_type][str(addr)] = minutes
@@ -1403,8 +1429,7 @@ def heater_hass_data() -> Callable[..., dict[str, Any]]:
         }
         if boost_runtime is not None:
             entry_data["boost_runtime"] = {
-                key: dict(value)
-                for key, value in boost_runtime.items()
+                key: dict(value) for key, value in boost_runtime.items()
             }
         if ws_state is not None:
             entry_data["ws_state"] = dict(ws_state)
@@ -1429,7 +1454,7 @@ class FakeCoordinator:
         dev_id: str = "dev",
         dev: dict[str, Any] | None = None,
         nodes: dict[str, Any] | None = None,
-        node_inventory: Iterable[Any] | None = None,
+        node_inventory: Iterable[Any] | "Inventory" | None = None,
         *,
         data: dict[str, Any] | None = None,
     ) -> None:
@@ -1439,7 +1464,9 @@ class FakeCoordinator:
         self.dev_id = dev_id
         self.dev = dev or {}
         self.nodes = nodes or {}
-        self.node_inventory = list(node_inventory or [])
+        inventory_obj, nodes_list = _split_inventory_payload(node_inventory)
+        self.inventory: "Inventory" | None = inventory_obj
+        self.node_inventory = list(nodes_list or [])
         self.update_interval = dt.timedelta(seconds=base_interval or 0)
         if data is not None:
             self.data = data
@@ -1468,11 +1495,16 @@ class FakeCoordinator:
     def update_nodes(
         self,
         nodes: dict[str, Any],
-        node_inventory: Iterable[Any] | None = None,
+        node_inventory: Iterable[Any] | "Inventory" | None = None,
     ) -> None:
         self.nodes = nodes
-        if node_inventory is not None:
-            self.node_inventory = list(node_inventory)
+        inventory_obj, nodes_list = _split_inventory_payload(node_inventory)
+        if inventory_obj is not None:
+            self.inventory = inventory_obj
+            self.node_inventory = list(nodes_list or [])
+        elif nodes_list is not None:
+            self.inventory = None
+            self.node_inventory = list(nodes_list)
 
     def register_pending_setting(
         self,
@@ -1536,7 +1568,10 @@ def ducaheat_rest_harness(
         """Create a Ducaheat REST client with predictable helpers for tests."""
 
         from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
-        from custom_components.termoweb.const import BRAND_DUCAHEAT, get_brand_user_agent
+        from custom_components.termoweb.const import (
+            BRAND_DUCAHEAT,
+            get_brand_user_agent,
+        )
         from homeassistant.components.climate import HVACMode
 
         client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
@@ -1553,8 +1588,7 @@ def ducaheat_rest_harness(
         if headers is not None:
             base_headers = dict(headers)
         rtc_template = dict(
-            rtc_payload
-            or {"y": 2024, "n": 1, "d": 1, "h": 0, "m": 0, "s": 0}
+            rtc_payload or {"y": 2024, "n": 1, "d": 1, "h": 0, "m": 0, "s": 0}
         )
 
         def _hvac_mode_str(self: HVACMode) -> str:
@@ -1569,9 +1603,7 @@ def ducaheat_rest_harness(
 
             return dict(base_headers)
 
-        async def fake_request(
-            method: str, path: str, **kwargs: Any
-        ) -> dict[str, Any]:
+        async def fake_request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
             """Record REST requests and return queued responses."""
 
             request_calls.append((method, path, kwargs))
@@ -1589,7 +1621,7 @@ def ducaheat_rest_harness(
             addr: str,
             node_type: str,
             ignore_statuses: tuple[int, ...] | None = None,
-            ) -> dict[str, Any]:
+        ) -> dict[str, Any]:
             """Record segmented POST calls and replay optional side effects."""
 
             payload_copy = dict(payload)
