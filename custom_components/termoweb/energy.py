@@ -878,25 +878,33 @@ async def async_register_import_energy_history_service(
                 if snapshot is not None:
                     override = rec.get("node_inventory")
                     if override is not None:
-                        inventory = list(override)
+                        override_nodes = list(override)
+                        inventory_container = Inventory(
+                            snapshot.dev_id,
+                            snapshot.raw_nodes,
+                            override_nodes,
+                        )
                         snapshot.update_nodes(
-                            snapshot.raw_nodes, node_inventory=inventory
+                            snapshot.raw_nodes,
+                            inventory=inventory_container,
                         )
                     else:
-                        inventory = snapshot.inventory
-                        rec["node_inventory"] = list(inventory)
-                else:
-                    inventory = list(rec.get("node_inventory") or [])
-                if snapshot is not None:
+                        inventory_container = Inventory(
+                            snapshot.dev_id,
+                            snapshot.raw_nodes,
+                            snapshot.inventory,
+                        )
+                        rec["node_inventory"] = list(inventory_container.nodes)
                     by_type, _ = snapshot.heater_address_map
                 else:
                     nodes_payload = rec.get("nodes") if isinstance(rec, Mapping) else None
-                    container = Inventory(
+                    inventory_nodes = list(rec.get("node_inventory") or [])
+                    inventory_container = Inventory(
                         str(rec.get("dev_id", "")),
                         nodes_payload if nodes_payload is not None else {},
-                        inventory,
+                        inventory_nodes,
                     )
-                    by_type, _ = container.heater_address_map
+                    by_type, _ = inventory_container.heater_address_map
                 tasks.append(
                     import_fn(
                         hass,
