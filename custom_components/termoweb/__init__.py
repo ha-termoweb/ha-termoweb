@@ -56,7 +56,7 @@ from .energy import (
     reset_samples_rate_limit_state,
 )
 from .installation import InstallationSnapshot
-from .inventory import build_node_inventory
+from .inventory import Inventory, build_node_inventory
 from .utils import async_get_integration_version as _async_get_integration_version
 
 try:  # pragma: no cover - fallback for test stubs
@@ -137,7 +137,9 @@ def _diagnostics_component_loaded(hass: HomeAssistant) -> bool:
         except TypeError:  # pragma: no cover - defensive: non-container iterables
             pass
 
-    data_components = hass.data.get("components") if isinstance(hass.data, Mapping) else None
+    data_components = (
+        hass.data.get("components") if isinstance(hass.data, Mapping) else None
+    )
     if isinstance(data_components, set):
         return "diagnostics" in data_components
     if isinstance(data_components, Mapping):
@@ -210,9 +212,7 @@ async def _async_register_diagnostics_when_ready(hass: HomeAssistant) -> None:
         _LOGGER.debug("Diagnostics component not loaded; waiting for setup")
         completion = asyncio.Event()
 
-        async def _on_component_ready(
-            _hass: HomeAssistant, _component: Any
-        ) -> None:
+        async def _on_component_ready(_hass: HomeAssistant, _component: Any) -> None:
             try:
                 await _attempt_until_success()
             finally:
@@ -305,9 +305,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         else:
             hass.config_entries.async_update_entry(entry, data=update_payload)
 
-    diagnostics_task = asyncio.create_task(
-        _async_register_diagnostics_when_ready(hass)
-    )
+    diagnostics_task = asyncio.create_task(_async_register_diagnostics_when_ready(hass))
 
     version = await _async_get_integration_version(hass)
 
@@ -360,14 +358,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     dev = dev or {}
     nodes = await client.get_nodes(dev_id)
     node_inventory = build_node_inventory(nodes)
+    inventory = Inventory(dev_id, nodes, node_inventory)
     snapshot = InstallationSnapshot(
         dev_id=dev_id,
         raw_nodes=nodes,
-        node_inventory=node_inventory,
+        node_inventory=inventory.nodes,
     )
 
-    if node_inventory:
-        type_counts = Counter(node.type for node in node_inventory)
+    if inventory.nodes:
+        type_counts = Counter(node.type for node in inventory.nodes)
         summary = ", ".join(
             f"{node_type}:{count}" for node_type, count in sorted(type_counts.items())
         )
@@ -382,7 +381,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         dev_id,
         dev,
         nodes,
-        node_inventory,
+        inventory,
     )
 
     debug_enabled = bool(entry.options.get("debug", entry.data.get("debug", False)))
@@ -394,7 +393,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         "coordinator": coordinator,
         "dev_id": dev_id,
         "snapshot": snapshot,
-        "node_inventory": list(snapshot.inventory),
+        "inventory": inventory,
+        "node_inventory": list(inventory.nodes),
         "config_entry": entry,
         "base_poll_interval": max(base_interval, MIN_POLL_INTERVAL),
         "stretched": False,
