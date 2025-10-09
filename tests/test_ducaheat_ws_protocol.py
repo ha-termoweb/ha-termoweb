@@ -14,6 +14,7 @@ import aiohttp
 import pytest
 
 from custom_components.termoweb.backend import ducaheat_ws
+from custom_components.termoweb.installation import InstallationSnapshot
 from homeassistant.core import HomeAssistant
 
 
@@ -129,20 +130,9 @@ def _make_client(monkeypatch: pytest.MonkeyPatch) -> ducaheat_ws.DucaheatWSClien
     )
     monkeypatch.setattr(client, "_get_token", AsyncMock(return_value="token"))
     monkeypatch.setattr(ducaheat_ws, "_rand_t", lambda: "P123456")
-    monkeypatch.setattr(
-        ducaheat_ws,
-        "collect_heater_sample_addresses",
-        lambda *_args, **_kwargs: ([], {"htr": ["1"]}, {}),
-    )
-    monkeypatch.setattr(
-        ducaheat_ws,
-        "normalize_heater_addresses",
-        lambda mapping: (mapping, {}),
-    )
-    monkeypatch.setattr(
-        ducaheat_ws,
-        "heater_sample_subscription_targets",
-        lambda mapping: [(kind, addr) for kind, addrs in mapping.items() for addr in addrs],
+    hass.data[ducaheat_ws.DOMAIN]["entry"]["snapshot"] = InstallationSnapshot(
+        dev_id="device",
+        raw_nodes={"nodes": [{"type": "htr", "addr": "1"}]},
     )
     return client
 
@@ -1387,20 +1377,9 @@ async def test_subscribe_feeds_handles_missing_targets(
     """When no subscription targets exist the helper should no-op."""
 
     client = _make_client(monkeypatch)
-    monkeypatch.setattr(
-        ducaheat_ws,
-        "collect_heater_sample_addresses",
-        lambda *_args, **_kwargs: ([], {}, {}),
-    )
-    monkeypatch.setattr(
-        ducaheat_ws,
-        "normalize_heater_addresses",
-        lambda mapping: (mapping, {}),
-    )
-    monkeypatch.setattr(
-        ducaheat_ws,
-        "heater_sample_subscription_targets",
-        lambda mapping: [],
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"]["snapshot"] = InstallationSnapshot(
+        dev_id="device",
+        raw_nodes={},
     )
     emit_mock = AsyncMock()
     monkeypatch.setattr(client, "_emit_sio", emit_mock)
@@ -1409,6 +1388,121 @@ async def test_subscribe_feeds_handles_missing_targets(
 
     assert count == 0
     emit_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_subscribe_feeds_uses_coordinator_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fallback coordinator addresses should be subscribed when snapshot empty."""
+
+    client = _make_client(monkeypatch)
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"]["snapshot"] = InstallationSnapshot(
+        dev_id="device",
+        raw_nodes={},
+    )
+    client._coordinator._addrs = lambda: ["5", "6"]
+
+    emissions: list[str] = []
+
+    async def _capture(event: str, path: str) -> None:
+        emissions.append(path)
+
+    monkeypatch.setattr(client, "_emit_sio", _capture)
+
+    count = await client._subscribe_feeds(None)
+
+    assert count == 4
+    assert {"/htr/5/status", "/htr/6/samples"}.issubset(set(emissions))
+
+
+@pytest.mark.asyncio
+async def test_subscribe_feeds_rebuilds_inventory_when_snapshot_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing snapshots should rebuild inventory and skip duplicate fallbacks."""
+
+    client = _make_client(monkeypatch)
+    record = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
+    record.pop("snapshot", None)
+
+    nodes_payload = {"nodes": [{"addr": "7", "type": "htr"}]}
+    record["nodes"] = nodes_payload
+
+    calls: dict[str, Any] = {}
+
+    def _fake_inventory(cache: dict[str, Any], *, nodes: Any | None = None) -> list[Any]:
+        calls["cache"] = cache
+        calls["nodes"] = nodes
+        return []
+
+    monkeypatch.setattr(ducaheat_ws, "ensure_node_inventory", _fake_inventory)
+
+    client._coordinator._addrs = lambda: ["7", " ", "7"]
+
+    emissions: list[str] = []
+
+    async def _capture(event: str, path: str) -> None:
+        emissions.append(path)
+
+    monkeypatch.setattr(client, "_emit_sio", _capture)
+
+    count = await client._subscribe_feeds({"htr": {"samples": {"7": {}}}})
+
+    assert calls["cache"] is record
+    assert calls["nodes"] == {"htr": {"samples": {"7": {}}}}
+    assert "/htr/7/samples" in emissions
+    assert "/htr/7/status" in emissions
+    assert count == 2
+
+
+@pytest.mark.asyncio
+async def test_subscribe_feeds_handles_mapping_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mapping entries should rebuild inventory using a temporary cache."""
+
+    client = _make_client(monkeypatch)
+    mapping_record = MappingProxyType({"nodes": {"nodes": [{"addr": "8", "type": "htr"}]}})
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"] = mapping_record
+
+    calls: dict[str, Any] = {}
+
+    def _fake_inventory(cache: dict[str, Any], *, nodes: Any | None = None) -> list[Any]:
+        calls["cache"] = cache
+        calls["nodes"] = nodes
+        return []
+
+    monkeypatch.setattr(ducaheat_ws, "ensure_node_inventory", _fake_inventory)
+    client._coordinator._addrs = lambda: []
+
+    count = await client._subscribe_feeds(None)
+
+    assert count == 0
+    assert calls["cache"] == {}
+    assert calls["nodes"] == mapping_record["nodes"]
+
+
+@pytest.mark.asyncio
+async def test_subscribe_feeds_handles_missing_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    """None records should provide empty cache and nodes payload."""
+
+    client = _make_client(monkeypatch)
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"] = None
+
+    calls: dict[str, Any] = {}
+
+    def _fake_inventory(cache: dict[str, Any], *, nodes: Any | None = None) -> list[Any]:
+        calls["cache"] = cache
+        calls["nodes"] = nodes
+        return []
+
+    monkeypatch.setattr(ducaheat_ws, "ensure_node_inventory", _fake_inventory)
+    client._coordinator._addrs = lambda: []
+
+    count = await client._subscribe_feeds(None)
+
+    assert count == 0
+    assert calls["cache"] == {}
+    assert calls["nodes"] is None
 
 
 @pytest.mark.asyncio

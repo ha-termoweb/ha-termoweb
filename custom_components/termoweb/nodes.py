@@ -11,7 +11,6 @@ from .inventory import (
     Node,
     addresses_by_node_type,
     build_node_inventory,
-    normalize_heater_addresses,
     normalize_node_addr,
     normalize_node_type,
 )
@@ -75,63 +74,3 @@ def ensure_node_inventory(
         mutable_record["node_inventory"] = []
 
     return []
-
-
-def collect_heater_sample_addresses(
-    record: Mapping[str, Any] | None,
-    *,
-    coordinator: Any | None = None,
-) -> tuple[list[Node], dict[str, list[str]], dict[str, str]]:
-    """Return inventory and canonical heater sample subscription addresses."""
-
-    from .installation import InstallationSnapshot, ensure_snapshot  # noqa: PLC0415
-
-    snapshot = ensure_snapshot(record)
-    if isinstance(snapshot, InstallationSnapshot):
-        inventory = snapshot.inventory
-        normalized_map, compat = snapshot.heater_sample_address_map
-    else:
-        nodes_payload: Any | None = None
-        cache_record: MutableMapping[str, Any] | None = None
-
-        if isinstance(record, MutableMapping):
-            cache_record = cast(MutableMapping[str, Any], record)
-            nodes_payload = record.get("nodes")
-        elif isinstance(record, Mapping):
-            nodes_payload = record.get("nodes")
-
-        inventory = ensure_node_inventory(cache_record or {}, nodes=nodes_payload)
-
-        raw_map, _ = addresses_by_node_type(
-            inventory,
-            known_types=HEATER_NODE_TYPES,
-        )
-        addr_map: dict[str, list[str]] = {
-            node_type: list(addresses)
-            for node_type, addresses in raw_map.items()
-            if node_type in HEATER_NODE_TYPES and addresses
-        }
-
-        normalized_map, compat = normalize_heater_addresses(addr_map)
-
-    if (not normalized_map.get("htr")) and coordinator is not None:
-        fallback: Iterable[Any] | None = None
-        if hasattr(coordinator, "_addrs"):
-            try:
-                fallback = coordinator._addrs()  # type: ignore[attr-defined]  # noqa: SLF001
-            except Exception:  # pragma: no cover - defensive  # noqa: BLE001
-                fallback = None
-        if fallback:
-            normalised: list[str] = list(normalized_map.get("htr", []))
-            seen = set(normalised)
-            for candidate in fallback:
-                addr = normalize_node_addr(candidate)
-                if not addr or addr in seen:
-                    continue
-                seen.add(addr)
-                normalised.append(addr)
-            if normalised:
-                normalized_map = dict(normalized_map)
-                normalized_map["htr"] = normalised
-
-    return list(inventory), normalized_map, compat

@@ -275,6 +275,17 @@ def test_normalize_heater_addresses_with_none() -> None:
     assert aliases == {"htr": "htr"}
 
 
+def test_normalize_heater_addresses_accepts_string_sources() -> None:
+    """String inputs should be coerced into normalised heater maps."""
+
+    mapping, aliases = normalize_heater_addresses(
+        {"heater": " 1 ", "acm": ["2", "2", " "]}
+    )
+
+    assert mapping == {"htr": ["1"], "acm": ["2"]}
+    assert aliases["heater"] == "htr"
+
+
 def test_get_brand_api_base_fallback() -> None:
     from custom_components.termoweb import const
 

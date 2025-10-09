@@ -9,7 +9,7 @@ import logging
 import random
 import string
 import time
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import aiohttp
@@ -27,13 +27,9 @@ from ..const import (
     get_brand_requested_with,
     get_brand_user_agent,
 )
-from ..inventory import (
-    heater_sample_subscription_targets,
-    normalize_heater_addresses,
-    normalize_node_addr,
-    normalize_node_type,
-)
-from ..nodes import collect_heater_sample_addresses
+from ..installation import InstallationSnapshot, ensure_snapshot
+from ..inventory import Inventory, normalize_node_addr, normalize_node_type
+from ..nodes import ensure_node_inventory
 from .ws_client import (
     DUCAHEAT_NAMESPACE,
     HandshakeError,
@@ -756,15 +752,63 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 entry_bucket["nodes"] = resolved_nodes
 
             record = domain_bucket.get(self.entry_id)
-            _, normalized_map, _ = collect_heater_sample_addresses(
-                record,
-                coordinator=self._coordinator,
-            )
-            normalized_map, _ = normalize_heater_addresses(normalized_map)
-            targets = list(heater_sample_subscription_targets(normalized_map))
-            for node_type, addr in targets:
-                paths.add(f"/{node_type}/{addr}/status")
-                paths.add(f"/{node_type}/{addr}/samples")
+            snapshot_obj = ensure_snapshot(record)
+
+            normalized_map: dict[str, list[str]]
+            if isinstance(snapshot_obj, InstallationSnapshot):
+                normalized_map, _ = snapshot_obj.heater_sample_address_map
+            else:
+                nodes_payload: Mapping[str, Any] | None
+                if isinstance(resolved_nodes, Mapping):
+                    nodes_payload = resolved_nodes
+                elif isinstance(record, Mapping):
+                    nodes_payload = record.get("nodes")
+                else:
+                    nodes_payload = None
+
+                cache_record: dict[str, Any]
+                if isinstance(record, dict):
+                    cache_record = record
+                else:
+                    cache_record = {}
+
+                inventory_nodes = ensure_node_inventory(
+                    cache_record,
+                    nodes=nodes_payload,
+                )
+                container = Inventory(
+                    self.dev_id,
+                    nodes_payload if nodes_payload is not None else {},
+                    inventory_nodes,
+                )
+                normalized_map, _ = container.heater_sample_address_map
+
+            if not normalized_map.get("htr"):
+                fallback: Iterable[Any] | None = None
+                if hasattr(self._coordinator, "_addrs"):
+                    try:
+                        fallback = self._coordinator._addrs()  # type: ignore[attr-defined]  # noqa: SLF001
+                    except Exception:  # pragma: no cover - defensive  # noqa: BLE001
+                        fallback = None
+                if fallback:
+                    normalised = list(normalized_map.get("htr", []))
+                    seen = set(normalised)
+                    for candidate in fallback:
+                        addr = normalize_node_addr(candidate)
+                        if not addr or addr in seen:
+                            continue
+                        seen.add(addr)
+                        normalised.append(addr)
+                    if normalised:
+                        normalized_map = dict(normalized_map)
+                        normalized_map["htr"] = normalised
+
+            other_types = sorted(node_type for node_type in normalized_map if node_type != "htr")
+            order = ["htr", *other_types]
+            for node_type in order:
+                for addr in normalized_map.get(node_type, []) or []:
+                    paths.add(f"/{node_type}/{addr}/status")
+                    paths.add(f"/{node_type}/{addr}/samples")
         except Exception:  # pragma: no cover - defensive
             _LOGGER.debug("WS (ducaheat): subscribe failed", exc_info=True)
             return 0

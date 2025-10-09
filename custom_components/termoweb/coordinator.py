@@ -19,11 +19,11 @@ from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .boost import coerce_int, resolve_boost_end_from_fields
 from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
 from .inventory import (
+    HEATER_NODE_TYPES,
+    Inventory,
     Node,
     _existing_nodes_map,
-    build_heater_address_map,
     build_node_inventory,
-    normalize_heater_addresses,
     normalize_node_addr,
     normalize_node_type,
 )
@@ -104,6 +104,54 @@ def _ensure_heater_section(
     return heater_section
 
 
+def _normalize_heater_payload(
+    payload: Mapping[str, Iterable[Any]] | Iterable[Any] | None,
+) -> tuple[dict[str, list[str]], dict[str, str]]:
+    """Return canonical heater address mapping and aliases for ``payload``."""
+
+    if payload is None:
+        return {}, {"htr": "htr"}
+
+    cleaned_map: dict[str, list[str]] = {}
+    compat_aliases: dict[str, str] = {"htr": "htr"}
+    if isinstance(payload, Mapping):
+        sources: Iterable[tuple[Any, Iterable[Any] | Any]] = payload.items()
+    else:
+        sources = [("htr", payload)]
+
+    for raw_type, values in sources:
+        node_type = normalize_node_type(raw_type, use_default_when_falsey=True)
+        if not node_type:
+            continue
+        alias_target = node_type
+        if node_type in {"heater", "heaters", "htr"}:
+            alias_target = "htr"
+        if alias_target not in HEATER_NODE_TYPES:
+            continue
+
+        compat_aliases.setdefault(alias_target, alias_target)
+        if node_type != alias_target:
+            compat_aliases[node_type] = alias_target
+
+        if isinstance(values, (str, bytes)) or not isinstance(values, Iterable):
+            candidates = [values]
+        else:
+            candidates = list(values)
+
+        bucket = cleaned_map.setdefault(alias_target, [])
+        seen = set(bucket)
+        for candidate in candidates:
+            addr = normalize_node_addr(candidate, use_default_when_falsey=True)
+            if not addr or addr in seen:
+                continue
+            seen.add(addr)
+            bucket.append(addr)
+
+    cleaned_map.setdefault("htr", [])
+    compat_aliases.setdefault("htr", "htr")
+    return cleaned_map, compat_aliases
+
+
 class StateCoordinator(
     RaiseUpdateFailedCoordinator[dict[str, dict[str, Any]]]
 ):  # dev_id -> per-device data
@@ -133,6 +181,7 @@ class StateCoordinator(
         self._device = device or {}
         self._nodes: dict[str, Any] = {}
         self._node_inventory: list[Node] = []
+        self._inventory_container: Inventory | None = None
         self._nodes_by_type: dict[str, list[str]] = {}
         self._addr_lookup: dict[str, set[str]] = {}
         self._pending_settings: dict[tuple[str, str], PendingSetting] = {}
@@ -164,6 +213,15 @@ class StateCoordinator(
             inventory = []
 
         self._node_inventory = inventory
+        if inventory:
+            payload = nodes if isinstance(nodes, Mapping) else self._nodes
+            self._inventory_container = Inventory(
+                self._dev_id,
+                payload if isinstance(payload, Mapping) else {},
+                inventory,
+            )
+        else:
+            self._inventory_container = None
         return inventory
 
     def _ensure_inventory(self) -> list[Node]:
@@ -176,9 +234,13 @@ class StateCoordinator(
     def _refresh_node_cache(self) -> None:
         """Rebuild cached mappings of node types to addresses."""
 
-        inventory = self._node_inventory
-        forward_map, reverse_map = build_heater_address_map(inventory)
+        container = self._inventory_container
+        if container is None:
+            payload = self._nodes if isinstance(self._nodes, Mapping) else {}
+            container = Inventory(self._dev_id, payload, self._node_inventory)
+            self._inventory_container = container
 
+        forward_map, reverse_map = container.heater_address_map
         nodes_by_type: dict[str, list[str]] = {
             node_type: list(addresses) for node_type, addresses in forward_map.items()
         }
@@ -186,14 +248,17 @@ class StateCoordinator(
             str(addr): set(node_types) for addr, node_types in reverse_map.items()
         }
 
-        for node in inventory:
-            node_type = normalize_node_type(getattr(node, "type", ""))
-            addr = normalize_node_addr(getattr(node, "addr", ""))
-            if not node_type or not addr:
-                continue
+        for node_type, nodes in container.nodes_by_type.items():
             bucket = nodes_by_type.setdefault(node_type, [])
-            nodes_by_type[node_type] = list(dict.fromkeys([*bucket, addr]))
-            addr_lookup.setdefault(addr, set()).add(node_type)
+            seen = set(bucket)
+            for node in nodes:
+                addr = normalize_node_addr(getattr(node, "addr", ""))
+                if not addr or addr in seen:
+                    continue
+                seen.add(addr)
+                bucket.append(addr)
+                addr_lookup.setdefault(addr, set()).add(node_type)
+            nodes_by_type[node_type] = list(bucket)
 
         self._nodes_by_type = nodes_by_type
         self._addr_lookup = addr_lookup
@@ -206,7 +271,7 @@ class StateCoordinator(
         if not payload:
             return
 
-        cleaned_map, _ = normalize_heater_addresses(payload)
+        cleaned_map, _ = _normalize_heater_payload(payload)
 
         for node_type, addrs in cleaned_map.items():
             if not addrs:
@@ -543,6 +608,20 @@ class StateCoordinator(
                     addr = normalize_node_addr(raw_addr)
                     if addr and addr not in normalized["addrs"]:
                         normalized["addrs"].append(addr)
+
+            default_order: list[str] = []
+            for node in self._node_inventory:
+                if normalize_node_type(getattr(node, "type", "")) != node_type:
+                    continue
+                addr = normalize_node_addr(getattr(node, "addr", ""))
+                if addr and addr not in default_order:
+                    default_order.append(addr)
+            for candidate in self._nodes_by_type.get(node_type, []) or []:
+                addr = normalize_node_addr(candidate)
+                if addr and addr not in default_order:
+                    default_order.append(addr)
+            extras = [addr for addr in normalized["addrs"] if addr not in default_order]
+            normalized["addrs"] = default_order + extras
 
             nodes_by_type[node_type] = normalized
 
@@ -960,7 +1039,7 @@ class EnergyStateCoordinator(
     ) -> None:
         """Replace the tracked heater addresses with ``addrs``."""
 
-        cleaned_map, compat_aliases = normalize_heater_addresses(addrs)
+        cleaned_map, compat_aliases = _normalize_heater_payload(addrs)
         self._addresses_by_type = cleaned_map
         self._compat_aliases = compat_aliases
         self._addr_lookup = {

@@ -169,6 +169,70 @@ def test_set_inventory_from_nodes_defaults_to_empty() -> None:
     assert coord._node_inventory == []
 
 
+def test_refresh_node_cache_populates_lookup() -> None:
+    """Refreshing the node cache should expand lookup tables for each node."""
+
+    client = types.SimpleNamespace(get_node_settings=AsyncMock())
+    hass = HomeAssistant()
+    coord = StateCoordinator(
+        hass,
+        client,
+        30,
+        "dev",
+        {"name": "Device"},
+        {},
+    )
+
+    coord._node_inventory = [
+        nodes_module.Node(name="Heater", addr="1", node_type="htr"),
+        nodes_module.Node(name="Accumulator", addr="2", node_type="acm"),
+    ]
+    coord._nodes = {"nodes": []}
+    coord._inventory_container = None
+
+    coord._refresh_node_cache()
+
+    assert coord._nodes_by_type["htr"] == ["1"]
+    assert coord._nodes_by_type["acm"] == ["2"]
+    assert coord._addr_lookup["2"] == {"acm"}
+
+
+def test_refresh_node_cache_deduplicates_addresses() -> None:
+    """Duplicate nodes should not inflate address caches."""
+
+    client = types.SimpleNamespace(get_node_settings=AsyncMock())
+    hass = HomeAssistant()
+    coord = StateCoordinator(
+        hass,
+        client,
+        30,
+        "dev",
+        {"name": "Device"},
+        {},
+    )
+
+    class _Node:
+        def __init__(self, addr: str, node_type: str) -> None:
+            self.addr = addr
+            self.type = node_type
+
+    class _Container:
+        heater_address_map = ({}, {})
+        nodes_by_type = {
+            "htr": [_Node("1", "htr")],
+            "acm": [_Node("2", "acm"), _Node("2", "acm")],
+        }
+
+    coord._inventory_container = _Container()  # type: ignore[assignment]
+    coord._node_inventory = []
+    coord._nodes = {}
+
+    coord._refresh_node_cache()
+
+    assert coord._nodes_by_type["acm"] == ["2"]
+    assert coord._addr_lookup["2"] == {"acm"}
+
+
 def test_normalise_type_section_cleans_addresses() -> None:
     section = {
         "addrs": [" 1 ", None, "2"],
@@ -822,10 +886,7 @@ def test_state_coordinator_async_update_data_reuses_previous(
             {},
         )
 
-        coord._node_inventory = [
-            nodes_module.Node(name="Acc", addr="7", node_type="acm")
-        ]
-        coord._refresh_node_cache()
+        coord.update_nodes({"nodes": [{"type": "acm", "addr": "7"}]})
         coord.data = {
             "dev": {
                 "nodes_by_type": {
@@ -883,10 +944,7 @@ def test_async_refresh_heater_uses_merge_helper(
             {},
         )
 
-        coord._node_inventory = [
-            nodes_module.Node(name="Heater", addr="A", node_type="htr")
-        ]
-        coord._refresh_node_cache()
+        coord.update_nodes({"nodes": [{"type": "htr", "addr": "A"}]})
 
         await coord.async_refresh_heater("A")
 
@@ -1687,7 +1745,7 @@ def test_energy_state_coordinator_update_addresses_uses_helper(
         calls.append(addrs)
         return {"htr": ["A"]}, {"htr": "htr"}
 
-    monkeypatch.setattr(coord_module, "normalize_heater_addresses", fake_normalize)
+    monkeypatch.setattr(coord_module, "_normalize_heater_payload", fake_normalize)
 
     coord = EnergyStateCoordinator(hass, client, "dev", [])  # type: ignore[arg-type]
     assert calls == [[]]
@@ -1697,6 +1755,32 @@ def test_energy_state_coordinator_update_addresses_uses_helper(
     assert calls[-1] == ["ignored"]
     assert coord._addresses_by_type == {"htr": ["A"]}
     assert coord._compat_aliases == {"htr": "htr"}
+
+
+def test_normalize_heater_payload_handles_none() -> None:
+    mapping, aliases = coord_module._normalize_heater_payload(None)
+
+    assert mapping == {}
+    assert aliases == {"htr": "htr"}
+
+
+def test_normalize_heater_payload_aliases() -> None:
+    mapping, aliases = coord_module._normalize_heater_payload(
+        {"heater": ["1"], "acm": ["2"]}
+    )
+
+    assert mapping == {"htr": ["1"], "acm": ["2"]}
+    assert aliases["heater"] == "htr"
+    assert aliases["acm"] == "acm"
+
+
+def test_normalize_heater_payload_accepts_string() -> None:
+    """String payloads should be coerced into heater address lists."""
+
+    mapping, aliases = coord_module._normalize_heater_payload(" 5 ")
+
+    assert mapping == {"htr": ["5"]}
+    assert aliases == {"htr": "htr"}
 
 
 def test_energy_state_coordinator_async_update_adds_legacy_bucket() -> None:

@@ -18,8 +18,10 @@ from .const import DOMAIN
 from .identifiers import build_heater_energy_unique_id
 from .installation import ensure_snapshot
 from .inventory import (
-    build_heater_address_map,
-    normalize_heater_addresses,
+    HEATER_NODE_TYPES,
+    Inventory,
+    normalize_node_addr,
+    normalize_node_type,
     parse_heater_energy_unique_id,
 )
 from .nodes import ensure_node_inventory
@@ -131,6 +133,46 @@ def _resolve_statistics_helpers(
         sync=sync_helper,
         async_fn=async_helper,
     )
+
+
+def _normalize_heater_sources(
+    addrs: Mapping[Any, Iterable[Any]] | Iterable[Any] | None,
+) -> dict[str, list[str]]:
+    """Return canonical heater node address map for ``addrs``."""
+
+    cleaned_map: dict[str, list[str]] = {}
+    if addrs is None:
+        sources: Iterable[tuple[Any, Iterable[Any] | Any]] = []
+    elif isinstance(addrs, Mapping):
+        sources = addrs.items()
+    else:
+        sources = [("htr", addrs)]
+
+    for raw_type, values in sources:
+        node_type = normalize_node_type(raw_type, use_default_when_falsey=True)
+        if not node_type:
+            continue
+        if node_type in {"heater", "heaters", "htr"}:
+            node_type = "htr"
+        if node_type not in HEATER_NODE_TYPES:
+            continue
+
+        if isinstance(values, (str, bytes)) or not isinstance(values, Iterable):
+            candidates = [values]
+        else:
+            candidates = list(values)
+
+        bucket = cleaned_map.setdefault(node_type, [])
+        seen = set(bucket)
+        for candidate in candidates:
+            addr = normalize_node_addr(candidate, use_default_when_falsey=True)
+            if not addr or addr in seen:
+                continue
+            seen.add(addr)
+            bucket.append(addr)
+
+    cleaned_map.setdefault("htr", [])
+    return cleaned_map
 
 
 def _iso_date(ts: int) -> str:
@@ -338,9 +380,6 @@ async def async_import_energy_history(
     logger = _LOGGER
     async_mod = asyncio
     datetime_mod = datetime
-    ensure_inventory = ensure_node_inventory
-    build_map = build_heater_address_map
-    normalize = normalize_heater_addresses
     registry_mod = er
     store_stats = _store_statistics
     stats_period = _statistics_during_period_compat
@@ -353,15 +392,29 @@ async def async_import_energy_history(
         return
     client: RESTClient = rec["client"]
     dev_id: str = rec["dev_id"]
-    inventory: list[Any] = ensure_inventory(rec)
+    inventory_nodes: list[Any]
+    snapshot = ensure_snapshot(rec)
+    nodes_payload: Any | None = rec.get("nodes") if isinstance(rec, Mapping) else None
 
-    by_type, reverse_lookup = build_map(inventory)
+    if snapshot is not None:
+        inventory_nodes = list(snapshot.inventory)
+        by_type, reverse_lookup = snapshot.heater_address_map
+    else:
+        inventory_nodes = ensure_node_inventory(rec)
+        container = Inventory(
+            dev_id,
+            nodes_payload if nodes_payload is not None else {},
+            inventory_nodes,
+        )
+        by_type, reverse_lookup = container.heater_address_map
+        if isinstance(rec, dict):
+            rec["node_inventory"] = list(inventory_nodes)
 
     requested_map: dict[str, list[str]] | None
     if nodes is None:
         requested_map = None
     else:
-        normalized_map, _ = normalize(nodes)
+        normalized_map = _normalize_heater_sources(nodes)
         requested_map = {k: list(v) for k, v in normalized_map.items() if v}
 
     selected_map: dict[str, list[str]] = {}
@@ -388,7 +441,7 @@ async def async_import_energy_history(
         selected_map = {node_type: list(addrs) for node_type, addrs in by_type.items()}
 
     if selected_map:
-        deduped_map, _ = normalize(selected_map)
+        deduped_map = _normalize_heater_sources(selected_map)
         selected_map = {k: list(v) for k, v in deduped_map.items() if v}
 
     all_pairs: list[tuple[str, str]] = [
@@ -756,7 +809,6 @@ async def async_register_import_energy_history_service(
 
     logger = _LOGGER
     async_mod = asyncio
-    build_map = build_heater_address_map
     registry_mod = er
 
     async def _service_import_energy_history(call) -> None:
@@ -834,8 +886,17 @@ async def async_register_import_energy_history_service(
                         inventory = snapshot.inventory
                         rec["node_inventory"] = list(inventory)
                 else:
-                    inventory = rec.get("node_inventory") or []
-                by_type, _ = build_map(inventory)
+                    inventory = list(rec.get("node_inventory") or [])
+                if snapshot is not None:
+                    by_type, _ = snapshot.heater_address_map
+                else:
+                    nodes_payload = rec.get("nodes") if isinstance(rec, Mapping) else None
+                    container = Inventory(
+                        str(rec.get("dev_id", "")),
+                        nodes_payload if nodes_payload is not None else {},
+                        inventory,
+                    )
+                    by_type, _ = container.heater_address_map
                 tasks.append(
                     import_fn(
                         hass,

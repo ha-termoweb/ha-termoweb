@@ -42,6 +42,9 @@ def test_snapshot_properties_and_inventory_cache() -> None:
     assert snapshot.nodes_by_type == reference.nodes_by_type
     assert snapshot.explicit_heater_names == reference.explicit_heater_names
     assert snapshot.heater_address_map == reference.heater_address_map
+    first_map = snapshot.heater_sample_address_map
+    second_map = snapshot.heater_sample_address_map
+    assert first_map == second_map
 
 
 def test_snapshot_sample_targets_and_name_map_caching() -> None:
@@ -121,3 +124,12 @@ def test_snapshot_nodes_by_type_skips_unknown() -> None:
 
     assert "htr" in mapping
     assert all(node.addr == "2" for node in mapping["htr"])
+
+
+def test_ensure_snapshot_handles_missing() -> None:
+    """ensure_snapshot should return None when no snapshot is present."""
+
+    assert ensure_snapshot(None) is None
+    assert ensure_snapshot(SimpleNamespace(snapshot=None)) is None
+    assert ensure_snapshot({"snapshot": "ignored"}) is None
+    assert ensure_snapshot({}) is None
