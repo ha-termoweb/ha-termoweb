@@ -31,6 +31,7 @@ from .heater import (
     prepare_heater_platform_data,
 )
 from .identifiers import build_heater_entity_unique_id
+from .inventory import Inventory, heater_platform_details_from_inventory
 from .utils import build_gateway_device_info
 
 _LOGGER = logging.getLogger(__name__)
@@ -49,10 +50,19 @@ async def async_setup_entry(hass, entry, async_add_entities):
         StateRefreshButton(coordinator, entry.entry_id, dev_id)
     ]
 
-    _, nodes_by_type, _, resolve_name = prepare_heater_platform_data(
-        data,
-        default_name_simple=lambda addr: f"Heater {addr}",
-    )
+    entry_inventory = data.get("inventory")
+    if isinstance(entry_inventory, Inventory):
+        nodes_by_type, _, resolve_name = (
+            heater_platform_details_from_inventory(
+                entry_inventory,
+                default_name_simple=lambda addr: f"Heater {addr}",
+            )
+        )
+    else:
+        _, nodes_by_type, _, resolve_name = prepare_heater_platform_data(
+            data,
+            default_name_simple=lambda addr: f"Heater {addr}",
+        )
 
     boost_entities: list[ButtonEntity] = []
     for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(

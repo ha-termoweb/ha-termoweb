@@ -52,6 +52,7 @@ __all__ = [
     "build_heater_address_map",
     "build_heater_inventory_details",
     "build_node_inventory",
+    "heater_platform_details_from_inventory",
     "heater_sample_subscription_targets",
     "normalize_heater_addresses",
     "normalize_node_addr",
@@ -498,6 +499,89 @@ def build_heater_inventory_details(
         address_map=filtered_forward,
         reverse_address_map=filtered_reverse,
     )
+
+
+def heater_platform_details_from_inventory(
+    inventory: Inventory,
+    *,
+    default_name_simple: Callable[[str], str],
+) -> tuple[
+    dict[str, list[Node]],
+    dict[str, list[str]],
+    Callable[[str, str], str],
+]:
+    """Return heater platform metadata derived from ``inventory``."""
+
+    nodes_by_type = inventory.nodes_by_type
+    explicit_names = inventory.explicit_heater_names
+    forward_map, _ = inventory.heater_address_map
+    addrs_by_type = {
+        node_type: list(forward_map.get(node_type, []))
+        for node_type in HEATER_NODE_TYPES
+    }
+
+    name_map = inventory.heater_name_map(default_name_simple)
+    if isinstance(name_map, Mapping):
+        names_by_type_raw = name_map.get("by_type", {})
+        names_by_type = (
+            names_by_type_raw if isinstance(names_by_type_raw, Mapping) else {}
+        )
+        legacy_names_raw = name_map.get("htr", {})
+        legacy_names = (
+            legacy_names_raw if isinstance(legacy_names_raw, Mapping) else {}
+        )
+        name_lookup: Mapping[Any, Any] = name_map
+    else:
+        names_by_type = {}
+        legacy_names = {}
+        name_lookup = {}
+
+    def _default_name(addr: str, node_type: str | None = None) -> str:
+        if (node_type or "").lower() == "acm":
+            return f"Accumulator {addr}"
+        return default_name_simple(addr)
+
+    def resolve_name(node_type: str, addr: str) -> str:
+        """Resolve friendly names for heater nodes."""
+
+        node_type_norm = normalize_node_type(
+            node_type,
+            use_default_when_falsey=True,
+        )
+        addr_str = normalize_node_addr(
+            addr,
+            use_default_when_falsey=True,
+        )
+        default_simple = default_name_simple(addr_str)
+
+        def _candidate(value: Any) -> str | None:
+            if not isinstance(value, str) or not value:
+                return None
+            if (
+                node_type_norm == "acm"
+                and value == default_simple
+                and (node_type_norm, addr_str) not in explicit_names
+            ):
+                return None
+            return value
+
+        per_type_raw = names_by_type.get(node_type_norm, {})
+        per_type = (
+            per_type_raw if isinstance(per_type_raw, Mapping) else {}
+        )
+
+        for candidate_value in (
+            per_type.get(addr_str),
+            name_lookup.get((node_type_norm, addr_str)),
+            legacy_names.get(addr_str),
+        ):
+            candidate = _candidate(candidate_value)
+            if candidate:
+                return candidate
+
+        return _default_name(addr_str, node_type_norm)
+
+    return nodes_by_type, addrs_by_type, resolve_name
 
 
 def normalize_heater_addresses(
