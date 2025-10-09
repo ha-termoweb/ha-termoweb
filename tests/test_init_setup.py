@@ -458,6 +458,98 @@ def test_async_setup_entry_sets_supports_diagnostics(
     assert entry.supports_diagnostics is sentinel.YES
 
 
+def test_async_setup_entry_resets_diagnostics_cache(
+    termoweb_init: Any,
+    stub_hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class DiagnosticsClient(BaseFakeClient):
+        async def list_devices(self) -> list[dict[str, Any]]:
+            return [{"dev_id": "dev-1"}]
+
+        async def get_nodes(self, dev_id: str) -> dict[str, Any]:
+            await super().get_nodes(dev_id)
+            return {"nodes": []}
+
+    monkeypatch.setattr(termoweb_init, "RESTClient", DiagnosticsClient)
+
+    loader_module = types.ModuleType("homeassistant.loader")
+    missing_cache: dict[str, Any] = {
+        "termoweb.diagnostics": object(),
+        "other": object(),
+    }
+    loader_module.DATA_MISSING_PLATFORMS = missing_cache
+
+    async def _async_get_integration(_hass: HomeAssistant, _domain: str) -> Any:
+        return SimpleNamespace(version="1.0.0")
+
+    loader_module.async_get_integration = _async_get_integration
+
+    diagnostics_calls: list[tuple[HomeAssistant, str, types.ModuleType]] = []
+    diagnostics_module = types.ModuleType("homeassistant.components.diagnostics")
+    diagnostics_module.async_redact_data = lambda data, fields: data
+
+    class _RegisterStub:
+        def __init__(self) -> None:
+            self.should_fail = False
+
+        def __call__(
+            self, hass: HomeAssistant, domain: str, module: types.ModuleType
+        ) -> None:
+            if self.should_fail:
+                raise RuntimeError("boom")
+            diagnostics_calls.append((hass, domain, module))
+
+    register_stub = _RegisterStub()
+    diagnostics_module._register_diagnostics_platform = register_stub
+    monkeypatch.setitem(
+        sys.modules, "homeassistant.components.diagnostics", diagnostics_module
+    )
+
+    import_mock = AsyncMock()
+    monkeypatch.setattr(termoweb_init, "_async_import_energy_history", import_mock)
+
+    entry = ConfigEntry("diag-cache", data={"username": "user", "password": "pw"})
+    stub_hass.config_entries.add(entry)
+
+    async def _run() -> bool:
+        result = await termoweb_init.async_setup_entry(stub_hass, entry)
+        await _drain_tasks(stub_hass)
+        return result
+
+    register_stub.should_fail = True
+    monkeypatch.setattr(termoweb_init, "ha_loader", None)
+    with caplog.at_level(logging.DEBUG, logger=termoweb_init.__name__):
+        termoweb_init._register_diagnostics_platform(stub_hass)
+        assert "Diagnostics cache unavailable" in caplog.text
+        assert "Diagnostics registration raised exception" in caplog.text
+    caplog.clear()
+
+    register_stub.should_fail = False
+    monkeypatch.setattr(termoweb_init, "ha_loader", loader_module)
+    monkeypatch.setitem(sys.modules, "homeassistant.loader", loader_module)
+
+    with caplog.at_level(logging.DEBUG, logger=termoweb_init.__name__):
+        assert asyncio.run(_run()) is True
+        assert "Attempting to remove termoweb.diagnostics" in caplog.text
+        assert "Diagnostics platform registered successfully" in caplog.text
+    caplog.clear()
+
+    assert "termoweb.diagnostics" not in loader_module.DATA_MISSING_PLATFORMS
+    assert diagnostics_calls and len(diagnostics_calls) == 1
+    hass_call, domain_call, module_call = diagnostics_calls[0]
+    assert hass_call is stub_hass
+    assert domain_call == termoweb_init.DOMAIN
+    assert module_call.__name__ == "custom_components.termoweb.diagnostics"
+
+    register_stub.should_fail = True
+    with caplog.at_level(logging.DEBUG, logger=termoweb_init.__name__):
+        termoweb_init._register_diagnostics_platform(stub_hass)
+        assert "No cache entry stored for termoweb.diagnostics" in caplog.text
+        assert "Diagnostics registration raised exception" in caplog.text
+
+
 def test_build_heater_address_map_filters_invalid_nodes(termoweb_init: Any) -> None:
     inventory = [
         SimpleNamespace(type="htr", addr="A"),

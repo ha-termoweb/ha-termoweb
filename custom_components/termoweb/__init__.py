@@ -6,6 +6,7 @@ import asyncio
 from collections import Counter
 from collections.abc import Awaitable, Iterable, Mapping, MutableMapping
 from datetime import timedelta
+from importlib import import_module
 import logging
 from typing import Any
 
@@ -17,6 +18,10 @@ except ImportError:  # pragma: no cover - tests provide stubbed config entries
     from homeassistant.config_entries import ConfigEntry  # type: ignore[misc]
 
     SupportsDiagnostics = None  # type: ignore[assignment]
+try:  # pragma: no cover - loader is optional on older Home Assistant cores
+    from homeassistant import loader as ha_loader
+except ImportError:  # pragma: no cover - tests provide minimal loader stub
+    ha_loader = None
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client
@@ -57,6 +62,50 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["button", "binary_sensor", "climate", "select", "sensor"]
 
 reset_samples_rate_limit_state()
+
+
+def _register_diagnostics_platform(hass: HomeAssistant) -> None:
+    """Ensure diagnostics helpers are registered against Home Assistant."""
+
+    if ha_loader is None:
+        _LOGGER.debug("Diagnostics cache unavailable: loader import failed")
+    else:
+        missing = getattr(ha_loader, "DATA_MISSING_PLATFORMS", None)
+        if isinstance(missing, MutableMapping):
+            _LOGGER.debug(
+                "Attempting to remove termoweb.diagnostics from missing platform cache",
+            )
+            removed = missing.pop("termoweb.diagnostics", None)
+            if removed is not None:
+                _LOGGER.debug("Removed termoweb.diagnostics cache entry")
+            else:
+                _LOGGER.debug("No cache entry stored for termoweb.diagnostics")
+        else:
+            _LOGGER.debug("Missing platform cache not available: %s", missing)
+
+    try:
+        diagnostics = import_module("homeassistant.components.diagnostics")
+    except ImportError as err:  # pragma: no cover - guard against missing helper
+        _LOGGER.debug("Diagnostics helper import failed: %s", err)
+        return
+
+    register = getattr(diagnostics, "_register_diagnostics_platform", None)
+    if register is None:
+        _LOGGER.debug("Diagnostics registration helper unavailable on this core")
+        return
+
+    try:
+        diagnostics_module = import_module("custom_components.termoweb.diagnostics")
+    except ImportError as err:  # pragma: no cover - diagnostics import guard
+        _LOGGER.debug("Failed to import TermoWeb diagnostics module: %s", err)
+        return
+
+    try:
+        register(hass, DOMAIN, diagnostics_module)
+    except Exception as err:  # noqa: BLE001 - defensive logging for compatibility
+        _LOGGER.debug("Diagnostics registration raised exception: %s", err)
+    else:
+        _LOGGER.debug("Diagnostics platform registered successfully")
 
 
 def create_rest_client(
@@ -124,6 +173,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
 
     if SupportsDiagnostics is not None and hasattr(entry, "supports_diagnostics"):
         entry.supports_diagnostics = SupportsDiagnostics.YES
+
+    _register_diagnostics_platform(hass)
 
     version = await _async_get_integration_version(hass)
 
