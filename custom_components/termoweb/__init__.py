@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
+import inspect
 from collections.abc import Awaitable, Iterable, Mapping, MutableMapping
 from datetime import timedelta
 from importlib import import_module
@@ -173,6 +174,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
 
     if SupportsDiagnostics is not None and hasattr(entry, "supports_diagnostics"):
         entry.supports_diagnostics = SupportsDiagnostics.YES
+        update_payload = entry.data | {"supports_diagnostics": True}
+        update_method = getattr(entry, "async_update", None)
+        if callable(update_method):
+            update_result = update_method(update_payload)
+            if inspect.isawaitable(update_result):
+                await update_result
+        else:
+            hass.config_entries.async_update_entry(entry, data=update_payload)
 
     _register_diagnostics_platform(hass)
 
