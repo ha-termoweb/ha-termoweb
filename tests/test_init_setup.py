@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 import asyncio
-import types
 import importlib
+import inspect
 import logging
 import sys
-import types
+from dataclasses import dataclass
 from datetime import timedelta
-from types import SimpleNamespace
+from collections.abc import MutableMapping
+from types import MappingProxyType, SimpleNamespace
 from typing import Any, Callable, Coroutine
+
+import types
 
 import pytest
 from unittest.mock import AsyncMock
@@ -127,131 +130,226 @@ def test_create_rest_client_selects_brand(
     assert stub_hass.client_session_calls == 2
 
 
-def test_async_ensure_diagnostics_platform_registers(
-    termoweb_init: Any,
+@pytest.mark.asyncio
+async def test_async_ensure_diagnostics_platform_registers_immediately(
+    diagnostics_termoweb: Any,
     stub_hass: HomeAssistant,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    diagnostics_calls: list[tuple[str, HomeAssistant, str, types.ModuleType]] = []
+    register_calls: list[tuple[HomeAssistant, str, types.ModuleType]] = []
+
+    @dataclass
+    class DiagnosticsDataStub:
+        platforms: MutableMapping[str, types.ModuleType] | MappingProxyType
 
     diagnostics_module = types.ModuleType("diagnostics_stub")
     diagnostics_module.DOMAIN = "diagnostics"
-    diagnostics_module.async_redact_data = lambda data, fields: data
+    diagnostics_module._DIAGNOSTICS_DATA = "diag_key"
 
-    async def _async_register(
+    def _register(
         hass: HomeAssistant, domain: str, platform: types.ModuleType
     ) -> None:
-        diagnostics_calls.append(("async", hass, domain, platform))
+        register_calls.append((hass, domain, platform))
+        data = hass.data[diagnostics_module._DIAGNOSTICS_DATA]
+        container = data.platforms if hasattr(data, "platforms") else data
+        if not isinstance(container, MutableMapping):
+            raise AssertionError("platforms container should be mutable")
+        container[domain] = platform
 
-    def _sync_register(
-        hass: HomeAssistant, domain: str, platform: types.ModuleType
-    ) -> None:
-        diagnostics_calls.append(("sync", hass, domain, platform))
-
-    hass_key = object()
-    diagnostics_module.async_register_diagnostics_platform = _async_register
-    diagnostics_module._register_diagnostics_platform = _sync_register
-    diagnostics_module.DIAGNOSTICS_DATA = hass_key
+    diagnostics_module._register_diagnostics_platform = _register
 
     platform_module = types.ModuleType("termoweb_diagnostics_stub")
-
     monkeypatch.setitem(
         sys.modules, "homeassistant.components.diagnostics", diagnostics_module
     )
+    components_pkg = sys.modules.setdefault(
+        "homeassistant.components", types.ModuleType("homeassistant.components")
+    )
+    monkeypatch.setattr(components_pkg, "diagnostics", diagnostics_module, raising=False)
     monkeypatch.setitem(
         sys.modules, "custom_components.termoweb.diagnostics", platform_module
     )
 
-    asyncio.run(termoweb_init._async_ensure_diagnostics_platform(stub_hass))
+    hass = stub_hass
+    hass.bus = SimpleNamespace(async_listen=lambda *args, **kwargs: lambda: None)
+    hass.data[diagnostics_module._DIAGNOSTICS_DATA] = DiagnosticsDataStub(
+        platforms=MappingProxyType({})
+    )
 
-    diagnostics_platform = sys.modules["custom_components.termoweb.diagnostics"]
-    assert diagnostics_calls == [
-        ("async", stub_hass, termoweb_init.DOMAIN, diagnostics_platform)
-    ]
+    caplog.set_level(logging.DEBUG)
+    await diagnostics_termoweb._async_ensure_diagnostics_platform(hass)
 
-    diagnostics_calls.clear()
-    del diagnostics_module.async_register_diagnostics_platform
-    stub_hass.data.clear()
-    stub_hass.data[hass_key] = SimpleNamespace(platforms={})
+    assert len(register_calls) == 1
+    _, domain, registered_platform = register_calls[0]
+    assert domain == diagnostics_termoweb.DOMAIN
+    assert registered_platform is platform_module
 
-    asyncio.run(termoweb_init._async_ensure_diagnostics_platform(stub_hass))
-    assert diagnostics_calls == [
-        ("sync", stub_hass, termoweb_init.DOMAIN, diagnostics_platform)
-    ]
-
-    diagnostics_calls.clear()
-    del diagnostics_module.DIAGNOSTICS_DATA
-
-    for key_name in ("DATA_DIAGNOSTICS", "_DIAGNOSTICS_DATA"):
-        key = object()
-        setattr(diagnostics_module, key_name, key)
-        stub_hass.data.clear()
-        stub_hass.data[key] = SimpleNamespace(platforms={})
-
-        asyncio.run(termoweb_init._async_ensure_diagnostics_platform(stub_hass))
-        assert diagnostics_calls == [
-            ("sync", stub_hass, termoweb_init.DOMAIN, diagnostics_platform)
-        ]
-        diagnostics_calls.clear()
-        delattr(diagnostics_module, key_name)
-
-    stub_hass.data.clear()
-    stub_hass.data[diagnostics_module.DOMAIN] = SimpleNamespace(platforms={})
-
-    asyncio.run(termoweb_init._async_ensure_diagnostics_platform(stub_hass))
-    assert diagnostics_calls == [
-        ("sync", stub_hass, termoweb_init.DOMAIN, diagnostics_platform)
-    ]
+    diag_state = hass.data[diagnostics_module._DIAGNOSTICS_DATA]
+    assert isinstance(diag_state.platforms, dict)
+    assert diag_state.platforms[diagnostics_termoweb.DOMAIN] is platform_module
+    assert any(
+        "attempt 1 triggered by initial" in message for message in caplog.messages
+    )
+    assert any(
+        "attempt 1 succeeded" in message for message in caplog.messages
+    )
 
 
-def test_async_ensure_diagnostics_platform_guard_paths(
-    termoweb_init: Any,
+class _FakeEventBus:
+    def __init__(self) -> None:
+        self.listeners: list[tuple[str, Callable[[Any], Any]]] = []
+
+    def async_listen(
+        self, event: str, callback: Callable[[Any], Any]
+    ) -> Callable[[], None]:
+        self.listeners.append((event, callback))
+
+        def _remove() -> None:
+            try:
+                self.listeners.remove((event, callback))
+            except ValueError:
+                pass
+
+        return _remove
+
+    async def fire(self, event: str, data: Any | None = None) -> None:
+        payload = SimpleNamespace(data=data or {})
+        for registered_event, callback in list(self.listeners):
+            if registered_event != event:
+                continue
+            result = callback(payload)
+            if inspect.isawaitable(result):
+                await result
+
+
+@pytest.mark.asyncio
+async def test_async_ensure_diagnostics_platform_retries_until_ready(
+    diagnostics_termoweb: Any,
     stub_hass: HomeAssistant,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    diagnostics_calls: list[tuple[str, HomeAssistant, str, types.ModuleType]] = []
+    register_calls: list[tuple[str, types.ModuleType]] = []
 
-    diagnostics_module = types.ModuleType("diagnostics_guard_stub")
+    @dataclass
+    class DiagnosticsDataStub:
+        platforms: MutableMapping[str, types.ModuleType] | MappingProxyType
+
+    diagnostics_module = types.ModuleType("diagnostics_retry_stub")
     diagnostics_module.DOMAIN = "diagnostics"
-    diagnostics_module.async_redact_data = lambda data, fields: data
-
-    def _sync_register(
-        hass: HomeAssistant, domain: str, platform: types.ModuleType
-    ) -> None:
-        diagnostics_calls.append(("sync", hass, domain, platform))
-
-    diagnostics_module._register_diagnostics_platform = _sync_register
     diagnostics_module._DIAGNOSTICS_DATA = "diag_key"
 
+    def _register(
+        hass: HomeAssistant, domain: str, platform: types.ModuleType
+    ) -> None:
+        register_calls.append((domain, platform))
+        data = hass.data[diagnostics_module._DIAGNOSTICS_DATA]
+        container = data.platforms if hasattr(data, "platforms") else data
+        if isinstance(container, MutableMapping):
+            container[domain] = platform
+
+    diagnostics_module._register_diagnostics_platform = _register
+
+    platform_module = types.ModuleType("termoweb_diagnostics_retry_stub")
     monkeypatch.setitem(
         sys.modules, "homeassistant.components.diagnostics", diagnostics_module
     )
+    components_pkg = sys.modules.setdefault(
+        "homeassistant.components", types.ModuleType("homeassistant.components")
+    )
+    monkeypatch.setattr(components_pkg, "diagnostics", diagnostics_module, raising=False)
+    monkeypatch.setitem(
+        sys.modules, "custom_components.termoweb.diagnostics", platform_module
+    )
 
-    platform = importlib.import_module("custom_components.termoweb.diagnostics")
+    hass = stub_hass
+    bus = _FakeEventBus()
+    hass.bus = bus
 
-    stub_hass.data = {}
-    asyncio.run(termoweb_init._async_ensure_diagnostics_platform(stub_hass))
-    assert diagnostics_calls == []
+    scheduled: list[dict[str, Any]] = []
 
-    stub_hass.data = {
-        diagnostics_module._DIAGNOSTICS_DATA: SimpleNamespace(platforms=None)
-    }
-    asyncio.run(termoweb_init._async_ensure_diagnostics_platform(stub_hass))
-    assert diagnostics_calls == []
+    def _fake_async_call_later(
+        hass: HomeAssistant, delay: float, callback: Callable[[Any], None]
+    ) -> Callable[[], None]:
+        entry = {"callback": callback, "delay": delay}
 
-    stub_hass.data = {
-        diagnostics_module._DIAGNOSTICS_DATA: SimpleNamespace(
-            platforms={termoweb_init.DOMAIN: platform}
-        )
-    }
-    asyncio.run(termoweb_init._async_ensure_diagnostics_platform(stub_hass))
-    assert diagnostics_calls == []
+        def _cancel() -> None:
+            entry["callback"] = None
+            if entry in scheduled:
+                scheduled.remove(entry)
+
+        entry["cancel"] = _cancel
+        scheduled.append(entry)
+        return _cancel
+
+    monkeypatch.setattr(
+        diagnostics_termoweb, "async_call_later", _fake_async_call_later
+    )
+
+    caplog.set_level(logging.DEBUG)
+    await diagnostics_termoweb._async_ensure_diagnostics_platform(hass)
+
+    assert register_calls == []
+    assert scheduled, "retry should be scheduled when diagnostics storage is missing"
+    assert bus.listeners, "event listener should be installed for component_loaded"
+
+    hass.data[diagnostics_module._DIAGNOSTICS_DATA] = DiagnosticsDataStub(
+        platforms=MappingProxyType({})
+    )
+
+    await bus.fire(
+        diagnostics_termoweb.EVENT_COMPONENT_LOADED,
+        {diagnostics_termoweb.ATTR_COMPONENT: diagnostics_module.DOMAIN},
+    )
+
+    for entry in list(scheduled):
+        callback = entry.get("callback")
+        if callback is not None:
+            callback(None)
+            await asyncio.sleep(0)
+
+    await asyncio.sleep(0)
+
+    assert register_calls == [
+        (diagnostics_termoweb.DOMAIN, platform_module)
+    ]
+
+    diag_state = hass.data[diagnostics_module._DIAGNOSTICS_DATA]
+    assert isinstance(diag_state.platforms, dict)
+    assert diag_state.platforms[diagnostics_termoweb.DOMAIN] is platform_module
+
+    assert any(
+        "attempt 1 triggered by initial" in message for message in caplog.messages
+    )
+    assert any(
+        "attempt 1 deferred: storage missing" in message
+        for message in caplog.messages
+    )
+    assert any(
+        "attempt 2 triggered by component_loaded" in message
+        for message in caplog.messages
+    )
+    assert any(
+        "attempt 2 succeeded" in message for message in caplog.messages
+    )
 
 
 async def _drain_tasks(hass: HomeAssistant) -> None:
     if hass.tasks:
         await asyncio.gather(*hass.tasks, return_exceptions=True)
         hass.tasks.clear()
+
+
+@pytest.fixture
+def diagnostics_termoweb() -> Any:
+    for name in list(sys.modules):
+        if name.startswith("custom_components.termoweb"):
+            sys.modules.pop(name)
+
+    module = importlib.import_module("custom_components.termoweb.__init__")
+    module = importlib.reload(module)
+    return module
 
 
 @pytest.fixture
