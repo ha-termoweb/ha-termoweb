@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
-from typing import Any, List
+from typing import Any, Iterable, List, Mapping
 
 import pytest
 
+import custom_components.termoweb.inventory as inventory_module
 from custom_components.termoweb.inventory import Inventory, Node
 
 
@@ -140,6 +141,93 @@ def test_inventory_heater_metadata_properties(heater_inventory: Inventory) -> No
     cached_forward, cached_reverse = heater_inventory.heater_address_map
     assert cached_forward == {"htr": ["1", "2"], "acm": ["2"]}
     assert cached_reverse == {"1": {"htr"}, "2": {"htr", "acm"}}
+
+
+def test_inventory_heater_sample_address_map_caches(heater_inventory: Inventory) -> None:
+    """Normalised heater sample addresses should cache and defend against mutation."""
+
+    assert heater_inventory._heater_sample_address_cache is None
+
+    forward, compat = heater_inventory.heater_sample_address_map
+
+    assert heater_inventory._heater_sample_address_cache is not None
+    assert forward == {"htr": ["1", "2"], "acm": ["2"]}
+    assert compat == {"htr": "htr"}
+
+    forward["htr"].append("bogus")
+    compat["heater"] = "htr"
+
+    cached_forward, cached_compat = heater_inventory.heater_sample_address_map
+
+    assert cached_forward == {"htr": ["1", "2"], "acm": ["2"]}
+    assert cached_compat == {"htr": "htr"}
+
+
+def test_inventory_heater_sample_targets_cache_and_order(heater_inventory: Inventory) -> None:
+    """Sample targets should be cached and maintain canonical ordering."""
+
+    assert heater_inventory._heater_sample_targets_cache is None
+
+    targets = heater_inventory.heater_sample_targets
+
+    assert heater_inventory._heater_sample_targets_cache is not None
+    assert targets == [("htr", "1"), ("htr", "2"), ("acm", "2")]
+
+    targets.append(("acm", "extra"))
+
+    cached = heater_inventory.heater_sample_targets
+    assert cached == [("htr", "1"), ("htr", "2"), ("acm", "2")]
+    assert cached is not targets
+
+
+def test_inventory_heater_sample_alias_handling(heater_inventory: Inventory) -> None:
+    """Alias types should normalise to heater targets for sample metadata."""
+
+    object.__setattr__(
+        heater_inventory,
+        "_heater_address_map_cache",
+        (
+            {"heater": ("10",), "acm": ("2",)},
+            {"10": frozenset({"heater"}), "2": frozenset({"acm"})},
+        ),
+    )
+    object.__setattr__(heater_inventory, "_heater_sample_address_cache", None)
+    object.__setattr__(heater_inventory, "_heater_sample_targets_cache", None)
+
+    forward, compat = heater_inventory.heater_sample_address_map
+
+    assert forward == {"htr": ["10"], "acm": ["2"]}
+    assert compat == {"heater": "htr", "htr": "htr"}
+
+    targets = heater_inventory.heater_sample_targets
+    assert targets == [("htr", "10"), ("acm", "2")]
+
+
+def test_inventory_heater_sample_targets_filters_invalid(
+    heater_inventory: Inventory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sample targets property should discard invalid entries from helpers."""
+
+    def fake_targets(_: Mapping[Any, Iterable[Any]] | Iterable[Any] | None) -> list[Any]:
+        return [
+            None,
+            "bad",
+            ("htr", " 1 "),
+            ("acm", None),
+            ("acm", ""),
+            ["acm", "2 "],
+        ]
+
+    monkeypatch.setattr(
+        inventory_module,
+        "heater_sample_subscription_targets",
+        fake_targets,
+    )
+    object.__setattr__(heater_inventory, "_heater_sample_targets_cache", None)
+
+    targets = heater_inventory.heater_sample_targets
+    assert targets == [("htr", "1")]
+    assert ("acm", "2") not in targets
 
 
 def test_build_heater_inventory_details_wraps_inventory(

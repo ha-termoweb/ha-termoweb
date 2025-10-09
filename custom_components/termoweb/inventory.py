@@ -31,26 +31,26 @@ _SNAPSHOT_NAME_CANDIDATE_KEYS = (
 
 
 __all__ = [
+    "HEATER_NODE_TYPES",
     "NODE_CLASS_BY_TYPE",
     "AccumulatorNode",
-    "HeaterNode",
     "HeaterInventoryDetails",
-    "HEATER_NODE_TYPES",
+    "HeaterNode",
     "Inventory",
     "Node",
     "NodeDescriptor",
     "PowerMonitorNode",
     "ThermostatNode",
+    "_normalize_node_identifier",
     "addresses_by_node_type",
     "build_heater_address_map",
     "build_heater_inventory_details",
+    "build_node_inventory",
     "heater_sample_subscription_targets",
     "normalize_heater_addresses",
-    "parse_heater_energy_unique_id",
-    "_normalize_node_identifier",
-    "build_node_inventory",
     "normalize_node_addr",
     "normalize_node_type",
+    "parse_heater_energy_unique_id",
 ]
 
 
@@ -73,6 +73,10 @@ class Inventory:
     _heater_address_map_cache: (
         tuple[dict[str, tuple[str, ...]], dict[str, frozenset[str]]] | None
     )
+    _heater_sample_address_cache: (
+        tuple[dict[str, tuple[str, ...]], dict[str, str]] | None
+    )
+    _heater_sample_targets_cache: tuple[tuple[str, str], ...] | None
 
     def __init__(
         self,
@@ -89,6 +93,8 @@ class Inventory:
         object.__setattr__(self, "_heater_nodes_cache", None)
         object.__setattr__(self, "_explicit_name_pairs_cache", None)
         object.__setattr__(self, "_heater_address_map_cache", None)
+        object.__setattr__(self, "_heater_sample_address_cache", None)
+        object.__setattr__(self, "_heater_sample_targets_cache", None)
 
     @property
     def dev_id(self) -> str:
@@ -194,6 +200,63 @@ class Inventory:
             {node_type: list(addresses) for node_type, addresses in forward_cache.items()},
             {addr: set(node_types) for addr, node_types in reverse_cache.items()},
         )
+
+    def _ensure_heater_sample_addresses(
+        self,
+    ) -> tuple[dict[str, tuple[str, ...]], dict[str, str]]:
+        """Return cached normalised heater address data for samples."""
+
+        cached = self._heater_sample_address_cache
+        if cached is None:
+            forward_map, _ = self.heater_address_map
+            normalized_map, compat = normalize_heater_addresses(forward_map)
+            cached = (
+                {
+                    node_type: tuple(addresses)
+                    for node_type, addresses in normalized_map.items()
+                },
+                dict(compat),
+            )
+            object.__setattr__(self, "_heater_sample_address_cache", cached)
+        return cached
+
+    @property
+    def heater_sample_address_map(
+        self,
+    ) -> tuple[dict[str, list[str]], dict[str, str]]:
+        """Return normalised heater addresses and compatibility aliases."""
+
+        forward_cache, compat_cache = self._ensure_heater_sample_addresses()
+        return (
+            {
+                node_type: list(addresses)
+                for node_type, addresses in forward_cache.items()
+            },
+            dict(compat_cache),
+        )
+
+    @property
+    def heater_sample_targets(self) -> list[tuple[str, str]]:
+        """Return ordered ``(node_type, addr)`` sample subscription targets."""
+
+        cached = self._heater_sample_targets_cache
+        if cached is None:
+            normalized_map, _ = self._ensure_heater_sample_addresses()
+            raw_targets = heater_sample_subscription_targets(normalized_map)
+            validated: list[tuple[str, str]] = []
+            for item in raw_targets:
+                if not isinstance(item, tuple) or len(item) != 2:
+                    continue
+                node_type, addr = item
+                if not isinstance(node_type, str) or not isinstance(addr, str):
+                    continue
+                node_clean = node_type.strip()
+                addr_clean = addr.strip()
+                if node_clean and addr_clean:
+                    validated.append((node_clean, addr_clean))
+            cached = tuple(validated)
+            object.__setattr__(self, "_heater_sample_targets_cache", cached)
+        return [tuple(pair) for pair in cached]
 
 
 def _normalize_node_identifier(
