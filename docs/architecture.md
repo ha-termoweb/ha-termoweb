@@ -49,7 +49,7 @@ state and energy statistics to the rest of the platform.【F:custom_components/t
 - **Energy services** – the energy helper enforces a shared rate limiter for
   historical sample queries, performs targeted imports based on entity
   selection, and registers the `import_energy_history` service only once per
-  Home Assistant instance.【F:custom_components/termoweb/energy.py†L150-L177】【F:custom_components/termoweb/energy.py†L421-L512】【F:custom_components/termoweb/energy.py†L841-L919】
+  Home Assistant instance.【F:custom_components/termoweb/energy.py†L142-L178】【F:custom_components/termoweb/energy.py†L314-L733】【F:custom_components/termoweb/energy.py†L735-L846】
 
 ## Runtime data flow
 

@@ -138,18 +138,14 @@ def test_async_ensure_diagnostics_platform_registers(
     diagnostics_module.DOMAIN = "diagnostics"
     diagnostics_module.async_redact_data = lambda data, fields: data
 
-    async def _async_register(
-        hass: HomeAssistant, domain: str, platform: types.ModuleType
-    ) -> None:
-        diagnostics_calls.append(("async", hass, domain, platform))
-
     def _sync_register(
         hass: HomeAssistant, domain: str, platform: types.ModuleType
     ) -> None:
         diagnostics_calls.append(("sync", hass, domain, platform))
 
     hass_key = object()
-    diagnostics_module.async_register_diagnostics_platform = _async_register
+    async_register = AsyncMock(return_value=None)
+    diagnostics_module.async_register_diagnostics_platform = async_register
     diagnostics_module._register_diagnostics_platform = _sync_register
     diagnostics_module.DIAGNOSTICS_DATA = hass_key
 
@@ -162,12 +158,21 @@ def test_async_ensure_diagnostics_platform_registers(
         sys.modules, "custom_components.termoweb.diagnostics", platform_module
     )
 
+    real_module = importlib.reload(
+        importlib.import_module("custom_components.termoweb.__init__")
+    )
+    monkeypatch.setattr(
+        termoweb_init,
+        "_async_ensure_diagnostics_platform",
+        real_module._async_ensure_diagnostics_platform,
+    )
+
     asyncio.run(termoweb_init._async_ensure_diagnostics_platform(stub_hass))
 
     diagnostics_platform = sys.modules["custom_components.termoweb.diagnostics"]
-    assert diagnostics_calls == [
-        ("async", stub_hass, termoweb_init.DOMAIN, diagnostics_platform)
-    ]
+    async_register.assert_awaited_once_with(
+        stub_hass, termoweb_init.DOMAIN, diagnostics_platform
+    )
 
     diagnostics_calls.clear()
     del diagnostics_module.async_register_diagnostics_platform
@@ -517,7 +522,7 @@ def test_async_setup_entry_happy_path(
     assert stub_hass.services.has_service(
         termoweb_init.DOMAIN, "import_energy_history"
     )
-    import_mock.assert_awaited_once_with(stub_hass, entry)
+    assert import_mock.await_count == 0
 
 
 def test_async_setup_entry_sets_supports_diagnostics(
@@ -779,7 +784,7 @@ def test_async_setup_entry_logs_unexpected_devices_payload(
     assert WeirdClient.instances[0].get_nodes_calls == []
 
 
-def test_async_setup_entry_defers_until_started(
+def test_async_setup_entry_does_not_schedule_energy_import(
     termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class HappyClient(BaseFakeClient):
@@ -800,18 +805,14 @@ def test_async_setup_entry_defers_until_started(
     async def _run() -> None:
         await termoweb_init.async_setup_entry(stub_hass, entry)
         await _drain_tasks(stub_hass)
-        assert not import_mock.await_count
-        assert stub_hass.bus.listeners
-        callback = next(
-            cb
-            for event, cb in stub_hass.bus.listeners
-            if event == EVENT_HOMEASSISTANT_STARTED
-        )
-        await callback(None)
-        await _drain_tasks(stub_hass)
 
     asyncio.run(_run())
-    import_mock.assert_awaited_once_with(stub_hass, entry)
+    assert import_mock.await_count == 0
+    assert not [
+        event
+        for event, _callback in stub_hass.bus.listeners
+        if event == EVENT_HOMEASSISTANT_STARTED
+    ]
 
 
 def test_import_energy_history_service_invocation(

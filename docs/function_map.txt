@@ -672,8 +672,6 @@ custom_components/termoweb/energy.py :: async_register_import_energy_history_ser
     Register the import_energy_history service if it is missing.
 custom_components/termoweb/energy.py :: async_register_import_energy_history_service._service_import_energy_history
     Handle the import_energy_history service call.
-custom_components/termoweb/energy.py :: async_schedule_initial_energy_import
-    Schedule the initial energy history import for an entry.
 custom_components/termoweb/heater.py :: _coerce_boost_remaining_minutes
     Return ``value`` as a positive integer minute count when possible.
 custom_components/termoweb/heater.py :: _boost_runtime_store

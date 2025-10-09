@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 from collections import Counter
 from collections.abc import Awaitable, Iterable, Mapping, MutableMapping
 from datetime import timedelta
@@ -14,6 +13,7 @@ import sys
 from typing import Any, Final
 
 from aiohttp import ClientError
+
 try:  # pragma: no cover - compatibility shim for older Home Assistant cores
     from homeassistant.config_entries import ConfigEntry, SupportsDiagnostics
 except ImportError:  # pragma: no cover - tests provide stubbed config entries
@@ -24,6 +24,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+
 try:  # pragma: no cover - fallback for test stubs
     from homeassistant.setup import ATTR_COMPONENT
 except ImportError:  # pragma: no cover - tests provide minimal attributes
@@ -47,7 +48,6 @@ from .coordinator import StateCoordinator
 from .energy import (
     async_import_energy_history as _async_import_energy_history_impl,
     async_register_import_energy_history_service,
-    async_schedule_initial_energy_import,
     default_samples_rate_limit_state,
     reset_samples_rate_limit_state,
 )
@@ -394,12 +394,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
 
     await async_register_import_energy_history_service(
         hass,
-        _async_import_energy_history,
-    )
-
-    async_schedule_initial_energy_import(
-        hass,
-        entry,
         _async_import_energy_history,
     )
 

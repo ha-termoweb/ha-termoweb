@@ -10,7 +10,6 @@ import logging
 from typing import Any, cast
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
@@ -24,7 +23,7 @@ from .inventory import (
     parse_heater_energy_unique_id,
 )
 from .nodes import ensure_node_inventory
-from .throttle import (
+from .throttle import (  # noqa: F401
     MonotonicRateLimiter,
     default_samples_rate_limit_state,
     reset_samples_rate_limit_state,
@@ -846,23 +845,3 @@ async def async_register_import_energy_history_service(
         DOMAIN, "import_energy_history", _service_import_energy_history
     )
 
-
-def async_schedule_initial_energy_import(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    import_fn: Callable[..., Awaitable[None]],
-) -> None:
-    """Schedule the initial energy history import for an entry."""
-
-    if entry.options.get(OPTION_ENERGY_HISTORY_IMPORTED):
-        return
-
-    _LOGGER.debug("%s: scheduling initial energy import", entry.entry_id)
-
-    async def _schedule_import(_event: Any | None = None) -> None:
-        await import_fn(hass, entry)
-
-    if hass.is_running:
-        hass.async_create_task(_schedule_import())
-    else:
-        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _schedule_import)

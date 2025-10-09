@@ -16,6 +16,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+
 from custom_components.termoweb import (
     identifiers as identifiers_module,
     inventory as inventory_module,
@@ -2170,17 +2172,11 @@ def test_setup_defers_import_until_started(monkeypatch: pytest.MonkeyPatch) -> N
         assert await mod.async_setup_entry(hass, entry) is True
         import_mock.assert_not_called()
 
-        start_listeners = [
-            cb for event, cb in listeners if event == energy_mod.EVENT_HOMEASSISTANT_STARTED
+        assert not [
+            event
+            for event, _callback in listeners
+            if event == EVENT_HOMEASSISTANT_STARTED
         ]
-        assert len(start_listeners) == 1
-        cb = start_listeners[0]
-
-        hass.async_create_task(cb(None))
-        if tasks:
-            await asyncio.gather(*tasks)
-
-        import_mock.assert_awaited_once_with(hass, entry)
 
     asyncio.run(_run())
 
