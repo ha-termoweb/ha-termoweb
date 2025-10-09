@@ -18,7 +18,7 @@ from custom_components.termoweb import coordinator as coordinator_module
 from custom_components.termoweb import sensor as sensor_module
 from custom_components.termoweb import const as const_module
 from custom_components.termoweb.identifiers import build_heater_energy_unique_id
-from custom_components.termoweb.inventory import build_node_inventory
+from custom_components.termoweb.inventory import Inventory, build_node_inventory
 from custom_components.termoweb.utils import build_gateway_device_info
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import UnitOfTemperature
@@ -349,18 +349,25 @@ def test_sensor_async_setup_entry_ignores_blank_addresses(
             }
         }
 
-        blank_node = types.SimpleNamespace(addr=" ")
-        valid_node = types.SimpleNamespace(addr="9")
+        blank_node = types.SimpleNamespace(type="acm", addr=" ", name="Blank")
+        valid_node = types.SimpleNamespace(type="acm", addr="9", name="Valid")
+        inventory = Inventory(
+            dev_id,
+            {"nodes": []},
+            [blank_node, valid_node],
+        )
+        record = hass.data[DOMAIN][entry.entry_id]
+        record["inventory"] = inventory
+        record["node_inventory"] = list(inventory.nodes)
 
-        def fake_prepare(*args: Any, **kwargs: Any) -> tuple[Any, Any, Any, Any]:
-            return (
-                [],
-                {"acm": [blank_node, valid_node]},
-                {"acm": ["9"]},
-                lambda *_: "Heater",
-            )
+        def _fail_prepare(*_args: Any, **_kwargs: Any) -> tuple[Any, ...]:
+            raise AssertionError("prepare_heater_platform_data should not run")
 
-        monkeypatch.setattr(sensor_module, "prepare_heater_platform_data", fake_prepare)
+        monkeypatch.setattr(
+            sensor_module,
+            "prepare_heater_platform_data",
+            _fail_prepare,
+        )
 
         added: list[Any] = []
 
@@ -401,18 +408,28 @@ def test_sensor_async_setup_entry_handles_boolean_boost_flag(
             }
         }
 
-        boost_node = types.SimpleNamespace(addr="4", supports_boost=True)
+        boost_node = types.SimpleNamespace(
+            type="acm",
+            addr="4",
+            name="Accumulator 4",
+            supports_boost=True,
+        )
+        inventory = Inventory(
+            dev_id,
+            {"nodes": []},
+            [boost_node],
+        )
+        record = hass.data[DOMAIN][entry.entry_id]
+        record["inventory"] = inventory
+        record["node_inventory"] = list(inventory.nodes)
 
-        def fake_prepare(*args: Any, **kwargs: Any) -> tuple[Any, Any, Any, Any]:
-            return (
-                [],
-                {"acm": [boost_node]},
-                {"acm": ["4"]},
-                lambda *_: "Accumulator 4",
-            )
+        def _fail_prepare(*_args: Any, **_kwargs: Any) -> tuple[Any, ...]:
+            raise AssertionError("prepare_heater_platform_data should not run")
 
         monkeypatch.setattr(
-            sensor_module, "prepare_heater_platform_data", fake_prepare
+            sensor_module,
+            "prepare_heater_platform_data",
+            _fail_prepare,
         )
 
         added: list[Any] = []
@@ -471,12 +488,15 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
                 }
             },
         )
+        inventory_nodes = build_node_inventory(nodes_meta)
+        inventory = Inventory(dev_id, nodes_meta, inventory_nodes)
         record: dict = {
             "coordinator": coordinator,
             "client": types.SimpleNamespace(),
             "dev_id": dev_id,
             "nodes": nodes_meta,
-            "node_inventory": build_node_inventory(nodes_meta),
+            "inventory": inventory,
+            "node_inventory": list(inventory.nodes),
         }
         hass.data = {DOMAIN: {entry.entry_id: record}}
 
@@ -506,6 +526,13 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
         ]
 
         with (
+            patch.object(
+                sensor_module,
+                "prepare_heater_platform_data",
+                side_effect=AssertionError(
+                    "prepare_heater_platform_data should not run"
+                ),
+            ),
             patch.object(
                 EnergyStateCoordinator,
                 "async_config_entry_first_refresh",

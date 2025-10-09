@@ -19,6 +19,7 @@ import custom_components.termoweb.button as button_module
 import custom_components.termoweb.heater as heater_module
 from custom_components.termoweb import identifiers as identifiers_module
 from custom_components.termoweb.const import DOMAIN, signal_ws_status
+from custom_components.termoweb.inventory import Inventory
 from custom_components.termoweb.utils import build_gateway_device_info
 
 GatewayOnlineBinarySensor = binary_sensor_module.GatewayOnlineBinarySensor
@@ -206,7 +207,7 @@ def test_button_setup_adds_accumulator_entities(
         dev_id = "device-boost"
         coordinator = types.SimpleNamespace(hass=hass, data={})
 
-        heater_hass_data(
+        entry_data = heater_hass_data(
             hass,
             entry.entry_id,
             dev_id,
@@ -216,6 +217,14 @@ def test_button_setup_adds_accumulator_entities(
         acm_node = heater_node_factory("5", node_type="acm")
         acm_skip = heater_node_factory("6", node_type="acm")
         htr_node = heater_node_factory("3", node_type="htr", supports_boost=False)
+
+        inventory = Inventory(
+            dev_id,
+            {"nodes": []},
+            [acm_node, acm_skip, htr_node],
+        )
+        entry_data["inventory"] = inventory
+        entry_data["node_inventory"] = list(inventory.nodes)
 
         calls: list[str | None] = []
 
@@ -264,15 +273,14 @@ def test_button_setup_adds_accumulator_entities(
             fake_iter,
         )
 
-        def fake_prepare(entry_data, *, default_name_simple):  # type: ignore[unused-argument]
-            return (
-                [],
-                {"acm": [acm_node, acm_skip], "htr": [htr_node]},
-                {},
-                lambda node_type, addr: f"{node_type.upper()} {addr}",
-            )
+        def _fail_prepare(*_args, **_kwargs):
+            raise AssertionError("prepare_heater_platform_data should not run")
 
-        monkeypatch.setattr(button_module, "prepare_heater_platform_data", fake_prepare)
+        monkeypatch.setattr(
+            button_module,
+            "prepare_heater_platform_data",
+            _fail_prepare,
+        )
 
         added: list = []
 
@@ -498,8 +506,16 @@ def test_binary_sensor_setup_adds_boost_entities(
             DOMAIN: {entry.entry_id: {"coordinator": coordinator, "dev_id": dev_id}}
         }
 
-        boost_node = types.SimpleNamespace(addr="4")
-        skip_node = types.SimpleNamespace(addr="5")
+        boost_node = types.SimpleNamespace(type="acm", addr="4", name="Boost")
+        skip_node = types.SimpleNamespace(type="acm", addr="5", name="Skip")
+        inventory = Inventory(
+            dev_id,
+            {"nodes": []},
+            [boost_node, skip_node],
+        )
+        record = hass.data[DOMAIN][entry.entry_id]
+        record["inventory"] = inventory
+        record["node_inventory"] = list(inventory.nodes)
 
         calls: list[str | None] = []
 
@@ -524,16 +540,13 @@ def test_binary_sensor_setup_adds_boost_entities(
             fake_iter_boostable,
         )
 
-        def fake_prepare(entry_data, *, default_name_simple):  # type: ignore[unused-argument]
-            return (
-                [],
-                {"acm": [boost_node, skip_node]},
-                {},
-                lambda node_type, addr: f"{node_type.upper()} {addr}",
-            )
+        def _fail_prepare(*_args, **_kwargs):
+            raise AssertionError("prepare_heater_platform_data should not run")
 
         monkeypatch.setattr(
-            binary_sensor_module, "prepare_heater_platform_data", fake_prepare
+            binary_sensor_module,
+            "prepare_heater_platform_data",
+            _fail_prepare,
         )
 
         added: list = []
@@ -548,6 +561,8 @@ def test_binary_sensor_setup_adds_boost_entities(
         gateway, boost = added
         assert isinstance(gateway, GatewayOnlineBinarySensor)
         assert isinstance(boost, binary_sensor_module.HeaterBoostActiveBinarySensor)
-        assert boost._attr_name == "ACM 4 Boost Active"  # pylint: disable=protected-access
+        assert (
+            boost._attr_name == f"{boost_node.name} Boost Active"
+        )  # pylint: disable=protected-access
 
     asyncio.run(_run())

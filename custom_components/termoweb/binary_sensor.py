@@ -23,6 +23,7 @@ from .heater import (
     prepare_heater_platform_data,
 )
 from .identifiers import build_heater_entity_unique_id
+from .inventory import Inventory, heater_platform_details_from_inventory
 from .utils import build_gateway_device_info
 
 _LOGGER = logging.getLogger(__name__)
@@ -35,10 +36,21 @@ async def async_setup_entry(hass, entry, async_add_entities):
     dev_id = data["dev_id"]
     gateway = GatewayOnlineBinarySensor(coord, entry.entry_id, dev_id)
 
-    _, nodes_by_type, _, resolve_name = prepare_heater_platform_data(
-        data,
-        default_name_simple=lambda addr: f"Node {addr}",
-    )
+    entry_inventory = data.get("inventory")
+    if isinstance(entry_inventory, Inventory):
+        nodes_by_type, _, resolve_name = (
+            heater_platform_details_from_inventory(
+                entry_inventory,
+                default_name_simple=lambda addr: f"Node {addr}",
+            )
+        )
+    else:
+        _, nodes_by_type, _, resolve_name = (
+            prepare_heater_platform_data(
+                data,
+                default_name_simple=lambda addr: f"Node {addr}",
+            )
+        )
 
     boost_entities: list[BinarySensorEntity] = []
     for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
