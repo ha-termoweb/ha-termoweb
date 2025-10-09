@@ -21,6 +21,7 @@ from custom_components.termoweb.backend.sanitize import (
     mask_identifier,
     redact_token_fragment,
 )
+from custom_components.termoweb.inventory import Inventory
 
 
 class DummyREST:
@@ -933,6 +934,7 @@ def test_ws_common_dispatch_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
             node_inventory: Any | None = None,
         ) -> None:
             self.updated = raw_nodes
+            self.inventory_obj = inventory
             self._inventory = [("htr", "1")]
 
         @property
@@ -959,7 +961,12 @@ def test_ws_common_dispatch_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
     dummy._dispatch_nodes(payload)
 
     assert snapshot.updated == payload["nodes"]
+    assert isinstance(snapshot.inventory_obj, Inventory)
     coordinator.update_nodes.assert_called_once()
+    update_args, update_kwargs = coordinator.update_nodes.call_args
+    assert not update_kwargs
+    assert update_args[0] is payload["nodes"]
+    assert update_args[1] is snapshot.inventory_obj
     dispatcher.assert_called_once()
     record = hass.data[base_ws.DOMAIN]["entry"]
     assert "node_inventory" in record

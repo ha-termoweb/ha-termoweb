@@ -110,6 +110,19 @@ def test_snapshot_sample_targets_filter_invalid_pairs(
     assert snapshot.heater_sample_targets == [("htr", "1"), ("acm", "2")]
 
 
+def test_snapshot_update_nodes_accepts_iterables() -> None:
+    """Providing ``node_inventory`` should update the cached inventory."""
+
+    snapshot = InstallationSnapshot(dev_id="dev", raw_nodes={"nodes": []})
+    node_inventory = [SimpleNamespace(type="htr", addr="1", name="Heater")]
+
+    snapshot.update_nodes({"nodes": []}, node_inventory=node_inventory)
+
+    inventory = snapshot.inventory
+    assert inventory is not None
+    assert [node.addr for node in inventory] == ["1"]
+
+
 def test_snapshot_nodes_by_type_skips_unknown() -> None:
     """Nodes without valid types should be ignored in type maps."""
 
