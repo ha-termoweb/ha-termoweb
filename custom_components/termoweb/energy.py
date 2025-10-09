@@ -252,13 +252,23 @@ async def _get_last_statistics_compat(  # pragma: no cover - compatibility shim
         and helpers.sync_target is not None
         and start_time is None
     ):
-        return await helpers.executor(
-            helpers.sync,
-            helpers.sync_target,
-            number_of_stats,
-            statistic_id,
-            types,
-        )
+        try:
+            return await helpers.executor(
+                helpers.sync,
+                helpers.sync_target,
+                number_of_stats,
+                statistic_id,
+                types,
+                None,
+            )
+        except TypeError:
+            return await helpers.executor(
+                helpers.sync,
+                helpers.sync_target,
+                number_of_stats,
+                statistic_id,
+                types,
+            )
 
     if helpers.async_fn is None:
         return None
