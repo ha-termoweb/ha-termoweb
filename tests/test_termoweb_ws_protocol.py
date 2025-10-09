@@ -18,6 +18,7 @@ from custom_components.termoweb.backend.sanitize import (
     redact_token_fragment,
 )
 from custom_components.termoweb.installation import InstallationSnapshot
+from custom_components.termoweb.inventory import Inventory
 from homeassistant.core import HomeAssistant
 
 
@@ -948,6 +949,11 @@ def test_dispatch_nodes_with_snapshot(monkeypatch: pytest.MonkeyPatch, caplog: p
 
     result = client._dispatch_nodes({"nodes": {"htr": {"settings": {"1": {}}}}})
     assert isinstance(result, dict)
+    client._coordinator.update_nodes.assert_called_once()
+    update_args, update_kwargs = client._coordinator.update_nodes.call_args
+    assert not update_kwargs
+    assert update_args[0] == {"nodes": {"htr": {"settings": {"1": {}}}}}
+    assert isinstance(update_args[1], Inventory)
     dispatcher.assert_called()
 
 
@@ -964,6 +970,11 @@ def test_dispatch_nodes_handles_unknown_types(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(module, "addresses_by_node_type", fake_addresses)
     client._dispatch_nodes({"nodes": {}})
+    client._coordinator.update_nodes.assert_called_once()
+    update_args, update_kwargs = client._coordinator.update_nodes.call_args
+    assert not update_kwargs
+    assert update_args[0] == {"nodes": {}}
+    assert isinstance(update_args[1], Inventory)
     dispatcher.assert_called()
 
 

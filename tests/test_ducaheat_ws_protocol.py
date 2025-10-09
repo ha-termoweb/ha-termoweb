@@ -15,6 +15,7 @@ import pytest
 
 from custom_components.termoweb.backend import ducaheat_ws
 from custom_components.termoweb.installation import InstallationSnapshot
+from custom_components.termoweb.inventory import Inventory
 from homeassistant.core import HomeAssistant
 
 
@@ -542,6 +543,11 @@ async def test_read_loop_updates_ws_state_on_dev_data(
     assert ws_state["status"] == "healthy"
     assert ws_state["healthy_since"] == base_ts
     assert ws_state["last_event_at"] == base_ts
+    client._coordinator.update_nodes.assert_called_once()
+    update_args, update_kwargs = client._coordinator.update_nodes.call_args
+    assert not update_kwargs
+    assert update_args[0] == {"htr": {"status": {"1": {"power": 1}}}}
+    assert isinstance(update_args[1], Inventory)
 
 
 @pytest.mark.asyncio
