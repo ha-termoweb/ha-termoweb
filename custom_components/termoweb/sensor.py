@@ -22,8 +22,8 @@ except ImportError:  # pragma: no cover - fallback for older Home Assistant stub
 
         MINUTES = "min"
 from homeassistant.core import callback
-from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_data
@@ -38,6 +38,7 @@ from .heater import (
     prepare_heater_platform_data,
 )
 from .identifiers import build_heater_energy_unique_id
+from .inventory import Inventory, heater_platform_details_from_inventory
 from .utils import build_gateway_device_info, float_or_none
 
 _WH_TO_KWH = 1 / 1000.0
@@ -107,12 +108,19 @@ async def async_setup_entry(hass, entry, async_add_entities):
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
-    inventory, nodes_by_type, addrs_by_type, resolve_name = (
-        prepare_heater_platform_data(
+    entry_inventory = data.get("inventory")
+    if isinstance(entry_inventory, Inventory):
+        nodes_by_type, addrs_by_type, resolve_name = (
+            heater_platform_details_from_inventory(
+                entry_inventory,
+                default_name_simple=lambda addr: f"Node {addr}",
+            )
+        )
+    else:
+        _, nodes_by_type, addrs_by_type, resolve_name = prepare_heater_platform_data(
             data,
             default_name_simple=lambda addr: f"Node {addr}",
         )
-    )
 
     energy_coordinator: EnergyStateCoordinator | None = data.get(
         "energy_coordinator",
@@ -127,7 +135,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         energy_coordinator.update_addresses(addrs_by_type)
 
     new_entities: list[SensorEntity] = []
-    for node_type, node, addr_str, base_name in iter_heater_nodes(
+    for node_type, _node, addr_str, base_name in iter_heater_nodes(
         nodes_by_type, resolve_name
     ):
         energy_unique_id = build_heater_energy_unique_id(dev_id, node_type, addr_str)
@@ -361,10 +369,11 @@ class HeaterBoostEndSensor(HeaterNodeBase, SensorEntity):
         ha_state = super().state
         state = self.boost_state()
         if ha_state in (STATE_UNKNOWN, None):
-            if state.end_datetime is not None:
+            end_dt = state.end_datetime
+            if end_dt is not None:
                 try:
-                    return state.end_datetime.isoformat()
-                except Exception:  # pragma: no cover - defensive
+                    return end_dt.isoformat()
+                except (AttributeError, TypeError, ValueError):
                     return ha_state
             if state.end_label:
                 return state.end_label
