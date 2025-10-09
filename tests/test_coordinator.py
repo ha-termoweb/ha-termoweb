@@ -5,7 +5,7 @@ import datetime as dt
 from aiohttp import ClientError
 from types import MappingProxyType
 import logging
-from typing import Any, Mapping
+from typing import Any, Callable, Iterable, Mapping
 from unittest.mock import AsyncMock
 
 import pytest
@@ -33,7 +33,11 @@ def test_coerce_int_variants() -> None:
     assert boost_module.coerce_int(" 7.2 ") == 7
 
 
-def test_resolve_boost_end_from_fields_variants() -> None:
+def test_resolve_boost_end_from_fields_variants(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
     """Boost end resolver should validate ranges and return offsets."""
 
     base_now = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
@@ -49,13 +53,15 @@ def test_resolve_boost_end_from_fields_variants() -> None:
     assert minutes == 1500
 
     hass = HomeAssistant()
+    inventory = inventory_builder("dev", {})
     coordinator = coord_module.StateCoordinator(
         hass,
         client=AsyncMock(),
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes={},
+        nodes=inventory.payload,
+        inventory=inventory,
     )
 
     derived_dt, derived_minutes = coordinator.resolve_boost_end(2, 60, now=base_now)
@@ -82,6 +88,9 @@ def test_rtc_payload_to_datetime(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.asyncio
 async def test_async_fetch_rtc_datetime_updates_reference(
     monkeypatch: pytest.MonkeyPatch,
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
 ) -> None:
     """Fetching RTC time should update the cached reference."""
 
@@ -94,13 +103,15 @@ async def test_async_fetch_rtc_datetime_updates_reference(
         return_value={"y": 2024, "n": 5, "d": 1, "h": 12, "m": 5, "s": 0}
     )
 
+    inventory = inventory_builder("dev", {})
     coordinator = coord_module.StateCoordinator(
         hass,
         client=client,
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes={},
+        nodes=inventory.payload,
+        inventory=inventory,
     )
 
     result = await coordinator._async_fetch_rtc_datetime()
@@ -111,6 +122,9 @@ async def test_async_fetch_rtc_datetime_updates_reference(
 @pytest.mark.asyncio
 async def test_async_fetch_rtc_datetime_handles_error(
     monkeypatch: pytest.MonkeyPatch,
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
 ) -> None:
     """RTC fetch helper should swallow client errors and keep reference unset."""
 
@@ -121,13 +135,15 @@ async def test_async_fetch_rtc_datetime_handles_error(
 
     client.get_rtc_time = AsyncMock(side_effect=ClientError("boom"))
 
+    inventory = inventory_builder("dev", {})
     coordinator = coord_module.StateCoordinator(
         hass,
         client=client,
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes={},
+        nodes=inventory.payload,
+        inventory=inventory,
     )
 
     result = await coordinator._async_fetch_rtc_datetime()
@@ -135,17 +151,23 @@ async def test_async_fetch_rtc_datetime_handles_error(
     assert coordinator._device_now_estimate() is None
 
 
-def test_boost_helpers_guard_against_invalid_sections() -> None:
+def test_boost_helpers_guard_against_invalid_sections(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
     """Derived metadata helpers should ignore unsupported payload shapes."""
 
     hass = HomeAssistant()
+    inventory = inventory_builder("dev", {})
     coordinator = coord_module.StateCoordinator(
         hass,
         client=AsyncMock(),
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes={},
+        nodes=inventory.payload,
+        inventory=inventory,
     )
 
     calls: list[tuple[Mapping[str, Any], datetime | None]] = []
@@ -161,17 +183,23 @@ def test_boost_helpers_guard_against_invalid_sections() -> None:
     assert coord_module.StateCoordinator._requires_boost_resolution(None) is False
 
 
-def test_apply_accumulator_boost_metadata_updates_payload() -> None:
+def test_apply_accumulator_boost_metadata_updates_payload(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
     """Accumulator boost helper should add and remove derived keys."""
 
     hass = HomeAssistant()
+    inventory = inventory_builder("dev", {})
     coordinator = coord_module.StateCoordinator(
         hass,
         client=AsyncMock(),
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes={},
+        nodes=inventory.payload,
+        inventory=inventory,
     )
 
     payload: dict[str, Any] = {"boost_end_day": 1, "boost_end_min": 90}
@@ -191,6 +219,9 @@ def test_apply_accumulator_boost_metadata_updates_payload() -> None:
 @pytest.mark.asyncio
 async def test_async_update_data_adds_boost_metadata(
     monkeypatch: pytest.MonkeyPatch,
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
 ) -> None:
     """Accumulator settings should expose derived boost metadata."""
 
@@ -199,14 +230,15 @@ async def test_async_update_data_adds_boost_metadata(
     base_now = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
     monkeypatch.setattr(coord_module.dt_util, "now", lambda: base_now)
 
-    inventory = [AccumulatorNode(name="Accumulator 1", addr="1")]
+    nodes_list = [AccumulatorNode(name="Accumulator 1", addr="1")]
+    inventory = inventory_builder("dev", {}, nodes_list)
     coordinator = coord_module.StateCoordinator(
         hass,
         client=client,
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes={},
+        nodes=inventory.payload,
         inventory=inventory,
     )
 
@@ -229,47 +261,63 @@ async def test_async_update_data_adds_boost_metadata(
 
 
 @pytest.mark.asyncio
-async def test_async_update_data_skips_without_inventory() -> None:
+async def test_async_update_data_skips_without_inventory(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
     """Coordinator should skip polling when inventory metadata is missing."""
 
     hass = HomeAssistant()
     client = AsyncMock()
+    inventory = inventory_builder("dev", {})
     coord = coord_module.StateCoordinator(
         hass,
         client=client,
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes=None,
+        nodes=inventory.payload,
+        inventory=inventory,
     )
+
+    coord.update_nodes(None)
 
     result = await coord._async_update_data()
 
+    assert coord._inventory is None
     assert result == {}
 
 
 @pytest.mark.asyncio
-async def test_async_update_data_rebuilds_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_async_update_data_rebuilds_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
     """Coordinator should rebuild inventory from cached nodes when missing."""
 
     hass = HomeAssistant()
     client = AsyncMock()
     nodes = {"nodes": [{"addr": "1", "type": "htr"}]}
+    inventory = inventory_builder("dev", nodes)
     coord = coord_module.StateCoordinator(
         hass,
         client=client,
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes=nodes,  # type: ignore[arg-type]
+        nodes=inventory.payload,
+        inventory=inventory,
     )
 
     coord._inventory = None
-    calls: list[Mapping[str, Any] | None] = []
+    calls: list[tuple[Mapping[str, Any] | None, Any]] = []
     original = coord.update_nodes
 
     def _spy(payload: Mapping[str, Any] | None, inventory: Any = None) -> None:
-        calls.append(payload)
+        calls.append((payload, inventory))
         original(payload, inventory=inventory)
 
     monkeypatch.setattr(coord, "update_nodes", _spy)
@@ -278,24 +326,35 @@ async def test_async_update_data_rebuilds_inventory(monkeypatch: pytest.MonkeyPa
     result = await coord._async_update_data()
 
     assert calls
+    payload_arg, inventory_arg = calls[0]
+    assert payload_arg == nodes
+    assert inventory_arg is None
+    rebuilt = coord._inventory
+    assert isinstance(rebuilt, coord_module.Inventory)
+    assert rebuilt.payload == nodes
     assert "dev" in result
 
 
 @pytest.mark.asyncio
 async def test_async_fetch_settings_by_address_pending_and_boost(
     monkeypatch: pytest.MonkeyPatch,
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
 ) -> None:
     """Per-address fetch helper should defer pending payloads and resolve boost."""
 
     hass = HomeAssistant()
     client = AsyncMock()
+    inventory = inventory_builder("dev", {})
     coord = coord_module.StateCoordinator(
         hass,
         client=client,
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes={},
+        nodes=inventory.payload,
+        inventory=inventory,
     )
 
     responses = [
@@ -349,19 +408,26 @@ async def test_async_fetch_settings_by_address_pending_and_boost(
 
 
 @pytest.mark.asyncio
-async def test_async_refresh_heater_rebuilds_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_async_refresh_heater_rebuilds_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
     """Heater refresh should rebuild inventory when cached data is missing."""
 
     hass = HomeAssistant()
     client = AsyncMock()
     nodes = {"nodes": [{"addr": "1", "type": "acm"}]}
+    inventory = inventory_builder("dev", nodes)
     coord = coord_module.StateCoordinator(
         hass,
         client=client,
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes=nodes,  # type: ignore[arg-type]
+        nodes=inventory.payload,
+        inventory=inventory,
     )
 
     coord._inventory = None
@@ -378,26 +444,39 @@ async def test_async_refresh_heater_rebuilds_inventory(monkeypatch: pytest.Monke
     await coord.async_refresh_heater(("acm", "1"))
 
     assert called
+    payload_arg, inventory_arg = called[0]
+    assert payload_arg == nodes
+    assert inventory_arg is None
+    rebuilt = coord._inventory
+    assert isinstance(rebuilt, coord_module.Inventory)
+    assert rebuilt.payload == nodes
     client.get_node_settings.assert_awaited_once_with("dev", ("acm", "1"))
 
 
 @pytest.mark.asyncio
-async def test_async_refresh_heater_errors_without_inventory(caplog: pytest.LogCaptureFixture) -> None:
+async def test_async_refresh_heater_errors_without_inventory(
+    caplog: pytest.LogCaptureFixture,
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
     """Heater refresh should log an error when inventory cannot be rebuilt."""
 
     hass = HomeAssistant()
     client = AsyncMock()
+    inventory = inventory_builder("dev", {})
     coord = coord_module.StateCoordinator(
         hass,
         client=client,
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes={},
+        nodes=inventory.payload,
+        inventory=inventory,
     )
 
-    coord._inventory = None
-    coord._nodes = {}
+    coord.update_nodes(None)
+    assert coord._inventory is None
     client.get_node_settings = AsyncMock()
 
     with caplog.at_level(logging.ERROR):
@@ -410,6 +489,9 @@ async def test_async_refresh_heater_errors_without_inventory(caplog: pytest.LogC
 @pytest.mark.asyncio
 async def test_async_refresh_heater_fetches_rtc(
     monkeypatch: pytest.MonkeyPatch,
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
 ) -> None:
     """Refreshing an accumulator should resolve boost metadata using RTC."""
 
@@ -418,14 +500,15 @@ async def test_async_refresh_heater_fetches_rtc(
     base_now = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
     monkeypatch.setattr(coord_module.dt_util, "now", lambda: base_now)
 
-    inventory = [AccumulatorNode(name="Accumulator 1", addr="1")]
+    nodes_list = [AccumulatorNode(name="Accumulator 1", addr="1")]
+    inventory = inventory_builder("dev", {}, nodes_list)
     coordinator = coord_module.StateCoordinator(
         hass,
         client=client,
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes={},
+        nodes=inventory.payload,
         inventory=inventory,
     )
 
@@ -478,7 +561,11 @@ def test_ensure_heater_section_helper() -> None:
     assert nodes_by_type["htr"] == created
 
 
-def test_mode_and_pending_key_helpers() -> None:
+def test_mode_and_pending_key_helpers(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
     """Mode normalisation and pending key helpers should validate input."""
 
     assert coord_module.StateCoordinator._normalize_mode_value(None) is None
@@ -490,30 +577,39 @@ def test_mode_and_pending_key_helpers() -> None:
     )
 
     hass = HomeAssistant()
+    inventory = inventory_builder("dev", {})
     coordinator = coord_module.StateCoordinator(
         hass,
         client=AsyncMock(),
         base_interval=30,
         dev_id="dev",
         device={"name": "Device"},
-        nodes={},
+        nodes=inventory.payload,
+        inventory=inventory,
     )
 
     assert coordinator._pending_key("", "") is None
     assert coordinator._pending_key("htr", "1") == ("htr", "1")
 
 
-def test_prune_and_register_pending_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_prune_and_register_pending_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
     """Pending settings helpers should drop expired entries and skip invalid keys."""
 
     hass = HomeAssistant()
+    inventory = inventory_builder("dev", {})
     coordinator = coord_module.StateCoordinator(
         hass,
         client=AsyncMock(),
         base_interval=30,
         dev_id="dev",
         device={"name": "Device"},
-        nodes={},
+        nodes=inventory.payload,
+        inventory=inventory,
     )
 
     coordinator.register_pending_setting("", "", mode="auto", stemp=21.0)
@@ -539,17 +635,22 @@ def test_prune_and_register_pending_settings(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_should_defer_pending_setting_branches(
     monkeypatch: pytest.MonkeyPatch,
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
 ) -> None:
     """The pending settings deferral logic should cover all validation branches."""
 
     hass = HomeAssistant()
+    inventory = inventory_builder("dev", {})
     coordinator = coord_module.StateCoordinator(
         hass,
         client=AsyncMock(),
         base_interval=30,
         dev_id="dev",
         device={"name": "Device"},
-        nodes={},
+        nodes=inventory.payload,
+        inventory=inventory,
     )
 
     assert coordinator._should_defer_pending_setting("", "", None) is False
@@ -591,20 +692,24 @@ def test_should_defer_pending_setting_branches(
 @pytest.mark.asyncio
 async def test_refresh_skips_pending_settings_merge(
     monkeypatch: pytest.MonkeyPatch,
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
 ) -> None:
     """Heater refresh should defer merging stale payloads while pending."""
 
     hass = HomeAssistant()
     client = AsyncMock()
     nodes = {"nodes": [{"type": "htr", "addr": "1", "name": "Heater"}]}
-    inventory = [HeaterNode(name="Heater", addr="1")]
+    node_list = [HeaterNode(name="Heater", addr="1")]
+    inventory = inventory_builder("dev", nodes, node_list)
     coordinator = coord_module.StateCoordinator(
         hass,
         client=client,
         base_interval=30,
         dev_id="dev",
         device={"name": "Device"},
-        nodes=nodes,
+        nodes=inventory.payload,
         inventory=inventory,
     )
     initial = {
@@ -662,20 +767,24 @@ async def test_refresh_skips_pending_settings_merge(
 @pytest.mark.asyncio
 async def test_poll_skips_pending_settings_merge(
     monkeypatch: pytest.MonkeyPatch,
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
 ) -> None:
     """Polling should defer merges until pending settings match."""
 
     hass = HomeAssistant()
     client = AsyncMock()
     nodes = {"nodes": [{"type": "htr", "addr": "1", "name": "Heater"}]}
-    inventory = [HeaterNode(name="Heater", addr="1")]
+    node_list = [HeaterNode(name="Heater", addr="1")]
+    inventory = inventory_builder("dev", nodes, node_list)
     coordinator = coord_module.StateCoordinator(
         hass,
         client=client,
         base_interval=30,
         dev_id="dev",
         device={"name": "Device"},
-        nodes=nodes,
+        nodes=inventory.payload,
         inventory=inventory,
     )
     initial = {
