@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import logging
 from types import MappingProxyType, SimpleNamespace
-from typing import Any
+from typing import Any, Callable, Iterable, Mapping
 from unittest.mock import AsyncMock
 
 import pytest
@@ -65,10 +65,18 @@ def _make_state_coordinator(
     hass: HomeAssistant,
     nodes: Any,
     *,
-    inventory: list[nodes_module.Node] | None = None,
+    inventory_builder: Callable[..., inventory_module.Inventory],
 ) -> coordinator_module.StateCoordinator:
     """Construct a coordinator with predictable defaults for tests."""
 
+    payload: Mapping[str, Any] | None = nodes if isinstance(nodes, Mapping) else None
+    node_list: Iterable[nodes_module.Node] | None = None
+    try:
+        node_list = list(build_node_inventory(nodes))
+    except ValueError:
+        node_list = None
+
+    inventory = inventory_builder("dev", payload, node_list)
     client = SimpleNamespace(get_node_settings=AsyncMock())
     return coordinator_module.StateCoordinator(
         hass,
@@ -76,8 +84,8 @@ def _make_state_coordinator(
         30,
         "dev",
         {"name": "Device"},
-        nodes,  # type: ignore[arg-type]
-        inventory,
+        inventory.payload,
+        inventory=inventory,
     )
 
 
@@ -324,32 +332,46 @@ def test_build_node_inventory_falls_back_to_address_field() -> None:
 
 def test_state_coordinator_handles_none_nodes_payload(
     caplog: pytest.LogCaptureFixture,
+    inventory_builder: Callable[..., inventory_module.Inventory],
 ) -> None:
     hass = HomeAssistant()
 
     with caplog.at_level(logging.DEBUG):
-        coordinator = _make_state_coordinator(hass, None)
+        coordinator = _make_state_coordinator(
+            hass,
+            None,
+            inventory_builder=inventory_builder,
+        )
 
-    assert coordinator._nodes == {}
-    assert coordinator._inventory is None
-    assert sum(
-        "Ignoring unexpected nodes payload" in message for message in caplog.messages
+    assert coordinator._inventory is not None
+    assert coordinator._inventory.payload == {}
+    assert (
+        sum(
+            "Ignoring unexpected nodes payload" in message
+            for message in caplog.messages
+        )
+        == 0
     )
     assert coordinator._inventory_addresses_by_type() == {}
 
 
 def test_state_coordinator_logs_once_for_invalid_nodes(
     caplog: pytest.LogCaptureFixture,
+    inventory_builder: Callable[..., inventory_module.Inventory],
 ) -> None:
     hass = HomeAssistant()
-    coordinator = _make_state_coordinator(hass, {})
+    coordinator = _make_state_coordinator(
+        hass,
+        {},
+        inventory_builder=inventory_builder,
+    )
 
     caplog.clear()
     with caplog.at_level(logging.DEBUG):
         coordinator.update_nodes(["bad"])
         coordinator.update_nodes("also bad")
 
-    assert coordinator._nodes == {}
+    assert coordinator._inventory is None
     assert sum(
         "Ignoring unexpected nodes payload" in message for message in caplog.messages
     ) == 1
