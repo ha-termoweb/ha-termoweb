@@ -729,6 +729,43 @@ def test_async_import_energy_history_missing_record(
     assert "no record found for energy import" in caplog.text
 
 
+def test_async_import_energy_history_skips_without_inventory(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def _run() -> None:
+        (
+            mod,
+            energy_mod,
+            const,
+            _import_stats,
+            _update_meta,
+            _last_stats,
+            _get_period,
+            _delete_stats,
+            ConfigEntry,
+            HomeAssistant,
+            ent_reg,
+        ) = await _load_module(monkeypatch)
+
+        hass = HomeAssistant()
+        hass.data = {const.DOMAIN: {}}
+        hass.config_entries = types.SimpleNamespace(async_update_entry=lambda *args, **kwargs: None)
+
+        entry = ConfigEntry("entry-missing")
+        hass.data[const.DOMAIN][entry.entry_id] = {
+            "client": AsyncMock(),
+            "dev_id": "dev-missing",
+        }
+
+        caplog.set_level(logging.DEBUG, logger=energy_mod._LOGGER.name)
+
+        await mod._async_import_energy_history(hass, entry)
+
+    asyncio.run(_run())
+
+    assert "dev-missing: unable to resolve node inventory" in caplog.text
+
+
 def test_register_import_service_uses_module_asyncio(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2528,6 +2565,62 @@ def test_service_dispatches_import_tasks(monkeypatch: pytest.MonkeyPatch) -> Non
             await asyncio.gather(*tasks)
 
     asyncio.run(_run())
+
+
+def test_service_skips_entries_without_inventory(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def _run() -> None:
+        (
+            mod,
+            energy_mod,
+            const,
+            _import_stats,
+            _update_meta,
+            _last_stats,
+            _get_period,
+            _delete_stats,
+            ConfigEntry,
+            HomeAssistant,
+            ent_reg,
+        ) = await _load_module(monkeypatch)
+
+        hass = HomeAssistant()
+        hass.data = {const.DOMAIN: {}}
+
+        entry = ConfigEntry(
+            "entry-skip",
+            data={"username": "skip", "password": "pw"},
+            options={},
+        )
+        entries = {entry.entry_id: entry}
+        hass.config_entries = types.SimpleNamespace(
+            async_update_entry=lambda e, *, options: e.options.update(options),
+            async_forward_entry_setups=AsyncMock(return_value=None),
+            async_get_entry=lambda entry_id: entries.get(entry_id),
+        )
+
+        import_mock = AsyncMock()
+        monkeypatch.setattr(mod, "_async_import_energy_history", import_mock)
+
+        assert await mod.async_setup_entry(hass, entry) is True
+
+        record = hass.data[const.DOMAIN][entry.entry_id]
+        record.pop("inventory", None)
+        record.pop("node_inventory", None)
+        record.pop("snapshot", None)
+        record.pop("nodes", None)
+
+        caplog.set_level(logging.DEBUG, logger=energy_mod._LOGGER.name)
+
+        service = hass.services.get(const.DOMAIN, "import_energy_history")
+        await service(types.SimpleNamespace(data={}))
+
+        import_mock.assert_not_called()
+
+    asyncio.run(_run())
+
+    assert "skipping energy import for entry entry-skip" in caplog.text
 
 
 def test_service_filters_invalid_entities(monkeypatch: pytest.MonkeyPatch) -> None:

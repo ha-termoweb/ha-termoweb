@@ -13,9 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import CONF_BRAND, DEFAULT_BRAND, DOMAIN, get_brand_label
-from .installation import ensure_snapshot
-from .inventory import Node
-from .nodes import ensure_node_inventory
+from .inventory import Node, resolve_record_inventory
 from .utils import async_get_integration_version
 
 _LOGGER = logging.getLogger(__name__)
@@ -44,14 +42,11 @@ async def async_get_config_entry_diagnostics(
         if isinstance(candidate, Mapping):
             record = candidate
 
-    snapshot = ensure_snapshot(record or {})
-    inventory_source_label = "fallback"
-    if snapshot is not None:
-        inventory_source = list(snapshot.inventory)
-        inventory_source_label = "snapshot"
-    elif record is not None:
-        inventory_source = list(ensure_node_inventory(record))
-        inventory_source_label = "cached inventory"
+    resolution = resolve_record_inventory(record)
+    inventory_container = resolution.inventory
+    inventory_source_label = resolution.source
+    if inventory_container is not None:
+        inventory_source = list(inventory_container.nodes)
     else:
         inventory_source = []
 
@@ -105,8 +100,8 @@ async def async_get_config_entry_diagnostics(
         "Diagnostics inventory source for %s: %s (raw=%d, filtered=%d)",
         entry.entry_id,
         inventory_source_label,
-        len(inventory_source),
-        len(node_inventory),
+        resolution.raw_count,
+        resolution.filtered_count,
     )
 
     try:

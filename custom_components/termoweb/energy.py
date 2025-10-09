@@ -16,15 +16,13 @@ from homeassistant.helpers import entity_registry as er
 from .api import RESTClient
 from .const import DOMAIN
 from .identifiers import build_heater_energy_unique_id
-from .installation import ensure_snapshot
 from .inventory import (
     HEATER_NODE_TYPES,
-    Inventory,
     normalize_node_addr,
     normalize_node_type,
     parse_heater_energy_unique_id,
+    resolve_record_inventory,
 )
-from .nodes import ensure_node_inventory
 from .throttle import (
     MonotonicRateLimiter,
     default_samples_rate_limit_state,
@@ -393,22 +391,29 @@ async def async_import_energy_history(
     client: RESTClient = rec["client"]
     dev_id: str = rec["dev_id"]
     inventory_nodes: list[Any]
-    snapshot = ensure_snapshot(rec)
     nodes_payload: Any | None = rec.get("nodes") if isinstance(rec, Mapping) else None
 
-    if snapshot is not None:
-        inventory_nodes = list(snapshot.inventory)
-        by_type, reverse_lookup = snapshot.heater_address_map
-    else:
-        inventory_nodes = ensure_node_inventory(rec)
-        container = Inventory(
+    resolution = resolve_record_inventory(
+        rec,
+        dev_id=dev_id,
+        nodes_payload=nodes_payload,
+    )
+    inventory_container = resolution.inventory
+    if inventory_container is None:
+        logger.debug(
+            "%s: unable to resolve node inventory (source=%s)",
             dev_id,
-            nodes_payload if nodes_payload is not None else {},
-            inventory_nodes,
+            resolution.source,
         )
-        by_type, reverse_lookup = container.heater_address_map
-        if isinstance(rec, dict):
-            rec["node_inventory"] = list(inventory_nodes)
+        return
+
+    by_type, reverse_lookup = inventory_container.heater_address_map
+    logger.debug(
+        "%s: energy import using %s inventory (%d nodes)",
+        dev_id,
+        resolution.source,
+        resolution.filtered_count,
+    )
 
     requested_map: dict[str, list[str]] | None
     if nodes is None:
@@ -874,37 +879,18 @@ async def async_register_import_energy_history_service(
                 ent: ConfigEntry | None = rec.get("config_entry")
                 if not ent:
                     continue
-                snapshot = ensure_snapshot(rec)
-                if snapshot is not None:
-                    override = rec.get("node_inventory")
-                    if override is not None:
-                        override_nodes = list(override)
-                        inventory_container = Inventory(
-                            snapshot.dev_id,
-                            snapshot.raw_nodes,
-                            override_nodes,
-                        )
-                        snapshot.update_nodes(
-                            snapshot.raw_nodes,
-                            inventory=inventory_container,
-                        )
-                    else:
-                        inventory_container = Inventory(
-                            snapshot.dev_id,
-                            snapshot.raw_nodes,
-                            snapshot.inventory,
-                        )
-                        rec["node_inventory"] = list(inventory_container.nodes)
-                    by_type, _ = snapshot.heater_address_map
-                else:
-                    nodes_payload = rec.get("nodes") if isinstance(rec, Mapping) else None
-                    inventory_nodes = list(rec.get("node_inventory") or [])
-                    inventory_container = Inventory(
-                        str(rec.get("dev_id", "")),
-                        nodes_payload if nodes_payload is not None else {},
-                        inventory_nodes,
+                resolution = resolve_record_inventory(rec)
+                inventory_container = resolution.inventory
+                if inventory_container is None:
+                    entry_id = getattr(ent, "entry_id", "<unknown>")
+                    logger.debug(
+                        "%s: skipping energy import for entry %s (source=%s)",
+                        rec.get("dev_id"),
+                        entry_id,
+                        resolution.source,
                     )
-                    by_type, _ = inventory_container.heater_address_map
+                    continue
+                by_type, _ = inventory_container.heater_address_map
                 tasks.append(
                     import_fn(
                         hass,
