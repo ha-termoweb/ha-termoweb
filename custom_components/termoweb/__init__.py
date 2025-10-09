@@ -62,8 +62,6 @@ except ImportError:  # pragma: no cover - tests provide minimal constants
     EVENT_HOMEASSISTANT_STOP = "homeassistant_stop"
 
 DIAGNOSTICS_HELPER_KEY: Final = f"{DOMAIN}_diagnostics"
-DIAGNOSTICS_REGISTERED_FLAG: Final = "registered"
-DIAGNOSTICS_UNSUB_FLAG: Final = "unsub"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -75,57 +73,113 @@ reset_samples_rate_limit_state()
 async def _async_ensure_diagnostics_platform(hass: HomeAssistant) -> None:
     """Ensure the diagnostics platform registers once the component is ready."""
 
-    state = hass.data.setdefault(DIAGNOSTICS_HELPER_KEY, {})
-    if state.get(DIAGNOSTICS_REGISTERED_FLAG):
+    state: MutableMapping[str, Any] = hass.data.setdefault(
+        DIAGNOSTICS_HELPER_KEY, {}
+    )
+    state.setdefault("registered", False)
+    if state.get("registered"):
         return
 
     try:
-        from homeassistant.components import diagnostics as diagnostics_component
+        diagnostics = importlib.import_module("homeassistant.components.diagnostics")
     except ImportError:  # pragma: no cover - diagnostics component unavailable
         return
 
-    diagnostics_key = getattr(diagnostics_component, "_DIAGNOSTICS_DATA", None)
-    register = getattr(
-        diagnostics_component, "_register_diagnostics_platform", None
-    )
-    if diagnostics_key is None or register is None:  # pragma: no cover - API change
-        return
-
     module_name = f"{__package__}.diagnostics"
-    diagnostics_module = sys.modules.get(module_name)
-    if diagnostics_module is None:
-        diagnostics_module = importlib.import_module(module_name)
+    platform = sys.modules.get(module_name)
+    if platform is None:
+        platform = importlib.import_module(module_name)
+
+    data_keys = [
+        key
+        for key in (
+            getattr(diagnostics, "_DIAGNOSTICS_DATA", None),
+            getattr(diagnostics, "DIAGNOSTICS_DATA", None),
+            getattr(diagnostics, "DATA_DIAGNOSTICS", None),
+            getattr(diagnostics, "DOMAIN", None),
+        )
+        if key is not None
+    ]
+
+    def _finalise_registration() -> None:
+        """Record registration and drop any pending listeners."""
+
+        state["registered"] = True
+        listener = state.pop("listener", None)
+        if callable(listener):
+            try:
+                listener()
+            except Exception:  # pragma: no cover - defensive cleanup
+                _LOGGER.debug(
+                    "Failed to unsubscribe diagnostics listener", exc_info=True
+                )
+
+    def _resolve_diagnostics_data() -> Any | None:
+        """Return the diagnostics data container if the component is ready."""
+
+        for key in data_keys:
+            data = hass.data.get(key)
+            if data is not None:
+                return data
+        return None
 
     async def _attempt_register(_event: Any | None = None) -> None:
         """Register diagnostics when the diagnostics integration is available."""
 
-        if diagnostics_key not in hass.data:
+        if state.get("registered"):
             return
-        register(hass, DOMAIN, diagnostics_module)
-        state[DIAGNOSTICS_REGISTERED_FLAG] = True
-        unsub = state.pop(DIAGNOSTICS_UNSUB_FLAG, None)
-        if unsub is not None:
-            try:
-                unsub()
-            except Exception:  # pragma: no cover - defensive cleanup
-                _LOGGER.debug("Failed to unsubscribe diagnostics listener", exc_info=True)
 
-    if diagnostics_key in hass.data:
-        await _attempt_register()
-        if state.get(DIAGNOSTICS_REGISTERED_FLAG):
+        register_async = getattr(
+            diagnostics, "async_register_diagnostics_platform", None
+        )
+        if callable(register_async):
+            result = register_async(hass, DOMAIN, platform)
+            if inspect.isawaitable(result):
+                await result
+            _finalise_registration()
             return
+
+        register_sync = getattr(diagnostics, "_register_diagnostics_platform", None)
+        if not callable(register_sync):
+            return
+
+        diagnostics_data = _resolve_diagnostics_data()
+        if diagnostics_data is None:
+            return
+
+        platforms = getattr(diagnostics_data, "platforms", None)
+        if not isinstance(platforms, dict):
+            return
+        if DOMAIN in platforms:
+            _finalise_registration()
+            return
+
+        register_sync(hass, DOMAIN, platform)
+        _finalise_registration()
+
+    await _attempt_register()
+    if state.get("registered"):
+        return
 
     async def _handle_component_loaded(event: Any) -> None:
         """Attempt diagnostics registration when diagnostics loads later."""
 
         component = getattr(event, "data", {}).get(ATTR_COMPONENT) if event else None
-        if component != diagnostics_component.DOMAIN:
+        target_domain = getattr(diagnostics, "DOMAIN", "diagnostics")
+        if component != target_domain:
             return
         await _attempt_register(event)
 
-    state[DIAGNOSTICS_UNSUB_FLAG] = hass.bus.async_listen(
-        EVENT_COMPONENT_LOADED, _handle_component_loaded
-    )
+    if state.get("listener"):
+        return
+
+    listen = getattr(hass.bus, "async_listen", None)
+    if not callable(listen):
+        listen = getattr(hass.bus, "async_listen_once", None)
+    if not callable(listen):
+        return
+
+    state["listener"] = listen(EVENT_COMPONENT_LOADED, _handle_component_loaded)
 
 def create_rest_client(
     hass: HomeAssistant, username: str, password: str, brand: str
@@ -515,53 +569,6 @@ async def async_register_ws_debug_probe_service(hass: HomeAssistant) -> None:
     )
 
 
-async def _async_ensure_diagnostics_platform(hass: HomeAssistant) -> None:
-    """Ensure the diagnostics integration knows about the TermoWeb platform."""
-
-    try:
-        diagnostics = importlib.import_module("homeassistant.components.diagnostics")
-    except ImportError:  # pragma: no cover - diagnostics integration unavailable
-        _LOGGER.debug("Diagnostics integration is unavailable; skipping registration")
-        return
-
-    platform = importlib.import_module("custom_components.termoweb.diagnostics")
-
-    register_async = getattr(diagnostics, "async_register_diagnostics_platform", None)
-    if callable(register_async):
-        result = register_async(hass, DOMAIN, platform)
-        if inspect.isawaitable(result):
-            await result
-        return
-
-    register_sync = getattr(diagnostics, "_register_diagnostics_platform", None)
-    if not callable(register_sync):
-        return
-
-    diagnostics_data = None
-    for key_name in (
-        "DIAGNOSTICS_DATA",
-        "_DIAGNOSTICS_DATA",
-        "DATA_DIAGNOSTICS",
-        "DOMAIN",
-    ):
-        data_key = getattr(diagnostics, key_name, None)
-        if data_key is None:
-            continue
-        diagnostics_data = hass.data.get(data_key)
-        if diagnostics_data is not None:
-            break
-    if diagnostics_data is None:
-        return
-
-    platforms = getattr(diagnostics_data, "platforms", None)
-    if not isinstance(platforms, dict):
-        return
-    if DOMAIN in platforms:
-        return
-
-    register_sync(hass, DOMAIN, platform)
-
-
 async def _async_shutdown_entry(rec: MutableMapping[str, Any]) -> None:
     """Cancel websocket tasks and listeners for an integration record."""
 
@@ -627,11 +634,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if ok and domain_data is not None and not domain_data:
         diag_state = hass.data.pop(DIAGNOSTICS_HELPER_KEY, None)
-        if diag_state:
-            unsub = diag_state.pop(DIAGNOSTICS_UNSUB_FLAG, None)
-            if callable(unsub):
+        if isinstance(diag_state, MutableMapping):
+            listener = diag_state.pop("listener", None)
+            if callable(listener):
                 try:
-                    unsub()
+                    listener()
                 except Exception:  # pragma: no cover - defensive cleanup
                     _LOGGER.debug(
                         "Failed to remove diagnostics listener on unload",
