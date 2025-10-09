@@ -32,7 +32,10 @@ sys.modules["homeassistant.components.diagnostics"] = diagnostics_stub
 from custom_components.termoweb.const import BRAND_DUCAHEAT, CONF_BRAND, DOMAIN
 from custom_components.termoweb.diagnostics import async_get_config_entry_diagnostics
 from custom_components.termoweb.installation import InstallationSnapshot
-from custom_components.termoweb.inventory import Node
+from custom_components.termoweb.inventory import (
+    Inventory,
+    build_node_inventory,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
@@ -63,16 +66,23 @@ def test_diagnostics_with_cached_inventory(caplog: pytest.LogCaptureFixture) -> 
         data={CONF_BRAND: BRAND_DUCAHEAT},
     )
 
-    nodes = [
-        Node(name="Heater One", addr="1", node_type="htr"),
-        Node(name="Monitor", addr="2", node_type="pmo"),
-    ]
+    raw_nodes = {
+        "nodes": [
+            {"name": "Heater One", "addr": "1", "type": "htr"},
+            {"name": "Monitor", "addr": "2", "type": "pmo"},
+        ]
+    }
+    inventory = Inventory(
+        "secret-dev",
+        raw_nodes,
+        build_node_inventory(raw_nodes),
+    )
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {
         "version": "1.2.3",
         "brand": BRAND_DUCAHEAT,
-        "node_inventory": list(nodes),
+        "inventory": inventory,
         "dev_id": "secret-dev",
         "username": "user@example.com",
     }
@@ -95,7 +105,7 @@ def test_diagnostics_with_cached_inventory(caplog: pytest.LogCaptureFixture) -> 
     assert "username" not in flattened
 
     assert (
-        "Diagnostics inventory source for entry-one: cached inventory (raw=2, filtered=2)"
+        "Diagnostics inventory source for entry-one: inventory (raw=2, filtered=2)"
         in caplog.text
     )
 

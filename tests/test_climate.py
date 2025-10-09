@@ -177,7 +177,7 @@ def test_async_setup_entry_creates_entities(
             dev_id,
             coordinator_data[dev_id],
             client=AsyncMock(),
-            node_inventory=inventory,
+            inventory=inventory,
         )
 
         hass.data = {
@@ -360,7 +360,7 @@ def test_async_setup_entry_default_names_and_invalid_nodes(
             dev_id,
             coordinator_data[dev_id],
             client=AsyncMock(),
-            inventory_nodes=inventory,
+            inventory=inventory,
         )
 
         hass.data = {
@@ -442,7 +442,7 @@ def test_async_setup_entry_skips_blank_addresses() -> None:
             dev_id,
             coordinator_data,
             client=AsyncMock(),
-            node_inventory=inventory,
+            inventory=inventory,
         )
 
         hass.data = {
@@ -503,7 +503,7 @@ def test_async_setup_entry_creates_accumulator_entity() -> None:
             dev_id,
             coordinator_data[dev_id],
             client=AsyncMock(),
-            node_inventory=inventory,
+            inventory=inventory,
         )
 
         client = AsyncMock()
@@ -1914,7 +1914,7 @@ def test_async_setup_entry_reuses_coordinator_inventory() -> None:
             dev_id,
             {"nodes": raw_nodes, "htr": {"settings": {"5": {}}}},
             client=AsyncMock(),
-            node_inventory=inventory,
+            inventory=inventory,
         )
 
         record: dict[str, Any] = {
@@ -1965,7 +1965,7 @@ def test_async_setup_entry_builds_inventory_from_node_list(
             dev_id,
             {"nodes": {}, "htr": {"settings": {}}},
             client=AsyncMock(),
-            node_inventory=node_list,
+            inventory_nodes=node_list,
         )
 
         record: dict[str, Any] = {

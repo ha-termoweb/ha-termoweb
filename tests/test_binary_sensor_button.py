@@ -327,6 +327,102 @@ def test_button_setup_adds_accumulator_entities(
     asyncio.run(_run())
 
 
+def test_button_setup_falls_back_to_prepare_heater_platform_data(
+    monkeypatch: pytest.MonkeyPatch,
+    heater_hass_data,
+    heater_node_factory,
+) -> None:
+    async def _run() -> None:
+        hass = HomeAssistant()
+        entry = types.SimpleNamespace(entry_id="entry-fallback")
+        dev_id = "device-fallback"
+        coordinator = types.SimpleNamespace(hass=hass, data={})
+
+        entry_data = heater_hass_data(
+            hass,
+            entry.entry_id,
+            dev_id,
+            coordinator,
+        )
+
+        entry_data["inventory"] = {"nodes": []}
+
+        fallback_node = heater_node_factory("7", node_type="acm")
+        nodes_by_type = {"acm": [fallback_node]}
+
+        def _resolve_name(node_type: str, addr: str) -> str:
+            assert node_type == "acm"
+            assert addr == fallback_node.addr
+            return f"Accumulator {addr}"
+
+        mock_prepare = MagicMock(
+            return_value=((), nodes_by_type, {"acm": [fallback_node.addr]}, _resolve_name)
+        )
+        monkeypatch.setattr(
+            button_module,
+            "prepare_heater_platform_data",
+            mock_prepare,
+        )
+
+        def _fake_iter(
+            nodes_by_type_arg,
+            resolve_name,
+            *,
+            node_types=None,
+            accumulators_only=False,
+        ):
+            assert nodes_by_type_arg is nodes_by_type
+            assert resolve_name is _resolve_name
+            assert accumulators_only is True
+            assert node_types is None
+            yield "acm", fallback_node, fallback_node.addr, resolve_name("acm", fallback_node.addr)
+
+        monkeypatch.setattr(
+            button_module,
+            "iter_boostable_heater_nodes",
+            _fake_iter,
+        )
+
+        metadata = (
+            heater_module.BoostButtonMetadata(
+                15,
+                "15",
+                "Quick boost",
+                "mdi:flash",
+            ),
+        )
+
+        monkeypatch.setattr(
+            button_module,
+            "iter_boost_button_metadata",
+            lambda: iter(metadata),
+        )
+
+        added: list = []
+
+        def _add_entities(entities):
+            for entity in entities:
+                entity.hass = hass
+            added.extend(entities)
+
+        await async_setup_button_entry(hass, entry, _add_entities)
+
+        assert mock_prepare.call_count == 1
+        call_args, call_kwargs = mock_prepare.call_args
+        assert call_args == (entry_data,)
+        assert set(call_kwargs) == {"default_name_simple"}
+        assert callable(call_kwargs["default_name_simple"])
+
+        assert len(added) == 1 + len(metadata)
+        assert isinstance(added[0], StateRefreshButton)
+
+        boost_entity = added[1]
+        assert isinstance(boost_entity, ButtonEntity)
+        assert boost_entity.unique_id.endswith("_15")
+
+    asyncio.run(_run())
+
+
 def test_accumulator_boost_button_triggers_service() -> None:
     async def _run() -> None:
         hass = HomeAssistant()

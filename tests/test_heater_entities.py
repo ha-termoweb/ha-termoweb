@@ -20,6 +20,7 @@ from custom_components.termoweb.sensor import (
     HeaterBoostEndSensor,
     HeaterBoostMinutesRemainingSensor,
 )
+from homeassistant.const import STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
@@ -507,6 +508,40 @@ def test_boost_end_sensor_returns_base_state_when_available() -> None:
     sensor._attr_state = "ready"
 
     assert sensor.state == "ready"
+
+
+def test_boost_end_sensor_handles_isoformat_error() -> None:
+    coordinator = SimpleNamespace(
+        data={"dev": {"nodes_by_type": {"acm": {"settings": {"1": {}}}}}}
+    )
+
+    sensor = HeaterBoostEndSensor(
+        coordinator,
+        "entry",
+        "dev",
+        "1",
+        "Accumulator Boost End",
+        f"{DOMAIN}:dev:acm:1:boost:end",
+        node_type="acm",
+    )
+
+    def _raise() -> None:
+        raise TypeError("bad isoformat")
+
+    faulty = SimpleNamespace(isoformat=_raise)
+
+    sensor.boost_state = MagicMock(  # type: ignore[assignment]
+        return_value=heater_module.BoostState(
+            active=True,
+            minutes_remaining=None,
+            end_datetime=faulty,
+            end_iso=None,
+            end_label="Later",
+        )
+    )
+    sensor._attr_state = STATE_UNKNOWN
+
+    assert sensor.state == STATE_UNKNOWN
 
 
 def test_coerce_boost_minutes_edge_cases() -> None:

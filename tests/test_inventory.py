@@ -9,6 +9,7 @@ from typing import Any, Iterable, List, Mapping
 import pytest
 
 import custom_components.termoweb.inventory as inventory_module
+from custom_components.termoweb.installation import InstallationSnapshot
 from custom_components.termoweb.inventory import Inventory, Node
 
 
@@ -287,3 +288,149 @@ def test_build_heater_inventory_details_wraps_inventory(
     assert details.explicit_name_pairs == heater_inventory.explicit_heater_names
     assert details.address_map == forward
     assert details.reverse_address_map == reverse
+
+
+def test_resolve_record_inventory_prefers_existing_container() -> None:
+    """Resolution should return stored inventory without rebuilding."""
+
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
+    container = Inventory(
+        "device",
+        raw_nodes,
+        inventory_module.build_node_inventory(raw_nodes),
+    )
+    record: dict[str, Any] = {"inventory": container}
+
+    resolution = inventory_module.resolve_record_inventory(record)
+
+    assert resolution.inventory is container
+    assert resolution.source == "inventory"
+    assert resolution.filtered_count == 1
+    assert resolution.raw_count == 1
+
+
+def test_resolve_record_inventory_uses_cached_node_list() -> None:
+    """Node lists should be normalised when no container is cached."""
+
+    nodes = [
+        Node(name="Heater", addr="1", node_type="htr"),
+        SimpleNamespace(type="htr", addr="", name="ignored"),
+        SimpleNamespace(as_dict=lambda: {}, type=" ", addr=""),
+    ]
+    record: dict[str, Any] = {
+        "dev_id": 101,
+        "node_inventory": nodes,
+        "nodes": {"nodes": []},
+    }
+
+    resolution = inventory_module.resolve_record_inventory(record)
+
+    assert resolution.source == "node_inventory"
+    assert resolution.filtered_count == 1
+    assert record["inventory"] is resolution.inventory
+    assert isinstance(resolution.inventory, Inventory)
+    assert resolution.inventory.dev_id == "101"
+
+
+def test_resolve_record_inventory_falls_back_to_snapshot() -> None:
+    """Snapshots should be converted into inventory containers when needed."""
+
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "2"}]}
+    snapshot = InstallationSnapshot(dev_id="snapshot-dev", raw_nodes=raw_nodes)
+    record: dict[str, Any] = {"snapshot": snapshot}
+
+    resolution = inventory_module.resolve_record_inventory(record)
+
+    assert resolution.source == "snapshot"
+    assert resolution.filtered_count == 1
+    assert record["inventory"] is resolution.inventory
+    assert resolution.inventory.dev_id == "snapshot-dev"
+
+
+def test_resolve_record_inventory_builds_from_raw_nodes() -> None:
+    """Raw node payloads should be normalised when no cache exists."""
+
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "5"}]}
+    record: dict[str, Any] = {"dev_id": "dev-raw", "nodes": raw_nodes}
+
+    resolution = inventory_module.resolve_record_inventory(record)
+
+    assert resolution.source == "raw_nodes"
+    assert resolution.filtered_count == 1
+    assert record["inventory"] is resolution.inventory
+    assert resolution.inventory.heater_address_map[0] == {"htr": ["5"]}
+
+
+def test_resolve_record_inventory_handles_missing_data() -> None:
+    """Resolution should return a fallback result when metadata is absent."""
+
+    resolution = inventory_module.resolve_record_inventory(None)
+
+    assert resolution.inventory is None
+    assert resolution.source == "fallback"
+    assert resolution.filtered_count == 0
+
+
+def test_resolve_record_inventory_handles_null_nodes() -> None:
+    """Records with null node payloads should fall back gracefully."""
+
+    record = {"dev_id": "dev-null", "nodes": None}
+
+    resolution = inventory_module.resolve_record_inventory(record)
+
+    assert resolution.inventory is None
+    assert resolution.source == "fallback"
+    assert resolution.filtered_count == 0
+
+
+def test_resolve_record_inventory_detects_mismatched_inventory() -> None:
+    """Cached inventory should be rebuilt when cached entries are invalid."""
+
+    invalid = SimpleNamespace(as_dict=lambda: {}, type=" ", addr="")
+    cached = Inventory("dev", {}, [invalid])
+    record: dict[str, Any] = {
+        "inventory": cached,
+        "node_inventory": [invalid],
+    }
+
+    resolution = inventory_module.resolve_record_inventory(record)
+
+    assert resolution.source == "node_inventory"
+    assert resolution.filtered_count == 0
+    assert record["inventory"] is resolution.inventory
+
+
+def test_heater_platform_details_default_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default naming should activate when name map is not a mapping."""
+
+    raw_nodes = {
+        "nodes": [
+            {"type": "htr", "addr": "1"},
+            {"type": "acm", "addr": "2"},
+        ]
+    }
+    inventory = Inventory(
+        "dev-name",
+        raw_nodes,
+        inventory_module.build_node_inventory(raw_nodes),
+    )
+
+    monkeypatch.setattr(
+        inventory_module.Inventory,
+        "heater_name_map",
+        lambda self, _factory: ["invalid"],
+    )
+
+    nodes_by_type, addrs_by_type, resolver = (
+        inventory_module.heater_platform_details_from_inventory(
+            inventory,
+            default_name_simple=lambda addr: f"Heater {addr}",
+        )
+    )
+
+    assert set(nodes_by_type) == {"htr", "acm"}
+    assert addrs_by_type == {"htr": ["1"], "acm": ["2"]}
+    assert resolver("htr", "1") == "Heater 1"
+    assert resolver("acm", "2") == "Accumulator 2"
