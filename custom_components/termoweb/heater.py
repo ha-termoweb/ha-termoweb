@@ -21,7 +21,6 @@ from .boost import (
     coerce_boost_remaining_minutes,
 )
 from .const import DOMAIN, signal_ws_data
-from .installation import InstallationSnapshot, ensure_snapshot
 from .inventory import (
     Inventory,
     Node,
@@ -29,7 +28,7 @@ from .inventory import (
     normalize_node_addr,
     normalize_node_type,
 )
-from .nodes import HEATER_NODE_TYPES, ensure_node_inventory
+from .nodes import HEATER_NODE_TYPES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -58,6 +57,8 @@ BOOST_BUTTON_METADATA: Final[tuple[BoostButtonMetadata, ...]] = (
 BOOST_DURATION_OPTIONS: Final[tuple[int, ...]] = tuple(
     option.minutes for option in BOOST_BUTTON_METADATA if option.minutes is not None
 )
+
+
 def _boost_runtime_store(
     entry_data: MutableMapping[str, Any] | None,
     *,
@@ -232,7 +233,9 @@ def iter_boostable_heater_nodes(
             filtered_types = accumulator_types
         else:
             filtered_types = [
-                node_type for node_type in filtered_types if node_type in accumulator_types
+                node_type
+                for node_type in filtered_types
+                if node_type in accumulator_types
             ]
             if not filtered_types:
                 return
@@ -255,6 +258,8 @@ class BoostState:
     end_datetime: datetime | None
     end_iso: str | None
     end_label: str | None
+
+
 # ruff: noqa: C901
 def derive_boost_state(
     settings: Mapping[str, Any] | None, coordinator: Any
@@ -287,9 +292,7 @@ def derive_boost_state(
     if isinstance(derived_dt, datetime):
         boost_end_dt = derived_dt
 
-    boost_minutes: int | None = coerce_boost_minutes(
-        source.get("boost_minutes_delta")
-    )
+    boost_minutes: int | None = coerce_boost_minutes(source.get("boost_minutes_delta"))
     resolver = getattr(coordinator, "resolve_boost_end", None)
     if (
         callable(resolver)
@@ -370,11 +373,7 @@ def derive_boost_state(
         boost_end_iso = None
 
     end_label: str | None = None
-    if (
-        boost_active is False
-        and boost_end_dt is None
-        and boost_end_iso is None
-    ):
+    if boost_active is False and boost_end_dt is None and boost_end_iso is None:
         end_label = "Never"
 
     return BoostState(
@@ -384,6 +383,7 @@ def derive_boost_state(
         end_iso=boost_end_iso,
         end_label=end_label,
     )
+
 
 # ruff: enable=C901
 
@@ -635,6 +635,101 @@ def build_heater_name_map(
     return result
 
 
+def _coerce_inventory(
+    candidate: Any,
+    *,
+    dev_id: str,
+    raw_nodes: Any,
+) -> Inventory | None:
+    """Return an :class:`Inventory` instance for ``candidate`` when possible."""
+
+    if isinstance(candidate, Inventory):
+        return candidate
+
+    if isinstance(candidate, Mapping):
+        iterable: Iterable[Any] = candidate.values()
+    elif isinstance(candidate, Iterable) and not isinstance(candidate, (str, bytes)):
+        iterable = candidate
+    else:
+        return None
+
+    try:
+        nodes = list(iterable)
+    except TypeError:
+        return None
+
+    if not nodes:
+        return None
+
+    return Inventory(dev_id, raw_nodes, nodes)
+
+
+def _extract_inventory(entry_data: Mapping[str, Any] | None) -> Inventory | None:
+    """Return the shared inventory stored alongside a config entry."""
+
+    if not isinstance(entry_data, Mapping):
+        return None
+
+    dev_id = str(entry_data.get("dev_id", "") or "").strip()
+    raw_nodes = entry_data.get("nodes")
+
+    inventory = _coerce_inventory(
+        entry_data.get("inventory"),
+        dev_id=dev_id,
+        raw_nodes=raw_nodes,
+    )
+    if inventory is not None:
+        return inventory
+
+    coordinator = entry_data.get("coordinator")
+    coordinator_dev_id = str(getattr(coordinator, "dev_id", "") or "").strip()
+    coordinator_nodes = getattr(coordinator, "nodes", None)
+
+    coordinator_inventory = _coerce_inventory(
+        getattr(coordinator, "inventory", None),
+        dev_id=coordinator_dev_id or dev_id,
+        raw_nodes=coordinator_nodes or raw_nodes,
+    )
+    if coordinator_inventory is not None:
+        return coordinator_inventory
+
+    inventory = _coerce_inventory(
+        entry_data.get("node_inventory"),
+        dev_id=dev_id,
+        raw_nodes=raw_nodes,
+    )
+    if inventory is not None:
+        return inventory
+
+    coordinator_nodes_list = getattr(coordinator, "node_inventory", None)
+    inventory = _coerce_inventory(
+        coordinator_nodes_list,
+        dev_id=coordinator_dev_id or dev_id,
+        raw_nodes=coordinator_nodes or raw_nodes,
+    )
+    if inventory is not None:
+        return inventory
+
+    fallback_raw = raw_nodes if raw_nodes is not None else coordinator_nodes
+    fallback_dev = dev_id or coordinator_dev_id
+
+    if fallback_raw is None:
+        return None
+
+    try:
+        built_nodes = list(build_node_inventory(fallback_raw))
+    except ValueError:
+        built_nodes = []
+
+    if not built_nodes:
+        return None
+
+    if isinstance(entry_data, MutableMapping):
+        entry_data.setdefault("node_inventory", list(built_nodes))
+
+    return Inventory(fallback_dev, fallback_raw, built_nodes)
+
+
 def prepare_heater_platform_data(
     entry_data: dict[str, Any],
     *,
@@ -647,42 +742,36 @@ def prepare_heater_platform_data(
 ]:
     """Return node metadata and name resolution helpers for a config entry."""
 
-    snapshot = ensure_snapshot(entry_data)
-    if isinstance(snapshot, InstallationSnapshot):
-        inventory = snapshot.inventory
-        nodes_by_type_raw = snapshot.nodes_by_type
-        nodes_by_type = {
-            node_type: list(nodes) for node_type, nodes in nodes_by_type_raw.items()
-        }
-        explicit_names = snapshot.explicit_heater_names
-        type_to_addresses, _reverse_lookup = snapshot.heater_address_map
-        addrs_by_type = {
-            node_type: list(type_to_addresses.get(node_type, []))
-            for node_type in HEATER_NODE_TYPES
-        }
-        name_map = snapshot.heater_name_map(default_name_simple)
-    else:
-        nodes = entry_data.get("nodes")
-        inventory_nodes = ensure_node_inventory(entry_data, nodes=nodes)
-        inventory_container = Inventory(
-            str(entry_data.get("dev_id", "")),
-            nodes,
-            inventory_nodes,
-        )
-        inventory = inventory_container.nodes
+    inventory_container = _extract_inventory(entry_data)
 
+    if inventory_container is None:
+        inventory = ()
+        nodes_by_type: dict[str, list[Node]] = {}
+        explicit_names: set[tuple[str, str]] = set()
+        addrs_by_type: dict[str, list[str]] = {
+            node_type: [] for node_type in HEATER_NODE_TYPES
+        }
+        name_map: Mapping[Any, Any] = {}
+    else:
+        inventory = inventory_container.nodes
         nodes_by_type = inventory_container.nodes_by_type
         explicit_names = inventory_container.explicit_heater_names
-        type_to_addresses, _reverse_lookup = inventory_container.heater_address_map
-
+        forward_map, _ = inventory_container.heater_address_map
         addrs_by_type = {
-            node_type: list(type_to_addresses.get(node_type, []))
+            node_type: list(forward_map.get(node_type, []))
             for node_type in HEATER_NODE_TYPES
         }
-
         name_map = inventory_container.heater_name_map(default_name_simple)
-    names_by_type: dict[str, dict[str, str]] = name_map.get("by_type", {})
-    legacy_names: dict[str, str] = name_map.get("htr", {})
+
+    names_by_type: Mapping[str, Mapping[str, str]]
+    if isinstance(name_map, Mapping):
+        names_by_type = name_map.get("by_type", {})  # type: ignore[assignment]
+        legacy_names = name_map.get("htr", {})  # type: ignore[assignment]
+        name_lookup: Mapping[Any, Any] = name_map
+    else:
+        names_by_type = {}
+        legacy_names = {}
+        name_lookup = {}
 
     def _default_name(addr: str, node_type: str | None = None) -> str:
         if (node_type or "").lower() == "acm":
@@ -716,7 +805,7 @@ def prepare_heater_platform_data(
         per_type = names_by_type.get(node_type_norm, {})
         for candidate_value in (
             per_type.get(addr_str),
-            name_map.get((node_type_norm, addr_str)),
+            name_lookup.get((node_type_norm, addr_str)),
             legacy_names.get(addr_str),
         ):
             candidate = _candidate(candidate_value)
@@ -957,7 +1046,9 @@ class HeaterNodeBase(CoordinatorEntity):
         """Expose Home Assistant device metadata for the heater."""
         model = "Accumulator" if self._node_type == "acm" else "Heater"
         return DeviceInfo(
-            identifiers=cast(set[tuple[str, str]], {(DOMAIN, self._dev_id, self._addr)}),
+            identifiers=cast(
+                set[tuple[str, str]], {(DOMAIN, self._dev_id, self._addr)}
+            ),
             name=self._device_name,
             manufacturer="TermoWeb",
             model=model,

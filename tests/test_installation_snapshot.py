@@ -5,7 +5,10 @@ from typing import Any
 
 import pytest
 
-from custom_components.termoweb.installation import InstallationSnapshot, ensure_snapshot
+from custom_components.termoweb.installation import (
+    InstallationSnapshot,
+    ensure_snapshot,
+)
 from custom_components.termoweb.inventory import (
     Inventory,
     build_node_inventory,
@@ -24,7 +27,9 @@ def _make_snapshot(
     payload = {"nodes": nodes}
     inventory = build_node_inventory(payload)
     if include_inventory:
-        return InstallationSnapshot(dev_id=dev_id, raw_nodes=payload, node_inventory=inventory)
+        return InstallationSnapshot(
+            dev_id=dev_id, raw_nodes=payload, node_inventory=inventory
+        )
     return InstallationSnapshot(dev_id=dev_id, raw_nodes=payload)
 
 
@@ -124,6 +129,17 @@ def test_snapshot_nodes_by_type_skips_unknown() -> None:
 
     assert "htr" in mapping
     assert all(node.addr == "2" for node in mapping["htr"])
+
+
+def test_snapshot_update_nodes_uses_node_inventory_fallback() -> None:
+    """update_nodes should accept node inventory when container is missing."""
+
+    snapshot = InstallationSnapshot(dev_id="dev", raw_nodes={})
+    nodes = [SimpleNamespace(type="htr", addr="5", name="Living")]
+
+    snapshot.update_nodes({}, node_inventory=nodes)
+
+    assert [node.addr for node in snapshot.inventory] == ["5"]
 
 
 def test_ensure_snapshot_handles_missing() -> None:
