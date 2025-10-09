@@ -617,6 +617,223 @@ def test_async_setup_entry_resets_diagnostics_cache(
         assert "Diagnostics registration raised exception" in caplog.text
 
 
+@pytest.mark.asyncio
+async def test_async_setup_entry_waits_for_delayed_diagnostics(
+    termoweb_init: Any,
+    stub_hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class DiagnosticsClient(BaseFakeClient):
+        async def list_devices(self) -> list[dict[str, Any]]:
+            return [{"dev_id": "dev-1"}]
+
+        async def get_nodes(self, dev_id: str) -> dict[str, Any]:
+            await super().get_nodes(dev_id)
+            return {"nodes": []}
+
+    monkeypatch.setattr(termoweb_init, "RESTClient", DiagnosticsClient)
+
+    callbacks: list[Callable[[HomeAssistant, Any], Coroutine[Any, Any, None]]] = []
+
+    def fake_async_when_setup(
+        hass: HomeAssistant,
+        component: str,
+        callback: Callable[[HomeAssistant, Any], Coroutine[Any, Any, None]],
+    ) -> Callable[[], None]:
+        assert component == "diagnostics"
+        callbacks.append(callback)
+
+        def _unsub() -> None:
+            if callback in callbacks:
+                callbacks.remove(callback)
+
+        return _unsub
+
+    monkeypatch.setattr(termoweb_init, "async_when_setup", fake_async_when_setup)
+
+    attempts: list[bool] = []
+
+    def fake_register(_: HomeAssistant, __: types.ModuleType) -> bool:
+        attempts.append(True)
+        return len(attempts) >= 2
+
+    monkeypatch.setattr(
+        termoweb_init, "_register_diagnostics_platform", fake_register
+    )
+
+    diagnostics_module = types.ModuleType("custom_components.termoweb.diagnostics")
+    monkeypatch.setitem(
+        sys.modules, "custom_components.termoweb.diagnostics", diagnostics_module
+    )
+
+    monkeypatch.setattr(termoweb_init, "DIAGNOSTICS_RETRY_DELAY", 0)
+
+    import_mock = AsyncMock()
+    monkeypatch.setattr(termoweb_init, "_async_import_energy_history", import_mock)
+
+    entry = ConfigEntry("diag-wait", data={"username": "user", "password": "pw"})
+    stub_hass.config.components = set()
+    stub_hass.config_entries.add(entry)
+
+    with caplog.at_level(logging.DEBUG, logger=termoweb_init.__name__):
+        assert await termoweb_init.async_setup_entry(stub_hass, entry)
+        await asyncio.sleep(0)
+        assert not attempts
+        assert callbacks
+
+        stub_hass.config.components.add("diagnostics")
+        await callbacks[0](stub_hass, None)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        record = termoweb_init._test_helpers.get_record(stub_hass, entry)
+        diag_task = record.get("diagnostics_task")
+        assert diag_task is not None
+        await diag_task
+
+    assert len(attempts) == 2
+    assert "Diagnostics component not loaded; waiting for setup" in caplog.text
+    assert "Diagnostics registration attempt 1 starting" in caplog.text
+    assert "Diagnostics registration attempt 2 finished with success=True" in caplog.text
+
+
+def test_diagnostics_component_loaded_checks_sources(
+    termoweb_init: Any, stub_hass: HomeAssistant
+) -> None:
+    stub_hass.config.components = {"diagnostics"}
+    assert termoweb_init._diagnostics_component_loaded(stub_hass) is True
+
+    stub_hass.config.components = ["other", "diagnostics"]
+    assert termoweb_init._diagnostics_component_loaded(stub_hass) is True
+
+    stub_hass.config.components = []
+    stub_hass.data["components"] = {"diagnostics"}
+    assert termoweb_init._diagnostics_component_loaded(stub_hass) is True
+
+    stub_hass.data["components"] = {"diagnostics": object()}
+    assert termoweb_init._diagnostics_component_loaded(stub_hass) is True
+
+    stub_hass.data["components"] = {}
+    assert termoweb_init._diagnostics_component_loaded(stub_hass) is False
+
+    stub_hass.data.pop("components", None)
+    assert termoweb_init._diagnostics_component_loaded(stub_hass) is False
+
+
+@pytest.mark.asyncio
+async def test_async_register_diagnostics_when_ready_component_loaded(
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    diagnostics_module = types.ModuleType("custom_components.termoweb.diagnostics")
+    monkeypatch.setitem(
+        sys.modules, "custom_components.termoweb.diagnostics", diagnostics_module
+    )
+
+    calls: list[types.ModuleType] = []
+
+    def fake_register(_: HomeAssistant, module: types.ModuleType) -> bool:
+        calls.append(module)
+        return True
+
+    monkeypatch.setattr(termoweb_init, "_register_diagnostics_platform", fake_register)
+
+    stub_hass.config.components = {"diagnostics"}
+
+    with caplog.at_level(logging.DEBUG, logger=termoweb_init.__name__):
+        await termoweb_init._async_register_diagnostics_when_ready(stub_hass)
+
+    assert calls and calls[0] is diagnostics_module
+    assert "Diagnostics component already loaded" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_async_register_diagnostics_when_ready_without_when_setup(
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    diagnostics_module = types.ModuleType("custom_components.termoweb.diagnostics")
+    monkeypatch.setitem(
+        sys.modules, "custom_components.termoweb.diagnostics", diagnostics_module
+    )
+
+    calls: list[types.ModuleType] = []
+
+    def fake_register(_: HomeAssistant, module: types.ModuleType) -> bool:
+        calls.append(module)
+        return True
+
+    monkeypatch.setattr(termoweb_init, "_register_diagnostics_platform", fake_register)
+
+    stub_hass.config.components = set()
+    monkeypatch.setattr(termoweb_init, "async_when_setup", None)
+
+    with caplog.at_level(logging.DEBUG, logger=termoweb_init.__name__):
+        await termoweb_init._async_register_diagnostics_when_ready(stub_hass)
+
+    assert calls and calls[0] is diagnostics_module
+    assert "async_when_setup unavailable" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_async_register_diagnostics_when_ready_retries_import(
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    diagnostics_module = types.ModuleType("custom_components.termoweb.diagnostics")
+
+    import_calls = 0
+
+    original_import = termoweb_init.import_module
+
+    def fake_import(name: str) -> types.ModuleType:
+        nonlocal import_calls
+        if name == "custom_components.termoweb.diagnostics":
+            import_calls += 1
+            if import_calls == 1:
+                raise ImportError("boom")
+            return diagnostics_module
+        return original_import(name)
+
+    monkeypatch.setattr(termoweb_init, "import_module", fake_import)
+
+    monkeypatch.setattr(termoweb_init, "DIAGNOSTICS_RETRY_DELAY", 0)
+
+    def fake_register(_: HomeAssistant, module: types.ModuleType) -> bool:
+        return True
+
+    monkeypatch.setattr(termoweb_init, "_register_diagnostics_platform", fake_register)
+
+    stub_hass.config.components = {"diagnostics"}
+
+    with caplog.at_level(logging.DEBUG, logger=termoweb_init.__name__):
+        await termoweb_init._async_register_diagnostics_when_ready(stub_hass)
+
+    assert import_calls >= 2
+    assert "Diagnostics module import failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_async_register_diagnostics_when_ready_handles_cancelled(
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    diagnostics_module = types.ModuleType("custom_components.termoweb.diagnostics")
+    monkeypatch.setitem(
+        sys.modules, "custom_components.termoweb.diagnostics", diagnostics_module
+    )
+
+    def fake_register(_: HomeAssistant, __: types.ModuleType) -> bool:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(termoweb_init, "_register_diagnostics_platform", fake_register)
+
+    stub_hass.config.components = {"diagnostics"}
+
+    with caplog.at_level(logging.DEBUG, logger=termoweb_init.__name__):
+        with pytest.raises(asyncio.CancelledError):
+            await termoweb_init._async_register_diagnostics_when_ready(stub_hass)
+
+    assert "Diagnostics registration attempts cancelled" in caplog.text
+
+
 def test_build_heater_address_map_filters_invalid_nodes(termoweb_init: Any) -> None:
     inventory = [
         SimpleNamespace(type="htr", addr="A"),

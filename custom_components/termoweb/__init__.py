@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
-import inspect
-from collections.abc import Awaitable, Iterable, Mapping, MutableMapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping, MutableMapping
 from datetime import timedelta
 from importlib import import_module
+import inspect
 import logging
+from types import ModuleType
 from typing import Any
 
 from aiohttp import ClientError
@@ -27,6 +28,11 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+
+try:  # pragma: no cover - optional helper on older Home Assistant cores
+    from homeassistant.setup import async_when_setup
+except ImportError:  # pragma: no cover - tests provide stubbed setup helper
+    async_when_setup = None
 
 from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend import Backend, DucaheatRESTClient, WsClientProto, create_backend
@@ -62,10 +68,14 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["button", "binary_sensor", "climate", "select", "sensor"]
 
+DIAGNOSTICS_RETRY_DELAY = 0.5
+
 reset_samples_rate_limit_state()
 
 
-def _register_diagnostics_platform(hass: HomeAssistant) -> None:
+def _register_diagnostics_platform(
+    hass: HomeAssistant, module: ModuleType | None = None
+) -> bool:
     """Ensure diagnostics helpers are registered against Home Assistant."""
 
     if ha_loader is None:
@@ -88,25 +98,137 @@ def _register_diagnostics_platform(hass: HomeAssistant) -> None:
         diagnostics = import_module("homeassistant.components.diagnostics")
     except ImportError as err:  # pragma: no cover - guard against missing helper
         _LOGGER.debug("Diagnostics helper import failed: %s", err)
-        return
+        return False
 
     register = getattr(diagnostics, "_register_diagnostics_platform", None)
     if register is None:
         _LOGGER.debug("Diagnostics registration helper unavailable on this core")
-        return
+        return False
 
     try:
-        diagnostics_module = import_module("custom_components.termoweb.diagnostics")
+        diagnostics_module = module or import_module(
+            "custom_components.termoweb.diagnostics"
+        )
     except ImportError as err:  # pragma: no cover - diagnostics import guard
         _LOGGER.debug("Failed to import TermoWeb diagnostics module: %s", err)
-        return
+        return False
 
     try:
         register(hass, DOMAIN, diagnostics_module)
     except Exception as err:  # noqa: BLE001 - defensive logging for compatibility
         _LOGGER.debug("Diagnostics registration raised exception: %s", err)
-    else:
-        _LOGGER.debug("Diagnostics platform registered successfully")
+        return False
+
+    _LOGGER.debug("Diagnostics platform registered successfully")
+    return True
+
+
+def _diagnostics_component_loaded(hass: HomeAssistant) -> bool:
+    """Return True if Home Assistant reports diagnostics as loaded."""
+
+    components = getattr(getattr(hass, "config", None), "components", None)
+    if isinstance(components, set):
+        if "diagnostics" in components:
+            return True
+    elif isinstance(components, Iterable):
+        try:
+            if "diagnostics" in components:
+                return True
+        except TypeError:  # pragma: no cover - defensive: non-container iterables
+            pass
+
+    data_components = hass.data.get("components") if isinstance(hass.data, Mapping) else None
+    if isinstance(data_components, set):
+        return "diagnostics" in data_components
+    if isinstance(data_components, Mapping):
+        return "diagnostics" in data_components
+
+    return False
+
+
+async def _async_register_diagnostics_when_ready(hass: HomeAssistant) -> None:
+    """Wait for diagnostics setup and register TermoWeb helpers."""
+
+    _LOGGER.debug("Diagnostics registration listener started")
+
+    async def _attempt_once(attempt: int) -> bool:
+        _LOGGER.debug("Diagnostics registration attempt %s starting", attempt)
+        try:
+            diagnostics_module = import_module("custom_components.termoweb.diagnostics")
+        except ImportError as err:
+            _LOGGER.debug(
+                "Diagnostics module import failed on attempt %s: %s", attempt, err
+            )
+            return False
+
+        success = _register_diagnostics_platform(hass, diagnostics_module)
+        _LOGGER.debug(
+            "Diagnostics registration attempt %s finished with success=%s",
+            attempt,
+            success,
+        )
+        return success
+
+    async def _attempt_until_success() -> None:
+        attempt = 1
+        while True:
+            try:
+                if await _attempt_once(attempt):
+                    return
+            except asyncio.CancelledError:
+                _LOGGER.debug("Diagnostics registration attempts cancelled")
+                raise
+
+            delay = max(DIAGNOSTICS_RETRY_DELAY, 0)
+            if delay:
+                try:
+                    await asyncio.sleep(delay)
+                except asyncio.CancelledError:
+                    _LOGGER.debug("Diagnostics registration retry cancelled")
+                    raise
+            else:
+                await asyncio.sleep(0)
+            attempt += 1
+
+    listener_remove: Callable[[], None] | None = None
+
+    try:
+        if _diagnostics_component_loaded(hass):
+            _LOGGER.debug(
+                "Diagnostics component already loaded; registering immediately"
+            )
+            await _attempt_until_success()
+            return
+
+        if async_when_setup is None:
+            _LOGGER.debug(
+                "async_when_setup unavailable; attempting diagnostics registration"
+            )
+            await _attempt_until_success()
+            return
+
+        _LOGGER.debug("Diagnostics component not loaded; waiting for setup")
+        completion = asyncio.Event()
+
+        async def _on_component_ready(
+            _hass: HomeAssistant, _component: Any
+        ) -> None:
+            try:
+                await _attempt_until_success()
+            finally:
+                completion.set()
+
+        result = async_when_setup(hass, "diagnostics", _on_component_ready)
+        if callable(result):
+            listener_remove = result
+
+        await completion.wait()
+    except asyncio.CancelledError:
+        _LOGGER.debug("Diagnostics registration listener cancelled")
+        raise
+    finally:
+        if callable(listener_remove):
+            listener_remove()
 
 
 def create_rest_client(
@@ -183,7 +305,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         else:
             hass.config_entries.async_update_entry(entry, data=update_payload)
 
-    _register_diagnostics_platform(hass)
+    diagnostics_task = asyncio.create_task(
+        _async_register_diagnostics_when_ready(hass)
+    )
 
     version = await _async_get_integration_version(hass)
 
@@ -281,6 +405,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         "brand": brand,
         "debug": debug_enabled,
         "boost_runtime": {},
+        "diagnostics_task": diagnostics_task,
     }
 
     async def _async_handle_hass_stop(_event: Any) -> None:
@@ -508,6 +633,22 @@ async def _async_shutdown_entry(rec: MutableMapping[str, Any]) -> None:
         return
 
     rec["_shutdown_complete"] = True
+
+    diagnostics_task = rec.get("diagnostics_task")
+    if diagnostics_task is not None:
+        cancel = getattr(diagnostics_task, "cancel", None)
+        if callable(cancel):
+            try:
+                cancel()
+            except Exception:  # pragma: no cover - defensive logging
+                _LOGGER.exception("Failed to cancel diagnostics listener task")
+        try:
+            await diagnostics_task
+        except asyncio.CancelledError:
+            pass
+        except Exception:  # pragma: no cover - defensive logging
+            _LOGGER.exception("Diagnostics listener task raised during shutdown")
+        rec["diagnostics_task"] = None
 
     ws_tasks = rec.get("ws_tasks")
     if isinstance(ws_tasks, Mapping):
