@@ -14,6 +14,7 @@ import sys
 from typing import Any, Final
 
 from aiohttp import ClientError
+
 try:  # pragma: no cover - compatibility shim for older Home Assistant cores
     from homeassistant.config_entries import ConfigEntry, SupportsDiagnostics
 except ImportError:  # pragma: no cover - tests provide stubbed config entries
@@ -24,10 +25,15 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+
 try:  # pragma: no cover - fallback for test stubs
     from homeassistant.setup import ATTR_COMPONENT
 except ImportError:  # pragma: no cover - tests provide minimal attributes
     ATTR_COMPONENT = "component"
+try:  # pragma: no cover - compatibility shim for event helpers
+    from homeassistant.helpers.event import async_call_later
+except ImportError:  # pragma: no cover - tests provide minimal helpers
+    async_call_later = None  # type: ignore[assignment]
 
 from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend import Backend, DucaheatRESTClient, WsClientProto, create_backend
@@ -73,16 +79,20 @@ reset_samples_rate_limit_state()
 async def _async_ensure_diagnostics_platform(hass: HomeAssistant) -> None:
     """Ensure the diagnostics platform registers once the component is ready."""
 
-    state: MutableMapping[str, Any] = hass.data.setdefault(
-        DIAGNOSTICS_HELPER_KEY, {}
-    )
-    state.setdefault("registered", False)
+    state: MutableMapping[str, Any] = hass.data.setdefault(DIAGNOSTICS_HELPER_KEY, {})
     if state.get("registered"):
+        _LOGGER.debug("Diagnostics platform already registered; skipping ensure call")
         return
+
+    state.setdefault("registered", False)
+    state.setdefault("attempts", 0)
 
     try:
         diagnostics = importlib.import_module("homeassistant.components.diagnostics")
     except ImportError:  # pragma: no cover - diagnostics component unavailable
+        _LOGGER.debug(
+            "Diagnostics integration unavailable; cannot register diagnostics platform"
+        )
         return
 
     module_name = f"{__package__}.diagnostics"
@@ -102,7 +112,7 @@ async def _async_ensure_diagnostics_platform(hass: HomeAssistant) -> None:
     ]
 
     def _finalise_registration() -> None:
-        """Record registration and drop any pending listeners."""
+        """Record registration and clear pending listeners or timers."""
 
         state["registered"] = True
         listener = state.pop("listener", None)
@@ -113,73 +123,176 @@ async def _async_ensure_diagnostics_platform(hass: HomeAssistant) -> None:
                 _LOGGER.debug(
                     "Failed to unsubscribe diagnostics listener", exc_info=True
                 )
+        cancel_retry = state.pop("cancel_retry", None)
+        if callable(cancel_retry):
+            try:
+                cancel_retry()
+            except Exception:  # pragma: no cover - defensive cleanup
+                _LOGGER.debug("Failed to cancel diagnostics retry timer", exc_info=True)
 
-    def _resolve_diagnostics_data() -> Any | None:
-        """Return the diagnostics data container if the component is ready."""
+    def _schedule_retry() -> None:
+        """Schedule a retry once diagnostics data becomes available."""
 
-        for key in data_keys:
-            data = hass.data.get(key)
-            if data is not None:
-                return data
-        return None
-
-    async def _attempt_register(_event: Any | None = None) -> None:
-        """Register diagnostics when the diagnostics integration is available."""
-
-        if state.get("registered"):
+        if state.get("registered"):  # pragma: no cover - defensive guard
             return
+
+        if state.get("listener") is None:
+            listen = getattr(hass.bus, "async_listen", None)
+            if not callable(listen):
+                listen = getattr(hass.bus, "async_listen_once", None)
+
+            if callable(listen):
+                target_domain = getattr(diagnostics, "DOMAIN", "diagnostics")
+
+                async def _handle_component_loaded(event: Any) -> None:
+                    component = (
+                        getattr(event, "data", {}).get(ATTR_COMPONENT)
+                        if event
+                        else None
+                    )
+                    if component != target_domain:
+                        return
+                    await _attempt_register("component_loaded")
+
+                state["listener"] = listen(
+                    EVENT_COMPONENT_LOADED, _handle_component_loaded
+                )
+                _LOGGER.debug(
+                    "Diagnostics registration listener installed for %s", target_domain
+                )
+
+        if state.get("cancel_retry") is None and async_call_later is not None:
+            loop = getattr(hass, "loop", None)
+
+            def _timer_callback(_: Any) -> None:  # pragma: no cover - runtime timer
+                state["cancel_retry"] = None
+                coroutine = _attempt_register("timer")
+                if inspect.isawaitable(coroutine):
+                    if loop is not None:
+                        loop.create_task(coroutine)
+                    else:  # pragma: no cover - fallback path for missing loop
+                        asyncio.create_task(coroutine)
+
+            cancel = async_call_later(hass, timedelta(seconds=5), _timer_callback)
+            state["cancel_retry"] = cancel
+            _LOGGER.debug("Diagnostics retry timer scheduled")
+
+    async def _attempt_register(reason: str) -> None:
+        """Attempt to register the diagnostics platform and log outcomes."""
+
+        if state.get("registered"):  # pragma: no cover - defensive guard
+            _LOGGER.debug(  # pragma: no cover - defensive guard
+                "Skipping diagnostics registration attempt triggered by %s; already registered",
+                reason,
+            )
+            return
+
+        state["attempts"] += 1
+        attempt_no = state["attempts"]
+        _LOGGER.debug(
+            "Diagnostics registration attempt %s triggered by %s", attempt_no, reason
+        )
 
         register_async = getattr(
             diagnostics, "async_register_diagnostics_platform", None
         )
         if callable(register_async):
-            result = register_async(hass, DOMAIN, platform)
-            if inspect.isawaitable(result):
-                await result
+            try:
+                result = register_async(hass, DOMAIN, platform)
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:  # pragma: no cover - defensive logging
+                _LOGGER.exception(
+                    "Diagnostics registration attempt %s failed via async helper",
+                    attempt_no,
+                )
+                return
+
+            _LOGGER.debug(
+                "Diagnostics registration attempt %s succeeded via async helper",
+                attempt_no,
+            )
             _finalise_registration()
             return
 
         register_sync = getattr(diagnostics, "_register_diagnostics_platform", None)
         if not callable(register_sync):
+            _LOGGER.debug(
+                "Diagnostics registration attempt %s blocked; register helper missing",
+                attempt_no,
+            )
             return
 
-        diagnostics_data = _resolve_diagnostics_data()
+        diagnostics_data: Any | None = None
+        used_key: Any | None = None
+        for key in data_keys:
+            diagnostics_data = hass.data.get(key)
+            if diagnostics_data is not None:
+                used_key = key
+                break
+
         if diagnostics_data is None:
+            _LOGGER.debug(
+                "Diagnostics registration attempt %s deferred; diagnostics data missing",
+                attempt_no,
+            )
+            _schedule_retry()
             return
 
         platforms = getattr(diagnostics_data, "platforms", None)
-        if not isinstance(platforms, dict):
-            return
+        if platforms is None:
+            platforms = {}
+        elif not isinstance(platforms, MutableMapping):
+            if isinstance(platforms, Mapping):
+                platforms = dict(platforms)
+            else:
+                _LOGGER.debug(
+                    "Diagnostics registration attempt %s deferred; invalid platforms container",
+                    attempt_no,
+                )
+                _schedule_retry()
+                return
+
+        if getattr(diagnostics_data, "platforms", None) is not platforms:
+            try:
+                setattr(diagnostics_data, "platforms", platforms)
+            except Exception:  # pragma: no cover - compatibility shim
+                try:
+                    object.__setattr__(diagnostics_data, "platforms", platforms)
+                except Exception:
+                    _LOGGER.debug(
+                        "Diagnostics registration attempt %s deferred; unable to update platforms",
+                        attempt_no,
+                    )
+                    _schedule_retry()
+                    return
+
         if DOMAIN in platforms:
+            _LOGGER.debug(
+                "Diagnostics registration attempt %s skipped; platform already registered",
+                attempt_no,
+            )
             _finalise_registration()
             return
 
-        register_sync(hass, DOMAIN, platform)
+        try:
+            register_sync(hass, DOMAIN, platform)
+        except Exception:  # pragma: no cover - defensive logging
+            _LOGGER.exception(
+                "Diagnostics registration attempt %s failed via sync helper",
+                attempt_no,
+            )
+            return
+
+        _LOGGER.debug(
+            "Diagnostics registration attempt %s succeeded via sync helper (key=%s)",
+            attempt_no,
+            used_key,
+        )
         _finalise_registration()
 
-    await _attempt_register()
-    if state.get("registered"):
-        return
+    await _attempt_register("initial")
 
-    async def _handle_component_loaded(event: Any) -> None:
-        """Attempt diagnostics registration when diagnostics loads later."""
-
-        component = getattr(event, "data", {}).get(ATTR_COMPONENT) if event else None
-        target_domain = getattr(diagnostics, "DOMAIN", "diagnostics")
-        if component != target_domain:
-            return
-        await _attempt_register(event)
-
-    if state.get("listener"):
-        return
-
-    listen = getattr(hass.bus, "async_listen", None)
-    if not callable(listen):
-        listen = getattr(hass.bus, "async_listen_once", None)
-    if not callable(listen):
-        return
-
-    state["listener"] = listen(EVENT_COMPONENT_LOADED, _handle_component_loaded)
 
 def create_rest_client(
     hass: HomeAssistant, username: str, password: str, brand: str
