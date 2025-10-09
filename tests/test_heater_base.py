@@ -182,16 +182,16 @@ def test_prepare_heater_platform_data_passes_inventory_to_name_map(
     def fake_ensure(record: dict[str, Any], *, nodes: Any | None = None) -> list[Any]:
         return list(expected_inventory)
 
-    calls: list[tuple[Any, Callable[[str], str]]] = []
+    calls: list[tuple[Inventory, Callable[[str], str] | None]] = []
 
     def fake_name_map(
-        nodes: Any, default_factory: Callable[[str], str]
+        self: Inventory, default_factory: Callable[[str], str] | None = None
     ) -> dict[Any, Any]:
-        calls.append((nodes, default_factory))
+        calls.append((self, default_factory))
         return {"htr": {}, "by_type": {}}
 
     monkeypatch.setattr(heater_module, "ensure_node_inventory", fake_ensure)
-    monkeypatch.setattr(heater_module, "build_heater_name_map", fake_name_map)
+    monkeypatch.setattr(Inventory, "heater_name_map", fake_name_map)
 
     snapshot = InstallationSnapshot(dev_id="dev", raw_nodes=raw_nodes, node_inventory=expected_inventory)
     inventory, *_ = prepare_heater_platform_data(
@@ -200,8 +200,10 @@ def test_prepare_heater_platform_data_passes_inventory_to_name_map(
     )
 
     assert calls
-    recorded_nodes, recorded_factory = calls[0]
-    assert recorded_nodes is inventory
+    recorded_inventory, recorded_factory = calls[0]
+    assert isinstance(recorded_inventory, Inventory)
+    assert list(recorded_inventory.nodes) == list(expected_inventory)
+    assert callable(recorded_factory)
     assert recorded_factory("9") == "Heater 9"
 
 

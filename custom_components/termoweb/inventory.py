@@ -30,6 +30,12 @@ _SNAPSHOT_NAME_CANDIDATE_KEYS = (
 )
 
 
+def _default_heater_name(addr: str) -> str:
+    """Return the default fallback name for a heater address."""
+
+    return f"Heater {addr}"
+
+
 __all__ = [
     "HEATER_NODE_TYPES",
     "NODE_CLASS_BY_TYPE",
@@ -77,6 +83,8 @@ class Inventory:
         tuple[dict[str, tuple[str, ...]], dict[str, str]] | None
     )
     _heater_sample_targets_cache: tuple[tuple[str, str], ...] | None
+    _heater_name_map_cache: dict[int, dict[Any, Any]]
+    _heater_name_map_factories: dict[int, Callable[[str], str]]
 
     def __init__(
         self,
@@ -95,6 +103,8 @@ class Inventory:
         object.__setattr__(self, "_heater_address_map_cache", None)
         object.__setattr__(self, "_heater_sample_address_cache", None)
         object.__setattr__(self, "_heater_sample_targets_cache", None)
+        object.__setattr__(self, "_heater_name_map_cache", {})
+        object.__setattr__(self, "_heater_name_map_factories", {})
 
     @property
     def dev_id(self) -> str:
@@ -257,6 +267,50 @@ class Inventory:
             cached = tuple(validated)
             object.__setattr__(self, "_heater_sample_targets_cache", cached)
         return [tuple(pair) for pair in cached]
+
+    def heater_name_map(
+        self, default_factory: Callable[[str], str] | None = None
+    ) -> dict[Any, Any]:
+        """Return cached heater name mapping for ``default_factory``."""
+
+        factory = default_factory or _default_heater_name
+        key = id(factory)
+        cached = self._heater_name_map_cache.get(key)
+        if cached is not None and self._heater_name_map_factories.get(key) is factory:
+            return cached
+
+        nodes: tuple[PrebuiltNode, ...] = self._nodes
+        if nodes:
+            sanitized: list[Any] = []
+            for node in nodes:
+                as_dict = getattr(node, "as_dict", None)
+                if callable(as_dict):
+                    try:
+                        payload = as_dict()
+                    except Exception:  # pragma: no cover - defensive  # noqa: BLE001
+                        payload = None
+                    else:
+                        if isinstance(payload, Mapping):
+                            sanitized.append(dict(payload))
+                            continue
+
+                sanitized.append(
+                    {
+                        "type": getattr(node, "type", None),
+                        "addr": getattr(node, "addr", None),
+                        "name": getattr(node, "name", None),
+                    }
+                )
+            nodes = tuple(sanitized)
+
+        from .heater import (  # noqa: PLC0415
+            build_heater_name_map as _build_heater_name_map,
+        )
+
+        mapping = _build_heater_name_map(nodes, factory)
+        self._heater_name_map_cache[key] = mapping
+        self._heater_name_map_factories[key] = factory
+        return mapping
 
 
 def _normalize_node_identifier(
