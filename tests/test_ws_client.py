@@ -255,7 +255,8 @@ def test_dispatch_nodes_without_snapshot(monkeypatch: pytest.MonkeyPatch) -> Non
     update_args = coordinator.update_nodes.call_args.args
     assert update_args[0] is payload["nodes"]
     inventory_arg = update_args[1]
-    assert hasattr(inventory_arg, "nodes")
+    assert isinstance(inventory_arg, Inventory)
+    assert inventory_arg.payload is payload["nodes"]
 
     def _extract_addr(node: Any) -> str:
         addr_attr = getattr(node, "addr", None)
@@ -362,6 +363,10 @@ def test_dispatch_nodes_updates_hass_and_coordinator(
     addr_map = client._dispatch_nodes(payload)
 
     client._coordinator.update_nodes.assert_called_once()  # type: ignore[attr-defined]
+    update_args = client._coordinator.update_nodes.call_args.args  # type: ignore[attr-defined]
+    assert update_args[0] is payload
+    assert isinstance(update_args[1], Inventory)
+    assert update_args[1].payload is payload
     assert isinstance(addr_map, dict)
     entry_state = client.hass.data[module.DOMAIN]["entry"]
     assert "node_inventory" in entry_state
