@@ -367,11 +367,12 @@ def test_state_coordinator_logs_once_for_invalid_nodes(
     )
 
     caplog.clear()
+    invalid_inventory = inventory_builder("dev", ["bad"], [])
     with caplog.at_level(logging.DEBUG):
-        coordinator.update_nodes(["bad"])
-        coordinator.update_nodes("also bad")
+        coordinator.update_nodes(["bad"], invalid_inventory)
+        coordinator.update_nodes("also bad", invalid_inventory)
 
-    assert coordinator._inventory is None
+    assert coordinator._inventory is invalid_inventory
     assert sum(
         "Ignoring unexpected nodes payload" in message for message in caplog.messages
     ) == 1
