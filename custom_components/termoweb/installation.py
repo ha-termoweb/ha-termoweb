@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from .inventory import (
     Inventory,
     Node,
     build_node_inventory,
-    heater_sample_subscription_targets,
-    normalize_heater_addresses,
+    heater_sample_subscription_targets as _heater_sample_subscription_targets,
 )
+
+# Backwards compatibility for legacy monkeypatches/tests relying on module-level helpers.
+heater_sample_subscription_targets = _heater_sample_subscription_targets
 
 
 class InstallationSnapshot:
@@ -125,8 +127,8 @@ class InstallationSnapshot:
         if self._sample_address_map is not None:
             return
 
-        forward_map, _ = self.heater_address_map
-        normalized_map, compat = normalize_heater_addresses(forward_map)
+        inventory = self._ensure_inventory()
+        normalized_map, compat = inventory.heater_sample_address_map
         self._sample_address_map = {
             node_type: list(addrs) for node_type, addrs in normalized_map.items()
         }
@@ -147,22 +149,8 @@ class InstallationSnapshot:
         """Return ordered ``(node_type, addr)`` sample subscription targets."""
 
         if self._sample_targets is None:
-            normalized_map, _ = self.heater_sample_address_map
-            raw_targets = heater_sample_subscription_targets(normalized_map)
-            validated: list[tuple[str, str]] = []
-            for item in raw_targets:
-                if (
-                    isinstance(item, Sequence)
-                    and not isinstance(item, (str, bytes))
-                    and len(item) == 2
-                ):
-                    node_type, addr = item
-                    if node_type is not None and addr is not None:
-                        node_str = str(node_type).strip()
-                        addr_str = str(addr).strip()
-                        if node_str and addr_str:
-                            validated.append((node_str, addr_str))
-            self._sample_targets = validated
+            inventory = self._ensure_inventory()
+            self._sample_targets = inventory.heater_sample_targets
         return list(self._sample_targets)
 
     def heater_name_map(
