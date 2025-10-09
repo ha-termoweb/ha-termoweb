@@ -145,6 +145,7 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "poll_interval": poll_interval,
             CONF_BRAND: brand,
         }
+        data["supports_diagnostics"] = True
         return None, data
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:

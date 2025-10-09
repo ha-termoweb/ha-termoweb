@@ -84,6 +84,17 @@ class DiagnosticsConfigEntry(ConfigEntry):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.supports_diagnostics: Any = None
+        self.update_calls: list[dict[str, Any]] = []
+
+    async def async_update(self, data: Mapping[str, Any]) -> None:
+        self.update_calls.append(dict(data))
+        self.data = dict(data)
+
+
+class DiagnosticsNoUpdateEntry(ConfigEntry):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.supports_diagnostics: Any = None
 
 
 def test_create_rest_client_selects_brand(
@@ -456,6 +467,62 @@ def test_async_setup_entry_sets_supports_diagnostics(
 
     assert asyncio.run(_run()) is True
     assert entry.supports_diagnostics is sentinel.YES
+
+
+def test_async_setup_entry_backfills_diagnostics_marker(
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class DiagnosticsClient(BaseFakeClient):
+        async def list_devices(self) -> list[dict[str, Any]]:
+            return [{"dev_id": "dev-1"}]
+
+    monkeypatch.setattr(termoweb_init, "RESTClient", DiagnosticsClient)
+
+    sentinel = SimpleNamespace(YES=object())
+    monkeypatch.setattr(termoweb_init, "SupportsDiagnostics", sentinel)
+
+    entry = DiagnosticsConfigEntry("legacy", data={"username": "user", "password": "pw"})
+    stub_hass.config_entries.add(entry)
+
+    assert "supports_diagnostics" not in entry.data
+
+    async def _run() -> bool:
+        result = await termoweb_init.async_setup_entry(stub_hass, entry)
+        await _drain_tasks(stub_hass)
+        return result
+
+    assert asyncio.run(_run()) is True
+    assert entry.supports_diagnostics is sentinel.YES
+    assert entry.update_calls[-1]["supports_diagnostics"] is True
+    assert entry.data["supports_diagnostics"] is True
+
+
+def test_async_setup_entry_updates_via_hass_config_entries(
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class DiagnosticsClient(BaseFakeClient):
+        async def list_devices(self) -> list[dict[str, Any]]:
+            return [{"dev_id": "dev-1"}]
+
+    monkeypatch.setattr(termoweb_init, "RESTClient", DiagnosticsClient)
+
+    sentinel = SimpleNamespace(YES=object())
+    monkeypatch.setattr(termoweb_init, "SupportsDiagnostics", sentinel)
+
+    entry = DiagnosticsNoUpdateEntry("fallback", data={"username": "user", "password": "pw"})
+    stub_hass.config_entries.add(entry)
+
+    assert stub_hass.config_entries.updated_entries == []
+
+    async def _run() -> bool:
+        result = await termoweb_init.async_setup_entry(stub_hass, entry)
+        await _drain_tasks(stub_hass)
+        return result
+
+    assert asyncio.run(_run()) is True
+    assert entry.supports_diagnostics is sentinel.YES
+    assert entry.data["supports_diagnostics"] is True
+    assert stub_hass.config_entries.updated_entries[-1][1] == entry.data
 
 
 def test_async_setup_entry_resets_diagnostics_cache(

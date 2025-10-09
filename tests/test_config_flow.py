@@ -193,6 +193,7 @@ def test_async_step_user_success(monkeypatch: pytest.MonkeyPatch) -> None:
         "password": "pw",
         "poll_interval": 200,
         config_flow.CONF_BRAND: config_flow.BRAND_DUCAHEAT,
+        "supports_diagnostics": True,
     }
 
 
