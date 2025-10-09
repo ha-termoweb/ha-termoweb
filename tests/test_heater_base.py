@@ -13,8 +13,6 @@ _install_stubs()
 
 from custom_components.termoweb import heater as heater_module
 from custom_components.termoweb import identifiers as identifiers_module
-from custom_components.termoweb import installation as installation_module
-from custom_components.termoweb.installation import InstallationSnapshot
 from custom_components.termoweb.inventory import (
     HeaterNode,
     Inventory,
@@ -87,13 +85,9 @@ def test_prepare_heater_platform_data_groups_nodes() -> None:
             {"type": "ACM", "addr": "2"},
         ]
     }
-    inventory = build_node_inventory(raw_nodes)
-    snapshot = InstallationSnapshot(
-        dev_id="dev",
-        raw_nodes=raw_nodes,
-        node_inventory=inventory,
-    )
-    entry_data = {"snapshot": snapshot}
+    inventory_nodes = build_node_inventory(raw_nodes)
+    container = Inventory("dev", raw_nodes, inventory_nodes)
+    entry_data = {"inventory": container}
 
     inventory, nodes_by_type, addrs_by_type, resolve_name = (
         prepare_heater_platform_data(
@@ -102,7 +96,7 @@ def test_prepare_heater_platform_data_groups_nodes() -> None:
         )
     )
 
-    assert inventory is snapshot.inventory
+    assert inventory == container.nodes
     htr_nodes = nodes_by_type.get("htr", [])
     assert [node.addr for node in htr_nodes] == ["1", "4", "4"]
     assert all(hasattr(node, "addr") for node in htr_nodes)
@@ -112,7 +106,7 @@ def test_prepare_heater_platform_data_groups_nodes() -> None:
     assert [node.addr for node in acm_nodes] == ["2", "2"]
     assert addrs_by_type["acm"] == ["2"]
     assert len(addrs_by_type["acm"]) == len(set(addrs_by_type["acm"]))
-    reference = Inventory("dev", raw_nodes, inventory)
+    reference = Inventory("dev", raw_nodes, inventory_nodes)
     helper_map, helper_reverse = reference.heater_address_map
     assert addrs_by_type == {
         node_type: helper_map.get(node_type, [])
@@ -124,87 +118,84 @@ def test_prepare_heater_platform_data_groups_nodes() -> None:
     assert resolve_name("acm", "2") == "Accumulator 2"
 
     cached_inventory, *_ = prepare_heater_platform_data(
-        {"node_inventory": list(inventory)},
+        {
+            "dev_id": "dev",
+            "nodes": raw_nodes,
+            "node_inventory": list(container.nodes),
+        },
         default_name_simple=lambda addr: f"Heater {addr}",
     )
-    assert cached_inventory == inventory
-
-    legacy_entry = {
-        "nodes": {"nodes": [{"type": "htr", "addr": "9", "name": " Kitchen "}]},
-        "node_inventory": build_node_inventory(
-            {"nodes": [{"type": "acm", "addr": "8"}]}
-        ),
-    }
-
-    _, legacy_nodes_by_type, _, legacy_resolve = prepare_heater_platform_data(
-        legacy_entry,
-        default_name_simple=lambda addr: f"Heater {addr}",
-    )
-
-    assert legacy_nodes_by_type.get("htr") is None or not legacy_nodes_by_type.get(
-        "htr"
-    )
-    assert legacy_resolve("htr", "9") == "Heater 9"
-    assert legacy_resolve("foo", "9") == "Heater 9"
+    assert cached_inventory == container.nodes
 
 
-def test_prepare_heater_platform_data_skips_blank_types(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    blank_node = SimpleNamespace(type="  ", addr="5")
-    valid_node = SimpleNamespace(type="htr", addr="6")
-
-    def fake_ensure(record: dict[str, Any], *, nodes: Any | None = None) -> list[Any]:
-        return [blank_node, valid_node]
-
-    monkeypatch.setattr(heater_module, "ensure_node_inventory", fake_ensure)
-
-    entry_data: dict[str, Any] = {}
+def test_prepare_heater_platform_data_skips_blank_types() -> None:
+    nodes = [
+        SimpleNamespace(type="  ", addr="5"),
+        SimpleNamespace(type="htr", addr="6"),
+    ]
+    container = Inventory("dev", {"nodes": nodes}, nodes)
 
     inventory, nodes_by_type, addrs_by_type, _ = prepare_heater_platform_data(
-        entry_data,
+        {"inventory": container},
         default_name_simple=lambda addr: f"Heater {addr}",
     )
 
+    assert inventory == container.nodes
     assert [node.addr for node in nodes_by_type.get("htr", [])] == ["6"]
     assert addrs_by_type["htr"] == ["6"]
-    reference = Inventory("dev", {"nodes": []}, inventory)
-    helper_map, _ = reference.heater_address_map
-    assert helper_map == {"htr": ["6"]}
 
 
 def test_prepare_heater_platform_data_passes_inventory_to_name_map(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    raw_nodes = {"nodes": [{"type": "htr", "addr": "9", "name": "Heater"}]}
-    expected_inventory = build_node_inventory(raw_nodes)
-
-    def fake_ensure(record: dict[str, Any], *, nodes: Any | None = None) -> list[Any]:
-        return list(expected_inventory)
+    raw_nodes = {
+        "nodes": [
+            {"type": "htr", "addr": "9"},
+            {"type": "htr", "addr": "7"},
+            {"type": "htr", "addr": "6"},
+            {"type": "acm", "addr": "5", "name": "Heater 5"},
+            {"type": "acm", "addr": "8"},
+        ]
+    }
+    inventory_nodes = build_node_inventory(raw_nodes)
+    container = Inventory("dev", raw_nodes, inventory_nodes)
 
     calls: list[tuple[Inventory, Callable[[str], str] | None]] = []
+    custom_map: dict[Any, Any] = {
+        "by_type": {
+            "htr": {"9": "By Type 9"},
+            "acm": {"5": "Heater 5", "8": "Heater 8"},
+        },
+        ("htr", "7"): "Pair 7",
+        "htr": {"6": "Legacy 6"},
+    }
 
     def fake_name_map(
         self: Inventory, default_factory: Callable[[str], str] | None = None
     ) -> dict[Any, Any]:
         calls.append((self, default_factory))
-        return {"htr": {}, "by_type": {}}
+        return custom_map
 
-    monkeypatch.setattr(heater_module, "ensure_node_inventory", fake_ensure)
     monkeypatch.setattr(Inventory, "heater_name_map", fake_name_map)
 
-    snapshot = InstallationSnapshot(dev_id="dev", raw_nodes=raw_nodes, node_inventory=expected_inventory)
-    inventory, *_ = prepare_heater_platform_data(
-        {"snapshot": snapshot},
+    inventory, _, _, resolve_name = prepare_heater_platform_data(
+        {"inventory": container},
         default_name_simple=lambda addr: f"Heater {addr}",
     )
 
+    assert inventory == container.nodes
     assert calls
     recorded_inventory, recorded_factory = calls[0]
-    assert isinstance(recorded_inventory, Inventory)
-    assert list(recorded_inventory.nodes) == list(expected_inventory)
+    assert recorded_inventory is container
     assert callable(recorded_factory)
     assert recorded_factory("9") == "Heater 9"
+
+    assert resolve_name("htr", "9") == "By Type 9"
+    assert resolve_name("htr", "7") == "Pair 7"
+    assert resolve_name("htr", "6") == "Legacy 6"
+    assert resolve_name("acm", "5") == "Heater 5"
+    assert resolve_name("acm", "8") == "Accumulator 8"
+    assert resolve_name("foo", "3") == "Heater 3"
 
 
 def test_build_heater_name_map_handles_invalid_entries() -> None:
@@ -245,46 +236,141 @@ def test_prepare_heater_platform_data_resolves_normalized_inputs() -> None:
             {"type": " hTr ", "addr": " 8 ", "name": "Hall"},
         ]
     }
-    snapshot = InstallationSnapshot(
-        dev_id="dev",
-        raw_nodes=raw_nodes,
-        node_inventory=build_node_inventory(raw_nodes),
-    )
+    container = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
 
     _, _, _, resolve_name = prepare_heater_platform_data(
-        {"snapshot": snapshot},
+        {"inventory": container},
         default_name_simple=lambda addr: f"Heater {addr}",
     )
 
     assert resolve_name(" HTR ", " 8 ") == "Hall"
 
 
-def test_prepare_heater_platform_data_uses_snapshot_cache(
+def test_prepare_heater_platform_data_uses_coordinator_inventory() -> None:
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "1", "name": " Lounge "}]}
+    container = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+    coordinator = SimpleNamespace(inventory=container)
+
+    inventory, nodes_by_type, addrs_by_type, resolve_name = (
+        prepare_heater_platform_data(
+            {"coordinator": coordinator},
+            default_name_simple=lambda addr: f"Heater {addr}",
+        )
+    )
+
+    assert inventory == container.nodes
+    assert nodes_by_type["htr"][0].name == "Lounge"
+    assert addrs_by_type["htr"] == ["1"]
+    assert resolve_name("htr", "1") == "Lounge"
+
+
+def test_prepare_heater_platform_data_uses_coordinator_node_inventory() -> None:
+    raw_nodes = {"nodes": [{"type": "acm", "addr": "2"}]}
+    inventory_nodes = build_node_inventory(raw_nodes)
+    coordinator = SimpleNamespace(
+        dev_id="dev",
+        nodes=raw_nodes,
+        inventory=None,
+        node_inventory=list(inventory_nodes),
+    )
+
+    inventory, nodes_by_type, addrs_by_type, resolve_name = (
+        prepare_heater_platform_data(
+            {"coordinator": coordinator},
+            default_name_simple=lambda addr: f"Heater {addr}",
+        )
+    )
+
+    assert list(inventory) == list(inventory_nodes)
+    assert [node.addr for node in nodes_by_type.get("acm", [])] == ["2"]
+    assert addrs_by_type["acm"] == ["2"]
+    assert resolve_name("acm", "2") == "Accumulator 2"
+
+
+def test_prepare_heater_platform_data_handles_missing_inventory() -> None:
+    inventory, nodes_by_type, addrs_by_type, resolve_name = (
+        prepare_heater_platform_data(
+            {},
+            default_name_simple=lambda addr: f"Heater {addr}",
+        )
+    )
+
+    assert inventory == ()
+    assert nodes_by_type == {}
+    assert addrs_by_type == {
+        node_type: [] for node_type in heater_module.HEATER_NODE_TYPES
+    }
+    assert resolve_name("acm", "3") == "Accumulator 3"
+    assert resolve_name("htr", "4") == "Heater 4"
+
+
+def test_extract_inventory_accepts_mapping_inventory() -> None:
+    entry_data = {
+        "inventory": {
+            "primary": SimpleNamespace(type="htr", addr="7", name="Hall"),
+            "secondary": SimpleNamespace(type="acm", addr="8"),
+        }
+    }
+
+    inventory = heater_module._extract_inventory(entry_data)
+
+    assert inventory is not None
+    assert sorted(node.addr for node in inventory.nodes) == ["7", "8"]
+
+
+def test_coerce_inventory_handles_iteration_failure() -> None:
+    class BadMapping(dict):
+        def values(self):  # type: ignore[override]
+            class _Values:
+                def __iter__(self_inner):
+                    raise TypeError("boom")
+
+            return _Values()
+
+    assert (
+        heater_module._coerce_inventory(
+            BadMapping({"broken": object()}),
+            dev_id="dev",
+            raw_nodes={},
+        )
+        is None
+    )
+
+
+def test_extract_inventory_handles_non_mapping_input() -> None:
+    assert heater_module._extract_inventory(None) is None
+    assert heater_module._extract_inventory(object()) is None
+
+
+def test_extract_inventory_value_error_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
-    call_count = 0
-
-    def fake_build(nodes: Any) -> list[Any]:
-        nonlocal call_count
-        call_count += 1
-        return build_node_inventory(raw_nodes)
-
-    monkeypatch.setattr(installation_module, "build_node_inventory", fake_build)
-
-    snapshot = InstallationSnapshot(dev_id="dev", raw_nodes=raw_nodes)
-    entry_data = {"snapshot": snapshot}
-
-    prepare_heater_platform_data(
-        entry_data,
-        default_name_simple=lambda addr: f"Heater {addr}",
-    )
-    prepare_heater_platform_data(
-        entry_data,
-        default_name_simple=lambda addr: f"Heater {addr}",
+    monkeypatch.setattr(
+        heater_module,
+        "build_node_inventory",
+        lambda raw: (_ for _ in ()).throw(ValueError("invalid")),
     )
 
-    assert call_count == 1
+    entry_data: dict[str, Any] = {"nodes": {"nodes": []}}
+
+    assert heater_module._extract_inventory(entry_data) is None
+    assert "node_inventory" not in entry_data
+
+
+def test_prepare_heater_platform_data_handles_non_mapping_name_map(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "4"}]}
+    container = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+
+    monkeypatch.setattr(Inventory, "heater_name_map", lambda self, _: "invalid")
+
+    _, _, _, resolve_name = prepare_heater_platform_data(
+        {"inventory": container},
+        default_name_simple=lambda addr: f"Heater {addr}",
+    )
+
+    assert resolve_name("htr", "4") == "Heater 4"
 
 
 def test_log_skipped_nodes_defaults_platform_name(
@@ -583,7 +669,9 @@ def test_heater_settings_missing_mapping() -> None:
     assert heater.heater_settings() is None
 
 
-def test_supports_boost_helper_handles_variants(caplog: pytest.LogCaptureFixture) -> None:
+def test_supports_boost_helper_handles_variants(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Verify the boost helper supports callables, booleans, and errors."""
 
     true_node = SimpleNamespace(supports_boost=True)

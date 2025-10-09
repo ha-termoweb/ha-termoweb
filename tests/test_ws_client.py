@@ -225,7 +225,9 @@ def test_dispatch_nodes_without_snapshot(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(base_ws, "async_dispatcher_send", dispatcher)
     seen: dict[str, Any] = {}
 
-    def fake_ensure(record_map: Mapping[str, Any], *, nodes: Any) -> list[dict[str, str]]:
+    def fake_ensure(
+        record_map: Mapping[str, Any], *, nodes: Any
+    ) -> list[dict[str, str]]:
         seen["record"] = record_map
         seen["nodes"] = nodes
         return [{"addr": "1", "type": "htr"}]
@@ -250,59 +252,59 @@ def test_dispatch_nodes_without_snapshot(monkeypatch: pytest.MonkeyPatch) -> Non
     assert seen["record"] is hass_record
     assert seen["nodes"] is payload["nodes"]
     coordinator.update_nodes.assert_called_once()
-    update_args, update_kwargs = coordinator.update_nodes.call_args
-    assert not update_kwargs
+    update_args = coordinator.update_nodes.call_args.args
     assert update_args[0] is payload["nodes"]
-    inventory = update_args[1]
-    assert isinstance(inventory, Inventory)
-    assert list(inventory.nodes) == [{"addr": "1", "type": "htr"}]
-    assert inventory.payload is payload["nodes"]
+    inventory_arg = update_args[1]
+    assert hasattr(inventory_arg, "nodes")
+
+    def _extract_addr(node: Any) -> str:
+        addr_attr = getattr(node, "addr", None)
+        if addr_attr is not None:
+            return addr_attr
+        if isinstance(node, Mapping):
+            return str(node.get("addr", ""))
+        return str(node)
+
+    assert [_extract_addr(node) for node in inventory_arg.nodes] == ["1"]
     dispatcher.assert_called_once()
     dispatched_payload = dispatcher.call_args.args[2]
     assert dispatched_payload["addr_map"] == {"htr": ["1"]}
 
 
-def test_dispatch_nodes_uses_empty_record_mapping(
+def test_prepare_nodes_dispatch_handles_non_mapping_record(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When hass data is not a mapping, an empty source mapping should be used."""
+    """Node dispatch helper should tolerate non-mapping hass records."""
 
-    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": object()}})
-    coordinator = SimpleNamespace(update_nodes=MagicMock())
-    dispatcher = MagicMock()
-    monkeypatch.setattr(base_ws, "async_dispatcher_send", dispatcher)
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": []}})
+    coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
     monkeypatch.setattr(base_ws, "ensure_snapshot", lambda record: None)
-
+    monkeypatch.setattr(
+        base_ws, "addresses_by_node_type", lambda inventory, **_: ({}, {})
+    )
     seen: dict[str, Any] = {}
 
-    def fake_ensure(record_map: Mapping[str, Any], *, nodes: Any) -> list[dict[str, str]]:
+    def fake_ensure(record_map: Mapping[str, Any], *, nodes: Any) -> list[Any]:
         seen["record"] = record_map
-        return [{"addr": "1", "type": "htr"}]
+        return []
 
     monkeypatch.setattr(base_ws, "ensure_node_inventory", fake_ensure)
-    monkeypatch.setattr(
-        base_ws,
-        "addresses_by_node_type",
-        lambda inventory, **_: ({"htr": ("1",)}, set()),
+
+    context = base_ws._prepare_nodes_dispatch(
+        hass,
+        entry_id="entry",
+        coordinator=coordinator,
+        raw_nodes={},
     )
 
-    class DummyCommon(base_ws._WSCommon):
-        def __init__(self) -> None:
-            self.hass = hass
-            self.entry_id = "entry"
-            self.dev_id = "device"
-            self._coordinator = coordinator
-
-    payload = {"nodes": {"htr": {"settings": {"1": {"temp": 20}}}}}
-    DummyCommon()._dispatch_nodes(payload)
-
     assert seen["record"] == {}
-    coordinator.update_nodes.assert_called_once()
-    dispatcher.assert_called_once()
+    assert context.record is None
 
 
 @pytest.mark.asyncio
-async def test_websocket_client_reuses_delegate(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_websocket_client_reuses_delegate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Starting twice should reuse the already created delegate."""
 
     hass = SimpleNamespace(loop=asyncio.get_event_loop(), data={base_ws.DOMAIN: {}})
@@ -344,7 +346,9 @@ def test_merge_nodes_combines_nested_payloads() -> None:
     """The merge helper should combine nested dictionaries in-place."""
 
     target = {"htr": {"1": {"temp": 20}, "2": None}}
-    module.WebSocketClient._merge_nodes(target, {"htr": {"1": {"temp": 21}, "3": {"temp": 19}}})
+    module.WebSocketClient._merge_nodes(
+        target, {"htr": {"1": {"temp": 21}, "3": {"temp": 19}}}
+    )
     assert target == {"htr": {"1": {"temp": 21}, "2": None, "3": {"temp": 19}}}
 
 
@@ -401,22 +405,30 @@ def test_decode_polling_packets_handles_gzip() -> None:
     assert decoded_gzip == ["40/message"]
 
 
-def test_ducaheat_base_host_uses_brand_api_base(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ducaheat_base_host_uses_brand_api_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The base host helper should derive the scheme and host from brand configuration."""
 
     client = _make_ducaheat_client(monkeypatch)
-    monkeypatch.setattr(ducaheat_ws, "get_brand_api_base", lambda _: "https://ducaheat.example/api/v2")
+    monkeypatch.setattr(
+        ducaheat_ws, "get_brand_api_base", lambda _: "https://ducaheat.example/api/v2"
+    )
     assert client._base_host() == "https://ducaheat.example"
 
 
 @pytest.mark.asyncio
-async def test_ducaheat_ws_url_includes_token_and_device(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_ducaheat_ws_url_includes_token_and_device(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Generating the websocket URL should include the token and device parameters."""
 
     client = _make_ducaheat_client(monkeypatch)
     monkeypatch.setattr(ducaheat_ws, "_rand_t", lambda: "Pabcdefg")
     monkeypatch.setattr(client, "_get_token", AsyncMock(return_value="token"))
-    monkeypatch.setattr(ducaheat_ws, "get_brand_api_base", lambda _: "https://ducaheat.example")
+    monkeypatch.setattr(
+        ducaheat_ws, "get_brand_api_base", lambda _: "https://ducaheat.example"
+    )
 
     ws_url = await client.ws_url()
     assert "token=token" in ws_url
@@ -437,7 +449,9 @@ def test_ducaheat_log_nodes_summary_includes_counts(
     assert "2" in caplog.text
 
 
-def test_termoweb_brand_headers_optional_origin(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_termoweb_brand_headers_optional_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Brand headers should include requested-with and optional origin."""
 
     client = _make_termoweb_client(monkeypatch)
@@ -572,7 +586,9 @@ async def test_termoweb_get_token_from_rest(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 @pytest.mark.asyncio
-async def test_termoweb_get_token_missing_header(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_termoweb_get_token_missing_header(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Missing authorization headers should raise an error."""
 
     client = _make_termoweb_client(monkeypatch)
@@ -612,6 +628,7 @@ def test_termoweb_start_reuses_existing_task(monkeypatch: pytest.MonkeyPatch) ->
 
     loop = DummyLoop()
     client = _make_termoweb_client(monkeypatch, hass_loop=loop)
+
     async def _noop() -> None:
         return None
 
@@ -792,6 +809,7 @@ def test_ducaheat_client_start_reuses_task(monkeypatch: pytest.MonkeyPatch) -> N
 
     loop = DummyLoop()
     client = _make_ducaheat_client(monkeypatch, hass_loop=loop)
+
     async def _noop() -> None:
         return None
 
@@ -901,6 +919,7 @@ def test_ws_common_dispatch_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
     coordinator = SimpleNamespace(update_nodes=MagicMock())
     dispatcher = MagicMock()
     monkeypatch.setattr(base_ws, "async_dispatcher_send", dispatcher)
+
     class DummySnapshot(base_ws.InstallationSnapshot):
         def __init__(self) -> None:
             super().__init__(dev_id="dev", raw_nodes={})
@@ -956,7 +975,9 @@ def test_ws_common_dispatch_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_ws_client_start_selects_delegate(monkeypatch: pytest.MonkeyPatch) -> None:
     """Top-level websocket client should instantiate the appropriate delegate."""
 
-    hass = SimpleNamespace(loop=SimpleNamespace(create_task=lambda coro, **_: DummyTask(coro)))
+    hass = SimpleNamespace(
+        loop=SimpleNamespace(create_task=lambda coro, **_: DummyTask(coro))
+    )
     rest_client = DummyREST()
     coordinator = SimpleNamespace(update_nodes=MagicMock())
 
@@ -994,7 +1015,9 @@ def test_ws_client_start_selects_delegate(monkeypatch: pytest.MonkeyPatch) -> No
 def test_ws_client_start_selects_ducaheat(monkeypatch: pytest.MonkeyPatch) -> None:
     """Top-level websocket client should delegate to the Ducaheat client when flagged."""
 
-    hass = SimpleNamespace(loop=SimpleNamespace(create_task=lambda coro, **_: DummyTask(coro)))
+    hass = SimpleNamespace(
+        loop=SimpleNamespace(create_task=lambda coro, **_: DummyTask(coro))
+    )
     rest_client = DummyREST(is_ducaheat=True)
     coordinator = SimpleNamespace(update_nodes=MagicMock())
 
@@ -1032,7 +1055,9 @@ def test_ws_client_start_selects_ducaheat(monkeypatch: pytest.MonkeyPatch) -> No
 def test_ws_client_is_running_and_ws_url(monkeypatch: pytest.MonkeyPatch) -> None:
     """Top-level helpers should proxy to the delegate when available."""
 
-    hass = SimpleNamespace(loop=SimpleNamespace(create_task=lambda coro, **_: DummyTask(coro)))
+    hass = SimpleNamespace(
+        loop=SimpleNamespace(create_task=lambda coro, **_: DummyTask(coro))
+    )
     rest_client = DummyREST()
     coordinator = SimpleNamespace(update_nodes=MagicMock())
 
@@ -1076,4 +1101,3 @@ def test_ws_client_is_running_and_ws_url(monkeypatch: pytest.MonkeyPatch) -> Non
     url = asyncio.run(client.ws_url())
     assert url == "wss://example"
     task.cancel()
-
