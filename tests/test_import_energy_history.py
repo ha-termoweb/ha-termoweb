@@ -28,6 +28,60 @@ from conftest import _install_stubs
 _install_stubs()
 
 
+def _setup_last_statistics_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    sync_helper: Any | None = None,
+    async_helper: Any | None = None,
+):
+    """Prepare recorder statistics modules for _get_last_statistics_compat tests."""
+
+    stats_module = types.ModuleType("homeassistant.components.recorder.statistics")
+    if sync_helper is not None:
+        stats_module.get_last_statistics = sync_helper  # type: ignore[attr-defined]
+    if async_helper is not None:
+        stats_module.async_get_last_statistics = async_helper  # type: ignore[attr-defined]
+
+    recorder_module = types.ModuleType("homeassistant.components.recorder")
+
+    class _RecorderInstance:
+        async def async_add_executor_job(self, func: Any, *args: Any, **kwargs: Any) -> Any:
+            return func(*args, **kwargs)
+
+    recorder_module.get_instance = (  # type: ignore[attr-defined]
+        lambda _hass: _RecorderInstance()
+    )
+    recorder_module.statistics = stats_module  # type: ignore[attr-defined]
+
+    components_module = types.ModuleType("homeassistant.components")
+    components_module.recorder = recorder_module  # type: ignore[attr-defined]
+
+    homeassistant_module = sys.modules.setdefault(
+        "homeassistant", types.ModuleType("homeassistant")
+    )
+    monkeypatch.setattr(
+        homeassistant_module,
+        "components",
+        components_module,
+        raising=False,
+    )
+
+    monkeypatch.setitem(sys.modules, "homeassistant.components", components_module)
+    monkeypatch.setitem(sys.modules, "homeassistant.components.recorder", recorder_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.components.recorder.statistics",
+        stats_module,
+    )
+
+    energy_module = importlib.reload(
+        importlib.import_module("custom_components.termoweb.energy")
+    )
+    setattr(energy_module, "_RECORDER_IMPORTS", None)
+
+    return energy_module, types.SimpleNamespace(), stats_module
+
+
 def test_resolve_statistics_helpers_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fallback import path should expose async helpers when attribute is missing."""
 
@@ -100,6 +154,103 @@ def test_resolve_statistics_helpers_fallback(monkeypatch: pytest.MonkeyPatch) ->
 
     assert helpers.sync is None
     assert helpers.async_fn is _async_helper
+
+
+@pytest.mark.asyncio
+async def test_get_last_statistics_compat_uses_modern_signature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Modern sync helpers should accept the start_time placeholder."""
+
+    calls: dict[str, Any] = {}
+
+    def _modern_helper(
+        hass_obj: Any,
+        number_of_stats: int,
+        statistic_id: str,
+        types: set[str],
+        start_time: datetime | None,
+    ) -> dict[str, list[Any]]:
+        calls["args"] = (
+            hass_obj,
+            number_of_stats,
+            statistic_id,
+            types,
+            start_time,
+        )
+        return {statistic_id: []}
+
+    energy_module, hass, _ = _setup_last_statistics_environment(
+        monkeypatch, sync_helper=_modern_helper
+    )
+
+    result = await energy_module._get_last_statistics_compat(
+        hass,
+        3,
+        "sensor.test",
+        types={"state"},
+    )
+
+    assert result == {"sensor.test": []}
+    assert calls["args"] == (hass, 3, "sensor.test", {"state"}, None)
+
+
+@pytest.mark.asyncio
+async def test_get_last_statistics_compat_handles_legacy_signature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Legacy sync helpers without start_time should still be supported."""
+
+    calls = {"count": 0, "args": None}
+
+    def _legacy_helper(
+        hass_obj: Any, number_of_stats: int, statistic_id: str, types: set[str]
+    ) -> dict[str, list[Any]]:
+        calls["count"] += 1
+        calls["args"] = (hass_obj, number_of_stats, statistic_id, types)
+        return {statistic_id: []}
+
+    energy_module, hass, _ = _setup_last_statistics_environment(
+        monkeypatch, sync_helper=_legacy_helper
+    )
+
+    result = await energy_module._get_last_statistics_compat(
+        hass,
+        2,
+        "sensor.legacy",
+        types={"sum"},
+    )
+
+    assert result == {"sensor.legacy": []}
+    assert calls["count"] == 1
+    assert calls["args"] == (hass, 2, "sensor.legacy", {"sum"})
+
+
+@pytest.mark.asyncio
+async def test_get_last_statistics_compat_async_signature(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Async helpers should receive keyword-only compatibility arguments."""
+
+    async_helper = AsyncMock(return_value={"sensor.async": []})
+
+    energy_module, hass, _ = _setup_last_statistics_environment(
+        monkeypatch, async_helper=async_helper
+    )
+
+    start_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    result = await energy_module._get_last_statistics_compat(
+        hass,
+        1,
+        "sensor.async",
+        types={"state"},
+        start_time=start_time,
+    )
+
+    assert result == {"sensor.async": []}
+    async_helper.assert_awaited_once()
+    await_call = async_helper.await_args
+    assert await_call.args == (hass, 1, ["sensor.async"])
+    assert await_call.kwargs["types"] == {"state"}
+    assert await_call.kwargs["start_time"] is start_time
 
 
 async def _load_module(
