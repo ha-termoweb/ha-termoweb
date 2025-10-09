@@ -20,7 +20,12 @@ from custom_components.termoweb.const import (
     HTR_ENERGY_UPDATE_INTERVAL,
     signal_ws_data,
 )
-from custom_components.termoweb.inventory import normalize_heater_addresses
+from custom_components.termoweb.inventory import (
+    AccumulatorNode,
+    HeaterNode,
+    Node,
+    normalize_heater_addresses,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_connect, dispatcher_send
 from homeassistant.helpers.update_coordinator import UpdateFailed
@@ -63,6 +68,30 @@ def test_ensure_heater_section_helper() -> None:
     assert nodes_by_type["htr"] == replaced
 
 
+def test_merge_nodes_by_type_appends_new_addresses() -> None:
+    """Helper should append payload addresses not present in cache."""
+
+    client = types.SimpleNamespace(get_node_settings=AsyncMock())
+    hass = HomeAssistant()
+    coord = StateCoordinator(
+        hass,
+        client,
+        30,
+        "dev",
+        {"name": "Device"},
+        {},
+    )
+
+    cache_map = {"htr": ["A"]}
+    current = {"htr": {"addrs": ["A"], "settings": {}}}
+    payload = {"htr": {"B": {"mode": "auto"}}}
+
+    merged = coord._merge_nodes_by_type(cache_map, current, payload)
+
+    assert merged["htr"]["addrs"] == ["A", "B"]
+    assert merged["htr"]["settings"]["B"] == {"mode": "auto"}
+
+
 def test_merge_nodes_by_type_skips_invalid_addresses() -> None:
     """Helper should ignore payload and cache entries without valid addresses."""
 
@@ -88,9 +117,27 @@ def test_merge_nodes_by_type_skips_invalid_addresses() -> None:
     assert "" not in merged["htr"]["settings"]
 
 
-def test_ensure_inventory_rebuilds_and_refreshes_cache(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_inventory_addresses_by_type_handles_missing_inventory() -> None:
+    """Inventory helper should return an empty mapping when unset."""
+
+    client = types.SimpleNamespace(get_node_settings=AsyncMock())
+    hass = HomeAssistant()
+    coord = StateCoordinator(
+        hass,
+        client,
+        30,
+        "dev",
+        {"name": "Device"},
+        None,
+    )
+
+    assert coord._inventory is None
+    assert coord._inventory_addresses_by_type() == {}
+
+
+def test_inventory_addresses_by_type_merges_forward_map() -> None:
+    """Inventory helper should combine node cache and heater mapping results."""
+
     client = types.SimpleNamespace(get_node_settings=AsyncMock())
     hass = HomeAssistant()
     nodes = {"nodes": [{"addr": "1", "type": "htr"}]}
@@ -103,25 +150,63 @@ def test_ensure_inventory_rebuilds_and_refreshes_cache(
         nodes,  # type: ignore[arg-type]
     )
 
-    sentinel = [nodes_module.Node(name="Heater", addr="1", node_type="htr")]
+    inventory = coord._inventory
+    assert inventory is not None
 
-    def _fake_builder(raw: Any) -> list[nodes_module.Node]:
-        assert raw == nodes
+    object.__setattr__(
+        inventory,
+        "_heater_address_map_cache",
+        ({"htr": ("1", "2")}, {"1": frozenset({"htr"}), "2": frozenset({"htr"})}),
+    )
+
+    addresses = coord._inventory_addresses_by_type()
+    assert addresses["htr"] == ["1", "2"]
+
+
+def test_update_nodes_builds_inventory_from_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Updating nodes should build an inventory container from payload data."""
+
+    client = types.SimpleNamespace(get_node_settings=AsyncMock())
+    hass = HomeAssistant()
+    coord = StateCoordinator(
+        hass,
+        client,
+        30,
+        "dev",
+        {"name": "Device"},
+        None,
+    )
+
+    payload = {
+        "nodes": [
+            {"addr": "1", "type": "htr", "name": "Heater"},
+            {"addr": "2", "type": "acm", "name": "Accumulator"},
+        ]
+    }
+    sentinel = [
+        HeaterNode(name="Heater", addr="1"),
+        AccumulatorNode(name="Accumulator", addr="2"),
+    ]
+
+    def _fake_builder(raw: Any) -> list[Node]:
+        assert raw == payload
         return sentinel
 
     monkeypatch.setattr(coord_module, "build_node_inventory", _fake_builder)
 
-    coord._nodes = nodes
-    coord._node_inventory = []
+    coord.update_nodes(payload)
 
-    inventory = coord._ensure_inventory()
-
-    assert inventory is sentinel
-    assert coord._nodes_by_type == {"htr": ["1"]}
-    assert coord._addr_lookup == {"1": {"htr"}}
+    inventory = coord._inventory
+    assert isinstance(inventory, coord_module.Inventory)
+    assert inventory.nodes == tuple(sentinel)
+    assert coord._nodes == payload
 
 
-def test_update_nodes_uses_provided_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_update_nodes_handles_non_iterable_inventory_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-iterable inventory hints should fall back to building from payload."""
+
     client = types.SimpleNamespace(get_node_settings=AsyncMock())
     hass = HomeAssistant()
     coord = StateCoordinator(
@@ -130,107 +215,46 @@ def test_update_nodes_uses_provided_inventory(monkeypatch: pytest.MonkeyPatch) -
         30,
         "dev",
         {"name": "Device"},
-        {},
+        None,
     )
 
-    builder_called = False
+    payload = {"nodes": [{"addr": "5", "type": "htr"}]}
+    sentinel = [HeaterNode(name="Heater", addr="5")]
 
-    def _fake_builder(raw: Any) -> list[nodes_module.Node]:
-        nonlocal builder_called
-        builder_called = True
-        return []
+    def _fake_builder(raw: Any) -> list[Node]:
+        assert raw == payload
+        return sentinel
 
     monkeypatch.setattr(coord_module, "build_node_inventory", _fake_builder)
 
-    provided = [nodes_module.Node(name="Acc", addr="2", node_type="acm")]
-    coord.update_nodes({"nodes": []}, provided)
+    coord.update_nodes(payload, inventory=object())
 
-    assert coord._node_inventory == provided
-    assert coord._nodes_by_type == {"acm": ["2"]}
-    assert coord._addr_lookup == {"2": {"acm"}}
-    assert builder_called is False
+    inventory = coord._inventory
+    assert isinstance(inventory, coord_module.Inventory)
+    assert inventory.nodes == tuple(sentinel)
 
 
-def test_set_inventory_from_nodes_defaults_to_empty() -> None:
+def test_update_nodes_accepts_inventory_container() -> None:
+    """Providing an inventory container should be reused directly."""
+
     client = types.SimpleNamespace(get_node_settings=AsyncMock())
     hass = HomeAssistant()
+    payload = {"nodes": [{"addr": "3", "type": "acm"}]}
+    nodes_list = [AccumulatorNode(name="Accumulator", addr="3")]
+    container = coord_module.Inventory("dev", payload, nodes_list)
+
     coord = StateCoordinator(
         hass,
         client,
         30,
         "dev",
         {"name": "Device"},
-        {},
+        payload,  # type: ignore[arg-type]
+        inventory=container,
     )
 
-    result = coord._set_inventory_from_nodes(None)
-
-    assert result == []
-    assert coord._node_inventory == []
-
-
-def test_refresh_node_cache_populates_lookup() -> None:
-    """Refreshing the node cache should expand lookup tables for each node."""
-
-    client = types.SimpleNamespace(get_node_settings=AsyncMock())
-    hass = HomeAssistant()
-    coord = StateCoordinator(
-        hass,
-        client,
-        30,
-        "dev",
-        {"name": "Device"},
-        {},
-    )
-
-    coord._node_inventory = [
-        nodes_module.Node(name="Heater", addr="1", node_type="htr"),
-        nodes_module.Node(name="Accumulator", addr="2", node_type="acm"),
-    ]
-    coord._nodes = {"nodes": []}
-    coord._inventory_container = None
-
-    coord._refresh_node_cache()
-
-    assert coord._nodes_by_type["htr"] == ["1"]
-    assert coord._nodes_by_type["acm"] == ["2"]
-    assert coord._addr_lookup["2"] == {"acm"}
-
-
-def test_refresh_node_cache_deduplicates_addresses() -> None:
-    """Duplicate nodes should not inflate address caches."""
-
-    client = types.SimpleNamespace(get_node_settings=AsyncMock())
-    hass = HomeAssistant()
-    coord = StateCoordinator(
-        hass,
-        client,
-        30,
-        "dev",
-        {"name": "Device"},
-        {},
-    )
-
-    class _Node:
-        def __init__(self, addr: str, node_type: str) -> None:
-            self.addr = addr
-            self.type = node_type
-
-    class _Container:
-        heater_address_map = ({}, {})
-        nodes_by_type = {
-            "htr": [_Node("1", "htr")],
-            "acm": [_Node("2", "acm"), _Node("2", "acm")],
-        }
-
-    coord._inventory_container = _Container()  # type: ignore[assignment]
-    coord._node_inventory = []
-    coord._nodes = {}
-
-    coord._refresh_node_cache()
-
-    assert coord._nodes_by_type["acm"] == ["2"]
-    assert coord._addr_lookup["2"] == {"acm"}
+    assert coord._inventory is container
+    assert coord._nodes == payload
 
 
 def test_normalise_type_section_cleans_addresses() -> None:
@@ -469,113 +493,120 @@ def test_refresh_heater_skips_invalid_inputs() -> None:
     asyncio.run(_run())
 
 
-def test_register_node_address_strips_and_skips_blank() -> None:
+def test_register_pending_setting_normalizes_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = types.SimpleNamespace(get_node_settings=AsyncMock())
     hass = HomeAssistant()
-    nodes = {"nodes": []}
     coord = StateCoordinator(
         hass,
         client,
         30,
         "dev",
         {"name": "Device"},
-        nodes,  # type: ignore[arg-type]
+        {},
     )
 
-    coord._nodes_by_type = {}
-    coord._addr_lookup = {}
+    monkeypatch.setattr(coord_module, "time_mod", lambda: 100.0)
 
-    coord._merge_address_payload(None)
-    coord._merge_address_payload({})
+    coord.register_pending_setting(" htr ", " 01 ", mode="Auto", stemp="21.5", ttl=5)
 
-    coord._register_node_address("", "")
-    coord._register_node_address("htr", " ")
-
-    assert coord._nodes_by_type == {}
-    assert coord._addr_lookup == {}
-
-    coord._register_node_address(" htr ", " A ")
-    coord._register_node_address("htr", "A")
-
-    assert coord._nodes_by_type == {"htr": ["A"]}
-    assert coord._addr_lookup == {"A": {"htr"}}
+    key = ("htr", "01")
+    assert key in coord._pending_settings
+    entry = coord._pending_settings[key]
+    assert entry.mode == "auto"
+    assert entry.stemp == pytest.approx(21.5)
+    assert entry.expires_at == pytest.approx(105.0)
 
 
-def test_register_node_address_normalizes_aliases() -> None:
+def test_should_defer_pending_setting_handles_expiry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = types.SimpleNamespace(get_node_settings=AsyncMock())
     hass = HomeAssistant()
-    nodes = {"nodes": []}
     coord = StateCoordinator(
         hass,
         client,
         30,
         "dev",
         {"name": "Device"},
-        nodes,  # type: ignore[arg-type]
+        {},
     )
 
-    coord._nodes_by_type = {}
-    coord._addr_lookup = {}
+    monkeypatch.setattr(coord_module, "time_mod", lambda: 10.0)
+    coord.register_pending_setting("htr", "1", mode="auto", stemp=20.0, ttl=0)
 
-    coord._register_node_address("heater", "A")
-    coord._register_node_address("heaters", "B")
-
-    assert coord._nodes_by_type == {"htr": ["A", "B"]}
-    assert coord._addr_lookup == {"A": {"htr"}, "B": {"htr"}}
+    monkeypatch.setattr(coord_module, "time_mod", lambda: 11.0)
+    assert coord._should_defer_pending_setting("htr", "1", {"mode": "auto"}) is False
+    assert coord._pending_settings == {}
 
 
-def test_merge_address_payload_merges_and_deduplicates() -> None:
+def test_should_defer_pending_setting_defers_missing_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = types.SimpleNamespace(get_node_settings=AsyncMock())
     hass = HomeAssistant()
-    nodes = {"nodes": []}
     coord = StateCoordinator(
         hass,
         client,
         30,
         "dev",
         {"name": "Device"},
-        nodes,  # type: ignore[arg-type]
+        {},
     )
 
-    coord._nodes_by_type = {"htr": ["1"], "acm": ["5"]}
-    coord._addr_lookup = {"1": {"htr"}, "5": {"acm"}}
+    monkeypatch.setattr(coord_module, "time_mod", lambda: 50.0)
+    coord.register_pending_setting("acm", "2", mode="boost", stemp=None, ttl=5)
 
-    coord._merge_address_payload(
-        {
-            "heater": ["1", "2", "2", ""],
-            "acm": ["5", "6", None],
-            "foo": ["7"],
-        }
-    )
-
-    assert coord._nodes_by_type == {"htr": ["1", "2"], "acm": ["5", "6"]}
-    assert coord._addr_lookup == {
-        "1": {"htr"},
-        "2": {"htr"},
-        "5": {"acm"},
-        "6": {"acm"},
-    }
+    monkeypatch.setattr(coord_module, "time_mod", lambda: 52.0)
+    assert coord._should_defer_pending_setting("acm", "2", None) is True
+    assert ("acm", "2") in coord._pending_settings
 
 
-def test_merge_address_payload_upgrades_string_lookup() -> None:
+def test_should_defer_pending_setting_satisfied_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = types.SimpleNamespace(get_node_settings=AsyncMock())
     hass = HomeAssistant()
-    nodes = {"nodes": []}
     coord = StateCoordinator(
         hass,
         client,
         30,
         "dev",
         {"name": "Device"},
-        nodes,  # type: ignore[arg-type]
+        {},
     )
 
-    coord._nodes_by_type = {"htr": ["1"]}
-    coord._addr_lookup = {"1": "htr"}
+    monkeypatch.setattr(coord_module, "time_mod", lambda: 75.0)
+    coord.register_pending_setting("htr", "3", mode="manual", stemp=19.5, ttl=5)
 
-    coord._merge_address_payload({"htr": ["1", "2"]})
+    payload = {"mode": "MANUAL", "stemp": 19.52}
+    monkeypatch.setattr(coord_module, "time_mod", lambda: 76.0)
+    assert coord._should_defer_pending_setting("htr", "3", payload) is False
+    assert coord._pending_settings == {}
 
-    assert coord._addr_lookup == {"1": {"htr"}, "2": {"htr"}}
+
+def test_should_defer_pending_setting_mismatch_defers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = types.SimpleNamespace(get_node_settings=AsyncMock())
+    hass = HomeAssistant()
+    coord = StateCoordinator(
+        hass,
+        client,
+        30,
+        "dev",
+        {"name": "Device"},
+        {},
+    )
+
+    monkeypatch.setattr(coord_module, "time_mod", lambda: 200.0)
+    coord.register_pending_setting("htr", "4", mode="auto", stemp=18.0, ttl=10)
+
+    payload = {"mode": "eco", "stemp": 16.0}
+    monkeypatch.setattr(coord_module, "time_mod", lambda: 201.0)
+    assert coord._should_defer_pending_setting("htr", "4", payload) is True
+    assert ("htr", "4") in coord._pending_settings
 
 
 def test_refresh_heater_updates_existing_and_new_data() -> None:
@@ -667,12 +698,8 @@ def test_refresh_heater_handles_tuple_and_acm() -> None:
             "dev",
             {"name": "Device"},
             {},
+            inventory=[AccumulatorNode(name="Acc", addr="3")],
         )
-
-        coord._node_inventory = [
-            nodes_module.Node(name="Acc", addr="3", node_type="acm")
-        ]
-        coord._refresh_node_cache()
         coord.data = {
             "dev": {
                 "nodes_by_type": {
@@ -715,6 +742,10 @@ def test_async_refresh_heater_adds_missing_type() -> None:
 
         hass = HomeAssistant()
         nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
+        inventory = [
+            HeaterNode(name="Heater", addr="A"),
+            AccumulatorNode(name="Accumulator", addr="B"),
+        ]
         coord = StateCoordinator(
             hass,
             client,
@@ -722,10 +753,9 @@ def test_async_refresh_heater_adds_missing_type() -> None:
             "dev",
             {"name": "Device"},
             nodes,  # type: ignore[arg-type]
+            inventory=inventory,
         )
 
-        coord._nodes_by_type = {"htr": ["A"]}
-        coord._addr_lookup = {"A": {"htr"}}
         coord.data = {
             "dev": {
                 "nodes_by_type": {
@@ -736,9 +766,10 @@ def test_async_refresh_heater_adds_missing_type() -> None:
 
         await coord.async_refresh_heater(("acm", "B"))
 
-        assert coord._nodes_by_type["acm"] == ["B"]
         dev_data = coord.data["dev"]
-        assert dev_data["nodes_by_type"]["acm"]["settings"]["B"] == {"mode": "eco"}
+        acm_section = dev_data["nodes_by_type"]["acm"]
+        assert "B" in acm_section["addrs"]
+        assert acm_section["settings"]["B"] == {"mode": "eco"}
 
     asyncio.run(_run())
 
@@ -1653,15 +1684,17 @@ def test_state_coordinator_update_nodes_rebuilds_inventory(
 
     coord.update_nodes(nodes)
 
-    assert calls == [nodes]
-    assert coord._node_inventory == built_nodes
+    assert nodes in calls
+    inventory = coord._inventory
+    assert isinstance(inventory, coord_module.Inventory)
+    assert inventory.nodes == tuple(built_nodes)
 
 
 def test_state_coordinator_update_nodes_uses_provided_inventory() -> None:
     hass = HomeAssistant()
     client = types.SimpleNamespace()
     nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
-    provided_inventory = [nodes_module.Node(name="Heater", addr="A", node_type="htr")]
+    provided_inventory = [Node(name="Heater", addr="A", node_type="htr")]
 
     coord = StateCoordinator(
         hass,
@@ -1675,9 +1708,9 @@ def test_state_coordinator_update_nodes_uses_provided_inventory() -> None:
     coord.update_nodes(nodes, provided_inventory)
 
     assert coord._nodes == nodes
-    assert coord._node_inventory is not provided_inventory
-    assert coord._node_inventory == provided_inventory
-    assert coord._node_inventory[0] is provided_inventory[0]
+    inventory = coord._inventory
+    assert isinstance(inventory, coord_module.Inventory)
+    assert inventory.nodes[0] is provided_inventory[0]
 
 
 def test_energy_state_coordinator_update_addresses_filters_duplicates() -> None:
