@@ -40,7 +40,6 @@ from .coordinator import StateCoordinator
 from .energy import (
     async_import_energy_history as _async_import_energy_history_impl,
     async_register_import_energy_history_service,
-    async_schedule_initial_energy_import,
     default_samples_rate_limit_state,
     reset_samples_rate_limit_state,
 )
@@ -324,12 +323,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
 
     await async_register_import_energy_history_service(
         hass,
-        _async_import_energy_history,
-    )
-
-    async_schedule_initial_energy_import(
-        hass,
-        entry,
         _async_import_energy_history,
     )
 

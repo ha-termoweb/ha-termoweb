@@ -429,7 +429,7 @@ def test_async_setup_entry_happy_path(
         (entry, tuple(termoweb_init.PLATFORMS))
     ]
     assert stub_hass.services.has_service(termoweb_init.DOMAIN, "import_energy_history")
-    import_mock.assert_awaited_once_with(stub_hass, entry)
+    assert import_mock.await_count == 0
 
 
 def test_async_setup_entry_sets_supports_diagnostics(
@@ -710,18 +710,13 @@ def test_async_setup_entry_defers_until_started(
     async def _run() -> None:
         await termoweb_init.async_setup_entry(stub_hass, entry)
         await _drain_tasks(stub_hass)
-        assert not import_mock.await_count
-        assert stub_hass.bus.listeners
-        callback = next(
-            cb
-            for event, cb in stub_hass.bus.listeners
-            if event == EVENT_HOMEASSISTANT_STARTED
+        assert import_mock.await_count == 0
+        assert all(
+            event != EVENT_HOMEASSISTANT_STARTED
+            for event, _ in stub_hass.bus.listeners
         )
-        await callback(None)
-        await _drain_tasks(stub_hass)
 
     asyncio.run(_run())
-    import_mock.assert_awaited_once_with(stub_hass, entry)
 
 
 def test_import_energy_history_service_invocation(
