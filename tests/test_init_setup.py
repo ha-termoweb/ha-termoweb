@@ -368,8 +368,12 @@ def termoweb_init(monkeypatch: pytest.MonkeyPatch) -> Any:
         ensure_diagnostics_platform=real_diag_helper,
     )
 
+    real_async_ensure = module._async_ensure_diagnostics_platform
+
     async def _stub_async_ensure_diagnostics_platform(_hass: Any) -> None:
         """Stub diagnostics registration during unit tests."""
+
+        await real_async_ensure(_hass)
 
     module._async_ensure_diagnostics_platform = _stub_async_ensure_diagnostics_platform
     return module

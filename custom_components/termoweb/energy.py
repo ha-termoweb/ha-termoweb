@@ -195,6 +195,8 @@ async def _statistics_during_period_compat(  # pragma: no cover - compatibility 
 ) -> dict[str, list[Any]] | None:
     """Fetch statistics for a period using the best available API."""
 
+    wanted_types = {"state", "sum"}
+
     helpers = _resolve_statistics_helpers(
         hass,
         "statistics_during_period",
@@ -210,7 +212,7 @@ async def _statistics_during_period_compat(  # pragma: no cover - compatibility 
             statistic_ids,
             "hour",
             None,
-            None,
+            wanted_types,
         )
 
     if helpers.async_fn is None:
@@ -222,6 +224,7 @@ async def _statistics_during_period_compat(  # pragma: no cover - compatibility 
         end_time,
         list(statistic_ids),
         period="hour",
+        types=wanted_types,
     )  # pragma: no cover - exercised when async helper available at runtime
 
 

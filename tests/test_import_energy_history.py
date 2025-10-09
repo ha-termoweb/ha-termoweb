@@ -31,7 +31,6 @@ _install_stubs()
 def test_resolve_statistics_helpers_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fallback import path should expose async helpers when attribute is missing."""
 
-    _install_stubs()
     energy_module = importlib.import_module("custom_components.termoweb.energy")
     reset_cache = getattr(energy_module, "_reset_integration_dependencies_cache", None)
     if reset_cache is not None:
@@ -338,6 +337,88 @@ async def _load_module(
         HomeAssistant,
         ent_reg,
     )
+
+
+@pytest.mark.asyncio
+async def test_statistics_during_period_compat_sync_types(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Synchronous helper should receive default types set."""
+
+    energy_module = importlib.import_module("custom_components.termoweb.energy")
+
+    executor = AsyncMock(return_value={})
+    sync_helper = Mock(return_value={})
+
+    monkeypatch.setattr(
+        energy_module,
+        "_resolve_statistics_helpers",
+        lambda *args, **kwargs: energy_module._RecorderStatisticsHelpers(
+            executor=executor,
+            sync_target="hass",
+            sync=sync_helper,
+            async_fn=None,
+        ),
+    )
+
+    start = datetime.now(timezone.utc)
+    end = start + timedelta(hours=1)
+    hass = types.SimpleNamespace()
+
+    await energy_module._statistics_during_period_compat(
+        hass, start, end, {"sensor.energy"}
+    )
+
+    assert executor.await_count == 1
+    exec_args = executor.await_args.args
+    assert exec_args[0] is sync_helper
+    assert exec_args[1] == "hass"
+    assert exec_args[2] == start
+    assert exec_args[3] == end
+    assert exec_args[4] == {"sensor.energy"}
+    assert exec_args[5] == "hour"
+    assert exec_args[6] is None
+    assert exec_args[7] == {"state", "sum"}
+
+
+@pytest.mark.asyncio
+async def test_statistics_during_period_compat_async_types(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Asynchronous helper should receive default types set."""
+
+    energy_module = importlib.import_module("custom_components.termoweb.energy")
+
+    async_helper = AsyncMock(return_value={})
+
+    monkeypatch.setattr(
+        energy_module,
+        "_resolve_statistics_helpers",
+        lambda *args, **kwargs: energy_module._RecorderStatisticsHelpers(
+            executor=None,
+            sync_target=None,
+            sync=None,
+            async_fn=async_helper,
+        ),
+    )
+
+    start = datetime.now(timezone.utc)
+    end = start + timedelta(hours=1)
+    hass = types.SimpleNamespace()
+
+    await energy_module._statistics_during_period_compat(
+        hass, start, end, {"sensor.energy"}
+    )
+
+    async_helper.assert_awaited_once()
+    helper_args = async_helper.await_args.args
+    helper_kwargs = async_helper.await_args.kwargs
+    assert helper_args[0] is hass
+    assert helper_args[1] == start
+    assert helper_args[2] == end
+    assert helper_args[3] == ["sensor.energy"]
+    assert helper_kwargs["period"] == "hour"
+    assert helper_kwargs["types"] == {"state", "sum"}
 
 
 def _inventory_for(mod: Any, nodes: dict[str, list[str]] | list[str]) -> list[Any]:
