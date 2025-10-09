@@ -167,8 +167,8 @@ class StateCoordinator(
         base_interval: int,
         dev_id: str,
         device: dict[str, Any],
-        nodes: dict[str, Any],
-        node_inventory: Inventory | Iterable[Node] | None = None,
+        nodes: Mapping[str, Any] | None,
+        inventory: Inventory | Iterable[Node] | None = None,
     ) -> None:
         """Initialize the TermoWeb device coordinator."""
         super().__init__(
@@ -183,125 +183,127 @@ class StateCoordinator(
         self._dev_id = dev_id
         self._device = device or {}
         self._nodes: dict[str, Any] = {}
-        self._node_inventory: list[Node] = []
-        self._inventory_container: Inventory | None = None
-        self._nodes_by_type: dict[str, list[str]] = {}
-        self._addr_lookup: dict[str, set[str]] = {}
+        self._inventory: Inventory | None = None
         self._pending_settings: dict[tuple[str, str], PendingSetting] = {}
         self._invalid_nodes_logged = False
         self._rtc_reference: datetime | None = None
         self._rtc_reference_monotonic: float | None = None
-        self.update_nodes(nodes, node_inventory=node_inventory)
+        self.update_nodes(nodes, inventory=inventory)
 
-    def _set_inventory_from_nodes(
-        self,
-        nodes: Mapping[str, Any] | None,
-        provided: Inventory | Iterable[Node] | None = None,
-    ) -> list[Node]:
-        """Populate the cached inventory from ``provided`` or ``nodes``."""
+    def _inventory_addresses_by_type(self) -> dict[str, list[str]]:
+        """Return normalized node addresses derived from inventory metadata."""
 
-        container: Inventory | None = None
-        if isinstance(provided, Inventory):
-            inventory = list(provided.nodes)
-            container = provided
-        elif provided is not None:
-            inventory = list(provided)
-        elif nodes:
-            try:
-                inventory = build_node_inventory(nodes)
-            except ValueError as err:  # pragma: no cover - defensive
-                _LOGGER.debug(
-                    "Failed to build node inventory: %s",
-                    err,
-                    exc_info=err,
-                )
-                inventory = []
-        else:
-            inventory = []
+        inventory = self._inventory
+        if inventory is None:
+            return {}
 
-        self._node_inventory = inventory
-        if container is not None:
-            self._inventory_container = container
-        elif inventory:
-            payload = nodes if isinstance(nodes, Mapping) else self._nodes
-            self._inventory_container = Inventory(
-                self._dev_id,
-                payload if isinstance(payload, Mapping) else {},
-                inventory,
-            )
-        else:
-            self._inventory_container = None
-        return inventory
-
-    def _ensure_inventory(self) -> list[Node]:
-        """Return cached node inventory, rebuilding when necessary."""
-        if not self._node_inventory:
-            self._set_inventory_from_nodes(self._nodes)
-        self._refresh_node_cache()
-        return self._node_inventory
-
-    def _refresh_node_cache(self) -> None:
-        """Rebuild cached mappings of node types to addresses."""
-
-        container = self._inventory_container
-        if container is None:
-            payload = self._nodes if isinstance(self._nodes, Mapping) else {}
-            container = Inventory(self._dev_id, payload, self._node_inventory)
-            self._inventory_container = container
-
-        forward_map, reverse_map = container.heater_address_map
-        nodes_by_type: dict[str, list[str]] = {
-            node_type: list(addresses) for node_type, addresses in forward_map.items()
-        }
-        addr_lookup: dict[str, set[str]] = {
-            str(addr): set(node_types) for addr, node_types in reverse_map.items()
-        }
-
-        for node_type, nodes in container.nodes_by_type.items():
-            bucket = nodes_by_type.setdefault(node_type, [])
+        addresses: dict[str, list[str]] = {}
+        for node_type, nodes in inventory.nodes_by_type.items():
+            bucket = addresses.setdefault(node_type, [])
             seen = set(bucket)
             for node in nodes:
                 addr = normalize_node_addr(getattr(node, "addr", ""))
-                if not addr or addr in seen:
-                    continue
-                seen.add(addr)
-                bucket.append(addr)
-                addr_lookup.setdefault(addr, set()).add(node_type)
-            nodes_by_type[node_type] = list(bucket)
-
-        self._nodes_by_type = nodes_by_type
-        self._addr_lookup = addr_lookup
-
-    def _merge_address_payload(
-        self, payload: Mapping[str, Iterable[Any]] | None
-    ) -> None:
-        """Merge normalized heater addresses into cached lookups."""
-
-        if not payload:
-            return
-
-        cleaned_map, _ = _normalize_heater_payload(payload)
-
-        for node_type, addrs in cleaned_map.items():
-            if not addrs:
-                continue
-            bucket = self._nodes_by_type.setdefault(node_type, [])
-            for addr in addrs:
-                if addr not in bucket:
+                if addr and addr not in seen:
+                    seen.add(addr)
                     bucket.append(addr)
-                existing = self._addr_lookup.get(addr)
-                if isinstance(existing, set):
-                    lookup = existing
-                else:
-                    lookup = set()
-                    if isinstance(existing, str) and existing:
-                        lookup.add(existing)
-                    self._addr_lookup[addr] = lookup
-                lookup.add(node_type)
 
-    def _register_node_address(self, node_type: str, addr: str) -> None:
-        """Add ``addr`` to the cached map for ``node_type`` if missing."""
-        self._merge_address_payload({node_type: [addr]})
+        forward_map, _ = inventory.heater_address_map
+        for node_type, addrs in forward_map.items():
+            bucket = addresses.setdefault(node_type, [])
+            seen = set(bucket)
+            for addr in addrs:
+                normalized = normalize_node_addr(addr)
+                if normalized and normalized not in seen:
+                    seen.add(normalized)
+                    bucket.append(normalized)
+
+        return {key: list(values) for key, values in addresses.items()}
+
+    @staticmethod
+    def _collect_previous_settings(
+        prev_dev: Mapping[str, Any],
+        addr_map: Mapping[str, Iterable[str]],
+    ) -> dict[str, dict[str, Any]]:
+        """Return normalised settings carried over from previous poll."""
+
+        preserved: dict[str, dict[str, Any]] = {}
+
+        existing_nodes = prev_dev.get("nodes_by_type")
+        if isinstance(existing_nodes, Mapping):
+            for node_type, section in existing_nodes.items():
+                normalised = StateCoordinator._normalise_type_section(
+                    node_type,
+                    section,
+                    addr_map.get(node_type, []),
+                )
+                if normalised["settings"]:
+                    preserved[node_type] = dict(normalised["settings"])
+
+        for key, value in prev_dev.items():
+            if key in {
+                "dev_id",
+                "name",
+                "raw",
+                "connected",
+                "nodes",
+                "nodes_by_type",
+            }:
+                continue
+            if not isinstance(value, Mapping):
+                continue
+            normalised = StateCoordinator._normalise_type_section(
+                key,
+                value,
+                addr_map.get(key, []),
+            )
+            if normalised["settings"]:
+                bucket = preserved.setdefault(key, {})
+                bucket.update(normalised["settings"])
+
+        return preserved
+
+    async def _async_fetch_settings_by_address(
+        self,
+        dev_id: str,
+        addr_map: Mapping[str, Iterable[str]],
+        reverse: Mapping[str, set[str]],
+        settings_by_type: dict[str, dict[str, Any]],
+        rtc_now: datetime | None,
+    ) -> datetime | None:
+        """Fetch settings for every address and update ``settings_by_type``."""
+
+        current_rtc = rtc_now
+        for node_type, addrs_for_type in addr_map.items():
+            for addr in addrs_for_type:
+                addr_types = reverse.get(addr)
+                resolved_type = (
+                    node_type
+                    if node_type in (addr_types or {node_type})
+                    else next(iter(addr_types))
+                    if addr_types
+                    else node_type
+                )
+                payload = await self.client.get_node_settings(
+                    dev_id, (resolved_type, addr)
+                )
+                if not isinstance(payload, dict):
+                    continue
+                if self._should_defer_pending_setting(resolved_type, addr, payload):
+                    _LOGGER.debug(
+                        "Deferring poll merge for pending settings type=%s addr=%s",
+                        resolved_type,
+                        addr,
+                    )
+                    continue
+                if resolved_type == "acm" and isinstance(payload, MutableMapping):
+                    now_value: datetime | None = None
+                    if self._requires_boost_resolution(payload) and current_rtc is None:
+                        current_rtc = await self._async_fetch_rtc_datetime()
+                    now_value = current_rtc or self._device_now_estimate()
+                    self._apply_accumulator_boost_metadata(payload, now=now_value)
+                bucket = settings_by_type.setdefault(resolved_type, {})
+                bucket[addr] = payload
+        return current_rtc
 
     @staticmethod
     def _normalize_mode_value(value: Any) -> str | None:
@@ -611,24 +613,13 @@ class StateCoordinator(
                     if addr not in normalized["addrs"]:
                         normalized["addrs"].append(addr)
 
-            cache_addrs = cache_map.get(node_type)
-            if cache_addrs:
-                for raw_addr in cache_addrs:
-                    addr = normalize_node_addr(raw_addr)
-                    if addr and addr not in normalized["addrs"]:
-                        normalized["addrs"].append(addr)
-
-            default_order: list[str] = []
-            for node in self._node_inventory:
-                if normalize_node_type(getattr(node, "type", "")) != node_type:
-                    continue
-                addr = normalize_node_addr(getattr(node, "addr", ""))
-                if addr and addr not in default_order:
-                    default_order.append(addr)
-            for candidate in self._nodes_by_type.get(node_type, []) or []:
-                addr = normalize_node_addr(candidate)
-                if addr and addr not in default_order:
-                    default_order.append(addr)
+            default_order = [
+                addr
+                for addr in (
+                    normalize_node_addr(candidate) for candidate in cache_map.get(node_type, [])
+                )
+                if addr
+            ]
             extras = [addr for addr in normalized["addrs"] if addr not in default_order]
             normalized["addrs"] = default_order + extras
 
@@ -686,12 +677,43 @@ class StateCoordinator(
     def update_nodes(
         self,
         nodes: Mapping[str, Any] | None,
-        node_inventory: Inventory | Iterable[Node] | None = None,
+        inventory: Inventory | Iterable[Node] | None = None,
     ) -> None:
         """Update cached node payload and inventory."""
 
-        if isinstance(nodes, Mapping):
-            self._nodes = dict(nodes)
+        payload_mapping: Mapping[str, Any] | None = None
+        container: Inventory | None = None
+
+        if isinstance(inventory, Inventory):
+            container = inventory
+            payload_source = inventory.payload
+            if isinstance(payload_source, Mapping):
+                payload_mapping = payload_source
+        elif isinstance(nodes, Mapping):
+            payload_mapping = nodes
+            node_list: list[Node] | None = None
+            if inventory is not None:
+                try:
+                    node_list = list(inventory)
+                except TypeError:
+                    node_list = None
+            if node_list is None:
+                try:
+                    node_list = list(build_node_inventory(nodes))
+                except ValueError as err:  # pragma: no cover - defensive
+                    _LOGGER.debug(
+                        "Failed to build node inventory: %s",
+                        err,
+                        exc_info=err,
+                    )
+                    node_list = None
+            if node_list is not None:
+                container = Inventory(self._dev_id, nodes, node_list)
+        else:
+            payload_mapping = None
+
+        if isinstance(payload_mapping, Mapping):
+            self._nodes = dict(payload_mapping)
             self._invalid_nodes_logged = False
         else:
             if not self._invalid_nodes_logged:
@@ -702,8 +724,8 @@ class StateCoordinator(
                 )
                 self._invalid_nodes_logged = True
             self._nodes = {}
-        self._set_inventory_from_nodes(self._nodes, provided=node_inventory)
-        self._refresh_node_cache()
+
+        self._inventory = container
 
     async def async_refresh_heater(self, node: str | tuple[str, str]) -> None:
         """Refresh settings for a specific node and push the update to listeners."""
@@ -739,10 +761,21 @@ class StateCoordinator(
                 )
                 return
 
-            self._ensure_inventory()
+            inventory = self._inventory
+            if inventory is None and isinstance(self._nodes, Mapping) and self._nodes:
+                self.update_nodes(self._nodes)
+                inventory = self._inventory
+
+            if inventory is None:
+                _LOGGER.error(
+                    "Cannot refresh heater settings without inventory metadata",
+                )
+                return
+
+            _, reverse_map = inventory.heater_address_map
             reverse = {
                 normalize_node_addr(address): set(types)
-                for address, types in self._addr_lookup.items()
+                for address, types in reverse_map.items()
                 if normalize_node_addr(address)
             }
             addr_types = reverse.get(addr)
@@ -803,8 +836,10 @@ class StateCoordinator(
 
             existing_nodes = _existing_nodes_map(dev_data)
 
-            cache_map = dict(self._nodes_by_type)
-            self._register_node_address(node_type, addr)
+            cache_map = self._inventory_addresses_by_type()
+            cache_bucket = cache_map.setdefault(node_type, [])
+            if addr not in cache_bucket:
+                cache_bucket.append(addr)
             payload_map = {node_type: {addr: payload}}
             nodes_by_type = self._merge_nodes_by_type(
                 cache_map,
@@ -824,10 +859,11 @@ class StateCoordinator(
             for n_type, section in dev_data["nodes_by_type"].items():
                 dev_data[n_type] = section
 
+            address_map = cache_map
             heater_section = _ensure_heater_section(
                 dev_data["nodes_by_type"],
                 lambda: self._normalise_type_section(
-                    "htr", {}, self._nodes_by_type.get("htr", [])
+                    "htr", {}, address_map.get("htr", [])
                 ),
             )
             dev_data["htr"] = heater_section
@@ -861,48 +897,28 @@ class StateCoordinator(
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Fetch the latest settings for every known node on each poll."""
         dev_id = self._dev_id
-        self._ensure_inventory()
-        addr_map = dict(self._nodes_by_type)
-        reverse = {address: set(types) for address, types in self._addr_lookup.items()}
+        inventory = self._inventory
+        if inventory is None and isinstance(self._nodes, Mapping) and self._nodes:
+            self.update_nodes(self._nodes)
+            inventory = self._inventory
+
+        if inventory is None:
+            _LOGGER.debug("Skipping poll because inventory metadata is unavailable")
+            return {}
+
+        addr_map = self._inventory_addresses_by_type()
+        _, reverse_map = inventory.heater_address_map
+        reverse = {
+            normalize_node_addr(address): set(types)
+            for address, types in reverse_map.items()
+            if normalize_node_addr(address)
+        }
         addrs = [addr for addrs in addr_map.values() for addr in addrs]
         rtc_now: datetime | None = None
         try:
             self._prune_pending_settings()
             prev_dev = (self.data or {}).get(dev_id, {})
-            prev_by_type: dict[str, dict[str, Any]] = {}
-
-            existing_nodes = prev_dev.get("nodes_by_type")
-            if isinstance(existing_nodes, dict):
-                for node_type, section in existing_nodes.items():
-                    normalised = self._normalise_type_section(
-                        node_type,
-                        section,
-                        addr_map.get(node_type, []),
-                    )
-                    if normalised["settings"]:
-                        prev_by_type[node_type] = dict(normalised["settings"])
-
-            for key, value in prev_dev.items():
-                if key in {
-                    "dev_id",
-                    "name",
-                    "raw",
-                    "connected",
-                    "nodes",
-                    "nodes_by_type",
-                }:
-                    continue
-                if not isinstance(value, dict):
-                    continue
-                normalised = self._normalise_type_section(
-                    key,
-                    value,
-                    addr_map.get(key, []),
-                )
-                if normalised["settings"]:
-                    bucket = prev_by_type.setdefault(key, {})
-                    bucket.update(normalised["settings"])
-
+            prev_by_type = self._collect_previous_settings(prev_dev, addr_map)
             all_types = set(addr_map) | set(prev_by_type)
             settings_by_type: dict[str, dict[str, Any]] = {
                 node_type: dict(prev_by_type.get(node_type, {}))
@@ -910,49 +926,28 @@ class StateCoordinator(
             }
 
             if addrs:
-                for node_type, addrs_for_type in addr_map.items():
-                    for addr in addrs_for_type:
-                        addr_types = reverse.get(addr)
-                        resolved_type = (
-                            node_type
-                            if node_type in (addr_types or {node_type})
-                            else next(iter(addr_types))
-                            if addr_types
-                            else node_type
-                        )
-                        js = await self.client.get_node_settings(
-                            dev_id, (resolved_type, addr)
-                        )
-                        if not isinstance(js, dict):
-                            continue
-                        if self._should_defer_pending_setting(resolved_type, addr, js):
-                            _LOGGER.debug(
-                                "Deferring poll merge for pending settings type=%s addr=%s",
-                                resolved_type,
-                                addr,
-                            )
-                            continue
-                        if resolved_type == "acm" and isinstance(js, MutableMapping):
-                            now_value: datetime | None = None
-                            if self._requires_boost_resolution(js) and rtc_now is None:
-                                rtc_now = await self._async_fetch_rtc_datetime()
-                            now_value = rtc_now or self._device_now_estimate()
-                            self._apply_accumulator_boost_metadata(js, now=now_value)
-                        bucket = settings_by_type.setdefault(resolved_type, {})
-                        bucket[addr] = js
+                rtc_now = await self._async_fetch_settings_by_address(
+                    dev_id,
+                    addr_map,
+                    reverse,
+                    settings_by_type,
+                    rtc_now,
+                )
 
             dev_name = _device_display_name(self._device, dev_id)
 
+            cache_map = {key: list(values) for key, values in addr_map.items()}
             for node_type, settings in settings_by_type.items():
+                bucket = cache_map.setdefault(node_type, [])
                 for addr in settings:
-                    self._register_node_address(node_type, str(addr))
-
-            addr_map = dict(self._nodes_by_type)
+                    normalized = normalize_node_addr(addr)
+                    if normalized and normalized not in bucket:
+                        bucket.append(normalized)
 
             existing_nodes = _existing_nodes_map(prev_dev)
 
             nodes_by_type = self._merge_nodes_by_type(
-                addr_map,
+                cache_map,
                 existing_nodes,
                 settings_by_type,
             )
@@ -965,7 +960,7 @@ class StateCoordinator(
             heater_section = _ensure_heater_section(
                 nodes_by_type,
                 lambda: {
-                    "addrs": list(addr_map.get("htr", [])),
+                    "addrs": list(cache_map.get("htr", [])),
                     "settings": dict(settings_by_type.get("htr", {})),
                 },
             )
