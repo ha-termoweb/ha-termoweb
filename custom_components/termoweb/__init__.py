@@ -362,7 +362,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     snapshot = InstallationSnapshot(
         dev_id=dev_id,
         raw_nodes=nodes,
-        node_inventory=inventory.nodes,
+        inventory=inventory,
     )
 
     if inventory.nodes:

@@ -45,7 +45,6 @@ from custom_components.termoweb.const import (
     get_brand_requested_with,
     get_brand_user_agent,
     signal_ws_data,
-    signal_ws_status,
 )
 from custom_components.termoweb.installation import (
     InstallationSnapshot,
@@ -60,10 +59,11 @@ from custom_components.termoweb.inventory import (
     normalize_node_type,
 )
 from custom_components.termoweb.nodes import ensure_node_inventory
+
 from .ws_client import (
     WSStats,
-    _WSStatusMixin,
     _prepare_nodes_dispatch,
+    _WSStatusMixin,
     forward_ws_sample_updates,
     resolve_ws_update_section,
 )
@@ -908,7 +908,7 @@ class WebSocketClient(_WSStatusMixin):
         unknown_types = context.unknown_types
         record = context.record
         snapshot_obj = context.snapshot
-        raw_nodes_payload = context.raw_nodes if context.raw_nodes is not None else {}
+        raw_nodes_payload = inventory.payload if inventory.payload is not None else {}
         if unknown_types:  # pragma: no cover - diagnostic branch
             _LOGGER.debug(
                 "WS: unknown node types in inventory: %s",
@@ -927,7 +927,7 @@ class WebSocketClient(_WSStatusMixin):
 
         if isinstance(record, MutableMapping) and snapshot_obj is None:
             record["nodes"] = raw_nodes_payload
-            record["node_inventory"] = list(inventory)
+            record["node_inventory"] = list(inventory.nodes)
 
         self._apply_heater_addresses(
             addr_map,
@@ -990,7 +990,7 @@ class WebSocketClient(_WSStatusMixin):
         self,
         normalized_map: Mapping[Any, Iterable[Any]] | None,
         *,
-        inventory: Iterable[Any] | None = None,
+        inventory: Inventory | None = None,
         snapshot: InstallationSnapshot | None = None,
     ) -> dict[str, list[str]]:
         """Update entry and coordinator state with heater address data."""
@@ -1028,20 +1028,25 @@ class WebSocketClient(_WSStatusMixin):
             else ensure_snapshot(record)
         )
 
-        inventory_list = list(inventory) if inventory is not None else None
-        if isinstance(snapshot_obj, InstallationSnapshot) and inventory_list is not None:
-            snapshot_obj.update_nodes(snapshot_obj.raw_nodes, node_inventory=inventory_list)
+        inventory_nodes: list[Any] | None
+        if isinstance(inventory, Inventory):
+            inventory_nodes = list(inventory.nodes)
+        elif inventory is not None:
+            inventory_nodes = list(inventory)
+            inventory = Inventory(self.dev_id, snapshot_obj.raw_nodes if snapshot_obj else {}, inventory_nodes)
+        else:
+            inventory_nodes = None
+
+        if isinstance(snapshot_obj, InstallationSnapshot) and inventory is not None:
+            snapshot_obj.update_nodes(snapshot_obj.raw_nodes, inventory=inventory)
             if isinstance(record, dict):
                 record["node_inventory"] = list(snapshot_obj.inventory)
-        elif isinstance(record, dict) and inventory_list is not None and snapshot_obj is None:
-            record["node_inventory"] = list(inventory_list)
+        elif isinstance(record, dict) and inventory_nodes is not None and snapshot_obj is None:
+            record["node_inventory"] = list(inventory_nodes)
 
-        if isinstance(record, dict):
-            energy_coordinator = record.get("energy_coordinator")
-        elif isinstance(record, Mapping):
-            energy_coordinator = record.get("energy_coordinator")
-        else:
-            energy_coordinator = None
+        energy_coordinator = (
+            record.get("energy_coordinator") if isinstance(record, Mapping) else None
+        )
         if hasattr(energy_coordinator, "update_addresses"):
             energy_coordinator.update_addresses(cleaned_map)
 
@@ -1071,9 +1076,15 @@ class WebSocketClient(_WSStatusMixin):
 
         inventory_nodes: list[Any]
         normalized_map: dict[str, list[str]]
+        inventory_container: Inventory | None
         if isinstance(snapshot_obj, InstallationSnapshot):
             inventory_nodes = list(snapshot_obj.inventory)
             normalized_map, _ = snapshot_obj.heater_sample_address_map
+            inventory_container = Inventory(
+                snapshot_obj.dev_id,
+                snapshot_obj.raw_nodes,
+                inventory_nodes,
+            )
         else:
             nodes_payload: Any | None = None
             inventory_nodes = []
@@ -1097,6 +1108,7 @@ class WebSocketClient(_WSStatusMixin):
                 inventory_nodes,
             )
             normalized_map, _ = container.heater_sample_address_map
+            inventory_container = container
 
         if not normalized_map.get("htr"):
             fallback: Iterable[Any] | None = None
@@ -1120,7 +1132,7 @@ class WebSocketClient(_WSStatusMixin):
 
         normalized_map = self._apply_heater_addresses(
             normalized_map,
-            inventory=inventory_nodes,
+            inventory=inventory_container,
             snapshot=snapshot_obj,
         )
 

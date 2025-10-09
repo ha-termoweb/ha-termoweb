@@ -33,17 +33,17 @@ class InstallationSnapshot:
         *,
         dev_id: str,
         raw_nodes: Any,
+        inventory: Inventory | Iterable[Node] | None = None,
         node_inventory: Iterable[Node] | None = None,
     ) -> None:
         """Initialise the snapshot with backend payload metadata."""
 
         self._dev_id = str(dev_id)
         self._raw_nodes = raw_nodes
-        self._inventory: Inventory | None = (
-            Inventory(self._dev_id, self._raw_nodes, node_inventory)
-            if node_inventory is not None
-            else None
-        )
+        resolved_inventory = inventory
+        if resolved_inventory is None and node_inventory is not None:
+            resolved_inventory = node_inventory
+        self._inventory: Inventory | None = self._coerce_inventory(resolved_inventory)
         self._sample_address_map: dict[str, list[str]] | None = None
         self._compat_aliases: dict[str, str] | None = None
         self._sample_targets: list[tuple[str, str]] | None = None
@@ -61,17 +61,31 @@ class InstallationSnapshot:
         return self._raw_nodes
 
     def update_nodes(
-        self, raw_nodes: Any, *, node_inventory: Iterable[Node] | None = None
+        self,
+        raw_nodes: Any,
+        *,
+        inventory: Inventory | Iterable[Node] | None = None,
+        node_inventory: Iterable[Node] | None = None,
     ) -> None:
         """Update cached payload data and invalidate derived caches."""
 
         self._raw_nodes = raw_nodes
-        self._inventory = (
-            Inventory(self._dev_id, self._raw_nodes, node_inventory)
-            if node_inventory is not None
-            else None
-        )
+        resolved_inventory = inventory
+        if resolved_inventory is None and node_inventory is not None:
+            resolved_inventory = node_inventory
+        self._inventory = self._coerce_inventory(resolved_inventory)
         self._invalidate_caches()
+
+    def _coerce_inventory(
+        self, inventory: Inventory | Iterable[Node] | None
+    ) -> Inventory | None:
+        """Return ``Inventory`` instance for ``inventory`` when provided."""
+
+        if isinstance(inventory, Inventory):
+            return inventory
+        if inventory is None:
+            return None
+        return Inventory(self._dev_id, self._raw_nodes, inventory)
 
     def _invalidate_caches(self) -> None:
         """Reset derived cache state so it can be lazily recomputed."""

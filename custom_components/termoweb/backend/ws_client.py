@@ -36,7 +36,7 @@ from ..const import (
     signal_ws_status,
 )
 from ..installation import InstallationSnapshot, ensure_snapshot
-from ..inventory import NODE_CLASS_BY_TYPE, addresses_by_node_type
+from ..inventory import Inventory, NODE_CLASS_BY_TYPE, addresses_by_node_type
 from ..nodes import ensure_node_inventory
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -219,8 +219,8 @@ class _WSStatusMixin:
 class NodeDispatchContext:
     """Container for shared node dispatch metadata."""
 
-    raw_nodes: Any
-    inventory: list[Any]
+    payload: Any
+    inventory: Inventory
     addr_map: dict[str, list[str]]
     unknown_types: set[str]
     record: MutableMapping[str, Any] | None
@@ -243,24 +243,39 @@ def _prepare_nodes_dispatch(
     )
 
     snapshot_obj = ensure_snapshot(record)
+
     if isinstance(snapshot_obj, InstallationSnapshot):
-        snapshot_obj.update_nodes(raw_nodes)
-        inventory = list(snapshot_obj.inventory)
-        if record_mapping is not None:
-            record_mapping["node_inventory"] = list(inventory)
+        dev_id = snapshot_obj.dev_id
     else:
-        source_mapping: Mapping[str, Any] = (
-            record_mapping if record_mapping is not None else {}
-        )
-        inventory = list(ensure_node_inventory(source_mapping, nodes=raw_nodes))
+        dev_id = str(getattr(coordinator, "_dev_id", ""))
+        if not dev_id:
+            dev_id = str(getattr(coordinator, "dev_id", ""))
+        if not dev_id and isinstance(record_mapping, Mapping):
+            dev_id = str(record_mapping.get("dev_id", ""))
+
+    source_mapping: Mapping[str, Any]
+    if isinstance(record_mapping, Mapping):
+        source_mapping = record_mapping
+    else:
+        source_mapping = {}
+
+    inventory_nodes = ensure_node_inventory(source_mapping, nodes=raw_nodes)
+    inventory_container = Inventory(dev_id, raw_nodes, inventory_nodes)
+
+    if isinstance(snapshot_obj, InstallationSnapshot):
+        snapshot_obj.update_nodes(raw_nodes, inventory=inventory_container)
+        if record_mapping is not None:
+            record_mapping["node_inventory"] = list(snapshot_obj.inventory)
+    elif record_mapping is not None:
+        record_mapping["node_inventory"] = list(inventory_container.nodes)
 
     addr_map_raw, unknown_types = addresses_by_node_type(
-        inventory, known_types=NODE_CLASS_BY_TYPE
+        inventory_container.nodes, known_types=NODE_CLASS_BY_TYPE
     )
     addr_map = {node_type: list(addrs) for node_type, addrs in addr_map_raw.items()}
 
     if hasattr(coordinator, "update_nodes"):
-        coordinator.update_nodes(raw_nodes, inventory)
+        coordinator.update_nodes(raw_nodes, inventory_container)
 
     normalized_unknown: set[str] = {
         node_str
@@ -273,8 +288,8 @@ def _prepare_nodes_dispatch(
     }
 
     return NodeDispatchContext(
-        raw_nodes=raw_nodes,
-        inventory=inventory,
+        payload=raw_nodes,
+        inventory=inventory_container,
         addr_map=addr_map,
         unknown_types=normalized_unknown,
         record=record_mapping,
@@ -298,10 +313,13 @@ class _WSCommon(_WSStatusMixin):
             coordinator=self._coordinator,
             raw_nodes=raw_nodes,
         )
+        nodes_payload = (
+            context.inventory.payload if context.inventory is not None else context.payload
+        )
         payload_copy = {
             "dev_id": self.dev_id,
             "node_type": None,
-            "nodes": deepcopy(context.raw_nodes),
+            "nodes": deepcopy(nodes_payload),
             "addr_map": {t: list(a) for t, a in context.addr_map.items()},
         }
         async_dispatcher_send(self.hass, signal_ws_data(self.entry_id), payload_copy)
