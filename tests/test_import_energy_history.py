@@ -23,6 +23,7 @@ from custom_components.termoweb import (
     inventory as inventory_module,
     nodes as nodes_module,
 )
+from custom_components.termoweb.energy import _normalize_heater_sources
 from custom_components.termoweb.installation import InstallationSnapshot
 
 from conftest import _install_stubs
@@ -618,6 +619,24 @@ def test_store_statistics_prefers_internal_import(
         external.assert_not_called()
 
     asyncio.run(_run())
+
+
+def test_normalize_heater_sources_handles_none() -> None:
+    """Normalising with no addresses should return an empty heater list."""
+
+    mapping = _normalize_heater_sources(None)
+
+    assert mapping == {"htr": []}
+
+
+def test_normalize_heater_sources_deduplicates_entries() -> None:
+    """Normalization should coerce types, deduplicate and trim addresses."""
+
+    mapping = _normalize_heater_sources(
+        {"heater": [" 1 ", "", None], "acm": " 2 ", "invalid": ["3"]}
+    )
+
+    assert mapping == {"htr": ["1"], "acm": ["2"]}
 
 
 def test_store_statistics_external_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2010,42 +2029,23 @@ def test_import_energy_history_requested_map_filters(
             ]
         )
 
+        snapshot = InstallationSnapshot(
+            dev_id="dev",
+            raw_nodes={
+                "nodes": [
+                    {"type": "htr", "addr": "A"},
+                    {"type": "acm", "addr": "B"},
+                    {"type": "pmo", "addr": "ignored"},
+                ]
+            },
+        )
         hass.data[const.DOMAIN][entry.entry_id] = {
             "client": client,
             "dev_id": "dev",
-            "node_inventory": [],
+            "node_inventory": list(snapshot.inventory),
             "config_entry": entry,
+            "snapshot": snapshot,
         }
-
-        helper_calls: list[dict[str, Any]] = []
-        normalize_calls: list[Any] = []
-
-        def fake_addresses_by_node_type(nodes, *, known_types=None):
-            helper_calls.append(
-                {
-                    "nodes": list(nodes),
-                    "known_types": None if known_types is None else set(known_types),
-                }
-            )
-            assert known_types == nodes_module.HEATER_NODE_TYPES
-            return (
-                {"htr": ["A"], "acm": ["B"], "pmo": ["ignored"]},
-                set(),
-            )
-
-        monkeypatch.setattr(
-            inventory_module, "addresses_by_node_type", fake_addresses_by_node_type
-        )
-
-        original_normalize = energy_mod.normalize_heater_addresses
-
-        def fake_normalize(addrs: Any) -> tuple[dict[str, list[str]], dict[str, str]]:
-            normalize_calls.append(addrs)
-            return original_normalize(addrs)
-
-        monkeypatch.setattr(
-            energy_mod, "normalize_heater_addresses", fake_normalize
-        )
 
         uid_a = identifiers_module.build_heater_energy_unique_id("dev", "htr", "A")
         uid_b_legacy = identifiers_module.build_heater_energy_unique_id("dev", "htr", "B")
@@ -2103,9 +2103,7 @@ def test_import_energy_history_requested_map_filters(
         assert client.get_node_samples.await_count >= 2
         progress = entry.options[energy_mod.OPTION_ENERGY_HISTORY_PROGRESS]
         assert set(progress) >= {"htr:A", "acm:B"}
-        assert helper_calls
-        assert helper_calls[0]["known_types"] == nodes_module.HEATER_NODE_TYPES
-        assert normalize_calls
+        assert progress
 
     asyncio.run(_run())
 

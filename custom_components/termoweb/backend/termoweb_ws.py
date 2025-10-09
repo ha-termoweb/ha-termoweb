@@ -52,14 +52,14 @@ from custom_components.termoweb.installation import (
     ensure_snapshot,
 )
 from custom_components.termoweb.inventory import (
+    HEATER_NODE_TYPES,
+    Inventory,
     addresses_by_node_type as _addresses_by_node_type,
     build_node_inventory as _build_node_inventory,
-    heater_sample_subscription_targets,
-    normalize_heater_addresses,
     normalize_node_addr,
     normalize_node_type,
 )
-from custom_components.termoweb.nodes import collect_heater_sample_addresses
+from custom_components.termoweb.nodes import ensure_node_inventory
 from .ws_client import (
     WSStats,
     _WSStatusMixin,
@@ -929,7 +929,11 @@ class WebSocketClient(_WSStatusMixin):
             record["nodes"] = raw_nodes_payload
             record["node_inventory"] = list(inventory)
 
-        self._apply_heater_addresses(addr_map, inventory=None)
+        self._apply_heater_addresses(
+            addr_map,
+            inventory=inventory,
+            snapshot=snapshot_obj,
+        )
 
         payload_copy = {
             "dev_id": self.dev_id,
@@ -984,41 +988,69 @@ class WebSocketClient(_WSStatusMixin):
 
     def _apply_heater_addresses(
         self,
-        addr_map: Mapping[Any, Iterable[Any]] | Iterable[Any] | None,
+        normalized_map: Mapping[Any, Iterable[Any]] | None,
         *,
-        inventory: list[Any] | None = None,
+        inventory: Iterable[Any] | None = None,
+        snapshot: InstallationSnapshot | None = None,
     ) -> dict[str, list[str]]:
         """Update entry and coordinator state with heater address data."""
 
-        normalized_map, _compat_aliases = normalize_heater_addresses(addr_map)
-        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-        snapshot_obj = ensure_snapshot(record)
-        if isinstance(snapshot_obj, InstallationSnapshot) and inventory is not None:
-            snapshot_obj.update_nodes(snapshot_obj.raw_nodes, node_inventory=inventory)
+        cleaned_map: dict[str, list[str]] = {}
+        if isinstance(normalized_map, Mapping):
+            for raw_type, addrs in normalized_map.items():
+                node_type = normalize_node_type(raw_type)
+                if not node_type:
+                    continue
+                if node_type not in HEATER_NODE_TYPES:
+                    continue
+                if isinstance(addrs, (str, bytes)):
+                    addr_iterable: Iterable[Any] = [addrs]
+                else:
+                    addr_iterable = addrs or []
+                addresses: list[str] = []
+                for candidate in addr_iterable:
+                    addr = normalize_node_addr(candidate)
+                    if not addr or addr in addresses:
+                        continue
+                    addresses.append(addr)
+                if addresses:
+                    cleaned_map[node_type] = addresses
+                else:
+                    cleaned_map.setdefault(node_type, [])
+
+        cleaned_map.setdefault("htr", [])
+
+        record_container = self.hass.data.get(DOMAIN, {})
+        record = record_container.get(self.entry_id) if isinstance(record_container, dict) else None
+        snapshot_obj = (
+            snapshot
+            if isinstance(snapshot, InstallationSnapshot)
+            else ensure_snapshot(record)
+        )
+
+        inventory_list = list(inventory) if inventory is not None else None
+        if isinstance(snapshot_obj, InstallationSnapshot) and inventory_list is not None:
+            snapshot_obj.update_nodes(snapshot_obj.raw_nodes, node_inventory=inventory_list)
             if isinstance(record, dict):
                 record["node_inventory"] = list(snapshot_obj.inventory)
+        elif isinstance(record, dict) and inventory_list is not None and snapshot_obj is None:
+            record["node_inventory"] = list(inventory_list)
 
-        if isinstance(record, dict) and snapshot_obj is None:
-            if inventory is not None:
-                record["node_inventory"] = inventory
+        if isinstance(record, dict):
             energy_coordinator = record.get("energy_coordinator")
-            if hasattr(energy_coordinator, "update_addresses"):
-                energy_coordinator.update_addresses(normalized_map)
+        elif isinstance(record, Mapping):
+            energy_coordinator = record.get("energy_coordinator")
         else:
-            energy_coordinator = (
-                record.get("energy_coordinator")
-                if isinstance(record, Mapping)
-                else None
-            )
-            if hasattr(energy_coordinator, "update_addresses"):
-                energy_coordinator.update_addresses(normalized_map)
+            energy_coordinator = None
+        if hasattr(energy_coordinator, "update_addresses"):
+            energy_coordinator.update_addresses(cleaned_map)
 
         coordinator_data = getattr(self._coordinator, "data", None)
         if isinstance(coordinator_data, dict):
             dev_map = coordinator_data.get(self.dev_id)
             if isinstance(dev_map, dict):
                 nodes_by_type: dict[str, Any] = dev_map.setdefault("nodes_by_type", {})
-                for node_type, addrs in normalized_map.items():
+                for node_type, addrs in cleaned_map.items():
                     if not addrs and node_type != "htr":
                         continue
                     bucket = self._ensure_type_bucket(dev_map, nodes_by_type, node_type)
@@ -1028,19 +1060,77 @@ class WebSocketClient(_WSStatusMixin):
                 updated[self.dev_id] = dev_map
                 self._coordinator.data = updated  # type: ignore[attr-defined]
 
-        return normalized_map
+        return cleaned_map
 
     def _heater_sample_subscription_targets(self) -> list[tuple[str, str]]:
         """Return ordered ``(node_type, addr)`` heater sample subscriptions."""
 
-        record = self.hass.data.get(DOMAIN, {}).get(self.entry_id)
-        inventory, normalized_map, _ = collect_heater_sample_addresses(
-            record, coordinator=self._coordinator
-        )
+        record_container = self.hass.data.get(DOMAIN, {})
+        record = record_container.get(self.entry_id) if isinstance(record_container, dict) else None
+        snapshot_obj = ensure_snapshot(record)
+
+        inventory_nodes: list[Any]
+        normalized_map: dict[str, list[str]]
+        if isinstance(snapshot_obj, InstallationSnapshot):
+            inventory_nodes = list(snapshot_obj.inventory)
+            normalized_map, _ = snapshot_obj.heater_sample_address_map
+        else:
+            nodes_payload: Any | None = None
+            inventory_nodes = []
+            if isinstance(record, MutableMapping):
+                cached_inventory = record.get("node_inventory")
+                if isinstance(cached_inventory, list):
+                    inventory_nodes = list(cached_inventory)
+                nodes_payload = record.get("nodes")
+                if not inventory_nodes:
+                    inventory_nodes = ensure_node_inventory(record, nodes=nodes_payload)
+            elif isinstance(record, Mapping):
+                nodes_payload = record.get("nodes")
+                inventory_nodes = ensure_node_inventory(dict(record), nodes=nodes_payload)
+            else:
+                nodes_payload = None
+                inventory_nodes = []
+
+            container = Inventory(
+                self.dev_id,
+                nodes_payload if nodes_payload is not None else {},
+                inventory_nodes,
+            )
+            normalized_map, _ = container.heater_sample_address_map
+
+        if not normalized_map.get("htr"):
+            fallback: Iterable[Any] | None = None
+            if hasattr(self._coordinator, "_addrs"):
+                try:
+                    fallback = self._coordinator._addrs()  # type: ignore[attr-defined]  # noqa: SLF001
+                except Exception:  # pragma: no cover - defensive  # noqa: BLE001
+                    fallback = None
+            if fallback:
+                normalised = list(normalized_map.get("htr", []))
+                seen = set(normalised)
+                for candidate in fallback:
+                    addr = normalize_node_addr(candidate)
+                    if not addr or addr in seen:
+                        continue
+                    seen.add(addr)
+                    normalised.append(addr)
+                if normalised:
+                    normalized_map = dict(normalized_map)
+                    normalized_map["htr"] = normalised
+
         normalized_map = self._apply_heater_addresses(
-            normalized_map, inventory=inventory or None
+            normalized_map,
+            inventory=inventory_nodes,
+            snapshot=snapshot_obj,
         )
-        return heater_sample_subscription_targets(normalized_map)
+
+        other_types = sorted(node_type for node_type in normalized_map if node_type != "htr")
+        order = ["htr", *other_types]
+        return [
+            (node_type, addr)
+            for node_type in order
+            for addr in normalized_map.get(node_type, []) or []
+        ]
 
     async def _subscribe_heater_samples(self) -> None:
         """Subscribe to heater and accumulator sample updates."""

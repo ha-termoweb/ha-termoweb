@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 from unittest.mock import AsyncMock, MagicMock
@@ -986,8 +986,12 @@ def test_apply_heater_addresses_updates_coordinator(monkeypatch: pytest.MonkeyPa
 
     client, _sio, _ = _make_client(monkeypatch)
     client._coordinator.data = {"device": {}}
-    normalized = client._apply_heater_addresses({"htr": ["1"], "acm": []}, inventory=[("htr", "1")])
+    inventory = [SimpleNamespace(type="htr", addr="1")]
+    normalized = client._apply_heater_addresses(
+        {"htr": ["1"], "acm": ["2"]}, inventory=inventory
+    )
     assert normalized["htr"] == ["1"]
+    assert normalized["acm"] == ["2"]
     assert client._coordinator.data["device"]["nodes_by_type"]
 
 
@@ -1008,7 +1012,11 @@ def test_apply_heater_addresses_updates_snapshot(monkeypatch: pytest.MonkeyPatch
     record = client.hass.data[module.DOMAIN]["entry"]
     record["snapshot"] = InstallationSnapshot(dev_id="device", raw_nodes={})
     record["energy_coordinator"] = SimpleNamespace(update_addresses=MagicMock())
-    client._apply_heater_addresses({"htr": ["1"]}, inventory=[("htr", "1")])
+    client._apply_heater_addresses(
+        {"htr": ["1"]},
+        inventory=[SimpleNamespace(type="htr", addr="1")],
+        snapshot=record["snapshot"],
+    )
     assert "node_inventory" in record
 
 
@@ -1016,13 +1024,134 @@ def test_heater_sample_subscription_targets(monkeypatch: pytest.MonkeyPatch) -> 
     """Subscription helper should normalise addresses before returning targets."""
 
     client, _sio, _ = _make_client(monkeypatch)
-    monkeypatch.setattr(
-        module,
-        "collect_heater_sample_addresses",
-        lambda record, coordinator=None: ([("htr", "1")], {"htr": ["1"]}, {}),
+    record = client.hass.data[module.DOMAIN]["entry"]
+    record["snapshot"] = InstallationSnapshot(
+        dev_id="device",
+        raw_nodes={"nodes": [{"type": "htr", "addr": "1"}]},
     )
     targets = client._heater_sample_subscription_targets()
     assert targets == [("htr", "1")]
+
+
+def test_heater_sample_subscription_targets_uses_coordinator_addrs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Coordinator fallback addresses should be merged into subscription list."""
+
+    client, _sio, _ = _make_client(monkeypatch)
+    record = client.hass.data[module.DOMAIN]["entry"]
+    record["snapshot"] = InstallationSnapshot(dev_id="device", raw_nodes={})
+    client._coordinator._addrs = lambda: [" 3 ", "3", "4"]
+
+    targets = client._heater_sample_subscription_targets()
+
+    assert targets[0] == ("htr", "3")
+    assert ("htr", "4") in targets
+
+
+def test_heater_sample_subscription_targets_rebuilds_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Inventory should be rebuilt when snapshots are missing or immutable."""
+
+    client, _sio, _ = _make_client(monkeypatch)
+    record = client.hass.data[module.DOMAIN]["entry"]
+    record.pop("snapshot", None)
+    record["nodes"] = {"nodes": [{"type": "htr", "addr": "9"}]}
+    record["node_inventory"] = [SimpleNamespace(type="htr", addr="9")]
+
+    calls: list[tuple[Any, Any]] = []
+
+    def _fake_inventory(cache: Any, *, nodes: Any | None = None) -> list[Any]:
+        calls.append((cache, nodes))
+        nodes_payload = nodes or {}
+        addr = "9"
+        try:
+            first = nodes_payload.get("nodes", [])[0]
+            addr = str(first.get("addr", addr))
+        except Exception:  # pragma: no cover - defensive test shim
+            addr = "9"
+        return [SimpleNamespace(type="htr", addr=addr)]
+
+    monkeypatch.setattr(module, "ensure_node_inventory", _fake_inventory)
+
+    targets = client._heater_sample_subscription_targets()
+
+    assert targets == [("htr", "9")]
+    assert not calls
+
+    record.pop("node_inventory", None)
+
+    calls.clear()
+    targets_dict = client._heater_sample_subscription_targets()
+
+    assert targets_dict == [("htr", "9")]
+    assert calls[0][0] is record
+    assert calls[0][1] == record["nodes"]
+
+    mapping_record = MappingProxyType({"nodes": {"nodes": [{"type": "htr", "addr": "10"}]}})
+    client.hass.data[module.DOMAIN]["entry"] = mapping_record
+
+    calls.clear()
+    targets_mapping = client._heater_sample_subscription_targets()
+
+    assert targets_mapping == [("htr", "10")]
+    assert isinstance(calls[0][0], dict)
+    assert calls[0][1] == mapping_record["nodes"]
+
+    client.hass.data[module.DOMAIN]["entry"] = None
+    client._coordinator._addrs = lambda: ["11"]
+
+    calls.clear()
+    targets_none = client._heater_sample_subscription_targets()
+
+    assert targets_none[0] == ("htr", "11")
+    assert not calls
+
+
+def test_apply_heater_addresses_filters_non_heaters(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Non-heater node types should be ignored when applying addresses."""
+
+    client, _sio, _ = _make_client(monkeypatch)
+    record = client.hass.data[module.DOMAIN]["entry"]
+    record["snapshot"] = InstallationSnapshot(dev_id="device", raw_nodes={})
+
+    normalized = client._apply_heater_addresses(
+        {"foo": ["5"], "htr": ["6"]},
+        inventory=[SimpleNamespace(type="htr", addr="6")],
+        snapshot=record["snapshot"],
+    )
+
+    assert "foo" not in normalized
+    assert normalized["htr"] == ["6"]
+
+
+def test_apply_heater_addresses_normalizes_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Normalized heater data should update coordinator and energy helpers."""
+
+    client, _sio, _ = _make_client(monkeypatch)
+    coordinator = SimpleNamespace(update_addresses=MagicMock())
+    record_map = {
+        "snapshot": None,
+        "energy_coordinator": coordinator,
+    }
+    record_proxy = MappingProxyType(record_map)
+    client.hass.data[module.DOMAIN]["entry"] = record_proxy
+    client._coordinator.data = {
+        "device": {
+            "nodes_by_type": {"htr": {"addrs": []}},
+        }
+    }
+
+    normalized = client._apply_heater_addresses(
+        {"": ["  "], "htr": " 1 ", "acm": ["2", "2", ""]},
+        inventory=[SimpleNamespace(type="acm", addr="2")],
+    )
+
+    assert normalized == {"htr": ["1"], "acm": ["2"]}
+    coordinator.update_addresses.assert_called_once_with(normalized)
+    dev_map = client._coordinator.data["device"]
+    assert dev_map["nodes_by_type"]["acm"]["addrs"] == ["2"]
 
 
 @pytest.mark.asyncio
