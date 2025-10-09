@@ -4,6 +4,7 @@ import datetime as dt
 
 from aiohttp import ClientError
 from types import MappingProxyType
+import logging
 from typing import Any, Mapping
 from unittest.mock import AsyncMock
 
@@ -160,6 +161,33 @@ def test_boost_helpers_guard_against_invalid_sections() -> None:
     assert coord_module.StateCoordinator._requires_boost_resolution(None) is False
 
 
+def test_apply_accumulator_boost_metadata_updates_payload() -> None:
+    """Accumulator boost helper should add and remove derived keys."""
+
+    hass = HomeAssistant()
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device={},
+        nodes={},
+    )
+
+    payload: dict[str, Any] = {"boost_end_day": 1, "boost_end_min": 90}
+    now = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
+    coordinator._apply_accumulator_boost_metadata(payload, now=now)
+
+    assert payload["boost_end_datetime"] == dt.datetime(2024, 1, 1, 1, 30, tzinfo=dt.timezone.utc)
+    assert payload["boost_minutes_delta"] == 90
+
+    payload.clear()
+    coordinator._apply_accumulator_boost_metadata(payload, now=now)
+
+    assert "boost_end_datetime" not in payload
+    assert "boost_minutes_delta" not in payload
+
+
 @pytest.mark.asyncio
 async def test_async_update_data_adds_boost_metadata(
     monkeypatch: pytest.MonkeyPatch,
@@ -179,7 +207,7 @@ async def test_async_update_data_adds_boost_metadata(
         dev_id="dev",
         device={},
         nodes={},
-        node_inventory=inventory,
+        inventory=inventory,
     )
 
     client.get_node_settings = AsyncMock(
@@ -201,6 +229,185 @@ async def test_async_update_data_adds_boost_metadata(
 
 
 @pytest.mark.asyncio
+async def test_async_update_data_skips_without_inventory() -> None:
+    """Coordinator should skip polling when inventory metadata is missing."""
+
+    hass = HomeAssistant()
+    client = AsyncMock()
+    coord = coord_module.StateCoordinator(
+        hass,
+        client=client,
+        base_interval=30,
+        dev_id="dev",
+        device={},
+        nodes=None,
+    )
+
+    result = await coord._async_update_data()
+
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_async_update_data_rebuilds_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Coordinator should rebuild inventory from cached nodes when missing."""
+
+    hass = HomeAssistant()
+    client = AsyncMock()
+    nodes = {"nodes": [{"addr": "1", "type": "htr"}]}
+    coord = coord_module.StateCoordinator(
+        hass,
+        client=client,
+        base_interval=30,
+        dev_id="dev",
+        device={},
+        nodes=nodes,  # type: ignore[arg-type]
+    )
+
+    coord._inventory = None
+    calls: list[Mapping[str, Any] | None] = []
+    original = coord.update_nodes
+
+    def _spy(payload: Mapping[str, Any] | None, inventory: Any = None) -> None:
+        calls.append(payload)
+        original(payload, inventory=inventory)
+
+    monkeypatch.setattr(coord, "update_nodes", _spy)
+    client.get_node_settings = AsyncMock(return_value={})
+
+    result = await coord._async_update_data()
+
+    assert calls
+    assert "dev" in result
+
+
+@pytest.mark.asyncio
+async def test_async_fetch_settings_by_address_pending_and_boost(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Per-address fetch helper should defer pending payloads and resolve boost."""
+
+    hass = HomeAssistant()
+    client = AsyncMock()
+    coord = coord_module.StateCoordinator(
+        hass,
+        client=client,
+        base_interval=30,
+        dev_id="dev",
+        device={},
+        nodes={},
+    )
+
+    responses = [
+        {"mode": "boost", "boost_end_day": 1, "boost_end_min": 30},
+        {"mode": "auto", "boost_end_day": 1, "boost_end_min": 60},
+    ]
+    client.get_node_settings = AsyncMock(side_effect=responses)
+
+    pending_calls = 0
+
+    def _fake_defer(_type: str, addr: str, payload: Mapping[str, Any] | None) -> bool:
+        nonlocal pending_calls
+        pending_calls += 1
+        return pending_calls == 1
+
+    monkeypatch.setattr(
+        coord,
+        "_should_defer_pending_setting",
+        _fake_defer,
+    )
+    monkeypatch.setattr(
+        coord_module.StateCoordinator,
+        "_requires_boost_resolution",
+        staticmethod(lambda payload: True),
+    )
+    rtc_value = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
+    monkeypatch.setattr(
+        coord,
+        "_async_fetch_rtc_datetime",
+        AsyncMock(return_value=rtc_value),
+    )
+
+    addr_map = {"acm": ["1", "2"]}
+    reverse = {"1": {"acm"}, "2": {"acm"}}
+    settings: dict[str, dict[str, Any]] = {}
+
+    rtc_now = await coord._async_fetch_settings_by_address(
+        "dev",
+        addr_map,
+        reverse,
+        settings,
+        rtc_now=None,
+    )
+
+    assert pending_calls == 2
+    assert "acm" in settings
+    assert "1" not in settings["acm"]
+    assert settings["acm"]["2"]["mode"] == "auto"
+    assert rtc_now == rtc_value
+    coord._async_fetch_rtc_datetime.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_async_refresh_heater_rebuilds_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Heater refresh should rebuild inventory when cached data is missing."""
+
+    hass = HomeAssistant()
+    client = AsyncMock()
+    nodes = {"nodes": [{"addr": "1", "type": "acm"}]}
+    coord = coord_module.StateCoordinator(
+        hass,
+        client=client,
+        base_interval=30,
+        dev_id="dev",
+        device={},
+        nodes=nodes,  # type: ignore[arg-type]
+    )
+
+    coord._inventory = None
+    called: list[tuple[Mapping[str, Any] | None, Any]] = []
+    original = coord.update_nodes
+
+    def _wrapped(payload: Mapping[str, Any] | None, inventory: Any = None) -> None:
+        called.append((payload, inventory))
+        original(payload, inventory=inventory)
+
+    monkeypatch.setattr(coord, "update_nodes", _wrapped)
+    client.get_node_settings = AsyncMock(return_value={"mode": "auto"})
+
+    await coord.async_refresh_heater(("acm", "1"))
+
+    assert called
+    client.get_node_settings.assert_awaited_once_with("dev", ("acm", "1"))
+
+
+@pytest.mark.asyncio
+async def test_async_refresh_heater_errors_without_inventory(caplog: pytest.LogCaptureFixture) -> None:
+    """Heater refresh should log an error when inventory cannot be rebuilt."""
+
+    hass = HomeAssistant()
+    client = AsyncMock()
+    coord = coord_module.StateCoordinator(
+        hass,
+        client=client,
+        base_interval=30,
+        dev_id="dev",
+        device={},
+        nodes={},
+    )
+
+    coord._inventory = None
+    coord._nodes = {}
+    client.get_node_settings = AsyncMock()
+
+    with caplog.at_level(logging.ERROR):
+        await coord.async_refresh_heater("1")
+
+    client.get_node_settings.assert_not_called()
+    assert any("inventory metadata" in record.message for record in caplog.records)
+
+
+@pytest.mark.asyncio
 async def test_async_refresh_heater_fetches_rtc(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -219,7 +426,7 @@ async def test_async_refresh_heater_fetches_rtc(
         dev_id="dev",
         device={},
         nodes={},
-        node_inventory=inventory,
+        inventory=inventory,
     )
 
     client.get_node_settings = AsyncMock(
@@ -398,7 +605,7 @@ async def test_refresh_skips_pending_settings_merge(
         dev_id="dev",
         device={"name": "Device"},
         nodes=nodes,
-        node_inventory=inventory,
+        inventory=inventory,
     )
     initial = {
         "dev": {
@@ -469,7 +676,7 @@ async def test_poll_skips_pending_settings_merge(
         dev_id="dev",
         device={"name": "Device"},
         nodes=nodes,
-        node_inventory=inventory,
+        inventory=inventory,
     )
     initial = {
         "dev": {

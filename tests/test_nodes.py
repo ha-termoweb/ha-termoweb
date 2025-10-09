@@ -331,11 +331,11 @@ def test_state_coordinator_handles_none_nodes_payload(
         coordinator = _make_state_coordinator(hass, None)
 
     assert coordinator._nodes == {}
-    assert coordinator._node_inventory == []
+    assert coordinator._inventory is None
     assert sum(
         "Ignoring unexpected nodes payload" in message for message in caplog.messages
     )
-    assert coordinator._nodes_by_type == {}
+    assert coordinator._inventory_addresses_by_type() == {}
 
 
 def test_state_coordinator_logs_once_for_invalid_nodes(
