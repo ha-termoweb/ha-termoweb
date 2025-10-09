@@ -199,9 +199,50 @@ def test_inventory_heater_sample_alias_handling(heater_inventory: Inventory) -> 
     assert forward == {"htr": ["10"], "acm": ["2"]}
     assert compat == {"heater": "htr", "htr": "htr"}
 
-    targets = heater_inventory.heater_sample_targets
-    assert targets == [("htr", "10"), ("acm", "2")]
 
+def test_inventory_heater_name_map_caches_by_factory(
+    heater_inventory: Inventory,
+) -> None:
+    """Name map computations should be cached per default factory."""
+
+    def prefixed(addr: str) -> str:
+        return f"Prefixed {addr}"
+
+    first = heater_inventory.heater_name_map(prefixed)
+    second = heater_inventory.heater_name_map(prefixed)
+
+    assert first is second
+    assert first[("htr", "1")] == "Lounge"
+    assert first[("htr", "2")] == "Prefixed 2"
+
+    def alternate(addr: str) -> str:
+        return f"Alternate {addr}"
+
+    third = heater_inventory.heater_name_map(alternate)
+    fourth = heater_inventory.heater_name_map(alternate)
+
+    assert third is fourth
+    assert third is not first
+    assert third[("htr", "2")] == "Alternate 2"
+
+
+def test_inventory_heater_name_map_supports_default_factory_optional(
+    sample_payload: dict[str, Any],
+) -> None:
+    """Calling without a factory should use the built-in heater fallback names."""
+
+    nodes = [
+        Node(name=None, addr="1", node_type="HTR"),
+        Node(name="Storage", addr="2", node_type="acm"),
+    ]
+    inventory = Inventory("dev", sample_payload, nodes)
+
+    first = inventory.heater_name_map()
+    second = inventory.heater_name_map()
+
+    assert first is second
+    assert first[("htr", "1")] == "Heater 1"
+    assert first[("acm", "2")] == "Storage"
 
 def test_inventory_heater_sample_targets_filters_invalid(
     heater_inventory: Inventory, monkeypatch: pytest.MonkeyPatch

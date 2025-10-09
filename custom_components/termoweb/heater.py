@@ -680,7 +680,7 @@ def prepare_heater_platform_data(
             for node_type in HEATER_NODE_TYPES
         }
 
-        name_map = build_heater_name_map(inventory, default_name_simple)
+        name_map = inventory_container.heater_name_map(default_name_simple)
     names_by_type: dict[str, dict[str, str]] = name_map.get("by_type", {})
     legacy_names: dict[str, str] = name_map.get("htr", {})
 

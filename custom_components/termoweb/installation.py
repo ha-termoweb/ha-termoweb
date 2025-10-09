@@ -23,8 +23,6 @@ class InstallationSnapshot:
         "_compat_aliases",
         "_dev_id",
         "_inventory",
-        "_name_map_cache",
-        "_name_map_factories",
         "_raw_nodes",
         "_sample_address_map",
         "_sample_targets",
@@ -49,8 +47,6 @@ class InstallationSnapshot:
         self._sample_address_map: dict[str, list[str]] | None = None
         self._compat_aliases: dict[str, str] | None = None
         self._sample_targets: list[tuple[str, str]] | None = None
-        self._name_map_cache: dict[int, dict[Any, Any]] = {}
-        self._name_map_factories: dict[int, Callable[[str], str]] = {}
 
     @property
     def dev_id(self) -> str:
@@ -83,8 +79,6 @@ class InstallationSnapshot:
         self._sample_address_map = None
         self._compat_aliases = None
         self._sample_targets = None
-        self._name_map_cache.clear()
-        self._name_map_factories.clear()
 
     def _ensure_inventory(self) -> Inventory:
         """Return the cached node inventory container, rebuilding if required."""
@@ -154,23 +148,12 @@ class InstallationSnapshot:
         return list(self._sample_targets)
 
     def heater_name_map(
-        self, default_factory: Callable[[str], str]
+        self, default_factory: Callable[[str], str] | None = None
     ) -> dict[Any, Any]:
         """Return cached heater name mapping for ``default_factory``."""
 
-        key = id(default_factory)
-        cached = self._name_map_cache.get(key)
-        if cached is not None and self._name_map_factories.get(key) is default_factory:
-            return cached
-
-        from .heater import (  # noqa: PLC0415
-            build_heater_name_map as _build_heater_name_map,
-        )
-
-        mapping = _build_heater_name_map(self._ensure_inventory().nodes, default_factory)
-        self._name_map_cache[key] = mapping
-        self._name_map_factories[key] = default_factory
-        return mapping
+        inventory = self._ensure_inventory()
+        return inventory.heater_name_map(default_factory)
 
 
 def ensure_snapshot(record: Any) -> InstallationSnapshot | None:
