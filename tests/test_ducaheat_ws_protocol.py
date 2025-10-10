@@ -922,8 +922,8 @@ async def test_read_loop_forwards_sample_updates(
     client = _make_client(monkeypatch)
     forwarded: list[tuple[str, Mapping[str, Any]]] = []
 
-    def _handler(dev_id: str, payload: Mapping[str, Any]) -> None:
-        forwarded.append((dev_id, payload))
+    def _handler(dev_id: str, payload: Mapping[str, Any], **kwargs: Any) -> None:
+        forwarded.append((dev_id, payload, kwargs))
 
     client.hass.data[ducaheat_ws.DOMAIN]["entry"]["energy_coordinator"] = (
         SimpleNamespace(handle_ws_samples=_handler)
@@ -957,6 +957,7 @@ async def test_read_loop_forwards_sample_updates(
     assert statuses and statuses[-1] == "healthy"
     assert dispatched and dispatched[-1]["nodes"]["htr"]["samples"]["1"]["power"] == 10
     assert forwarded and forwarded[-1][0] == "device"
+    assert forwarded[-1][2].get("lease_seconds") is None
     assert forwarded[-1][1]["htr"]["1"]["power"] == 10
 
 
@@ -1097,7 +1098,7 @@ def test_collect_sample_updates_filters_entries(
 
     result = client._collect_sample_updates(payload)
 
-    assert result == {"htr": {"1": {"power": 2}}}
+    assert result == {"htr": {"samples": {"1": {"power": 2}}, "lease_seconds": None}}
 
 
 def test_forward_sample_updates_handles_guard_paths(
@@ -1107,11 +1108,11 @@ def test_forward_sample_updates_handles_guard_paths(
 
     client = _make_client(monkeypatch)
     client.hass.data = {}
-    client._forward_sample_updates({"htr": {"1": {"power": 1}}})
+    client._forward_sample_updates({"htr": {"samples": {"1": {"power": 1}}}})
 
     client = _make_client(monkeypatch)
     client.hass.data[ducaheat_ws.DOMAIN]["entry"]["energy_coordinator"] = object()
-    client._forward_sample_updates({"htr": {"1": {"power": 1}}})
+    client._forward_sample_updates({"htr": {"samples": {"1": {"power": 1}}}})
 
 
 def test_forward_sample_updates_handles_exception(
@@ -1128,7 +1129,7 @@ def test_forward_sample_updates_handles_exception(
     client.hass.data[ducaheat_ws.DOMAIN]["entry"]["energy_coordinator"] = (
         FailingCoordinator()
     )
-    client._forward_sample_updates({"htr": {"1": {"power": 1}}})
+    client._forward_sample_updates({"htr": {"samples": {"1": {"power": 1}}}})
 
 
 def test_merge_nodes_overwrites_non_mapping() -> None:

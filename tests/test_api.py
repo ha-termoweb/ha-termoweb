@@ -979,6 +979,39 @@ def test_get_node_settings_acm_logs(
     asyncio.run(_run())
 
 
+def test_get_node_settings_pmo_uses_device_endpoint(monkeypatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        client = RESTClient(session, "user", "pw")
+        client._access_token = "tok"
+        _set_token_expiry_seconds(client, 1000.0)
+
+        captured: dict[str, Any] = {}
+
+        async def fake_request(method: str, path: str, **kwargs: Any) -> Any:
+            captured["method"] = method
+            captured["path"] = path
+            captured["kwargs"] = kwargs
+            return {"status": {"power": 0}}
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer tok"}
+
+        monkeypatch.setattr(client, "_request", fake_request)
+        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+
+        payload = await client.get_node_settings("dev", ("pmo", "4"))
+
+        assert payload == {"status": {"power": 0}}
+        assert captured == {
+            "method": "GET",
+            "path": "/api/v2/devs/dev/pmo/4",
+            "kwargs": {"headers": {"Authorization": "Bearer tok"}},
+        }
+
+    asyncio.run(_run())
+
+
 def test_get_node_samples_logs_for_unknown_type(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -2480,6 +2513,40 @@ def test_extract_samples_handles_list_payload() -> None:
     )
 
     assert samples == [{"t": 2000, "counter": "5.5"}, {"t": 1000, "counter": "3"}]
+
+
+def test_extract_samples_preserves_min_max() -> None:
+    client = RESTClient(FakeSession(), "user", "pass", api_base="https://api.fake")
+
+    samples = client._extract_samples(
+        [
+            {
+                "t": 1000,
+                "counter": {"value": 3_600_000, "min": 3_500_000, "max": 3_700_000},
+            },
+            {
+                "t": 2000,
+                "counter": 7_200_000,
+                "counter_min": 7_100_000,
+                "counter_max": 7_300_000,
+            },
+        ]
+    )
+
+    assert samples == [
+        {
+            "t": 1000,
+            "counter": "3600000",
+            "counter_min": "3500000",
+            "counter_max": "3700000",
+        },
+        {
+            "t": 2000,
+            "counter": "7200000",
+            "counter_min": "7100000",
+            "counter_max": "7300000",
+        },
+    ]
 
 
 @pytest.mark.asyncio

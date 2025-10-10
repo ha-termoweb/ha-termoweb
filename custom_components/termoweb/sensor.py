@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 import logging
 import math
-from typing import Any
+from typing import Any, Iterable, Mapping
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -38,6 +38,8 @@ from .heater import (
     log_skipped_nodes,
 )
 from .identifiers import build_heater_energy_unique_id
+from .installation import ensure_snapshot
+from .inventory import Inventory, normalize_node_addr, normalize_node_type
 from .utils import build_gateway_device_info, float_or_none
 
 _WH_TO_KWH = 1 / 1000.0
@@ -115,14 +117,54 @@ async def async_setup_entry(hass, entry, async_add_entities):
     energy_coordinator: EnergyStateCoordinator | None = data.get(
         "energy_coordinator",
     )
+
+    def _merge_energy_addresses(source: Mapping[str, Iterable[str]] | None) -> None:
+        if not isinstance(source, Mapping):
+            return
+        for raw_type, values in source.items():
+            canonical_type = normalize_node_type(
+                raw_type,
+                use_default_when_falsey=True,
+            ) or str(raw_type)
+            if isinstance(values, (str, bytes)) or not isinstance(values, Iterable):
+                candidates = [values]
+            else:
+                candidates = list(values)
+            bucket = energy_nodes_map.setdefault(canonical_type, [])
+            seen = set(bucket)
+            for candidate in candidates:
+                addr = normalize_node_addr(candidate, use_default_when_falsey=True)
+                if not addr or addr in seen:
+                    continue
+                seen.add(addr)
+                bucket.append(addr)
+
+    energy_nodes_map: dict[str, list[str]] = {
+        node_type: list(addresses)
+        for node_type, addresses in addrs_by_type.items()
+    }
+    energy_nodes_map.setdefault("htr", list(addrs_by_type.get("htr", [])))
+    energy_nodes_map.setdefault("acm", list(addrs_by_type.get("acm", [])))
+    energy_nodes_map.setdefault("pmo", [])
+
+    snapshot = ensure_snapshot(data)
+    if snapshot is not None:
+        forward_pmo, _ = snapshot.power_monitor_sample_address_map
+        _merge_energy_addresses(forward_pmo)
+
+    inventory_obj = data.get("inventory")
+    if isinstance(inventory_obj, Inventory):
+        forward_pmo, _ = inventory_obj.power_monitor_sample_address_map
+        _merge_energy_addresses(forward_pmo)
+
     if energy_coordinator is None:
         energy_coordinator = EnergyStateCoordinator(
-            hass, data["client"], dev_id, addrs_by_type
+            hass, data["client"], dev_id, energy_nodes_map
         )
         data["energy_coordinator"] = energy_coordinator
         await energy_coordinator.async_config_entry_first_refresh()
     else:
-        energy_coordinator.update_addresses(addrs_by_type)
+        energy_coordinator.update_addresses(energy_nodes_map)
 
     new_entities: list[SensorEntity] = []
     for node_type, _node, addr_str, base_name in iter_heater_nodes(

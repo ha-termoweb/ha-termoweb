@@ -736,8 +736,12 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 if not normalised_addr:
                     continue
                 bucket[normalised_addr] = payload
-            if bucket:
-                updates[node_type] = bucket
+            lease_seconds = type_payload.get("lease_seconds")
+            if bucket or lease_seconds is not None:
+                updates[node_type] = {
+                    "samples": bucket,
+                    "lease_seconds": lease_seconds,
+                }
         return updates
 
     def _translate_path_update(self, payload: Any) -> dict[str, Any] | None:

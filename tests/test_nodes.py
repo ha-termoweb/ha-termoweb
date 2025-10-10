@@ -358,7 +358,7 @@ def test_state_coordinator_handles_none_nodes_payload(
         )
         == 0
     )
-    assert coordinator._inventory_addresses_by_type() == {}
+    assert coordinator._inventory_addresses_by_type() == {"pmo": []}
 
 
 def test_state_coordinator_logs_once_for_invalid_nodes(

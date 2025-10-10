@@ -722,8 +722,12 @@ class WebSocketClient(_WSStatusMixin):
                 if not normalised_addr:
                     continue
                 bucket[normalised_addr] = sample_payload
-            if bucket:
-                sample_updates[node_type] = bucket
+            lease_seconds = type_payload.get("lease_seconds")
+            if bucket or lease_seconds is not None:
+                sample_updates[node_type] = {
+                    "samples": bucket,
+                    "lease_seconds": lease_seconds,
+                }
 
         if merge and self._nodes_raw:
             self._merge_nodes(self._nodes_raw, nodes)
