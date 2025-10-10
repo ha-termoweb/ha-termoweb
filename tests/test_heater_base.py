@@ -672,9 +672,10 @@ def test_device_available_accepts_inventory_metadata() -> None:
     assert not heater._device_available({})
     assert not heater._device_available({"inventory": object()})
     assert heater._device_available({"inventory": inventory})
-    assert heater._device_available({"nodes_by_type": {}})
-    assert heater._device_available({"address_map": {}})
+    assert not heater._device_available({"nodes_by_type": {}})
+    assert heater._device_available({"heater_address_map": {"forward": {"htr": ["A"]}}})
     assert heater._device_available({"addresses_by_type": {}})
+    assert heater._device_available({"settings": {"htr": {"A": {}}}})
 
 
 class _FakeDict(dict):
@@ -718,7 +719,10 @@ def test_heater_section_falls_back_to_legacy_data() -> None:
     )
 
     section = heater._heater_section()
-    assert section == {"settings": {"A": {"mode": "auto"}}}
+    assert section == {
+        "addrs": ["A"],
+        "settings": {"A": {"mode": "auto"}},
+    }
 
 
 def test_heater_settings_missing_mapping() -> None:

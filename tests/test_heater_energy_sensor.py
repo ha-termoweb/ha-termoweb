@@ -745,6 +745,8 @@ def test_heater_temp_sensor() -> None:
                         }
                     },
                     "htr": {"settings": settings},
+                    "settings": {"htr": dict(settings)},
+                    "addresses_by_type": {"htr": ["A"]},
                 }
             },
         )
@@ -795,10 +797,10 @@ def test_heater_temp_sensor() -> None:
             "units": "C",
         }
 
-        original_nodes_by_type = coordinator.data["dev1"]["nodes_by_type"]
-        coordinator.data["dev1"]["nodes_by_type"] = None
-        assert sensor.available is False
-        coordinator.data["dev1"]["nodes_by_type"] = original_nodes_by_type
+        original_addresses = coordinator.data["dev1"]["addresses_by_type"]
+        coordinator.data["dev1"]["addresses_by_type"] = {}
+        assert sensor.available is True
+        coordinator.data["dev1"]["addresses_by_type"] = original_addresses
         assert sensor.available is True
 
         original_device = coordinator.data["dev1"]

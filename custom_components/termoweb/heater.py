@@ -928,28 +928,29 @@ class HeaterNodeBase(CoordinatorEntity):
         return self._device_available(self._device_record())
 
     def _device_available(self, device_entry: dict[str, Any] | None) -> bool:
-        """Return True when the device entry exposes heater inventory metadata."""
+        """Return True when ``device_entry`` provides heater metadata for this node."""
 
         if not isinstance(device_entry, Mapping):
             return False
 
-        inventory = device_entry.get("inventory")
-        if isinstance(inventory, Inventory):
+        node_type = getattr(self, "_node_type", "htr")
+
+        if self._extract_device_addresses(device_entry, node_type):
             return True
 
-        nodes_by_type = device_entry.get("nodes_by_type")
-        if isinstance(nodes_by_type, Mapping):
-            return True
+        settings = device_entry.get("settings")
+        if isinstance(settings, Mapping):
+            node_settings = settings.get(node_type)
+            if isinstance(node_settings, Mapping) and node_settings:
+                return True
 
-        address_map = device_entry.get("address_map")
-        if isinstance(address_map, Mapping):
-            return True
+        legacy = device_entry.get("htr")
+        if node_type == "htr" and isinstance(legacy, Mapping):
+            legacy_settings = legacy.get("settings")
+            if isinstance(legacy_settings, Mapping) and legacy_settings:
+                return True
 
-        addresses_by_type = device_entry.get("addresses_by_type")
-        if isinstance(addresses_by_type, Mapping):
-            return True
-
-        return False
+        return isinstance(device_entry.get("inventory"), Inventory)
 
     def _device_record(self) -> dict[str, Any] | None:
         """Return the coordinator cache entry for this device."""
@@ -966,32 +967,98 @@ class HeaterNodeBase(CoordinatorEntity):
         return record if isinstance(record, dict) else None
 
     def _heater_section(self) -> dict[str, Any]:
-        """Return the heater-specific portion of the coordinator data."""
+        """Return the heater-specific metadata cached for this entity."""
+
         record = self._device_record()
-        if record is None:
+        if not isinstance(record, Mapping):
             return {}
+
         node_type = getattr(self, "_node_type", "htr")
-        if node_type == "htr":
+        addresses = self._extract_device_addresses(record, node_type)
+
+        settings = {}
+        cached_settings = record.get("settings")
+        if isinstance(cached_settings, Mapping):
+            node_settings = cached_settings.get(node_type)
+            if isinstance(node_settings, Mapping):
+                settings = node_settings
+
+        if not settings:
             legacy = record.get("htr")
-            if isinstance(legacy, dict):
-                return legacy
+            if isinstance(legacy, Mapping):
+                legacy_settings = legacy.get("settings")
+                if isinstance(legacy_settings, Mapping):
+                    settings = legacy_settings
+                legacy_addrs = legacy.get("addrs")
+                if not addresses and isinstance(legacy_addrs, Iterable):
+                    addresses = self._normalise_addresses(legacy_addrs)
 
-        by_type = record.get("nodes_by_type")
-        if isinstance(by_type, dict):
-            section = by_type.get(node_type)
-            if isinstance(section, dict):
-                return section
+        if not addresses and settings:
+            addresses = list(settings)
 
-        heaters = record.get("htr")
-        return heaters if isinstance(heaters, dict) else {}
+        return {"addrs": addresses, "settings": settings}
 
     def heater_settings(self) -> dict[str, Any] | None:
         """Return the cached settings for this heater, if available."""
-        settings_map = self._heater_section().get("settings")
-        if not isinstance(settings_map, dict):
+        section = self._heater_section()
+        settings_map = section.get("settings")
+        if not isinstance(settings_map, Mapping):
             return None
         settings = settings_map.get(self._addr)
         return settings if isinstance(settings, dict) else None
+
+    @staticmethod
+    def _normalise_addresses(addresses: Iterable[Any]) -> list[str]:
+        """Return a list of normalised addresses from ``addresses``."""
+
+        normalised: list[str] = []
+        seen: set[str] = set()
+
+        for candidate in addresses:
+            addr = normalize_node_addr(candidate, use_default_when_falsey=True)
+            if not addr or addr in seen:
+                continue
+            seen.add(addr)
+            normalised.append(addr)
+
+        return normalised
+
+    def _extract_device_addresses(
+        self, device_entry: Mapping[str, Any], node_type: str
+    ) -> list[str]:
+        """Return all known addresses for ``node_type`` from ``device_entry``."""
+
+        addresses: list[str] = []
+        seen: set[str] = set()
+
+        def _add(candidates: Iterable[Any]) -> None:
+            for addr in self._normalise_addresses(candidates):
+                if addr in seen:
+                    continue
+                seen.add(addr)
+                addresses.append(addr)
+
+        addresses_by_type = device_entry.get("addresses_by_type")
+        if isinstance(addresses_by_type, Mapping):
+            _add(addresses_by_type.get(node_type, ()))
+
+        if not addresses:
+            heater_map = device_entry.get("heater_address_map")
+            if isinstance(heater_map, Mapping):
+                forward = heater_map.get("forward")
+                if isinstance(forward, Mapping):
+                    _add(forward.get(node_type, ()))
+
+        if not addresses:
+            inventory = device_entry.get("inventory")
+            if isinstance(inventory, Inventory):
+                forward_map, _ = inventory.heater_address_map
+                _add(forward_map.get(node_type, ()))
+                if not addresses:
+                    node_bucket = inventory.nodes_by_type.get(node_type, [])
+                    _add(getattr(node, "addr", "") for node in node_bucket)
+
+        return addresses
 
     def _hass_for_runtime(self) -> HomeAssistant | None:
         """Return the best-effort Home Assistant instance for runtime access."""

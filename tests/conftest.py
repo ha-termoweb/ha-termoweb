@@ -1546,6 +1546,79 @@ class FakeCoordinator:
 
     instances: list["FakeCoordinator"] = []
 
+    @staticmethod
+    def _normalise_device_record(record: Mapping[str, Any] | None) -> dict[str, Any]:
+        """Return a copy of ``record`` with normalized heater metadata."""
+
+        base: dict[str, Any]
+        if isinstance(record, Mapping):
+            base = dict(record)
+        else:
+            base = {}
+
+        settings_source = base.get("settings") if isinstance(record, Mapping) else None
+        normalised_settings: dict[str, dict[str, Any]] = {}
+        if isinstance(settings_source, Mapping):
+            for node_type, bucket in settings_source.items():
+                if isinstance(bucket, Mapping):
+                    normalised_settings[node_type] = dict(bucket)
+
+        addresses_source = base.get("addresses_by_type") if isinstance(record, Mapping) else None
+        normalised_addresses: dict[str, list[str]] = {}
+        if isinstance(addresses_source, Mapping):
+            for node_type, addrs in addresses_source.items():
+                if isinstance(addrs, Iterable) and not isinstance(addrs, (str, bytes)):
+                    normalised_addresses[node_type] = list(addrs)
+
+        nodes_by_type = base.get("nodes_by_type")
+        if isinstance(nodes_by_type, Mapping):
+            nodes_copy: dict[str, Any] = {}
+            for node_type, section in nodes_by_type.items():
+                if not isinstance(section, Mapping):
+                    continue
+                section_copy = dict(section)
+                node_settings = section_copy.get("settings")
+                if (
+                    isinstance(node_settings, Mapping)
+                    and node_type not in normalised_settings
+                ):
+                    if not isinstance(node_settings, dict):
+                        node_settings = dict(node_settings)
+                    section_copy["settings"] = node_settings
+                    normalised_settings[node_type] = node_settings
+                elif isinstance(node_settings, dict):
+                    section_copy["settings"] = node_settings
+                    normalised_settings.setdefault(node_type, node_settings)
+
+                node_addrs = section_copy.get("addrs")
+                if (
+                    isinstance(node_addrs, Iterable)
+                    and not isinstance(node_addrs, (str, bytes))
+                    and node_type not in normalised_addresses
+                ):
+                    normalised_addresses[node_type] = list(node_addrs)
+
+                nodes_copy[node_type] = section_copy
+
+            base["nodes_by_type"] = nodes_copy
+
+        base["settings"] = normalised_settings
+        if normalised_addresses:
+            base["addresses_by_type"] = normalised_addresses
+
+        legacy = base.get("htr")
+        legacy_copy = dict(legacy) if isinstance(legacy, Mapping) else {}
+        htr_settings = normalised_settings.get("htr")
+        if htr_settings and "settings" not in legacy_copy:
+            legacy_copy["settings"] = dict(htr_settings)
+        htr_addrs = normalised_addresses.get("htr")
+        if htr_addrs and "addrs" not in legacy_copy:
+            legacy_copy["addrs"] = list(htr_addrs)
+        if legacy_copy:
+            base["htr"] = legacy_copy
+
+        return base
+
     def __init__(
         self,
         hass: Any,
@@ -1564,7 +1637,7 @@ class FakeCoordinator:
         self.client = client
         self.base_interval = base_interval
         self.dev_id = dev_id
-        self.dev = dev or {}
+        self.dev = self._normalise_device_record(dev)
         self.nodes = nodes or {}
         inventory_obj, nodes_list = _resolve_inventory_container(
             dev_id,
@@ -1576,7 +1649,10 @@ class FakeCoordinator:
         self.node_inventory = list(nodes_list)
         self.update_interval = dt.timedelta(seconds=base_interval or 0)
         if data is not None:
-            self.data = data
+            self.data = {
+                key: self._normalise_device_record(value)
+                for key, value in data.items()
+            }
         elif dev_id:
             self.data = {dev_id: self.dev}
         else:
