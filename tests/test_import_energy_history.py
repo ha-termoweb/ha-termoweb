@@ -48,7 +48,9 @@ def _setup_last_statistics_environment(
     recorder_module = types.ModuleType("homeassistant.components.recorder")
 
     class _RecorderInstance:
-        async def async_add_executor_job(self, func: Any, *args: Any, **kwargs: Any) -> Any:
+        async def async_add_executor_job(
+            self, func: Any, *args: Any, **kwargs: Any
+        ) -> Any:
             return func(*args, **kwargs)
 
     recorder_module.get_instance = (  # type: ignore[attr-defined]
@@ -70,7 +72,9 @@ def _setup_last_statistics_environment(
     )
 
     monkeypatch.setitem(sys.modules, "homeassistant.components", components_module)
-    monkeypatch.setitem(sys.modules, "homeassistant.components.recorder", recorder_module)
+    monkeypatch.setitem(
+        sys.modules, "homeassistant.components.recorder", recorder_module
+    )
     monkeypatch.setitem(
         sys.modules,
         "homeassistant.components.recorder.statistics",
@@ -229,7 +233,9 @@ async def test_get_last_statistics_compat_handles_legacy_signature(
 
 
 @pytest.mark.asyncio
-async def test_get_last_statistics_compat_async_signature(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_get_last_statistics_compat_async_signature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Async helpers should receive keyword-only compatibility arguments."""
 
     async_helper = AsyncMock(return_value={"sensor.async": []})
@@ -407,9 +413,7 @@ async def _load_module(
 
     monkeypatch.setattr(api_module, "RESTClient", _FakeRESTClient)
 
-    ws_module = importlib.import_module(
-        "custom_components.termoweb.backend.ws_client"
-    )
+    ws_module = importlib.import_module("custom_components.termoweb.backend.ws_client")
     termoweb_ws_module = importlib.import_module(
         "custom_components.termoweb.backend.termoweb_ws"
     )
@@ -779,7 +783,9 @@ def test_async_import_energy_history_skips_without_inventory(
 
         hass = HomeAssistant()
         hass.data = {const.DOMAIN: {}}
-        hass.config_entries = types.SimpleNamespace(async_update_entry=lambda *args, **kwargs: None)
+        hass.config_entries = types.SimpleNamespace(
+            async_update_entry=lambda *args, **kwargs: None
+        )
 
         entry = ConfigEntry("entry-missing")
         hass.data[const.DOMAIN][entry.entry_id] = {
@@ -849,18 +855,22 @@ def test_async_import_energy_history_uses_inventory_nodes(
             **kwargs: Any,
         ):
             captured["node_list"] = node_list
-            return real_resolve(
+            resolution = real_resolve(
                 record,
                 dev_id=dev_id,
                 node_list=node_list,
                 **kwargs,
             )
+            captured["resolution"] = resolution
+            return resolution
 
         monkeypatch.setattr(energy_mod, "resolve_record_inventory", _capture)
 
         await mod._async_import_energy_history(hass, entry)
 
-        assert captured["node_list"] == stored_inventory.nodes
+        assert captured["node_list"] is None
+        assert captured["resolution"].inventory is stored_inventory
+        assert captured["resolution"].source == "inventory"
 
     asyncio.run(_run())
 
@@ -919,6 +929,15 @@ def test_register_import_service_uses_module_asyncio(
             "A energy",
             config_entry_id=entry.entry_id,
         )
+        uid_pmo = identifiers_module.build_power_monitor_energy_unique_id("dev", "P1")
+        ent_reg.add(
+            "sensor.dev_P1_energy",
+            "sensor",
+            const.DOMAIN,
+            uid_pmo,
+            "P1 energy",
+            config_entry_id=entry.entry_id,
+        )
 
         gather_calls: list[int] = []
 
@@ -946,11 +965,20 @@ def test_register_import_service_uses_module_asyncio(
         assert callable(service)
 
         await service(
-            types.SimpleNamespace(data={"entity_id": ["sensor.dev_A_energy"]})
+            types.SimpleNamespace(
+                data={
+                    "entity_id": [
+                        "sensor.dev_A_energy",
+                        "sensor.dev_P1_energy",
+                    ]
+                }
+            )
         )
 
         assert gather_calls == [1]
         import_mock.assert_awaited_once()
+        args, kwargs = import_mock.await_args
+        assert args[2] == {"htr": ["A"], "pmo": ["P1"]}
 
     asyncio.run(_run())
 
@@ -1176,7 +1204,9 @@ def test_async_import_energy_history_waits_between_queries(
             sleep_calls.append(delay)
 
         energy_mod.reset_samples_rate_limit_state(
-            time_module=types.SimpleNamespace(monotonic=fake_monotonic, time=lambda: 0.0),
+            time_module=types.SimpleNamespace(
+                monotonic=fake_monotonic, time=lambda: 0.0
+            ),
             sleep=fake_sleep,
         )
         limiter = energy_mod.default_samples_rate_limit_state()
@@ -1394,8 +1424,104 @@ def test_import_energy_history(monkeypatch: pytest.MonkeyPatch) -> None:
             pytest.approx(0.003),
         ]
         assert entry.options[energy_mod.OPTION_ENERGY_HISTORY_IMPORTED] is True
-        assert entry.options[energy_mod.OPTION_ENERGY_HISTORY_PROGRESS] == {"htr:A": 172_799}
+        assert entry.options[energy_mod.OPTION_ENERGY_HISTORY_PROGRESS] == {
+            "htr:A": 172_799
+        }
         assert entry.options["max_history_retrieved"] == 2
+
+    asyncio.run(_run())
+
+
+def test_import_energy_history_power_monitor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        (
+            mod,
+            energy_mod,
+            const,
+            _import_stats,
+            _update_meta,
+            last_stats,
+            get_period,
+            delete_stats,
+            ConfigEntry,
+            HomeAssistant,
+            ent_reg,
+        ) = await _load_module(monkeypatch)
+
+        hass = HomeAssistant()
+        hass.data = {const.DOMAIN: {}}
+        hass.config_entries = types.SimpleNamespace(
+            async_update_entry=lambda entry, *, options: entry.options.update(options)
+        )
+
+        entry = ConfigEntry("pmo", options={"max_history_retrieved": 1})
+        client = types.SimpleNamespace()
+        client.get_node_samples = AsyncMock(
+            return_value=[
+                {"t": 259_200, "counter": 180_000},
+                {"t": 345_600, "counter": 360_000},
+            ]
+        )
+        hass.data[const.DOMAIN][entry.entry_id] = {
+            "client": client,
+            "dev_id": "dev",
+            "node_inventory": _inventory_for(mod, {"pmo": ["P1"]}),
+            "config_entry": entry,
+        }
+        uid = identifiers_module.build_power_monitor_energy_unique_id("dev", "P1")
+        ent_reg.add("sensor.dev_P1_energy", "sensor", const.DOMAIN, uid, "P1 energy")
+
+        fake_now = 4 * 86_400
+        monotonic_counter = itertools.count(start=1, step=2)
+
+        async def _fake_sleep(_delay: float) -> None:
+            return None
+
+        energy_mod.reset_samples_rate_limit_state(
+            time_module=types.SimpleNamespace(
+                time=lambda: fake_now, monotonic=lambda: next(monotonic_counter)
+            ),
+            sleep=_fake_sleep,
+        )
+
+        class FakeDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return super().fromtimestamp(fake_now, tz)
+
+        monkeypatch.setattr(energy_mod, "datetime", FakeDateTime)
+
+        captured: dict = {}
+        monkeypatch.setattr(
+            energy_mod,
+            "_store_statistics",
+            lambda _h, m, s: captured.update(meta=m, stats=s),
+        )
+
+        await mod._async_import_energy_history(hass, entry)
+
+        energy_mod.reset_samples_rate_limit_state(time_module=time, sleep=asyncio.sleep)
+
+        client.get_node_samples.assert_awaited_once()
+        call_args = client.get_node_samples.await_args.args
+        assert call_args[0] == "dev"
+        assert call_args[1] == ("pmo", "P1")
+
+        get_period.assert_awaited_once()
+        delete_stats.assert_not_awaited()
+        last_stats.assert_called_once()
+        assert captured["meta"]["statistic_id"] == "sensor.dev_P1_energy"
+        stats_list = captured["stats"]
+        assert len(stats_list) == 1
+        stat = stats_list[0]
+        assert stat["sum"] == pytest.approx(0.05)
+        assert stat["state"] == pytest.approx(0.1)
+        assert entry.options[energy_mod.OPTION_ENERGY_HISTORY_IMPORTED] is True
+        assert entry.options[energy_mod.OPTION_ENERGY_HISTORY_PROGRESS] == {
+            "pmo:P1": 259_199
+        }
 
     asyncio.run(_run())
 
@@ -1707,7 +1833,9 @@ def test_import_history_uses_last_stats_and_clears_overlap(
             async_update_entry=lambda entry, *, options: entry.options.update(options)
         )
 
-        entry = ConfigEntry("import", options={energy_mod.OPTION_MAX_HISTORY_RETRIEVED: 1})
+        entry = ConfigEntry(
+            "import", options={energy_mod.OPTION_MAX_HISTORY_RETRIEVED: 1}
+        )
 
         client = types.SimpleNamespace()
         sample_list = [
@@ -2099,10 +2227,13 @@ def test_import_energy_history_reset_all_progress(
             ("dev", "htr", "B", 172_799, 259_199),
         ]
         assert len(updates) == client.get_node_samples.await_count + 2
-        assert all(energy_mod.OPTION_ENERGY_HISTORY_PROGRESS in update for update in updates)
+        assert all(
+            energy_mod.OPTION_ENERGY_HISTORY_PROGRESS in update for update in updates
+        )
         assert energy_mod.OPTION_ENERGY_HISTORY_IMPORTED not in updates[0]
         assert all(
-            energy_mod.OPTION_ENERGY_HISTORY_IMPORTED not in update for update in updates[1:-1]
+            energy_mod.OPTION_ENERGY_HISTORY_IMPORTED not in update
+            for update in updates[1:-1]
         )
         assert updates[0][energy_mod.OPTION_ENERGY_HISTORY_PROGRESS] == {}
         final_update = updates[-1]
@@ -2186,7 +2317,9 @@ def test_import_energy_history_requested_map_filters(
         }
 
         uid_a = identifiers_module.build_heater_energy_unique_id("dev", "htr", "A")
-        uid_b_legacy = identifiers_module.build_heater_energy_unique_id("dev", "htr", "B")
+        uid_b_legacy = identifiers_module.build_heater_energy_unique_id(
+            "dev", "htr", "B"
+        )
         ent_reg.add(
             "sensor.dev_A_energy",
             "sensor",
@@ -2352,7 +2485,6 @@ def test_import_energy_history_resets_requested_progress(
                     "known_types": None if known_types is None else set(known_types),
                 }
             )
-            assert known_types == nodes_module.HEATER_NODE_TYPES
             return ({"pmo": ["X"]}, set())
 
         monkeypatch.setattr(
@@ -2387,9 +2519,21 @@ def test_import_energy_history_resets_requested_progress(
 
         energy_mod.reset_samples_rate_limit_state(time_module=time, sleep=asyncio.sleep)
 
-        assert entry.options[energy_mod.OPTION_ENERGY_HISTORY_PROGRESS] == {}
+        progress = entry.options[energy_mod.OPTION_ENERGY_HISTORY_PROGRESS]
+        assert "htr:X" not in progress
+        assert "X" not in progress
+        assert progress == {"pmo:X": progress.get("pmo:X")}
         assert helper_calls
-        assert helper_calls[0]["known_types"] == nodes_module.HEATER_NODE_TYPES
+        heater_calls = [
+            call
+            for call in helper_calls
+            if call.get("known_types") == nodes_module.HEATER_NODE_TYPES
+        ]
+        pmo_calls = [
+            call for call in helper_calls if call.get("known_types") == {"pmo"}
+        ]
+        assert heater_calls
+        assert pmo_calls
 
     asyncio.run(_run())
 

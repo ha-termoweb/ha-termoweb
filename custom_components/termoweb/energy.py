@@ -15,9 +15,10 @@ from homeassistant.helpers import entity_registry as er
 
 from .api import RESTClient
 from .const import DOMAIN
-from .identifiers import build_heater_energy_unique_id
+from .identifiers import build_energy_unique_id, build_heater_energy_unique_id
 from .inventory import (
     normalize_heater_addresses,
+    normalize_power_monitor_addresses,
     parse_heater_energy_unique_id,
     resolve_record_inventory,
 )
@@ -55,6 +56,9 @@ class _RecorderModuleImports:
 
 
 _RECORDER_IMPORTS: _RecorderModuleImports | None = None
+
+
+_COUNTER_SCALES: dict[str, float] = {"pmo": 3_600_000.0}
 
 
 def _resolve_recorder_imports() -> _RecorderModuleImports:
@@ -131,12 +135,40 @@ def _resolve_statistics_helpers(
     )
 
 
+def _normalize_energy_sources(
+    addrs: Mapping[Any, Iterable[Any]] | Iterable[Any] | None,
+) -> dict[str, list[str]]:
+    """Return canonical energy node address map for ``addrs``."""
+
+    def _merge(
+        source: Mapping[str, Iterable[str]], target: dict[str, list[str]]
+    ) -> None:
+        for node_type, values in source.items():
+            if not values:
+                continue
+            bucket = target.setdefault(node_type, [])
+            seen = set(bucket)
+            for value in values:
+                if value in seen:
+                    continue
+                seen.add(value)
+                bucket.append(value)
+
+    heater_map, _aliases = normalize_heater_addresses(addrs)
+    power_monitor_map, _ = normalize_power_monitor_addresses(addrs)
+    combined: dict[str, list[str]] = {}
+    _merge(heater_map, combined)
+    _merge(power_monitor_map, combined)
+    return combined
+
+
 def _normalize_heater_sources(
     addrs: Mapping[Any, Iterable[Any]] | Iterable[Any] | None,
 ) -> dict[str, list[str]]:
-    """Return canonical heater node address map for ``addrs``."""
+    """Backwards-compatible wrapper for heater-only address normalisation."""
 
     normalized_map, _aliases = normalize_heater_addresses(addrs)
+    normalized_map.setdefault("htr", [])
     return normalized_map
 
 
@@ -151,7 +183,9 @@ def _store_statistics(
 ) -> None:
     """Insert statistics using recorder helpers."""
 
-    _import_stats: Callable[[HomeAssistant, Mapping[str, Any], list[dict[str, Any]]], None] | None
+    _import_stats: (
+        Callable[[HomeAssistant, Mapping[str, Any], list[dict[str, Any]]], None] | None
+    )
 
     try:
         from homeassistant.components.recorder.statistics import (
@@ -357,13 +391,9 @@ async def async_import_energy_history(
         return
     client: RESTClient = rec["client"]
     dev_id: str = rec["dev_id"]
-    stored_inventory = rec.get("inventory") if isinstance(rec, Mapping) else None
-    node_list = getattr(stored_inventory, "nodes", None)
-
     resolution = resolve_record_inventory(
         rec,
         dev_id=dev_id,
-        node_list=node_list,
     )
     inventory_container = resolution.inventory
     if inventory_container is None:
@@ -374,13 +404,33 @@ async def async_import_energy_history(
         )
         return
 
-    by_type, reverse_lookup = inventory_container.heater_address_map
+    heater_map, reverse_lookup = inventory_container.heater_address_map
+    power_monitor_map, power_monitor_reverse = (
+        inventory_container.power_monitor_address_map
+    )
+    by_type: dict[str, list[str]] = {
+        node_type: list(addrs) for node_type, addrs in heater_map.items()
+    }
+    reverse_lookup = {addr: set(types) for addr, types in reverse_lookup.items()}
+    for node_type, addrs in power_monitor_map.items():
+        bucket = by_type.setdefault(node_type, [])
+        seen = set(bucket)
+        for addr in addrs:
+            if addr in seen:
+                continue
+            seen.add(addr)
+            bucket.append(addr)
+            reverse_lookup.setdefault(addr, set()).add(node_type)
+    for addr, types in power_monitor_reverse.items():
+        if not types:
+            continue
+        reverse_lookup.setdefault(addr, set()).update(types)
 
     requested_map: dict[str, list[str]] | None
     if nodes is None:
         requested_map = None
     else:
-        normalized_map = _normalize_heater_sources(nodes)
+        normalized_map = _normalize_energy_sources(nodes)
         requested_map = {k: list(v) for k, v in normalized_map.items() if v}
 
     selected_map: dict[str, list[str]] = {}
@@ -407,7 +457,7 @@ async def async_import_energy_history(
         selected_map = {node_type: list(addrs) for node_type, addrs in by_type.items()}
 
     if selected_map:
-        deduped_map = _normalize_heater_sources(selected_map)
+        deduped_map = _normalize_energy_sources(selected_map)
         selected_map = {k: list(v) for k, v in deduped_map.items() if v}
 
     all_pairs: list[tuple[str, str]] = [
@@ -459,12 +509,10 @@ async def async_import_energy_history(
         if nodes is None:
             progress.clear()
         else:
-            cleared_any = False
             for node_type, addr in target_pairs:
                 progress.pop(f"{node_type}:{addr}", None)
                 progress.pop(addr, None)
-                cleared_any = True
-            if not cleared_any and requested_map:
+            if requested_map:
                 for req_type, addr_list in requested_map.items():
                     for addr in addr_list:
                         progress.pop(f"{req_type}:{addr}", None)
@@ -475,7 +523,7 @@ async def async_import_energy_history(
         return
 
     if not target_pairs:
-        logger.debug("Energy import: no heater nodes selected for device")
+        logger.debug("Energy import: no energy nodes selected for device")
         return
 
     logger.debug("Energy import: fetching hourly samples down to %s", _iso_date(target))
@@ -483,7 +531,6 @@ async def async_import_energy_history(
     async def _rate_limited_fetch(
         node_type: str, addr: str, start: int, stop: int
     ) -> list[dict[str, Any]]:
-
         def _log_wait(wait: float) -> None:
             logger.debug(
                 "%s:%s/%s: sleeping %.2fs before query",
@@ -544,7 +591,7 @@ async def async_import_energy_history(
 
         all_samples_sorted = sorted(all_samples, key=lambda s: s.get("t", 0))
 
-        uid = build_heater_energy_unique_id(dev_id, node_type, addr)
+        uid = build_energy_unique_id(dev_id, node_type, addr)
         entity_id = (
             ent_reg.async_get_entity_id("sensor", DOMAIN, uid) if ent_reg else None
         )
@@ -709,12 +756,16 @@ async def async_import_energy_history(
 
         stats: list[dict[str, Any]] = []
         running_sum: float = sum_offset
+        scale = float(_COUNTER_SCALES.get(node_type, 1000.0) or 1000.0)
+        if scale <= 0:  # pragma: no cover - defensive guard
+            scale = 1000.0
+
         for sample in all_samples_sorted:
             t_val = sample.get("t")
             counter_val = sample.get("counter")
             try:
                 ts = int(t_val)
-                kwh = float(counter_val) / 1000.0
+                kwh = float(counter_val) / scale
             except (TypeError, ValueError):
                 logger.debug("%s: invalid sample %s", addr, sample)
                 continue
@@ -851,12 +902,19 @@ async def async_register_import_energy_history_service(
                         resolution.source,
                     )
                     continue
-                by_type, _ = inventory_container.heater_address_map
+                heater_map, _ = inventory_container.heater_address_map
+                power_monitor_map, _ = inventory_container.power_monitor_address_map
+                combined_sources: dict[str, Iterable[str]] = {
+                    node_type: list(addrs) for node_type, addrs in heater_map.items()
+                }
+                for node_type, addrs in power_monitor_map.items():
+                    combined_sources[node_type] = list(addrs)
+                combined_map = _normalize_energy_sources(combined_sources)
                 tasks.append(
                     import_fn(
                         hass,
                         ent,
-                        by_type,
+                        combined_map,
                         reset_progress=reset,
                         max_days=max_days,
                     )

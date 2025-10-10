@@ -232,7 +232,8 @@ Representative payload emitted after a successful write:
 - **Entity mixins & platforms**
   - `HeaterNodeBase` underpins climate and sensor entities, while
     `HeaterClimateEntity`, `HeaterTemperatureSensor`, `HeaterEnergyTotalSensor`,
-    `HeaterPowerSensor`, `InstallationTotalEnergySensor`,
+    `HeaterPowerSensor`, `PowerMonitorEnergySensor`,
+    `PowerMonitorPowerSensor`, `InstallationTotalEnergySensor`,
     `GatewayOnlineBinarySensor`, and `StateRefreshButton` expose heater control,
     telemetry and maintenance helpers to Home Assistant.【F:custom_components/termoweb/heater.py†L374-L520】【F:custom_components/termoweb/climate.py†L134-L220】【F:custom_components/termoweb/sensor.py†L156-L421】【F:custom_components/termoweb/binary_sensor.py†L21-L99】【F:custom_components/termoweb/button.py†L21-L67】
 - **Websocket clients**
@@ -241,7 +242,8 @@ Representative payload emitted after a successful write:
     diagnostics.【F:custom_components/termoweb/ws_client.py†L40-L104】【F:custom_components/termoweb/ws_client.py†L760-L833】【F:custom_components/termoweb/ws_client.py†L1856-L1896】
 - **Energy import services**
   - Helper functions manage rate limiting, targeted imports and the public
-    `import_energy_history` service for historical statistics.【F:custom_components/termoweb/energy.py†L150-L177】【F:custom_components/termoweb/energy.py†L421-L919】
+    `import_energy_history` service for historical statistics across heaters and
+    power monitors.【F:custom_components/termoweb/energy.py†L150-L177】【F:custom_components/termoweb/energy.py†L421-L919】
 
 ### Class relationships diagram
 

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 import logging
 import math
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -17,10 +18,13 @@ from homeassistant.const import STATE_UNKNOWN, UnitOfTemperature
 try:  # pragma: no cover - fallback for older Home Assistant stubs
     from homeassistant.const import UnitOfTime
 except ImportError:  # pragma: no cover - fallback for older Home Assistant stubs
+
     class UnitOfTime:  # type: ignore[override]
         """Fallback UnitOfTime namespace with minute granularity."""
 
         MINUTES = "min"
+
+
 from homeassistant.core import callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.typing import StateType
@@ -37,9 +41,16 @@ from .heater import (
     iter_heater_nodes,
     log_skipped_nodes,
 )
-from .identifiers import build_heater_energy_unique_id
+from .identifiers import (
+    build_heater_energy_unique_id,
+    build_power_monitor_energy_unique_id,
+)
 from .installation import ensure_snapshot
-from .inventory import Inventory, normalize_node_addr, normalize_node_type
+from .inventory import (
+    normalize_node_addr,
+    normalize_node_type,
+    resolve_record_inventory,
+)
 from .utils import build_gateway_device_info, float_or_none
 
 _WH_TO_KWH = 1 / 1000.0
@@ -140,22 +151,22 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 bucket.append(addr)
 
     energy_nodes_map: dict[str, list[str]] = {
-        node_type: list(addresses)
-        for node_type, addresses in addrs_by_type.items()
+        node_type: list(addresses) for node_type, addresses in addrs_by_type.items()
     }
     energy_nodes_map.setdefault("htr", list(addrs_by_type.get("htr", [])))
     energy_nodes_map.setdefault("acm", list(addrs_by_type.get("acm", [])))
     energy_nodes_map.setdefault("pmo", [])
 
-    snapshot = ensure_snapshot(data)
-    if snapshot is not None:
-        forward_pmo, _ = snapshot.power_monitor_sample_address_map
+    resolution = resolve_record_inventory(data)
+    inventory_container = resolution.inventory
+    if inventory_container is not None:
+        forward_pmo, _ = inventory_container.power_monitor_sample_address_map
         _merge_energy_addresses(forward_pmo)
-
-    inventory_obj = data.get("inventory")
-    if isinstance(inventory_obj, Inventory):
-        forward_pmo, _ = inventory_obj.power_monitor_sample_address_map
-        _merge_energy_addresses(forward_pmo)
+    else:
+        snapshot = ensure_snapshot(data)
+        if snapshot is not None:
+            forward_pmo, _ = snapshot.power_monitor_sample_address_map
+            _merge_energy_addresses(forward_pmo)
 
     if energy_coordinator is None:
         energy_coordinator = EnergyStateCoordinator(
@@ -185,6 +196,28 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 node_type=node_type,
             )
         )
+    for _node_type, _node, addr_str, base_name in iter_heater_nodes(
+        nodes_by_type, resolve_name, node_types=("pmo",)
+    ):
+        friendly_name = base_name or f"Power Monitor {addr_str}"
+        if isinstance(friendly_name, str) and friendly_name.strip().lower().startswith(
+            "node "
+        ):
+            friendly_name = f"Power Monitor {addr_str}"
+        energy_unique_id = build_power_monitor_energy_unique_id(dev_id, addr_str)
+        uid_prefix = energy_unique_id.rsplit(":", 1)[0]
+        new_entities.extend(
+            _create_power_monitor_sensors(
+                coordinator,
+                energy_coordinator,
+                entry.entry_id,
+                dev_id,
+                addr_str,
+                friendly_name,
+                uid_prefix,
+                energy_unique_id,
+            )
+        )
     for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
         nodes_by_type, resolve_name
     ):
@@ -202,7 +235,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             )
         )
 
-    log_skipped_nodes("sensor", nodes_by_type, logger=_LOGGER)
+    log_skipped_nodes("sensor", nodes_by_type, logger=_LOGGER, skipped_types=("thm",))
 
     uid_total = f"{DOMAIN}:{dev_id}:energy_total"
     new_entities.append(
@@ -354,6 +387,143 @@ class HeaterPowerSensor(HeaterEnergyBase):
     _metric_key = "power"
 
 
+class PowerMonitorEntityMixin:
+    """Mixin exposing shared helpers for power monitor sensors."""
+
+    _state_coordinator: Any | None = None
+
+    def _state_coordinator_record(self) -> Mapping[str, Any] | None:
+        """Return the state coordinator cache for this device."""
+
+        coordinator = getattr(self, "_state_coordinator", None)
+        if coordinator is None:
+            return None
+        data = getattr(coordinator, "data", None) or {}
+        getter = getattr(data, "get", None)
+        if callable(getter):
+            record = getter(self._dev_id)
+        elif isinstance(data, Mapping):
+            record = data.get(self._dev_id)
+        else:
+            return None
+        return record if isinstance(record, Mapping) else None
+
+    def _power_monitor_section(self) -> Mapping[str, Any]:
+        """Return the node metadata for the current power monitor."""
+
+        record = self._state_coordinator_record()
+        if not isinstance(record, Mapping):
+            return {}
+        nodes_by_type = record.get("nodes_by_type")
+        if isinstance(nodes_by_type, Mapping):
+            section = nodes_by_type.get("pmo")
+            if isinstance(section, Mapping):
+                return section
+        legacy = record.get("pmo")
+        return legacy if isinstance(legacy, Mapping) else {}
+
+    def _extract_node_attribute(self, value: Any) -> Any | None:
+        """Return attribute values specific to this node address."""
+
+        if isinstance(value, Mapping):
+            addr_value = value.get(self._addr)
+            if addr_value is not None:
+                return addr_value
+        return value
+
+    def _power_monitor_attributes(self) -> dict[str, Any]:
+        """Return additional state attributes for power monitors."""
+
+        section = self._power_monitor_section()
+        if not section:
+            return {}
+        attrs: dict[str, Any] = {}
+        for key in ("power_limit", "setup"):
+            if key not in section:
+                continue
+            extracted = self._extract_node_attribute(section.get(key))
+            if extracted is None:
+                continue
+            attrs[key] = extracted
+        return attrs
+
+    @property
+    def device_info(self) -> DeviceInfo:  # type: ignore[override]
+        """Return gateway metadata for the power monitor."""
+
+        return build_gateway_device_info(self.hass, self._entry_id, self._dev_id)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:  # type: ignore[override]
+        """Return power monitor specific state attributes."""
+
+        base_attrs = super().extra_state_attributes()
+        attrs = dict(base_attrs) if isinstance(base_attrs, Mapping) else {}
+        attrs.update(self._power_monitor_attributes())
+        attrs.setdefault("node_type", "pmo")
+        return attrs
+
+
+class PowerMonitorEnergySensor(PowerMonitorEntityMixin, HeaterEnergyTotalSensor):
+    """Energy sensor for a power monitor."""
+
+    def __init__(
+        self,
+        coordinator: EnergyStateCoordinator,
+        entry_id: str,
+        dev_id: str,
+        addr: str,
+        name: str,
+        unique_id: str,
+        device_name: str,
+        *,
+        state_coordinator: Any | None = None,
+    ) -> None:
+        """Initialise the power monitor energy sensor."""
+
+        self._state_coordinator = state_coordinator
+        super().__init__(
+            coordinator,
+            entry_id,
+            dev_id,
+            addr,
+            name,
+            unique_id,
+            device_name,
+            node_type="pmo",
+        )
+
+
+class PowerMonitorPowerSensor(PowerMonitorEntityMixin, HeaterPowerSensor):
+    """Real-time power sensor for a power monitor."""
+
+    def __init__(
+        self,
+        coordinator: EnergyStateCoordinator,
+        entry_id: str,
+        dev_id: str,
+        addr: str,
+        name: str,
+        unique_id: str,
+        device_name: str,
+        *,
+        state_coordinator: Any | None = None,
+    ) -> None:
+        """Initialise the power monitor power sensor."""
+
+        self._state_coordinator = state_coordinator
+        super().__init__(
+            coordinator,
+            entry_id,
+            dev_id,
+            addr,
+            name,
+            unique_id,
+            device_name,
+            node_type="pmo",
+        )
+
+
 class HeaterBoostMinutesRemainingSensor(HeaterNodeBase, SensorEntity):
     """Sensor exposing the remaining minutes for the active boost."""
 
@@ -480,6 +650,45 @@ def _create_heater_sensors(
     return (temperature, energy, power)
 
 
+def _create_power_monitor_sensors(
+    coordinator: Any,
+    energy_coordinator: EnergyStateCoordinator,
+    entry_id: str,
+    dev_id: str,
+    addr: str,
+    base_name: str,
+    uid_prefix: str,
+    energy_unique_id: str,
+    *,
+    energy_cls: type[PowerMonitorEnergySensor] = PowerMonitorEnergySensor,
+    power_cls: type[PowerMonitorPowerSensor] = PowerMonitorPowerSensor,
+) -> tuple[PowerMonitorEnergySensor, PowerMonitorPowerSensor]:
+    """Create the power monitor energy and power sensors."""
+
+    energy = energy_cls(
+        energy_coordinator,
+        entry_id,
+        dev_id,
+        addr,
+        f"{base_name} Energy",
+        energy_unique_id,
+        base_name,
+        state_coordinator=coordinator,
+    )
+    power = power_cls(
+        energy_coordinator,
+        entry_id,
+        dev_id,
+        addr,
+        f"{base_name} Power",
+        f"{uid_prefix}:power",
+        base_name,
+        state_coordinator=coordinator,
+    )
+
+    return (energy, power)
+
+
 def _create_boost_sensors(
     coordinator: Any,
     entry_id: str,
@@ -489,7 +698,9 @@ def _create_boost_sensors(
     uid_prefix: str,
     *,
     node_type: str | None = None,
-    minutes_cls: type[HeaterBoostMinutesRemainingSensor] = HeaterBoostMinutesRemainingSensor,
+    minutes_cls: type[
+        HeaterBoostMinutesRemainingSensor
+    ] = HeaterBoostMinutesRemainingSensor,
     end_cls: type[HeaterBoostEndSensor] = HeaterBoostEndSensor,
 ) -> tuple[
     HeaterBoostMinutesRemainingSensor,

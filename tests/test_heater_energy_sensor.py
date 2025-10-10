@@ -18,7 +18,10 @@ from custom_components.termoweb import coordinator as coordinator_module
 from custom_components.termoweb import heater as heater_module
 from custom_components.termoweb import sensor as sensor_module
 from custom_components.termoweb import const as const_module
-from custom_components.termoweb.identifiers import build_heater_energy_unique_id
+from custom_components.termoweb.identifiers import (
+    build_heater_energy_unique_id,
+    build_power_monitor_energy_unique_id,
+)
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
 from custom_components.termoweb.utils import build_gateway_device_info
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
@@ -32,6 +35,8 @@ HeaterTemperatureSensor = sensor_module.HeaterTemperatureSensor
 HeaterEnergyTotalSensor = sensor_module.HeaterEnergyTotalSensor
 HeaterPowerSensor = sensor_module.HeaterPowerSensor
 InstallationTotalEnergySensor = sensor_module.InstallationTotalEnergySensor
+PowerMonitorEnergySensor = sensor_module.PowerMonitorEnergySensor
+PowerMonitorPowerSensor = sensor_module.PowerMonitorPowerSensor
 async_setup_sensor_entry = sensor_module.async_setup_entry
 signal_ws_data = const_module.signal_ws_data
 DOMAIN = const_module.DOMAIN
@@ -53,13 +58,17 @@ def test_coordinator_and_sensors() -> None:
             side_effect=[
                 [{"t": 1000, "counter": "1.0"}],
                 [{"t": 1000, "counter": "3.0"}],
+                [{"t": 1000, "counter": "360000"}],
                 [{"t": 1900, "counter": "1.5"}],
                 [{"t": 1900, "counter": "3.5"}],
+                [{"t": 1900, "counter": "720000"}],
             ]
         )
 
         hass = HomeAssistant()
-        coord = EnergyStateCoordinator(hass, client, "1", {"htr": ["A"], "acm": ["B"]})
+        coord = EnergyStateCoordinator(
+            hass, client, "1", {"htr": ["A"], "acm": ["B"], "pmo": ["P1"]}
+        )
 
         await coord.async_refresh()
         await coord.async_refresh()
@@ -70,6 +79,9 @@ def test_coordinator_and_sensors() -> None:
         acm_section = device_data["nodes_by_type"]["acm"]
         assert acm_section["energy"]["B"] == pytest.approx(0.0035)
         assert acm_section["power"]["B"] == pytest.approx(2.0, rel=1e-3)
+        pmo_section = device_data["nodes_by_type"]["pmo"]
+        assert pmo_section["energy"]["P1"] == pytest.approx(0.2)
+        assert pmo_section["power"]["P1"] == pytest.approx(400.0, rel=1e-3)
 
         sensors = {
             ("htr", "energy"): HeaterEnergyTotalSensor(
@@ -110,6 +122,24 @@ def test_coordinator_and_sensors() -> None:
                 "Accumulator",
                 node_type="acm",
             ),
+            ("pmo", "energy"): PowerMonitorEnergySensor(
+                coord,
+                "entry",
+                "1",
+                "P1",
+                "Monitor Energy",
+                build_power_monitor_energy_unique_id("1", "P1"),
+                "Monitor",
+            ),
+            ("pmo", "power"): PowerMonitorPowerSensor(
+                coord,
+                "entry",
+                "1",
+                "P1",
+                "Monitor Power",
+                f"{DOMAIN}:1:pmo:P1:power",
+                "Monitor",
+            ),
         }
 
         signal = signal_ws_data("entry")
@@ -134,16 +164,22 @@ def test_coordinator_and_sensors() -> None:
         assert energy_sensor._attr_unique_id == build_heater_energy_unique_id(
             "1", "htr", "A"
         )
-        assert sensors[("acm", "energy")]._attr_unique_id == build_heater_energy_unique_id(
-            "1", "acm", "B"
-        )
+        assert sensors[
+            ("acm", "energy")
+        ]._attr_unique_id == build_heater_energy_unique_id("1", "acm", "B")
         assert sensors[("acm", "power")]._attr_unique_id == f"{DOMAIN}:1:acm:B:power"
+        assert sensors[("pmo", "energy")]._attr_unique_id == (
+            build_power_monitor_energy_unique_id("1", "P1")
+        )
+        assert sensors[("pmo", "power")]._attr_unique_id == f"{DOMAIN}:1:pmo:P1:power"
 
         expected_initial = {
             ("htr", "energy"): pytest.approx(0.0015),
             ("htr", "power"): pytest.approx(2.0, rel=1e-3),
             ("acm", "energy"): pytest.approx(0.0035),
             ("acm", "power"): pytest.approx(2.0, rel=1e-3),
+            ("pmo", "energy"): pytest.approx(0.2),
+            ("pmo", "power"): pytest.approx(400.0, rel=1e-3),
         }
         for key, sensor in sensors.items():
             assert sensor.native_value == expected_initial[key]
@@ -154,9 +190,11 @@ def test_coordinator_and_sensors() -> None:
             if key[1] == "energy"
         }
 
+        addr_lookup = {"htr": "A", "acm": "B", "pmo": "P1"}
+
         def _set_metric(node_type: str, metric: str, value: Any) -> None:
             section = coord.data["1"]["nodes_by_type"][node_type][metric]
-            addr = "A" if node_type == "htr" else "B"
+            addr = addr_lookup[node_type]
             section[addr] = value
 
         for node_type, metric in sensors:
@@ -191,6 +229,24 @@ def test_coordinator_and_sensors() -> None:
                 sensor.schedule_update_ha_state.assert_called_once()
                 expected = 0.004 if metric == "energy" else 456.0
                 assert sensor.native_value == pytest.approx(expected)
+            elif node_type == "htr":
+                assert sensor.schedule_update_ha_state.call_count == 1
+            else:
+                sensor.schedule_update_ha_state.assert_not_called()
+
+        _set_metric("pmo", "energy", 0.25)
+        _set_metric("pmo", "power", 500.0)
+
+        dispatcher_send(signal, make_ws_payload("1", "P1", node_type="pmo"))
+
+        for key, sensor in sensors.items():
+            node_type, metric = key
+            if node_type == "pmo":
+                sensor.schedule_update_ha_state.assert_called_once()
+                expected = 0.25 if metric == "energy" else 500.0
+                assert sensor.native_value == pytest.approx(expected)
+            elif node_type == "acm":
+                assert sensor.schedule_update_ha_state.call_count == 1
             else:
                 assert sensor.schedule_update_ha_state.call_count == 1
 
@@ -215,13 +271,15 @@ def test_coordinator_and_sensors() -> None:
         for sensor in sensors.values():
             sensor.schedule_update_ha_state.assert_not_called()
 
-        assert client.get_node_samples.await_count == 4
+        assert client.get_node_samples.await_count == 6
         call_args = [call.args[:2] for call in client.get_node_samples.await_args_list]
-        assert call_args[:4] == [
+        assert call_args[:6] == [
             ("1", ("htr", "A")),
             ("1", ("acm", "B")),
+            ("1", ("pmo", "P1")),
             ("1", ("htr", "A")),
             ("1", ("acm", "B")),
+            ("1", ("pmo", "P1")),
         ]
 
     asyncio.run(_run())
@@ -312,16 +370,15 @@ def test_sensor_async_setup_entry_defaults_and_skips_invalid(
             "Node 1 Energy",
             "Node 1 Power",
             "Node 1 Temperature",
+            "Power Monitor P1 Energy",
+            "Power Monitor P1 Power",
             "Total Energy",
         ]
 
         assert calls and calls[0][0] == "sensor"
         assert "pmo" in calls[0][1]
         messages = [record.getMessage() for record in caplog.records]
-        assert any(
-            "Skipping TermoWeb pmo nodes for sensor platform: P1" in message
-            for message in messages
-        )
+        assert not any("Skipping TermoWeb pmo" in message for message in messages)
 
     asyncio.run(_run())
 
@@ -929,9 +986,8 @@ def test_total_energy_sensor() -> None:
             await total_sensor.async_will_remove_from_hass()
         mock_total_unsub.assert_called_once()
         assert not total_sensor._gateway_dispatcher.is_connected
-        assert (
-            total_sensor._handle_gateway_dispatcher
-            not in dispatch_map.get(signal, [])
+        assert total_sensor._handle_gateway_dispatcher not in dispatch_map.get(
+            signal, []
         )
         dispatcher_send(signal, {"dev_id": "1", "addr": "B"})
         total_sensor.schedule_update_ha_state.assert_not_called()

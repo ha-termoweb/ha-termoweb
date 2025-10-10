@@ -115,10 +115,11 @@ See instructions in custom_components/termoweb/assets, to install the card and c
 
 ## Energy monitoring & history
 - Each heater provides an **Energy** sensor in kWh and the integration adds a **Total Energy** sensor aggregating all heaters.
+- Each power monitor exposes **Energy** (kWh) and real-time **Power** (W) sensors tied to the gateway device, making it easy to feed whole-home usage into the Energy Dashboard or automations.
 - Add these sensors in **Settings → Dashboards → Energy** to include them in Home Assistant’s Energy Dashboard.
 - Live energy samples now arrive via the websocket connection, with the hourly
   REST poll remaining as a fallback if the push feed is unavailable.
-- Use the `termoweb.import_energy_history` service (Developer Tools → Services) to backfill past consumption after installing the integration.
+- Use the `termoweb.import_energy_history` service (Developer Tools → Services) to backfill past consumption after installing the integration. The integration avoids duplicate inserts by tracking the oldest imported timestamp per heater or power monitor.
 - No extra configuration is required beyond selecting the sensors in the Energy Dashboard.
 
 ---
