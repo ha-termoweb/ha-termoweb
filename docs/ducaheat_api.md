@@ -150,18 +150,28 @@ Use `/setup` to read or update defaults (for example `extra_options.boost_time` 
 
 `start` and `end` are **epoch milliseconds**. The response shape varies by device and firmware; treat as opaque JSON until stabilized by capture.
 
-## Power monitor node model (read)
+## Power monitor (pmo) nodes
 
-**GET** `/api/v2/devs/{dev_id}/pmo/{addr}`
+**Read**
+- `GET /api/v2/devs/{dev_id}/pmo/{addr}` → object with:
+  - `power_limit` — wrapper object with a stringified limit.
+  - `setup` — `{ "power_limit": <int>, "reverse": <bool>, "circuit_type": <int> }`
+  - `version` — `{ "hw_version", "fw_version", "pid", "uid" }`
 
-`pmo` nodes report:
+**Samples**
+- `GET /api/v2/devs/{dev_id}/pmo/{addr}/samples?start=<sec>&end=<sec>`
+  - **Epoch seconds** for `start`/`end` (contrast: thermal nodes use **milliseconds**).
+  - 200 with `{ "samples": [ … ] }` or 204/empty-array for empty ranges.
+  - Typical item keys include `t` (epoch seconds), `counter`, `max`, `min` (stringified numeric values). Treat shape as opaque.
 
-- `power_limit` — wrapper around the configured limit (stringified value).
-- `setup` — `{ "power_limit": <int>, "reverse": <bool>, "circuit_type": <int> }`.
-- `version` — firmware and hardware identifiers (`hw_version`, `fw_version`, `pid`, `uid`).
+**WebSocket**
+- `pmo` participates in `dev_data` snapshots (see `pmo_system` block), but no dedicated `update`/`status` events observed.
+- Handle `pmo` primarily over REST + samples.
 
-No Socket.IO `status` event has been seen for `pmo` nodes, but the node appears in `dev_data` with `lost: true` when
-connectivity drops.
+**Selection**
+- Not required for `pmo` reads or samples.
+
+> **Contrast with heaters/accumulators:** thermal nodes (`htr`, `acm`) require a selection gate before writes, expose samples in epoch **milliseconds**, and surface `update` deltas for live telemetry. Power monitors do not currently require selection, surface samples in epoch **seconds**, and rely on snapshot metadata rather than Socket.IO deltas.
 
 ---
 

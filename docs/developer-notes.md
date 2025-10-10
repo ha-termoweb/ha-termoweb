@@ -84,3 +84,8 @@ These semantics apply to both heater (`htr`) and accumulator (`acm`) nodes withi
 - Stop Boost and confirm both the `boost` flag and end fields flip to the expected values.
 - Validate client-side guards reject invalid `stemp` values (`"7"`, `7.5`, `"7.53"`) and lowercase
   `units`.
+
+### PMO specifics
+- No selection (`/select`) step is required before reading `/pmo/{addr}` or `/pmo/{addr}/samples`.
+- Samples use epoch-second windows. Empty ranges may return HTTP 204 or `{ "samples": [] }`.
+- Treat sample payload keys as vendor-controlled. Only assert the top-level `{ "samples": [...] }` shape before persisting data.
