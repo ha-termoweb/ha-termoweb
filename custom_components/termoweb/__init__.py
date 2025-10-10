@@ -397,7 +397,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         "dev_id": dev_id,
         "snapshot": snapshot,
         "inventory": inventory,
-        "node_inventory": list(inventory.nodes),
         "config_entry": entry,
         "base_poll_interval": max(base_interval, MIN_POLL_INTERVAL),
         "stretched": False,
