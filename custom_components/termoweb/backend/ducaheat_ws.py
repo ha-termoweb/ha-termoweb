@@ -28,8 +28,12 @@ from ..const import (
     get_brand_user_agent,
 )
 from ..installation import InstallationSnapshot, ensure_snapshot
-from ..inventory import Inventory, normalize_node_addr, normalize_node_type
-from ..nodes import ensure_node_inventory
+from ..inventory import (
+    Inventory,
+    build_node_inventory,
+    normalize_node_addr,
+    normalize_node_type,
+)
 from .ws_client import (
     DUCAHEAT_NAMESPACE,
     HandshakeError,
@@ -756,16 +760,24 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             record = domain_bucket.get(self.entry_id)
             snapshot_obj = ensure_snapshot(record)
 
-            normalized_map: dict[str, list[str]]
-            inventory_container = self._inventory if isinstance(self._inventory, Inventory) else None
-            record_inventory_nodes: Iterable[Any] | None = None
-            if inventory_container is not None:
-                normalized_map, _ = inventory_container.heater_sample_address_map
-                record_inventory_nodes = inventory_container.nodes
-            elif isinstance(snapshot_obj, InstallationSnapshot):
-                normalized_map, _ = snapshot_obj.heater_sample_address_map
-                record_inventory_nodes = snapshot_obj.inventory
-            else:
+            normalized_map: dict[str, list[str]] = {}
+            inventory_container = (
+                self._inventory if isinstance(self._inventory, Inventory) else None
+            )
+
+            if inventory_container is None and isinstance(snapshot_obj, InstallationSnapshot):
+                ensure_inventory = getattr(snapshot_obj, "_ensure_inventory", None)
+                snapshot_inventory: Inventory | None = None
+                if callable(ensure_inventory):
+                    try:
+                        snapshot_inventory = ensure_inventory()
+                    except Exception:  # pragma: no cover - defensive  # noqa: BLE001
+                        snapshot_inventory = None
+                if isinstance(snapshot_inventory, Inventory):
+                    inventory_container = snapshot_inventory
+                    self._inventory = snapshot_inventory
+
+            if inventory_container is None:
                 nodes_payload: Mapping[str, Any] | None
                 if isinstance(resolved_nodes, Mapping):
                     nodes_payload = resolved_nodes
@@ -774,28 +786,23 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 else:
                     nodes_payload = None
 
-                cache_record: dict[str, Any]
-                if isinstance(record, dict):
-                    cache_record = record
+                raw_payload: Any
+                if nodes_payload is None:
+                    raw_payload = {}
                 else:
-                    cache_record = {}
+                    raw_payload = nodes_payload
 
-                inventory_nodes = ensure_node_inventory(
-                    cache_record,
-                    nodes=nodes_payload,
-                )
-                container = Inventory(
-                    self.dev_id,
-                    nodes_payload if nodes_payload is not None else {},
-                    inventory_nodes,
-                )
-                normalized_map, _ = container.heater_sample_address_map
+                try:
+                    inventory_nodes = build_node_inventory(raw_payload)
+                except Exception:  # pragma: no cover - defensive  # noqa: BLE001
+                    inventory_nodes = []
+
+                container = Inventory(self.dev_id, raw_payload, inventory_nodes)
                 inventory_container = container
                 self._inventory = container
-                record_inventory_nodes = container.nodes
 
-            if isinstance(record, dict) and record_inventory_nodes is not None:
-                record["node_inventory"] = list(record_inventory_nodes)
+            if isinstance(inventory_container, Inventory):
+                normalized_map, _ = inventory_container.heater_sample_address_map
 
             if not normalized_map.get("htr"):
                 fallback: Iterable[Any] | None = None

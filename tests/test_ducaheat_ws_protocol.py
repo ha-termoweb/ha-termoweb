@@ -1404,8 +1404,35 @@ async def test_subscribe_feeds_uses_inventory_cache(monkeypatch: pytest.MonkeyPa
         ("subscribe", "/htr/7/status"),
     ]
     record = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
-    assert "node_inventory" in record
-    assert any(getattr(node, "addr", "") == "7" for node in record["node_inventory"])
+    assert "node_inventory" not in record
+    assert client._inventory is inventory
+
+
+@pytest.mark.asyncio
+async def test_subscribe_feeds_uses_snapshot_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Snapshots should initialise the local inventory cache."""
+
+    client = _make_client(monkeypatch)
+    snapshot = client.hass.data[ducaheat_ws.DOMAIN]["entry"]["snapshot"]
+    assert isinstance(snapshot, InstallationSnapshot)
+    snapshot.update_nodes({"nodes": [{"type": "htr", "addr": "9"}]})
+    client._inventory = None
+
+    emissions: list[str] = []
+
+    async def _capture(event: str, path: str) -> None:
+        emissions.append(path)
+
+    monkeypatch.setattr(client, "_emit_sio", _capture)
+
+    count = await client._subscribe_feeds(None)
+
+    assert count == 2
+    assert emissions == ["/htr/9/samples", "/htr/9/status"]
+    assert isinstance(client._inventory, Inventory)
+    assert client._inventory is getattr(snapshot, "_inventory")
 
 
 @pytest.mark.asyncio
@@ -1439,7 +1466,7 @@ async def test_subscribe_feeds_uses_coordinator_fallback(
         dev_id="device",
         raw_nodes={},
     )
-    client._coordinator._addrs = lambda: ["5", "6"]
+    client._coordinator._addrs = lambda: ["5", " ", "5", "6"]
 
     emissions: list[str] = []
 
@@ -1452,6 +1479,7 @@ async def test_subscribe_feeds_uses_coordinator_fallback(
 
     assert count == 4
     assert {"/htr/5/status", "/htr/6/samples"}.issubset(set(emissions))
+    assert not any(path.endswith("/ ") for path in emissions)
 
 
 @pytest.mark.asyncio
@@ -1464,18 +1492,17 @@ async def test_subscribe_feeds_rebuilds_inventory_when_snapshot_missing(
     record = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
     record.pop("snapshot", None)
 
-    nodes_payload = {"nodes": [{"addr": "7", "type": "htr"}]}
-    record["nodes"] = nodes_payload
+    nodes_payload = {"htr": {"samples": {"7": {}}}}
 
     calls: dict[str, Any] = {}
 
-    def _fake_inventory(cache: dict[str, Any], *, nodes: Any | None = None) -> list[Any]:
-        calls["cache"] = cache
-        calls["nodes"] = nodes
-        return []
+    original_build = ducaheat_ws.build_node_inventory
 
-    monkeypatch.setattr(ducaheat_ws, "ensure_node_inventory", _fake_inventory)
+    def _capture(payload: Any) -> list[Any]:
+        calls["payload"] = payload
+        return original_build(payload)
 
+    monkeypatch.setattr(ducaheat_ws, "build_node_inventory", _capture)
     client._coordinator._addrs = lambda: ["7", " ", "7"]
 
     emissions: list[str] = []
@@ -1485,10 +1512,11 @@ async def test_subscribe_feeds_rebuilds_inventory_when_snapshot_missing(
 
     monkeypatch.setattr(client, "_emit_sio", _capture)
 
-    count = await client._subscribe_feeds({"htr": {"samples": {"7": {}}}})
+    count = await client._subscribe_feeds(nodes_payload)
 
-    assert calls["cache"] is record
-    assert calls["nodes"] == {"htr": {"samples": {"7": {}}}}
+    assert calls["payload"] is nodes_payload
+    assert isinstance(client._inventory, Inventory)
+    assert client._inventory.payload is nodes_payload
     assert "/htr/7/samples" in emissions
     assert "/htr/7/status" in emissions
     assert count == 2
@@ -1504,19 +1532,19 @@ async def test_subscribe_feeds_handles_mapping_record(monkeypatch: pytest.Monkey
 
     calls: dict[str, Any] = {}
 
-    def _fake_inventory(cache: dict[str, Any], *, nodes: Any | None = None) -> list[Any]:
-        calls["cache"] = cache
-        calls["nodes"] = nodes
+    def _capture(payload: Any) -> list[Any]:
+        calls["payload"] = payload
         return []
 
-    monkeypatch.setattr(ducaheat_ws, "ensure_node_inventory", _fake_inventory)
+    monkeypatch.setattr(ducaheat_ws, "build_node_inventory", _capture)
     client._coordinator._addrs = lambda: []
 
     count = await client._subscribe_feeds(None)
 
     assert count == 0
-    assert calls["cache"] == {}
-    assert calls["nodes"] == mapping_record["nodes"]
+    assert calls["payload"] is mapping_record["nodes"]
+    assert isinstance(client._inventory, Inventory)
+    assert client._inventory.payload is mapping_record["nodes"]
 
 
 @pytest.mark.asyncio
@@ -1528,19 +1556,19 @@ async def test_subscribe_feeds_handles_missing_record(monkeypatch: pytest.Monkey
 
     calls: dict[str, Any] = {}
 
-    def _fake_inventory(cache: dict[str, Any], *, nodes: Any | None = None) -> list[Any]:
-        calls["cache"] = cache
-        calls["nodes"] = nodes
+    def _capture(payload: Any) -> list[Any]:
+        calls["payload"] = payload
         return []
 
-    monkeypatch.setattr(ducaheat_ws, "ensure_node_inventory", _fake_inventory)
+    monkeypatch.setattr(ducaheat_ws, "build_node_inventory", _capture)
     client._coordinator._addrs = lambda: []
 
     count = await client._subscribe_feeds(None)
 
     assert count == 0
-    assert calls["cache"] == {}
-    assert calls["nodes"] is None
+    assert calls["payload"] == {}
+    assert isinstance(client._inventory, Inventory)
+    assert client._inventory.payload is calls["payload"]
 
 
 @pytest.mark.asyncio
