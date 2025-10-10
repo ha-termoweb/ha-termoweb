@@ -630,6 +630,51 @@ def test_iter_inventory_heater_metadata_uses_inventory() -> None:
     assert supports == {"1": False, "2": True, "3": True}
 
 
+def test_iter_inventory_heater_metadata_uses_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Generator should source node data from inventory helper."""
+
+    inventory = Inventory("dev", {}, [])
+    default_factory = lambda addr: f"Heater {addr}"
+
+    node = SimpleNamespace(
+        addr="2",
+        type="acm",
+        supports_boost=lambda: "true",
+    )
+
+    def _fake_helper(inv, *, default_name_simple):
+        assert inv is inventory
+        assert default_name_simple is default_factory
+        return (
+            {"acm": [node]},
+            {"acm": ["2"]},
+            lambda node_type, addr: f"Resolved {node_type} {addr}",
+        )
+
+    monkeypatch.setattr(
+        boost_module,
+        "heater_platform_details_from_inventory",
+        _fake_helper,
+    )
+
+    results = list(
+        boost_module.iter_inventory_heater_metadata(
+            inventory,
+            default_name_simple=default_factory,
+        )
+    )
+
+    assert len(results) == 1
+    metadata = results[0]
+    assert metadata.node is node
+    assert metadata.node_type == "acm"
+    assert metadata.addr == "2"
+    assert metadata.name == "Resolved acm 2"
+    assert metadata.supports_boost is True
+
+
 def test_iter_inventory_heater_metadata_handles_missing() -> None:
     """Generator should gracefully handle missing inventory."""
 
