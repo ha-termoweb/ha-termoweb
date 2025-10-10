@@ -46,10 +46,6 @@ from custom_components.termoweb.const import (
     get_brand_user_agent,
     signal_ws_data,
 )
-from custom_components.termoweb.installation import (
-    InstallationSnapshot,
-    ensure_snapshot,
-)
 from custom_components.termoweb.inventory import (
     HEATER_NODE_TYPES,
     Inventory,
@@ -892,15 +888,10 @@ class WebSocketClient(_WSStatusMixin):
             return {}
 
         is_snapshot = isinstance(payload.get("nodes_by_type"), dict)
-        raw_nodes: Any
-        snapshot: dict[str, Any]
-
-        if is_snapshot:
-            snapshot = payload
-            raw_nodes = snapshot.get("nodes")
-        else:
-            raw_nodes = payload
-            snapshot = {"nodes": None, "nodes_by_type": {}}
+        raw_nodes: Any = payload.get("nodes") if is_snapshot else payload
+        snapshot_payload: dict[str, Any] = (
+            payload if is_snapshot else {"nodes": None, "nodes_by_type": {}}
+        )
 
         context = _prepare_nodes_dispatch(
             self.hass,
@@ -916,10 +907,11 @@ class WebSocketClient(_WSStatusMixin):
         addr_map = context.addr_map
         unknown_types = context.unknown_types
         record = context.record
-        snapshot_obj = context.snapshot
         raw_nodes_payload = context.payload
         if raw_nodes_payload is None:
-            raw_nodes_payload = inventory.payload if inventory.payload is not None else {}
+            raw_nodes_payload = (
+                inventory.payload if isinstance(inventory, Inventory) else {}
+            )
         if unknown_types:  # pragma: no cover - diagnostic branch
             _LOGGER.debug(
                 "WS: unknown node types in inventory: %s",
@@ -931,10 +923,10 @@ class WebSocketClient(_WSStatusMixin):
                 node_type: {"addrs": list(addrs)}
                 for node_type, addrs in addr_map.items()
             }
-            snapshot["nodes_by_type"] = nodes_by_type
+            snapshot_payload["nodes_by_type"] = nodes_by_type
             if "htr" in nodes_by_type:
-                snapshot.setdefault("htr", nodes_by_type["htr"])
-            snapshot["nodes"] = deepcopy(raw_nodes_payload)
+                snapshot_payload.setdefault("htr", nodes_by_type["htr"])
+            snapshot_payload["nodes"] = deepcopy(raw_nodes_payload)
 
         if isinstance(record, MutableMapping):
             record["nodes"] = raw_nodes_payload
@@ -944,14 +936,15 @@ class WebSocketClient(_WSStatusMixin):
         self._apply_heater_addresses(
             addr_map,
             inventory=inventory,
-            snapshot=snapshot_obj,
         )
 
         payload_copy = {
             "dev_id": self.dev_id,
             "node_type": None,
-            "nodes": deepcopy(snapshot.get("nodes", raw_nodes_payload)),
-            "nodes_by_type": deepcopy(snapshot.get("nodes_by_type", {})),
+            "nodes": deepcopy(snapshot_payload.get("nodes", raw_nodes_payload)),
+            "nodes_by_type": deepcopy(
+                snapshot_payload.get("nodes_by_type", {})
+            ),
         }
         payload_copy.setdefault(
             "addr_map",
@@ -1003,7 +996,6 @@ class WebSocketClient(_WSStatusMixin):
         normalized_map: Mapping[Any, Iterable[Any]] | None,
         *,
         inventory: Inventory | None = None,
-        snapshot: InstallationSnapshot | None = None,
     ) -> dict[str, list[str]]:
         """Update entry and coordinator state with heater address data."""
 
@@ -1033,11 +1025,14 @@ class WebSocketClient(_WSStatusMixin):
         cleaned_map.setdefault("htr", [])
 
         record_container = self.hass.data.get(DOMAIN, {})
-        record = record_container.get(self.entry_id) if isinstance(record_container, dict) else None
-        snapshot_obj = (
-            snapshot
-            if isinstance(snapshot, InstallationSnapshot)
-            else ensure_snapshot(record)
+        record_raw = (
+            record_container.get(self.entry_id)
+            if isinstance(record_container, dict)
+            else None
+        )
+        record = record_raw if isinstance(record_raw, Mapping) else None
+        record_mutable: MutableMapping[str, Any] | None = (
+            record_raw if isinstance(record_raw, MutableMapping) else None
         )
 
         if isinstance(inventory, Inventory):
@@ -1055,13 +1050,8 @@ class WebSocketClient(_WSStatusMixin):
             inventory_container = None
 
         if isinstance(inventory_container, Inventory):
-            if isinstance(record, MutableMapping):
-                record["inventory"] = inventory_container
-            if isinstance(snapshot_obj, InstallationSnapshot):
-                snapshot_obj.update_nodes(
-                    snapshot_obj.raw_nodes,
-                    inventory=inventory_container,
-                )
+            if isinstance(record_mutable, MutableMapping):
+                record_mutable["inventory"] = inventory_container
             if not isinstance(self._inventory, Inventory):
                 self._inventory = inventory_container
 
@@ -1138,11 +1128,6 @@ class WebSocketClient(_WSStatusMixin):
             record if isinstance(record, MutableMapping) else None
         )
 
-        snapshot_obj = ensure_snapshot(record)
-        snapshot_raw_nodes: Any | None = (
-            snapshot_obj.raw_nodes if isinstance(snapshot_obj, InstallationSnapshot) else None
-        )
-
         def _bind_inventory(container: Inventory) -> Inventory:
             """Cache ``container`` across runtime state helpers."""
 
@@ -1150,11 +1135,6 @@ class WebSocketClient(_WSStatusMixin):
             if isinstance(record_mutable, MutableMapping):
                 record_mutable["inventory"] = container
             self._inventory = container
-            if isinstance(snapshot_obj, InstallationSnapshot):
-                snapshot_obj.update_nodes(
-                    payload if payload is not None else snapshot_obj.raw_nodes,
-                    inventory=container,
-                )
             return container
 
         inventory_container: Inventory | None
@@ -1164,7 +1144,7 @@ class WebSocketClient(_WSStatusMixin):
             resolution = resolve_record_inventory(
                 record_mapping,
                 dev_id=self.dev_id,
-                nodes_payload=snapshot_raw_nodes,
+                nodes_payload=record_mapping.get("nodes") if isinstance(record_mapping, Mapping) else None,
             )
             if resolution.inventory is not None:
                 inventory_container = _bind_inventory(resolution.inventory)
@@ -1206,7 +1186,6 @@ class WebSocketClient(_WSStatusMixin):
         normalized_map = self._apply_heater_addresses(
             normalized_map,
             inventory=inventory_container,
-            snapshot=snapshot_obj,
         )
 
         other_types = sorted(node_type for node_type in normalized_map if node_type != "htr")
