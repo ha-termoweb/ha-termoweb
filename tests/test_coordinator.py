@@ -12,7 +12,11 @@ import pytest
 
 from homeassistant.core import HomeAssistant
 
-from custom_components.termoweb import boost as boost_module, coordinator as coord_module
+from custom_components.termoweb import (
+    boost as boost_module,
+    coordinator as coord_module,
+    inventory as inventory_module,
+)
 from custom_components.termoweb.inventory import AccumulatorNode, HeaterNode
 
 
@@ -176,8 +180,8 @@ def test_boost_helpers_guard_against_invalid_sections(
         calls.append((payload, now))
 
     coordinator._apply_accumulator_boost_metadata = _record  # type: ignore[assignment]
-    coordinator._apply_boost_metadata_for_section(None, now=None)
-    coordinator._apply_boost_metadata_for_section({"settings": []}, now=None)
+    coordinator._apply_boost_metadata_for_settings(None, now=None)
+    coordinator._apply_boost_metadata_for_settings({"1": []}, now=None)
 
     assert calls == []
     assert coord_module.StateCoordinator._requires_boost_resolution(None) is False
@@ -251,7 +255,8 @@ async def test_async_update_data_adds_boost_metadata(
     )
 
     result = await coordinator._async_update_data()
-    settings = result["dev"]["nodes_by_type"]["acm"]["settings"]["1"]
+    record = result["dev"]
+    settings = record["settings"]["acm"]["1"]
     derived_dt = settings.get("boost_end_datetime")
     derived_minutes = settings.get("boost_minutes_delta")
 
@@ -336,7 +341,7 @@ async def test_async_update_data_omits_raw_nodes(
         [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
     ],
 ) -> None:
-    """Coordinator data should expose nodes_by_type but not raw node payloads."""
+    """Coordinator data should expose settings metadata but not raw node payloads."""
 
     hass = HomeAssistant()
     client = AsyncMock()
@@ -359,7 +364,8 @@ async def test_async_update_data_omits_raw_nodes(
 
     record = result["dev"]
     assert "nodes" not in record
-    assert record["nodes_by_type"]["htr"]["addrs"] == ["1"]
+    assert record["addresses_by_type"]["htr"] == ["1"]
+    assert record["settings"]["htr"]["1"] == {}
 
 @pytest.mark.asyncio
 async def test_async_fetch_settings_by_address_pending_and_boost(
@@ -745,29 +751,20 @@ async def test_refresh_skips_pending_settings_merge(
             "name": "Device",
             "raw": {"name": "Device"},
             "connected": True,
-            "nodes": nodes,
-            "nodes_by_type": {
-                "htr": {
-                    "addrs": ["1"],
-                    "settings": {"1": {"mode": "manual", "stemp": "21.0"}},
-                }
+            "inventory": inventory,
+            "addresses_by_type": {"htr": ["1"], "acm": [], "pmo": []},
+            "heater_address_map": {
+                "forward": {"htr": ["1"], "acm": []},
+                "reverse": {"1": ["htr"]},
             },
-            "htr": {
-                "addrs": ["1"],
-                "settings": {"1": {"mode": "manual", "stemp": "21.0"}},
+            "power_monitor_address_map": {
+                "forward": {"pmo": []},
+                "reverse": {},
             },
+            "settings": {"htr": {"1": {"mode": "manual", "stemp": "21.0"}}},
         }
     }
     coordinator.data = initial
-
-    calls: list[Mapping[str, Any]] = []
-    original_helper = coord_module._existing_nodes_map
-
-    def recording_helper(source: Mapping[str, Any] | None) -> dict[str, Any]:
-        calls.append(source or {})
-        return original_helper(source)
-
-    monkeypatch.setattr(coord_module, "_existing_nodes_map", recording_helper)
 
     client.get_node_settings = AsyncMock(return_value={"mode": "auto", "stemp": "20.0"})
     coordinator.register_pending_setting(
@@ -776,10 +773,9 @@ async def test_refresh_skips_pending_settings_merge(
 
     await coordinator.async_refresh_heater(("htr", "1"))
 
-    settings = coordinator.data["dev"]["nodes_by_type"]["htr"]["settings"]["1"]
+    settings = coordinator.data["dev"]["settings"]["htr"]["1"]
     assert settings == {"mode": "manual", "stemp": "21.0"}
     assert ("htr", "1") in coordinator._pending_settings
-    assert not calls
 
     client.get_node_settings.return_value = {"mode": "manual", "stemp": "21.0"}
 
@@ -787,8 +783,6 @@ async def test_refresh_skips_pending_settings_merge(
 
     assert ("htr", "1") not in coordinator._pending_settings
     assert client.get_node_settings.await_count == 2
-    assert calls
-    assert calls[0]["htr"]["settings"]["1"]["mode"] == "manual"
 
 
 @pytest.mark.asyncio
@@ -820,29 +814,20 @@ async def test_poll_skips_pending_settings_merge(
             "name": "Device",
             "raw": {"name": "Device"},
             "connected": True,
-            "nodes": nodes,
-            "nodes_by_type": {
-                "htr": {
-                    "addrs": ["1"],
-                    "settings": {"1": {"mode": "manual", "stemp": "21.0"}},
-                }
+            "inventory": inventory,
+            "addresses_by_type": {"htr": ["1"], "acm": [], "pmo": []},
+            "heater_address_map": {
+                "forward": {"htr": ["1"], "acm": []},
+                "reverse": {"1": ["htr"]},
             },
-            "htr": {
-                "addrs": ["1"],
-                "settings": {"1": {"mode": "manual", "stemp": "21.0"}},
+            "power_monitor_address_map": {
+                "forward": {"pmo": []},
+                "reverse": {},
             },
+            "settings": {"htr": {"1": {"mode": "manual", "stemp": "21.0"}}},
         }
     }
     coordinator.data = initial
-
-    calls: list[Mapping[str, Any]] = []
-    original_helper = coord_module._existing_nodes_map
-
-    def recording_helper(source: Mapping[str, Any] | None) -> dict[str, Any]:
-        calls.append(source or {})
-        return original_helper(source)
-
-    monkeypatch.setattr(coord_module, "_existing_nodes_map", recording_helper)
 
     client.get_node_settings = AsyncMock(return_value={"mode": "auto", "stemp": "20.0"})
     coordinator.register_pending_setting(
@@ -851,11 +836,9 @@ async def test_poll_skips_pending_settings_merge(
 
     result = await coordinator._async_update_data()
 
-    settings = result["dev"]["nodes_by_type"]["htr"]["settings"]["1"]
+    settings = result["dev"]["settings"]["htr"]["1"]
     assert settings == {"mode": "manual", "stemp": "21.0"}
     assert ("htr", "1") in coordinator._pending_settings
-    assert calls
-    assert calls[0] is initial["dev"]
 
     coordinator.data = result
     client.get_node_settings.return_value = {"mode": "manual", "stemp": "21.0"}
@@ -864,7 +847,7 @@ async def test_poll_skips_pending_settings_merge(
 
     assert ("htr", "1") not in coordinator._pending_settings
     assert client.get_node_settings.await_count == 2
-    settings_second = result_second["dev"]["nodes_by_type"]["htr"]["settings"]["1"]
+    settings_second = result_second["dev"]["settings"]["htr"]["1"]
     assert settings_second == {"mode": "manual", "stemp": "21.0"}
 
 

@@ -177,22 +177,24 @@ def test_node_as_dict() -> None:
 
 def test_existing_nodes_map_collects_sections() -> None:
     nodes = {
-        "nodes_by_type": {
-            "htr": {"addrs": ["1"], "settings": {"1": {"mode": "auto"}}},
-            "thm": {"addrs": [], "settings": {}},
+        "settings": {
+            "htr": {"1": {"mode": "auto"}},
+            "thm": {},
         },
-        "htr": {"addrs": ["1"], "settings": {"1": {"mode": "auto"}}},
-        "thm": {"addrs": [], "settings": {}},
+        "addresses_by_type": {"htr": ["1"], "thm": []},
+        "heater_address_map": {
+            "forward": {"htr": ["1"]},
+            "reverse": {"1": ["htr"]},
+        },
         "dev_id": "dev",
         "connected": True,
     }
 
     sections = _existing_nodes_map(nodes)
 
-    assert sections == {
-        "htr": {"addrs": ["1"], "settings": {"1": {"mode": "auto"}}},
-        "thm": {"addrs": [], "settings": {}},
-    }
+    assert sections["settings"]["htr"]["1"]["mode"] == "auto"
+    assert sections["settings"]["thm"] == {}
+    assert sections["addresses_by_type"]["htr"] == ["1"]
 
 
 def test_existing_nodes_map_handles_non_mapping_input() -> None:

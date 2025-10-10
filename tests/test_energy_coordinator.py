@@ -368,15 +368,12 @@ def test_coordinator_success_resets_backoff() -> None:
             "dev",
             ("acm", "B"),
         )
-        assert dev["htr"]["settings"]["A"] == {"mode": "auto"}
-        nodes_by_type = dev.get("nodes_by_type")
-        assert nodes_by_type is not None
-        assert nodes_by_type["htr"]["settings"]["A"] == {"mode": "auto"}
-        assert nodes_by_type["htr"]["addrs"] == ["A"]
-        assert nodes_by_type["acm"]["addrs"] == ["B"]
-        assert nodes_by_type["acm"]["settings"]["B"] == {"mode": "auto"}
-        assert dev["htr"] is nodes_by_type["htr"]
+        assert dev["settings"]["htr"]["A"] == {"mode": "auto"}
+        assert dev["settings"]["acm"]["B"] == {"mode": "auto"}
+        assert dev["addresses_by_type"]["htr"] == ["A"]
+        assert dev["addresses_by_type"]["acm"] == ["B"]
         assert "nodes" not in dev
+        assert "nodes_by_type" not in dev
         assert coord._backoff == 0
         assert coord.update_interval == timedelta(seconds=coord._base_interval)
 
@@ -426,11 +423,11 @@ def test_state_coordinator_round_robin_mixed_types() -> None:
             "dev",
             ("acm", "B"),
         )
-        assert dev["nodes_by_type"]["htr"]["settings"]["A"] == {"mode": "auto"}
-        assert dev["nodes_by_type"]["htr"]["settings"]["C"] == {"mode": "eco"}
-        assert dev["nodes_by_type"]["acm"]["settings"]["B"] == {"mode": "charge"}
-        assert dev["htr"] is dev["nodes_by_type"]["htr"]
-        assert dev["acm"] is dev["nodes_by_type"]["acm"]
+        assert dev["settings"]["htr"]["A"] == {"mode": "auto"}
+        assert dev["settings"]["htr"]["C"] == {"mode": "eco"}
+        assert dev["settings"]["acm"]["B"] == {"mode": "charge"}
+        assert dev["addresses_by_type"]["htr"] == ["A", "C"]
+        assert dev["addresses_by_type"]["acm"] == ["B"]
         assert "nodes" not in dev
 
     asyncio.run(_run())
@@ -473,7 +470,7 @@ def test_state_coordinator_ignores_non_dict_payloads() -> None:
             "dev",
             ("htr", "B"),
         )
-        assert dev["htr"]["settings"] == {"B": {"mode": "auto"}}
+        assert dev["settings"]["htr"] == {"B": {"mode": "auto"}}
 
     asyncio.run(_run())
 
@@ -510,12 +507,22 @@ def test_refresh_heater_skips_invalid_inputs() -> None:
             coord,
         )
 
-        coord.data = {"dev": {"htr": {"settings": {"A": {"mode": "manual"}}}}}
+        coord.data = {
+            "dev": {
+                "settings": {"htr": {"A": {"mode": "manual"}}},
+                "addresses_by_type": {"htr": ["A"]},
+            }
+        }
         await coord.async_refresh_heater("")
         client.get_node_settings.assert_not_called()
         assert updates == []
 
-        coord.data = {"dev": {"htr": {"settings": {}}}}
+        coord.data = {
+            "dev": {
+                "settings": {"htr": {}},
+                "addresses_by_type": {"htr": ["A"]},
+            }
+        }
         await coord.async_refresh_heater("A")
         client.get_node_settings.assert_called_once_with("dev", ("htr", "A"))
         assert updates == []
@@ -685,13 +692,8 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
         assert dev["raw"] == {"name": " Device "}
         assert "nodes" not in dev
         assert dev["connected"] is True
-        htr = dev["htr"]
-        assert htr["settings"]["A"] == {"mode": "auto"}
-        assert htr["addrs"] == ["A", "B"]
-        nodes_by_type = dev.get("nodes_by_type")
-        assert nodes_by_type is not None
-        assert nodes_by_type["htr"]["settings"]["A"] == {"mode": "auto"}
-        assert nodes_by_type["htr"]["addrs"] == ["A", "B"]
+        assert dev["settings"]["htr"]["A"] == {"mode": "auto"}
+        assert dev["addresses_by_type"]["htr"] == ["A", "B"]
 
         await coord.async_refresh_heater("B")
         assert client.get_node_settings.await_args_list[-1].args == (
@@ -700,17 +702,11 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
         )
         assert len(updates) == 2
         second = updates[-1]
-        htr_second = second["dev"]["htr"]
-        assert htr_second["settings"]["A"] == {"mode": "auto"}
-        assert htr_second["settings"]["B"] == {"mode": "eco"}
-        assert htr_second["addrs"] == ["A", "B"]
-        assert htr_second["addrs"] is not htr["addrs"]
-        nodes_by_type_second = second["dev"].get("nodes_by_type")
-        assert nodes_by_type_second is not None
-        assert nodes_by_type_second["htr"]["settings"]["B"] == {"mode": "eco"}
-        assert nodes_by_type_second["htr"]["addrs"] == ["A", "B"]
-        assert nodes_by_type_second["acm"]["addrs"] == ["C"]
-        assert nodes_by_type_second["acm"]["settings"] == {}
+        assert second["dev"]["settings"]["htr"]["A"] == {"mode": "auto"}
+        assert second["dev"]["settings"]["htr"]["B"] == {"mode": "eco"}
+        assert second["dev"]["addresses_by_type"]["htr"] == ["A", "B"]
+        assert second["dev"]["addresses_by_type"]["acm"] == ["C"]
+        assert second["dev"]["settings"].get("acm", {}) == {}
 
     asyncio.run(_run())
 
@@ -738,10 +734,8 @@ def test_refresh_heater_handles_tuple_and_acm() -> None:
         )
         coord.data = {
             "dev": {
-                "nodes_by_type": {
-                    "acm": {"addrs": "bad", "settings": {"1": {"prev": True}}},
-                    "weird": [],
-                }
+                "addresses_by_type": {"acm": ["3"], "htr": []},
+                "settings": {"acm": {"1": {"prev": True}}},
             }
         }
 
@@ -761,12 +755,10 @@ def test_refresh_heater_handles_tuple_and_acm() -> None:
         client.get_node_settings.assert_awaited_once()
         assert updates, "Expected coordinator data to be updated"
         latest = updates[-1]["dev"]
-        acm_section = latest["nodes_by_type"]["acm"]
-        addrs = acm_section["addrs"]
+        addrs = latest["addresses_by_type"]["acm"]
         assert addrs[0] == "3"
         assert "2" in addrs
-        assert acm_section["settings"]["2"] == {"mode": "auto"}
-        assert "htr" in latest["nodes_by_type"]
+        assert latest["settings"]["acm"]["2"] == {"mode": "auto"}
 
     asyncio.run(_run())
 
@@ -794,18 +786,16 @@ def test_async_refresh_heater_adds_missing_type() -> None:
 
         coord.data = {
             "dev": {
-                "nodes_by_type": {
-                    "htr": {"addrs": ["A"], "settings": {"A": {"mode": "manual"}}}
-                }
+                "settings": {"htr": {"A": {"mode": "manual"}}},
+                "addresses_by_type": {"htr": ["A"], "acm": []},
             }
         }
 
         await coord.async_refresh_heater(("acm", "B"))
 
         dev_data = coord.data["dev"]
-        acm_section = dev_data["nodes_by_type"]["acm"]
-        assert "B" in acm_section["addrs"]
-        assert acm_section["settings"]["B"] == {"mode": "eco"}
+        assert "B" in dev_data["addresses_by_type"]["acm"]
+        assert dev_data["settings"]["acm"]["B"] == {"mode": "eco"}
 
     asyncio.run(_run())
 
@@ -842,7 +832,13 @@ def test_refresh_heater_populates_missing_metadata() -> None:
             coord,
         )
 
-        coord.data = {"dev": {"htr": {"settings": {}}, "connected": False}}
+        coord.data = {
+            "dev": {
+                "settings": {"htr": {}},
+                "addresses_by_type": {"htr": [], "acm": ["B"]},
+                "connected": False,
+            }
+        }
 
         await coord.async_refresh_heater("A")
 
@@ -852,12 +848,9 @@ def test_refresh_heater_populates_missing_metadata() -> None:
         assert result["name"] == "Device"
         assert result["raw"] == {"name": " Device "}
         assert "nodes" not in result
-        assert result["connected"] is False
-        assert result["htr"]["settings"]["A"] == {"mode": "heat"}
-        nodes_by_type = result.get("nodes_by_type")
-        assert nodes_by_type is not None
-        assert nodes_by_type["htr"]["settings"]["A"] == {"mode": "heat"}
-        assert nodes_by_type["acm"]["addrs"] == ["B"]
+        assert result["connected"] is True
+        assert result["settings"]["htr"]["A"] == {"mode": "heat"}
+        assert result["addresses_by_type"]["acm"] == ["B"]
 
     asyncio.run(_run())
 
@@ -900,7 +893,12 @@ def test_refresh_heater_handles_errors(caplog: pytest.LogCaptureFixture) -> None
             coord,
         )
 
-        coord.data = {"dev": {"htr": {"settings": {}}}}
+        coord.data = {
+            "dev": {
+                "settings": {"htr": {}},
+                "addresses_by_type": {"htr": []},
+            }
+        }
         await coord.async_refresh_heater("A")
         assert updates == []
         assert client.get_node_settings.await_args_list[-1].args == (
@@ -922,23 +920,7 @@ def test_refresh_heater_handles_errors(caplog: pytest.LogCaptureFixture) -> None
     asyncio.run(_run())
 
 
-def test_state_coordinator_async_update_data_reuses_previous(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[tuple[dict[str, list[str]], dict[str, Any], dict[str, dict[str, Any]]]] = []
-    original = StateCoordinator._merge_nodes_by_type
-
-    def _spy(
-        self: StateCoordinator,
-        cache_map: dict[str, list[str]],
-        current_sections: dict[str, Any] | None,
-        new_payload: dict[str, dict[str, Any]] | None,
-    ) -> dict[str, dict[str, Any]]:
-        calls.append((dict(cache_map), dict(current_sections or {}), dict(new_payload or {})))
-        return original(self, cache_map, current_sections, new_payload)
-
-    monkeypatch.setattr(StateCoordinator, "_merge_nodes_by_type", _spy)
-
+def test_state_coordinator_async_update_data_reuses_previous() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
         client.get_node_settings = AsyncMock(return_value={"mode": "eco"})
@@ -956,11 +938,11 @@ def test_state_coordinator_async_update_data_reuses_previous(
         coord.update_nodes({"nodes": [{"type": "acm", "addr": "7"}]})
         coord.data = {
             "dev": {
-                "nodes_by_type": {
-                    "acm": {"settings": {"7": {"prev": True}}},
-                    "bad": [],
+                "settings": {
+                    "acm": {"7": {"prev": True}},
+                    "htr": {"legacy": {"mode": "auto"}},
                 },
-                "htr": {"settings": {"legacy": {"mode": "auto"}}},
+                "addresses_by_type": {"acm": ["7"], "htr": ["legacy"]},
             }
         }
 
@@ -968,35 +950,14 @@ def test_state_coordinator_async_update_data_reuses_previous(
 
         client.get_node_settings.assert_awaited_once()
         dev_data = result["dev"]
-        acm_section = dev_data["nodes_by_type"]["acm"]
-        assert acm_section["settings"]["7"] == {"mode": "eco"}
-        assert dev_data["htr"]["addrs"] == ["legacy"]
+        assert dev_data["settings"]["acm"]["7"] == {"mode": "eco"}
+        assert dev_data["settings"]["htr"]["legacy"] == {"mode": "auto"}
+        assert dev_data["addresses_by_type"]["htr"] == ["legacy"]
 
     asyncio.run(_run())
 
-    assert len(calls) == 1
-    cache_map, _, payload = calls[0]
-    assert cache_map.get("acm") == ["7"]
-    assert payload.get("acm", {}).get("7") == {"mode": "eco"}
 
-
-def test_async_refresh_heater_uses_merge_helper(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[tuple[dict[str, list[str]], dict[str, Any], dict[str, dict[str, Any]]]] = []
-    original = StateCoordinator._merge_nodes_by_type
-
-    def _spy(
-        self: StateCoordinator,
-        cache_map: dict[str, list[str]],
-        current_sections: dict[str, Any] | None,
-        new_payload: dict[str, dict[str, Any]] | None,
-    ) -> dict[str, dict[str, Any]]:
-        calls.append((dict(cache_map), dict(current_sections or {}), dict(new_payload or {})))
-        return original(self, cache_map, current_sections, new_payload)
-
-    monkeypatch.setattr(StateCoordinator, "_merge_nodes_by_type", _spy)
-
+def test_async_refresh_heater_updates_cache() -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
         client.get_node_settings = AsyncMock(return_value={"mode": "heat"})
@@ -1015,13 +976,11 @@ def test_async_refresh_heater_uses_merge_helper(
 
         await coord.async_refresh_heater("A")
 
-    asyncio.run(_run())
+        dev_data = coord.data["dev"]
+        assert dev_data["settings"]["htr"]["A"] == {"mode": "heat"}
+        assert dev_data["addresses_by_type"]["htr"] == ["A"]
 
-    assert len(calls) == 1
-    cache_map, current, payload = calls[0]
-    assert cache_map == {"htr": ["A"], "pmo": []}
-    assert current == {}
-    assert payload == {"htr": {"A": {"mode": "heat"}}}
+    asyncio.run(_run())
 
 
 def test_async_update_data_skips_non_dict_sections() -> None:
@@ -1042,9 +1001,8 @@ def test_async_update_data_skips_non_dict_sections() -> None:
 
         coord.data = {
             "dev": {
-                "nodes_by_type": {
-                    "acm": {"addrs": ["B"], "settings": {"B": {"mode": "auto"}}}
-                },
+                "settings": {"acm": {"B": {"mode": "auto"}}},
+                "addresses_by_type": {"acm": ["B"]},
                 "misc": "invalid",
             }
         }
@@ -1052,7 +1010,8 @@ def test_async_update_data_skips_non_dict_sections() -> None:
         result = await coord._async_update_data()
 
         dev_data = result["dev"]
-        assert "htr" in dev_data["nodes_by_type"]
+        assert dev_data["settings"]["acm"]["B"] == {"mode": "heat"}
+        assert dev_data["addresses_by_type"]["acm"] == ["B"]
         assert client.get_node_settings.await_count == 1
 
     asyncio.run(_run())
