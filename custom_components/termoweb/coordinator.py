@@ -19,9 +19,7 @@ from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .boost import coerce_int, resolve_boost_end_from_fields
 from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
 from .inventory import (
-    HEATER_NODE_TYPES,
     Inventory,
-    _existing_nodes_map,
     build_node_inventory,
     normalize_node_addr,
     normalize_node_type,
@@ -246,16 +244,37 @@ class StateCoordinator(
 
         preserved: dict[str, dict[str, Any]] = {}
 
+        existing_settings = prev_dev.get("settings")
+        if isinstance(existing_settings, Mapping):
+            for node_type, bucket in existing_settings.items():
+                if not isinstance(bucket, Mapping):
+                    continue
+                dest: dict[str, Any] = preserved.setdefault(node_type, {})
+                for raw_addr, payload in bucket.items():
+                    addr = normalize_node_addr(
+                        raw_addr,
+                        use_default_when_falsey=True,
+                    )
+                    if not addr:
+                        continue
+                    dest[addr] = payload
+
+        def _ingest_section(node_type: str, section: Any) -> None:
+            if node_type in preserved:
+                return
+            normalised = StateCoordinator._normalise_type_section(
+                node_type,
+                section,
+                addr_map.get(node_type, []),
+            )
+            if not normalised["settings"]:
+                return
+            preserved[node_type] = dict(normalised["settings"])
+
         existing_nodes = prev_dev.get("nodes_by_type")
         if isinstance(existing_nodes, Mapping):
             for node_type, section in existing_nodes.items():
-                normalised = StateCoordinator._normalise_type_section(
-                    node_type,
-                    section,
-                    addr_map.get(node_type, []),
-                )
-                if normalised["settings"]:
-                    preserved[node_type] = dict(normalised["settings"])
+                _ingest_section(node_type, section)
 
         for key, value in prev_dev.items():
             if key in {
@@ -265,18 +284,16 @@ class StateCoordinator(
                 "connected",
                 "nodes",
                 "nodes_by_type",
+                "settings",
+                "addresses_by_type",
+                "heater_address_map",
+                "power_monitor_address_map",
+                "inventory",
             }:
                 continue
             if not isinstance(value, Mapping):
                 continue
-            normalised = StateCoordinator._normalise_type_section(
-                key,
-                value,
-                addr_map.get(key, []),
-            )
-            if normalised["settings"]:
-                bucket = preserved.setdefault(key, {})
-                bucket.update(normalised["settings"])
+            _ingest_section(key, value)
 
         return preserved
 
@@ -322,6 +339,128 @@ class StateCoordinator(
                 bucket = settings_by_type.setdefault(resolved_type, {})
                 bucket[addr] = payload
         return current_rtc
+
+    @staticmethod
+    def _clone_inventory(inventory: Inventory) -> Inventory:
+        """Return a fresh ``Inventory`` instance for cached payloads."""
+
+        return Inventory(inventory.dev_id, inventory.payload, inventory.nodes)
+
+    @staticmethod
+    def _normalise_settings_map(
+        settings_by_type: Mapping[str, Mapping[str, Any]] | None,
+    ) -> dict[str, dict[str, Any]]:
+        """Return a copy of ``settings_by_type`` keyed by normalised addresses."""
+
+        if not isinstance(settings_by_type, Mapping):
+            return {}
+
+        normalised: dict[str, dict[str, Any]] = {}
+        for node_type, bucket in settings_by_type.items():
+            if not isinstance(bucket, Mapping):
+                continue
+            dest: dict[str, Any] = {}
+            for raw_addr, payload in bucket.items():
+                addr = normalize_node_addr(raw_addr, use_default_when_falsey=True)
+                if not addr:
+                    continue
+                dest[addr] = payload
+            normalised[node_type] = dest
+        return normalised
+
+    def _assemble_device_record(
+        self,
+        *,
+        inventory: Inventory,
+        addresses_by_type: Mapping[str, Iterable[str]],
+        settings_by_type: Mapping[str, Mapping[str, Any]],
+        name: str,
+    ) -> dict[str, Any]:
+        """Return a coordinator cache record for ``inventory`` and settings."""
+
+        normalized_addresses: dict[str, list[str]] = {}
+        for node_type, addrs in addresses_by_type.items():
+            bucket: list[str] = []
+            seen: set[str] = set()
+            for candidate in addrs:
+                addr = normalize_node_addr(candidate, use_default_when_falsey=True)
+                if not addr or addr in seen:
+                    continue
+                seen.add(addr)
+                bucket.append(addr)
+            normalized_addresses[node_type] = bucket
+
+        normalized_settings = self._normalise_settings_map(settings_by_type)
+        for node_type, bucket in normalized_settings.items():
+            dest = normalized_addresses.setdefault(node_type, [])
+            seen = set(dest)
+            for addr in bucket:
+                if addr in seen:
+                    continue
+                seen.add(addr)
+                dest.append(addr)
+
+        heater_forward, heater_reverse = inventory.heater_address_map
+        power_forward, power_reverse = inventory.power_monitor_address_map
+
+        heater_forward_copy = {
+            node_type: [
+                normalized
+                for addr in addrs
+                if (normalized := normalize_node_addr(addr, use_default_when_falsey=True))
+            ]
+            for node_type, addrs in heater_forward.items()
+        }
+        power_forward_copy = {
+            node_type: [
+                normalized
+                for addr in addrs
+                if (normalized := normalize_node_addr(addr, use_default_when_falsey=True))
+            ]
+            for node_type, addrs in power_forward.items()
+        }
+
+        heater_reverse_copy = {
+            normalize_node_addr(addr, use_default_when_falsey=True) or addr: sorted(
+                {
+                    normalize_node_type(node_type, use_default_when_falsey=True)
+                    or node_type
+                    for node_type in node_types
+                }
+            )
+            for addr, node_types in heater_reverse.items()
+        }
+        power_reverse_copy = {
+            normalize_node_addr(addr, use_default_when_falsey=True) or addr: sorted(
+                {
+                    normalize_node_type(node_type, use_default_when_falsey=True)
+                    or node_type
+                    for node_type in node_types
+                }
+            )
+            for addr, node_types in power_reverse.items()
+        }
+
+        return {
+            "dev_id": self._dev_id,
+            "name": name,
+            "raw": self._device,
+            "connected": True,
+            "inventory": self._clone_inventory(inventory),
+            "addresses_by_type": {
+                node_type: list(addrs)
+                for node_type, addrs in normalized_addresses.items()
+            },
+            "heater_address_map": {
+                "forward": heater_forward_copy,
+                "reverse": heater_reverse_copy,
+            },
+            "power_monitor_address_map": {
+                "forward": power_forward_copy,
+                "reverse": power_reverse_copy,
+            },
+            "settings": normalized_settings,
+        }
 
     @staticmethod
     def _normalize_mode_value(value: Any) -> str | None:
@@ -518,20 +657,17 @@ class StateCoordinator(
         else:
             payload.pop("boost_minutes_delta", None)
 
-    def _apply_boost_metadata_for_section(
+    def _apply_boost_metadata_for_settings(
         self,
-        section: Mapping[str, Any] | None,
+        bucket: Mapping[str, Any] | None,
         *,
         now: datetime | None,
     ) -> None:
         """Apply boost metadata derivation to every settings payload."""
 
-        if not isinstance(section, Mapping):
+        if not isinstance(bucket, Mapping):
             return
-        settings = section.get("settings")
-        if not isinstance(settings, MutableMapping):
-            return
-        for payload in settings.values():
+        for payload in bucket.values():
             if isinstance(payload, MutableMapping):
                 self._apply_accumulator_boost_metadata(payload, now=now)
 
@@ -844,68 +980,50 @@ class StateCoordinator(
                 if isinstance(payload, MutableMapping):
                     self._apply_accumulator_boost_metadata(payload, now=now_value)
 
-            current = self.data or {}
-            new_data: dict[str, dict[str, Any]] = dict(current)
-            dev_data = dict(new_data.get(dev_id) or {})
-
-            if not dev_data:
-                dev_data = {
-                    "dev_id": dev_id,
-                    "name": _device_display_name(self._device, dev_id),
-                    "raw": self._device,
-                    "connected": True,
-                }
-            else:
-                dev_data.setdefault("dev_id", dev_id)
-                if "name" not in dev_data:
-                    dev_data["name"] = _device_display_name(self._device, dev_id)
-                dev_data.setdefault("raw", self._device)
-                dev_data.setdefault("connected", True)
-
-            node_type = resolved_type
-
-            if self._should_defer_pending_setting(node_type, addr, payload):
+            if self._should_defer_pending_setting(resolved_type, addr, payload):
                 _LOGGER.debug(
                     "Skipping heater refresh merge for pending settings type=%s addr=%s",
-                    node_type,
+                    resolved_type,
                     addr,
                 )
                 success = True
                 return
 
-            existing_nodes = _existing_nodes_map(dev_data)
-
             cache_map = self._inventory_addresses_by_type()
-            cache_bucket = cache_map.setdefault(node_type, [])
+            cache_bucket = cache_map.setdefault(resolved_type, [])
             if addr not in cache_bucket:
                 cache_bucket.append(addr)
-            payload_map = {node_type: {addr: payload}}
-            nodes_by_type = self._merge_nodes_by_type(
-                cache_map,
-                existing_nodes,
-                payload_map,
-            )
 
-            dev_data["nodes_by_type"] = {
-                n_type: {
-                    "addrs": list(section["addrs"]),
-                    "settings": dict(section["settings"]),
-                }
-                for n_type, section in nodes_by_type.items()
+            current = self.data or {}
+            new_data: dict[str, dict[str, Any]] = dict(current)
+            prev_dev = dict(new_data.get(dev_id) or {})
+            prev_settings = self._collect_previous_settings(prev_dev, cache_map)
+
+            for node_type, settings in prev_settings.items():
+                bucket = cache_map.setdefault(node_type, [])
+                for existing_addr in settings:
+                    normalized = normalize_node_addr(
+                        existing_addr, use_default_when_falsey=True
+                    )
+                    if normalized and normalized not in bucket:
+                        bucket.append(normalized)
+
+            settings_map = {
+                node_type: dict(bucket)
+                for node_type, bucket in prev_settings.items()
             }
+            settings_bucket = settings_map.setdefault(resolved_type, {})
+            settings_bucket[addr] = payload
 
-            for n_type, section in dev_data["nodes_by_type"].items():
-                dev_data[n_type] = section
-
-            address_map = cache_map
-            heater_section = _ensure_heater_section(
-                dev_data["nodes_by_type"],
-                lambda: self._normalise_type_section(
-                    "htr", {}, address_map.get("htr", [])
-                ),
+            dev_name = _device_display_name(self._device, dev_id)
+            device_record = self._assemble_device_record(
+                inventory=inventory,
+                addresses_by_type=cache_map,
+                settings_by_type=settings_map,
+                name=dev_name,
             )
-            dev_data["htr"] = heater_section
-            new_data[dev_id] = dev_data
+
+            new_data[dev_id] = device_record
             self.async_set_updated_data(new_data)
             success = True
 
@@ -975,45 +1093,26 @@ class StateCoordinator(
             for node_type, settings in settings_by_type.items():
                 bucket = cache_map.setdefault(node_type, [])
                 for addr in settings:
-                    normalized = normalize_node_addr(addr)
+                    normalized = normalize_node_addr(
+                        addr,
+                        use_default_when_falsey=True,
+                    )
                     if normalized and normalized not in bucket:
                         bucket.append(normalized)
 
-            existing_nodes = _existing_nodes_map(prev_dev)
-
-            nodes_by_type = self._merge_nodes_by_type(
-                cache_map,
-                existing_nodes,
-                settings_by_type,
-            )
-
-            acm_section = nodes_by_type.get("acm")
-            if isinstance(acm_section, Mapping):
+            acm_settings = settings_by_type.get("acm")
+            if isinstance(acm_settings, Mapping):
                 now_value = rtc_now or self._device_now_estimate()
-                self._apply_boost_metadata_for_section(acm_section, now=now_value)
+                self._apply_boost_metadata_for_settings(acm_settings, now=now_value)
 
-            heater_section = _ensure_heater_section(
-                nodes_by_type,
-                lambda: {
-                    "addrs": list(cache_map.get("htr", [])),
-                    "settings": dict(settings_by_type.get("htr", {})),
-                },
+            device_record = self._assemble_device_record(
+                inventory=inventory,
+                addresses_by_type=cache_map,
+                settings_by_type=settings_by_type,
+                name=dev_name,
             )
 
-            result = {
-                dev_id: {
-                    "dev_id": dev_id,
-                    "name": dev_name,
-                    "raw": self._device,
-                    "connected": True,
-                    "nodes_by_type": nodes_by_type,
-                },
-            }
-
-            for node_type, section in nodes_by_type.items():
-                result[dev_id][node_type] = section
-
-            result[dev_id]["htr"] = heater_section
+            result = {dev_id: device_record}
 
         except TimeoutError as err:
             raise UpdateFailed("API timeout") from err
