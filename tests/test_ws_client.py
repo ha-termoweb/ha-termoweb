@@ -612,7 +612,14 @@ def test_apply_heater_addresses_includes_power_monitors(
         {"htr": ["1"], "pmo": ["", "5"]}, inventory=None, snapshot=None
     )
 
-    assert result == {"htr": ["1"]}
+    assert result == {"htr": ["1"], "pmo": ["5"]}
+
+    energy_coordinator = client.hass.data[module.DOMAIN]["entry"][
+        "energy_coordinator"
+    ]
+    energy_coordinator.update_addresses.assert_called_once()
+    payload_arg = energy_coordinator.update_addresses.call_args.args[0]
+    assert payload_arg == {"htr": ["1"], "pmo": ["5"]}
 
     coordinator_data = getattr(client._coordinator, "data", {})  # type: ignore[attr-defined]
     dev_state = coordinator_data.get("device") if isinstance(coordinator_data, dict) else None
@@ -624,6 +631,7 @@ def test_apply_heater_addresses_includes_power_monitors(
 
     second = client._apply_heater_addresses({"pmo": "7"}, inventory=None, snapshot=None)
     assert second.get("htr") == []
+    assert second.get("pmo") == ["7"]
 
     coordinator_data = getattr(client._coordinator, "data", {})  # type: ignore[attr-defined]
     dev_state = coordinator_data.get("device") if isinstance(coordinator_data, dict) else None
