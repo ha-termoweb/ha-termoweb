@@ -28,8 +28,12 @@ from ..const import (
     get_brand_user_agent,
 )
 from ..installation import InstallationSnapshot, ensure_snapshot
-from ..inventory import Inventory, normalize_node_addr, normalize_node_type
-from ..nodes import ensure_node_inventory
+from ..inventory import (
+    Inventory,
+    build_node_inventory,
+    normalize_node_addr,
+    normalize_node_type,
+)
 from .ws_client import (
     DUCAHEAT_NAMESPACE,
     HandshakeError,
@@ -756,50 +760,62 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             record = domain_bucket.get(self.entry_id)
             snapshot_obj = ensure_snapshot(record)
 
-            normalized_map: dict[str, list[str]]
             inventory_container = self._inventory if isinstance(self._inventory, Inventory) else None
-            record_inventory_nodes: Iterable[Any] | None = None
-            if inventory_container is not None:
-                normalized_map, _ = inventory_container.heater_sample_address_map
-                record_inventory_nodes = inventory_container.nodes
-            elif isinstance(snapshot_obj, InstallationSnapshot):
-                normalized_map, _ = snapshot_obj.heater_sample_address_map
-                record_inventory_nodes = snapshot_obj.inventory
-            else:
-                nodes_payload: Mapping[str, Any] | None
-                if isinstance(resolved_nodes, Mapping):
-                    nodes_payload = resolved_nodes
-                elif isinstance(record, Mapping):
-                    nodes_payload = record.get("nodes")
-                else:
-                    nodes_payload = None
+            if inventory_container is None and isinstance(record, Mapping):
+                cached_inventory = record.get("inventory")
+                if isinstance(cached_inventory, Inventory):
+                    inventory_container = cached_inventory
 
-                cache_record: dict[str, Any]
+            nodes_payload: Mapping[str, Any] | None = None
+            if isinstance(resolved_nodes, Mapping):
+                nodes_payload = resolved_nodes
+            elif isinstance(record, Mapping):
+                nodes_payload = record.get("nodes")
+
+            if inventory_container is None and isinstance(snapshot_obj, InstallationSnapshot):
+                snapshot_nodes: Iterable[Any]
+                try:
+                    snapshot_nodes = tuple(snapshot_obj.inventory)
+                except Exception:  # pragma: no cover - defensive  # noqa: BLE001
+                    snapshot_nodes = ()
+                raw_nodes_payload: Any
+                try:
+                    raw_nodes_payload = snapshot_obj.raw_nodes
+                except Exception:  # pragma: no cover - defensive  # noqa: BLE001
+                    raw_nodes_payload = nodes_payload if nodes_payload is not None else {}
+                snapshot_dev_id = getattr(snapshot_obj, "dev_id", self.dev_id)
+                try:
+                    inventory_container = Inventory(
+                        str(snapshot_dev_id),
+                        raw_nodes_payload,
+                        snapshot_nodes,
+                    )
+                except Exception:  # pragma: no cover - defensive  # noqa: BLE001
+                    inventory_container = None
+
+            if inventory_container is None:
+                payload_for_inventory: Any = nodes_payload if nodes_payload is not None else {}
+                try:
+                    inventory_nodes = build_node_inventory(payload_for_inventory)
+                except Exception:  # pragma: no cover - defensive  # noqa: BLE001
+                    inventory_nodes = []
+                try:
+                    inventory_container = Inventory(
+                        self.dev_id,
+                        payload_for_inventory,
+                        inventory_nodes,
+                    )
+                except Exception:  # pragma: no cover - defensive  # noqa: BLE001
+                    inventory_container = None
+
+            targets: list[tuple[str, str]] = []
+            if isinstance(inventory_container, Inventory):
+                targets = inventory_container.heater_sample_targets
+                self._inventory = inventory_container
                 if isinstance(record, dict):
-                    cache_record = record
-                else:
-                    cache_record = {}
+                    record["inventory"] = inventory_container
 
-                inventory_nodes = ensure_node_inventory(
-                    cache_record,
-                    nodes=nodes_payload,
-                )
-                container = Inventory(
-                    self.dev_id,
-                    nodes_payload if nodes_payload is not None else {},
-                    inventory_nodes,
-                )
-                normalized_map, _ = container.heater_sample_address_map
-                inventory_container = container
-                self._inventory = container
-                record_inventory_nodes = container.nodes
-
-            if isinstance(record, dict) and record_inventory_nodes is not None:
-                record["node_inventory"] = list(record_inventory_nodes)
-            if isinstance(record, dict) and isinstance(inventory_container, Inventory):
-                record["inventory"] = inventory_container
-
-            if not normalized_map.get("htr"):
+            if not any(node_type == "htr" for node_type, _ in targets):
                 fallback: Iterable[Any] | None = None
                 if hasattr(self._coordinator, "_addrs"):
                     try:
@@ -807,22 +823,15 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     except Exception:  # pragma: no cover - defensive  # noqa: BLE001
                         fallback = None
                 if fallback:
-                    normalised = list(normalized_map.get("htr", []))
-                    seen = set(normalised)
+                    seen_pairs = {pair for pair in targets}
                     for candidate in fallback:
                         addr = normalize_node_addr(candidate)
-                        if not addr or addr in seen:
+                        if not addr or ("htr", addr) in seen_pairs:
                             continue
-                        seen.add(addr)
-                        normalised.append(addr)
-                    if normalised:
-                        normalized_map = dict(normalized_map)
-                        normalized_map["htr"] = normalised
+                        seen_pairs.add(("htr", addr))
+                        targets.append(("htr", addr))
 
-            other_types = sorted(node_type for node_type in normalized_map if node_type != "htr")
-            order = ["htr", *other_types]
-            for node_type in order:
-                for addr in normalized_map.get(node_type, []) or []:
+            for node_type, addr in targets:
                     paths.add(f"/{node_type}/{addr}/status")
                     paths.add(f"/{node_type}/{addr}/samples")
         except Exception:  # pragma: no cover - defensive
