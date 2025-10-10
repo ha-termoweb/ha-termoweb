@@ -389,15 +389,15 @@ def test_async_setup_entry_default_names_and_invalid_nodes(
 
         def _mock_helper(
             platform_name: str,
-            nodes_by_type: dict[str, Any],
+            inventory_or_details: Any,
             *,
             logger: logging.Logger | None = None,
             skipped_types: Iterable[str] = ("pmo", "thm"),
         ) -> None:
-            calls.append((platform_name, nodes_by_type))
+            calls.append((platform_name, inventory_or_details))
             original_helper(
                 platform_name,
-                nodes_by_type,
+                inventory_or_details,
                 logger=logger or climate_module._LOGGER,
                 skipped_types=skipped_types,
             )
@@ -414,7 +414,14 @@ def test_async_setup_entry_default_names_and_invalid_nodes(
         assert all(entity._addr in {"1", "2"} for entity in added)
 
         assert calls and calls[0][0] == "climate"
-        assert "pmo" in calls[0][1]
+        logged_details = calls[0][1]
+        if isinstance(logged_details, tuple):
+            logged_nodes = logged_details[0]
+        elif hasattr(logged_details, "nodes_by_type"):
+            logged_nodes = logged_details.nodes_by_type
+        else:
+            logged_nodes = {}
+        assert "pmo" in logged_nodes
         messages = [record.getMessage() for record in caplog.records]
         assert any(
             "Skipping TermoWeb pmo nodes for climate platform: P1" in message

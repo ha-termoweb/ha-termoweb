@@ -58,7 +58,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
         if isinstance(candidate, Inventory):
             inventory = candidate
 
-    nodes_by_type = inventory.nodes_by_type if isinstance(inventory, Inventory) else {}
 
     default_name_simple = lambda addr: f"Heater {addr}"
     new_entities: list[ClimateEntity] = []
@@ -92,7 +91,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             )
         )
 
-    log_skipped_nodes("climate", nodes_by_type, logger=_LOGGER)
+    log_skipped_nodes("climate", inventory, logger=_LOGGER)
     if new_entities:
         _LOGGER.debug("Adding %d TermoWeb heater entities", len(new_entities))
         async_add_entities(new_entities)
@@ -326,6 +325,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 data,
                 map_key="settings",
                 node_types=[self._node_type],
+                inventory_or_details=getattr(self.coordinator, "inventory", None),
             )
         )
 

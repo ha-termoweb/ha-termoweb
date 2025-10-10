@@ -256,7 +256,7 @@ def test_button_setup_adds_accumulator_entities(
         calls: list[str | None] = []
 
         def fake_iter_boostable(
-            nodes_by_type,
+            inventory_or_details,
             resolve_name,
             *,
             node_types=None,
@@ -264,7 +264,13 @@ def test_button_setup_adds_accumulator_entities(
         ):
             assert accumulators_only is True
             assert node_types is None
-            for node in nodes_by_type.get("acm", []):
+            if isinstance(inventory_or_details, tuple):
+                nodes_map = inventory_or_details[0]
+            elif hasattr(inventory_or_details, "nodes_by_type"):
+                nodes_map = inventory_or_details.nodes_by_type
+            else:
+                nodes_map = {}
+            for node in nodes_map.get("acm", []):
                 addr = getattr(node, "addr", None)
                 calls.append(addr)
                 if addr == acm_node.addr:
@@ -643,7 +649,7 @@ def test_binary_sensor_setup_adds_boost_entities(
         calls: list[str | None] = []
 
         def fake_iter_boostable(
-            nodes_by_type,
+            inventory_or_details,
             resolve_name,
             *,
             node_types=None,
@@ -651,7 +657,13 @@ def test_binary_sensor_setup_adds_boost_entities(
         ):
             assert accumulators_only is False
             assert node_types is None
-            for node in nodes_by_type.get("acm", []):
+            if isinstance(inventory_or_details, tuple):
+                nodes_map = inventory_or_details[0]
+            elif hasattr(inventory_or_details, "nodes_by_type"):
+                nodes_map = inventory_or_details.nodes_by_type
+            else:
+                nodes_map = {}
+            for node in nodes_map.get("acm", []):
                 addr = getattr(node, "addr", None)
                 calls.append(addr)
                 if addr == boost_node.addr:

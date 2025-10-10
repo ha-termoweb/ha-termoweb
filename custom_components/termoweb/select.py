@@ -33,14 +33,15 @@ async def async_setup_entry(hass, entry, async_add_entities):
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
-    nodes_by_type, _, resolve_name = heater_platform_details_for_entry(
+    heater_details = heater_platform_details_for_entry(
         data,
         default_name_simple=lambda addr: f"Heater {addr}",
     )
+    nodes_by_type, _, resolve_name = heater_details
 
     new_entities: list[AccumulatorBoostDurationSelect] = []
     for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
-        nodes_by_type,
+        heater_details,
         resolve_name,
         accumulators_only=True,
     ):
@@ -62,7 +63,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             )
         )
 
-    log_skipped_nodes("select", nodes_by_type, logger=_LOGGER)
+    log_skipped_nodes("select", heater_details, logger=_LOGGER)
 
     if new_entities:
         _LOGGER.debug("Adding %d TermoWeb boost selectors", len(new_entities))

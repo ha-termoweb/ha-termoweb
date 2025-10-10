@@ -49,14 +49,15 @@ async def async_setup_entry(hass, entry, async_add_entities):
         StateRefreshButton(coordinator, entry.entry_id, dev_id)
     ]
 
-    nodes_by_type, _, resolve_name = heater_platform_details_for_entry(
+    heater_details = heater_platform_details_for_entry(
         data,
         default_name_simple=lambda addr: f"Heater {addr}",
     )
+    nodes_by_type, _, resolve_name = heater_details
 
     boost_entities: list[ButtonEntity] = []
     for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
-        nodes_by_type,
+        heater_details,
         resolve_name,
         accumulators_only=True,
     ):
@@ -74,7 +75,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     if boost_entities:
         entities.extend(boost_entities)
-    log_skipped_nodes("button", nodes_by_type, logger=_LOGGER)
+    log_skipped_nodes("button", heater_details, logger=_LOGGER)
 
     async_add_entities(entities)
 

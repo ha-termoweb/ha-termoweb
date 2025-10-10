@@ -414,9 +414,14 @@ def test_log_skipped_nodes_defaults_platform_name(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     nodes_by_type = {"thm": [SimpleNamespace(addr="7")]}
+    details = (
+        nodes_by_type,
+        {"thm": ["7"]},
+        lambda node_type, addr: f"{node_type}-{addr}",
+    )
 
     with caplog.at_level(logging.DEBUG):
-        heater_module.log_skipped_nodes("", nodes_by_type, skipped_types=["thm"])
+        heater_module.log_skipped_nodes("", details, skipped_types=["thm"])
 
     messages = [record.message for record in caplog.records]
     assert any("platform" in message for message in messages)
@@ -435,6 +440,7 @@ def test_iter_heater_nodes_filters_addresses() -> None:
         "acm": [SimpleNamespace(addr="2", type="acm"), SimpleNamespace(addr=None)],
         "pmo": [SimpleNamespace(addr="3", type="pmo")],
     }
+    details = (nodes_by_type, {"htr": ["1"], "acm": ["2"]}, lambda nt, addr: f"{nt}-{addr}")
 
     resolved: list[tuple[str, str]] = []
 
@@ -442,7 +448,7 @@ def test_iter_heater_nodes_filters_addresses() -> None:
         resolved.append((node_type, addr))
         return f"{node_type}-{addr}"
 
-    yielded = list(iter_heater_nodes(nodes_by_type, fake_resolve))
+    yielded = list(iter_heater_nodes(details, fake_resolve))
 
     assert sorted([(node_type, addr) for node_type, _node, addr, _ in yielded]) == [
         ("acm", "2"),
@@ -458,7 +464,7 @@ def test_iter_heater_nodes_filters_addresses() -> None:
         return f"{node_type}-{addr}"
 
     only_acm = list(
-        iter_heater_nodes(nodes_by_type, fake_resolve_acm, node_types=["acm", "thm"])
+        iter_heater_nodes(details, fake_resolve_acm, node_types=["acm", "thm"])
     )
 
     assert [(node_type, addr) for node_type, _node, addr, _ in only_acm] == [
@@ -466,22 +472,27 @@ def test_iter_heater_nodes_filters_addresses() -> None:
     ]
     assert resolved_acm == [("acm", "2")]
 
-    mapping_nodes = {
-        "htr": {"first": SimpleNamespace(addr="5")},
-        "acm": SimpleNamespace(addr="6"),
-        "pmo": [SimpleNamespace(addr=" None ")],
-        "thm": "ignored",
-    }
-
     extra_resolved: list[tuple[str, str]] = []
 
     def extra_resolve(node_type: str, addr: str) -> str:
         extra_resolved.append((node_type, addr))
         return f"{node_type}-{addr}"
 
+    mapping_nodes = {
+        "htr": {"first": SimpleNamespace(addr="5")},
+        "acm": SimpleNamespace(addr="6"),
+        "pmo": [SimpleNamespace(addr=" None ")],
+        "thm": "ignored",
+    }
+    mapping_details = (
+        mapping_nodes,
+        {"htr": ["5"], "acm": ["6"]},
+        extra_resolve,
+    )
+
     extra_results = list(
         iter_heater_nodes(
-            mapping_nodes,
+            mapping_details,
             extra_resolve,
             node_types=["htr", "acm", "pmo", "thm"],
         )
@@ -494,10 +505,11 @@ def test_iter_heater_nodes_filters_addresses() -> None:
     assert extra_resolved == [("htr", "5"), ("acm", "6")]
 
     blank_nodes: dict[str, list[SimpleNamespace] | None] = {"htr": None, "acm": []}
-    assert list(iter_heater_nodes(blank_nodes, fake_resolve)) == []
+    blank_details = (blank_nodes, {"htr": [], "acm": []}, fake_resolve)
+    assert list(iter_heater_nodes(blank_details, fake_resolve)) == []
 
     assert list(
-        iter_heater_nodes(nodes_by_type, fake_resolve, node_types=["", "acm"])
+        iter_heater_nodes(details, fake_resolve, node_types=["", "acm"])
     ) == [("acm", nodes_by_type["acm"][0], "2", "acm-2")]
 
 
@@ -514,13 +526,19 @@ def test_iter_boostable_heater_nodes_filters_support_and_types() -> None:
     def resolve(node_type: str, addr: str) -> str:
         return f"{node_type}-{addr}"
 
-    yielded = list(iter_boostable_heater_nodes(nodes_by_type, resolve))
+    details = (
+        nodes_by_type,
+        {"htr": ["1", "2"], "acm": ["3"], "thm": ["4"]},
+        resolve,
+    )
+
+    yielded = list(iter_boostable_heater_nodes(details, resolve))
     assert sorted((node_type, addr) for node_type, _node, addr, _ in yielded) == sorted(
         [("htr", "1"), ("acm", "3")]
     )
 
     accumulators_only = list(
-        iter_boostable_heater_nodes(nodes_by_type, resolve, accumulators_only=True)
+        iter_boostable_heater_nodes(details, resolve, accumulators_only=True)
     )
     assert [(node_type, addr) for node_type, _node, addr, _ in accumulators_only] == [
         ("acm", "3")
@@ -529,7 +547,7 @@ def test_iter_boostable_heater_nodes_filters_support_and_types() -> None:
     assert (
         list(
             iter_boostable_heater_nodes(
-                nodes_by_type,
+                details,
                 resolve,
                 node_types=["htr"],
                 accumulators_only=True,
