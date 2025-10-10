@@ -754,6 +754,14 @@ def _extract_inventory(entry_data: Mapping[str, Any] | None) -> Inventory | None
     return None
 
 
+def resolve_entry_inventory(
+    entry_data: Mapping[str, Any] | None,
+) -> Inventory | None:
+    """Return the shared inventory stored alongside a config entry."""
+
+    return _extract_inventory(entry_data)
+
+
 def heater_platform_details_for_entry(
     entry_data: Mapping[str, Any] | None,
     *,

@@ -227,7 +227,8 @@ def test_heater_climate_entity_normalizes_node_type(
 
 
 def test_async_setup_entry_creates_entities(
-    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory]
+    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def _run() -> None:
         _reset_environment()
@@ -282,9 +283,23 @@ def test_async_setup_entry_creates_entities(
         entity_platform_module._set_current_platform(platform)
 
         entry = types.SimpleNamespace(entry_id=entry_id)
+        calls: list[Mapping[str, Any] | None] = []
+
+        original_resolver = climate_module.resolve_entry_inventory
+
+        def _record_inventory(entry_data: Mapping[str, Any] | None) -> Inventory | None:
+            calls.append(entry_data)
+            return original_resolver(entry_data)
+
+        monkeypatch.setattr(
+            climate_module,
+            "resolve_entry_inventory",
+            _record_inventory,
+        )
         await async_setup_entry(hass, entry, _async_add_entities)
 
         assert len(added) == 3
+        assert calls and calls[0] is hass.data[DOMAIN][entry_id]
         entities_by_addr = {entity._addr: entity for entity in added}
         assert set(entities_by_addr) == {"A1", "B2", "C3"}
         assert isinstance(entities_by_addr["A1"], HeaterClimateEntity)
@@ -1943,7 +1958,9 @@ def test_commit_write_runs_optimistic_and_fallback() -> None:
     asyncio.run(_run())
 
 
-def test_async_setup_entry_without_inventory_skips_entities() -> None:
+def test_async_setup_entry_without_inventory_skips_entities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     async def _run() -> None:
         _reset_environment()
         hass = HomeAssistant()
@@ -1976,18 +1993,31 @@ def test_async_setup_entry_without_inventory_skips_entities() -> None:
         def _async_add_entities(entities: list[HeaterClimateEntity]) -> None:
             added.extend(entities)
 
+        calls: list[Mapping[str, Any] | None] = []
+
+        def _missing_inventory(entry_data: Mapping[str, Any] | None) -> Inventory | None:
+            calls.append(entry_data)
+            return None
+
+        monkeypatch.setattr(
+            climate_module,
+            "resolve_entry_inventory",
+            _missing_inventory,
+        )
         await async_setup_entry(hass, entry, _async_add_entities)
 
         assert added == []
         record_after = hass.data[DOMAIN][entry.entry_id]
         assert "inventory" not in record_after
         assert "node_inventory" not in record_after
+        assert calls and calls[0] is record
 
     asyncio.run(_run())
 
 
 def test_async_setup_entry_reuses_coordinator_inventory(
-    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory]
+    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def _run() -> None:
         _reset_environment()
@@ -2018,10 +2048,22 @@ def test_async_setup_entry_reuses_coordinator_inventory(
         def _async_add_entities(entities: list[HeaterClimateEntity]) -> None:
             added.extend(entities)
 
+        calls: list[Mapping[str, Any] | None] = []
+
+        def _reuse_inventory(entry_data: Mapping[str, Any] | None) -> Inventory | None:
+            calls.append(entry_data)
+            return inventory
+
+        monkeypatch.setattr(
+            climate_module,
+            "resolve_entry_inventory",
+            _reuse_inventory,
+        )
         await async_setup_entry(hass, entry, _async_add_entities)
 
         assert len(added) == 1
         assert "inventory" not in hass.data[DOMAIN][entry.entry_id]
+        assert calls and calls[0] is record
 
     asyncio.run(_run())
 
