@@ -21,10 +21,9 @@ from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from custom_components.termoweb import (
     identifiers as identifiers_module,
     inventory as inventory_module,
-    nodes as nodes_module,
 )
 from custom_components.termoweb.energy import _normalize_heater_sources
-from custom_components.termoweb.installation import InstallationSnapshot
+from custom_components.termoweb.inventory import HEATER_NODE_TYPES
 
 from conftest import _install_stubs
 
@@ -2167,15 +2166,17 @@ def test_import_energy_history_requested_map_filters(
             ]
         )
 
-        snapshot = InstallationSnapshot(
+        raw_nodes = {
+            "nodes": [
+                {"type": "htr", "addr": "A"},
+                {"type": "acm", "addr": "B"},
+                {"type": "pmo", "addr": "ignored"},
+            ]
+        }
+        snapshot = types.SimpleNamespace(
             dev_id="dev",
-            raw_nodes={
-                "nodes": [
-                    {"type": "htr", "addr": "A"},
-                    {"type": "acm", "addr": "B"},
-                    {"type": "pmo", "addr": "ignored"},
-                ]
-            },
+            raw_nodes=raw_nodes,
+            inventory=list(inventory_module.build_node_inventory(raw_nodes)),
         )
         hass.data[const.DOMAIN][entry.entry_id] = {
             "client": client,
@@ -2352,7 +2353,7 @@ def test_import_energy_history_resets_requested_progress(
                     "known_types": None if known_types is None else set(known_types),
                 }
             )
-            assert known_types == nodes_module.HEATER_NODE_TYPES
+            assert known_types == HEATER_NODE_TYPES
             return ({"pmo": ["X"]}, set())
 
         monkeypatch.setattr(
@@ -2389,7 +2390,7 @@ def test_import_energy_history_resets_requested_progress(
 
         assert entry.options[energy_mod.OPTION_ENERGY_HISTORY_PROGRESS] == {}
         assert helper_calls
-        assert helper_calls[0]["known_types"] == nodes_module.HEATER_NODE_TYPES
+        assert helper_calls[0]["known_types"] == HEATER_NODE_TYPES
 
     asyncio.run(_run())
 

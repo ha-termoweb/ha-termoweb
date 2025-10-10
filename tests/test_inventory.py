@@ -9,7 +9,6 @@ from typing import Any, Iterable, List, Mapping
 import pytest
 
 import custom_components.termoweb.inventory as inventory_module
-from custom_components.termoweb.installation import InstallationSnapshot
 from custom_components.termoweb.inventory import (
     Inventory,
     Node,
@@ -427,7 +426,12 @@ def test_resolve_record_inventory_falls_back_to_snapshot() -> None:
     """Snapshots should be converted into inventory containers when needed."""
 
     raw_nodes = {"nodes": [{"type": "htr", "addr": "2"}]}
-    snapshot = InstallationSnapshot(dev_id="snapshot-dev", raw_nodes=raw_nodes)
+    snapshot_nodes = inventory_module.build_node_inventory(raw_nodes)
+    snapshot = SimpleNamespace(
+        dev_id="snapshot-dev",
+        raw_nodes=raw_nodes,
+        inventory=list(snapshot_nodes),
+    )
     record: dict[str, Any] = {"snapshot": snapshot}
 
     resolution = inventory_module.resolve_record_inventory(record)

@@ -15,9 +15,7 @@ from conftest import _install_stubs
 _install_stubs()
 
 import custom_components.termoweb.coordinator as coordinator_module
-import custom_components.termoweb.installation as installation_module
 import custom_components.termoweb.inventory as inventory_module
-import custom_components.termoweb.nodes as nodes_module
 from custom_components.termoweb.inventory import (
     AccumulatorNode,
     _existing_nodes_map,
@@ -70,7 +68,7 @@ def _make_state_coordinator(
     """Construct a coordinator with predictable defaults for tests."""
 
     payload: Mapping[str, Any] | None = nodes if isinstance(nodes, Mapping) else None
-    node_list: Iterable[nodes_module.Node] | None = None
+    node_list: Iterable[inventory_module.Node] | None = None
     try:
         node_list = list(build_node_inventory(nodes))
     except ValueError:
@@ -414,13 +412,6 @@ def test_node_init_uses_normalization_helpers() -> None:
     )
     assert node.addr == normalize_node_addr(" 42 ")
     assert node.name == "Normalised"
-
-
-def test_ensure_node_inventory_sets_empty_cache() -> None:
-    record: dict[str, object] = {}
-    result = nodes_module.ensure_node_inventory(record)
-    assert result == []
-    assert record["node_inventory"] == []
 def test_heater_sample_subscription_targets_orders_types() -> None:
     targets = heater_sample_subscription_targets({"acm": ["2"], "htr": ["1", "3"]})
 
