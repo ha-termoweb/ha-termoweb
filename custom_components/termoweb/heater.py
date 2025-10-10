@@ -22,13 +22,13 @@ from .boost import (
 )
 from .const import DOMAIN, signal_ws_data
 from .inventory import (
+    HEATER_NODE_TYPES,
     Inventory,
     Node,
     build_node_inventory,
     normalize_node_addr,
     normalize_node_type,
 )
-from .nodes import HEATER_NODE_TYPES
 
 _LOGGER = logging.getLogger(__name__)
 
