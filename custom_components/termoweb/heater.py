@@ -19,6 +19,7 @@ from .boost import (
     coerce_boost_bool,
     coerce_boost_minutes,
     coerce_boost_remaining_minutes,
+    supports_boost,
 )
 from .const import DOMAIN, signal_ws_data
 from .inventory import (
@@ -188,33 +189,6 @@ def iter_boost_button_metadata() -> Iterator[BoostButtonMetadata]:
     """Yield the metadata describing boost helper buttons."""
 
     yield from BOOST_BUTTON_METADATA
-
-
-def supports_boost(node: Any) -> bool:
-    """Return ``True`` when ``node`` exposes boost controls."""
-
-    candidate = getattr(node, "supports_boost", None)
-
-    if isinstance(candidate, bool):
-        return candidate
-
-    if callable(candidate):
-        try:
-            candidate = candidate()
-        except Exception:  # noqa: BLE001 - defensive
-            node_ref = getattr(node, "addr", node)
-            _LOGGER.debug(
-                "Ignoring boost support probe failure for node %r",
-                node_ref,
-                exc_info=True,
-            )
-            return False
-
-    result = coerce_boost_bool(candidate)
-    if result is not None:
-        return result
-
-    return False
 
 
 def iter_boostable_heater_nodes(

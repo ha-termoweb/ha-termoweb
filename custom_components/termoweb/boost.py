@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+import logging
 from typing import Any, Callable, Iterator
 
 from homeassistant.util import dt as dt_util
@@ -16,6 +17,9 @@ from .inventory import (
     normalize_node_addr,
     normalize_node_type,
 )
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def coerce_int(value: Any) -> int | None:
@@ -104,6 +108,33 @@ def coerce_boost_remaining_minutes(value: Any) -> int | None:
         return None
 
     return candidate
+
+
+def supports_boost(node: Any) -> bool:
+    """Return ``True`` when ``node`` exposes boost controls."""
+
+    candidate = getattr(node, "supports_boost", None)
+
+    if isinstance(candidate, bool):
+        return candidate
+
+    if callable(candidate):
+        try:
+            candidate = candidate()
+        except Exception:  # noqa: BLE001 - defensive
+            node_ref = getattr(node, "addr", node)
+            _LOGGER.debug(
+                "Ignoring boost support probe failure for node %r",
+                node_ref,
+                exc_info=True,
+            )
+            return False
+
+    result = coerce_boost_bool(candidate)
+    if result is not None:
+        return result
+
+    return False
 
 
 def resolve_boost_end_from_fields(
@@ -225,22 +256,11 @@ def iter_inventory_heater_metadata(
                 node = node_lookup.get(addr)
                 if node is not None:
                     name = resolve_name(node_type, addr)
-                    candidate = getattr(node, "supports_boost", None)
-                    if callable(candidate):
-                        try:
-                            result = candidate()
-                        except Exception:  # noqa: BLE001 - defensive  # pragma: no cover - defensive
-                            result = None
-                    else:
-                        result = candidate  # pragma: no cover - defensive
-                    supports = coerce_boost_bool(result)
-                    supports_boost = bool(supports) if supports is not None else False
-
                     yield InventoryHeaterMetadata(
                         node_type=node_type,
                         addr=addr,
                         name=name,
                         node=node,
-                        supports_boost=supports_boost,
+                        supports_boost=supports_boost(node),
                     )
 
