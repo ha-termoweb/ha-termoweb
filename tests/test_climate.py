@@ -67,16 +67,18 @@ def _make_coordinator(
     inventory_payload: Mapping[str, Any] | None = None,
     inventory_nodes: Iterable[Any] | None = None,
 ) -> FakeCoordinator:
+    normalised = FakeCoordinator._normalise_device_record(record)
+
     return FakeCoordinator(
         hass,
         client=client,
         dev_id=dev_id,
-        dev=record,
-        nodes=record.get("nodes", {}),
+        dev=normalised,
+        nodes=normalised.get("nodes", {}),
         inventory=inventory,
         inventory_payload=inventory_payload,
         inventory_nodes=inventory_nodes,
-        data={dev_id: record},
+        data={dev_id: normalised},
     )
 
 

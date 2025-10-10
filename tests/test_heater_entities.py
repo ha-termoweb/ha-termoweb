@@ -370,9 +370,8 @@ def test_boost_entities_expose_state(monkeypatch: pytest.MonkeyPatch) -> None:
     coordinator = SimpleNamespace(
         data={
             "dev": {
-                "nodes_by_type": {
-                    "acm": {"settings": {"1": settings}},
-                }
+                "settings": {"acm": {"1": settings}},
+                "addresses_by_type": {"acm": ["1"]},
             }
         },
         resolve_boost_end=_resolver,
@@ -431,9 +430,8 @@ def test_boost_entities_handle_missing_data() -> None:
     coordinator = SimpleNamespace(
         data={
             "dev": {
-                "nodes_by_type": {
-                    "acm": {"settings": {"1": {}}},
-                }
+                "settings": {"acm": {"1": {}}},
+                "addresses_by_type": {"acm": ["1"]},
             }
         }
     )
@@ -483,7 +481,12 @@ def test_boost_entities_handle_missing_data() -> None:
 
 def test_boost_end_sensor_returns_base_state_when_available() -> None:
     coordinator = SimpleNamespace(
-        data={"dev": {"nodes_by_type": {"acm": {"settings": {"1": {}}}}}}
+        data={
+            "dev": {
+                "settings": {"acm": {"1": {}}},
+                "addresses_by_type": {"acm": ["1"]},
+            }
+        }
     )
 
     sensor = HeaterBoostEndSensor(
@@ -512,7 +515,12 @@ def test_boost_end_sensor_returns_base_state_when_available() -> None:
 
 def test_boost_end_sensor_handles_isoformat_error() -> None:
     coordinator = SimpleNamespace(
-        data={"dev": {"nodes_by_type": {"acm": {"settings": {"1": {}}}}}}
+        data={
+            "dev": {
+                "settings": {"acm": {"1": {}}},
+                "addresses_by_type": {"acm": ["1"]},
+            }
+        }
     )
 
     sensor = HeaterBoostEndSensor(
