@@ -867,15 +867,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             coordinator_inventory = getattr(self._coordinator, "_inventory", None)
             coordinator_nodes: Iterable[Any] | None = None
             if isinstance(coordinator_inventory, Inventory):
-                if inventory_container is None:
-                    inventory_container = coordinator_inventory
                 coordinator_nodes = coordinator_inventory.nodes
-            else:
-                node_inventory_attr = getattr(self._coordinator, "node_inventory", None)
-                if isinstance(node_inventory_attr, Iterable) and not isinstance(
-                    node_inventory_attr, (str, bytes)
-                ):
-                    coordinator_nodes = tuple(node_inventory_attr)
 
             nodes_payload: Any | None
             if isinstance(resolved_nodes, Mapping):
@@ -883,7 +875,12 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             else:
                 nodes_payload = record_mapping.get("nodes")
 
-            if inventory_container is None:
+            should_resolve = inventory_container is None and (
+                nodes_payload is not None
+                or not isinstance(coordinator_inventory, Inventory)
+            )
+
+            if should_resolve:
                 resolution = resolve_record_inventory(
                     record_mapping,
                     dev_id=self.dev_id,
@@ -891,6 +888,11 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     node_list=coordinator_nodes,
                 )
                 inventory_container = resolution.inventory
+
+            if inventory_container is None and isinstance(
+                coordinator_inventory, Inventory
+            ):
+                inventory_container = coordinator_inventory
 
             if not isinstance(inventory_container, Inventory):
                 _LOGGER.error(
