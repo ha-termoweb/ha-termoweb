@@ -17,9 +17,7 @@ from .api import RESTClient
 from .const import DOMAIN
 from .identifiers import build_heater_energy_unique_id
 from .inventory import (
-    HEATER_NODE_TYPES,
-    normalize_node_addr,
-    normalize_node_type,
+    normalize_heater_addresses,
     parse_heater_energy_unique_id,
     resolve_record_inventory,
 )
@@ -138,39 +136,8 @@ def _normalize_heater_sources(
 ) -> dict[str, list[str]]:
     """Return canonical heater node address map for ``addrs``."""
 
-    cleaned_map: dict[str, list[str]] = {}
-    if addrs is None:
-        sources: Iterable[tuple[Any, Iterable[Any] | Any]] = []
-    elif isinstance(addrs, Mapping):
-        sources = addrs.items()
-    else:
-        sources = [("htr", addrs)]
-
-    for raw_type, values in sources:
-        node_type = normalize_node_type(raw_type, use_default_when_falsey=True)
-        if not node_type:
-            continue
-        if node_type in {"heater", "heaters", "htr"}:
-            node_type = "htr"
-        if node_type not in HEATER_NODE_TYPES:
-            continue
-
-        if isinstance(values, (str, bytes)) or not isinstance(values, Iterable):
-            candidates = [values]
-        else:
-            candidates = list(values)
-
-        bucket = cleaned_map.setdefault(node_type, [])
-        seen = set(bucket)
-        for candidate in candidates:
-            addr = normalize_node_addr(candidate, use_default_when_falsey=True)
-            if not addr or addr in seen:
-                continue
-            seen.add(addr)
-            bucket.append(addr)
-
-    cleaned_map.setdefault("htr", [])
-    return cleaned_map
+    normalized_map, _aliases = normalize_heater_addresses(addrs)
+    return normalized_map
 
 
 def _iso_date(ts: int) -> str:
