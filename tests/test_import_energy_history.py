@@ -11,7 +11,7 @@ import logging
 import sys
 import time
 import types
-from typing import Any
+from typing import Any, Iterable, Mapping
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -637,6 +637,36 @@ def test_normalize_heater_sources_deduplicates_entries() -> None:
     )
 
     assert mapping == {"htr": ["1"], "acm": ["2"]}
+
+
+def test_normalize_heater_sources_uses_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Wrapper should delegate to inventory normalization helpers."""
+
+    sample = {"heater": ["1"]}
+
+    expected_map = {"htr": ["1"]}
+    expected_aliases = {"heater": "htr"}
+
+    calls: list[Mapping[Any, Iterable[Any]] | Iterable[Any] | None] = []
+
+    def _fake_normalize(
+        addrs: Mapping[Any, Iterable[Any]] | Iterable[Any] | None,
+    ) -> tuple[dict[str, list[str]], dict[str, str]]:
+        calls.append(addrs)
+        assert addrs is sample
+        return expected_map, expected_aliases
+
+    monkeypatch.setattr(
+        "custom_components.termoweb.energy.normalize_heater_addresses",
+        _fake_normalize,
+    )
+
+    mapping = _normalize_heater_sources(sample)
+
+    assert mapping is expected_map
+    assert calls == [sample]
 
 
 def test_store_statistics_external_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
