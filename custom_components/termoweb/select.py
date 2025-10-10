@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Mapping
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.helpers.entity import EntityCategory
@@ -15,7 +15,9 @@ from .heater import (
     BOOST_DURATION_OPTIONS,
     DEFAULT_BOOST_DURATION,
     HeaterNodeBase,
+    HeaterPlatformDetails,
     get_boost_runtime_minutes,
+    heater_platform_details_from_inventory,
     heater_platform_details_for_entry,
     iter_boostable_heater_nodes,
     log_skipped_nodes,
@@ -23,8 +25,24 @@ from .heater import (
     set_boost_runtime_minutes,
 )
 from .identifiers import build_heater_entity_unique_id
+from .inventory import Inventory
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _resolve_inventory(entry_data: Mapping[str, Any]) -> Inventory | None:
+    """Return the Inventory attached to ``entry_data`` when available."""
+
+    candidate = entry_data.get("inventory")
+    if isinstance(candidate, Inventory):
+        return candidate
+
+    coordinator = entry_data.get("coordinator")
+    candidate = getattr(coordinator, "inventory", None)
+    if isinstance(candidate, Inventory):
+        return candidate
+
+    return None
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -33,15 +51,26 @@ async def async_setup_entry(hass, entry, async_add_entities):
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
-    heater_details = heater_platform_details_for_entry(
-        data,
-        default_name_simple=lambda addr: f"Heater {addr}",
+    inventory = _resolve_inventory(data)
+    default_name = lambda addr: f"Heater {addr}"
+    if inventory is not None:
+        heater_details = heater_platform_details_from_inventory(
+            inventory,
+            default_name_simple=default_name,
+        )
+    else:
+        heater_details = heater_platform_details_for_entry(
+            data,
+            default_name_simple=default_name,
+        )
+    _, _, resolve_name = heater_details
+    metadata_source: Inventory | HeaterPlatformDetails = (
+        inventory if inventory is not None else heater_details
     )
-    nodes_by_type, _, resolve_name = heater_details
 
     new_entities: list[AccumulatorBoostDurationSelect] = []
     for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
-        heater_details,
+        metadata_source,
         resolve_name,
         accumulators_only=True,
     ):
@@ -63,7 +92,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             )
         )
 
-    log_skipped_nodes("select", heater_details, logger=_LOGGER)
+    log_skipped_nodes("select", metadata_source, logger=_LOGGER)
 
     if new_entities:
         _LOGGER.debug("Adding %d TermoWeb boost selectors", len(new_entities))

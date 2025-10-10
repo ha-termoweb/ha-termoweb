@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Mapping
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
@@ -18,14 +18,32 @@ from .coordinator import StateCoordinator
 from .entity import GatewayDispatcherEntity
 from .heater import (
     HeaterNodeBase,
+    HeaterPlatformDetails,
+    heater_platform_details_from_inventory,
     heater_platform_details_for_entry,
     iter_boostable_heater_nodes,
     log_skipped_nodes,
 )
 from .identifiers import build_heater_entity_unique_id
+from .inventory import Inventory
 from .utils import build_gateway_device_info
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _resolve_inventory(entry_data: Mapping[str, Any]) -> Inventory | None:
+    """Return the Inventory associated with ``entry_data`` when present."""
+
+    candidate = entry_data.get("inventory")
+    if isinstance(candidate, Inventory):
+        return candidate
+
+    coordinator = entry_data.get("coordinator")
+    candidate = getattr(coordinator, "inventory", None)
+    if isinstance(candidate, Inventory):
+        return candidate
+
+    return None
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -35,15 +53,26 @@ async def async_setup_entry(hass, entry, async_add_entities):
     dev_id = data["dev_id"]
     gateway = GatewayOnlineBinarySensor(coord, entry.entry_id, dev_id)
 
-    heater_details = heater_platform_details_for_entry(
-        data,
-        default_name_simple=lambda addr: f"Node {addr}",
+    inventory = _resolve_inventory(data)
+    default_name = lambda addr: f"Node {addr}"
+    if inventory is not None:
+        heater_details = heater_platform_details_from_inventory(
+            inventory,
+            default_name_simple=default_name,
+        )
+    else:
+        heater_details = heater_platform_details_for_entry(
+            data,
+            default_name_simple=default_name,
+        )
+    _, _, resolve_name = heater_details
+    metadata_source: Inventory | HeaterPlatformDetails = (
+        inventory if inventory is not None else heater_details
     )
-    nodes_by_type, _, resolve_name = heater_details
 
     boost_entities: list[BinarySensorEntity] = []
     for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
-        heater_details,
+        metadata_source,
         resolve_name,
     ):
         unique_id = build_heater_entity_unique_id(
@@ -70,7 +99,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             "Adding %d TermoWeb heater boost binary sensors", len(boost_entities)
         )
 
-    log_skipped_nodes("binary_sensor", heater_details, logger=_LOGGER)
+    log_skipped_nodes("binary_sensor", metadata_source, logger=_LOGGER)
     async_add_entities([gateway, *boost_entities])
 
 

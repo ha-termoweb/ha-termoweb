@@ -46,17 +46,28 @@ _WRITE_DEBOUNCE = 0.2
 _WS_ECHO_FALLBACK_REFRESH = 4.0
 
 
+def _resolve_inventory(entry_data: Mapping[str, Any]) -> Inventory | None:
+    """Return the Inventory attached to ``entry_data`` when available."""
+
+    candidate = entry_data.get("inventory")
+    if isinstance(candidate, Inventory):
+        return candidate
+
+    coordinator = entry_data.get("coordinator")
+    candidate = getattr(coordinator, "inventory", None)
+    if isinstance(candidate, Inventory):
+        return candidate
+
+    return None
+
+
 async def async_setup_entry(hass, entry, async_add_entities):
     """Discover heater nodes and create climate entities."""
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
 
-    inventory: Inventory | None = data.get("inventory")
-    if not isinstance(inventory, Inventory):
-        candidate = getattr(coordinator, "inventory", None)
-        if isinstance(candidate, Inventory):
-            inventory = candidate
+    inventory = _resolve_inventory(data)
 
 
     default_name_simple = lambda addr: f"Heater {addr}"
