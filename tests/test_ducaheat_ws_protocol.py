@@ -390,6 +390,27 @@ def test_is_running_reflects_task_state(monkeypatch: pytest.MonkeyPatch) -> None
     assert client.is_running() is False
 
 
+def test_extract_dev_data_payload_variants(monkeypatch: pytest.MonkeyPatch) -> None:
+    """dev_data payload extraction should walk nested containers safely."""
+
+    client = _make_client(monkeypatch)
+    nodes = {"nodes": {"htr": {}}}
+    wrapper = {"data": nodes}
+
+    result = client._extract_dev_data_payload([wrapper, wrapper])
+    assert result is nodes
+
+    list_wrapper = [[nodes]]
+    result = client._extract_dev_data_payload(list_wrapper)
+    assert result is nodes
+
+    tuple_wrapper = ({"body": nodes},)
+    result = client._extract_dev_data_payload([tuple_wrapper])
+    assert result is nodes
+
+    assert client._extract_dev_data_payload(["not json"]) is None
+
+
 @pytest.mark.asyncio
 async def test_connect_once_open_failures(monkeypatch: pytest.MonkeyPatch) -> None:
     """Different handshake failures should surface as HandshakeError instances."""
@@ -577,6 +598,49 @@ async def test_read_loop_updates_ws_state_on_dev_data(
     assert not update_kwargs
     assert update_args[0] == {"htr": {"status": {"1": {"power": 1}}}}
     assert isinstance(update_args[1], Inventory)
+
+
+@pytest.mark.asyncio
+async def test_read_loop_handles_stringified_dev_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The client should decode string-wrapped dev_data payloads."""
+
+    client = _make_client(monkeypatch)
+    monkeypatch.setattr(client, "_subscribe_feeds", AsyncMock(return_value=1))
+    dispatched: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        client, "_dispatch_nodes", lambda payload: dispatched.append(payload)
+    )
+
+    nodes = {"htr": {"status": {"1": {"power": 5}}}}
+    wrapped = json.dumps({"nodes": nodes}, separators=(",", ":"))
+    payload = json.dumps(["dev_data", wrapped], separators=(",", ":"))
+
+    class DevDataWS:
+        def __init__(self, frame: str) -> None:
+            self._frame = frame
+            self.closed = False
+
+        def __aiter__(self) -> Any:
+            async def _iterate() -> AsyncIterator[Any]:
+                yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data=self._frame)
+
+            return _iterate()
+
+    frame = f"42{client._namespace},{payload}"
+    client._ws = DevDataWS(frame)  # type: ignore[assignment]
+
+    await client._read_loop_ws()
+
+    assert isinstance(client._nodes_raw, dict)
+    assert client._nodes_raw["htr"]["status"]["1"]["power"] == 5
+    assert dispatched
+    assert dispatched[-1]["nodes"]["htr"]["status"]["1"]["power"] == 5
+    client._subscribe_feeds.assert_awaited_once()
+    await_args = client._subscribe_feeds.await_args_list
+    assert await_args and isinstance(await_args[0].args[0], Mapping)
+    assert await_args[0].args[0]["htr"]["status"]["1"]["power"] == 5
 
 
 @pytest.mark.asyncio

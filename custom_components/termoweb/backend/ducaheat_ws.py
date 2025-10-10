@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from copy import deepcopy
 import gzip
 import json
@@ -488,10 +489,11 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                             await self._emit_sio("message", "pong")
                             break
 
-                        if evt == "dev_data" and args and isinstance(args[0], dict):
+                        if evt == "dev_data" and args:
+                            payload_map = self._extract_dev_data_payload(args)
                             nodes = (
-                                args[0].get("nodes")
-                                if isinstance(args[0], dict)
+                                payload_map.get("nodes")
+                                if isinstance(payload_map, Mapping)
                                 else None
                             )
                             if isinstance(nodes, dict):
@@ -591,6 +593,39 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             if self._keepalive_task is task:
                 self._keepalive_task = None
             _LOGGER.debug("WS (ducaheat): keepalive loop stopped")
+
+    def _extract_dev_data_payload(
+        self, args: Iterable[Any]
+    ) -> Mapping[str, Any] | None:
+        """Return the mapping payload embedded in a dev_data Socket.IO event."""
+
+        queue: deque[Any] = deque(args)
+        seen: set[int] = set()
+        while queue:
+            item = queue.popleft()
+            marker = id(item)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            if isinstance(item, Mapping):
+                nodes = item.get("nodes") if "nodes" in item else None
+                if isinstance(nodes, Mapping):
+                    return item
+                for key in ("data", "payload", "body"):
+                    nested = item.get(key)
+                    if nested is not None:
+                        queue.append(nested)
+                continue
+            if isinstance(item, str):
+                try:
+                    decoded = json.loads(item)
+                except Exception:  # pragma: no cover - defensive
+                    continue
+                queue.append(decoded)
+                continue
+            if isinstance(item, (list, tuple)):
+                queue.extend(item)
+        return None
 
     def _log_nodes_summary(self, nodes: Mapping[str, Any]) -> None:
         if not _LOGGER.isEnabledFor(logging.INFO):
