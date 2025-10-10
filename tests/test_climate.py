@@ -37,6 +37,18 @@ HeaterClimateEntity = climate_module.HeaterClimateEntity
 async_setup_entry = climate_module.async_setup_entry
 
 
+@pytest.fixture
+def climate_inventory(
+    inventory_builder: Callable[[str, Mapping[str, Any] | None, Iterable[Any] | None], Inventory]
+) -> Callable[[str, Mapping[str, Any]], Inventory]:
+    """Return helper that constructs inventory containers for climate tests."""
+
+    def _factory(dev_id: str, raw_nodes: Mapping[str, Any]) -> Inventory:
+        return inventory_builder(dev_id, raw_nodes, build_node_inventory(raw_nodes))
+
+    return _factory
+
+
 def _reset_environment() -> None:
     _install_stubs()
     entity_platform_module._set_current_platform(EntityPlatform())
@@ -66,12 +78,6 @@ def _make_coordinator(
         inventory_nodes=inventory_nodes,
         data={dev_id: record},
     )
-
-
-def _inventory(dev_id: str, raw_nodes: Mapping[str, Any]) -> Inventory:
-    """Create an :class:`Inventory` instance for ``raw_nodes``."""
-
-    return Inventory(dev_id, raw_nodes, build_node_inventory(raw_nodes))
 
 
 # -------------------- Helpers for tests --------------------
@@ -134,7 +140,7 @@ def test_heater_climate_entity_normalizes_node_type(
 
 
 def test_async_setup_entry_creates_entities(
-    inventory_builder: Callable[[str, Mapping[str, Any] | None, Iterable[Any] | None], Any]
+    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory]
 ) -> None:
     async def _run() -> None:
         _reset_environment()
@@ -149,7 +155,7 @@ def test_async_setup_entry_creates_entities(
                 {"type": "other", "addr": "X"},
             ]
         }
-        inventory = _inventory(dev_id, nodes)
+        inventory = climate_inventory(dev_id, nodes)
         coordinator_data = {
             dev_id: {
                 "nodes": nodes,
@@ -167,11 +173,6 @@ def test_async_setup_entry_creates_entities(
                 "version": "3.1.4",
             }
         }
-        coordinator_inventory = inventory_builder(
-            dev_id,
-            nodes,
-            build_node_inventory(nodes),
-        )
         coordinator = _make_coordinator(
             hass,
             dev_id,
@@ -188,7 +189,6 @@ def test_async_setup_entry_creates_entities(
                     "client": AsyncMock(),
                     "nodes": nodes,
                     "inventory": inventory,
-                    "node_inventory": list(inventory.nodes),
                     "version": "3.1.4",
                     "brand": BRAND_TERMOWEB,
                 }
@@ -330,7 +330,9 @@ def test_accumulator_preferred_boost_defaults_without_hass() -> None:
 
 
 def test_async_setup_entry_default_names_and_invalid_nodes(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory],
 ) -> None:
     async def _run() -> None:
         _reset_environment()
@@ -346,7 +348,7 @@ def test_async_setup_entry_default_names_and_invalid_nodes(
                 {"type": "htr", "addr": " "},
             ]
         }
-        inventory = _inventory(dev_id, raw_nodes)
+        inventory = climate_inventory(dev_id, raw_nodes)
 
         coordinator_data = {
             dev_id: {
@@ -371,7 +373,6 @@ def test_async_setup_entry_default_names_and_invalid_nodes(
                     "client": AsyncMock(),
                     "nodes": raw_nodes,
                     "inventory": inventory,
-                    "node_inventory": list(inventory.nodes),
                 }
             }
         }
@@ -423,7 +424,9 @@ def test_async_setup_entry_default_names_and_invalid_nodes(
     asyncio.run(_run())
 
 
-def test_async_setup_entry_skips_blank_addresses() -> None:
+def test_async_setup_entry_skips_blank_addresses(
+    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory]
+) -> None:
     async def _run() -> None:
         _reset_environment()
         hass = HomeAssistant()
@@ -435,7 +438,7 @@ def test_async_setup_entry_skips_blank_addresses() -> None:
                 {"type": "htr", "addr": "7"},
             ]
         }
-        inventory = _inventory(dev_id, raw_nodes)
+        inventory = climate_inventory(dev_id, raw_nodes)
         coordinator_data = {"nodes": raw_nodes, "htr": {"settings": {}}}
         coordinator = _make_coordinator(
             hass,
@@ -453,7 +456,6 @@ def test_async_setup_entry_skips_blank_addresses() -> None:
                     "client": AsyncMock(),
                     "nodes": raw_nodes,
                     "inventory": inventory,
-                    "node_inventory": list(inventory.nodes),
                 }
             }
         }
@@ -472,14 +474,16 @@ def test_async_setup_entry_skips_blank_addresses() -> None:
     asyncio.run(_run())
 
 
-def test_async_setup_entry_creates_accumulator_entity() -> None:
+def test_async_setup_entry_creates_accumulator_entity(
+    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory]
+) -> None:
     async def _run() -> None:
         _reset_environment()
         hass = HomeAssistant()
         entry_id = "entry-acm"
         dev_id = "dev-acm"
         nodes = {"nodes": [{"type": "acm", "addr": "7", "name": "Store"}]}
-        inventory = _inventory(dev_id, nodes)
+        inventory = climate_inventory(dev_id, nodes)
         settings = {
             "mode": "boost",
             "state": "idle",
@@ -518,7 +522,6 @@ def test_async_setup_entry_creates_accumulator_entity() -> None:
                     "client": client,
                     "nodes": nodes,
                     "inventory": inventory,
-                    "node_inventory": list(inventory.nodes),
                     "brand": BRAND_DUCAHEAT,
                 }
             }
@@ -1858,7 +1861,7 @@ def test_commit_write_runs_optimistic_and_fallback() -> None:
     asyncio.run(_run())
 
 
-def test_async_setup_entry_rebuilds_inventory_when_missing() -> None:
+def test_async_setup_entry_without_inventory_skips_entities() -> None:
     async def _run() -> None:
         _reset_environment()
         hass = HomeAssistant()
@@ -1893,21 +1896,24 @@ def test_async_setup_entry_rebuilds_inventory_when_missing() -> None:
 
         await async_setup_entry(hass, entry, _async_add_entities)
 
-        assert len(added) == 2
-        stored_inventory = hass.data[DOMAIN][entry.entry_id]["node_inventory"]
-        assert [node.addr for node in stored_inventory] == ["11", "22"]
+        assert added == []
+        record_after = hass.data[DOMAIN][entry.entry_id]
+        assert "inventory" not in record_after
+        assert "node_inventory" not in record_after
 
     asyncio.run(_run())
 
 
-def test_async_setup_entry_reuses_coordinator_inventory() -> None:
+def test_async_setup_entry_reuses_coordinator_inventory(
+    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory]
+) -> None:
     async def _run() -> None:
         _reset_environment()
         hass = HomeAssistant()
         entry = types.SimpleNamespace(entry_id="entry-coord")
         dev_id = "dev-coord"
         raw_nodes = {"nodes": [{"type": "htr", "addr": "5"}]}
-        inventory = _inventory(dev_id, raw_nodes)
+        inventory = climate_inventory(dev_id, raw_nodes)
 
         coordinator = _make_coordinator(
             hass,
@@ -1933,15 +1939,12 @@ def test_async_setup_entry_reuses_coordinator_inventory() -> None:
         await async_setup_entry(hass, entry, _async_add_entities)
 
         assert len(added) == 1
-        stored = hass.data[DOMAIN][entry.entry_id]["inventory"]
-        assert stored is inventory
+        assert "inventory" not in hass.data[DOMAIN][entry.entry_id]
 
     asyncio.run(_run())
 
 
-def test_async_setup_entry_builds_inventory_from_node_list(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_async_setup_entry_ignores_cached_node_list() -> None:
     async def _run() -> None:
         _reset_environment()
         hass = HomeAssistant()
@@ -1949,16 +1952,6 @@ def test_async_setup_entry_builds_inventory_from_node_list(
         dev_id = "dev-list"
         raw_nodes = {"nodes": [{"type": "htr", "addr": "3", "name": "Three"}]}
         node_list = [types.SimpleNamespace(type="htr", addr="3", name="Three")]
-
-        captured: list[dict[str, Any]] = []
-        original_build = climate_module.build_node_inventory
-
-        def _capture(payload: Any) -> list[HeaterNode]:
-            if isinstance(payload, dict):
-                captured.append(payload)
-            return original_build(payload)
-
-        monkeypatch.setattr(climate_module, "build_node_inventory", _capture)
 
         coordinator = _make_coordinator(
             hass,
@@ -1983,14 +1976,13 @@ def test_async_setup_entry_builds_inventory_from_node_list(
 
         await async_setup_entry(hass, entry, _async_add_entities)
 
-        assert captured
+        assert not added
+        assert "node_inventory" in hass.data[DOMAIN][entry.entry_id]
 
     asyncio.run(_run())
 
 
-def test_async_setup_entry_handles_inventory_build_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_async_setup_entry_does_not_build_inventory_on_error() -> None:
     async def _run() -> None:
         _reset_environment()
         hass = HomeAssistant()
@@ -2013,11 +2005,6 @@ def test_async_setup_entry_handles_inventory_build_error(
         }
         hass.data = {DOMAIN: {entry.entry_id: record}}
 
-        def _raise(_value: Any) -> list[HeaterNode]:
-            raise ValueError("boom")
-
-        monkeypatch.setattr(climate_module, "build_node_inventory", _raise)
-
         added: list[HeaterClimateEntity] = []
 
         def _async_add_entities(entities: list[HeaterClimateEntity]) -> None:
@@ -2026,7 +2013,9 @@ def test_async_setup_entry_handles_inventory_build_error(
         await async_setup_entry(hass, entry, _async_add_entities)
 
         assert added == []
-        assert "inventory" not in hass.data[DOMAIN][entry.entry_id]
+        record_after = hass.data[DOMAIN][entry.entry_id]
+        assert "inventory" not in record_after
+        assert "node_inventory" not in record_after
 
     asyncio.run(_run())
 

@@ -33,7 +33,6 @@ from .identifiers import build_heater_entity_unique_id
 from .inventory import (
     HeaterNode,
     Inventory,
-    build_node_inventory,
     normalize_node_addr,
     normalize_node_type,
 )
@@ -54,57 +53,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
     dev_id = data["dev_id"]
 
     inventory: Inventory | None = data.get("inventory")
-    inventory_created = False
     if not isinstance(inventory, Inventory):
         candidate = getattr(coordinator, "inventory", None)
         if isinstance(candidate, Inventory):
             inventory = candidate
-        else:
-            raw_nodes = data.get("nodes")
-            if raw_nodes is None:
-                raw_nodes = getattr(coordinator, "nodes", None)
-            if raw_nodes is None:  # pragma: no cover - defensive
-                node_list = data.get("node_inventory") or getattr(
-                    coordinator, "node_inventory", None
-                )
-                if node_list:  # pragma: no cover - defensive
-                    nodes_payload = []
-                    for node in node_list:
-                        as_dict = getattr(node, "as_dict", None)
-                        if callable(as_dict):
-                            try:
-                                payload = as_dict()
-                            except Exception:  # noqa: BLE001 - defensive
-                                payload = None
-                            if isinstance(payload, dict):
-                                nodes_payload.append(dict(payload))
-                                continue
-                        nodes_payload.append(
-                            {
-                                "type": getattr(node, "type", None),
-                                "addr": getattr(node, "addr", None),
-                                "name": getattr(node, "name", None),
-                            }
-                        )
-                    raw_nodes = {"nodes": nodes_payload}
-            built_nodes: list[HeaterNode] = []
-            if raw_nodes is not None:
-                try:
-                    built_nodes = build_node_inventory(raw_nodes)
-                except ValueError:
-                    built_nodes = []
-            if built_nodes:
-                inventory = Inventory(dev_id, raw_nodes, built_nodes)
-                inventory_created = True
 
-    if isinstance(inventory, Inventory):
-        if inventory_created or "inventory" not in data:
-            data["inventory"] = inventory
-        if inventory_created or "node_inventory" not in data:
-            data["node_inventory"] = list(inventory.nodes)
-        nodes_by_type = inventory.nodes_by_type
-    else:
-        nodes_by_type = {}
+    nodes_by_type = inventory.nodes_by_type if isinstance(inventory, Inventory) else {}
 
     default_name_simple = lambda addr: f"Heater {addr}"
     new_entities: list[ClimateEntity] = []
