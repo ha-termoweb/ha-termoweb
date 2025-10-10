@@ -9,7 +9,13 @@ from typing import Any, Callable, Iterator
 
 from homeassistant.util import dt as dt_util
 
-from .inventory import Inventory, Node, normalize_node_addr, normalize_node_type
+from .inventory import (
+    Inventory,
+    Node,
+    heater_platform_details_from_inventory,
+    normalize_node_addr,
+    normalize_node_type,
+)
 
 
 def coerce_int(value: Any) -> int | None:
@@ -182,90 +188,59 @@ def iter_inventory_heater_metadata(
         return
 
     default_factory = default_name_simple or (lambda addr: f"Heater {addr}")
-    name_map = inventory.heater_name_map(default_factory)
-    explicit_names = inventory.explicit_heater_names
-
-    if isinstance(name_map, dict):
-        names_by_type = name_map.get("by_type", {})  # type: ignore[assignment]
-        legacy_names = name_map.get("htr", {})  # type: ignore[assignment]
-        name_lookup = name_map
-    else:  # pragma: no cover - defensive
-        names_by_type = {}
-        legacy_names = {}
-        name_lookup = {}
-
-    def _resolve_name(node_type: str, addr: str) -> str:
-        node_type_norm = normalize_node_type(
-            node_type,
-            use_default_when_falsey=True,
+    nodes_by_type, addresses_by_type, resolve_name = (
+        heater_platform_details_from_inventory(
+            inventory,
+            default_name_simple=default_factory,
         )
-        addr_norm = normalize_node_addr(
-            addr,
-            use_default_when_falsey=True,
-        )
-        if not node_type_norm or not addr_norm:
-            return default_factory(addr_norm or addr)  # pragma: no cover - defensive
+    )
 
-        default_simple = default_factory(addr_norm)
-
-        def _candidate(value: Any) -> str | None:
-            if not isinstance(value, str) or not value:
-                return None
-            if (
-                node_type_norm == "acm"
-                and value == default_simple
-                and (node_type_norm, addr_norm) not in explicit_names
-            ):
-                return None
-            return value
-
-        per_type = (
-            names_by_type.get(node_type_norm, {})
-            if isinstance(names_by_type, dict)
-            else {}
-        )
-        for candidate in (
-            per_type.get(addr_norm) if isinstance(per_type, dict) else None,
-            name_lookup.get((node_type_norm, addr_norm)),
-            legacy_names.get(addr_norm) if isinstance(legacy_names, dict) else None,
-        ):
-            resolved = _candidate(candidate)
-            if resolved:
-                return resolved
-
-        if node_type_norm == "acm":
-            return f"Accumulator {addr_norm}"
-        return default_simple  # pragma: no cover - defensive
-
-    for node in inventory.heater_nodes:
+    for node_type_raw, addresses in addresses_by_type.items():
         node_type = normalize_node_type(
-            getattr(node, "type", None),
+            node_type_raw,
             use_default_when_falsey=True,
         )
-        addr = normalize_node_addr(
-            getattr(node, "addr", None),
-            use_default_when_falsey=True,
-        )
-        if not node_type or not addr:
-            continue  # pragma: no cover - defensive
+        if not node_type or not addresses:
+            continue
 
-        name = _resolve_name(node_type, addr)
-        candidate = getattr(node, "supports_boost", None)
-        if callable(candidate):
-            try:
-                result = candidate()
-            except Exception:  # noqa: BLE001 - defensive  # pragma: no cover - defensive
-                result = None
-        else:
-            result = candidate  # pragma: no cover - defensive
-        supports = coerce_boost_bool(result)
-        supports_boost = bool(supports) if supports is not None else False
+        nodes = nodes_by_type.get(node_type, [])
+        if not isinstance(nodes, list):  # pragma: no cover - defensive
+            nodes = list(nodes)
 
-        yield InventoryHeaterMetadata(
-            node_type=node_type,
-            addr=addr,
-            name=name,
-            node=node,
-            supports_boost=supports_boost,
-        )
+        node_lookup: dict[str, Node] = {}
+        for node in nodes:
+            addr = normalize_node_addr(
+                getattr(node, "addr", None),
+                use_default_when_falsey=True,
+            )
+            if addr and addr not in node_lookup:
+                node_lookup[addr] = node
+
+        for addr_raw in addresses:
+            addr = normalize_node_addr(
+                addr_raw,
+                use_default_when_falsey=True,
+            )
+            if addr:
+                node = node_lookup.get(addr)
+                if node is not None:
+                    name = resolve_name(node_type, addr)
+                    candidate = getattr(node, "supports_boost", None)
+                    if callable(candidate):
+                        try:
+                            result = candidate()
+                        except Exception:  # noqa: BLE001 - defensive  # pragma: no cover - defensive
+                            result = None
+                    else:
+                        result = candidate  # pragma: no cover - defensive
+                    supports = coerce_boost_bool(result)
+                    supports_boost = bool(supports) if supports is not None else False
+
+                    yield InventoryHeaterMetadata(
+                        node_type=node_type,
+                        addr=addr,
+                        name=name,
+                        node=node,
+                        supports_boost=supports_boost,
+                    )
 
