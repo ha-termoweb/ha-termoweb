@@ -428,7 +428,6 @@ def resolve_record_inventory(
 
         if mutable is not None:
             mutable["inventory"] = container
-            mutable["node_inventory"] = list(container.nodes)
 
         resolved_dev_id = container.dev_id
         return InventoryResolution(container, source, raw_count, len(container.nodes))

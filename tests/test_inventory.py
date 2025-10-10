@@ -330,6 +330,7 @@ def test_resolve_record_inventory_uses_cached_node_list() -> None:
     assert record["inventory"] is resolution.inventory
     assert isinstance(resolution.inventory, Inventory)
     assert resolution.inventory.dev_id == "101"
+    assert record["node_inventory"] is nodes
 
 
 def test_resolve_record_inventory_falls_back_to_snapshot() -> None:
@@ -345,6 +346,7 @@ def test_resolve_record_inventory_falls_back_to_snapshot() -> None:
     assert resolution.filtered_count == 1
     assert record["inventory"] is resolution.inventory
     assert resolution.inventory.dev_id == "snapshot-dev"
+    assert "node_inventory" not in record
 
 
 def test_resolve_record_inventory_builds_from_raw_nodes() -> None:
@@ -358,6 +360,7 @@ def test_resolve_record_inventory_builds_from_raw_nodes() -> None:
     assert resolution.source == "raw_nodes"
     assert resolution.filtered_count == 1
     assert record["inventory"] is resolution.inventory
+    assert "node_inventory" not in record
     assert resolution.inventory.heater_address_map[0] == {"htr": ["5"]}
 
 
@@ -398,6 +401,7 @@ def test_resolve_record_inventory_detects_mismatched_inventory() -> None:
     assert resolution.source == "node_inventory"
     assert resolution.filtered_count == 0
     assert record["inventory"] is resolution.inventory
+    assert record["node_inventory"] == [invalid]
 
 
 def test_heater_platform_details_default_name(
