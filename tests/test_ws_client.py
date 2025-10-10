@@ -606,7 +606,7 @@ def test_apply_heater_addresses_includes_power_monitors(
     client.hass.data[module.DOMAIN]["entry"]["energy_coordinator"] = SimpleNamespace(
         update_addresses=MagicMock()
     )
-    client._coordinator.data = {"device": {"nodes_by_type": {}}}  # type: ignore[attr-defined]
+    client._coordinator.data = {"device": {"nodes_by_type": {}, "addresses_by_type": {}}}  # type: ignore[attr-defined]
 
     result = client._apply_heater_addresses(
         {"htr": ["1"], "pmo": ["", "5"]}, inventory=None, snapshot=None
@@ -628,6 +628,9 @@ def test_apply_heater_addresses_includes_power_monitors(
         nodes_by_type = dev_state.get("nodes_by_type", {})
         first_addrs = nodes_by_type.get("pmo", {}).get("addrs")
         assert first_addrs == ["5"]
+        addresses_by_type = dev_state.get("addresses_by_type", {})
+        assert addresses_by_type.get("htr") == ["1"]
+        assert addresses_by_type.get("pmo") == ["5"]
 
     second = client._apply_heater_addresses({"pmo": "7"}, inventory=None, snapshot=None)
     assert second.get("htr") == []
@@ -637,7 +640,9 @@ def test_apply_heater_addresses_includes_power_monitors(
     dev_state = coordinator_data.get("device") if isinstance(coordinator_data, dict) else None
     if isinstance(dev_state, dict):
         nodes_by_type = dev_state.get("nodes_by_type", {})
-        assert nodes_by_type.get("pmo", {}).get("addrs") == ["7"]
+        assert nodes_by_type.get("pmo", {}).get("addrs") == ["5", "7"]
+        addresses_by_type = dev_state.get("addresses_by_type", {})
+        assert addresses_by_type.get("pmo") == ["5", "7"]
 
 def test_ducaheat_brand_headers_include_expected_fields() -> None:
     """Verify Ducaheat brand headers contain required keys."""

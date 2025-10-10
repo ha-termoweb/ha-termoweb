@@ -949,6 +949,13 @@ def test_dispatch_nodes_with_snapshot(monkeypatch: pytest.MonkeyPatch, caplog: p
     energy = SimpleNamespace(update_addresses=MagicMock(), handle_ws_samples=MagicMock())
     record["energy_coordinator"] = energy
     client._coordinator.update_nodes = MagicMock()
+    client._coordinator.data = {"device": {"nodes_by_type": {}, "addresses_by_type": {}}}
+    nodes_payload = {"nodes": [{"type": "htr", "addr": "1"}]}
+    client._inventory = Inventory(
+        client.dev_id,
+        nodes_payload,
+        build_node_inventory(nodes_payload),
+    )
     caplog.set_level(logging.DEBUG)
 
     result = client._dispatch_nodes({"nodes": {"htr": {"settings": {"1": {}}}}})
@@ -959,6 +966,8 @@ def test_dispatch_nodes_with_snapshot(monkeypatch: pytest.MonkeyPatch, caplog: p
     assert update_args[0] == {"nodes": {"htr": {"settings": {"1": {}}}}}
     assert isinstance(update_args[1], Inventory)
     dispatcher.assert_called()
+    dev_map = client._coordinator.data["device"]
+    assert dev_map["addresses_by_type"]["htr"] == ["1"]
 
 
 def test_dispatch_nodes_handles_unknown_types(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1162,7 +1171,7 @@ def test_apply_heater_addresses_includes_power_monitors(
     energy_coordinator = SimpleNamespace(update_addresses=MagicMock())
     record = client.hass.data[module.DOMAIN]["entry"]
     record["energy_coordinator"] = energy_coordinator
-    client._coordinator.data = {"device": {"nodes_by_type": {}}}
+    client._coordinator.data = {"device": {"nodes_by_type": {}, "addresses_by_type": {}}}
 
     nodes_payload = {
         "nodes": [
@@ -1189,9 +1198,9 @@ def test_apply_heater_addresses_includes_power_monitors(
     addr_map = dev_map.get("addr_map")
     if isinstance(addr_map, Mapping):
         assert addr_map["pmo"] == ["9"]
-    addresses_by_type = dev_map.get("addresses_by_type")
-    if isinstance(addresses_by_type, Mapping):
-        assert addresses_by_type["pmo"] == ["9"]
+    addresses_by_type = dev_map["addresses_by_type"]
+    assert addresses_by_type["htr"] == ["1"]
+    assert addresses_by_type["pmo"] == ["9"]
 
 
 def test_apply_heater_addresses_skips_empty_non_heater(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1471,6 +1480,7 @@ def test_apply_heater_addresses_normalizes_inputs(monkeypatch: pytest.MonkeyPatc
     client._coordinator.data = {
         "device": {
             "nodes_by_type": {"htr": {"addrs": []}},
+            "addresses_by_type": {},
         }
     }
 
@@ -1490,6 +1500,42 @@ def test_apply_heater_addresses_normalizes_inputs(monkeypatch: pytest.MonkeyPatc
     coordinator.update_addresses.assert_called_once_with(normalized)
     dev_map = client._coordinator.data["device"]
     assert dev_map["nodes_by_type"]["acm"]["addrs"] == ["2"]
+    assert dev_map["addresses_by_type"]["htr"] == ["1"]
+    assert dev_map["addresses_by_type"]["acm"] == ["2"]
+
+
+def test_apply_heater_addresses_merges_existing_map(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Incremental updates should merge with cached coordinator address maps."""
+
+    client, _sio, _ = _make_client(monkeypatch)
+    client._coordinator.data = {
+        "device": {
+            "nodes_by_type": {
+                "htr": {"addrs": ["1"]},
+                "acm": {"addrs": ["3"]},
+                "pmo": {"addrs": ["9"]},
+            },
+            "addresses_by_type": {"htr": ["1"], "acm": ["3"], "pmo": ["9"]},
+            "addr_map": {"pmo": ["9"]},
+        }
+    }
+
+    normalized = client._apply_heater_addresses(
+        {"htr": ["2"], "acm": ["3"]},
+        inventory=None,
+    )
+
+    assert normalized == {"htr": ["2"], "acm": ["3"]}
+    dev_map = client._coordinator.data["device"]
+    assert dev_map["nodes_by_type"]["htr"]["addrs"] == ["1", "2"]
+    assert dev_map["nodes_by_type"]["acm"]["addrs"] == ["3"]
+    assert dev_map["nodes_by_type"]["pmo"]["addrs"] == ["9"]
+    assert dev_map["addresses_by_type"]["htr"] == ["1", "2"]
+    assert dev_map["addresses_by_type"]["acm"] == ["3"]
+    assert dev_map["addresses_by_type"]["pmo"] == ["9"]
+    addr_map = dev_map.get("addr_map")
+    assert isinstance(addr_map, Mapping)
+    assert addr_map["pmo"] == ["9"]
 
 
 @pytest.mark.asyncio
