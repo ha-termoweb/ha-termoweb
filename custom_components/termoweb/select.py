@@ -16,9 +16,9 @@ from .heater import (
     DEFAULT_BOOST_DURATION,
     HeaterNodeBase,
     get_boost_runtime_minutes,
+    heater_platform_details_for_entry,
     iter_boostable_heater_nodes,
     log_skipped_nodes,
-    prepare_heater_platform_data,
     resolve_boost_runtime_minutes,
     set_boost_runtime_minutes,
 )
@@ -33,7 +33,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
-    _, nodes_by_type, _, resolve_name = prepare_heater_platform_data(
+    nodes_by_type, _, resolve_name = heater_platform_details_for_entry(
         data,
         default_name_simple=lambda addr: f"Heater {addr}",
     )
