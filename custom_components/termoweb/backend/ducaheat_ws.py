@@ -29,7 +29,6 @@ from ..const import (
     get_brand_requested_with,
     get_brand_user_agent,
 )
-from ..installation import InstallationSnapshot, ensure_snapshot
 from ..inventory import (
     Inventory,
     normalize_node_addr,
@@ -834,12 +833,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             domain_bucket = self.hass.data.setdefault(DOMAIN, {})
             existing_record = domain_bucket.get(self.entry_id)
 
-            snapshot_obj = ensure_snapshot(existing_record)
-            if snapshot_obj is None and isinstance(existing_record, Mapping):
-                candidate_snapshot = existing_record.get("snapshot")
-                if isinstance(candidate_snapshot, InstallationSnapshot):
-                    snapshot_obj = candidate_snapshot
-
             record_mapping: MutableMapping[str, Any]
             if isinstance(existing_record, MutableMapping):
                 record_mapping = existing_record
@@ -847,18 +840,10 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 record_mapping = {}
                 if isinstance(existing_record, Mapping):
                     record_mapping.update(existing_record)
-                if snapshot_obj is not None:
-                    record_mapping.setdefault("snapshot", snapshot_obj)
                 domain_bucket[self.entry_id] = record_mapping
 
             if isinstance(resolved_nodes, Mapping):
                 record_mapping["nodes"] = resolved_nodes
-
-            snapshot_obj = (
-                ensure_snapshot(record_mapping)
-                if isinstance(record_mapping, Mapping)
-                else snapshot_obj
-            )
 
             inventory_container: Inventory | None = (
                 self._inventory if isinstance(self._inventory, Inventory) else None
@@ -907,15 +892,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
 
             self._inventory = inventory_container
             record_mapping["inventory"] = inventory_container
-
-            if isinstance(snapshot_obj, InstallationSnapshot):
-                snapshot_nodes = (
-                    nodes_payload
-                    if nodes_payload is not None
-                    else snapshot_obj.raw_nodes
-                )
-                snapshot_obj.update_nodes(snapshot_nodes, inventory=inventory_container)
-                record_mapping.setdefault("snapshot", snapshot_obj)
 
             targets: list[tuple[str, str]] = list(
                 inventory_container.heater_sample_targets

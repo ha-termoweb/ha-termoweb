@@ -17,7 +17,6 @@ from custom_components.termoweb.backend.sanitize import (
     mask_identifier,
     redact_token_fragment,
 )
-from custom_components.termoweb.installation import InstallationSnapshot
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
 from custom_components.termoweb.backend.ws_client import NodeDispatchContext
 from homeassistant.core import HomeAssistant
@@ -940,12 +939,12 @@ def test_merge_nodes_handles_scalars() -> None:
     assert target["flag"] is True
 
 
-def test_dispatch_nodes_with_snapshot(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
-    """dispatch_nodes should support snapshot records and update energy coordinator."""
+def test_dispatch_nodes_with_inventory(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """dispatch_nodes should support pre-existing inventory records."""
 
     client, _sio, dispatcher = _make_client(monkeypatch)
     record = client.hass.data[module.DOMAIN]["entry"]
-    record["snapshot"] = InstallationSnapshot(dev_id="device", raw_nodes={})
+    record["inventory"] = Inventory(client.dev_id, {"nodes": {}}, ())
     energy = SimpleNamespace(update_addresses=MagicMock(), handle_ws_samples=MagicMock())
     record["energy_coordinator"] = energy
     client._coordinator.update_nodes = MagicMock()
@@ -1017,7 +1016,6 @@ def test_dispatch_nodes_uses_inventory_payload(monkeypatch: pytest.MonkeyPatch) 
             addr_map={"htr": ["2"]},
             unknown_types=set(),
             record=record,
-            snapshot=None,
         )
 
     monkeypatch.setattr(module, "_prepare_nodes_dispatch", fake_prepare)
@@ -1204,12 +1202,11 @@ def test_apply_heater_addresses_skips_empty_non_heater(monkeypatch: pytest.Monke
     assert "acm" not in client._coordinator.data["device"]["nodes_by_type"]
 
 
-def test_apply_heater_addresses_updates_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Applying heater addresses should refresh snapshot inventory when present."""
+def test_apply_heater_addresses_updates_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Applying heater addresses should refresh stored inventory when present."""
 
     client, _sio, _ = _make_client(monkeypatch)
     record = client.hass.data[module.DOMAIN]["entry"]
-    record["snapshot"] = InstallationSnapshot(dev_id="device", raw_nodes={})
     record["energy_coordinator"] = SimpleNamespace(update_addresses=MagicMock())
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
     inventory = Inventory(
@@ -1220,7 +1217,6 @@ def test_apply_heater_addresses_updates_snapshot(monkeypatch: pytest.MonkeyPatch
     client._apply_heater_addresses(
         {"htr": ["1"]},
         inventory=inventory,
-        snapshot=record["snapshot"],
     )
     assert record.get("inventory") is inventory
 
@@ -1230,10 +1226,7 @@ def test_heater_sample_subscription_targets(monkeypatch: pytest.MonkeyPatch) -> 
 
     client, _sio, _ = _make_client(monkeypatch)
     record = client.hass.data[module.DOMAIN]["entry"]
-    record["snapshot"] = InstallationSnapshot(
-        dev_id="device",
-        raw_nodes={"nodes": [{"type": "htr", "addr": "1"}]},
-    )
+    record["nodes"] = {"nodes": [{"type": "htr", "addr": "1"}]}
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
     node_inventory = module.build_node_inventory(raw_nodes)
     inventory = Inventory(client.dev_id, raw_nodes, node_inventory)
@@ -1246,7 +1239,7 @@ def test_heater_sample_subscription_targets(monkeypatch: pytest.MonkeyPatch) -> 
     ) -> Any:
         assert record_map is record
         assert dev_id == client.dev_id
-        assert nodes_payload == record["snapshot"].raw_nodes
+        assert nodes_payload == record["nodes"]
         return SimpleNamespace(
             inventory=inventory,
             source="inventory",
@@ -1274,7 +1267,6 @@ def test_heater_sample_subscription_targets_uses_coordinator_addrs(
 
     client, _sio, _ = _make_client(monkeypatch)
     record = client.hass.data[module.DOMAIN]["entry"]
-    record["snapshot"] = InstallationSnapshot(dev_id="device", raw_nodes={})
     client._coordinator._addrs = lambda: [" 3 ", "3", "4"]
     inventory = Inventory(client.dev_id, {}, [])
 
@@ -1308,7 +1300,6 @@ def test_heater_sample_subscription_targets_logs_missing_inventory(
 
     client, _sio, _ = _make_client(monkeypatch)
     record = client.hass.data[module.DOMAIN]["entry"]
-    record.pop("snapshot", None)
     record.pop("inventory", None)
     record["nodes"] = {"nodes": [{"type": "htr", "addr": "9"}]}
 
@@ -1364,9 +1355,7 @@ def test_heater_sample_targets_use_record_inventory(
     ) -> Any:
         assert record_map is record
         assert dev_id == client.dev_id
-        snapshot_obj = record.get("snapshot")
-        expected_payload = snapshot_obj.raw_nodes if snapshot_obj is not None else None
-        assert nodes_payload == expected_payload
+        assert nodes_payload == record.get("nodes")
         return SimpleNamespace(
             inventory=inventory,
             source="inventory",
@@ -1387,20 +1376,16 @@ def test_heater_sample_targets_use_record_inventory(
     assert client._inventory is inventory
 
 
-def test_heater_sample_targets_use_snapshot_payload(
+def test_heater_sample_targets_build_from_record_nodes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Snapshot raw nodes should seed inventory rebuilds when record lacks data."""
+    """Record raw nodes should seed inventory rebuilds when missing inventory."""
 
     client, _sio, _ = _make_client(monkeypatch)
     record = client.hass.data[module.DOMAIN]["entry"]
     raw_nodes = {"nodes": [{"type": "htr", "addr": "13"}]}
     record.clear()
-    record["snapshot"] = InstallationSnapshot(
-        dev_id=client.dev_id,
-        raw_nodes=raw_nodes,
-    )
-    record.pop("nodes", None)
+    record["nodes"] = raw_nodes
     record.pop("inventory", None)
 
     client._inventory = None
@@ -1417,7 +1402,6 @@ def test_apply_heater_addresses_filters_non_heaters(monkeypatch: pytest.MonkeyPa
 
     client, _sio, _ = _make_client(monkeypatch)
     record = client.hass.data[module.DOMAIN]["entry"]
-    record["snapshot"] = InstallationSnapshot(dev_id="device", raw_nodes={})
 
     nodes_payload = {"nodes": [{"type": "htr", "addr": "6"}]}
     inventory_container = Inventory(
@@ -1429,7 +1413,6 @@ def test_apply_heater_addresses_filters_non_heaters(monkeypatch: pytest.MonkeyPa
     normalized = client._apply_heater_addresses(
         {"foo": ["5"], "htr": ["6"]},
         inventory=inventory_container,
-        snapshot=record["snapshot"],
     )
 
     assert "foo" not in normalized
@@ -1444,13 +1427,11 @@ def test_apply_heater_addresses_logs_invalid_inventory(
 
     client, _sio, _ = _make_client(monkeypatch)
     record = client.hass.data[module.DOMAIN]["entry"]
-    record["snapshot"] = InstallationSnapshot(dev_id="device", raw_nodes={})
 
     with caplog.at_level("DEBUG"):
         normalized = client._apply_heater_addresses(
             {"htr": ["4"]},
             inventory=[SimpleNamespace(type="htr", addr="4")],
-            snapshot=record["snapshot"],
         )
 
     assert normalized == {"htr": ["4"]}
@@ -1462,10 +1443,7 @@ def test_apply_heater_addresses_normalizes_inputs(monkeypatch: pytest.MonkeyPatc
 
     client, _sio, _ = _make_client(monkeypatch)
     coordinator = SimpleNamespace(update_addresses=MagicMock())
-    record_map = {
-        "snapshot": None,
-        "energy_coordinator": coordinator,
-    }
+    record_map = {"energy_coordinator": coordinator}
     record_proxy = MappingProxyType(record_map)
     client.hass.data[module.DOMAIN]["entry"] = record_proxy
     client._coordinator.data = {

@@ -22,7 +22,6 @@ from ..const import (
     signal_ws_data,
     signal_ws_status,
 )
-from ..installation import InstallationSnapshot, ensure_snapshot
 from ..inventory import (
     NODE_CLASS_BY_TYPE,
     Inventory,
@@ -296,7 +295,6 @@ class NodeDispatchContext:
     addr_map: dict[str, list[str]]
     unknown_types: set[str]
     record: MutableMapping[str, Any] | None
-    snapshot: InstallationSnapshot | None
 
 
 def _prepare_nodes_dispatch(
@@ -310,26 +308,42 @@ def _prepare_nodes_dispatch(
     """Normalise node payload data for downstream websocket dispatch."""
 
     record_container = hass.data.get(DOMAIN, {})
-    record = record_container.get(entry_id) if isinstance(record_container, dict) else None
-    record_mapping: MutableMapping[str, Any] | None = (
-        record if isinstance(record, MutableMapping) else None
+    record_raw = (
+        record_container.get(entry_id)
+        if isinstance(record_container, dict)
+        else None
+    )
+    record_mapping = record_raw if isinstance(record_raw, Mapping) else None
+    record_mutable: MutableMapping[str, Any] | None = (
+        record_raw if isinstance(record_raw, MutableMapping) else None
     )
 
-    snapshot_obj = ensure_snapshot(record)
-
-    if isinstance(snapshot_obj, InstallationSnapshot):
-        dev_id = snapshot_obj.dev_id
-    else:
-        dev_id = str(getattr(coordinator, "_dev_id", ""))
-        if not dev_id:
-            dev_id = str(getattr(coordinator, "dev_id", ""))
-        if not dev_id and isinstance(record_mapping, Mapping):
-            dev_id = str(record_mapping.get("dev_id", ""))
+    dev_id = str(getattr(coordinator, "_dev_id", "") or "")
+    if not dev_id:
+        dev_id = str(getattr(coordinator, "dev_id", "") or "")
+    if not dev_id and isinstance(record_mapping, Mapping):
+        candidate = record_mapping.get("dev_id")
+        if isinstance(candidate, str):
+            dev_id = candidate
+        elif candidate not in (None, ""):
+            dev_id = str(candidate)
 
     inventory_container: Inventory | None = None
     if isinstance(inventory, Inventory):
         inventory_container = inventory
+    elif isinstance(record_mapping, Mapping):
+        candidate_inventory = record_mapping.get("inventory")
+        if isinstance(candidate_inventory, Inventory):
+            inventory_container = candidate_inventory
     else:
+        inventory_container = None
+
+    if inventory_container is None and hasattr(coordinator, "inventory"):
+        candidate_inventory = getattr(coordinator, "inventory")
+        if isinstance(candidate_inventory, Inventory):
+            inventory_container = candidate_inventory
+
+    if inventory_container is None:
         resolution = resolve_record_inventory(
             record_mapping,
             dev_id=dev_id or None,
@@ -339,16 +353,15 @@ def _prepare_nodes_dispatch(
             inventory_container = resolution.inventory
 
     if inventory_container is None:
-        payload_for_inventory = raw_nodes if raw_nodes is not None else {}
+        payload_for_inventory = raw_nodes
+        if payload_for_inventory is None and isinstance(record_mapping, Mapping):
+            payload_for_inventory = record_mapping.get("nodes")
+        if payload_for_inventory is None:
+            payload_for_inventory = {}
         inventory_container = Inventory(dev_id, payload_for_inventory, [])
-        if isinstance(record_mapping, MutableMapping):
-            record_mapping.setdefault("inventory", inventory_container)
 
-    if isinstance(snapshot_obj, InstallationSnapshot):
-        snapshot_obj.update_nodes(raw_nodes, inventory=inventory_container)
-
-    if record_mapping is not None:
-        record_mapping["inventory"] = inventory_container
+    if isinstance(record_mutable, MutableMapping):
+        record_mutable["inventory"] = inventory_container
 
     addr_map_raw, unknown_types = addresses_by_node_type(
         inventory_container.nodes, known_types=NODE_CLASS_BY_TYPE
@@ -373,8 +386,7 @@ def _prepare_nodes_dispatch(
         inventory=inventory_container,
         addr_map=addr_map,
         unknown_types=normalized_unknown,
-        record=record_mapping,
-        snapshot=snapshot_obj if isinstance(snapshot_obj, InstallationSnapshot) else None,
+        record=record_mutable,
     )
 
 

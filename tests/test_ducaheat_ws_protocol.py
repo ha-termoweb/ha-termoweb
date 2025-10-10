@@ -14,7 +14,6 @@ import aiohttp
 import pytest
 
 from custom_components.termoweb.backend import ducaheat_ws
-from custom_components.termoweb.installation import InstallationSnapshot
 from custom_components.termoweb.inventory import (
     Inventory,
     InventoryResolution,
@@ -1776,8 +1775,7 @@ async def test_subscribe_feeds_handles_mapping_record(
     client.hass.data[ducaheat_ws.DOMAIN]["entry"].pop("inventory", None)
     client.hass.data[ducaheat_ws.DOMAIN]["entry"].pop("nodes", None)
     nodes_payload = {"nodes": [{"addr": "8", "type": "htr"}]}
-    snapshot = InstallationSnapshot(dev_id="device", raw_nodes={"nodes": []})
-    mapping_record = MappingProxyType({"nodes": nodes_payload, "snapshot": snapshot})
+    mapping_record = MappingProxyType({"nodes": nodes_payload})
     client.hass.data[ducaheat_ws.DOMAIN]["entry"] = mapping_record
 
     inventory_nodes = build_node_inventory(nodes_payload)
@@ -1811,7 +1809,6 @@ async def test_subscribe_feeds_handles_mapping_record(
     entry_record = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
     assert isinstance(entry_record, dict)
     assert isinstance(entry_record.get("inventory"), Inventory)
-    assert entry_record.get("snapshot") is snapshot
 
 
 @pytest.mark.asyncio
