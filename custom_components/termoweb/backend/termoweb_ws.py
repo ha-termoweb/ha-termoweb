@@ -49,8 +49,7 @@ from custom_components.termoweb.const import (
 from custom_components.termoweb.inventory import (
     HEATER_NODE_TYPES,
     Inventory,
-    addresses_by_node_type as _addresses_by_node_type,
-    build_node_inventory as _build_node_inventory,
+    build_node_inventory,
     normalize_node_addr,
     normalize_node_type,
     resolve_record_inventory,
@@ -65,10 +64,6 @@ from .ws_client import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-build_node_inventory = _build_node_inventory  # re-exported for tests
-addresses_by_node_type = _addresses_by_node_type  # legacy import hook for tests
-
 
 _SENSITIVE_PLACEHOLDERS: Mapping[str, tuple[str, Callable[[str | None], str]]] = {
     "token": ("{token}", redact_token_fragment),

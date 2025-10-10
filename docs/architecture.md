@@ -12,28 +12,28 @@ state and energy statistics to the rest of the platform.【F:custom_components/t
 
 The integration treats the gateway and node inventory as an immutable contract
 that is captured once during setup. Each config entry normalises the raw payload
-into an `Inventory` and persists the accompanying `InstallationSnapshot` inside
-`hass.data`, allowing coordinators, websocket clients and services to reuse the
-same canonical metadata without repeating discovery calls.【F:custom_components/termoweb/__init__.py†L331-L405】【F:custom_components/termoweb/installation.py†L18-L117】【F:custom_components/termoweb/inventory.py†L86-L170】
+into an `Inventory` stored inside `hass.data`, allowing coordinators, websocket
+clients and services to reuse the same canonical metadata without repeating
+discovery calls.【F:custom_components/termoweb/__init__.py†L331-L405】【F:custom_components/termoweb/inventory.py†L86-L170】
 
 Inventory helpers provide cached views for node type groupings, heater address
 maps and naming metadata so downstream consumers never mutate the raw payload.
 Coordinators rely on these cached structures to derive polling targets, websocket
 subscriptions and UI naming hints while assuming that the set of devices and
 addresses remains stable across the lifetime of the entry. When hardware changes
-are required, users are expected to reload the integration so a fresh snapshot is
-captured from the backend.【F:custom_components/termoweb/inventory.py†L138-L236】【F:custom_components/termoweb/installation.py†L83-L156】【F:custom_components/termoweb/__init__.py†L320-L411】
+are required, users are expected to reload the integration so a fresh inventory is
+captured from the backend.【F:custom_components/termoweb/inventory.py†L138-L236】【F:custom_components/termoweb/__init__.py†L320-L411】
 
 Power monitors (`pmo`) ride alongside heaters in the captured `dev_data`
 snapshot. The snapshot also exposes a `pmo_system` block with global power
 management metadata such as `main_circuit_pmos` plus the `max_power_config`
 profiles and slots observed in captures. Inventory caches persist these nodes
 even though the integration only reads them today so future entities inherit the
-discover-once contract.【F:docs/ducaheat_api.md†L27-L33】【F:custom_components/termoweb/installation.py†L58-L117】
+discover-once contract.【F:docs/ducaheat_api.md†L27-L33】【F:custom_components/termoweb/inventory.py†L181-L323】
 The heater caches now have power-monitor siblings so websocket rebuilds retain
 forward/reverse address maps, compatibility aliases (covering legacy
 `power_monitor` keys) and subscription tuples alongside the heater metadata the
-coordinators already consume.【F:custom_components/termoweb/inventory.py†L181-L323】【F:custom_components/termoweb/installation.py†L69-L161】
+coordinators already consume.【F:custom_components/termoweb/inventory.py†L181-L323】
 
 ## Key components
 
@@ -49,11 +49,10 @@ coordinators already consume.【F:custom_components/termoweb/inventory.py†L181
   websocket client, whereas `DucaheatBackend` injects an Engine.IO-compatible
   variant alongside the `DucaheatRESTClient` adapter that reshapes segmented API
   endpoints and websocket payloads.【F:custom_components/termoweb/backend/base.py†L11-L98】【F:custom_components/termoweb/backend/termoweb.py†L14-L69】【F:custom_components/termoweb/backend/ducaheat.py†L19-L190】【F:custom_components/termoweb/backend/ducaheat.py†L503-L529】
-- **Node & installation helpers** – `nodes.py` normalises node identifiers and
-  constructs `Node`/`HeaterNode` instances from raw payloads, while
-  `InstallationSnapshot` caches derived metadata such as heater address maps,
-  websocket subscription targets and canonicalised naming for reuse across
-  coordinators, websocket handlers and services.【F:custom_components/termoweb/nodes.py†L112-L325】【F:custom_components/termoweb/installation.py†L20-L195】
+- **Inventory helpers** – `inventory.py` normalises raw payloads into immutable
+  node objects, exposes cached heater and power monitor metadata, and provides
+  resolver utilities that rebuild cached inventories for coordinators, websocket
+  handlers and services.【F:custom_components/termoweb/inventory.py†L86-L340】
 - **Data coordinators** – `StateCoordinator` polls heater settings, maintains
   node caches and stretches polling intervals when websocket health is good,
   while `EnergyStateCoordinator` tracks address subscriptions, derives power
@@ -92,7 +91,7 @@ flowchart LR
         CF["Config Flow\n(validate credentials)"]
         Setup["Config Entry Setup\n(async_setup_entry)"]
         BackendFactory["Backend & RESTClient\n(brand aware)"]
-        Snapshot["InstallationSnapshot\n(node cache)"]
+        Snapshot["Inventory\n(node cache)"]
         Coord["StateCoordinator\n(REST polling)"]
         EnergyCoord["EnergyStateCoordinator\n(energy polling)"]
         Entities["Entity Platforms\n(climate / sensor / binary_sensor / button)"]
@@ -223,8 +222,8 @@ Representative payload emitted after a successful write:
     reconfiguration while reusing the shared login workflow.【F:custom_components/termoweb/config_flow.py†L71-L243】
 - **Installation & node modelling**
   - `Node`, `HeaterNode`, `AccumulatorNode` and helpers build canonical node
-    inventories. `InstallationSnapshot` caches derived structures (address maps,
-    subscription targets, explicit names).【F:custom_components/termoweb/nodes.py†L112-L325】【F:custom_components/termoweb/installation.py†L20-L195】
+    inventories. The `Inventory` container caches derived structures (address
+    maps, subscription targets, explicit names).【F:custom_components/termoweb/inventory.py†L86-L340】
 - **Coordinators**
   - `StateCoordinator` manages REST polling, pending write expectations and
     websocket-driven poll throttling. `EnergyStateCoordinator` tracks energy
@@ -256,7 +255,7 @@ classDiagram
     class DucaheatWSClient
     class TermoWebConfigFlow
     class TermoWebOptionsFlow
-    class InstallationSnapshot
+    class Inventory
     class Node
     class HeaterNode
     class AccumulatorNode
@@ -297,7 +296,7 @@ classDiagram
     StateCoordinator --> Backend : starts websocket clients
     EnergyStateCoordinator --> RESTClient : fetches samples
     WebSocketClient --> StateCoordinator : pushes updates
-    InstallationSnapshot --> StateCoordinator : supplies caches
+    Inventory --> StateCoordinator : supplies caches
     HeaterNodeBase --> StateCoordinator : consumes data
     HeaterEnergyTotalSensor --> EnergyStateCoordinator : reads energy
     GatewayOnlineBinarySensor --> StateCoordinator : monitors connectivity

@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from custom_components.termoweb.backend import termoweb_ws as module
+from custom_components.termoweb.backend import ws_client as ws_client_module
 from custom_components.termoweb.backend.sanitize import (
     mask_identifier,
     redact_token_fragment,
@@ -980,7 +981,7 @@ def test_dispatch_nodes_handles_unknown_types(monkeypatch: pytest.MonkeyPatch) -
     def fake_addresses(inventory: Any, *, known_types: Any) -> tuple[dict[str, list[str]], set[str]]:
         return {"foo": []}, {"unknown"}
 
-    monkeypatch.setattr(module, "addresses_by_node_type", fake_addresses)
+    monkeypatch.setattr(ws_client_module, "addresses_by_node_type", fake_addresses)
     client._dispatch_nodes({"nodes": {}})
     client._coordinator.update_nodes.assert_called_once()
     update_args, update_kwargs = client._coordinator.update_nodes.call_args

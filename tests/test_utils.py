@@ -5,11 +5,12 @@ from typing import Any
 
 import pytest
 
-from custom_components.termoweb import inventory as inventory_module, nodes as nodes_module
+import custom_components.termoweb.inventory as inventory_module
 from custom_components.termoweb.const import DOMAIN
 import custom_components.termoweb.identifiers as identifiers_module
 from custom_components.termoweb.identifiers import build_heater_energy_unique_id
 from custom_components.termoweb.inventory import (
+    HEATER_NODE_TYPES,
     addresses_by_node_type,
     build_node_inventory,
     normalize_heater_addresses,
@@ -17,95 +18,12 @@ from custom_components.termoweb.inventory import (
     normalize_node_type,
     parse_heater_energy_unique_id,
 )
-from custom_components.termoweb.nodes import (
-    HEATER_NODE_TYPES,
-    ensure_node_inventory,
-)
 from custom_components.termoweb.utils import (
     _entry_gateway_record,
     async_get_integration_version,
     build_gateway_device_info,
     float_or_none,
 )
-
-
-def test_ensure_node_inventory_returns_cached_copy() -> None:
-    raw = {"nodes": [{"type": "htr", "addr": "A"}]}
-    cached = build_node_inventory(raw)
-    record = {"node_inventory": cached, "nodes": raw}
-
-    result = ensure_node_inventory(record)
-
-    assert result == cached
-    assert result is not cached
-
-
-def test_ensure_node_inventory_filters_invalid_cached_entries() -> None:
-    raw = {"nodes": [{"type": "htr", "addr": "A"}]}
-    cached = build_node_inventory(raw)
-    cached.append(types.SimpleNamespace(type="", addr="bad"))
-    record = {"node_inventory": cached, "nodes": {}}
-
-    result = ensure_node_inventory(record)
-
-    assert [node.addr for node in result] == ["A"]
-    assert record.get("node_inventory") == result
-
-
-def test_ensure_node_inventory_skips_node_like_entries_with_missing_fields() -> None:
-    class FakeNode:
-        def __init__(self) -> None:
-            self.type = ""
-            self.addr = "valid"
-
-        def as_dict(self) -> dict[str, Any]:  # pragma: no cover - minimal stub
-            return {}
-
-    raw = {"nodes": [{"type": "htr", "addr": "A"}]}
-    cached = build_node_inventory(raw)
-    cached.append(FakeNode())
-    record = {"node_inventory": cached, "nodes": {}}
-
-    result = ensure_node_inventory(record)
-
-    assert [node.addr for node in result] == ["A"]
-
-
-def test_ensure_node_inventory_builds_and_caches() -> None:
-    raw = {"nodes": [{"type": "acm", "addr": "B"}]}
-    record: dict[str, Any] = {"nodes": raw}
-    result = ensure_node_inventory(record)
-
-    assert [node.addr for node in result] == ["B"]
-    assert [node.addr for node in record.get("node_inventory", [])] == ["B"]
-
-    record["nodes"] = object()
-    cached = ensure_node_inventory(record)
-    assert cached == result
-
-
-def test_ensure_node_inventory_falls_back_to_record_nodes() -> None:
-    arg_nodes = {"nodes": []}
-    record_nodes = {"nodes": [{"type": "acm", "addr": "C"}]}
-    record: dict[str, Any] = {"nodes": record_nodes}
-    result = ensure_node_inventory(record, nodes=arg_nodes)
-
-    assert [node.addr for node in result] == ["C"]
-    assert [node.addr for node in record.get("node_inventory", [])] == ["C"]
-
-
-def test_ensure_node_inventory_sets_empty_cache_when_missing() -> None:
-    class LazyDict(dict):
-        def get(self, key, default=None):
-            if key == "node_inventory" and key not in self:
-                return []
-            return super().get(key, default)
-
-    record = LazyDict()
-    result = ensure_node_inventory(record, nodes=None)
-
-    assert result == []
-    assert record["node_inventory"] == []
 def test_addresses_by_node_type_skips_invalid_entries() -> None:
     nodes = [
         types.SimpleNamespace(type=" ", addr="skip"),
@@ -312,9 +230,6 @@ def test_build_heater_energy_unique_id_round_trip(
     monkeypatch.setattr(inventory_module, "normalize_node_addr", _record_addr)
     monkeypatch.setattr(identifiers_module, "normalize_node_type", _record_type)
     monkeypatch.setattr(identifiers_module, "normalize_node_addr", _record_addr)
-    monkeypatch.setattr(nodes_module, "normalize_node_type", _record_type)
-    monkeypatch.setattr(nodes_module, "normalize_node_addr", _record_addr)
-
     unique_id = build_heater_energy_unique_id(" dev ", " ACM ", " 01 ")
 
     assert unique_id == f"{DOMAIN}:dev:acm:01:energy"
