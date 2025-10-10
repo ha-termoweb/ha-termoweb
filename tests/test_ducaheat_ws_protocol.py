@@ -15,7 +15,7 @@ import pytest
 
 from custom_components.termoweb.backend import ducaheat_ws
 from custom_components.termoweb.installation import InstallationSnapshot
-from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.inventory import Inventory, build_node_inventory
 from homeassistant.core import HomeAssistant
 
 
@@ -1374,6 +1374,38 @@ async def test_subscribe_feeds_reuses_cached_nodes(monkeypatch: pytest.MonkeyPat
     assert {path for _evt, path in emissions} == {"/htr/1/samples", "/htr/1/status"}
     bucket = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
     assert bucket["nodes"] == client._latest_nodes
+
+
+@pytest.mark.asyncio
+async def test_subscribe_feeds_uses_inventory_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Existing inventory metadata should drive subscription target selection."""
+
+    client = _make_client(monkeypatch)
+    node_inventory = build_node_inventory([{"type": "htr", "addr": "7"}])
+    inventory = Inventory(
+        client.dev_id,
+        {"nodes": [{"type": "htr", "addr": "7"}]},
+        node_inventory,
+    )
+    client._inventory = inventory
+
+    emissions: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        client,
+        "_emit_sio",
+        AsyncMock(side_effect=lambda evt, path: emissions.append((evt, path))),
+    )
+
+    count = await client._subscribe_feeds(None)
+
+    assert count == 2
+    assert emissions == [
+        ("subscribe", "/htr/7/samples"),
+        ("subscribe", "/htr/7/status"),
+    ]
+    record = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
+    assert "node_inventory" in record
+    assert any(getattr(node, "addr", "") == "7" for node in record["node_inventory"])
 
 
 @pytest.mark.asyncio

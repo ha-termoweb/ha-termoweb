@@ -18,7 +18,8 @@ from custom_components.termoweb.backend.sanitize import (
     redact_token_fragment,
 )
 from custom_components.termoweb.installation import InstallationSnapshot
-from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.inventory import Inventory, build_node_inventory
+from custom_components.termoweb.backend.ws_client import NodeDispatchContext
 from homeassistant.core import HomeAssistant
 
 
@@ -978,6 +979,56 @@ def test_dispatch_nodes_handles_unknown_types(monkeypatch: pytest.MonkeyPatch) -
     dispatcher.assert_called()
 
 
+def test_dispatch_nodes_uses_inventory_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Inventory payload should backfill missing node payload data."""
+
+    client, _sio, dispatcher = _make_client(monkeypatch)
+    record = client.hass.data[module.DOMAIN]["entry"]
+    record["energy_coordinator"] = SimpleNamespace(update_addresses=MagicMock())
+    client._coordinator.update_nodes = MagicMock()
+    node_inventory = build_node_inventory([{"type": "htr", "addr": "2"}])
+
+    class TrackingInventory(Inventory):
+        def __init__(self) -> None:
+            super().__init__(
+                client.dev_id,
+                {"nodes": {"htr": {"settings": {"2": {"temp": 21}}}}},
+                node_inventory,
+            )
+            object.__setattr__(self, "payload_calls", 0)
+
+        @property
+        def payload(self) -> Any:
+            current = getattr(self, "payload_calls", 0)
+            object.__setattr__(self, "payload_calls", current + 1)
+            return Inventory.payload.fget(self)
+
+    inventory = TrackingInventory()
+    client._inventory = inventory
+
+    def fake_prepare(*args: Any, **kwargs: Any) -> NodeDispatchContext:
+        client._coordinator.update_nodes({"nodes": None}, inventory)
+        return NodeDispatchContext(
+            payload=None,
+            inventory=inventory,
+            addr_map={"htr": ["2"]},
+            unknown_types=set(),
+            record=record,
+            snapshot=None,
+        )
+
+    monkeypatch.setattr(module, "_prepare_nodes_dispatch", fake_prepare)
+
+    client._dispatch_nodes({"nodes": None})
+
+    client._coordinator.update_nodes.assert_called_once()
+    update_args, update_kwargs = client._coordinator.update_nodes.call_args
+    assert not update_kwargs
+    assert update_args == ({"nodes": None}, inventory)
+    dispatcher.assert_called_once()
+    assert inventory.payload_calls >= 1
+
+
 def test_ensure_type_bucket_and_build_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
     """Helper methods should populate node buckets and snapshot structures."""
 
@@ -1092,6 +1143,7 @@ def test_heater_sample_subscription_targets_rebuilds_inventory(
     assert not calls
 
     record.pop("node_inventory", None)
+    client._inventory = None
 
     calls.clear()
     targets_dict = client._heater_sample_subscription_targets()
@@ -1103,6 +1155,7 @@ def test_heater_sample_subscription_targets_rebuilds_inventory(
     mapping_record = MappingProxyType({"nodes": {"nodes": [{"type": "htr", "addr": "10"}]}})
     client.hass.data[module.DOMAIN]["entry"] = mapping_record
 
+    client._inventory = None
     calls.clear()
     targets_mapping = client._heater_sample_subscription_targets()
 
@@ -1113,6 +1166,7 @@ def test_heater_sample_subscription_targets_rebuilds_inventory(
     client.hass.data[module.DOMAIN]["entry"] = None
     client._coordinator._addrs = lambda: ["11"]
 
+    client._inventory = None
     calls.clear()
     targets_none = client._heater_sample_subscription_targets()
 

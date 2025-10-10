@@ -21,7 +21,7 @@ from custom_components.termoweb.backend.sanitize import (
     mask_identifier,
     redact_token_fragment,
 )
-from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.inventory import Inventory, build_node_inventory
 
 
 class DummyREST:
@@ -245,6 +245,7 @@ def test_dispatch_nodes_without_snapshot(monkeypatch: pytest.MonkeyPatch) -> Non
             self.entry_id = "entry"
             self.dev_id = "device"
             self._coordinator = coordinator
+            self._inventory = None
 
     payload = {"nodes": [{"addr": "1", "type": "htr"}]}
     DummyCommon()._dispatch_nodes(payload)
@@ -300,6 +301,30 @@ def test_prepare_nodes_dispatch_handles_non_mapping_record(
 
     assert seen["record"] == {}
     assert context.record is None
+
+
+def test_prepare_nodes_dispatch_uses_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Existing inventory objects should be reused by the dispatch helper."""
+
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
+    coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
+    node_inventory = build_node_inventory([{"type": "htr", "addr": "4"}])
+    inventory = Inventory("dev", {"nodes": [{"type": "htr", "addr": "4"}]}, node_inventory)
+    monkeypatch.setattr(base_ws, "ensure_snapshot", lambda record: None)
+    monkeypatch.setattr(
+        base_ws, "addresses_by_node_type", lambda nodes, **_: ({"htr": ["4"]}, set())
+    )
+
+    context = base_ws._prepare_nodes_dispatch(
+        hass,
+        entry_id="entry",
+        coordinator=coordinator,
+        raw_nodes=None,
+        inventory=inventory,
+    )
+
+    assert context.inventory is inventory
+    coordinator.update_nodes.assert_called_once_with(None, inventory)
 
 
 @pytest.mark.asyncio
@@ -960,6 +985,7 @@ def test_ws_common_dispatch_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
             self.entry_id = "entry"
             self.dev_id = "dev"
             self._coordinator = coordinator
+            self._inventory = None
 
     dummy = Dummy()
     payload = {"nodes": {"htr": {"settings": {"1": {"temp": 20}}}}}

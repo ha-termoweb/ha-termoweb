@@ -36,12 +36,14 @@ class FakeWSClient:
         dev_id: str,
         api_client: Any,
         coordinator: Any,
+        inventory: Any | None = None,
     ) -> None:
         self.hass = hass
         self.entry_id = entry_id
         self.dev_id = dev_id
         self.api_client = api_client
         self.coordinator = coordinator
+        self.inventory = inventory
         self.start_calls: list[asyncio.Task[Any]] = []
         self.stop_calls = 0
 
