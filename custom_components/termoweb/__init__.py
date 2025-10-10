@@ -432,6 +432,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
                 entry_id=entry.entry_id,
                 dev_id=dev_id,
                 coordinator=coordinator,
+                inventory=data.get("inventory"),
             )
             clients[dev_id] = ws_client
         task = ws_client.start()

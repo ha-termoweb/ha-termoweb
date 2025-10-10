@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from asyncio import Task
 from typing import Any, Protocol
 
-from ..inventory import NodeDescriptor
+from ..inventory import Inventory, NodeDescriptor
 
 
 class HttpClientProto(Protocol):
@@ -96,5 +96,7 @@ class Backend(ABC):
         entry_id: str,
         dev_id: str,
         coordinator: Any,
+        *,
+        inventory: Inventory | None = None,
     ) -> WsClientProto:
         """Create a websocket client for the given device."""

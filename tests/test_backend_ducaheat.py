@@ -79,16 +79,19 @@ def ducaheat_rest_client(monkeypatch: pytest.MonkeyPatch) -> DucaheatRESTClient:
 async def test_ducaheat_backend_creates_ws_client() -> None:
     backend = DucaheatBackend(brand="ducaheat", client=DummyClient())
     hass = SimpleNamespace(loop=asyncio.get_running_loop(), data={})
+    inventory = object()
     ws_client = backend.create_ws_client(
         hass,
         entry_id="entry",
         dev_id="dev",
         coordinator=object(),
+        inventory=inventory,
     )
     assert isinstance(ws_client, DucaheatWSClient)
     assert ws_client.dev_id == "dev"
     assert ws_client.entry_id == "entry"
     assert ws_client._namespace == WS_NAMESPACE
+    assert getattr(ws_client, "_inventory", None) is inventory
 
 
 def test_dummy_client_get_node_settings_accepts_acm() -> None:

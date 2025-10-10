@@ -233,6 +233,7 @@ def _prepare_nodes_dispatch(
     entry_id: str,
     coordinator: Any,
     raw_nodes: Any,
+    inventory: Inventory | None = None,
 ) -> NodeDispatchContext:
     """Normalise node payload data for downstream websocket dispatch."""
 
@@ -259,8 +260,11 @@ def _prepare_nodes_dispatch(
     else:
         source_mapping = {}
 
-    inventory_nodes = ensure_node_inventory(source_mapping, nodes=raw_nodes)
-    inventory_container = Inventory(dev_id, raw_nodes, inventory_nodes)
+    if isinstance(inventory, Inventory):
+        inventory_container = inventory
+    else:
+        inventory_nodes = ensure_node_inventory(source_mapping, nodes=raw_nodes)
+        inventory_container = Inventory(dev_id, raw_nodes, inventory_nodes)
 
     if isinstance(snapshot_obj, InstallationSnapshot):
         snapshot_obj.update_nodes(raw_nodes, inventory=inventory_container)
@@ -305,6 +309,11 @@ class _WSCommon(_WSStatusMixin):
     dev_id: str
     _coordinator: Any
 
+    def __init__(self, *, inventory: Inventory | None = None) -> None:
+        """Initialise shared websocket state."""
+
+        self._inventory: Inventory | None = inventory
+
     def _dispatch_nodes(self, payload: dict[str, Any]) -> None:
         raw_nodes = payload.get("nodes") if "nodes" in payload else payload
         context = _prepare_nodes_dispatch(
@@ -312,10 +321,9 @@ class _WSCommon(_WSStatusMixin):
             entry_id=self.entry_id,
             coordinator=self._coordinator,
             raw_nodes=raw_nodes,
+            inventory=self._inventory,
         )
-        nodes_payload = (
-            context.inventory.payload if context.inventory is not None else context.payload
-        )
+        nodes_payload = context.payload if context.payload is not None else {}
         payload_copy = {
             "dev_id": self.dev_id,
             "node_type": None,
@@ -339,6 +347,7 @@ class WebSocketClient(_WsLeaseMixin, _WSStatusMixin):
         session: aiohttp.ClientSession | None = None,
         protocol: str | None = None,
         namespace: str = WS_NAMESPACE,
+        inventory: Inventory | None = None,
     ) -> None:
         _WsLeaseMixin.__init__(self)
         self.hass = hass
@@ -356,6 +365,7 @@ class WebSocketClient(_WsLeaseMixin, _WSStatusMixin):
             if getattr(api_client, "_is_ducaheat", False)
             else BRAND_TERMOWEB
         )
+        self._inventory = inventory
 
     def start(self) -> asyncio.Task:
         if self._delegate is not None:
@@ -371,6 +381,7 @@ class WebSocketClient(_WsLeaseMixin, _WSStatusMixin):
                 coordinator=self._coordinator,
                 session=self._session,
                 namespace=DUCAHEAT_NAMESPACE,
+                inventory=self._inventory,
             )
         else:
             from .termoweb_ws import TermoWebWSClient
@@ -383,6 +394,7 @@ class WebSocketClient(_WsLeaseMixin, _WSStatusMixin):
                 coordinator=self._coordinator,
                 session=self._session,
                 namespace=self._namespace,
+                inventory=self._inventory,
             )
         return self._delegate.start()
 

@@ -56,6 +56,8 @@ class ExampleBackend(Backend):
         entry_id: str,
         dev_id: str,
         coordinator: Any,
+        *,
+        inventory: Any | None = None,
     ) -> DummyWsClient:
         self.calls.append(
             {
@@ -63,6 +65,7 @@ class ExampleBackend(Backend):
                 "entry_id": entry_id,
                 "dev_id": dev_id,
                 "coordinator": coordinator,
+                "inventory": inventory,
             }
         )
         return DummyWsClient(hass, entry_id=entry_id, dev_id=dev_id)
@@ -80,11 +83,13 @@ async def test_backend_properties_and_ws_creation() -> None:
     assert backend.brand == "termoweb"
     assert backend.client is client
 
+    inventory = object()
     ws_client = backend.create_ws_client(
         hass,
         entry_id="entry-1",
         dev_id="dev-1",
         coordinator=coordinator,
+        inventory=inventory,
     )
     assert isinstance(ws_client, DummyWsClient)
     assert backend.calls == [
@@ -93,6 +98,7 @@ async def test_backend_properties_and_ws_creation() -> None:
             "entry_id": "entry-1",
             "dev_id": "dev-1",
             "coordinator": coordinator,
+            "inventory": inventory,
         }
     ]
 

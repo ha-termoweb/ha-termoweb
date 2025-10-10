@@ -11,7 +11,7 @@ from aiohttp import ClientResponseError
 
 from ..api import RESTClient
 from ..const import BRAND_DUCAHEAT, WS_NAMESPACE
-from ..inventory import NodeDescriptor
+from ..inventory import Inventory, NodeDescriptor
 from .base import Backend, WsClientProto
 from .ducaheat_ws import DucaheatWSClient
 from .sanitize import (
@@ -1001,6 +1001,8 @@ class DucaheatBackend(Backend):
         entry_id: str,
         dev_id: str,
         coordinator: Any,
+        *,
+        inventory: Inventory | None = None,
     ) -> WsClientProto:
         """Instantiate the unified websocket client for Ducaheat."""
 
@@ -1011,6 +1013,7 @@ class DucaheatBackend(Backend):
             api_client=self.client,
             coordinator=coordinator,
             namespace=WS_NAMESPACE,
+            inventory=inventory,
         )
 
 

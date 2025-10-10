@@ -88,11 +88,13 @@ def test_termoweb_backend_creates_ws_client() -> None:
     loop = asyncio.new_event_loop()
     try:
         fake_hass = SimpleNamespace(loop=loop)
+        inventory = object()
         ws_client = backend.create_ws_client(
             fake_hass,
             entry_id="entry123",
             dev_id="device456",
             coordinator=coordinator,
+            inventory=inventory,
         )
     finally:
         loop.close()
@@ -102,6 +104,7 @@ def test_termoweb_backend_creates_ws_client() -> None:
     assert ws_client.entry_id == "entry123"
     assert ws_client._coordinator is coordinator
     assert ws_client._protocol_hint is None
+    assert getattr(ws_client, "_inventory", None) is inventory
 
 
 def test_termoweb_backend_sets_protocol_for_websocket_client(

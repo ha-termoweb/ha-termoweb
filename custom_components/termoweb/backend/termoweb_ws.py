@@ -108,6 +108,7 @@ class WebSocketClient(_WSStatusMixin):
         handshake_fail_threshold: int = 5,  # legacy compatibility
         protocol: str | None = None,
         namespace: str = WS_NAMESPACE,
+        inventory: Inventory | None = None,
     ) -> None:
         """Initialise the websocket client container."""
         self.hass = hass
@@ -187,6 +188,8 @@ class WebSocketClient(_WSStatusMixin):
         self._disconnected.set()
         self._backoff_seq = [5, 10, 30, 120, 300]
         self._backoff_idx = 0
+
+        self._inventory: Inventory | None = inventory
 
         self._connected_since: float | None = None
         self._healthy_since: float | None = None
@@ -901,14 +904,19 @@ class WebSocketClient(_WSStatusMixin):
             entry_id=self.entry_id,
             coordinator=self._coordinator,
             raw_nodes=raw_nodes,
+            inventory=self._inventory,
         )
 
         inventory = context.inventory
+        if self._inventory is None and isinstance(inventory, Inventory):
+            self._inventory = inventory
         addr_map = context.addr_map
         unknown_types = context.unknown_types
         record = context.record
         snapshot_obj = context.snapshot
-        raw_nodes_payload = inventory.payload if inventory.payload is not None else {}
+        raw_nodes_payload = context.payload
+        if raw_nodes_payload is None:
+            raw_nodes_payload = inventory.payload if inventory.payload is not None else {}
         if unknown_types:  # pragma: no cover - diagnostic branch
             _LOGGER.debug(
                 "WS: unknown node types in inventory: %s",
@@ -1074,20 +1082,22 @@ class WebSocketClient(_WSStatusMixin):
         record = record_container.get(self.entry_id) if isinstance(record_container, dict) else None
         snapshot_obj = ensure_snapshot(record)
 
-        inventory_nodes: list[Any]
+        inventory_container: Inventory | None = (
+            self._inventory if isinstance(self._inventory, Inventory) else None
+        )
         normalized_map: dict[str, list[str]]
-        inventory_container: Inventory | None
-        if isinstance(snapshot_obj, InstallationSnapshot):
-            inventory_nodes = list(snapshot_obj.inventory)
-            normalized_map, _ = snapshot_obj.heater_sample_address_map
+
+        if inventory_container is None and isinstance(snapshot_obj, InstallationSnapshot):
             inventory_container = Inventory(
                 snapshot_obj.dev_id,
                 snapshot_obj.raw_nodes,
-                inventory_nodes,
+                list(snapshot_obj.inventory),
             )
-        else:
+            self._inventory = inventory_container
+
+        if inventory_container is None:
             nodes_payload: Any | None = None
-            inventory_nodes = []
+            inventory_nodes: list[Any] = []
             if isinstance(record, MutableMapping):
                 cached_inventory = record.get("node_inventory")
                 if isinstance(cached_inventory, list):
@@ -1109,6 +1119,12 @@ class WebSocketClient(_WSStatusMixin):
             )
             normalized_map, _ = container.heater_sample_address_map
             inventory_container = container
+            self._inventory = container
+        else:
+            normalized_map, _ = inventory_container.heater_sample_address_map
+
+        if isinstance(record, dict) and isinstance(inventory_container, Inventory):
+            record["node_inventory"] = list(inventory_container.nodes)
 
         if not normalized_map.get("htr"):
             fallback: Iterable[Any] | None = None
@@ -1293,6 +1309,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         session: aiohttp.ClientSession | None = None,
         handshake_fail_threshold: int = 5,
         protocol: str | None = None,
+        inventory: Inventory | None = None,
     ) -> None:
         """Initialise the legacy websocket client container."""
 
@@ -1341,6 +1358,8 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._handshake_payload: dict[str, Any] | None = None
         self._nodes: dict[str, Any] = {}
         self._nodes_raw: dict[str, Any] = {}
+
+        self._inventory: Inventory | None = inventory
 
         self._payload_idle_window: float = 240.0
         self._idle_restart_task: asyncio.Task | None = None
