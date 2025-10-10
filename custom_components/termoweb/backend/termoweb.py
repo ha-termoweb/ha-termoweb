@@ -5,6 +5,7 @@ from typing import Any, cast
 
 from .base import Backend, WsClientProto
 from .ws_client import WebSocketClient
+from ..inventory import Inventory
 
 try:  # pragma: no cover - exercised via backend tests
     from custom_components.termoweb.backend.termoweb_ws import (
@@ -32,6 +33,8 @@ class TermoWebBackend(Backend):
         entry_id: str,
         dev_id: str,
         coordinator: Any,
+        *,
+        inventory: Inventory | None = None,
     ) -> WsClientProto:
         """Instantiate the unified websocket client for TermoWeb."""
 
@@ -41,6 +44,7 @@ class TermoWebBackend(Backend):
             "dev_id": dev_id,
             "api_client": self.client,
             "coordinator": coordinator,
+            "inventory": inventory,
         }
         if issubclass(ws_cls, WebSocketClient):
             kwargs["protocol"] = "socketio09"

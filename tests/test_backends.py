@@ -44,14 +44,17 @@ def test_backend_factory_returns_expected_clients() -> None:
     loop = asyncio.new_event_loop()
     try:
         hass = _make_hass(loop)
+        inventory = object()
         ws_client = termoweb_backend.create_ws_client(
             hass,
             entry_id="entry",
             dev_id="dev",
             coordinator=object(),
+            inventory=inventory,
         )
         assert isinstance(ws_client, TermoWebWSClient)
         assert ws_client._protocol_hint is None
+        assert getattr(ws_client, "_inventory", None) is inventory
         loop.run_until_complete(ws_client.stop())
     finally:
         loop.close()
@@ -62,14 +65,17 @@ def test_backend_factory_returns_expected_clients() -> None:
     loop = asyncio.new_event_loop()
     try:
         hass = _make_hass(loop)
+        inventory = object()
         ws_client = ducaheat_backend.create_ws_client(
             hass,
             entry_id="entry",
             dev_id="dev",
             coordinator=object(),
+            inventory=inventory,
         )
         assert isinstance(ws_client, DucaheatWSClient)
         assert ws_client._namespace == WS_NAMESPACE
+        assert getattr(ws_client, "_inventory", None) is inventory
         loop.run_until_complete(ws_client.stop())
     finally:
         loop.close()

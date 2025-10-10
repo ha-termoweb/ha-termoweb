@@ -128,8 +128,10 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         coordinator: Any,
         session: aiohttp.ClientSession | None = None,
         namespace: str | None = None,
+        inventory: Inventory | None = None,
     ) -> None:
         _WsLeaseMixin.__init__(self)
+        _WSCommon.__init__(self, inventory=inventory)
         self.hass = hass
         self.entry_id = entry_id
         self.dev_id = dev_id
@@ -755,8 +757,14 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             snapshot_obj = ensure_snapshot(record)
 
             normalized_map: dict[str, list[str]]
-            if isinstance(snapshot_obj, InstallationSnapshot):
+            inventory_container = self._inventory if isinstance(self._inventory, Inventory) else None
+            record_inventory_nodes: Iterable[Any] | None = None
+            if inventory_container is not None:
+                normalized_map, _ = inventory_container.heater_sample_address_map
+                record_inventory_nodes = inventory_container.nodes
+            elif isinstance(snapshot_obj, InstallationSnapshot):
                 normalized_map, _ = snapshot_obj.heater_sample_address_map
+                record_inventory_nodes = snapshot_obj.inventory
             else:
                 nodes_payload: Mapping[str, Any] | None
                 if isinstance(resolved_nodes, Mapping):
@@ -782,6 +790,12 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     inventory_nodes,
                 )
                 normalized_map, _ = container.heater_sample_address_map
+                inventory_container = container
+                self._inventory = container
+                record_inventory_nodes = container.nodes
+
+            if isinstance(record, dict) and record_inventory_nodes is not None:
+                record["node_inventory"] = list(record_inventory_nodes)
 
             if not normalized_map.get("htr"):
                 fallback: Iterable[Any] | None = None
