@@ -8,6 +8,22 @@ constructs for each gateway. Home Assistant maintains per-installation caches of
 nodes, coordinates REST polling, merges websocket deltas, and exposes entity
 state and energy statistics to the rest of the platform.【F:custom_components/termoweb/__init__.py†L140-L233】【F:custom_components/termoweb/backend/ws_client.py†L77-L193】【F:custom_components/termoweb/backend/ducaheat_ws.py†L188-L386】【F:custom_components/termoweb/energy.py†L421-L512】
 
+## Inventory-centric design
+
+The integration treats the gateway and node inventory as an immutable contract
+that is captured once during setup. Each config entry normalises the raw payload
+into an `Inventory` and persists the accompanying `InstallationSnapshot` inside
+`hass.data`, allowing coordinators, websocket clients and services to reuse the
+same canonical metadata without repeating discovery calls.【F:custom_components/termoweb/__init__.py†L331-L405】【F:custom_components/termoweb/installation.py†L18-L117】【F:custom_components/termoweb/inventory.py†L86-L170】
+
+Inventory helpers provide cached views for node type groupings, heater address
+maps and naming metadata so downstream consumers never mutate the raw payload.
+Coordinators rely on these cached structures to derive polling targets, websocket
+subscriptions and UI naming hints while assuming that the set of devices and
+addresses remains stable across the lifetime of the entry. When hardware changes
+are required, users are expected to reload the integration so a fresh snapshot is
+captured from the backend.【F:custom_components/termoweb/inventory.py†L138-L236】【F:custom_components/termoweb/installation.py†L83-L156】【F:custom_components/termoweb/__init__.py†L320-L411】
+
 ## Key components
 
 - **Config flow** – collects credentials, preferred brand and polling interval,

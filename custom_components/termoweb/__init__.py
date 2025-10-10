@@ -359,6 +359,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     dev = dev or {}
     nodes = await client.get_nodes(dev_id)
     node_inventory = build_node_inventory(nodes)
+    # Inventory-centric design: build and freeze the gateway/node topology once
+    # during setup so every runtime component can trust the shared snapshot.
     inventory = Inventory(dev_id, nodes, node_inventory)
     snapshot = InstallationSnapshot(
         dev_id=dev_id,
