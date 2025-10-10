@@ -24,6 +24,13 @@ addresses remains stable across the lifetime of the entry. When hardware changes
 are required, users are expected to reload the integration so a fresh snapshot is
 captured from the backend.【F:custom_components/termoweb/inventory.py†L138-L236】【F:custom_components/termoweb/installation.py†L83-L156】【F:custom_components/termoweb/__init__.py†L320-L411】
 
+Power monitors (`pmo`) ride alongside heaters in the captured `dev_data`
+snapshot. The snapshot also exposes a `pmo_system` block with global power
+management metadata such as `main_circuit_pmos` plus the `max_power_config`
+profiles and slots observed in captures. Inventory caches persist these nodes
+even though the integration only reads them today so future entities inherit the
+discover-once contract.【F:docs/ducaheat_api.md†L27-L33】【F:custom_components/termoweb/installation.py†L58-L117】
+
 ## Key components
 
 - **Config flow** – collects credentials, preferred brand and polling interval,
@@ -67,6 +74,10 @@ captured from the backend.【F:custom_components/termoweb/inventory.py†L138-L2
   selection, and registers the `import_energy_history` service only once per
   Home Assistant instance.【F:custom_components/termoweb/energy.py†L150-L177】【F:custom_components/termoweb/energy.py†L421-L512】【F:custom_components/termoweb/energy.py†L841-L919】
 
+- **Power monitor coverage** – `pmo` nodes are discovered from `dev_data`, expose read payloads via `/pmo/{addr}`
+  and energy counters via `/pmo/{addr}/samples`. No WebSocket `status` deltas are observed, so consumers must poll REST or fetch
+  samples when updated limits or counters are required.【F:docs/ducaheat_api.md†L154-L181】
+
 ## Runtime data flow
 
 ```mermaid
@@ -94,7 +105,7 @@ flowchart LR
     subgraph Field[Home Gateway & Nodes]
         Gateway[TermoWeb Gateway]
         Htr["Heater Nodes (htr / acm)"]
-        Pmo[Other Nodes]
+        Pmo["Power monitor nodes (pmo)\nREST /pmo/{addr}/samples (epoch sec)"]
     end
 
     User --> CF
@@ -130,6 +141,8 @@ flowchart LR
     Gateway --> Htr
     Gateway --> Pmo
 ```
+
+Power monitor energy counters flow exclusively through REST reads and `/pmo/{addr}/samples` requests using epoch-second windows; no WebSocket deltas supplement these feeds today.【F:docs/ducaheat_api.md†L154-L181】
 
 ## Ducaheat selection & boost pipeline
 

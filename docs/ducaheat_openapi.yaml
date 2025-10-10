@@ -13,6 +13,7 @@ info:
       - Boost sessions run 60–600 minutes and are controlled via `/boost`.
       - Temperature payloads are strings with exactly one decimal and uppercase units.
       - Socket path differs: `/socket.io?token=...&dev_id=...`.
+      - Power monitor samples use epoch seconds; thermal nodes (`htr`, `acm`) keep epoch milliseconds.
 
     Base host: https://api-tevolve.termoweb.net
 servers:
@@ -804,6 +805,48 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+  /api/v2/devs/{dev_id}/pmo/{addr}/samples:
+    get:
+      tags: [PowerMonitors]
+      summary: Read power monitor samples (epoch seconds)
+      parameters:
+        - name: dev_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: addr
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: start
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+            description: Epoch seconds (inclusive)
+        - name: end
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+            description: Epoch seconds (exclusive)
+      responses:
+        "200":
+          description: Samples payload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  samples:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+        "204":
+          description: No samples in the requested range
   /api/v2/devs/{dev_id}/pmo/{addr}:
     get:
       tags: [PowerMonitors]
