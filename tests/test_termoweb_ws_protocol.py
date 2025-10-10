@@ -1029,6 +1029,94 @@ def test_dispatch_nodes_uses_inventory_payload(monkeypatch: pytest.MonkeyPatch) 
     assert inventory.payload_calls >= 1
 
 
+def test_handle_event_includes_addr_map(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Legacy websocket events should include ``addr_map`` in dispatcher payloads."""
+
+    hass = HomeAssistant()
+    hass.loop = SimpleNamespace(
+        call_soon_threadsafe=lambda cb, *args: cb(*args),
+        is_running=lambda: False,
+    )
+    hass.data.setdefault(module.DOMAIN, {})["entry"] = {}
+    coordinator = SimpleNamespace(data={}, update_nodes=MagicMock())
+
+    dispatcher = MagicMock()
+    monkeypatch.setattr(module, "async_dispatcher_send", dispatcher)
+    monkeypatch.setattr(module.TermoWebWSClient, "_install_write_hook", lambda self: None)
+    monkeypatch.setattr(
+        module.TermoWebWSClient,
+        "_dispatch_nodes",
+        lambda self, payload: {"htr": ["2"]},
+    )
+
+    def _fake_bucket(
+        self: Any, dev_map: dict[str, Any], nodes_by_type: dict[str, Any], node_type: str
+    ) -> dict[str, Any]:
+        return nodes_by_type.setdefault(
+            node_type,
+            {"settings": {}, "advanced": {}, "samples": {}, "addrs": []},
+        )
+
+    monkeypatch.setattr(module.TermoWebWSClient, "_ensure_type_bucket", _fake_bucket)
+    monkeypatch.setattr(
+        module.TermoWebWSClient,
+        "_update_legacy_section",
+        lambda self, **_: True,
+    )
+    monkeypatch.setattr(
+        module.TermoWebWSClient,
+        "_legacy_section_for_path",
+        staticmethod(lambda path: "settings"),
+    )
+
+    client = module.TermoWebWSClient(
+        hass,
+        entry_id="entry",
+        dev_id="device",
+        api_client=DummyREST(),
+        coordinator=coordinator,
+        session=SimpleNamespace(closed=False),
+    )
+
+    event_payload = {
+        "name": "data",
+        "args": [
+            [
+                {
+                    "path": "/devs/device/mgr/nodes",
+                    "body": {"htr": {"settings": {"2": {"mode": "auto"}}}},
+                },
+                {
+                    "path": "/devs/device/htr/2/settings",
+                    "body": {"mode": "auto"},
+                },
+            ]
+        ],
+    }
+
+    client._handle_event(event_payload)
+
+    payloads = [call.args[2] for call in dispatcher.call_args_list]
+    assert payloads
+    nodes_payload = next(
+        (payload for payload in payloads if payload.get("kind") == "nodes"),
+        None,
+    )
+    assert nodes_payload is not None
+    assert nodes_payload["addr_map"] == {"htr": ["2"]}
+
+    settings_payload = next(
+        (
+            payload
+            for payload in payloads
+            if payload.get("kind") == "htr_settings"
+        ),
+        None,
+    )
+    assert settings_payload is not None
+    assert settings_payload["addr_map"] == {"htr": ["2"]}
+
+
 def test_ensure_type_bucket_and_build_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
     """Helper methods should populate node buckets and snapshot structures."""
 
