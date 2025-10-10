@@ -25,11 +25,10 @@ def _make_snapshot(
     """Return an installation snapshot preloaded with ``nodes`` payload."""
 
     payload = {"nodes": nodes}
-    inventory = build_node_inventory(payload)
+    inventory_nodes = build_node_inventory(payload)
     if include_inventory:
-        return InstallationSnapshot(
-            dev_id=dev_id, raw_nodes=payload, node_inventory=inventory
-        )
+        inventory = Inventory(dev_id, payload, inventory_nodes)
+        return InstallationSnapshot(dev_id=dev_id, raw_nodes=payload, inventory=inventory)
     return InstallationSnapshot(dev_id=dev_id, raw_nodes=payload)
 
 
@@ -110,13 +109,15 @@ def test_snapshot_sample_targets_filter_invalid_pairs(
     assert snapshot.heater_sample_targets == [("htr", "1"), ("acm", "2")]
 
 
-def test_snapshot_update_nodes_accepts_iterables() -> None:
-    """Providing ``node_inventory`` should update the cached inventory."""
+def test_snapshot_update_nodes_accepts_inventory() -> None:
+    """Providing an inventory container should refresh cached nodes."""
 
     snapshot = InstallationSnapshot(dev_id="dev", raw_nodes={"nodes": []})
-    node_inventory = [SimpleNamespace(type="htr", addr="1", name="Heater")]
+    payload = {"nodes": [{"type": "htr", "addr": "1", "name": "Heater"}]}
+    inventory_nodes = build_node_inventory(payload)
+    container = Inventory("dev", payload, inventory_nodes)
 
-    snapshot.update_nodes({"nodes": []}, node_inventory=node_inventory)
+    snapshot.update_nodes(payload, inventory=container)
 
     inventory = snapshot.inventory
     assert inventory is not None
@@ -126,13 +127,17 @@ def test_snapshot_update_nodes_accepts_iterables() -> None:
 def test_snapshot_nodes_by_type_skips_unknown() -> None:
     """Nodes without valid types should be ignored in type maps."""
 
+    payload = {
+        "nodes": [
+            {"type": "", "addr": "1", "name": ""},
+            {"type": "htr", "addr": "2", "name": ""},
+        ]
+    }
+    inventory_nodes = build_node_inventory(payload)
     snapshot = InstallationSnapshot(
         dev_id="dev",
         raw_nodes={"nodes": []},
-        node_inventory=[
-            SimpleNamespace(type="", addr="1", name=""),
-            SimpleNamespace(type="htr", addr="2", name=""),
-        ],
+        inventory=Inventory("dev", payload, inventory_nodes),
     )
     record = {"snapshot": snapshot}
 
@@ -144,15 +149,26 @@ def test_snapshot_nodes_by_type_skips_unknown() -> None:
     assert all(node.addr == "2" for node in mapping["htr"])
 
 
-def test_snapshot_update_nodes_uses_node_inventory_fallback() -> None:
-    """update_nodes should accept node inventory when container is missing."""
+def test_snapshot_update_nodes_rebuilds_from_payload() -> None:
+    """update_nodes should rebuild inventory when none is provided."""
 
+    payload = {"nodes": [{"type": "htr", "addr": "5", "name": "Living"}]}
     snapshot = InstallationSnapshot(dev_id="dev", raw_nodes={})
-    nodes = [SimpleNamespace(type="htr", addr="5", name="Living")]
 
-    snapshot.update_nodes({}, node_inventory=nodes)
+    snapshot.update_nodes(payload)
 
     assert [node.addr for node in snapshot.inventory] == ["5"]
+
+
+def test_snapshot_rejects_invalid_inventory() -> None:
+    """Passing non-Inventory instances should raise ``TypeError``."""
+
+    with pytest.raises(TypeError):
+        InstallationSnapshot(dev_id="dev", raw_nodes={}, inventory=object())
+
+    snapshot = InstallationSnapshot(dev_id="dev", raw_nodes={})
+    with pytest.raises(TypeError):
+        snapshot.update_nodes({}, inventory=object())
 
 
 def test_ensure_snapshot_handles_missing() -> None:
