@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Mapping
 
 from homeassistant.components.button import ButtonEntity
 
@@ -25,17 +25,35 @@ from .const import DOMAIN
 from .heater import (
     BoostButtonMetadata,
     HeaterNodeBase,
+    HeaterPlatformDetails,
+    heater_platform_details_from_inventory,
     heater_platform_details_for_entry,
     iter_boost_button_metadata,
     iter_boostable_heater_nodes,
     log_skipped_nodes,
 )
 from .identifiers import build_heater_entity_unique_id
+from .inventory import Inventory
 from .utils import build_gateway_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
 _SERVICE_REQUEST_ACCUMULATOR_BOOST = "request_accumulator_boost"
+
+
+def _resolve_inventory(entry_data: Mapping[str, Any]) -> Inventory | None:
+    """Return the Inventory associated with ``entry_data`` when available."""
+
+    candidate = entry_data.get("inventory")
+    if isinstance(candidate, Inventory):
+        return candidate
+
+    coordinator = entry_data.get("coordinator")
+    candidate = getattr(coordinator, "inventory", None)
+    if isinstance(candidate, Inventory):
+        return candidate
+
+    return None
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -45,19 +63,30 @@ async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
 
+    inventory = _resolve_inventory(data)
+    default_name = lambda addr: f"Heater {addr}"
+    if inventory is not None:
+        heater_details = heater_platform_details_from_inventory(
+            inventory,
+            default_name_simple=default_name,
+        )
+    else:
+        heater_details = heater_platform_details_for_entry(
+            data,
+            default_name_simple=default_name,
+        )
+    _, _, resolve_name = heater_details
+    metadata_source: Inventory | HeaterPlatformDetails = (
+        inventory if inventory is not None else heater_details
+    )
+
     entities: list[ButtonEntity] = [
         StateRefreshButton(coordinator, entry.entry_id, dev_id)
     ]
 
-    heater_details = heater_platform_details_for_entry(
-        data,
-        default_name_simple=lambda addr: f"Heater {addr}",
-    )
-    nodes_by_type, _, resolve_name = heater_details
-
     boost_entities: list[ButtonEntity] = []
     for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
-        heater_details,
+        metadata_source,
         resolve_name,
         accumulators_only=True,
     ):
@@ -75,7 +104,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     if boost_entities:
         entities.extend(boost_entities)
-    log_skipped_nodes("button", heater_details, logger=_LOGGER)
+    log_skipped_nodes("button", metadata_source, logger=_LOGGER)
 
     async_add_entities(entities)
 
