@@ -74,10 +74,12 @@ def test_select_setup_and_selection(
             boost_runtime=boost_runtime_store("acm", node.addr, 30),
         )
 
-        def fake_prepare(entry_data, default_name_simple):
-            return ([node], {"acm": [node]}, {"acm": [node.addr]}, lambda *_: "Accumulator 7")
+        def fake_details(entry_data, default_name_simple):
+            return ({"acm": [node]}, {"acm": [node.addr]}, lambda *_: "Accumulator 7")
 
-        monkeypatch.setattr(select_module, "prepare_heater_platform_data", fake_prepare)
+        monkeypatch.setattr(
+            select_module, "heater_platform_details_for_entry", fake_details
+        )
 
         added: list[AccumulatorBoostDurationSelect] = []
 
@@ -211,10 +213,12 @@ def test_select_restores_last_state(
             boost_runtime={},
         )
 
-        def fake_prepare(entry_data, default_name_simple):
-            return ([node], {"acm": [node]}, {"acm": [node.addr]}, lambda *_: "Accumulator 9")
+        def fake_details(entry_data, default_name_simple):
+            return ({"acm": [node]}, {"acm": [node.addr]}, lambda *_: "Accumulator 9")
 
-        monkeypatch.setattr(select_module, "prepare_heater_platform_data", fake_prepare)
+        monkeypatch.setattr(
+            select_module, "heater_platform_details_for_entry", fake_details
+        )
 
         added: list[AccumulatorBoostDurationSelect] = []
 
@@ -302,15 +306,16 @@ def test_select_filters_nodes_and_handles_fallback(
             boost_runtime={},
         )
 
-        def fake_prepare(entry_data, default_name_simple):
+        def fake_details(entry_data, default_name_simple):
             return (
-                [non_acm, disabled_acm, enabled_acm],
                 {"htr": [non_acm], "acm": [disabled_acm, enabled_acm]},
                 {"acm": [disabled_acm.addr, enabled_acm.addr]},
                 lambda *_: "Accumulator 3",
             )
 
-        monkeypatch.setattr(select_module, "prepare_heater_platform_data", fake_prepare)
+        monkeypatch.setattr(
+            select_module, "heater_platform_details_for_entry", fake_details
+        )
 
         added: list[AccumulatorBoostDurationSelect] = []
 

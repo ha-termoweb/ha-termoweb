@@ -796,6 +796,75 @@ def test_async_import_energy_history_skips_without_inventory(
     assert "dev-missing: unable to resolve node inventory" in caplog.text
 
 
+def test_async_import_energy_history_uses_inventory_nodes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        (
+            mod,
+            energy_mod,
+            const,
+            _import_stats,
+            _update_meta,
+            _last_stats,
+            _get_period,
+            _delete_stats,
+            ConfigEntry,
+            HomeAssistant,
+            ent_reg,
+        ) = await _load_module(monkeypatch)
+
+        hass = HomeAssistant()
+        hass.config_entries = types.SimpleNamespace(async_update_entry=Mock())
+
+        entry = ConfigEntry("inventory-entry")
+        stored_inventory = inventory_module.Inventory(
+            "dev",
+            {},
+            [types.SimpleNamespace(type="htr", addr="A")],
+        )
+
+        client = types.SimpleNamespace(
+            get_node_samples=AsyncMock(return_value=[]),
+        )
+
+        hass.data = {
+            const.DOMAIN: {
+                entry.entry_id: {
+                    "client": client,
+                    "dev_id": "dev",
+                    "inventory": stored_inventory,
+                }
+            }
+        }
+
+        captured: dict[str, Any] = {}
+        real_resolve = energy_mod.resolve_record_inventory
+
+        def _capture(
+            record: Mapping[str, Any] | None,
+            *,
+            dev_id: str | None = None,
+            node_list=None,
+            **kwargs: Any,
+        ):
+            captured["node_list"] = node_list
+            return real_resolve(
+                record,
+                dev_id=dev_id,
+                node_list=node_list,
+                **kwargs,
+            )
+
+        monkeypatch.setattr(energy_mod, "resolve_record_inventory", _capture)
+
+        await mod._async_import_energy_history(hass, entry)
+
+        assert captured["node_list"] == stored_inventory.nodes
+
+    asyncio.run(_run())
+
+
 def test_register_import_service_uses_module_asyncio(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
