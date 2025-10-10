@@ -55,6 +55,7 @@ from custom_components.termoweb.inventory import (
     normalize_node_type,
     resolve_record_inventory,
 )
+
 from .ws_client import (
     WSStats,
     _prepare_nodes_dispatch,
@@ -1089,27 +1090,98 @@ class WebSocketClient(_WSStatusMixin):
             dev_map = coordinator_data.get(self.dev_id)
             if isinstance(dev_map, dict):
                 nodes_by_type: dict[str, Any] = dev_map.setdefault("nodes_by_type", {})
+
+                def _iter_addresses(candidate: Any) -> Iterable[Any]:
+                    """Return iterable form of ``candidate`` for address merging."""
+
+                    if isinstance(candidate, (str, bytes)):
+                        return [candidate]
+                    if isinstance(candidate, Iterable):
+                        return candidate
+                    return []
+
+                def _merge_addresses(
+                    existing: Any,
+                    candidates: Iterable[Any],
+                ) -> list[str]:
+                    """Return normalised union of ``existing`` and ``candidates``."""
+
+                    merged: list[str] = []
+                    seen: set[str] = set()
+                    if isinstance(existing, Iterable) and not isinstance(
+                        existing, (str, bytes)
+                    ):
+                        for candidate in existing:
+                            addr = normalize_node_addr(
+                                candidate,
+                                use_default_when_falsey=True,
+                            )
+                            if not addr or addr in seen:
+                                continue
+                            merged.append(addr)
+                            seen.add(addr)
+                    for candidate in candidates:
+                        addr = normalize_node_addr(
+                            candidate,
+                            use_default_when_falsey=True,
+                        )
+                        if not addr or addr in seen:
+                            continue
+                        merged.append(addr)
+                        seen.add(addr)
+                    return merged
+
+                addresses_by_type: dict[str, list[str]] = {}
+                existing_addresses = dev_map.get("addresses_by_type")
+                if isinstance(existing_addresses, Mapping):
+                    for raw_type, raw_addrs in existing_addresses.items():
+                        node_type = normalize_node_type(
+                            raw_type,
+                            use_default_when_falsey=True,
+                        )
+                        if not node_type:
+                            continue
+                        merged = _merge_addresses(
+                            addresses_by_type.get(node_type),
+                            _iter_addresses(raw_addrs),
+                        )
+                        addresses_by_type[node_type] = merged
+
                 for node_type, addrs in cleaned_map.items():
                     if not addrs and node_type != "htr":
                         continue
                     bucket = self._ensure_type_bucket(dev_map, nodes_by_type, node_type)
-                    if addrs:
-                        bucket["addrs"] = list(addrs)
-                if pmo_addresses or "pmo" in nodes_by_type:
-                    bucket = self._ensure_type_bucket(dev_map, nodes_by_type, "pmo")
-                    if pmo_addresses:
-                        addresses_copy = list(pmo_addresses)
-                        bucket["addrs"] = addresses_copy
+                    merged_addrs = _merge_addresses(bucket.get("addrs"), addrs)
+                    if merged_addrs or node_type == "htr":
+                        bucket["addrs"] = merged_addrs
+                    addresses_by_type[node_type] = merged_addrs
+                    if node_type == "pmo" and merged_addrs:
                         addr_map = dev_map.get("addr_map")
                         if isinstance(addr_map, Mapping):
                             updated_map = dict(addr_map)
-                            updated_map["pmo"] = list(addresses_copy)
+                            updated_map["pmo"] = list(merged_addrs)
                             dev_map["addr_map"] = updated_map
-                        addresses_by_type = dev_map.get("addresses_by_type")
-                        if isinstance(addresses_by_type, Mapping):
-                            updated_map = dict(addresses_by_type)
-                            updated_map["pmo"] = list(addresses_copy)
-                            dev_map["addresses_by_type"] = updated_map
+
+                if (pmo_addresses or "pmo" in nodes_by_type) and "pmo" not in cleaned_map:
+                    bucket = self._ensure_type_bucket(dev_map, nodes_by_type, "pmo")
+                    merged_addrs = _merge_addresses(bucket.get("addrs"), pmo_addresses)
+                    bucket["addrs"] = merged_addrs
+                    addresses_by_type["pmo"] = merged_addrs
+                    if merged_addrs:
+                        addr_map = dev_map.get("addr_map")
+                        if isinstance(addr_map, Mapping):
+                            updated_map = dict(addr_map)
+                            updated_map["pmo"] = list(merged_addrs)
+                            dev_map["addr_map"] = updated_map
+
+                if "htr" not in addresses_by_type:
+                    addresses_by_type["htr"] = []
+
+                dev_map["addresses_by_type"] = {
+                    node_type: list(addrs)
+                    for node_type, addrs in addresses_by_type.items()
+                }
+
                 updated = dict(coordinator_data)
                 updated[self.dev_id] = dev_map
                 self._coordinator.data = updated  # type: ignore[attr-defined]
@@ -1168,7 +1240,7 @@ class WebSocketClient(_WSStatusMixin):
             if hasattr(self._coordinator, "_addrs"):
                 try:
                     fallback = self._coordinator._addrs()  # type: ignore[attr-defined]  # noqa: SLF001
-                except Exception:  # pragma: no cover - defensive  # noqa: BLE001
+                except Exception:  # pragma: no cover - defensive
                     fallback = None
             if fallback:
                 normalised = list(normalized_map.get("htr", []))
