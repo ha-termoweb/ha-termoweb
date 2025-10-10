@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from conftest import FakeCoordinator, _install_stubs
+from conftest import FakeCoordinator, _install_stubs, build_coordinator_device_state
 
 _install_stubs()
 
@@ -67,7 +67,86 @@ def _make_coordinator(
     inventory_payload: Mapping[str, Any] | None = None,
     inventory_nodes: Iterable[Any] | None = None,
 ) -> FakeCoordinator:
-    normalised = FakeCoordinator._normalise_device_record(record)
+    base_record = dict(record)
+
+    raw_nodes = base_record.get("nodes")
+    nodes_payload = raw_nodes if isinstance(raw_nodes, Mapping) else None
+
+    raw_settings: dict[str, dict[str, Any]] = {}
+    raw_addresses: dict[str, Iterable[Any]] = {}
+    section_extras: dict[str, dict[str, Any]] = {}
+
+    def _merge_settings(node_type: str, bucket: Mapping[str, Any] | None) -> None:
+        if not isinstance(bucket, Mapping):
+            return
+        target = raw_settings.setdefault(node_type, {})
+        for addr, data in bucket.items():
+            target.setdefault(addr, data)
+
+    def _merge_addresses(node_type: str, addrs: Iterable[Any] | None) -> None:
+        if addrs is None or isinstance(addrs, (str, bytes)):
+            return
+        existing = list(raw_addresses.get(node_type, ()))
+        existing.extend(addrs)
+        raw_addresses[node_type] = existing
+
+    def _merge_section(node_type: str, section: Mapping[str, Any] | None) -> None:
+        if not isinstance(section, Mapping):
+            return
+        extras = {
+            key: value
+            for key, value in section.items()
+            if key not in {"settings", "addrs"}
+        }
+        _merge_settings(node_type, section.get("settings"))
+        addrs_value = section.get("addrs")
+        if isinstance(addrs_value, Iterable) and not isinstance(addrs_value, (str, bytes)):
+            _merge_addresses(node_type, addrs_value)
+        if extras:
+            section_extras.setdefault(node_type, {}).update(extras)
+
+    settings_section = base_record.get("settings")
+    if isinstance(settings_section, Mapping):
+        for node_type, bucket in settings_section.items():
+            _merge_settings(str(node_type), bucket if isinstance(bucket, Mapping) else None)
+
+    addresses_section = base_record.get("addresses_by_type")
+    if isinstance(addresses_section, Mapping):
+        for node_type, addrs in addresses_section.items():
+            _merge_addresses(str(node_type), addrs if isinstance(addrs, Iterable) else None)
+
+    nodes_by_type = base_record.get("nodes_by_type")
+    if isinstance(nodes_by_type, Mapping):
+        for node_type, section in nodes_by_type.items():
+            _merge_section(str(node_type), section if isinstance(section, Mapping) else None)
+
+    for candidate_type in ("htr", "acm", "heater"):
+        _merge_section(candidate_type, base_record.get(candidate_type))
+
+    remaining_keys = {
+        key: value
+        for key, value in base_record.items()
+        if key
+        not in {
+            "nodes",
+            "nodes_by_type",
+            "settings",
+            "addresses_by_type",
+            "htr",
+            "acm",
+            "heater",
+        }
+    }
+
+    rebuilt_record = build_coordinator_device_state(
+        nodes=nodes_payload,
+        settings=raw_settings or None,
+        addresses=raw_addresses or None,
+        sections=section_extras or None,
+        extra=remaining_keys or None,
+    )
+
+    normalised = FakeCoordinator._normalise_device_record(rebuilt_record)
 
     return FakeCoordinator(
         hass,
@@ -89,8 +168,11 @@ def test_termoweb_heater_is_heater_node() -> None:
     _reset_environment()
     hass = HomeAssistant()
     dev_id = "dev"
-    coordinator_data = {dev_id: {"htr": {"settings": {}}, "nodes": {}}}
-    coordinator = _make_coordinator(hass, dev_id, coordinator_data[dev_id])
+    coordinator_record = build_coordinator_device_state(
+        nodes={},
+        settings={"htr": {}},
+    )
+    coordinator = _make_coordinator(hass, dev_id, coordinator_record)
 
     heater = HeaterClimateEntity(
         coordinator,
@@ -112,8 +194,11 @@ def test_heater_climate_entity_normalizes_node_type(
     _reset_environment()
     hass = HomeAssistant()
     dev_id = "dev-acm"
-    coordinator_data = {dev_id: {"htr": {"settings": {}}, "nodes": {}}}
-    coordinator = _make_coordinator(hass, dev_id, coordinator_data[dev_id])
+    coordinator_record = build_coordinator_device_state(
+        nodes={},
+        settings={"htr": {}},
+    )
+    coordinator = _make_coordinator(hass, dev_id, coordinator_record)
 
     calls: list[tuple[object, dict[str, Any]]] = []
 
@@ -158,27 +243,18 @@ def test_async_setup_entry_creates_entities(
             ]
         }
         inventory = climate_inventory(dev_id, nodes)
-        coordinator_data = {
-            dev_id: {
-                "nodes": nodes,
-                "htr": {"settings": {"A1": {}, "B2": {}}, "addrs": ["A1", "B2"]},
-                "nodes_by_type": {
-                    "htr": {
-                        "settings": {"A1": {}, "B2": {}},
-                        "addrs": ["A1", "B2"],
-                    },
-                    "acm": {
-                        "settings": {"C3": {"units": "C"}},
-                        "addrs": ["C3"],
-                    },
-                },
-                "version": "3.1.4",
-            }
-        }
+        coordinator_record = build_coordinator_device_state(
+            nodes=nodes,
+            settings={
+                "htr": {"A1": {}, "B2": {}},
+                "acm": {"C3": {"units": "C"}},
+            },
+            extra={"version": "3.1.4"},
+        )
         coordinator = _make_coordinator(
             hass,
             dev_id,
-            coordinator_data[dev_id],
+            coordinator_record,
             client=AsyncMock(),
             inventory=inventory,
         )
@@ -315,7 +391,7 @@ def test_accumulator_preferred_boost_defaults_without_hass() -> None:
     _reset_environment()
     hass = HomeAssistant()
     dev_id = "dev-acc"
-    record = {"nodes": {}, "htr": {"settings": {}}, "nodes_by_type": {}}
+    record = build_coordinator_device_state(nodes={}, settings={"htr": {}})
     coordinator = _make_coordinator(hass, dev_id, record)
 
     entity = climate_module.AccumulatorClimateEntity(
@@ -352,17 +428,14 @@ def test_async_setup_entry_default_names_and_invalid_nodes(
         }
         inventory = climate_inventory(dev_id, raw_nodes)
 
-        coordinator_data = {
-            dev_id: {
-                "nodes": {},
-                "htr": {"settings": {}},
-                "nodes_by_type": {},
-            }
-        }
+        coordinator_record = build_coordinator_device_state(
+            nodes={},
+            settings={"htr": {}},
+        )
         coordinator = _make_coordinator(
             hass,
             dev_id,
-            coordinator_data[dev_id],
+            coordinator_record,
             client=AsyncMock(),
             inventory=inventory,
         )

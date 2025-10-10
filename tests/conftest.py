@@ -130,6 +130,140 @@ def inventory_builder() -> Callable[[str, Mapping[str, Any] | None, Iterable[Any
     return _factory
 
 
+def build_coordinator_device_state(
+    *,
+    nodes: Mapping[str, Any] | None = None,
+    settings: Mapping[str, Mapping[str, Any]] | None = None,
+    addresses: Mapping[str, Iterable[Any]] | None = None,
+    sections: Mapping[str, Mapping[str, Any]] | None = None,
+    extra: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return a coordinator device record with normalised heater metadata."""
+
+    from custom_components.termoweb.inventory import (
+        normalize_node_addr,
+        normalize_node_type,
+    )
+
+    record: dict[str, Any] = {}
+    if nodes is not None:
+        record["nodes"] = nodes
+    if extra:
+        record.update(dict(extra))
+
+    normalised_settings: dict[str, dict[str, Any]] = {}
+    if settings:
+        for raw_type, raw_bucket in settings.items():
+            node_type = normalize_node_type(raw_type, use_default_when_falsey=True)
+            if not node_type or not isinstance(raw_bucket, Mapping):
+                continue
+            bucket = normalised_settings.setdefault(node_type, {})
+            for addr, data in raw_bucket.items():
+                normalised_addr = normalize_node_addr(addr, use_default_when_falsey=True)
+                if not normalised_addr:
+                    continue
+                if isinstance(data, dict):
+                    bucket[normalised_addr] = data
+                elif isinstance(data, Mapping):
+                    bucket[normalised_addr] = dict(data)
+                elif data is None:
+                    bucket[normalised_addr] = {}
+                else:
+                    bucket[normalised_addr] = {"value": data}
+
+    normalised_addresses: dict[str, list[str]] = {}
+    if addresses:
+        for raw_type, raw_addrs in addresses.items():
+            node_type = normalize_node_type(raw_type, use_default_when_falsey=True)
+            if not node_type:
+                continue
+            bucket = normalised_addresses.setdefault(node_type, [])
+            if isinstance(raw_addrs, Iterable) and not isinstance(raw_addrs, (str, bytes)):
+                seen: set[str] = set(bucket)
+                for candidate in raw_addrs:
+                    normalised_addr = normalize_node_addr(
+                        candidate, use_default_when_falsey=True
+                    )
+                    if not normalised_addr or normalised_addr in seen:
+                        continue
+                    seen.add(normalised_addr)
+                    bucket.append(normalised_addr)
+
+    normalised_sections: dict[str, dict[str, Any]] = {}
+    if sections:
+        for raw_type, raw_section in sections.items():
+            node_type = normalize_node_type(raw_type, use_default_when_falsey=True)
+            if not node_type or not isinstance(raw_section, Mapping):
+                continue
+            normalised_sections[node_type] = dict(raw_section)
+
+    type_keys = (
+        set(normalised_settings)
+        | set(normalised_addresses)
+        | set(normalised_sections)
+    )
+    nodes_by_type: dict[str, dict[str, Any]] = {}
+
+    for node_type in sorted(type_keys):
+        section = dict(normalised_sections.get(node_type, {}))
+        settings_bucket = normalised_settings.setdefault(node_type, {})
+        if not isinstance(settings_bucket, dict):
+            settings_bucket = normalised_settings[node_type] = dict(settings_bucket)
+
+        existing_settings = section.get("settings")
+        if isinstance(existing_settings, Mapping):
+            for addr, data in existing_settings.items():
+                normalised_addr = normalize_node_addr(
+                    addr, use_default_when_falsey=True
+                )
+                if not normalised_addr:
+                    continue
+                if isinstance(data, dict):
+                    settings_bucket.setdefault(normalised_addr, data)
+                elif isinstance(data, Mapping):
+                    settings_bucket.setdefault(normalised_addr, dict(data))
+                elif data is None:
+                    settings_bucket.setdefault(normalised_addr, {})
+        section["settings"] = settings_bucket
+
+        addr_list = normalised_addresses.get(node_type)
+        if addr_list is None:
+            existing_addrs = section.get("addrs")
+            addr_list = []
+            seen_addrs: set[str] = set()
+            if isinstance(existing_addrs, Iterable) and not isinstance(
+                existing_addrs, (str, bytes)
+            ):
+                for candidate in existing_addrs:
+                    normalised_addr = normalize_node_addr(
+                        candidate, use_default_when_falsey=True
+                    )
+                    if not normalised_addr or normalised_addr in seen_addrs:
+                        continue
+                    seen_addrs.add(normalised_addr)
+                    addr_list.append(normalised_addr)
+        else:
+            addr_list = list(addr_list)
+
+        for addr in settings_bucket:
+            if addr not in addr_list:
+                addr_list.append(addr)
+
+        normalised_addresses[node_type] = addr_list
+        section["addrs"] = addr_list
+        nodes_by_type[node_type] = section
+
+    if nodes_by_type:
+        record["nodes_by_type"] = nodes_by_type
+        record["settings"] = normalised_settings
+        if normalised_addresses:
+            record["addresses_by_type"] = normalised_addresses
+        if "htr" in nodes_by_type:
+            record["htr"] = nodes_by_type["htr"]
+
+    return record
+
+
 def _setup_frame_for_hass(hass: Any) -> None:
     """Ensure frame helpers are initialised for a HomeAssistant instance."""
 
@@ -1171,6 +1305,7 @@ def _install_stubs() -> None:
         addr: Any | None = None,
         *,
         node_type: str | None = None,
+        settings: Mapping[str, Any] | None = None,
         **extra: Any,
     ) -> dict[str, Any]:
         """Return a websocket payload for tests with optional node type."""
@@ -1180,6 +1315,23 @@ def _install_stubs() -> None:
             payload["addr"] = addr
         if node_type is not None:
             payload["node_type"] = node_type
+
+        provided_settings: Mapping[str, Any] | None
+        if settings is not None:
+            provided_settings = settings
+        else:
+            raw_settings = extra.pop("settings", None)
+            provided_settings = (
+                raw_settings if isinstance(raw_settings, Mapping) else None
+            )
+
+        if provided_settings is None and addr is not None:
+            key = str(addr)
+            provided_settings = {key: {}}
+
+        if provided_settings is not None:
+            payload["settings"] = dict(provided_settings)
+
         payload.update(extra)
         return payload
 
