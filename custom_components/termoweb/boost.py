@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import logging
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterable, Iterator, Mapping
 
 from homeassistant.util import dt as dt_util
 
@@ -219,7 +219,7 @@ def iter_inventory_heater_metadata(
         return
 
     default_factory = default_name_simple or (lambda addr: f"Heater {addr}")
-    _, addresses_by_type, resolve_name = (
+    nodes_by_type, addresses_by_type, resolve_name = (
         heater_platform_details_from_inventory(
             inventory,
             default_name_simple=default_factory,
@@ -242,6 +242,31 @@ def iter_inventory_heater_metadata(
         key = (node_type, addr)
         if key not in node_lookup:
             node_lookup[key] = node
+
+    if not node_lookup:
+        for node_type_raw, nodes in nodes_by_type.items():
+            node_type = normalize_node_type(
+                node_type_raw,
+                use_default_when_falsey=True,
+            )
+            if not node_type:
+                continue
+            candidates: Iterable[Any]
+            if isinstance(nodes, Mapping):
+                candidates = nodes.values()
+            elif isinstance(nodes, Iterable) and not isinstance(nodes, (str, bytes)):
+                candidates = nodes
+            else:
+                candidates = (nodes,)
+            for node in candidates:
+                addr = normalize_node_addr(
+                    getattr(node, "addr", None),
+                    use_default_when_falsey=True,
+                )
+                if not addr:
+                    continue
+                key = (node_type, addr)
+                node_lookup.setdefault(key, node)
 
     for node_type_raw, addresses in addresses_by_type.items():
         node_type = normalize_node_type(

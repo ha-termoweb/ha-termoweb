@@ -1,44 +1,31 @@
-# -*- coding: utf-8 -*-
 """Shared websocket helpers."""
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping, MutableMapping
 from copy import deepcopy
 from dataclasses import dataclass
-import gzip
-import json
 import logging
-import random
-import string
 import time
-from collections.abc import MutableMapping
-from typing import TYPE_CHECKING, Any, Mapping
-from urllib.parse import urlencode, urlsplit, urlunsplit
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
-import socketio
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from ..api import RESTClient
 from ..const import (
-    ACCEPT_LANGUAGE,
-    API_BASE,
     BRAND_DUCAHEAT,
     BRAND_TERMOWEB,
     DOMAIN,
-    USER_AGENT,
     WS_NAMESPACE,
-    get_brand_api_base,
-    get_brand_requested_with,
-    get_brand_user_agent,
     signal_ws_data,
     signal_ws_status,
 )
 from ..installation import InstallationSnapshot, ensure_snapshot
 from ..inventory import (
-    Inventory,
     NODE_CLASS_BY_TYPE,
+    Inventory,
     addresses_by_node_type,
     normalize_node_addr,
     normalize_node_type,
@@ -101,19 +88,21 @@ def forward_ws_sample_updates(
             if normalized_raw:
                 alias_map[normalized_raw] = normalized_canonical or canonical
 
-    snapshot = ensure_snapshot(record)
-    if snapshot is not None:
-        _, heater_aliases = snapshot.heater_sample_address_map
-        _, pmo_aliases = snapshot.power_monitor_sample_address_map
+    inventory: Inventory | None = None
+    candidate = record.get("inventory")
+    if isinstance(candidate, Inventory):
+        inventory = candidate
+    if inventory is None:
+        coordinator = record.get("coordinator")
+        candidate = getattr(coordinator, "inventory", None)
+        if isinstance(candidate, Inventory):
+            inventory = candidate
+
+    if isinstance(inventory, Inventory):
+        _, heater_aliases = inventory.heater_sample_address_map
+        _, pmo_aliases = inventory.power_monitor_sample_address_map
         _merge_aliases(heater_aliases)
         _merge_aliases(pmo_aliases)
-    else:
-        inventory = record.get("inventory")
-        if isinstance(inventory, Inventory):
-            _, heater_aliases = inventory.heater_sample_address_map
-            _, pmo_aliases = inventory.power_monitor_sample_address_map
-            _merge_aliases(heater_aliases)
-            _merge_aliases(pmo_aliases)
 
     normalized_updates: dict[str, dict[str, Any]] = {}
     lease_seconds: float | None = None
@@ -337,12 +326,6 @@ def _prepare_nodes_dispatch(
         if not dev_id and isinstance(record_mapping, Mapping):
             dev_id = str(record_mapping.get("dev_id", ""))
 
-    source_mapping: Mapping[str, Any]
-    if isinstance(record_mapping, Mapping):
-        source_mapping = record_mapping
-    else:
-        source_mapping = {}
-
     inventory_container: Inventory | None = None
     if isinstance(inventory, Inventory):
         inventory_container = inventory
@@ -509,9 +492,9 @@ __all__ = [
     "DUCAHEAT_NAMESPACE",
     "HandshakeError",
     "WSStats",
+    "WebSocketClient",
     "forward_ws_sample_updates",
     "resolve_ws_update_section",
-    "WebSocketClient",
 ]
 
 time_mod = time.monotonic

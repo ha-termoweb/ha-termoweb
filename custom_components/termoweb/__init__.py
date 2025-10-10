@@ -56,7 +56,6 @@ from .energy import (
     default_samples_rate_limit_state,
     reset_samples_rate_limit_state,
 )
-from .installation import InstallationSnapshot
 from .inventory import Inventory, build_node_inventory
 from .utils import async_get_integration_version as _async_get_integration_version
 
@@ -360,14 +359,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     nodes = await client.get_nodes(dev_id)
     node_inventory = build_node_inventory(nodes)
     # Inventory-centric design: build and freeze the gateway/node topology once
-    # during setup so every runtime component can trust the shared snapshot.
+    # during setup so every runtime component can trust the shared metadata.
     inventory = Inventory(dev_id, nodes, node_inventory)
-    snapshot = InstallationSnapshot(
-        dev_id=dev_id,
-        raw_nodes=nodes,
-        inventory=inventory,
-    )
-
     if inventory.nodes:
         type_counts = Counter(node.type for node in inventory.nodes)
         summary = ", ".join(
@@ -395,8 +388,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         "client": backend.client,
         "coordinator": coordinator,
         "dev_id": dev_id,
-        "snapshot": snapshot,
         "inventory": inventory,
+        "nodes": nodes,
         "config_entry": entry,
         "base_poll_interval": max(base_interval, MIN_POLL_INTERVAL),
         "stretched": False,

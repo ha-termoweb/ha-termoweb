@@ -378,7 +378,7 @@ def test_button_setup_falls_back_to_prepare_heater_platform_data(
             coordinator,
         )
 
-        entry_data["inventory"] = {"nodes": []}
+        entry_data.pop("inventory", None)
 
         fallback_node = heater_node_factory("7", node_type="acm")
         nodes_by_type = {"acm": [fallback_node]}
@@ -398,13 +398,16 @@ def test_button_setup_falls_back_to_prepare_heater_platform_data(
         )
 
         def _fake_iter(
-            nodes_by_type_arg,
+            metadata_or_details,
             resolve_name,
             *,
             node_types=None,
             accumulators_only=False,
         ):
-            assert nodes_by_type_arg is nodes_by_type
+            assert isinstance(metadata_or_details, tuple)
+            assert metadata_or_details[0] == nodes_by_type
+            assert metadata_or_details[1] == {"acm": [fallback_node.addr]}
+            assert metadata_or_details[2] is _resolve_name
             assert resolve_name is _resolve_name
             assert accumulators_only is True
             assert node_types is None

@@ -31,7 +31,6 @@ sys.modules["homeassistant.components.diagnostics"] = diagnostics_stub
 
 from custom_components.termoweb.const import BRAND_DUCAHEAT, CONF_BRAND, DOMAIN
 from custom_components.termoweb.diagnostics import async_get_config_entry_diagnostics
-from custom_components.termoweb.installation import InstallationSnapshot
 from custom_components.termoweb.inventory import (
     Inventory,
     build_node_inventory,
@@ -114,10 +113,10 @@ def test_diagnostics_with_cached_inventory(caplog: pytest.LogCaptureFixture) -> 
     )
 
 
-def test_diagnostics_uses_snapshot_fallback(
+def test_diagnostics_uses_raw_nodes_fallback(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Diagnostics fall back to snapshot inventory and helper version."""
+    """Diagnostics fall back to raw node payloads and helper version."""
 
     hass = HomeAssistant()
     hass.version = "2025.5.1"
@@ -127,14 +126,15 @@ def test_diagnostics_uses_snapshot_fallback(
         data={CONF_BRAND: "termoweb"},
     )
 
-    raw_nodes = [
-        {"name": "Heater Two", "addr": "5", "type": "htr"},
-    ]
-    snapshot = InstallationSnapshot(dev_id="dev-123", raw_nodes=raw_nodes)
+    raw_nodes = {
+        "nodes": [
+            {"name": "Heater Two", "addr": "5", "type": "htr"},
+        ]
+    }
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {
-        "snapshot": snapshot,
+        "nodes": raw_nodes,
     }
 
     with caplog.at_level(logging.DEBUG):
@@ -150,7 +150,7 @@ def test_diagnostics_uses_snapshot_fallback(
     assert "time_zone" not in diagnostics["home_assistant"]
 
     assert (
-        "Diagnostics inventory source for entry-two: snapshot (raw=1, filtered=1)"
+        "Diagnostics inventory source for entry-two: raw_nodes (raw=1, filtered=1)"
         in caplog.text
     )
 

@@ -882,8 +882,21 @@ def test_total_energy_sensor() -> None:
                 }
             }
         }
+        raw_nodes = {
+            "nodes": [
+                {"type": "htr", "addr": "A"},
+                {"type": "acm", "addr": "B"},
+            ]
+        }
+        inventory = Inventory("1", raw_nodes, build_node_inventory(raw_nodes))
+        hass.data[DOMAIN][entry_id]["inventory"] = inventory
         total_sensor = InstallationTotalEnergySensor(
-            coord, entry_id, "1", "Total Energy", "tot"
+            coord,
+            entry_id,
+            "1",
+            "Total Energy",
+            "tot",
+            inventory,
         )
         total_sensor.hass = hass
         with patch.object(
@@ -1005,8 +1018,15 @@ def test_energy_and_power_sensor_properties() -> None:
 
         coordinator.data = copy.deepcopy(base_data)
 
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "A"}]}
+    inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
     total_sensor = InstallationTotalEnergySensor(
-        coordinator, "entry", "dev", "Total", "tot"
+        coordinator,
+        "entry",
+        "dev",
+        "Total",
+        "tot",
+        inventory,
     )
     total_sensor.hass = hass
     hass.data = {
@@ -1014,6 +1034,7 @@ def test_energy_and_power_sensor_properties() -> None:
             "entry": {
                 "coordinator": coordinator,
                 "dev_id": "dev",
+                "inventory": inventory,
             }
         }
     }
@@ -1054,8 +1075,21 @@ def test_energy_sensor_respects_scale_metadata() -> None:
         "uid",
         "Node",
     )
+    raw_nodes = {
+        "nodes": [
+            {"type": "htr", "addr": "A"},
+            {"type": "htr", "addr": "B"},
+        ]
+    }
+    inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+    coordinator.data.setdefault("dev", {})["inventory"] = inventory
     total_sensor = InstallationTotalEnergySensor(
-        coordinator, "entry", "dev", "Total", "tot"
+        coordinator,
+        "entry",
+        "dev",
+        "Total",
+        "tot",
+        inventory,
     )
 
     assert energy_sensor.native_value == pytest.approx(1.5)

@@ -675,7 +675,7 @@ def test_device_available_accepts_inventory_metadata() -> None:
     assert not heater._device_available({"nodes_by_type": {}})
     assert heater._device_available({"heater_address_map": {"forward": {"htr": ["A"]}}})
     assert heater._device_available({"addresses_by_type": {}})
-    assert heater._device_available({"settings": {"htr": {"A": {}}}})
+    assert not heater._device_available({"settings": {"htr": {"A": {}}}})
 
 
 class _FakeDict(dict):

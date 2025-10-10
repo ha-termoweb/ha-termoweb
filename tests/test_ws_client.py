@@ -175,11 +175,11 @@ def test_forward_ws_sample_updates_handles_power_monitors(
     hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
     raw_nodes = {"nodes": [{"type": "pmo", "addr": "7", "name": "PM"}]}
     inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
-    snapshot = InstallationSnapshot(dev_id="dev", raw_nodes=raw_nodes, inventory=inventory)
     handler = MagicMock()
     hass.data[base_ws.DOMAIN]["entry"] = {
         "energy_coordinator": SimpleNamespace(handle_ws_samples=handler),
-        "snapshot": snapshot,
+        "inventory": inventory,
+        "nodes": raw_nodes,
     }
 
     base_ws.forward_ws_sample_updates(
