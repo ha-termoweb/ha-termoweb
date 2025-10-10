@@ -502,22 +502,72 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                     return True
             return False
 
-        addr_map = payload.get("addr_map") if isinstance(payload, Mapping) else None
+        if not isinstance(payload, Mapping):
+            return False
+
+        addr_map = payload.get("addr_map")
         if isinstance(addr_map, Mapping):
             addresses = addr_map.get(node_type)
             if isinstance(addresses, Iterable) and not isinstance(addresses, (str, bytes)):
                 for candidate in addresses:
                     if _matches(candidate):
                         return True
+            elif _matches(addresses):
+                return True
 
-        nodes_section = payload.get("nodes") if isinstance(payload, Mapping) else None
-        if isinstance(nodes_section, Mapping):
-            node_payload = nodes_section.get(node_type)
+        inventory: Inventory | None = None
+        coordinator = getattr(self, "coordinator", None)
+        for attr in ("inventory", "_inventory"):
+            candidate = getattr(coordinator, attr, None)
+            if isinstance(candidate, Inventory):
+                inventory = candidate
+                break
+        if inventory is None:
+            record = self._device_record()
+            if isinstance(record, Mapping):
+                candidate = record.get("inventory")
+                if isinstance(candidate, Inventory):
+                    inventory = candidate
+
+        nodes_by_type = payload.get("nodes_by_type")
+        if isinstance(nodes_by_type, Mapping):
+            node_payload = nodes_by_type.get(node_type)
             if isinstance(node_payload, Mapping):
+                known_addresses: set[str] | None = None
+                known_core: set[str] | None = None
+                if isinstance(inventory, Inventory):
+                    forward_map, _ = inventory.heater_address_map
+                    known_addresses = set(forward_map.get(node_type, ()))
+                    known_core = {
+                        candidate.lstrip("0") or candidate for candidate in known_addresses
+                    }
                 for section in node_payload.values():
                     if not isinstance(section, Mapping):
                         continue
                     for candidate in section.keys():
+                        if known_addresses is not None:
+                            normalized = normalize_node_addr(candidate)
+                            if normalized and normalized in known_addresses:
+                                if _matches(candidate):
+                                    return True
+                                continue
+                            if normalized:
+                                normalized_core = normalized.lstrip("0") or normalized
+                                if known_core and normalized_core in known_core:
+                                    if _matches(candidate):
+                                        return True
+                                    continue
+                            if isinstance(candidate, str):
+                                stripped = candidate.strip()
+                                if stripped:
+                                    if stripped in known_addresses or (
+                                        known_core
+                                        and stripped.lstrip("0") in known_core
+                                    ):
+                                        if _matches(candidate):
+                                            return True
+                                    continue
+                            continue
                         if _matches(candidate):
                             return True
 

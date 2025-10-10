@@ -3057,7 +3057,10 @@ def test_ducaheat_snapshot_cancels_refresh_fallback() -> None:
         heater._refresh_fallback = fallback
         payload = {
             "dev_id": dev_id,
-            "nodes": {"htr": {"settings": {addr: {"mode": "auto"}}}},
+            "kind": "nodes",
+            "addr": None,
+            "node_type": None,
+            "nodes_by_type": {"htr": {"settings": {addr: {"mode": "auto"}}}},
             "addr_map": {"htr": [addr]},
         }
         heater._handle_ws_event(payload)
@@ -3068,7 +3071,10 @@ def test_ducaheat_snapshot_cancels_refresh_fallback() -> None:
         heater._refresh_fallback = fallback
         payload_int_addr = {
             "dev_id": dev_id,
-            "nodes": {"htr": {"settings": {addr: {"mode": "auto"}}}},
+            "kind": "nodes",
+            "addr": None,
+            "node_type": None,
+            "nodes_by_type": {"htr": {"settings": {addr: {"mode": "auto"}}}},
             "addr_map": {"htr": [2]},
         }
         heater._handle_ws_event(payload_int_addr)
@@ -3077,29 +3083,8 @@ def test_ducaheat_snapshot_cancels_refresh_fallback() -> None:
 
         fallback = loop.create_future()
         heater._refresh_fallback = fallback
-        payload_no_map = {
-            "dev_id": dev_id,
-            "nodes": {"htr": {"status": {"0002": {"mode": "auto"}}}},
-        }
-        heater._handle_ws_event(payload_no_map)
-        assert heater._refresh_fallback is None
-        assert fallback.cancelled()
-
-        fallback = loop.create_future()
-        heater._refresh_fallback = fallback
-        payload_mixed_sections = {
-            "dev_id": dev_id,
-            "nodes": {"htr": {"settings": [], "status": {addr: {"mode": "auto"}}}},
-        }
-        heater._handle_ws_event(payload_mixed_sections)
-        assert heater._refresh_fallback is None
-        assert fallback.cancelled()
-
-        fallback = loop.create_future()
-        heater._refresh_fallback = fallback
         unrelated_payload = {
             "dev_id": dev_id,
-            "nodes": {"acm": {"settings": {"3": {"mode": "auto"}}}},
             "addr_map": {"acm": ["3"]},
         }
         heater._handle_ws_event(unrelated_payload)
@@ -3119,9 +3104,18 @@ def test_ducaheat_snapshot_cancels_refresh_fallback() -> None:
 
         fallback = loop.create_future()
         heater._refresh_fallback = fallback
+        empty_map_payload = {
+            "dev_id": dev_id,
+            "addr_map": {"htr": []},
+        }
+        heater._handle_ws_event(empty_map_payload)
+        assert heater._refresh_fallback is fallback
+        assert not fallback.cancelled()
+
+        fallback = loop.create_future()
+        heater._refresh_fallback = fallback
         none_payload = {
             "dev_id": dev_id,
-            "nodes": {"htr": {"settings": {}}},
             "addr_map": {"htr": [None]},
         }
         heater._handle_ws_event(none_payload)

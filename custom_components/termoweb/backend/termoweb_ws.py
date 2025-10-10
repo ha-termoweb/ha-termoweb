@@ -1780,6 +1780,30 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                     return node_type, addr
             return None, None
 
+        touched_addrs: dict[str, set[str]] = {}
+
+        def _normalise_addr(value: Any) -> str | None:
+            """Return a normalised representation of a node address."""
+
+            normalized = normalize_node_addr(value)
+            if normalized:
+                return normalized
+            if isinstance(value, str):
+                stripped = value.strip()
+                return stripped or None
+            if value is None:
+                return None
+            candidate = str(value)
+            return candidate if candidate else None
+
+        def _record_addr(node_type: str, value: Any) -> str | None:
+            """Normalise ``value`` and add it to ``touched_addrs``."""
+
+            normalised = _normalise_addr(value)
+            if normalised:
+                touched_addrs.setdefault(node_type, set()).add(normalised)
+            return normalised
+
         for item in batch:
             if not isinstance(item, Mapping):
                 continue
@@ -1822,6 +1846,11 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                             dev_map, nodes_by_type, node_type
                         )
                         bucket["addrs"] = list(addrs)
+                        if isinstance(addrs, Iterable) and not isinstance(
+                            addrs, (str, bytes)
+                        ):
+                            for addr_candidate in addrs:
+                                _record_addr(node_type, addr_candidate)
                     updated_nodes = True
                 continue
             node_type, addr = _extract_type_addr(path)
@@ -1840,10 +1869,11 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                         dev_map=dev_map,
                         nodes_by_type=nodes_by_type,
                     ):
+                        recorded_addr = _record_addr(node_type, addr)
                         if section == "samples":
-                            sample_addrs.append((node_type, addr))
+                            sample_addrs.append((node_type, recorded_addr or addr))
                         elif section == "settings":
-                            updated_addrs.append((node_type, addr))
+                            updated_addrs.append((node_type, recorded_addr or addr))
                         updated_nodes = True
                     continue
             raw = dev_map.setdefault("raw", {})
@@ -1858,13 +1888,26 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             "ts": self._stats.last_event_ts,
             "node_type": None,
         }
+        addr_map_payload = {
+            node_type: sorted(addresses)
+            for node_type, addresses in touched_addrs.items()
+            if addresses
+        }
         if updated_nodes:
+            nodes_payload = {
+                **payload_base,
+                "addr": None,
+                "kind": "nodes",
+                "addr_map": addr_map_payload,
+            }
             async_dispatcher_send(
                 self.hass,
                 signal_ws_data(self.entry_id),
-                {**payload_base, "addr": None, "kind": "nodes"},
+                nodes_payload,
             )
         for node_type, addr in set(updated_addrs):
+            addr_str = _normalise_addr(addr) or (addr if isinstance(addr, str) else None)
+            addr_map = {node_type: [addr_str] if addr_str is not None else []}
             async_dispatcher_send(
                 self.hass,
                 signal_ws_data(self.entry_id),
@@ -1873,9 +1916,12 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                     "addr": addr,
                     "kind": f"{node_type}_settings",
                     "node_type": node_type,
+                    "addr_map": addr_map,
                 },
             )
         for node_type, addr in set(sample_addrs):
+            addr_str = _normalise_addr(addr) or (addr if isinstance(addr, str) else None)
+            addr_map = {node_type: [addr_str] if addr_str is not None else []}
             async_dispatcher_send(
                 self.hass,
                 signal_ws_data(self.entry_id),
@@ -1884,6 +1930,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                     "addr": addr,
                     "kind": f"{node_type}_samples",
                     "node_type": node_type,
+                    "addr_map": addr_map,
                 },
             )
         self._log_legacy_update(
