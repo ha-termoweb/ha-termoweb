@@ -6,7 +6,7 @@ import asyncio
 import logging
 import threading
 from types import MappingProxyType, SimpleNamespace
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import parse_qsl, urlsplit
 from unittest.mock import AsyncMock, MagicMock
 
@@ -1102,6 +1102,35 @@ def test_heater_sample_subscription_targets(monkeypatch: pytest.MonkeyPatch) -> 
         dev_id="device",
         raw_nodes={"nodes": [{"type": "htr", "addr": "1"}]},
     )
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
+    node_inventory = module.build_node_inventory(raw_nodes)
+    inventory = Inventory(client.dev_id, raw_nodes, node_inventory)
+
+    def fake_resolve(
+        record_map: Mapping[str, Any] | None,
+        *,
+        dev_id: str | None = None,
+        nodes_payload: Any | None = None,
+    ) -> Any:
+        assert record_map is record
+        assert dev_id == client.dev_id
+        assert nodes_payload == record["snapshot"].raw_nodes
+        return SimpleNamespace(
+            inventory=inventory,
+            source="inventory",
+            raw_count=len(node_inventory),
+            filtered_count=len(node_inventory),
+        )
+
+    monkeypatch.setattr(module, "resolve_record_inventory", fake_resolve)
+
+    def _unexpected_build(*_: Any, **__: Any) -> Any:
+        raise AssertionError("build_node_inventory should not be called")
+
+    monkeypatch.setattr(module, "build_node_inventory", _unexpected_build)
+
+    client._inventory = inventory
+
     targets = client._heater_sample_subscription_targets()
     assert targets == [("htr", "1")]
 
@@ -1115,6 +1144,23 @@ def test_heater_sample_subscription_targets_uses_coordinator_addrs(
     record = client.hass.data[module.DOMAIN]["entry"]
     record["snapshot"] = InstallationSnapshot(dev_id="device", raw_nodes={})
     client._coordinator._addrs = lambda: [" 3 ", "3", "4"]
+    inventory = Inventory(client.dev_id, {}, [])
+
+    monkeypatch.setattr(
+        module,
+        "resolve_record_inventory",
+        lambda *_, **__: SimpleNamespace(
+            inventory=inventory,
+            source="inventory",
+            raw_count=0,
+            filtered_count=0,
+        ),
+    )
+
+    def _unexpected_build(*_: Any, **__: Any) -> Any:
+        raise AssertionError("build_node_inventory should not be called")
+
+    monkeypatch.setattr(module, "build_node_inventory", _unexpected_build)
 
     targets = client._heater_sample_subscription_targets()
 
@@ -1122,10 +1168,11 @@ def test_heater_sample_subscription_targets_uses_coordinator_addrs(
     assert ("htr", "4") in targets
 
 
-def test_heater_sample_subscription_targets_rebuilds_inventory(
+def test_heater_sample_subscription_targets_logs_missing_inventory(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Inventory should be rebuilt when snapshots are missing or immutable."""
+    """Missing shared inventory should be logged without rebuilding."""
 
     client, _sio, _ = _make_client(monkeypatch)
     record = client.hass.data[module.DOMAIN]["entry"]
@@ -1133,43 +1180,32 @@ def test_heater_sample_subscription_targets_rebuilds_inventory(
     record.pop("inventory", None)
     record["nodes"] = {"nodes": [{"type": "htr", "addr": "9"}]}
 
-    calls: list[Any] = []
-    original_build = module.build_node_inventory
+    monkeypatch.setattr(
+        module,
+        "resolve_record_inventory",
+        lambda *_, **__: SimpleNamespace(
+            inventory=None,
+            source="fallback",
+            raw_count=0,
+            filtered_count=0,
+        ),
+    )
 
-    def _tracking_build(payload: Any) -> list[Any]:
-        calls.append(payload)
-        return original_build(payload)
+    def _unexpected_build(*_: Any, **__: Any) -> Any:
+        raise AssertionError("build_node_inventory should not be called")
 
-    monkeypatch.setattr(module, "build_node_inventory", _tracking_build)
-
-    client._inventory = None
-
-    targets = client._heater_sample_subscription_targets()
-
-    assert targets == [("htr", "9")]
-    assert calls and calls[0] is record["nodes"]
-    assert isinstance(record.get("inventory"), Inventory)
-    assert client._inventory is record["inventory"]
-
-    mapping_record = MappingProxyType({"nodes": {"nodes": [{"type": "htr", "addr": "10"}]}})
-    client.hass.data[module.DOMAIN]["entry"] = mapping_record
+    monkeypatch.setattr(module, "build_node_inventory", _unexpected_build)
 
     client._inventory = None
-    calls.clear()
-    targets_mapping = client._heater_sample_subscription_targets()
-
-    assert targets_mapping == [("htr", "10")]
-    assert calls and calls[0] == mapping_record["nodes"]
-    assert isinstance(client._inventory, Inventory)
-
-    client.hass.data[module.DOMAIN]["entry"] = None
     client._coordinator._addrs = lambda: ["11"]
 
-    client._inventory = None
-    calls.clear()
-    targets_none = client._heater_sample_subscription_targets()
+    with caplog.at_level(logging.ERROR):
+        targets = client._heater_sample_subscription_targets()
 
-    assert targets_none[0] == ("htr", "11")
+    assert any(
+        "Unable to resolve shared inventory" in record.message for record in caplog.records
+    )
+    assert targets[0] == ("htr", "11")
 
 
 def test_heater_sample_targets_use_record_inventory(
@@ -1188,8 +1224,28 @@ def test_heater_sample_targets_use_record_inventory(
     record["inventory"] = inventory
     client._inventory = None
 
-    def _unexpected_build(payload: Any) -> list[Any]:
-        raise AssertionError(f"unexpected build for payload: {payload!r}")
+    def fake_resolve(
+        record_map: Mapping[str, Any] | None,
+        *,
+        dev_id: str | None = None,
+        nodes_payload: Any | None = None,
+    ) -> Any:
+        assert record_map is record
+        assert dev_id == client.dev_id
+        snapshot_obj = record.get("snapshot")
+        expected_payload = snapshot_obj.raw_nodes if snapshot_obj is not None else None
+        assert nodes_payload == expected_payload
+        return SimpleNamespace(
+            inventory=inventory,
+            source="inventory",
+            raw_count=len(inventory.nodes),
+            filtered_count=len(inventory.nodes),
+        )
+
+    monkeypatch.setattr(module, "resolve_record_inventory", fake_resolve)
+
+    def _unexpected_build(*_: Any, **__: Any) -> Any:
+        raise AssertionError("build_node_inventory should not be called")
 
     monkeypatch.setattr(module, "build_node_inventory", _unexpected_build)
 
