@@ -230,15 +230,16 @@ async def test_async_update_data_adds_boost_metadata(
     base_now = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
     monkeypatch.setattr(coord_module.dt_util, "now", lambda: base_now)
 
+    nodes_payload = {"nodes": [{"addr": "1", "type": "acm"}]}
     nodes_list = [AccumulatorNode(name="Accumulator 1", addr="1")]
-    inventory = inventory_builder("dev", {}, nodes_list)
+    inventory = inventory_builder("dev", nodes_payload, nodes_list)
     coordinator = coord_module.StateCoordinator(
         hass,
         client=client,
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes=inventory.payload,
+        nodes=nodes_payload,
         inventory=inventory,
     )
 
@@ -290,13 +291,13 @@ async def test_async_update_data_skips_without_inventory(
 
 
 @pytest.mark.asyncio
-async def test_async_update_data_rebuilds_inventory(
+async def test_async_update_data_requires_inventory(
     monkeypatch: pytest.MonkeyPatch,
     inventory_builder: Callable[
         [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
     ],
 ) -> None:
-    """Coordinator should rebuild inventory from cached nodes when missing."""
+    """Coordinator should not rebuild inventory when the cache is cleared."""
 
     hass = HomeAssistant()
     client = AsyncMock()
@@ -315,23 +316,50 @@ async def test_async_update_data_rebuilds_inventory(
     coord._inventory = None
     calls: list[Mapping[str, Any] | None] = []
 
-    sentinel_nodes = list(inventory.nodes)
-
     def _fake_builder(payload: Mapping[str, Any] | None) -> list[Any]:
         calls.append(payload)
-        return sentinel_nodes
+        return []
 
     monkeypatch.setattr(coord_module, "build_node_inventory", _fake_builder)
     client.get_node_settings = AsyncMock(return_value={})
 
     result = await coord._async_update_data()
 
-    assert calls and calls[0] == nodes
-    rebuilt = coord._inventory
-    assert isinstance(rebuilt, coord_module.Inventory)
-    assert rebuilt.payload == nodes
-    assert "dev" in result
+    assert not calls
+    assert coord._inventory is None
+    assert result == {}
 
+
+@pytest.mark.asyncio
+async def test_async_update_data_omits_raw_nodes(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """Coordinator data should expose nodes_by_type but not raw node payloads."""
+
+    hass = HomeAssistant()
+    client = AsyncMock()
+    nodes_payload = {"nodes": [{"addr": "1", "type": "htr"}]}
+    node_list = list(coord_module.build_node_inventory(nodes_payload))
+    inventory = inventory_builder("dev", nodes_payload, node_list)
+    coord = coord_module.StateCoordinator(
+        hass,
+        client=client,
+        base_interval=30,
+        dev_id="dev",
+        device={},
+        nodes=nodes_payload,
+        inventory=inventory,
+    )
+
+    client.get_node_settings = AsyncMock(return_value={})
+
+    result = await coord._async_update_data()
+
+    record = result["dev"]
+    assert "nodes" not in record
+    assert record["nodes_by_type"]["htr"]["addrs"] == ["1"]
 
 @pytest.mark.asyncio
 async def test_async_fetch_settings_by_address_pending_and_boost(
@@ -440,12 +468,15 @@ async def test_async_refresh_heater_rebuilds_inventory(
     monkeypatch.setattr(coord_module, "build_node_inventory", _fake_builder)
     client.get_node_settings = AsyncMock(return_value={"mode": "auto"})
 
-    await coord.async_refresh_heater(("acm", "1"))
+    coord.update_nodes(nodes)
 
     assert calls and calls[0] == nodes
     rebuilt = coord._inventory
     assert isinstance(rebuilt, coord_module.Inventory)
     assert rebuilt.payload == nodes
+
+    await coord.async_refresh_heater(("acm", "1"))
+
     client.get_node_settings.assert_awaited_once_with("dev", ("acm", "1"))
 
 

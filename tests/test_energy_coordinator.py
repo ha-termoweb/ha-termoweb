@@ -214,8 +214,6 @@ def test_update_nodes_builds_inventory_from_payload(monkeypatch: pytest.MonkeyPa
 
     coord.update_nodes(payload)
 
-    assert coord._inventory is None
-
     inventory = coord._ensure_inventory()
     assert isinstance(inventory, coord_module.Inventory)
     assert inventory.nodes == tuple(sentinel)
@@ -250,8 +248,6 @@ def test_update_nodes_handles_non_iterable_inventory_hint(
 
     coord.update_nodes(payload, inventory=object())
 
-    assert coord._inventory is None
-
     inventory = coord._ensure_inventory()
     assert isinstance(inventory, coord_module.Inventory)
     assert inventory.nodes == tuple(sentinel)
@@ -285,7 +281,7 @@ def test_update_nodes_accepts_inventory_container(
     assert coord._inventory.payload == payload
 
     coord.update_nodes(None, container)
-    assert coord._nodes == payload
+    assert coord._inventory is container
 
 
 def test_normalise_type_section_cleans_addresses() -> None:
@@ -379,6 +375,7 @@ def test_coordinator_success_resets_backoff() -> None:
         assert nodes_by_type["acm"]["addrs"] == ["B"]
         assert nodes_by_type["acm"]["settings"]["B"] == {"mode": "auto"}
         assert dev["htr"] is nodes_by_type["htr"]
+        assert "nodes" not in dev
         assert coord._backoff == 0
         assert coord.update_interval == timedelta(seconds=coord._base_interval)
 
@@ -433,6 +430,7 @@ def test_state_coordinator_round_robin_mixed_types() -> None:
         assert dev["nodes_by_type"]["acm"]["settings"]["B"] == {"mode": "charge"}
         assert dev["htr"] is dev["nodes_by_type"]["htr"]
         assert dev["acm"] is dev["nodes_by_type"]["acm"]
+        assert "nodes" not in dev
 
     asyncio.run(_run())
 
@@ -684,7 +682,7 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
         assert dev["dev_id"] == "dev"
         assert dev["name"] == "Device"
         assert dev["raw"] == {"name": " Device "}
-        assert dev["nodes"] == nodes
+        assert "nodes" not in dev
         assert dev["connected"] is True
         htr = dev["htr"]
         assert htr["settings"]["A"] == {"mode": "auto"}
@@ -852,7 +850,7 @@ def test_refresh_heater_populates_missing_metadata() -> None:
         client.get_node_settings.assert_called_once_with("dev", ("htr", "A"))
         assert result["name"] == "Device"
         assert result["raw"] == {"name": " Device "}
-        assert result["nodes"] == nodes
+        assert "nodes" not in result
         assert result["connected"] is False
         assert result["htr"]["settings"]["A"] == {"mode": "heat"}
         nodes_by_type = result.get("nodes_by_type")
@@ -1727,14 +1725,10 @@ def test_state_coordinator_update_nodes_rebuilds_inventory(
 
     coord.update_nodes(nodes)
 
-    assert coord._inventory is None
-
-    rebuilt = coord._ensure_inventory()
-
     assert nodes in calls
+    rebuilt = coord._inventory
     assert isinstance(rebuilt, coord_module.Inventory)
     assert rebuilt.nodes == tuple(built_nodes)
-    assert coord._inventory is rebuilt
 
 
 def test_state_coordinator_update_nodes_uses_provided_inventory(
