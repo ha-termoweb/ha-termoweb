@@ -204,21 +204,34 @@ class StateCoordinator(
             return {}
 
         addresses: dict[str, list[str]] = {}
-        for node_type, nodes in inventory.nodes_by_type.items():
+        seen_by_type: dict[str, set[str]] = {}
+
+        for node in getattr(inventory, "nodes", ()):  # type: ignore[attr-defined]
+            node_type = normalize_node_type(
+                getattr(node, "type", None),
+                use_default_when_falsey=True,
+            )
+            addr = normalize_node_addr(
+                getattr(node, "addr", None),
+                use_default_when_falsey=True,
+            )
+            if not node_type or not addr:
+                continue
             bucket = addresses.setdefault(node_type, [])
-            seen = set(bucket)
-            for node in nodes:
-                addr = normalize_node_addr(getattr(node, "addr", ""))
-                if addr and addr not in seen:
-                    seen.add(addr)
-                    bucket.append(addr)
+            seen = seen_by_type.setdefault(node_type, set())
+            if addr not in seen:
+                seen.add(addr)
+                bucket.append(addr)
 
         forward_map, _ = inventory.heater_address_map
         for node_type, addrs in forward_map.items():
             bucket = addresses.setdefault(node_type, [])
-            seen = set(bucket)
+            seen = seen_by_type.setdefault(node_type, set())
             for addr in addrs:
-                normalized = normalize_node_addr(addr)
+                normalized = normalize_node_addr(
+                    addr,
+                    use_default_when_falsey=True,
+                )
                 if normalized and normalized not in seen:
                     seen.add(normalized)
                     bucket.append(normalized)
@@ -226,9 +239,12 @@ class StateCoordinator(
         pmo_forward, _ = inventory.power_monitor_address_map
         for node_type, addrs in pmo_forward.items():
             bucket = addresses.setdefault(node_type, [])
-            seen = set(bucket)
+            seen = seen_by_type.setdefault(node_type, set())
             for addr in addrs:
-                normalized = normalize_node_addr(addr)
+                normalized = normalize_node_addr(
+                    addr,
+                    use_default_when_falsey=True,
+                )
                 if normalized and normalized not in seen:
                     seen.add(normalized)
                     bucket.append(normalized)

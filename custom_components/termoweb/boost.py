@@ -219,12 +219,29 @@ def iter_inventory_heater_metadata(
         return
 
     default_factory = default_name_simple or (lambda addr: f"Heater {addr}")
-    nodes_by_type, addresses_by_type, resolve_name = (
+    _, addresses_by_type, resolve_name = (
         heater_platform_details_from_inventory(
             inventory,
             default_name_simple=default_factory,
         )
     )
+
+    heater_nodes = getattr(inventory, "heater_nodes", ())
+    node_lookup: dict[tuple[str, str], Node] = {}
+    for node in heater_nodes:
+        node_type = normalize_node_type(
+            getattr(node, "type", None),
+            use_default_when_falsey=True,
+        )
+        addr = normalize_node_addr(
+            getattr(node, "addr", None),
+            use_default_when_falsey=True,
+        )
+        if not node_type or not addr:
+            continue
+        key = (node_type, addr)
+        if key not in node_lookup:
+            node_lookup[key] = node
 
     for node_type_raw, addresses in addresses_by_type.items():
         node_type = normalize_node_type(
@@ -234,33 +251,22 @@ def iter_inventory_heater_metadata(
         if not node_type or not addresses:
             continue
 
-        nodes = nodes_by_type.get(node_type, [])
-        if not isinstance(nodes, list):  # pragma: no cover - defensive
-            nodes = list(nodes)
-
-        node_lookup: dict[str, Node] = {}
-        for node in nodes:
-            addr = normalize_node_addr(
-                getattr(node, "addr", None),
-                use_default_when_falsey=True,
-            )
-            if addr and addr not in node_lookup:
-                node_lookup[addr] = node
-
         for addr_raw in addresses:
             addr = normalize_node_addr(
                 addr_raw,
                 use_default_when_falsey=True,
             )
-            if addr:
-                node = node_lookup.get(addr)
-                if node is not None:
-                    name = resolve_name(node_type, addr)
-                    yield InventoryHeaterMetadata(
-                        node_type=node_type,
-                        addr=addr,
-                        name=name,
-                        node=node,
-                        supports_boost=supports_boost(node),
-                    )
+            if not addr:
+                continue
+            node = node_lookup.get((node_type, addr))
+            if node is None:
+                continue
+            name = resolve_name(node_type, addr)
+            yield InventoryHeaterMetadata(
+                node_type=node_type,
+                addr=addr,
+                name=name,
+                node=node,
+                supports_boost=supports_boost(node),
+            )
 
