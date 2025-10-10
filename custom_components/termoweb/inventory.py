@@ -354,6 +354,7 @@ def resolve_record_inventory(
     dev_id: str | None = None,
     nodes_payload: Any | None = None,
     node_list: Iterable[Node] | None = None,
+    cache_nodes: bool = True,
 ) -> InventoryResolution:
     """Return the ``Inventory`` for ``record`` and describe its origin."""
 
@@ -428,21 +429,25 @@ def resolve_record_inventory(
 
         if mutable is not None:
             mutable["inventory"] = container
-            mutable["node_inventory"] = list(container.nodes)
+            if cache_nodes:
+                mutable["node_inventory"] = list(container.nodes)
 
         resolved_dev_id = container.dev_id
         return InventoryResolution(container, source, raw_count, len(container.nodes))
 
     if node_info is not None:
         nodes_tuple, raw_count = node_info
-        result = _finalize(
-            nodes_tuple,
-            source="node_inventory",
-            raw_count=raw_count,
-            payload=payload_candidate,
-        )
-        if result is not None:
-            return result
+        if nodes_tuple or raw_count == 0:
+            result = _finalize(
+                nodes_tuple,
+                source="node_inventory",
+                raw_count=raw_count,
+                payload=payload_candidate,
+            )
+            if result is not None:
+                return result
+        elif mutable is not None:
+            mutable.pop("inventory", None)
 
     snapshot = mapping.get("snapshot") if mapping is not None else None
     if snapshot is not None:

@@ -896,8 +896,11 @@ def test_async_import_energy_history_rebuilds_missing_inventory(
 
         await mod._async_import_energy_history(hass, entry)
 
-        inventory = hass.data[const.DOMAIN][entry.entry_id]["node_inventory"]
-        assert [node.addr for node in inventory] == ["A"]
+        record = hass.data[const.DOMAIN][entry.entry_id]
+        inventory = record["inventory"]
+        assert isinstance(inventory, inventory_module.Inventory)
+        assert [node.addr for node in inventory.nodes] == ["A"]
+        assert "node_inventory" not in record
 
     asyncio.run(_run())
 

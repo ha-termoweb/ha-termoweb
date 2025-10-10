@@ -438,11 +438,12 @@ def test_async_setup_entry_happy_path(
     assert isinstance(record["inventory"], inventory_module.Inventory)
     assert record["inventory"].dev_id == "dev-1"
     assert record["coordinator"].inventory is record["inventory"]
-    assert list(record["inventory"].nodes) == record["node_inventory"]
-    by_type, _ = build_heater_address_map(record["node_inventory"])
+    nodes = list(record["inventory"].nodes)
+    by_type, _ = build_heater_address_map(nodes)
     assert by_type == {"htr": ["A"], "acm": ["B"]}
-    assert [node.addr for node in record["node_inventory"]] == ["A", "B"]
-    assert [node.type for node in record["node_inventory"]] == ["htr", "acm"]
+    assert [node.addr for node in nodes] == ["A", "B"]
+    assert [node.type for node in nodes] == ["htr", "acm"]
+    assert "node_inventory" not in record
     assert stub_hass.client_session_calls == 1
     assert stub_hass.config_entries.forwarded == [
         (entry, tuple(termoweb_init.PLATFORMS))

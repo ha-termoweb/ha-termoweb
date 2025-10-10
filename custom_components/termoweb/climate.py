@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping, MutableMapping
 import logging
 import time
 from typing import Any, cast
@@ -36,6 +36,7 @@ from .inventory import (
     build_node_inventory,
     normalize_node_addr,
     normalize_node_type,
+    resolve_record_inventory,
 )
 from .utils import float_or_none
 
@@ -55,56 +56,86 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     inventory: Inventory | None = data.get("inventory")
     inventory_created = False
-    if not isinstance(inventory, Inventory):
-        candidate = getattr(coordinator, "inventory", None)
-        if isinstance(candidate, Inventory):
-            inventory = candidate
-        else:
-            raw_nodes = data.get("nodes")
-            if raw_nodes is None:
-                raw_nodes = getattr(coordinator, "nodes", None)
-            if raw_nodes is None:  # pragma: no cover - defensive
-                node_list = data.get("node_inventory") or getattr(
-                    coordinator, "node_inventory", None
+
+    coordinator_nodes_payload = data.get("nodes")
+    if coordinator_nodes_payload is None:
+        coordinator_nodes_payload = getattr(coordinator, "nodes", None)
+    if isinstance(coordinator_nodes_payload, Mapping) and not coordinator_nodes_payload:
+        coordinator_nodes_payload = None
+    if coordinator_nodes_payload is None:
+        node_list_source = data.get("node_inventory") or getattr(
+            coordinator, "node_inventory", None
+        )
+        if node_list_source:
+            nodes_payload: list[dict[str, Any]] = []
+            for node in node_list_source:
+                as_dict = getattr(node, "as_dict", None)
+                if callable(as_dict):
+                    try:
+                        payload = as_dict()
+                    except Exception:  # noqa: BLE001 - defensive
+                        payload = None
+                    if isinstance(payload, dict):
+                        nodes_payload.append(dict(payload))
+                        continue
+                nodes_payload.append(
+                    {
+                        "type": getattr(node, "type", None),
+                        "addr": getattr(node, "addr", None),
+                        "name": getattr(node, "name", None),
+                    }
                 )
-                if node_list:  # pragma: no cover - defensive
-                    nodes_payload = []
-                    for node in node_list:
-                        as_dict = getattr(node, "as_dict", None)
-                        if callable(as_dict):
-                            try:
-                                payload = as_dict()
-                            except Exception:  # noqa: BLE001 - defensive
-                                payload = None
-                            if isinstance(payload, dict):
-                                nodes_payload.append(dict(payload))
-                                continue
-                        nodes_payload.append(
-                            {
-                                "type": getattr(node, "type", None),
-                                "addr": getattr(node, "addr", None),
-                                "name": getattr(node, "name", None),
-                            }
-                        )
-                    raw_nodes = {"nodes": nodes_payload}
-            built_nodes: list[HeaterNode] = []
-            if raw_nodes is not None:
-                try:
-                    built_nodes = build_node_inventory(raw_nodes)
-                except ValueError:
-                    built_nodes = []
-            if built_nodes:
-                inventory = Inventory(dev_id, raw_nodes, built_nodes)
-                inventory_created = True
+            coordinator_nodes_payload = {"nodes": nodes_payload}
+
+    coordinator_inventory = getattr(coordinator, "inventory", None)
+    coordinator_node_list: Iterable[HeaterNode] | None = None
+    if isinstance(coordinator_inventory, Inventory):
+        if not isinstance(inventory, Inventory):
+            inventory = coordinator_inventory
+    elif isinstance(coordinator_inventory, Iterable) and not isinstance(
+        coordinator_inventory, (str, bytes)
+    ):
+        coordinator_node_list = coordinator_inventory
+
+    if not isinstance(inventory, Inventory):
+        resolution = resolve_record_inventory(
+            data,
+            dev_id=dev_id,
+            nodes_payload=coordinator_nodes_payload,
+            node_list=coordinator_node_list,
+            cache_nodes=False,
+        )
+        if resolution.inventory is not None:
+            inventory = resolution.inventory
+
+    if not isinstance(inventory, Inventory):
+        raw_nodes = coordinator_nodes_payload
+        if raw_nodes is None:
+            snapshot = data.get("snapshot")
+            raw_nodes = getattr(snapshot, "raw_nodes", None)
+        built_nodes: list[HeaterNode] = []
+        if raw_nodes is not None:
+            try:
+                built_nodes = build_node_inventory(raw_nodes)
+            except ValueError:
+                built_nodes = []
+        if built_nodes:
+            inventory = Inventory(dev_id, raw_nodes, built_nodes)
+            inventory_created = True
 
     if isinstance(inventory, Inventory):
-        if inventory_created or "inventory" not in data:
+        if (
+            inventory_created
+            or "inventory" not in data
+            or data.get("inventory") is not inventory
+        ):
             data["inventory"] = inventory
-        if inventory_created or "node_inventory" not in data:
-            data["node_inventory"] = list(inventory.nodes)
         nodes_by_type = inventory.nodes_by_type
     else:
         nodes_by_type = {}
+
+    if isinstance(data, MutableMapping):
+        data.pop("node_inventory", None)
 
     default_name_simple = lambda addr: f"Heater {addr}"
     new_entities: list[ClimateEntity] = []

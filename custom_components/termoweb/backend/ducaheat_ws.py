@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable, Mapping
 from copy import deepcopy
 import gzip
 import json
@@ -9,7 +10,7 @@ import logging
 import random
 import string
 import time
-from typing import Any, Iterable, Mapping
+from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import aiohttp
@@ -502,9 +503,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                         break
                         break
                     continue
-                elif msg.type == aiohttp.WSMsgType.ERROR:
+                if msg.type == aiohttp.WSMsgType.ERROR:
                     raise RuntimeError(f"websocket error: {ws.exception()}")
-                elif msg.type in {aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED}:
+                if msg.type in {aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED}:
                     raise RuntimeError("websocket closed")
         finally:
             _LOGGER.debug("WS (ducaheat): read loop ended (ws closed or error)")

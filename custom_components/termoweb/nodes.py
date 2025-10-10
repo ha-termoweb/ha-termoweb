@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, MutableMapping
+from collections.abc import Mapping, MutableMapping
 import logging
 from typing import Any, cast
 
 from .inventory import (
     HEATER_NODE_TYPES,
     Node,
-    addresses_by_node_type,
     build_node_inventory,
     normalize_node_addr,
     normalize_node_type,

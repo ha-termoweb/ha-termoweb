@@ -15,7 +15,9 @@ from .const import DOMAIN
 async def async_get_integration(*args, **kwargs):
     """Proxy ``homeassistant.loader.async_get_integration`` for monkeypatching."""
 
-    from homeassistant.loader import async_get_integration as loader_async_get_integration
+    from homeassistant.loader import (
+        async_get_integration as loader_async_get_integration,
+    )
 
     return await loader_async_get_integration(*args, **kwargs)
 

@@ -13,11 +13,13 @@ _install_stubs()
 
 from custom_components.termoweb import heater as heater_module
 from custom_components.termoweb import identifiers as identifiers_module
+from custom_components.termoweb import inventory as inventory_module
 from custom_components.termoweb.inventory import (
     HeaterNode,
     Inventory,
     build_node_inventory,
 )
+from custom_components.termoweb.installation import InstallationSnapshot
 from homeassistant.core import HomeAssistant
 
 HeaterNodeBase = heater_module.HeaterNodeBase
@@ -270,8 +272,7 @@ def test_prepare_heater_platform_data_uses_coordinator_node_inventory() -> None:
     coordinator = SimpleNamespace(
         dev_id="dev",
         nodes=raw_nodes,
-        inventory=None,
-        node_inventory=list(inventory_nodes),
+        inventory=Inventory("dev", raw_nodes, inventory_nodes),
     )
 
     inventory, nodes_by_type, addrs_by_type, resolve_name = (
@@ -337,6 +338,30 @@ def test_coerce_inventory_handles_iteration_failure() -> None:
     )
 
 
+def test_coerce_inventory_accepts_iterable() -> None:
+    nodes = [SimpleNamespace(type="htr", addr="1")]
+
+    inventory = heater_module._coerce_inventory(
+        nodes,
+        dev_id="dev",
+        raw_nodes={},
+    )
+
+    assert inventory is not None
+    assert [node.addr for node in inventory.nodes] == ["1"]
+
+
+def test_coerce_inventory_rejects_empty_iterable() -> None:
+    assert (
+        heater_module._coerce_inventory(
+            [],
+            dev_id="dev",
+            raw_nodes={},
+        )
+        is None
+    )
+
+
 def test_extract_inventory_handles_non_mapping_input() -> None:
     assert heater_module._extract_inventory(None) is None
     assert heater_module._extract_inventory(object()) is None
@@ -350,11 +375,85 @@ def test_extract_inventory_value_error_fallback(
         "build_node_inventory",
         lambda raw: (_ for _ in ()).throw(ValueError("invalid")),
     )
+    monkeypatch.setattr(
+        inventory_module,
+        "build_node_inventory",
+        lambda raw: (_ for _ in ()).throw(ValueError("invalid")),
+    )
 
     entry_data: dict[str, Any] = {"nodes": {"nodes": []}}
 
     assert heater_module._extract_inventory(entry_data) is None
     assert "node_inventory" not in entry_data
+
+
+def test_extract_inventory_handles_empty_coordinator_mapping() -> None:
+    coordinator = SimpleNamespace(dev_id="dev", nodes={}, inventory={})
+    entry_data = {"coordinator": coordinator}
+
+    inventory = heater_module._extract_inventory(entry_data)
+
+    assert inventory is not None
+    assert list(inventory.nodes) == []
+
+
+def test_extract_inventory_handles_empty_iterable_inventory() -> None:
+    coordinator = SimpleNamespace(dev_id="dev", nodes={}, inventory=[])
+    entry_data = {"coordinator": coordinator}
+
+    inventory = heater_module._extract_inventory(entry_data)
+
+    assert inventory is not None
+    assert list(inventory.nodes) == []
+
+
+def test_extract_inventory_builds_from_snapshot() -> None:
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "5"}]}
+    snapshot = InstallationSnapshot(dev_id="dev", raw_nodes=raw_nodes)
+    entry_data = {"snapshot": snapshot}
+
+    inventory = heater_module._extract_inventory(entry_data)
+
+    assert inventory is not None
+    assert [node.addr for node in inventory.nodes] == ["5"]
+
+
+def test_extract_inventory_falls_back_to_raw_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "6"}]}
+    entry_data = {"nodes": raw_nodes}
+
+    def _fallback(*_args: Any, **_kwargs: Any) -> Any:
+        return SimpleNamespace(inventory=None, source="fallback", filtered_count=0)
+
+    monkeypatch.setattr(heater_module, "resolve_record_inventory", _fallback)
+
+    inventory = heater_module._extract_inventory(entry_data)
+
+    assert inventory is not None
+    assert [node.addr for node in inventory.nodes] == ["6"]
+
+
+def test_extract_inventory_uses_coordinator_inventory_nodes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "7"}]}
+    inventory_container = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+    coordinator = SimpleNamespace(dev_id="dev", nodes={}, inventory=inventory_container)
+    entry_data = {"coordinator": coordinator}
+
+    original_coerce = heater_module._coerce_inventory
+
+    def _coerce_override(candidate: Any, *, dev_id: str, raw_nodes: Any) -> Inventory | None:
+        if candidate is inventory_container:
+            return None
+        return original_coerce(candidate, dev_id=dev_id, raw_nodes=raw_nodes)
+
+    monkeypatch.setattr(heater_module, "_coerce_inventory", _coerce_override)
+
+    inventory = heater_module._extract_inventory(entry_data)
+
+    assert inventory is not None
+    assert [node.addr for node in inventory.nodes] == ["7"]
 
 
 def test_prepare_heater_platform_data_handles_non_mapping_name_map(

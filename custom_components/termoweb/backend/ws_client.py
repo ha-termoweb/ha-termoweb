@@ -1,42 +1,29 @@
-# -*- coding: utf-8 -*-
 """Shared websocket helpers."""
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping, MutableMapping
 from copy import deepcopy
 from dataclasses import dataclass
-import gzip
-import json
 import logging
-import random
-import string
 import time
-from collections.abc import MutableMapping
-from typing import TYPE_CHECKING, Any, Mapping
-from urllib.parse import urlencode, urlsplit, urlunsplit
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
-import socketio
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from ..api import RESTClient
 from ..const import (
-    ACCEPT_LANGUAGE,
-    API_BASE,
     BRAND_DUCAHEAT,
     BRAND_TERMOWEB,
     DOMAIN,
-    USER_AGENT,
     WS_NAMESPACE,
-    get_brand_api_base,
-    get_brand_requested_with,
-    get_brand_user_agent,
     signal_ws_data,
     signal_ws_status,
 )
 from ..installation import InstallationSnapshot, ensure_snapshot
-from ..inventory import Inventory, NODE_CLASS_BY_TYPE, addresses_by_node_type
+from ..inventory import NODE_CLASS_BY_TYPE, Inventory, addresses_by_node_type
 from ..nodes import ensure_node_inventory
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -415,9 +402,9 @@ __all__ = [
     "DUCAHEAT_NAMESPACE",
     "HandshakeError",
     "WSStats",
+    "WebSocketClient",
     "forward_ws_sample_updates",
     "resolve_ws_update_section",
-    "WebSocketClient",
 ]
 
 time_mod = time.monotonic

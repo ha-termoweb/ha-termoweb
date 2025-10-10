@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol
-
-if TYPE_CHECKING:
-    from homeassistant.helpers.entity import Entity
+from typing import Any, Protocol
 
 from .heater import DispatcherSubscriptionHelper
 

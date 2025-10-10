@@ -397,6 +397,7 @@ async def async_import_energy_history(
         rec,
         dev_id=dev_id,
         nodes_payload=nodes_payload,
+        cache_nodes=False,
     )
     inventory_container = resolution.inventory
     if inventory_container is None:

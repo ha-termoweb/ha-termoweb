@@ -395,9 +395,9 @@ def test_resolve_record_inventory_detects_mismatched_inventory() -> None:
 
     resolution = inventory_module.resolve_record_inventory(record)
 
-    assert resolution.source == "node_inventory"
-    assert resolution.filtered_count == 0
-    assert record["inventory"] is resolution.inventory
+    assert resolution.source == "fallback"
+    assert resolution.inventory is None
+    assert "inventory" not in record
 
 
 def test_heater_platform_details_default_name(

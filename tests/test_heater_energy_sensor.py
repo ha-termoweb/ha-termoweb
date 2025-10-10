@@ -680,8 +680,11 @@ def test_sensor_async_setup_entry_rebuilds_inventory_when_missing() -> None:
 
         assert refresh_mock.await_count == 1
         assert len(added) == 7
-        stored_inventory = hass.data[DOMAIN][entry.entry_id]["node_inventory"]
-        assert [node.addr for node in stored_inventory] == ["A1", "B2"]
+        record = hass.data[DOMAIN][entry.entry_id]
+        stored_inventory = record["inventory"]
+        assert isinstance(stored_inventory, Inventory)
+        assert [node.addr for node in stored_inventory.nodes] == ["A1", "B2"]
+        assert "node_inventory" not in record
 
     asyncio.run(_run())
 

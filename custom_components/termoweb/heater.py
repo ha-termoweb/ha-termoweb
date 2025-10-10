@@ -9,7 +9,6 @@ import logging
 from typing import Any, Final, cast
 
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import dispatcher
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -27,6 +26,7 @@ from .inventory import (
     build_node_inventory,
     normalize_node_addr,
     normalize_node_type,
+    resolve_record_inventory,
 )
 from .nodes import HEATER_NODE_TYPES
 
@@ -363,9 +363,7 @@ def derive_boost_state(
 
     placeholder_iso = boost_end_iso.strip() if isinstance(boost_end_iso, str) else None
     placeholder_detected = False
-    if boost_end_dt is not None and boost_end_dt.year <= 1971:
-        placeholder_detected = True
-    elif placeholder_iso and placeholder_iso.startswith("1970-"):
+    if (boost_end_dt is not None and boost_end_dt.year <= 1971) or (placeholder_iso and placeholder_iso.startswith("1970-")):
         placeholder_detected = True
 
     if placeholder_detected:
@@ -684,34 +682,45 @@ def _extract_inventory(entry_data: Mapping[str, Any] | None) -> Inventory | None
     coordinator = entry_data.get("coordinator")
     coordinator_dev_id = str(getattr(coordinator, "dev_id", "") or "").strip()
     coordinator_nodes = getattr(coordinator, "nodes", None)
+    coordinator_inventory_candidate = getattr(coordinator, "inventory", None)
 
     coordinator_inventory = _coerce_inventory(
-        getattr(coordinator, "inventory", None),
+        coordinator_inventory_candidate,
         dev_id=coordinator_dev_id or dev_id,
         raw_nodes=coordinator_nodes or raw_nodes,
     )
     if coordinator_inventory is not None:
         return coordinator_inventory
 
-    inventory = _coerce_inventory(
-        entry_data.get("node_inventory"),
-        dev_id=dev_id,
-        raw_nodes=raw_nodes,
-    )
-    if inventory is not None:
-        return inventory
+    coordinator_node_list: Iterable[Any] | None = None
+    if isinstance(coordinator_inventory_candidate, Inventory):
+        coordinator_node_list = coordinator_inventory_candidate.nodes
+    elif isinstance(coordinator_inventory_candidate, Mapping):
+        coordinator_node_list = coordinator_inventory_candidate.values()
+    elif isinstance(coordinator_inventory_candidate, Iterable) and not isinstance(
+        coordinator_inventory_candidate, (str, bytes)
+    ):
+        coordinator_node_list = coordinator_inventory_candidate
 
-    coordinator_nodes_list = getattr(coordinator, "node_inventory", None)
-    inventory = _coerce_inventory(
-        coordinator_nodes_list,
-        dev_id=coordinator_dev_id or dev_id,
-        raw_nodes=coordinator_nodes or raw_nodes,
+    resolution = resolve_record_inventory(
+        entry_data,
+        dev_id=dev_id or coordinator_dev_id,
+        nodes_payload=raw_nodes if raw_nodes is not None else coordinator_nodes,
+        node_list=coordinator_node_list,
+        cache_nodes=False,
     )
-    if inventory is not None:
-        return inventory
+    if resolution.inventory is not None:
+        return resolution.inventory
 
     fallback_raw = raw_nodes if raw_nodes is not None else coordinator_nodes
-    fallback_dev = dev_id or coordinator_dev_id
+    if fallback_raw is None:
+        snapshot = entry_data.get("snapshot")
+        fallback_raw = getattr(snapshot, "raw_nodes", None)
+        fallback_dev = dev_id or coordinator_dev_id or str(
+            getattr(snapshot, "dev_id", "") or ""
+        )
+    else:
+        fallback_dev = dev_id or coordinator_dev_id
 
     if fallback_raw is None:
         return None
@@ -723,9 +732,6 @@ def _extract_inventory(entry_data: Mapping[str, Any] | None) -> Inventory | None
 
     if not built_nodes:
         return None
-
-    if isinstance(entry_data, MutableMapping):
-        entry_data.setdefault("node_inventory", list(built_nodes))
 
     return Inventory(fallback_dev, fallback_raw, built_nodes)
 
