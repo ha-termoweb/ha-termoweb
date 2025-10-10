@@ -1404,8 +1404,9 @@ async def test_subscribe_feeds_uses_inventory_cache(monkeypatch: pytest.MonkeyPa
         ("subscribe", "/htr/7/status"),
     ]
     record = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
-    assert "node_inventory" in record
-    assert any(getattr(node, "addr", "") == "7" for node in record["node_inventory"])
+    inventory = record.get("inventory")
+    assert isinstance(inventory, Inventory)
+    assert any(getattr(node, "addr", "") == "7" for node in inventory.nodes)
 
 
 @pytest.mark.asyncio

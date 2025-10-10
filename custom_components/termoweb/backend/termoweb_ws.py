@@ -58,8 +58,6 @@ from custom_components.termoweb.inventory import (
     normalize_node_addr,
     normalize_node_type,
 )
-from custom_components.termoweb.nodes import ensure_node_inventory
-
 from .ws_client import (
     WSStats,
     _prepare_nodes_dispatch,
@@ -933,9 +931,10 @@ class WebSocketClient(_WSStatusMixin):
                 snapshot.setdefault("htr", nodes_by_type["htr"])
             snapshot["nodes"] = deepcopy(raw_nodes_payload)
 
-        if isinstance(record, MutableMapping) and snapshot_obj is None:
+        if isinstance(record, MutableMapping):
             record["nodes"] = raw_nodes_payload
-            record["node_inventory"] = list(inventory.nodes)
+            if isinstance(inventory, Inventory):
+                record["inventory"] = inventory
 
         self._apply_heater_addresses(
             addr_map,
@@ -1036,21 +1035,26 @@ class WebSocketClient(_WSStatusMixin):
             else ensure_snapshot(record)
         )
 
-        inventory_nodes: list[Any] | None
         if isinstance(inventory, Inventory):
-            inventory_nodes = list(inventory.nodes)
-        elif inventory is not None:
-            inventory_nodes = list(inventory)
-            inventory = Inventory(self.dev_id, snapshot_obj.raw_nodes if snapshot_obj else {}, inventory_nodes)
+            inventory_container = inventory
+        elif inventory is None:
+            inventory_container = (
+                self._inventory if isinstance(self._inventory, Inventory) else None
+            )
         else:
-            inventory_nodes = None
+            raw_nodes = snapshot_obj.raw_nodes if snapshot_obj else {}
+            inventory_container = Inventory(self.dev_id, raw_nodes, inventory)
 
-        if isinstance(snapshot_obj, InstallationSnapshot) and inventory is not None:
-            snapshot_obj.update_nodes(snapshot_obj.raw_nodes, inventory=inventory)
-            if isinstance(record, dict):
-                record["node_inventory"] = list(snapshot_obj.inventory)
-        elif isinstance(record, dict) and inventory_nodes is not None and snapshot_obj is None:
-            record["node_inventory"] = list(inventory_nodes)
+        if isinstance(inventory_container, Inventory):
+            if isinstance(record, MutableMapping):
+                record["inventory"] = inventory_container
+            if isinstance(snapshot_obj, InstallationSnapshot):
+                snapshot_obj.update_nodes(
+                    snapshot_obj.raw_nodes,
+                    inventory=inventory_container,
+                )
+            if not isinstance(self._inventory, Inventory):
+                self._inventory = inventory_container
 
         energy_coordinator = (
             record.get("energy_coordinator") if isinstance(record, Mapping) else None
@@ -1081,50 +1085,64 @@ class WebSocketClient(_WSStatusMixin):
         record_container = self.hass.data.get(DOMAIN, {})
         record = record_container.get(self.entry_id) if isinstance(record_container, dict) else None
         snapshot_obj = ensure_snapshot(record)
+        snapshot_raw_nodes: Any | None = (
+            snapshot_obj.raw_nodes if isinstance(snapshot_obj, InstallationSnapshot) else None
+        )
+
+        def _bind_inventory(container: Inventory, raw_nodes: Any | None) -> Inventory:
+            """Cache ``container`` across runtime state helpers."""
+
+            if isinstance(record, MutableMapping):
+                record["inventory"] = container
+            if not isinstance(self._inventory, Inventory):
+                self._inventory = container
+            if isinstance(snapshot_obj, InstallationSnapshot):
+                snapshot_obj.update_nodes(
+                    raw_nodes if raw_nodes is not None else snapshot_obj.raw_nodes,
+                    inventory=container,
+                )
+            return container
 
         inventory_container: Inventory | None = (
             self._inventory if isinstance(self._inventory, Inventory) else None
         )
-        normalized_map: dict[str, list[str]]
+
+        if inventory_container is None and isinstance(record, Mapping):
+            candidate = record.get("inventory")
+            if isinstance(candidate, Inventory):
+                inventory_container = _bind_inventory(
+                    candidate,
+                    getattr(candidate, "payload", None),
+                )
 
         if inventory_container is None and isinstance(snapshot_obj, InstallationSnapshot):
-            inventory_container = Inventory(
-                snapshot_obj.dev_id,
-                snapshot_obj.raw_nodes,
-                list(snapshot_obj.inventory),
+            inventory_container = _bind_inventory(
+                Inventory(
+                    snapshot_obj.dev_id,
+                    snapshot_raw_nodes,
+                    list(snapshot_obj.inventory),
+                ),
+                snapshot_raw_nodes,
             )
-            self._inventory = inventory_container
 
         if inventory_container is None:
-            nodes_payload: Any | None = None
-            inventory_nodes: list[Any] = []
-            if isinstance(record, MutableMapping):
-                cached_inventory = record.get("node_inventory")
-                if isinstance(cached_inventory, list):
-                    inventory_nodes = list(cached_inventory)
+            nodes_payload: Any | None
+            if isinstance(record, Mapping):
                 nodes_payload = record.get("nodes")
-                if not inventory_nodes:
-                    inventory_nodes = ensure_node_inventory(record, nodes=nodes_payload)
-            elif isinstance(record, Mapping):
-                nodes_payload = record.get("nodes")
-                inventory_nodes = ensure_node_inventory(dict(record), nodes=nodes_payload)
             else:
                 nodes_payload = None
-                inventory_nodes = []
-
-            container = Inventory(
-                self.dev_id,
-                nodes_payload if nodes_payload is not None else {},
-                inventory_nodes,
+            if nodes_payload is None:
+                nodes_payload = snapshot_raw_nodes if snapshot_raw_nodes is not None else {}
+            inventory_container = _bind_inventory(
+                Inventory(
+                    self.dev_id,
+                    nodes_payload,
+                    build_node_inventory(nodes_payload),
+                ),
+                nodes_payload,
             )
-            normalized_map, _ = container.heater_sample_address_map
-            inventory_container = container
-            self._inventory = container
-        else:
-            normalized_map, _ = inventory_container.heater_sample_address_map
 
-        if isinstance(record, dict) and isinstance(inventory_container, Inventory):
-            record["node_inventory"] = list(inventory_container.nodes)
+        normalized_map, _ = inventory_container.heater_sample_address_map
 
         if not normalized_map.get("htr"):
             fallback: Iterable[Any] | None = None

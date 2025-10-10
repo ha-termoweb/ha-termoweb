@@ -796,6 +796,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
 
             if isinstance(record, dict) and record_inventory_nodes is not None:
                 record["node_inventory"] = list(record_inventory_nodes)
+            if isinstance(record, dict) and isinstance(inventory_container, Inventory):
+                record["inventory"] = inventory_container
 
             if not normalized_map.get("htr"):
                 fallback: Iterable[Any] | None = None

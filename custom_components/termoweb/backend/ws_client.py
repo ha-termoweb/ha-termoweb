@@ -273,6 +273,9 @@ def _prepare_nodes_dispatch(
     elif record_mapping is not None:
         record_mapping["node_inventory"] = list(inventory_container.nodes)
 
+    if record_mapping is not None:
+        record_mapping["inventory"] = inventory_container
+
     addr_map_raw, unknown_types = addresses_by_node_type(
         inventory_container.nodes, known_types=NODE_CLASS_BY_TYPE
     )
