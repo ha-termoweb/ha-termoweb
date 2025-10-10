@@ -858,7 +858,13 @@ class HeaterNodeBase(CoordinatorEntity):
         """Return True when the device entry contains node data."""
         if not isinstance(device_entry, dict):
             return False
-        return device_entry.get("nodes") is not None
+        inventory = device_entry.get("inventory")
+        if isinstance(inventory, Inventory):
+            return bool(inventory.nodes)
+        nodes_by_type = device_entry.get("nodes_by_type")
+        if isinstance(nodes_by_type, Mapping):
+            return any(nodes_by_type.values())
+        return False
 
     def _device_record(self) -> dict[str, Any] | None:
         """Return the coordinator cache entry for this device."""

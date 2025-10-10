@@ -182,7 +182,7 @@ def test_inventory_addresses_by_type_merges_forward_map(
 
 
 def test_update_nodes_builds_inventory_from_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Ensuring inventory should rebuild containers from cached payload data."""
+    """update_nodes should rebuild the inventory container when raw nodes arrive."""
 
     client = types.SimpleNamespace(get_node_settings=AsyncMock())
     hass = HomeAssistant()
@@ -214,13 +214,11 @@ def test_update_nodes_builds_inventory_from_payload(monkeypatch: pytest.MonkeyPa
 
     coord.update_nodes(payload)
 
-    assert coord._inventory is None
-
-    inventory = coord._ensure_inventory()
+    inventory = coord._inventory
     assert isinstance(inventory, coord_module.Inventory)
     assert inventory.nodes == tuple(sentinel)
     assert inventory.payload == payload
-    assert coord._inventory is inventory
+    assert coord._ensure_inventory() is inventory
 
 
 def test_update_nodes_handles_non_iterable_inventory_hint(
@@ -250,12 +248,10 @@ def test_update_nodes_handles_non_iterable_inventory_hint(
 
     coord.update_nodes(payload, inventory=object())
 
-    assert coord._inventory is None
-
-    inventory = coord._ensure_inventory()
+    inventory = coord._inventory
     assert isinstance(inventory, coord_module.Inventory)
     assert inventory.nodes == tuple(sentinel)
-    assert coord._inventory is inventory
+    assert coord._ensure_inventory() is inventory
 
 
 def test_update_nodes_accepts_inventory_container(
@@ -285,7 +281,7 @@ def test_update_nodes_accepts_inventory_container(
     assert coord._inventory.payload == payload
 
     coord.update_nodes(None, container)
-    assert coord._nodes == payload
+    assert coord._inventory is container
 
 
 def test_normalise_type_section_cleans_addresses() -> None:
@@ -684,8 +680,11 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
         assert dev["dev_id"] == "dev"
         assert dev["name"] == "Device"
         assert dev["raw"] == {"name": " Device "}
-        assert dev["nodes"] == nodes
         assert dev["connected"] is True
+        inventory = dev["inventory"]
+        assert isinstance(inventory, coord_module.Inventory)
+        assert inventory.payload == nodes
+        assert dev["inventory"] is coord._inventory
         htr = dev["htr"]
         assert htr["settings"]["A"] == {"mode": "auto"}
         assert htr["addrs"] == ["A", "B"]
@@ -702,6 +701,7 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
         assert len(updates) == 2
         second = updates[-1]
         htr_second = second["dev"]["htr"]
+        assert second["dev"]["inventory"] is coord._inventory
         assert htr_second["settings"]["A"] == {"mode": "auto"}
         assert htr_second["settings"]["B"] == {"mode": "eco"}
         assert htr_second["addrs"] == ["A", "B"]
@@ -852,8 +852,9 @@ def test_refresh_heater_populates_missing_metadata() -> None:
         client.get_node_settings.assert_called_once_with("dev", ("htr", "A"))
         assert result["name"] == "Device"
         assert result["raw"] == {"name": " Device "}
-        assert result["nodes"] == nodes
         assert result["connected"] is False
+        assert isinstance(result["inventory"], coord_module.Inventory)
+        assert result["inventory"].payload == nodes
         assert result["htr"]["settings"]["A"] == {"mode": "heat"}
         nodes_by_type = result.get("nodes_by_type")
         assert nodes_by_type is not None
@@ -969,6 +970,7 @@ def test_state_coordinator_async_update_data_reuses_previous(
 
         client.get_node_settings.assert_awaited_once()
         dev_data = result["dev"]
+        assert isinstance(dev_data.get("inventory"), coord_module.Inventory)
         acm_section = dev_data["nodes_by_type"]["acm"]
         assert acm_section["settings"]["7"] == {"mode": "eco"}
         assert dev_data["htr"]["addrs"] == ["legacy"]
@@ -1053,6 +1055,7 @@ def test_async_update_data_skips_non_dict_sections() -> None:
         result = await coord._async_update_data()
 
         dev_data = result["dev"]
+        assert isinstance(dev_data.get("inventory"), coord_module.Inventory)
         assert "htr" in dev_data["nodes_by_type"]
         assert client.get_node_settings.await_count == 1
 
@@ -1700,7 +1703,7 @@ def test_state_coordinator_update_nodes_rebuilds_inventory(
         [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
     ],
 ) -> None:
-    """Coordinator should rebuild inventory lazily when requested."""
+    """Coordinator should rebuild inventory immediately when payload arrives."""
     hass = HomeAssistant()
     client = types.SimpleNamespace()
     nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
@@ -1727,14 +1730,12 @@ def test_state_coordinator_update_nodes_rebuilds_inventory(
 
     coord.update_nodes(nodes)
 
-    assert coord._inventory is None
-
-    rebuilt = coord._ensure_inventory()
+    rebuilt = coord._inventory
 
     assert nodes in calls
     assert isinstance(rebuilt, coord_module.Inventory)
     assert rebuilt.nodes == tuple(built_nodes)
-    assert coord._inventory is rebuilt
+    assert coord._ensure_inventory() is rebuilt
 
 
 def test_state_coordinator_update_nodes_uses_provided_inventory(

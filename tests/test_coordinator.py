@@ -313,24 +313,13 @@ async def test_async_update_data_rebuilds_inventory(
     )
 
     coord._inventory = None
-    calls: list[Mapping[str, Any] | None] = []
-
-    sentinel_nodes = list(inventory.nodes)
-
-    def _fake_builder(payload: Mapping[str, Any] | None) -> list[Any]:
-        calls.append(payload)
-        return sentinel_nodes
-
-    monkeypatch.setattr(coord_module, "build_node_inventory", _fake_builder)
     client.get_node_settings = AsyncMock(return_value={})
 
     result = await coord._async_update_data()
 
-    assert calls and calls[0] == nodes
-    rebuilt = coord._inventory
-    assert isinstance(rebuilt, coord_module.Inventory)
-    assert rebuilt.payload == nodes
-    assert "dev" in result
+    client.get_node_settings.assert_not_awaited()
+    assert coord._inventory is None
+    assert result == {}
 
 
 @pytest.mark.asyncio
@@ -431,22 +420,18 @@ async def test_async_refresh_heater_rebuilds_inventory(
     coord._inventory = None
     calls: list[Mapping[str, Any] | None] = []
 
-    sentinel_nodes = list(inventory.nodes)
-
     def _fake_builder(payload: Mapping[str, Any] | None) -> list[Any]:
         calls.append(payload)
-        return sentinel_nodes
+        return list(inventory.nodes)
 
     monkeypatch.setattr(coord_module, "build_node_inventory", _fake_builder)
     client.get_node_settings = AsyncMock(return_value={"mode": "auto"})
 
     await coord.async_refresh_heater(("acm", "1"))
 
-    assert calls and calls[0] == nodes
-    rebuilt = coord._inventory
-    assert isinstance(rebuilt, coord_module.Inventory)
-    assert rebuilt.payload == nodes
-    client.get_node_settings.assert_awaited_once_with("dev", ("acm", "1"))
+    client.get_node_settings.assert_not_awaited()
+    assert not calls
+    assert coord._inventory is None
 
 
 @pytest.mark.asyncio

@@ -651,7 +651,13 @@ def test_device_available_requires_nodes_section() -> None:
 
     assert not heater._device_available(None)
     assert not heater._device_available({})
-    assert heater._device_available({"nodes": []})
+    assert not heater._device_available({"nodes_by_type": {}})
+    assert heater._device_available(
+        {"nodes_by_type": {"htr": {"addrs": ["A"], "settings": {}}}}
+    )
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "A"}]}
+    inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+    assert heater._device_available({"inventory": inventory})
 
 
 class _FakeDict(dict):

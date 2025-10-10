@@ -719,11 +719,25 @@ def test_sensor_async_setup_entry_requires_inventory() -> None:
 def test_heater_temp_sensor() -> None:
     async def _run() -> None:
         hass = HomeAssistant()
+        raw_nodes = {"nodes": [{"type": "htr", "addr": "A"}]}
+        inventory = Inventory("dev1", raw_nodes, build_node_inventory(raw_nodes))
         coordinator = types.SimpleNamespace(
             hass=hass,
             data={
                 "dev1": {
-                    "nodes": {"nodes": [{"type": "htr", "addr": "A"}]},
+                    "inventory": inventory,
+                    "nodes_by_type": {
+                        "htr": {
+                            "addrs": ["A"],
+                            "settings": {
+                                "A": {
+                                    "mtemp": "21.5",
+                                    "units": "C",
+                                    "timestamp": 1_700_000_000,
+                                }
+                            },
+                        }
+                    },
                     "htr": {
                         "settings": {
                             "A": {
@@ -783,10 +797,13 @@ def test_heater_temp_sensor() -> None:
             "units": "C",
         }
 
-        original_nodes = coordinator.data["dev1"]["nodes"]
-        coordinator.data["dev1"]["nodes"] = None
+        original_inventory = coordinator.data["dev1"].get("inventory")
+        original_nodes_by_type = coordinator.data["dev1"].get("nodes_by_type")
+        coordinator.data["dev1"]["inventory"] = None
+        coordinator.data["dev1"]["nodes_by_type"] = {}
         assert sensor.available is False
-        coordinator.data["dev1"]["nodes"] = original_nodes
+        coordinator.data["dev1"]["inventory"] = original_inventory
+        coordinator.data["dev1"]["nodes_by_type"] = original_nodes_by_type
         assert sensor.available is True
 
         original_device = coordinator.data["dev1"]

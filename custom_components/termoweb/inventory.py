@@ -14,7 +14,7 @@ RawNodePayload = Any
 PrebuiltNode = Any
 
 _NODE_SECTION_IGNORE_KEYS = frozenset(
-    {"dev_id", "name", "raw", "connected", "nodes", "nodes_by_type"}
+    {"dev_id", "name", "raw", "connected", "nodes", "nodes_by_type", "inventory"}
 )
 
 _SNAPSHOT_NAME_CANDIDATE_KEYS = (

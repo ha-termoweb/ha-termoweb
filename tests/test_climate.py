@@ -87,7 +87,7 @@ def test_termoweb_heater_is_heater_node() -> None:
     _reset_environment()
     hass = HomeAssistant()
     dev_id = "dev"
-    coordinator_data = {dev_id: {"htr": {"settings": {}}, "nodes": {}}}
+    coordinator_data = {dev_id: {"htr": {"settings": {}}, "nodes_by_type": {}}}
     coordinator = _make_coordinator(hass, dev_id, coordinator_data[dev_id])
 
     heater = HeaterClimateEntity(
@@ -110,7 +110,7 @@ def test_heater_climate_entity_normalizes_node_type(
     _reset_environment()
     hass = HomeAssistant()
     dev_id = "dev-acm"
-    coordinator_data = {dev_id: {"htr": {"settings": {}}, "nodes": {}}}
+    coordinator_data = {dev_id: {"htr": {"settings": {}}, "nodes_by_type": {}}}
     coordinator = _make_coordinator(hass, dev_id, coordinator_data[dev_id])
 
     calls: list[tuple[object, dict[str, Any]]] = []
@@ -2214,9 +2214,14 @@ def test_heater_properties_and_ws_update() -> None:
             "units": "C",
             "max_power": 1200,
         }
+        raw_nodes = {"nodes": [{"addr": addr, "type": "htr"}]}
+        inventory = Inventory(dev_id, raw_nodes, build_node_inventory(raw_nodes))
         coordinator_data = {
             dev_id: {
-                "nodes": {"nodes": []},
+                "inventory": inventory,
+                "nodes_by_type": {
+                    "htr": {"addrs": [addr], "settings": {addr: settings}}
+                },
                 "htr": {"settings": {addr: settings}},
                 "version": "2.0.0",
             }
@@ -2226,6 +2231,7 @@ def test_heater_properties_and_ws_update() -> None:
             dev_id,
             coordinator_data[dev_id],
             client=AsyncMock(),
+            inventory=inventory,
         )
         hass.data = {
             DOMAIN: {
@@ -2311,9 +2317,13 @@ def test_heater_properties_and_ws_update() -> None:
         finally:
             dt_util.NOW = original_now
 
-        coordinator.data[dev_id]["nodes"] = None
+        original_inventory = coordinator.data[dev_id].get("inventory")
+        original_nodes_by_type = coordinator.data[dev_id].get("nodes_by_type")
+        coordinator.data[dev_id]["inventory"] = None
+        coordinator.data[dev_id]["nodes_by_type"] = {}
         assert heater.available is False
-        coordinator.data[dev_id]["nodes"] = {"nodes": []}
+        coordinator.data[dev_id]["inventory"] = original_inventory
+        coordinator.data[dev_id]["nodes_by_type"] = original_nodes_by_type
         assert heater.available is True
 
         settings["mode"] = "auto"
