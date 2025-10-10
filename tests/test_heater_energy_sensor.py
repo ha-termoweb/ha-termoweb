@@ -317,12 +317,8 @@ def test_sensor_async_setup_entry_defaults_and_skips_invalid(
 
         assert calls and calls[0][0] == "sensor"
         logged_details = calls[0][1]
-        if isinstance(logged_details, tuple):
-            logged_nodes = logged_details[0]
-        elif hasattr(logged_details, "nodes_by_type"):
-            logged_nodes = logged_details.nodes_by_type
-        else:
-            logged_nodes = {}
+        assert isinstance(logged_details, tuple)
+        logged_nodes = logged_details[0]
         assert "pmo" in logged_nodes
         messages = [record.getMessage() for record in caplog.records]
         assert any(

@@ -32,16 +32,14 @@ from .coordinator import EnergyStateCoordinator
 from .entity import GatewayDispatcherEntity
 from .heater import (
     HeaterNodeBase,
-    HeaterPlatformDetails,
     heater_platform_details_for_entry,
-    heater_platform_details_from_inventory,
     iter_boostable_heater_nodes,
     iter_heater_maps,
     iter_heater_nodes,
     log_skipped_nodes,
 )
 from .identifiers import build_heater_energy_unique_id
-from .inventory import Inventory, normalize_node_addr, normalize_node_type
+from .inventory import normalize_node_addr, normalize_node_type
 from .utils import build_gateway_device_info, float_or_none
 
 _WH_TO_KWH = 1 / 1000.0
@@ -106,45 +104,22 @@ def _normalise_energy_value(coordinator: Any, raw: Any) -> float | None:
     return numeric * scale
 
 
-def _resolve_inventory(entry_data: Mapping[str, Any]) -> Inventory | None:
-    """Return the Inventory stored alongside ``entry_data`` when available."""
-
-    candidate = entry_data.get("inventory")
-    if isinstance(candidate, Inventory):
-        return candidate
-
-    coordinator = entry_data.get("coordinator")
-    candidate = getattr(coordinator, "inventory", None)
-    if isinstance(candidate, Inventory):
-        return candidate
-
-    return None
-
-
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up sensors for each heater node."""
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
-    inventory = _resolve_inventory(data)
+    inventory = data.get("inventory")
+
     def default_name(addr: str) -> str:
         """Return a placeholder name for heater nodes."""
 
         return f"Node {addr}"
-    if inventory is not None:
-        heater_details = heater_platform_details_from_inventory(
-            inventory,
-            default_name_simple=default_name,
-        )
-    else:
-        heater_details = heater_platform_details_for_entry(
-            data,
-            default_name_simple=default_name,
-        )
-    _, addrs_by_type, resolve_name = heater_details
-    metadata_source: Inventory | HeaterPlatformDetails = (
-        inventory if inventory is not None else heater_details
+    heater_details = heater_platform_details_for_entry(
+        data,
+        default_name_simple=default_name,
     )
+    _, addrs_by_type, resolve_name = heater_details
 
     energy_coordinator: EnergyStateCoordinator | None = data.get(
         "energy_coordinator",
@@ -179,8 +154,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     energy_nodes_map.setdefault("acm", list(addrs_by_type.get("acm", [])))
     energy_nodes_map.setdefault("pmo", [])
 
-    if isinstance(inventory, Inventory):
-        forward_pmo, _ = inventory.power_monitor_sample_address_map
+    sample_map = getattr(inventory, "power_monitor_sample_address_map", None)
+    if isinstance(sample_map, tuple) and sample_map:
+        forward_pmo = sample_map[0]
         _merge_energy_addresses(forward_pmo)
 
     if energy_coordinator is None:
@@ -194,7 +170,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     new_entities: list[SensorEntity] = []
     for node_type, _node, addr_str, base_name in iter_heater_nodes(
-        metadata_source,
+        heater_details,
         resolve_name,
     ):
         energy_unique_id = build_heater_energy_unique_id(dev_id, node_type, addr_str)
@@ -213,7 +189,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             )
         )
     for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
-        metadata_source,
+        heater_details,
         resolve_name,
     ):
         energy_unique_id = build_heater_energy_unique_id(dev_id, node_type, addr_str)
@@ -230,7 +206,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             )
         )
 
-    log_skipped_nodes("sensor", metadata_source, logger=_LOGGER)
+    log_skipped_nodes("sensor", heater_details, logger=_LOGGER)
 
     uid_total = f"{DOMAIN}:{dev_id}:energy_total"
     new_entities.append(
@@ -240,7 +216,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             dev_id,
             "Total Energy",
             uid_total,
-            metadata_source,
+            heater_details,
         )
     )
 
@@ -573,7 +549,7 @@ class InstallationTotalEnergySensor(
         dev_id: str,
         name: str,
         unique_id: str,
-        inventory_or_details: Inventory | HeaterPlatformDetails,
+        inventory_or_details: Any,
     ) -> None:
         """Initialise the installation-wide energy sensor."""
         super().__init__(coordinator)
