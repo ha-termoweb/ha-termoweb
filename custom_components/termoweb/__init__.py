@@ -9,6 +9,7 @@ from datetime import timedelta
 from importlib import import_module
 import inspect
 import logging
+import time
 from types import ModuleType
 from typing import Any
 
@@ -453,7 +454,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
                 data["stretched"] = False
             return
 
+        min_healthy_minutes = 5
+        min_healthy_seconds = min_healthy_minutes * 60
         all_healthy = True
+        now: float | None = None
         for dev_id, task in tasks.items():
             if task.done():
                 all_healthy = False
@@ -463,11 +467,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
                 all_healthy = False
                 break
 
+            eligible = False
+            minutes_val: float | None
+            try:
+                minutes_raw = s.get("healthy_minutes")
+                minutes_val = float(minutes_raw) if minutes_raw is not None else None
+            except (TypeError, ValueError):
+                minutes_val = None
+
+            if minutes_val is not None:
+                eligible = minutes_val >= min_healthy_minutes
+            else:
+                try:
+                    since_raw = s.get("healthy_since")
+                    since_val = float(since_raw) if since_raw is not None else None
+                except (TypeError, ValueError):
+                    since_val = None
+
+                if since_val is not None:
+                    if now is None:
+                        now = time.time()
+                    if now >= since_val:
+                        eligible = (now - since_val) >= min_healthy_seconds
+
+            if not eligible:
+                all_healthy = False
+                break
+
         if all_healthy and not stretched:
             coordinator.update_interval = timedelta(seconds=STRETCHED_POLL_INTERVAL)
             data["stretched"] = True
             _LOGGER.info(
-                "WS: healthy for ≥5m; stretching REST polling to %ss",
+                "WS: healthy for ≥5 minutes; stretching REST polling to %ss",
                 STRETCHED_POLL_INTERVAL,
             )
         elif (not all_healthy) and stretched:

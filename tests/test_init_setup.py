@@ -1227,13 +1227,22 @@ def test_recalc_poll_interval_transitions(
         assert record["stretched"] is False
         assert coordinator.update_interval == timedelta(seconds=base_interval)
 
-        # (b) All healthy tasks stretch polling interval
+        # (b) Healthy tasks below 5 minutes keep base polling interval
         healthy_event = asyncio.Event()
         healthy_task = asyncio.create_task(healthy_event.wait())
         record["ws_tasks"]["dev-healthy"] = healthy_task
-        record["ws_state"]["dev-healthy"] = {"status": "healthy"}
+        record["ws_state"]["dev-healthy"] = {
+            "status": "healthy",
+            "healthy_minutes": 4,
+        }
         record["stretched"] = False
         coordinator.update_interval = timedelta(seconds=base_interval)
+        record["recalc_poll"]()
+        assert record["stretched"] is False
+        assert coordinator.update_interval == timedelta(seconds=base_interval)
+
+        # (c) Healthy tasks meeting 5 minute threshold stretch polling interval
+        record["ws_state"]["dev-healthy"]["healthy_minutes"] = 5
         record["recalc_poll"]()
         assert record["stretched"] is True
         assert coordinator.update_interval == timedelta(
@@ -1242,7 +1251,50 @@ def test_recalc_poll_interval_transitions(
         healthy_event.set()
         await healthy_task
 
-        # (c) Unhealthy status reverts stretched polling
+        # (d) Healthy tasks rely on healthy_since when minutes invalid
+        record["ws_tasks"].clear()
+        record["ws_state"].clear()
+        fallback_event = asyncio.Event()
+        fallback_task = asyncio.create_task(fallback_event.wait())
+        record["ws_tasks"]["dev-fallback"] = fallback_task
+        record["ws_state"]["dev-fallback"] = {
+            "status": "healthy",
+            "healthy_minutes": "bad",
+            "healthy_since": 1000.0,
+        }
+        record["stretched"] = False
+        coordinator.update_interval = timedelta(seconds=base_interval)
+        original_time = termoweb_init.time.time
+        monkeypatch.setattr(termoweb_init.time, "time", lambda: 1301.0)
+        record["recalc_poll"]()
+        assert record["stretched"] is True
+        assert coordinator.update_interval == timedelta(
+            seconds=termoweb_init.STRETCHED_POLL_INTERVAL
+        )
+        fallback_event.set()
+        await fallback_task
+        monkeypatch.setattr(termoweb_init.time, "time", original_time)
+
+        # (e) Invalid healthy_since values prevent stretching
+        record["ws_tasks"].clear()
+        record["ws_state"].clear()
+        invalid_event = asyncio.Event()
+        invalid_task = asyncio.create_task(invalid_event.wait())
+        record["ws_tasks"]["dev-invalid"] = invalid_task
+        record["ws_state"]["dev-invalid"] = {
+            "status": "healthy",
+            "healthy_minutes": "bad",
+            "healthy_since": "invalid",
+        }
+        record["stretched"] = False
+        coordinator.update_interval = timedelta(seconds=base_interval)
+        record["recalc_poll"]()
+        assert record["stretched"] is False
+        assert coordinator.update_interval == timedelta(seconds=base_interval)
+        invalid_event.set()
+        await invalid_task
+
+        # (f) Unhealthy status reverts stretched polling
         record["ws_tasks"].clear()
         record["ws_state"].clear()
         unhealthy_event = asyncio.Event()
@@ -1300,7 +1352,10 @@ def test_ws_status_dispatcher_filters_entry(
         healthy_event = asyncio.Event()
         healthy_task = asyncio.create_task(healthy_event.wait())
         record1["ws_tasks"]["dev-1"] = healthy_task
-        record1["ws_state"]["dev-1"] = {"status": "healthy"}
+        record1["ws_state"]["dev-1"] = {
+            "status": "healthy",
+            "healthy_minutes": 5,
+        }
         record1["stretched"] = False
         coordinator1.update_interval = timedelta(seconds=base_interval)
         cb1({"entry_id": entry1.entry_id})
@@ -1317,7 +1372,10 @@ def test_ws_status_dispatcher_filters_entry(
         other_event = asyncio.Event()
         other_task = asyncio.create_task(other_event.wait())
         record1["ws_tasks"]["dev-1"] = other_task
-        record1["ws_state"]["dev-1"] = {"status": "healthy"}
+        record1["ws_state"]["dev-1"] = {
+            "status": "healthy",
+            "healthy_minutes": 5,
+        }
         record1["stretched"] = False
         coordinator1.update_interval = timedelta(seconds=base_interval)
         cb2({"entry_id": entry1.entry_id})
