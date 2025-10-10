@@ -394,7 +394,7 @@ def test_dispatch_nodes_updates_hass_and_coordinator(
     assert update_args[1].payload is payload
     assert isinstance(addr_map, dict)
     entry_state = client.hass.data[module.DOMAIN]["entry"]
-    assert "node_inventory" in entry_state
+    assert isinstance(entry_state.get("inventory"), Inventory)
     client._dispatcher_mock.assert_called()  # type: ignore[attr-defined]
 
 
@@ -1000,7 +1000,7 @@ def test_ws_common_dispatch_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
     assert update_args[1] is snapshot.inventory_obj
     dispatcher.assert_called_once()
     record = hass.data[base_ws.DOMAIN]["entry"]
-    assert "node_inventory" in record
+    assert isinstance(record.get("inventory"), Inventory)
 
 
 def test_ws_client_start_selects_delegate(monkeypatch: pytest.MonkeyPatch) -> None:

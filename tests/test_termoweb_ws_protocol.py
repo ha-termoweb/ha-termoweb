@@ -1048,7 +1048,12 @@ def test_apply_heater_addresses_updates_coordinator(monkeypatch: pytest.MonkeyPa
 
     client, _sio, _ = _make_client(monkeypatch)
     client._coordinator.data = {"device": {}}
-    inventory = [SimpleNamespace(type="htr", addr="1")]
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}, {"type": "acm", "addr": "2"}]}
+    inventory = Inventory(
+        client.dev_id,
+        raw_nodes,
+        build_node_inventory(raw_nodes),
+    )
     normalized = client._apply_heater_addresses(
         {"htr": ["1"], "acm": ["2"]}, inventory=inventory
     )
@@ -1074,12 +1079,18 @@ def test_apply_heater_addresses_updates_snapshot(monkeypatch: pytest.MonkeyPatch
     record = client.hass.data[module.DOMAIN]["entry"]
     record["snapshot"] = InstallationSnapshot(dev_id="device", raw_nodes={})
     record["energy_coordinator"] = SimpleNamespace(update_addresses=MagicMock())
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
+    inventory = Inventory(
+        client.dev_id,
+        raw_nodes,
+        build_node_inventory(raw_nodes),
+    )
     client._apply_heater_addresses(
         {"htr": ["1"]},
-        inventory=[SimpleNamespace(type="htr", addr="1")],
+        inventory=inventory,
         snapshot=record["snapshot"],
     )
-    assert "node_inventory" in record
+    assert record.get("inventory") is inventory
 
 
 def test_heater_sample_subscription_targets(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1119,38 +1130,26 @@ def test_heater_sample_subscription_targets_rebuilds_inventory(
     client, _sio, _ = _make_client(monkeypatch)
     record = client.hass.data[module.DOMAIN]["entry"]
     record.pop("snapshot", None)
+    record.pop("inventory", None)
     record["nodes"] = {"nodes": [{"type": "htr", "addr": "9"}]}
-    record["node_inventory"] = [SimpleNamespace(type="htr", addr="9")]
 
-    calls: list[tuple[Any, Any]] = []
+    calls: list[Any] = []
+    original_build = module.build_node_inventory
 
-    def _fake_inventory(cache: Any, *, nodes: Any | None = None) -> list[Any]:
-        calls.append((cache, nodes))
-        nodes_payload = nodes or {}
-        addr = "9"
-        try:
-            first = nodes_payload.get("nodes", [])[0]
-            addr = str(first.get("addr", addr))
-        except Exception:  # pragma: no cover - defensive test shim
-            addr = "9"
-        return [SimpleNamespace(type="htr", addr=addr)]
+    def _tracking_build(payload: Any) -> list[Any]:
+        calls.append(payload)
+        return original_build(payload)
 
-    monkeypatch.setattr(module, "ensure_node_inventory", _fake_inventory)
+    monkeypatch.setattr(module, "build_node_inventory", _tracking_build)
+
+    client._inventory = None
 
     targets = client._heater_sample_subscription_targets()
 
     assert targets == [("htr", "9")]
-    assert not calls
-
-    record.pop("node_inventory", None)
-    client._inventory = None
-
-    calls.clear()
-    targets_dict = client._heater_sample_subscription_targets()
-
-    assert targets_dict == [("htr", "9")]
-    assert calls[0][0] is record
-    assert calls[0][1] == record["nodes"]
+    assert calls and calls[0] is record["nodes"]
+    assert isinstance(record.get("inventory"), Inventory)
+    assert client._inventory is record["inventory"]
 
     mapping_record = MappingProxyType({"nodes": {"nodes": [{"type": "htr", "addr": "10"}]}})
     client.hass.data[module.DOMAIN]["entry"] = mapping_record
@@ -1160,8 +1159,8 @@ def test_heater_sample_subscription_targets_rebuilds_inventory(
     targets_mapping = client._heater_sample_subscription_targets()
 
     assert targets_mapping == [("htr", "10")]
-    assert isinstance(calls[0][0], dict)
-    assert calls[0][1] == mapping_record["nodes"]
+    assert calls and calls[0] == mapping_record["nodes"]
+    assert isinstance(client._inventory, Inventory)
 
     client.hass.data[module.DOMAIN]["entry"] = None
     client._coordinator._addrs = lambda: ["11"]
@@ -1171,7 +1170,58 @@ def test_heater_sample_subscription_targets_rebuilds_inventory(
     targets_none = client._heater_sample_subscription_targets()
 
     assert targets_none[0] == ("htr", "11")
-    assert not calls
+
+
+def test_heater_sample_targets_use_record_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Record-scoped inventory containers should be reused."""
+
+    client, _sio, _ = _make_client(monkeypatch)
+    record = client.hass.data[module.DOMAIN]["entry"]
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "12"}]}
+    inventory = Inventory(
+        client.dev_id,
+        raw_nodes,
+        build_node_inventory(raw_nodes),
+    )
+    record["inventory"] = inventory
+    client._inventory = None
+
+    def _unexpected_build(payload: Any) -> list[Any]:
+        raise AssertionError(f"unexpected build for payload: {payload!r}")
+
+    monkeypatch.setattr(module, "build_node_inventory", _unexpected_build)
+
+    targets = client._heater_sample_subscription_targets()
+
+    assert targets == [("htr", "12")]
+    assert client._inventory is inventory
+
+
+def test_heater_sample_targets_use_snapshot_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Snapshot raw nodes should seed inventory rebuilds when record lacks data."""
+
+    client, _sio, _ = _make_client(monkeypatch)
+    record = client.hass.data[module.DOMAIN]["entry"]
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "13"}]}
+    record.clear()
+    record["snapshot"] = InstallationSnapshot(
+        dev_id=client.dev_id,
+        raw_nodes=raw_nodes,
+    )
+    record.pop("nodes", None)
+    record.pop("inventory", None)
+
+    client._inventory = None
+
+    targets = client._heater_sample_subscription_targets()
+
+    assert targets == [("htr", "13")]
+    assert isinstance(client._inventory, Inventory)
+    assert client._inventory.payload == raw_nodes
 
 
 def test_apply_heater_addresses_filters_non_heaters(monkeypatch: pytest.MonkeyPatch) -> None:
