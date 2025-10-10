@@ -26,6 +26,7 @@ from .inventory import (
     Inventory,
     Node,
     build_node_inventory,
+    heater_platform_details_from_inventory,
     normalize_node_addr,
     normalize_node_type,
 )
@@ -667,6 +668,37 @@ def _extract_inventory(entry_data: Mapping[str, Any] | None) -> Inventory | None
     return None
 
 
+def heater_platform_details_for_entry(
+    entry_data: Mapping[str, Any] | None,
+    *,
+    default_name_simple: Callable[[str], str],
+) -> tuple[
+    dict[str, list[Node]],
+    dict[str, list[str]],
+    Callable[[str, str], str],
+]:
+    """Return heater platform metadata derived from ``entry_data``."""
+
+    inventory = _extract_inventory(entry_data)
+    if inventory is not None:
+        return heater_platform_details_from_inventory(
+            inventory,
+            default_name_simple=default_name_simple,
+        )
+
+    entry_dict: dict[str, Any]
+    if isinstance(entry_data, Mapping):
+        entry_dict = dict(entry_data)
+    else:
+        entry_dict = {}
+
+    _, nodes_by_type, addrs_by_type, resolve_name = prepare_heater_platform_data(
+        entry_dict,
+        default_name_simple=default_name_simple,
+    )
+    return nodes_by_type, addrs_by_type, resolve_name
+
+
 def prepare_heater_platform_data(
     entry_data: dict[str, Any],
     *,
@@ -692,65 +724,12 @@ def prepare_heater_platform_data(
         raise ValueError("TermoWeb inventory unavailable for heater platform")
 
     inventory = inventory_container.nodes
-    nodes_by_type = inventory_container.nodes_by_type
-    explicit_names = inventory_container.explicit_heater_names
-    forward_map, _ = inventory_container.heater_address_map
-    addrs_by_type = {
-        node_type: list(forward_map.get(node_type, []))
-        for node_type in HEATER_NODE_TYPES
-    }
-    name_map = inventory_container.heater_name_map(default_name_simple)
-
-    names_by_type: Mapping[str, Mapping[str, str]]
-    if isinstance(name_map, Mapping):
-        names_by_type = name_map.get("by_type", {})  # type: ignore[assignment]
-        legacy_names = name_map.get("htr", {})  # type: ignore[assignment]
-        name_lookup: Mapping[Any, Any] = name_map
-    else:
-        names_by_type = {}
-        legacy_names = {}
-        name_lookup = {}
-
-    def _default_name(addr: str, node_type: str | None = None) -> str:
-        if (node_type or "").lower() == "acm":
-            return f"Accumulator {addr}"
-        return default_name_simple(addr)
-
-    def resolve_name(node_type: str, addr: str) -> str:
-        """Resolve the friendly name for ``addr`` of the given node type."""
-
-        node_type_norm = normalize_node_type(
-            node_type,
-            use_default_when_falsey=True,
+    nodes_by_type, addrs_by_type, resolve_name = (
+        heater_platform_details_from_inventory(
+            inventory_container,
+            default_name_simple=default_name_simple,
         )
-        addr_str = normalize_node_addr(
-            addr,
-            use_default_when_falsey=True,
-        )
-        default_simple = default_name_simple(addr_str)
-
-        def _candidate(value: Any) -> str | None:
-            if not isinstance(value, str) or not value:
-                return None
-            if (
-                node_type_norm == "acm"
-                and value == default_simple
-                and (node_type_norm, addr_str) not in explicit_names
-            ):
-                return None
-            return value
-
-        per_type = names_by_type.get(node_type_norm, {})
-        for candidate_value in (
-            per_type.get(addr_str),
-            name_lookup.get((node_type_norm, addr_str)),
-            legacy_names.get(addr_str),
-        ):
-            candidate = _candidate(candidate_value)
-            if candidate:
-                return candidate
-
-        return _default_name(addr_str, node_type_norm)
+    )
 
     return inventory, dict(nodes_by_type), addrs_by_type, resolve_name
 

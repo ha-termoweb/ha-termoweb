@@ -15,6 +15,7 @@ _install_stubs()
 
 from aiohttp import ClientError
 from custom_components.termoweb import coordinator as coordinator_module
+from custom_components.termoweb import heater as heater_module
 from custom_components.termoweb import sensor as sensor_module
 from custom_components.termoweb import const as const_module
 from custom_components.termoweb.identifiers import build_heater_energy_unique_id
@@ -363,7 +364,7 @@ def test_sensor_async_setup_entry_ignores_blank_addresses(
             raise AssertionError("prepare_heater_platform_data should not run")
 
         monkeypatch.setattr(
-            sensor_module,
+            heater_module,
             "prepare_heater_platform_data",
             _fail_prepare,
         )
@@ -426,7 +427,7 @@ def test_sensor_async_setup_entry_handles_boolean_boost_flag(
             raise AssertionError("prepare_heater_platform_data should not run")
 
         monkeypatch.setattr(
-            sensor_module,
+            heater_module,
             "prepare_heater_platform_data",
             _fail_prepare,
         )
@@ -526,7 +527,7 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
 
         with (
             patch.object(
-                sensor_module,
+                heater_module,
                 "prepare_heater_platform_data",
                 side_effect=AssertionError(
                     "prepare_heater_platform_data should not run"

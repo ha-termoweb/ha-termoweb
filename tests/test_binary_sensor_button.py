@@ -304,7 +304,7 @@ def test_button_setup_adds_accumulator_entities(
             raise AssertionError("prepare_heater_platform_data should not run")
 
         monkeypatch.setattr(
-            button_module,
+            heater_module,
             "prepare_heater_platform_data",
             _fail_prepare,
         )
@@ -386,7 +386,7 @@ def test_button_setup_falls_back_to_prepare_heater_platform_data(
             return_value=((), nodes_by_type, {"acm": [fallback_node.addr]}, _resolve_name)
         )
         monkeypatch.setattr(
-            button_module,
+            heater_module,
             "prepare_heater_platform_data",
             mock_prepare,
         )
@@ -436,7 +436,7 @@ def test_button_setup_falls_back_to_prepare_heater_platform_data(
 
         assert mock_prepare.call_count == 1
         call_args, call_kwargs = mock_prepare.call_args
-        assert call_args == (entry_data,)
+        assert call_args and call_args[0] == entry_data
         assert set(call_kwargs) == {"default_name_simple"}
         assert callable(call_kwargs["default_name_simple"])
 
@@ -667,7 +667,7 @@ def test_binary_sensor_setup_adds_boost_entities(
             raise AssertionError("prepare_heater_platform_data should not run")
 
         monkeypatch.setattr(
-            binary_sensor_module,
+            heater_module,
             "prepare_heater_platform_data",
             _fail_prepare,
         )

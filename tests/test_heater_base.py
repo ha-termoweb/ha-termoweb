@@ -4,6 +4,7 @@ import asyncio
 import logging
 from types import SimpleNamespace
 from typing import Any, Callable
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -25,6 +26,7 @@ build_heater_name_map = heater_module.build_heater_name_map
 iter_heater_nodes = heater_module.iter_heater_nodes
 iter_boostable_heater_nodes = heater_module.iter_boostable_heater_nodes
 prepare_heater_platform_data = heater_module.prepare_heater_platform_data
+heater_platform_details_for_entry = heater_module.heater_platform_details_for_entry
 
 
 def test_build_heater_entity_unique_id_normalises_inputs() -> None:
@@ -233,6 +235,105 @@ def test_prepare_heater_platform_data_resolves_normalized_inputs() -> None:
     )
 
     assert resolve_name(" HTR ", " 8 ") == "Hall"
+
+
+def test_heater_platform_details_for_entry_prefers_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_nodes = {
+        "nodes": [
+            {"type": "htr", "addr": "1", "name": " Lounge "},
+            {"type": "acm", "addr": "2"},
+        ]
+    }
+    container = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+
+    def _fail_prepare(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("prepare_heater_platform_data should not run")
+
+    monkeypatch.setattr(
+        heater_module,
+        "prepare_heater_platform_data",
+        _fail_prepare,
+    )
+
+    nodes_by_type, addrs_by_type, resolve_name = heater_platform_details_for_entry(
+        {"inventory": container},
+        default_name_simple=lambda addr: f"Heater {addr}",
+    )
+
+    assert nodes_by_type == container.nodes_by_type
+    assert addrs_by_type == {
+        node_type: list(container.heater_address_map[0].get(node_type, []))
+        for node_type in heater_module.HEATER_NODE_TYPES
+    }
+    assert resolve_name("htr", "1") == "Lounge"
+    assert resolve_name("acm", "2") == "Accumulator 2"
+
+
+def test_heater_platform_details_for_entry_uses_prepare_when_missing_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fallback_nodes = {"acm": [SimpleNamespace(addr="5", type="acm")]}
+    fallback_addrs = {"acm": ["5"]}
+
+    def _resolve(node_type: str, addr: str) -> str:
+        return f"{node_type}-{addr}"
+
+    mock_prepare = MagicMock(
+        return_value=((), fallback_nodes, fallback_addrs, _resolve)
+    )
+
+    monkeypatch.setattr(
+        heater_module,
+        "prepare_heater_platform_data",
+        mock_prepare,
+    )
+
+    nodes_by_type, addrs_by_type, resolve_name = heater_platform_details_for_entry(
+        {"dev_id": "missing"},
+        default_name_simple=lambda addr: f"Heater {addr}",
+    )
+
+    assert nodes_by_type is fallback_nodes
+    assert addrs_by_type is fallback_addrs
+    assert resolve_name is _resolve
+    assert mock_prepare.call_count == 1
+    call_args, call_kwargs = mock_prepare.call_args
+    assert call_args and call_args[0] == {"dev_id": "missing"}
+    assert set(call_kwargs) == {"default_name_simple"}
+
+
+def test_heater_platform_details_for_entry_handles_non_mapping_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fallback_nodes = {"htr": [SimpleNamespace(addr="1", type="htr")]} 
+    fallback_addrs = {"htr": ["1"]}
+
+    def _resolve(node_type: str, addr: str) -> str:
+        return f"{node_type}:{addr}"
+
+    mock_prepare = MagicMock(
+        return_value=((), fallback_nodes, fallback_addrs, _resolve)
+    )
+
+    monkeypatch.setattr(
+        heater_module,
+        "prepare_heater_platform_data",
+        mock_prepare,
+    )
+
+    nodes_by_type, addrs_by_type, resolve_name = heater_platform_details_for_entry(
+        SimpleNamespace(dev_id="ignored"),
+        default_name_simple=lambda addr: f"Heater {addr}",
+    )
+
+    assert nodes_by_type is fallback_nodes
+    assert addrs_by_type is fallback_addrs
+    assert resolve_name is _resolve
+    call_args, call_kwargs = mock_prepare.call_args
+    assert call_args and call_args[0] == {}
+    assert set(call_kwargs) == {"default_name_simple"}
 
 
 def test_prepare_heater_platform_data_uses_coordinator_inventory() -> None:
