@@ -35,14 +35,16 @@ async def async_setup_entry(hass, entry, async_add_entities):
     dev_id = data["dev_id"]
     gateway = GatewayOnlineBinarySensor(coord, entry.entry_id, dev_id)
 
-    nodes_by_type, _, resolve_name = heater_platform_details_for_entry(
+    heater_details = heater_platform_details_for_entry(
         data,
         default_name_simple=lambda addr: f"Node {addr}",
     )
+    nodes_by_type, _, resolve_name = heater_details
 
     boost_entities: list[BinarySensorEntity] = []
     for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
-        nodes_by_type, resolve_name
+        heater_details,
+        resolve_name,
     ):
         unique_id = build_heater_entity_unique_id(
             dev_id,
@@ -68,7 +70,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             "Adding %d TermoWeb heater boost binary sensors", len(boost_entities)
         )
 
-    log_skipped_nodes("binary_sensor", nodes_by_type, logger=_LOGGER)
+    log_skipped_nodes("binary_sensor", heater_details, logger=_LOGGER)
     async_add_entities([gateway, *boost_entities])
 
 

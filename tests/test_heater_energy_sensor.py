@@ -279,15 +279,15 @@ def test_sensor_async_setup_entry_defaults_and_skips_invalid(
 
         def _mock_helper(
             platform_name: str,
-            nodes_by_type: dict[str, Any],
+            inventory_or_details: Any,
             *,
             logger: logging.Logger | None = None,
             skipped_types: Iterable[str] = ("pmo", "thm"),
         ) -> None:
-            calls.append((platform_name, nodes_by_type))
+            calls.append((platform_name, inventory_or_details))
             original_helper(
                 platform_name,
-                nodes_by_type,
+                inventory_or_details,
                 logger=logger or sensor_module._LOGGER,
                 skipped_types=skipped_types,
             )
@@ -316,7 +316,14 @@ def test_sensor_async_setup_entry_defaults_and_skips_invalid(
         ]
 
         assert calls and calls[0][0] == "sensor"
-        assert "pmo" in calls[0][1]
+        logged_details = calls[0][1]
+        if isinstance(logged_details, tuple):
+            logged_nodes = logged_details[0]
+        elif hasattr(logged_details, "nodes_by_type"):
+            logged_nodes = logged_details.nodes_by_type
+        else:
+            logged_nodes = {}
+        assert "pmo" in logged_nodes
         messages = [record.getMessage() for record in caplog.records]
         assert any(
             "Skipping TermoWeb pmo nodes for sensor platform: P1" in message

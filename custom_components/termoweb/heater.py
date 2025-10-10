@@ -61,6 +61,13 @@ BOOST_DURATION_OPTIONS: Final[tuple[int, ...]] = tuple(
 )
 
 
+HeaterPlatformDetails = tuple[
+    dict[str, list[Node]],
+    dict[str, list[str]],
+    Callable[[str, str], str],
+]
+
+
 def _boost_runtime_store(
     entry_data: MutableMapping[str, Any] | None,
     *,
@@ -191,9 +198,60 @@ def iter_boost_button_metadata() -> Iterator[BoostButtonMetadata]:
     yield from BOOST_BUTTON_METADATA
 
 
+def _resolve_inventory_metadata(
+    inventory_or_details: Inventory | HeaterPlatformDetails | None,
+    resolve_name: Callable[[str, str], str] | None,
+    *,
+    require_resolver: bool = True,
+) -> tuple[
+    Inventory | None,
+    dict[str, list[Node]],
+    dict[str, list[str]],
+    Callable[[str, str], str] | None,
+]:
+    """Return heater inventory metadata for helper utilities."""
+
+    if isinstance(inventory_or_details, Inventory):
+        nodes_by_type = inventory_or_details.nodes_by_type
+        forward_map, _ = inventory_or_details.heater_address_map
+        addrs_by_type = {
+            node_type: list(forward_map.get(node_type, []))
+            for node_type in HEATER_NODE_TYPES
+        }
+        resolver = resolve_name
+        if require_resolver and resolver is None:
+            msg = "resolve_name is required when providing an Inventory"
+            raise ValueError(msg)
+        return inventory_or_details, nodes_by_type, addrs_by_type, resolver
+
+    if isinstance(inventory_or_details, tuple) and len(inventory_or_details) == 3:
+        nodes_by_type, addrs_by_type, resolver = inventory_or_details
+        mapped_nodes = {
+            node_type: list(bucket or [])
+            for node_type, bucket in dict(nodes_by_type).items()
+        }
+        mapped_addrs = {
+            node_type: list(dict(addrs_by_type).get(node_type, []))
+            for node_type in HEATER_NODE_TYPES
+        }
+        for node_type, addrs in dict(addrs_by_type).items():
+            mapped_addrs.setdefault(node_type, list(addrs or []))
+        final_resolver = resolve_name or resolver
+        if require_resolver and final_resolver is None:
+            msg = "resolve_name is required for inventory tuples"
+            raise ValueError(msg)
+        return None, mapped_nodes, mapped_addrs, final_resolver
+
+    if require_resolver and resolve_name is None:
+        msg = "resolve_name must be provided when inventory details are absent"
+        raise ValueError(msg)
+
+    return None, {}, {}, resolve_name
+
+
 def iter_boostable_heater_nodes(
-    nodes_by_type: Mapping[str, Iterable[Node] | None],
-    resolve_name: Callable[[str, str], str],
+    inventory_or_details: Inventory | HeaterPlatformDetails | None,
+    resolve_name: Callable[[str, str], str] | None,
     *,
     node_types: Iterable[str] | None = None,
     accumulators_only: bool = False,
@@ -216,7 +274,7 @@ def iter_boostable_heater_nodes(
                 return
 
     for node_type, node, addr_str, base_name in iter_heater_nodes(
-        nodes_by_type,
+        inventory_or_details,
         resolve_name,
         node_types=filtered_types,
     ):
@@ -437,39 +495,47 @@ def _iter_nodes(nodes: Any) -> Iterable[Node]:
 
 
 def iter_heater_nodes(
-    nodes_by_type: Mapping[str, Iterable[Node] | None],
-    resolve_name: Callable[[str, str], str],
+    inventory_or_details: Inventory | HeaterPlatformDetails | None,
+    resolve_name: Callable[[str, str], str] | None,
     *,
     node_types: Iterable[str] | None = None,
 ) -> Iterator[tuple[str, Node, str, str]]:
     """Yield heater node metadata for supported node types."""
 
+    _, nodes_by_type, _addrs_by_type, resolver = _resolve_inventory_metadata(
+        inventory_or_details,
+        resolve_name,
+    )
+    if resolver is None:
+        return
+
     types = list(node_types or HEATER_NODE_TYPES)
-    for node_type in types:
-        if not node_type:
+    for desired_type in types:
+        if not desired_type:
             continue
-        nodes = nodes_by_type.get(node_type)
-        if not nodes:
-            continue
-        if isinstance(nodes, Mapping):
-            iterable: Iterable[Any] = nodes.values()
-        elif isinstance(nodes, (str, bytes)):
-            iterable = ()
-        elif isinstance(nodes, Iterable):
-            iterable = nodes
-        else:
-            iterable = (nodes,)
-        for node in iterable:
-            raw_addr = getattr(node, "addr", "")
-            if raw_addr is None:
+        for node_type, bucket in nodes_by_type.items():
+            if node_type != desired_type or not bucket:
                 continue
-            addr_str = normalize_node_addr(raw_addr)
-            if not addr_str:
-                continue
-            if addr_str.lower() == "none":
-                continue
-            resolved_name = resolve_name(node_type, addr_str)
-            yield node_type, node, addr_str, resolved_name
+            if isinstance(bucket, Mapping):
+                iterable: Iterable[Any] = bucket.values()
+            elif isinstance(bucket, (str, bytes)):
+                iterable = ()
+            elif isinstance(bucket, Iterable):
+                iterable = bucket
+            else:
+                iterable = (bucket,)
+            for node in iterable:
+                raw_addr = getattr(node, "addr", "")
+                if raw_addr is None:
+                    continue
+                addr_str = normalize_node_addr(raw_addr)
+                if not addr_str:
+                    continue
+                if addr_str.lower() == "none":
+                    continue
+                resolved_name = resolver(node_type, addr_str)
+                yield node_type, node, addr_str, resolved_name
+            break
 
 
 def iter_heater_maps(
@@ -477,6 +543,7 @@ def iter_heater_maps(
     *,
     map_key: str,
     node_types: Iterable[str] | None = None,
+    inventory_or_details: Inventory | HeaterPlatformDetails | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield unique heater map dictionaries for ``map_key``."""
 
@@ -487,7 +554,15 @@ def iter_heater_maps(
     cache = coordinator_cache if isinstance(coordinator_cache, Mapping) else {}
 
     if node_types is None:
-        types = list(HEATER_NODE_TYPES)
+        if inventory_or_details is not None:
+            _inventory, nodes_by_type, _addrs, _resolver = _resolve_inventory_metadata(
+                inventory_or_details,
+                None,
+                require_resolver=False,
+            )
+            types = list(nodes_by_type.keys()) or list(HEATER_NODE_TYPES)
+        else:
+            types = list(HEATER_NODE_TYPES)
     elif isinstance(node_types, str):
         types = [node_types]
     elif isinstance(node_types, bytes):  # pragma: no cover - defensive
@@ -499,35 +574,57 @@ def iter_heater_maps(
     else:
         types = list(node_types)
 
-    nodes_by_type = cache.get("nodes_by_type")
-    if isinstance(nodes_by_type, Mapping):
-        for node_type in types:
-            if not node_type:
+    nodes_by_type_section = cache.get("nodes_by_type")
+    if isinstance(nodes_by_type_section, Mapping):
+        for desired in types:
+            if not desired:
                 continue
-            section = nodes_by_type.get(node_type)
-            if not isinstance(section, Mapping):
-                continue
-            candidate = section.get(map_key)
-            if isinstance(candidate, dict):
-                ident = id(candidate)
-                if ident in seen:
+            for node_type, section in nodes_by_type_section.items():
+                if node_type != desired or not isinstance(section, Mapping):
                     continue
-                seen.add(ident)
-                yield candidate
+                for key, candidate in section.items():
+                    if key != map_key or not isinstance(candidate, dict):
+                        continue
+                    ident = id(candidate)
+                    if ident in seen:
+                        continue
+                    seen.add(ident)
+                    yield candidate
+                break
+
+    settings = cache.get("settings")
+    if isinstance(settings, Mapping):
+        for desired in types:
+            if not desired:
+                continue
+            for node_type, section in settings.items():
+                if node_type != desired or not isinstance(section, Mapping):
+                    continue
+                for key, candidate in section.items():
+                    if key != map_key or not isinstance(candidate, dict):
+                        continue
+                    ident = id(candidate)
+                    if ident in seen:
+                        continue
+                    seen.add(ident)
+                    yield candidate
+                break
 
     legacy = cache.get("htr")
     if isinstance(legacy, Mapping):
-        candidate = legacy.get(map_key)
-        if isinstance(candidate, dict):
+        for key, candidate in legacy.items():
+            if key != map_key or not isinstance(candidate, dict):
+                continue
             ident = id(candidate)
-            if ident not in seen:
-                seen.add(ident)
-                yield candidate
+            if ident in seen:
+                continue
+            seen.add(ident)
+            yield candidate
 
 
 def log_skipped_nodes(
     platform_name: str,
-    nodes_by_type: Mapping[str, Iterable[Node] | None],
+    inventory_or_details: Inventory | HeaterPlatformDetails | None,
     *,
     logger: logging.Logger | None = None,
     skipped_types: Iterable[str] = ("pmo", "thm"),
@@ -541,28 +638,34 @@ def log_skipped_nodes(
     elif not platform:
         platform = "platform"
 
-    for node_type in skipped_types:
-        nodes = nodes_by_type.get(node_type)
-        if not nodes:
-            continue
+    _inventory, nodes_by_type, _addrs_by_type, _resolver = _resolve_inventory_metadata(
+        inventory_or_details,
+        None,
+        require_resolver=False,
+    )
 
-        addrs = ", ".join(
-            sorted(
-                filter(
-                    None,
-                    (
-                        normalize_node_addr(getattr(node, "addr", ""))
-                        for node in _iter_nodes(nodes)
-                    ),
+    for node_type in skipped_types:
+        for candidate_type, nodes in nodes_by_type.items():
+            if candidate_type != node_type:
+                continue
+            addrs = ", ".join(
+                sorted(
+                    filter(
+                        None,
+                        (
+                            normalize_node_addr(getattr(node, "addr", ""))
+                            for node in _iter_nodes(nodes)
+                        ),
+                    )
                 )
             )
-        )
-        log.debug(
-            "Skipping TermoWeb %s nodes for %s: %s",
-            node_type,
-            platform,
-            addrs or "<no-addr>",
-        )
+            log.debug(
+                "Skipping TermoWeb %s nodes for %s: %s",
+                node_type,
+                platform,
+                addrs or "<no-addr>",
+            )
+            break
 
 
 def build_heater_name_map(
@@ -646,11 +749,7 @@ def heater_platform_details_for_entry(
     entry_data: Mapping[str, Any] | None,
     *,
     default_name_simple: Callable[[str], str],
-) -> tuple[
-    dict[str, list[Node]],
-    dict[str, list[str]],
-    Callable[[str, str], str],
-]:
+) -> HeaterPlatformDetails:
     """Return heater platform metadata derived from ``entry_data``."""
 
     inventory = _extract_inventory(entry_data)
