@@ -551,6 +551,45 @@ async def test_read_loop_updates_ws_state_on_dev_data(
 
 
 @pytest.mark.asyncio
+async def test_read_loop_handles_string_dev_data_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """String encoded dev_data payloads should be decoded."""
+
+    client = _make_client(monkeypatch)
+    hass = client.hass
+    client._coordinator.update_nodes = MagicMock()
+    monkeypatch.setattr(client, "_subscribe_feeds", AsyncMock(return_value=0))
+
+    frame_payload = json.dumps(
+        ["dev_data", json.dumps({"nodes": {"acm": {"status": {"1": {"power": 3}}}}})],
+        separators=(",", ":"),
+    )
+
+    class DevDataWS:
+        def __init__(self, frame: str) -> None:
+            self._frame = frame
+            self.closed = False
+
+        def __aiter__(self) -> Any:
+            async def _iterate() -> AsyncIterator[Any]:
+                yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data=self._frame)
+
+            return _iterate()
+
+    client._ws = DevDataWS(f"42{client._namespace},{frame_payload}")  # type: ignore[assignment]
+
+    await client._read_loop_ws()
+
+    ws_state = hass.data[ducaheat_ws.DOMAIN]["entry"]["ws_state"][client.dev_id]
+    assert ws_state["status"] == "healthy"
+    assert client._coordinator.update_nodes.called
+    update_args, update_kwargs = client._coordinator.update_nodes.call_args
+    assert not update_kwargs
+    assert update_args[0] == {"acm": {"status": {"1": {"power": 3}}}}
+
+
+@pytest.mark.asyncio
 async def test_keepalive_loop_handles_ws_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

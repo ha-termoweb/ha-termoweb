@@ -465,24 +465,32 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                             await self._emit_sio("message", "pong")
                             break
 
-                        if evt == "dev_data" and args and isinstance(args[0], dict):
-                            nodes = args[0].get("nodes") if isinstance(args[0], dict) else None
-                            if isinstance(nodes, dict):
-                                self._latest_nodes = nodes
-                                self._log_nodes_summary(nodes)
-                                normalised = self._normalise_nodes_payload(nodes)
-                                if isinstance(normalised, dict):
-                                    self._nodes_raw = deepcopy(normalised)
-                                    snapshot = self._build_nodes_snapshot(self._nodes_raw)
-                                else:
+                        if evt == "dev_data" and args:
+                            body = self._coerce_dev_data_body(args[0])
+                            if isinstance(body, Mapping):
+                                nodes = self._extract_dev_data_nodes(body)
+                                fallback_nodes = body.get("nodes")
+                                if isinstance(nodes, dict):
+                                    self._latest_nodes = nodes
+                                    self._log_nodes_summary(nodes)
+                                    normalised = self._normalise_nodes_payload(nodes)
+                                    if isinstance(normalised, dict):
+                                        self._nodes_raw = deepcopy(normalised)
+                                        snapshot = self._build_nodes_snapshot(self._nodes_raw)
+                                    else:
+                                        self._nodes_raw = None
+                                        snapshot = {"nodes": nodes}
+                                    self._dispatch_nodes(snapshot)
+                                    subs = await self._subscribe_feeds(nodes)
+                                    _LOGGER.info(
+                                        "WS (ducaheat): subscribed %d feeds", subs
+                                    )
+                                    self._update_status("healthy")
+                                elif fallback_nodes is not None:
                                     self._nodes_raw = None
-                                    snapshot = {"nodes": nodes}
-                                self._dispatch_nodes(snapshot)
-                                subs = await self._subscribe_feeds(nodes)
-                                _LOGGER.info(
-                                    "WS (ducaheat): subscribed %d feeds", subs
-                                )
-                                self._update_status("healthy")
+                                    snapshot = {"nodes": fallback_nodes}
+                                    self._dispatch_nodes(snapshot)
+                                    self._update_status("healthy")
                             break
 
                         if evt == "update" and args:
@@ -614,6 +622,37 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 _LOGGER.debug("WS (ducaheat): normalise_ws_nodes failed", exc_info=True)
                 return snapshot
         return snapshot
+
+    def _coerce_dev_data_body(self, payload: Any) -> Mapping[str, Any] | None:
+        """Return a mapping for ``dev_data`` payload variants when possible."""
+
+        if isinstance(payload, Mapping):
+            return payload if isinstance(payload, dict) else dict(payload)
+        if isinstance(payload, str):
+            try:
+                decoded = json.loads(payload)
+            except Exception:  # noqa: BLE001 - defensive logging
+                _LOGGER.debug(
+                    "WS (ducaheat): failed to decode dev_data string payload", exc_info=True
+                )
+                return None
+            if isinstance(decoded, Mapping):
+                return decoded if isinstance(decoded, dict) else dict(decoded)
+        return None
+
+    @staticmethod
+    def _extract_dev_data_nodes(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+        """Extract the ``nodes`` mapping from a dev_data payload."""
+
+        nodes = payload.get("nodes")
+        if isinstance(nodes, Mapping):
+            return nodes if isinstance(nodes, dict) else dict(nodes)
+        nested = payload.get("data")
+        if isinstance(nested, Mapping):
+            nodes = nested.get("nodes")
+            if isinstance(nodes, Mapping):
+                return nodes if isinstance(nodes, dict) else dict(nodes)
+        return None
 
     @staticmethod
     def _build_nodes_snapshot(nodes: dict[str, Any]) -> dict[str, Any]:
