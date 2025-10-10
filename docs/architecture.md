@@ -30,6 +30,10 @@ management metadata such as `main_circuit_pmos` plus the `max_power_config`
 profiles and slots observed in captures. Inventory caches persist these nodes
 even though the integration only reads them today so future entities inherit the
 discover-once contract.【F:docs/ducaheat_api.md†L27-L33】【F:custom_components/termoweb/installation.py†L58-L117】
+The heater caches now have power-monitor siblings so websocket rebuilds retain
+forward/reverse address maps, compatibility aliases (covering legacy
+`power_monitor` keys) and subscription tuples alongside the heater metadata the
+coordinators already consume.【F:custom_components/termoweb/inventory.py†L181-L323】【F:custom_components/termoweb/installation.py†L69-L161】
 
 ## Key components
 
@@ -142,7 +146,7 @@ flowchart LR
     Gateway --> Pmo
 ```
 
-Power monitor energy counters flow exclusively through REST reads and `/pmo/{addr}/samples` requests using epoch-second windows; no WebSocket deltas supplement these feeds today.【F:docs/ducaheat_api.md†L154-L181】
+Power monitor energy counters flow exclusively through REST reads and `/pmo/{addr}/samples` requests using epoch-second windows; no WebSocket deltas supplement these feeds today.【F:docs/ducaheat_api.md†L154-L181】 Inventory rebuilds reuse the cached address maps so entity display names and compatibility aliases persist even if websocket clients need to reconstruct their snapshot state.
 
 ## Ducaheat selection & boost pipeline
 

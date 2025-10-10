@@ -100,6 +100,10 @@ def test_diagnostics_with_cached_inventory(caplog: pytest.LogCaptureFixture) -> 
         {"name": "Monitor", "addr": "2", "type": "pmo"},
     ]
 
+    forward_map, _ = inventory.power_monitor_address_map
+    assert forward_map == {"pmo": ["2"]}
+    assert inventory.power_monitor_sample_targets == [("pmo", "2")]
+
     flattened = _flatten(diagnostics)
     assert "dev_id" not in flattened
     assert "username" not in flattened

@@ -1061,6 +1061,26 @@ class WebSocketClient(_WSStatusMixin):
             if not isinstance(self._inventory, Inventory):
                 self._inventory = inventory_container
 
+        pmo_addresses: list[str] = []
+        if isinstance(inventory_container, Inventory):
+            forward_map, _ = inventory_container.power_monitor_address_map
+            pmo_addresses = list(forward_map.get("pmo", []))
+        elif isinstance(normalized_map, Mapping):
+            raw_addrs = normalized_map.get("pmo")
+            if isinstance(raw_addrs, (str, bytes)):
+                candidates: Iterable[Any] = [raw_addrs]
+            elif isinstance(raw_addrs, Iterable):
+                candidates = raw_addrs
+            else:
+                candidates = []
+            seen: set[str] = set()
+            for candidate in candidates:
+                addr = normalize_node_addr(candidate, use_default_when_falsey=True)
+                if not addr or addr in seen:
+                    continue
+                seen.add(addr)
+                pmo_addresses.append(addr)
+
         energy_coordinator = (
             record.get("energy_coordinator") if isinstance(record, Mapping) else None
         )
@@ -1078,6 +1098,10 @@ class WebSocketClient(_WSStatusMixin):
                     bucket = self._ensure_type_bucket(dev_map, nodes_by_type, node_type)
                     if addrs:
                         bucket["addrs"] = list(addrs)
+                if pmo_addresses or "pmo" in nodes_by_type:
+                    bucket = self._ensure_type_bucket(dev_map, nodes_by_type, "pmo")
+                    if pmo_addresses:
+                        bucket["addrs"] = list(pmo_addresses)
                 updated = dict(coordinator_data)
                 updated[self.dev_id] = dev_map
                 self._coordinator.data = updated  # type: ignore[attr-defined]

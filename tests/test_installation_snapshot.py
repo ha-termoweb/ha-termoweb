@@ -109,6 +109,32 @@ def test_snapshot_sample_targets_filter_invalid_pairs(
     assert snapshot.heater_sample_targets == [("htr", "1"), ("acm", "2")]
 
 
+def test_snapshot_power_monitor_caches() -> None:
+    """Power monitor helpers should mirror heater cache behaviour."""
+
+    nodes = [
+        {"type": "pmo", "addr": "3", "name": "Monitor"},
+        {"type": "power_monitor", "addr": "4", "name": "Alias"},
+    ]
+    snapshot = _make_snapshot(nodes)
+
+    forward, reverse = snapshot.power_monitor_address_map
+    assert forward == {"pmo": ["3", "4"]}
+    assert reverse == {"3": {"pmo"}, "4": {"pmo"}}
+
+    sample_map, compat = snapshot.power_monitor_sample_address_map
+    assert sample_map == {"pmo": ["3", "4"]}
+    assert compat["power_monitor"] == "pmo"
+
+    targets_first = snapshot.power_monitor_sample_targets
+    targets_second = snapshot.power_monitor_sample_targets
+    assert targets_first == targets_second == [("pmo", "3"), ("pmo", "4")]
+
+    repeat_map, repeat_compat = snapshot.power_monitor_sample_address_map
+    assert repeat_map == sample_map
+    assert repeat_compat == compat
+
+
 def test_snapshot_update_nodes_accepts_inventory() -> None:
     """Providing an inventory container should refresh cached nodes."""
 
