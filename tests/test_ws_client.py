@@ -287,6 +287,52 @@ def test_dispatch_nodes_without_snapshot(monkeypatch: pytest.MonkeyPatch) -> Non
     assert dispatched_payload["addr_map"] == {"htr": ["1"]}
 
 
+def test_dispatch_nodes_uses_inventory_payload_and_unknown_types(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dispatch metadata should expose unknown types and inventory payload."""
+
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
+    coordinator = SimpleNamespace(update_nodes=MagicMock())
+    dispatcher = MagicMock()
+    monkeypatch.setattr(base_ws, "async_dispatcher_send", dispatcher)
+
+    raw_inventory_payload = {"nodes": {"htr": {"settings": {"4": {"temp": 19}}}}}
+    inventory_nodes = build_node_inventory([{"type": "htr", "addr": "4"}])
+    inventory = Inventory("device", raw_inventory_payload, inventory_nodes)
+
+    context = base_ws.NodeDispatchContext(
+        payload=None,
+        inventory=inventory,
+        addr_map={"htr": ["4"]},
+        node_types=("htr",),
+        unknown_types={"mystery"},
+        record=None,
+        snapshot=None,
+    )
+
+    monkeypatch.setattr(
+        base_ws,
+        "_prepare_nodes_dispatch",
+        lambda *args, **kwargs: context,
+    )
+
+    class DummyCommon(base_ws._WSCommon):
+        def __init__(self) -> None:
+            self.hass = hass
+            self.entry_id = "entry"
+            self.dev_id = "device"
+            self._coordinator = coordinator
+            self._inventory = inventory
+
+    DummyCommon()._dispatch_nodes({})
+
+    dispatcher.assert_called_once()
+    dispatched = dispatcher.call_args.args[2]
+    assert dispatched["unknown_types"] == ["mystery"]
+    assert dispatched["nodes"] is raw_inventory_payload
+
+
 def test_prepare_nodes_dispatch_handles_non_mapping_record(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

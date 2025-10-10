@@ -23,9 +23,12 @@ from .inventory import (
 )
 from .throttle import (
     MonotonicRateLimiter,
-    default_samples_rate_limit_state,
-    reset_samples_rate_limit_state,
+    default_samples_rate_limit_state as _default_samples_rate_limit_state,
+    reset_samples_rate_limit_state as _reset_samples_rate_limit_state,
 )
+
+default_samples_rate_limit_state = _default_samples_rate_limit_state
+reset_samples_rate_limit_state = _reset_samples_rate_limit_state
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -357,13 +360,9 @@ async def async_import_energy_history(
         return
     client: RESTClient = rec["client"]
     dev_id: str = rec["dev_id"]
-    inventory_nodes: list[Any]
-    nodes_payload: Any | None = rec.get("nodes") if isinstance(rec, Mapping) else None
-
     resolution = resolve_record_inventory(
         rec,
         dev_id=dev_id,
-        nodes_payload=nodes_payload,
     )
     inventory_container = resolution.inventory
     if inventory_container is None:

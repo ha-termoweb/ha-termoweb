@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from collections.abc import Iterable, Mapping, MutableMapping
 from copy import deepcopy
 import gzip
 import json
@@ -11,7 +12,7 @@ import logging
 import random
 import string
 import time
-from typing import Any, Iterable, Mapping, MutableMapping
+from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import aiohttp
@@ -508,7 +509,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                 else:
                                     self._nodes_raw = None
                                     snapshot = {"nodes": nodes}
-                                self._dispatch_nodes(snapshot)
+                                if isinstance(snapshot, Mapping):
+                                    self._dispatch_nodes(snapshot)
                                 subs = await self._subscribe_feeds(nodes)
                                 _LOGGER.info("WS (ducaheat): subscribed %d feeds", subs)
                                 self._update_status("healthy")
@@ -546,9 +548,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                         break
                         break
                     continue
-                elif msg.type == aiohttp.WSMsgType.ERROR:
+                if msg.type == aiohttp.WSMsgType.ERROR:
                     raise RuntimeError(f"websocket error: {ws.exception()}")
-                elif msg.type in {aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED}:
+                if msg.type in {aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED}:
                     raise RuntimeError("websocket closed")
         finally:
             _LOGGER.debug("WS (ducaheat): read loop ended (ws closed or error)")
@@ -693,7 +695,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
 
     @staticmethod
     def _build_nodes_snapshot(nodes: dict[str, Any]) -> dict[str, Any]:
-        """Return a snapshot structure with ``nodes`` and ``nodes_by_type`` buckets."""
+        """Return derived node metadata for downstream consumers."""
 
         nodes_copy = deepcopy(nodes)
         nodes_by_type = {
@@ -847,51 +849,74 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     record_mapping.setdefault("snapshot", snapshot_obj)
                 domain_bucket[self.entry_id] = record_mapping
 
-            if isinstance(resolved_nodes, Mapping):
-                record_mapping["nodes"] = resolved_nodes
-
             snapshot_obj = (
                 ensure_snapshot(record_mapping)
                 if isinstance(record_mapping, Mapping)
                 else snapshot_obj
             )
 
-            inventory_container: Inventory | None = (
+            self_inventory: Inventory | None = (
                 self._inventory if isinstance(self._inventory, Inventory) else None
             )
-            if inventory_container is None:
-                cached_inventory = record_mapping.get("inventory")
-                if isinstance(cached_inventory, Inventory):
-                    inventory_container = cached_inventory
-
+            cached_inventory = record_mapping.get("inventory")
+            record_inventory: Inventory | None = (
+                cached_inventory if isinstance(cached_inventory, Inventory) else None
+            )
             coordinator_inventory = getattr(self._coordinator, "_inventory", None)
-            coordinator_nodes: Iterable[Any] | None = None
-            if isinstance(coordinator_inventory, Inventory):
-                coordinator_nodes = coordinator_inventory.nodes
-
-            nodes_payload: Any | None
-            if isinstance(resolved_nodes, Mapping):
-                nodes_payload = resolved_nodes
-            else:
-                nodes_payload = record_mapping.get("nodes")
-
-            should_resolve = inventory_container is None and (
-                nodes_payload is not None
-                or not isinstance(coordinator_inventory, Inventory)
+            coordinator_inventory = (
+                coordinator_inventory if isinstance(coordinator_inventory, Inventory) else None
             )
 
-            if should_resolve:
+            inventory_container: Inventory | None = next(
+                (
+                    candidate
+                    for candidate in (
+                        self_inventory,
+                        record_inventory,
+                    )
+                    if candidate is not None
+                ),
+                None,
+            )
+
+            nodes_payload: Any | None = (
+                resolved_nodes if isinstance(resolved_nodes, Mapping) else None
+            )
+
+            if nodes_payload is not None:
                 resolution = resolve_record_inventory(
                     record_mapping,
                     dev_id=self.dev_id,
                     nodes_payload=nodes_payload,
-                    node_list=coordinator_nodes,
+                    node_list=(
+                        coordinator_inventory.nodes
+                        if isinstance(coordinator_inventory, Inventory)
+                        else None
+                    ),
                 )
-                inventory_container = resolution.inventory
+                if resolution.inventory is not None:
+                    inventory_container = resolution.inventory
+            else:
+                if inventory_container is None and coordinator_inventory is not None:
+                    inventory_container = coordinator_inventory
+                if inventory_container is None:
+                    if snapshot_obj is not None:
+                        nodes_payload = getattr(snapshot_obj, "raw_nodes", None)
 
-            if inventory_container is None and isinstance(
-                coordinator_inventory, Inventory
-            ):
+                    resolution = resolve_record_inventory(
+                        record_mapping,
+                        dev_id=self.dev_id,
+                        nodes_payload=nodes_payload,
+                        node_list=(
+                            coordinator_inventory.nodes
+                            if isinstance(coordinator_inventory, Inventory)
+                            else None
+                        ),
+                    )
+                    if resolution.inventory is not None:
+                        inventory_container = resolution.inventory
+
+            if inventory_container is None and coordinator_inventory is not None:
                 inventory_container = coordinator_inventory
 
             if not isinstance(inventory_container, Inventory):
@@ -905,11 +930,11 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             record_mapping["inventory"] = inventory_container
 
             if isinstance(snapshot_obj, InstallationSnapshot):
-                snapshot_nodes = (
-                    nodes_payload
-                    if nodes_payload is not None
-                    else snapshot_obj.raw_nodes
-                )
+                snapshot_nodes = nodes_payload
+                if snapshot_nodes is None:
+                    snapshot_nodes = getattr(inventory_container, "payload", None)
+                if snapshot_nodes is None:
+                    snapshot_nodes = snapshot_obj.raw_nodes
                 snapshot_obj.update_nodes(snapshot_nodes, inventory=inventory_container)
                 record_mapping.setdefault("snapshot", snapshot_obj)
 

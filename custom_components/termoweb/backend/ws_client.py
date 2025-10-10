@@ -1,44 +1,30 @@
-# -*- coding: utf-8 -*-
 """Shared websocket helpers."""
 from __future__ import annotations
 
 import asyncio
-from copy import deepcopy
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
-import gzip
-import json
 import logging
-import random
-import string
 import time
-from collections.abc import MutableMapping
-from typing import TYPE_CHECKING, Any, Mapping
-from urllib.parse import urlencode, urlsplit, urlunsplit
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
-import socketio
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from ..api import RESTClient
 from ..const import (
-    ACCEPT_LANGUAGE,
-    API_BASE,
     BRAND_DUCAHEAT,
     BRAND_TERMOWEB,
     DOMAIN,
-    USER_AGENT,
     WS_NAMESPACE,
-    get_brand_api_base,
-    get_brand_requested_with,
-    get_brand_user_agent,
     signal_ws_data,
     signal_ws_status,
 )
 from ..installation import InstallationSnapshot, ensure_snapshot
 from ..inventory import (
-    Inventory,
     NODE_CLASS_BY_TYPE,
+    Inventory,
     addresses_by_node_type,
     resolve_record_inventory,
 )
@@ -226,6 +212,7 @@ class NodeDispatchContext:
     payload: Any
     inventory: Inventory
     addr_map: dict[str, list[str]]
+    node_types: tuple[str, ...]
     unknown_types: set[str]
     record: MutableMapping[str, Any] | None
     snapshot: InstallationSnapshot | None
@@ -292,6 +279,7 @@ def _prepare_nodes_dispatch(
         inventory_container.nodes, known_types=NODE_CLASS_BY_TYPE
     )
     addr_map = {node_type: list(addrs) for node_type, addrs in addr_map_raw.items()}
+    node_types: tuple[str, ...] = tuple(sorted(addr_map))
 
     if hasattr(coordinator, "update_nodes"):
         coordinator.update_nodes(raw_nodes, inventory_container)
@@ -310,6 +298,7 @@ def _prepare_nodes_dispatch(
         payload=raw_nodes,
         inventory=inventory_container,
         addr_map=addr_map,
+        node_types=node_types,
         unknown_types=normalized_unknown,
         record=record_mapping,
         snapshot=snapshot_obj if isinstance(snapshot_obj, InstallationSnapshot) else None,
@@ -330,7 +319,7 @@ class _WSCommon(_WSStatusMixin):
         self._inventory: Inventory | None = inventory
 
     def _dispatch_nodes(self, payload: dict[str, Any]) -> None:
-        raw_nodes = payload.get("nodes") if "nodes" in payload else payload
+        raw_nodes = payload.get("nodes") if isinstance(payload, Mapping) and "nodes" in payload else payload
         context = _prepare_nodes_dispatch(
             self.hass,
             entry_id=self.entry_id,
@@ -338,14 +327,24 @@ class _WSCommon(_WSStatusMixin):
             raw_nodes=raw_nodes,
             inventory=self._inventory,
         )
-        nodes_payload = context.payload if context.payload is not None else {}
-        payload_copy = {
+        addr_map = {node_type: list(addrs) for node_type, addrs in context.addr_map.items()}
+        metadata: dict[str, Any] = {
             "dev_id": self.dev_id,
             "node_type": None,
-            "nodes": deepcopy(nodes_payload),
-            "addr_map": {t: list(a) for t, a in context.addr_map.items()},
+            "addr_map": addr_map,
+            "node_types": list(context.node_types),
         }
-        async_dispatcher_send(self.hass, signal_ws_data(self.entry_id), payload_copy)
+        inventory = context.inventory
+        if isinstance(inventory, Inventory):
+            metadata["inventory"] = inventory
+        if context.unknown_types:
+            metadata["unknown_types"] = sorted(context.unknown_types)
+        nodes_payload = context.payload
+        if nodes_payload is None and isinstance(inventory, Inventory):
+            nodes_payload = inventory.payload
+        if nodes_payload is not None:
+            metadata["nodes"] = nodes_payload
+        async_dispatcher_send(self.hass, signal_ws_data(self.entry_id), metadata)
 
 
 class WebSocketClient(_WsLeaseMixin, _WSStatusMixin):
@@ -430,9 +429,9 @@ __all__ = [
     "DUCAHEAT_NAMESPACE",
     "HandshakeError",
     "WSStats",
+    "WebSocketClient",
     "forward_ws_sample_updates",
     "resolve_ws_update_section",
-    "WebSocketClient",
 ]
 
 time_mod = time.monotonic

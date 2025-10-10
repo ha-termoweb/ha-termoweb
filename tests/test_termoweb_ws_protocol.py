@@ -948,12 +948,12 @@ def test_dispatch_nodes_with_snapshot(monkeypatch: pytest.MonkeyPatch, caplog: p
     client._coordinator.update_nodes = MagicMock()
     caplog.set_level(logging.DEBUG)
 
-    result = client._dispatch_nodes({"nodes": {"htr": {"settings": {"1": {}}}}})
+    result = client._dispatch_nodes({"htr": {"settings": {"1": {}}}})
     assert isinstance(result, dict)
     client._coordinator.update_nodes.assert_called_once()
     update_args, update_kwargs = client._coordinator.update_nodes.call_args
     assert not update_kwargs
-    assert update_args[0] == {"nodes": {"htr": {"settings": {"1": {}}}}}
+    assert update_args[0] == {"htr": {"settings": {"1": {}}}}
     assert isinstance(update_args[1], Inventory)
     dispatcher.assert_called()
 
@@ -970,11 +970,11 @@ def test_dispatch_nodes_handles_unknown_types(monkeypatch: pytest.MonkeyPatch) -
         return {"foo": []}, {"unknown"}
 
     monkeypatch.setattr(module, "addresses_by_node_type", fake_addresses)
-    client._dispatch_nodes({"nodes": {}})
+    client._dispatch_nodes({})
     client._coordinator.update_nodes.assert_called_once()
     update_args, update_kwargs = client._coordinator.update_nodes.call_args
     assert not update_kwargs
-    assert update_args[0] == {"nodes": {}}
+    assert update_args[0] == {}
     assert isinstance(update_args[1], Inventory)
     dispatcher.assert_called()
 
@@ -1012,6 +1012,7 @@ def test_dispatch_nodes_uses_inventory_payload(monkeypatch: pytest.MonkeyPatch) 
             payload=None,
             inventory=inventory,
             addr_map={"htr": ["2"]},
+            node_types=("htr",),
             unknown_types=set(),
             record=record,
             snapshot=None,
@@ -1019,7 +1020,7 @@ def test_dispatch_nodes_uses_inventory_payload(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(module, "_prepare_nodes_dispatch", fake_prepare)
 
-    client._dispatch_nodes({"nodes": None})
+    client._dispatch_nodes({})
 
     client._coordinator.update_nodes.assert_called_once()
     update_args, update_kwargs = client._coordinator.update_nodes.call_args
@@ -1178,7 +1179,10 @@ def test_heater_sample_subscription_targets_logs_missing_inventory(
     record = client.hass.data[module.DOMAIN]["entry"]
     record.pop("snapshot", None)
     record.pop("inventory", None)
-    record["nodes"] = {"nodes": [{"type": "htr", "addr": "9"}]}
+    record["snapshot"] = InstallationSnapshot(
+        dev_id=client.dev_id,
+        raw_nodes={"nodes": [{"type": "htr", "addr": "9"}]},
+    )
 
     monkeypatch.setattr(
         module,

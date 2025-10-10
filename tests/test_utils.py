@@ -10,6 +10,7 @@ from custom_components.termoweb.const import DOMAIN
 import custom_components.termoweb.identifiers as identifiers_module
 from custom_components.termoweb.identifiers import build_heater_energy_unique_id
 from custom_components.termoweb.inventory import (
+    Inventory,
     addresses_by_node_type,
     build_node_inventory,
     normalize_heater_addresses,
@@ -32,7 +33,7 @@ from custom_components.termoweb.utils import (
 def test_ensure_node_inventory_returns_cached_copy() -> None:
     raw = {"nodes": [{"type": "htr", "addr": "A"}]}
     cached = build_node_inventory(raw)
-    record = {"node_inventory": cached, "nodes": raw}
+    record = {"node_inventory": cached}
 
     result = ensure_node_inventory(record)
 
@@ -44,7 +45,7 @@ def test_ensure_node_inventory_filters_invalid_cached_entries() -> None:
     raw = {"nodes": [{"type": "htr", "addr": "A"}]}
     cached = build_node_inventory(raw)
     cached.append(types.SimpleNamespace(type="", addr="bad"))
-    record = {"node_inventory": cached, "nodes": {}}
+    record = {"node_inventory": cached}
 
     result = ensure_node_inventory(record)
 
@@ -64,7 +65,7 @@ def test_ensure_node_inventory_skips_node_like_entries_with_missing_fields() -> 
     raw = {"nodes": [{"type": "htr", "addr": "A"}]}
     cached = build_node_inventory(raw)
     cached.append(FakeNode())
-    record = {"node_inventory": cached, "nodes": {}}
+    record = {"node_inventory": cached}
 
     result = ensure_node_inventory(record)
 
@@ -73,25 +74,24 @@ def test_ensure_node_inventory_skips_node_like_entries_with_missing_fields() -> 
 
 def test_ensure_node_inventory_builds_and_caches() -> None:
     raw = {"nodes": [{"type": "acm", "addr": "B"}]}
-    record: dict[str, Any] = {"nodes": raw}
-    result = ensure_node_inventory(record)
+    record: dict[str, Any] = {}
+    result = ensure_node_inventory(record, nodes=raw)
 
     assert [node.addr for node in result] == ["B"]
     assert [node.addr for node in record.get("node_inventory", [])] == ["B"]
 
-    record["nodes"] = object()
     cached = ensure_node_inventory(record)
     assert cached == result
 
 
-def test_ensure_node_inventory_falls_back_to_record_nodes() -> None:
-    arg_nodes = {"nodes": []}
-    record_nodes = {"nodes": [{"type": "acm", "addr": "C"}]}
-    record: dict[str, Any] = {"nodes": record_nodes}
-    result = ensure_node_inventory(record, nodes=arg_nodes)
+def test_ensure_node_inventory_prefers_inventory_container() -> None:
+    raw = {"nodes": [{"type": "acm", "addr": "C"}]}
+    inventory = Inventory("dev", raw, build_node_inventory(raw))
+    record: dict[str, Any] = {"inventory": inventory}
+    result = ensure_node_inventory(record, nodes={"nodes": []})
 
     assert [node.addr for node in result] == ["C"]
-    assert [node.addr for node in record.get("node_inventory", [])] == ["C"]
+    assert record.get("node_inventory") == result
 
 
 def test_ensure_node_inventory_sets_empty_cache_when_missing() -> None:

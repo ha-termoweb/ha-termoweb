@@ -59,6 +59,7 @@ from custom_components.termoweb.inventory import (
     normalize_node_type,
     resolve_record_inventory,
 )
+
 from .ws_client import (
     WSStats,
     _prepare_nodes_dispatch,
@@ -730,7 +731,7 @@ class WebSocketClient(_WSStatusMixin):
         else:
             self._nodes_raw = deepcopy(nodes)
         self._nodes = self._build_nodes_snapshot(self._nodes_raw)
-        self._dispatch_nodes(self._nodes)
+        self._dispatch_nodes(self._nodes_raw)
         if sample_updates:
             self._forward_sample_updates(sample_updates)
         self._mark_event(paths=None, count_event=True)
@@ -881,22 +882,11 @@ class WebSocketClient(_WSStatusMixin):
                         found.add((node_type, addr))
         return sorted(found)
 
-    def _dispatch_nodes(self, payload: dict[str, Any]) -> dict[str, list[str]]:
+    def _dispatch_nodes(self, raw_nodes: dict[str, Any]) -> dict[str, list[str]]:
         """Publish node updates and return the address map by node type."""
 
-        if not isinstance(payload, dict):  # pragma: no cover - defensive
+        if not isinstance(raw_nodes, dict):  # pragma: no cover - defensive
             return {}
-
-        is_snapshot = isinstance(payload.get("nodes_by_type"), dict)
-        raw_nodes: Any
-        snapshot: dict[str, Any]
-
-        if is_snapshot:
-            snapshot = payload
-            raw_nodes = snapshot.get("nodes")
-        else:
-            raw_nodes = payload
-            snapshot = {"nodes": None, "nodes_by_type": {}}
 
         context = _prepare_nodes_dispatch(
             self.hass,
@@ -913,27 +903,19 @@ class WebSocketClient(_WSStatusMixin):
         unknown_types = context.unknown_types
         record = context.record
         snapshot_obj = context.snapshot
-        raw_nodes_payload = context.payload
-        if raw_nodes_payload is None:
-            raw_nodes_payload = inventory.payload if inventory.payload is not None else {}
         if unknown_types:  # pragma: no cover - diagnostic branch
             _LOGGER.debug(
                 "WS: unknown node types in inventory: %s",
                 ", ".join(sorted(unknown_types)),
             )
 
-        if not is_snapshot:  # pragma: no cover - legacy branch
+        if isinstance(record, MutableMapping):
             nodes_by_type = {
                 node_type: {"addrs": list(addrs)}
                 for node_type, addrs in addr_map.items()
             }
-            snapshot["nodes_by_type"] = nodes_by_type
-            if "htr" in nodes_by_type:
-                snapshot.setdefault("htr", nodes_by_type["htr"])
-            snapshot["nodes"] = deepcopy(raw_nodes_payload)
-
-        if isinstance(record, MutableMapping):
-            record["nodes"] = raw_nodes_payload
+            record["nodes_by_type"] = nodes_by_type
+            record.pop("nodes", None)
             if isinstance(inventory, Inventory):
                 record["inventory"] = inventory
 
@@ -943,16 +925,27 @@ class WebSocketClient(_WSStatusMixin):
             snapshot=snapshot_obj,
         )
 
-        payload_copy = {
+        nodes_payload = context.payload
+        if nodes_payload is None and isinstance(inventory, Inventory):
+            nodes_payload = inventory.payload
+
+        payload_copy: dict[str, Any] = {
             "dev_id": self.dev_id,
             "node_type": None,
-            "nodes": deepcopy(snapshot.get("nodes", raw_nodes_payload)),
-            "nodes_by_type": deepcopy(snapshot.get("nodes_by_type", {})),
+            "addr_map": {node_type: list(addrs) for node_type, addrs in addr_map.items()},
+            "node_types": list(context.node_types),
         }
-        payload_copy.setdefault(
-            "addr_map",
-            {node_type: list(addrs) for node_type, addrs in addr_map.items()},
-        )
+        payload_copy["nodes"] = nodes_payload
+        if isinstance(inventory, Inventory):
+            payload_copy["inventory"] = inventory
+        if addr_map:
+            payload_copy.setdefault(
+                "nodes_by_type",
+                {
+                    node_type: {"addrs": list(addrs)}
+                    for node_type, addrs in addr_map.items()
+                },
+            )
         if unknown_types:  # pragma: no cover - diagnostic payload
             payload_copy.setdefault("unknown_types", sorted(unknown_types))
 

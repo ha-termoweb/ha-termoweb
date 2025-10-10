@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import math
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, Callable, Iterator
+import math
+from typing import Any
 
 from homeassistant.util import dt as dt_util
 

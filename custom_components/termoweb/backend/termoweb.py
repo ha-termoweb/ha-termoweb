@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+from ..inventory import Inventory
 from .base import Backend, WsClientProto
 from .ws_client import WebSocketClient
-from ..inventory import Inventory
 
 try:  # pragma: no cover - exercised via backend tests
     from custom_components.termoweb.backend.termoweb_ws import (

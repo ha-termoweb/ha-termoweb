@@ -108,7 +108,7 @@ async def async_get_config_entry_diagnostics(
         redacted = async_redact_data(diagnostics, SENSITIVE_FIELDS)
         if inspect.isawaitable(redacted):
             redacted = await redacted
-    except Exception:  # pragma: no cover - defensive  # noqa: BLE001
+    except Exception:  # pragma: no cover - defensive
         _LOGGER.exception(
             "Failed to redact diagnostics payload for %s", entry.entry_id
         )

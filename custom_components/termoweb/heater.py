@@ -9,7 +9,6 @@ import logging
 from typing import Any, Final, cast
 
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import dispatcher
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -364,9 +363,7 @@ def derive_boost_state(
 
     placeholder_iso = boost_end_iso.strip() if isinstance(boost_end_iso, str) else None
     placeholder_detected = False
-    if boost_end_dt is not None and boost_end_dt.year <= 1971:
-        placeholder_detected = True
-    elif placeholder_iso and placeholder_iso.startswith("1970-"):
+    if (boost_end_dt is not None and boost_end_dt.year <= 1971) or (placeholder_iso and placeholder_iso.startswith("1970-")):
         placeholder_detected = True
 
     if placeholder_detected:
@@ -858,7 +855,15 @@ class HeaterNodeBase(CoordinatorEntity):
         """Return True when the device entry contains node data."""
         if not isinstance(device_entry, dict):
             return False
-        return device_entry.get("nodes") is not None
+        nodes_by_type = device_entry.get("nodes_by_type")
+        if isinstance(nodes_by_type, Mapping):
+            return any(bool(section) for section in nodes_by_type.values())
+        if device_entry.get("nodes") is not None:
+            return True
+        inventory = device_entry.get("inventory")
+        if isinstance(inventory, Inventory):
+            return bool(inventory.nodes)
+        return False
 
     def _device_record(self) -> dict[str, Any] | None:
         """Return the coordinator cache entry for this device."""

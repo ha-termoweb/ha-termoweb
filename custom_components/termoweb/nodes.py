@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, MutableMapping
+from collections.abc import Mapping, MutableMapping
 import logging
 from typing import Any, cast
 
 from .inventory import (
-    HEATER_NODE_TYPES,
+    HEATER_NODE_TYPES as _HEATER_NODE_TYPES,
+    Inventory,
     Node,
-    addresses_by_node_type,
     build_node_inventory,
     normalize_node_addr,
     normalize_node_type,
 )
+
+HEATER_NODE_TYPES = _HEATER_NODE_TYPES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,13 +46,17 @@ def ensure_node_inventory(
                 mutable_record["node_inventory"] = list(cached_nodes)
             return list(cached_nodes)
 
+    inventory_container = record.get("inventory")
+    if isinstance(inventory_container, Inventory):
+        inventory_nodes = list(inventory_container.nodes)
+        if inventory_nodes:
+            if cacheable and mutable_record is not None:
+                mutable_record.setdefault("node_inventory", list(inventory_nodes))
+            return list(inventory_nodes)
+
     payloads: list[Any] = []
     if nodes is not None:
         payloads.append(nodes)
-
-    record_nodes = record.get("nodes")
-    if record_nodes is not None and (not payloads or record_nodes is not payloads[0]):
-        payloads.append(record_nodes)
 
     last_index = len(payloads) - 1
     for index, raw_nodes in enumerate(payloads):

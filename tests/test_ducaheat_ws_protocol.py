@@ -1535,7 +1535,44 @@ async def test_subscribe_feeds_reuses_cached_nodes(
     assert count == 2
     assert {path for _evt, path in emissions} == {"/htr/1/samples", "/htr/1/status"}
     bucket = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
-    assert bucket["nodes"] == client._latest_nodes
+    inventory = bucket.get("inventory")
+    assert isinstance(inventory, Inventory)
+    assert inventory.payload == client._latest_nodes
+
+
+@pytest.mark.asyncio
+async def test_subscribe_feeds_prefers_latest_nodes_when_snapshot_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Latest node payload cache should backfill resolver lookups."""
+
+    client = _make_client(monkeypatch)
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"]["snapshot"] = InstallationSnapshot(
+        dev_id="device",
+        raw_nodes=None,
+    )
+    client._latest_nodes = {"htr": {"status": {"5": {}}}}
+
+    captured: dict[str, Any] = {}
+
+    def _capture(
+        record: Mapping[str, Any],
+        *,
+        dev_id: str | None,
+        nodes_payload: Any | None,
+        **_: Any,
+    ) -> InventoryResolution:
+        captured["record"] = record
+        captured["dev_id"] = dev_id
+        captured["nodes_payload"] = nodes_payload
+        return InventoryResolution(None, "cache", 0, 0)
+
+    monkeypatch.setattr(ducaheat_ws, "resolve_record_inventory", _capture)
+
+    count = await client._subscribe_feeds(None)
+
+    assert count == 0
+    assert captured["nodes_payload"] is client._latest_nodes
 
 
 @pytest.mark.asyncio
@@ -1737,6 +1774,68 @@ async def test_subscribe_feeds_passes_nodes_payload_to_resolver(
     assert isinstance(captured["record"], Mapping)
     assert captured["node_list"] is not None
     assert any(getattr(node, "addr", None) == "7" for node in captured["node_list"])
+
+
+@pytest.mark.asyncio
+async def test_subscribe_feeds_uses_coordinator_inventory_when_resolver_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Resolver returning no inventory should defer to coordinator cache."""
+
+    client = _make_client(monkeypatch)
+    nodes_payload = {"htr": {"samples": {"11": {}}}}
+    coordinator_nodes = build_node_inventory([{"type": "htr", "addr": "11"}])
+    coordinator_inventory = Inventory(
+        client.dev_id,
+        {"nodes": [{"type": "htr", "addr": "11"}]},
+        coordinator_nodes,
+    )
+    client._coordinator._inventory = coordinator_inventory
+
+    def _empty_resolve(*_: Any, **__: Any) -> InventoryResolution:
+        return InventoryResolution(None, "resolver", 0, 0)
+
+    monkeypatch.setattr(ducaheat_ws, "resolve_record_inventory", _empty_resolve)
+
+    emissions: list[str] = []
+
+    async def _capture(event: str, path: str) -> None:
+        emissions.append(path)
+
+    monkeypatch.setattr(client, "_emit_sio", _capture)
+
+    count = await client._subscribe_feeds(nodes_payload)
+
+    assert count == 2
+    assert set(emissions) == {"/htr/11/samples", "/htr/11/status"}
+    assert client._inventory is coordinator_inventory
+
+
+@pytest.mark.asyncio
+async def test_subscribe_feeds_updates_snapshot_with_cached_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Snapshot updates should fall back to cached raw nodes when needed."""
+
+    client = _make_client(monkeypatch)
+    inventory = Inventory(client.dev_id, None, [])
+    client._inventory = inventory
+    snapshot = client.hass.data[ducaheat_ws.DOMAIN]["entry"]["snapshot"]
+    assert isinstance(snapshot, InstallationSnapshot)
+    sentinel_raw = {"nodes": [{"type": "htr", "addr": "21"}]}
+    object.__setattr__(snapshot, "_raw_nodes", sentinel_raw)
+    object.__setattr__(snapshot, "_inventory", None)
+
+    def _noop_resolve(*_: Any, **__: Any) -> InventoryResolution:
+        return InventoryResolution(None, "resolver", 0, 0)
+
+    monkeypatch.setattr(ducaheat_ws, "resolve_record_inventory", _noop_resolve)
+
+    count = await client._subscribe_feeds(None)
+
+    assert count == 0
+    assert snapshot.raw_nodes is sentinel_raw
+    assert object.__getattribute__(snapshot, "_inventory") is inventory
 
 
 @pytest.mark.asyncio
