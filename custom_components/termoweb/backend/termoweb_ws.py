@@ -1927,6 +1927,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 "addr": None,
                 "kind": "nodes",
                 "addr_map": addr_map_payload,
+                "addresses_by_type": addr_map_payload,
             }
             async_dispatcher_send(
                 self.hass,
@@ -1945,6 +1946,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                     "kind": f"{node_type}_settings",
                     "node_type": node_type,
                     "addr_map": addr_map,
+                    "addresses_by_type": addr_map,
                 },
             )
         for node_type, addr in set(sample_addrs):
@@ -1959,6 +1961,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                     "kind": f"{node_type}_samples",
                     "node_type": node_type,
                     "addr_map": addr_map,
+                    "addresses_by_type": addr_map,
                 },
             )
         self._log_legacy_update(
