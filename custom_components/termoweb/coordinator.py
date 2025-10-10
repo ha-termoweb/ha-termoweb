@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 import logging
 import time
 from time import monotonic as time_mod
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from aiohttp import ClientError
 from homeassistant.core import HomeAssistant
@@ -21,7 +21,6 @@ from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
 from .inventory import (
     HEATER_NODE_TYPES,
     Inventory,
-    Node,
     _existing_nodes_map,
     build_node_inventory,
     normalize_node_addr,
@@ -168,7 +167,7 @@ class StateCoordinator(
         dev_id: str,
         device: dict[str, Any],
         nodes: Mapping[str, Any] | None,
-        inventory: Inventory | Iterable[Node] | None = None,
+        inventory: Inventory | None = None,
     ) -> None:
         """Initialize the TermoWeb device coordinator."""
         super().__init__(
@@ -186,6 +185,7 @@ class StateCoordinator(
         self._inventory: Inventory | None = None
         self._pending_settings: dict[tuple[str, str], PendingSetting] = {}
         self._invalid_nodes_logged = False
+        self._invalid_inventory_logged = False
         self._rtc_reference: datetime | None = None
         self._rtc_reference_monotonic: float | None = None
         self.update_nodes(nodes, inventory=inventory)
@@ -193,7 +193,7 @@ class StateCoordinator(
     def _inventory_addresses_by_type(self) -> dict[str, list[str]]:
         """Return normalized node addresses derived from inventory metadata."""
 
-        inventory = self._inventory
+        inventory = self._ensure_inventory()
         if inventory is None:
             return {}
 
@@ -677,55 +677,88 @@ class StateCoordinator(
     def update_nodes(
         self,
         nodes: Mapping[str, Any] | None,
-        inventory: Inventory | Iterable[Node] | None = None,
+        inventory: Inventory | None = None,
     ) -> None:
         """Update cached node payload and inventory."""
 
-        payload_mapping: Mapping[str, Any] | None = None
-        container: Inventory | None = None
-
+        valid_inventory: Inventory | None
         if isinstance(inventory, Inventory):
-            container = inventory
-            payload_source = inventory.payload
+            valid_inventory = inventory
+        elif (
+            inventory is not None
+            and hasattr(inventory, "payload")
+            and hasattr(inventory, "nodes")
+            and hasattr(inventory, "heater_address_map")
+        ):
+            valid_inventory = cast(Inventory, inventory)
+        elif inventory is None:
+            valid_inventory = None
+        else:
+            if not self._invalid_inventory_logged:
+                _LOGGER.debug(
+                    "Ignoring unexpected inventory container (type=%s): %s",
+                    type(inventory).__name__,
+                    inventory,
+                )
+                self._invalid_inventory_logged = True
+            valid_inventory = None
+
+        payload_mapping: Mapping[str, Any] | None = None
+        if isinstance(nodes, Mapping):
+            payload_mapping = nodes
+        elif valid_inventory is not None:
+            payload_source = valid_inventory.payload
             if isinstance(payload_source, Mapping):
                 payload_mapping = payload_source
-        elif isinstance(nodes, Mapping):
-            payload_mapping = nodes
-            node_list: list[Node] | None = None
-            if inventory is not None:
-                try:
-                    node_list = list(inventory)
-                except TypeError:
-                    node_list = None
-            if node_list is None:
-                try:
-                    node_list = list(build_node_inventory(nodes))
-                except ValueError as err:  # pragma: no cover - defensive
-                    _LOGGER.debug(
-                        "Failed to build node inventory: %s",
-                        err,
-                        exc_info=err,
-                    )
-                    node_list = None
-            if node_list is not None:
-                container = Inventory(self._dev_id, nodes, node_list)
-        else:
-            payload_mapping = None
 
-        if isinstance(payload_mapping, Mapping):
+        if payload_mapping is not None:
             self._nodes = dict(payload_mapping)
             self._invalid_nodes_logged = False
         else:
-            if not self._invalid_nodes_logged:
-                _LOGGER.debug(
-                    "Ignoring unexpected nodes payload (type=%s): %s",
-                    type(nodes).__name__ if nodes is not None else "NoneType",
-                    nodes,
-                )
-                self._invalid_nodes_logged = True
+            if nodes is not None and not isinstance(nodes, Mapping):
+                if not self._invalid_nodes_logged:
+                    _LOGGER.debug(
+                        "Ignoring unexpected nodes payload (type=%s): %s",
+                        type(nodes).__name__,
+                        nodes,
+                    )
+                    self._invalid_nodes_logged = True
+            else:
+                self._invalid_nodes_logged = False
             self._nodes = {}
 
-        self._inventory = container
+        if valid_inventory is not None:
+            self._inventory = valid_inventory
+            self._invalid_inventory_logged = False
+        else:
+            if inventory is None:
+                self._invalid_inventory_logged = False
+            self._inventory = None
+
+    def _ensure_inventory(self) -> Inventory | None:
+        """Ensure cached inventory metadata is available."""
+
+        inventory = self._inventory
+        if inventory is not None:
+            return inventory
+
+        if not isinstance(self._nodes, Mapping) or not self._nodes:
+            return None
+
+        try:
+            node_list = list(build_node_inventory(self._nodes))
+        except ValueError as err:  # pragma: no cover - defensive
+            _LOGGER.debug(
+                "Failed to build node inventory: %s",
+                err,
+                exc_info=err,
+            )
+            return None
+
+        inventory = Inventory(self._dev_id, self._nodes, node_list)
+        self._inventory = inventory
+        self._invalid_inventory_logged = False
+        return inventory
 
     async def async_refresh_heater(self, node: str | tuple[str, str]) -> None:
         """Refresh settings for a specific node and push the update to listeners."""
@@ -761,10 +794,7 @@ class StateCoordinator(
                 )
                 return
 
-            inventory = self._inventory
-            if inventory is None and isinstance(self._nodes, Mapping) and self._nodes:
-                self.update_nodes(self._nodes)
-                inventory = self._inventory
+            inventory = self._ensure_inventory()
 
             if inventory is None:
                 _LOGGER.error(
@@ -897,10 +927,7 @@ class StateCoordinator(
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Fetch the latest settings for every known node on each poll."""
         dev_id = self._dev_id
-        inventory = self._inventory
-        if inventory is None and isinstance(self._nodes, Mapping) and self._nodes:
-            self.update_nodes(self._nodes)
-            inventory = self._inventory
+        inventory = self._ensure_inventory()
 
         if inventory is None:
             _LOGGER.debug("Skipping poll because inventory metadata is unavailable")

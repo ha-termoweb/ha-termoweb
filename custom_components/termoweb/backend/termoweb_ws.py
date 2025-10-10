@@ -1042,8 +1042,12 @@ class WebSocketClient(_WSStatusMixin):
                 self._inventory if isinstance(self._inventory, Inventory) else None
             )
         else:
-            raw_nodes = snapshot_obj.raw_nodes if snapshot_obj else {}
-            inventory_container = Inventory(self.dev_id, raw_nodes, inventory)
+            _LOGGER.debug(
+                "WS: ignoring unexpected inventory container (type=%s): %s",
+                type(inventory).__name__,
+                inventory,
+            )
+            inventory_container = None
 
         if isinstance(inventory_container, Inventory):
             if isinstance(record, MutableMapping):

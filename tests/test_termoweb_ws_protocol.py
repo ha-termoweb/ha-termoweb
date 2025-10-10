@@ -1231,14 +1231,42 @@ def test_apply_heater_addresses_filters_non_heaters(monkeypatch: pytest.MonkeyPa
     record = client.hass.data[module.DOMAIN]["entry"]
     record["snapshot"] = InstallationSnapshot(dev_id="device", raw_nodes={})
 
+    nodes_payload = {"nodes": [{"type": "htr", "addr": "6"}]}
+    inventory_container = Inventory(
+        "device",
+        nodes_payload,
+        build_node_inventory(nodes_payload),
+    )
+
     normalized = client._apply_heater_addresses(
         {"foo": ["5"], "htr": ["6"]},
-        inventory=[SimpleNamespace(type="htr", addr="6")],
+        inventory=inventory_container,
         snapshot=record["snapshot"],
     )
 
     assert "foo" not in normalized
     assert normalized["htr"] == ["6"]
+
+
+def test_apply_heater_addresses_logs_invalid_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Unexpected inventory inputs should be ignored with a debug message."""
+
+    client, _sio, _ = _make_client(monkeypatch)
+    record = client.hass.data[module.DOMAIN]["entry"]
+    record["snapshot"] = InstallationSnapshot(dev_id="device", raw_nodes={})
+
+    with caplog.at_level("DEBUG"):
+        normalized = client._apply_heater_addresses(
+            {"htr": ["4"]},
+            inventory=[SimpleNamespace(type="htr", addr="4")],
+            snapshot=record["snapshot"],
+        )
+
+    assert normalized == {"htr": ["4"]}
+    assert "ignoring unexpected inventory container" in caplog.text
 
 
 def test_apply_heater_addresses_normalizes_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1258,9 +1286,16 @@ def test_apply_heater_addresses_normalizes_inputs(monkeypatch: pytest.MonkeyPatc
         }
     }
 
+    nodes_payload = {"nodes": [{"type": "acm", "addr": "2"}]}
+    inventory_container = Inventory(
+        "device",
+        nodes_payload,
+        build_node_inventory(nodes_payload),
+    )
+
     normalized = client._apply_heater_addresses(
         {"": ["  "], "htr": " 1 ", "acm": ["2", "2", ""]},
-        inventory=[SimpleNamespace(type="acm", addr="2")],
+        inventory=inventory_container,
     )
 
     assert normalized == {"htr": ["1"], "acm": ["2"]}
