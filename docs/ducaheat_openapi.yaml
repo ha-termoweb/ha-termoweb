@@ -4,12 +4,14 @@ info:
   version: "0.1.0"
   description: |
     Unofficial OpenAPI description for the Ducaheat (Ducasa) mobile app backend.
-    This reflects endpoints discovered in the v1.40.1 APK decompile and
-    verified patterns that differ from the consolidated TermoWeb API.
+    This document captures observed backend behaviour from traffic captures
+    (app v1.40.1) and focuses on the enforced selection gate and dedicated
+    Boost endpoint. The contract diverges from the consolidated TermoWeb API.
 
-    Key differences vs TermoWeb:
-      - No consolidated `/settings` resource for heaters.
-      - Writes are segmented: `/status`, `/mode`, `/prog`, `/prog_temps`, `/setup`, `/lock`, `/select`.
+    Observed notes:
+      - Selection via `/select` is required before any state-changing write.
+      - Boost sessions run 60–600 minutes and are controlled via `/boost`.
+      - Temperature payloads are strings with exactly one decimal and uppercase units.
       - Socket path differs: `/socket.io?token=...&dev_id=...`.
 
     Base host: https://api-tevolve.termoweb.net
@@ -226,7 +228,7 @@ components:
           additionalProperties: false
     HeaterStatusWrite:
       type: object
-      description: Write status for a heater or accumulator
+      description: Write status for a heater or accumulator (mode/setpoint/units only)
       properties:
         mode:
           type: string
@@ -240,9 +242,6 @@ components:
           type: string
           enum: [C, F]
           example: C
-        boost:
-          type: boolean
-          description: Start/stop an immediate Boost (runback) session (accumulators only)
       additionalProperties: false
     HeaterModeWrite:
       type: object
@@ -290,13 +289,37 @@ components:
           type: boolean
           description: Enable/disable local controls (child lock)
       additionalProperties: false
-    HeaterSelectWrite:
+    SelectWrite:
       type: object
       properties:
         select:
           type: boolean
-          description: Select this node for subsequent operations
+          description: Set true to claim selection; set false to release.
+      required: [select]
       additionalProperties: false
+
+    HeaterBoostWrite:
+      type: object
+      properties:
+        boost:
+          type: boolean
+          description: Start/stop Boost
+        boost_time:
+          type: integer
+          minimum: 60
+          maximum: 600
+          description: Minutes (1–10 h). Required when boost is true.
+        stemp:
+          type: string
+          pattern: '^[0-9]+\.[0-9]$'
+          description: Setpoint string with one decimal. Required when boost is true.
+        units:
+          type: string
+          enum: [C, F]
+          description: Units (uppercase). Required when boost is true.
+      required: [boost]
+      additionalProperties: false
+
     PowerMonitorNode:
       type: object
       description: Power monitor node state returned by GET /devs/{dev_id}/pmo/{addr}
@@ -374,7 +397,7 @@ components:
       additionalProperties: true
     EmptyResponse:
       type: object
-      description: Empty JSON object on success
+      description: Empty JSON object '{}'
 paths:
   /client/token:
     post:
@@ -407,7 +430,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TokenResponse'
-  /api/v2/devs/{dev_id}/{node_type}/{addr}:
+  /api/v2/devs/{dev_id}/{type}/{addr}:
     get:
       tags: [ThermalNodes]
       summary: Read heater or accumulator node (consolidated state)
@@ -416,7 +439,7 @@ paths:
           in: path
           required: true
           schema: { type: string }
-        - name: node_type
+        - name: type
           in: path
           required: true
           schema:
@@ -433,22 +456,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ThermalNode'
-  /api/v2/devs/{dev_id}/{node_type}/{addr}/status:
+  /api/v2/devs/{dev_id}/{type}/{addr}/status:
     post:
       tags: [ThermalNodes]
-      summary: Set mode/setpoint/units; accumulators may also trigger Boost
+      summary: Set mode/setpoint/units after selection
+      description: |
+        Updates live status fields (mode, setpoint, units). Acquire selection via
+        `POST /api/v2/devs/{dev_id}/{type}/{addr}/select` before calling this endpoint.
       parameters:
         - name: dev_id
           in: path
           required: true
           schema: { type: string }
-        - name: node_type
+        - name: type
           in: path
           required: true
           schema:
             type: string
             enum: [htr, acm]
-            description: Use `acm` when sending boost-related writes
+            description: Node type (`htr` heater, `acm` accumulator).
         - name: addr
           in: path
           required: true
@@ -465,10 +491,6 @@ paths:
                   mode: manual
                   stemp: "22.0"
                   units: C
-              boost_now:
-                value:
-                  boost: true
-                summary: Valid only when node_type is acm
       responses:
         "201":
           description: Accepted
@@ -476,7 +498,58 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
-  /api/v2/devs/{dev_id}/{node_type}/{addr}/mode:
+
+  /api/v2/devs/{dev_id}/{type}/{addr}/boost:
+    post:
+      tags: [ThermalNodes]
+      summary: Start or stop Boost with runtime and setpoint
+      description: Requires prior successful selection (`select: true`).
+      parameters:
+        - name: dev_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: type
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Node type (Boost confirmed for `acm`).
+        - name: addr
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeaterBoostWrite'
+            examples:
+              start_1h_75:
+                value:
+                  boost: true
+                  boost_time: 60
+                  stemp: '7.5'
+                  units: C
+              start_10h_80:
+                value:
+                  boost: true
+                  boost_time: 600
+                  stemp: '8.0'
+                  units: C
+              stop:
+                value:
+                  boost: false
+      responses:
+        "201":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+
+  /api/v2/devs/{dev_id}/{type}/{addr}/mode:
     post:
       tags: [ThermalNodes]
       summary: Set mode only
@@ -485,7 +558,7 @@ paths:
           in: path
           required: true
           schema: { type: string }
-        - name: node_type
+        - name: type
           in: path
           required: true
           schema:
@@ -508,7 +581,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
-  /api/v2/devs/{dev_id}/{node_type}/{addr}/prog:
+  /api/v2/devs/{dev_id}/{type}/{addr}/prog:
     post:
       tags: [ThermalNodes]
       summary: Set weekly program
@@ -520,7 +593,7 @@ paths:
           in: path
           required: true
           schema: { type: string }
-        - name: node_type
+        - name: type
           in: path
           required: true
           schema:
@@ -543,7 +616,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
-  /api/v2/devs/{dev_id}/{node_type}/{addr}/prog_temps:
+  /api/v2/devs/{dev_id}/{type}/{addr}/prog_temps:
     post:
       tags: [ThermalNodes]
       summary: Set program temperatures (comfort/eco/antifrost)
@@ -552,7 +625,7 @@ paths:
           in: path
           required: true
           schema: { type: string }
-        - name: node_type
+        - name: type
           in: path
           required: true
           schema:
@@ -579,7 +652,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
-  /api/v2/devs/{dev_id}/{node_type}/{addr}/setup:
+  /api/v2/devs/{dev_id}/{type}/{addr}/setup:
     post:
       tags: [ThermalNodes]
       summary: Set advanced/extra options (incl. default Boost time/temp)
@@ -588,7 +661,7 @@ paths:
           in: path
           required: true
           schema: { type: string }
-        - name: node_type
+        - name: type
           in: path
           required: true
           schema:
@@ -615,7 +688,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
-  /api/v2/devs/{dev_id}/{node_type}/{addr}/lock:
+  /api/v2/devs/{dev_id}/{type}/{addr}/lock:
     post:
       tags: [ThermalNodes]
       summary: Toggle child lock / local control lock
@@ -624,7 +697,7 @@ paths:
           in: path
           required: true
           schema: { type: string }
-        - name: node_type
+        - name: type
           in: path
           required: true
           schema:
@@ -652,22 +725,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
-  /api/v2/devs/{dev_id}/{node_type}/{addr}/select:
+  /api/v2/devs/{dev_id}/{type}/{addr}/select:
     post:
       tags: [ThermalNodes]
-      summary: Select/deselect this node for subsequent writes
-      description: Some operations may require the node to be selected by the current user.
+      summary: Select/deselect a node (REQUIRED before writes)
       parameters:
         - name: dev_id
           in: path
           required: true
           schema: { type: string }
-        - name: node_type
+        - name: type
           in: path
           required: true
-          schema:
-            type: string
-            enum: [htr, acm]
+          schema: { type: string }
         - name: addr
           in: path
           required: true
@@ -677,11 +747,11 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/HeaterSelectWrite'
+              $ref: '#/components/schemas/SelectWrite'
             examples:
-              select:
+              claim:
                 value: { select: true }
-              deselect:
+              release:
                 value: { select: false }
       responses:
         "201":
@@ -690,7 +760,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
-  /api/v2/devs/{dev_id}/{node_type}/{addr}/samples:
+
+  /api/v2/devs/{dev_id}/{type}/{addr}/samples:
     get:
       tags: [Samples]
       summary: Read samples (telemetry/history)
@@ -699,7 +770,7 @@ paths:
           in: path
           required: true
           schema: { type: string }
-        - name: node_type
+        - name: type
           in: path
           required: true
           schema:
@@ -753,3 +824,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PowerMonitorNode'
+x-socketio-schemas:
+  WSStatusUpdate:
+    type: object
+    properties:
+      path:
+        type: string
+        example: "/{type}/{addr}/status"
+      body:
+        type: object
+        properties:
+          boost:
+            type: boolean
+          boost_end_day:
+            type: integer
+            minimum: 0
+            maximum: 6
+          boost_end_min:
+            type: integer
+            minimum: 0
+            maximum: 1439
+          stemp:
+            type: string
+            pattern: '^[0-9]+\.[0-9]$'
+          units:
+            type: string
+            enum: [C, F]
+

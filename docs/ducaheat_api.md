@@ -47,7 +47,7 @@ by node type and match the REST resources for that node.
 
 ## Heater and accumulator node model (read)
 
-**GET** `/api/v2/devs/{dev_id}/{node_type}/{addr}`
+**GET** `/api/v2/devs/{dev_id}/{type}/{addr}`
 
 Applies to heater (`htr`) and accumulator (`acm`) nodes. The response is a consolidated object with nested sections such as
 `status`, `setup`, `prog`, `prog_temps`, and `version`. Keys are model‑dependent; the app treats unknown keys leniently.
@@ -79,23 +79,74 @@ Unlike TermoWeb’s consolidated `/settings` endpoint, Ducaheat exposes discrete
 
 | Endpoint | Purpose | Example body | Value types / notes |
 | --- | --- | --- | --- |
-| `POST /api/v2/devs/{dev_id}/{node_type}/{addr}/status` | Change operating mode, setpoint, boost flag, and display units. | `{ "mode": "manual", "stemp": "22.0", "units": "C" }`<br>`{ "boost": true }` | Temperatures must be strings with one decimal place (`"22.0"`). Units are uppercase (`"C"` / `"F"`). Boolean toggles (for example `select`, `lock`) are literal booleans. Boost writes are valid only when `node_type` is `"acm"`. Returns `201 {}`. |
-| `POST /api/v2/devs/{dev_id}/{node_type}/{addr}/mode` | Explicitly set the operating mode when no setpoint change is required. | `{ "mode": "manual" }` | Use when the app issues a mode-only write. |
-| `POST /api/v2/devs/{dev_id}/{node_type}/{addr}/prog` | Persist the weekly program definition. | *(mirrors GET payload)* | Send the `prog` object echoed by the read call; structure varies by model. |
-| `POST /api/v2/devs/{dev_id}/{node_type}/{addr}/prog_temps` | Update named preset temperatures. | `{ "comfort": "21.0", "eco": "18.0", "antifrost": "7.0" }` | All temperature values are one-decimal strings in uppercase units context. |
-| `POST /api/v2/devs/{dev_id}/{node_type}/{addr}/setup` | Write advanced configuration and feature toggles. | `{ "extra_options": { "boost_time": 60, "boost_temp": "22.0" } }` | Nested objects follow the GET schema; keep temperature values as strings with uppercase units. |
-| `POST /api/v2/devs/{dev_id}/{node_type}/{addr}/lock` | Toggle the child lock. | `{ "lock": true }` | Boolean literal. |
-| `POST /api/v2/devs/{dev_id}/{node_type}/{addr}/select` | Claim ownership prior to issuing writes. | `{ "select": true }` | Some writes require `select: true`; release with `select: false` afterwards. |
+| `POST /api/v2/devs/{dev_id}/{type}/{addr}/status` | Change operating mode, setpoint, and display units. | `{ "mode": "manual", "stemp": "22.0", "units": "C" }` | Temperatures must be strings with one decimal place (`"22.0"`). Units are uppercase (`"C"` / `"F"`). Selection must be active before sending writes. Returns `201 {}`. |
+| `POST /api/v2/devs/{dev_id}/{type}/{addr}/mode` | Explicitly set the operating mode when no setpoint change is required. | `{ "mode": "manual" }` | Use when the app issues a mode-only write. |
+| `POST /api/v2/devs/{dev_id}/{type}/{addr}/prog` | Persist the weekly program definition. | *(mirrors GET payload)* | Send the `prog` object echoed by the read call; structure varies by model. |
+| `POST /api/v2/devs/{dev_id}/{type}/{addr}/prog_temps` | Update named preset temperatures. | `{ "comfort": "21.0", "eco": "18.0", "antifrost": "7.0" }` | All temperature values are one-decimal strings in uppercase units context. |
+| `POST /api/v2/devs/{dev_id}/{type}/{addr}/setup` | Write advanced configuration and feature toggles. | `{ "extra_options": { "boost_time": 60, "boost_temp": "22.0" } }` | Nested objects follow the GET schema; keep temperature values as strings with uppercase units. Use this endpoint to manage defaults, not to toggle Boost. |
+| `POST /api/v2/devs/{dev_id}/{type}/{addr}/lock` | Toggle the child lock. | `{ "lock": true }` | Boolean literal. |
+| `POST /api/v2/devs/{dev_id}/{type}/{addr}/select` | Claim ownership prior to issuing writes. | `{ "select": true }` | Selection is mandatory before any state-changing write; release with `{ "select": false }` afterwards. |
+| `POST /api/v2/devs/{dev_id}/{type}/{addr}/boost` | Start or stop Boost after a successful selection claim. | `{ "boost": true, "boost_time": 60, "stemp": "7.5", "units": "C" }`<br>`{ "boost": false }` | `boost_time` is minutes 60–600 (1–10 h). `stemp` must match `^[0-9]+\.[0-9]$`. `units` is uppercase `"C"`/`"F"`. |
 
 > **Temperature formatting:** Every captured request encodes degrees as strings with exactly one decimal place while keeping
 > the `units` field uppercase (`"C"`/`"F"`). Back-end writes fail when the decimal precision or unit casing diverges from the
 > mobile app.
 
+### Selection (required gate for writes)
+
+- **Endpoint:** `POST /api/v2/devs/{dev_id}/{type}/{addr}/select`
+- **Claim:** `{ "select": true }` → `201 {}`
+- **Release:** `{ "select": false }` → `201 {}`
+- Acquire the claim immediately before any state-changing write, retry safely if the response is lost, and always release even when the subsequent call fails.
+
+### Boost control endpoint
+
+- **Endpoint:** `POST /api/v2/devs/{dev_id}/{type}/{addr}/boost` (confirmed for accumulator type `acm`; other `{type}` segments follow the same pattern).
+- **Start example:**
+  ```json
+  { "boost": true, "boost_time": 60, "stemp": "7.5", "units": "C" }
+  ```
+- **Stop example:**
+  ```json
+  { "boost": false }
+  ```
+- `boost_time` is supplied in minutes and must be between **60** and **600** (1–10 hours).
+- `stemp` is a string that matches `^[0-9]+\.[0-9]$`.
+- `units` must be uppercase (`"C"` or `"F"`).
+- The server rejects boost writes sent without an active selection claim.
+
+### Validation invariants
+
+- Reject payloads where `stemp` is missing, numeric, or includes more than one decimal place.
+- Guard against lowercase `units`; only uppercase `C` or `F` are accepted.
+- Enforce the `boost_time` range (60–600).
+
+### WebSocket updates
+
+Boost changes trigger a Socket.IO `update` for `/{type}/{addr}/status` followed by a `dev_data` snapshot. The update body mirrors REST fields:
+
+```json
+{
+  "path": "/{type}/{addr}/status",
+  "body": {
+    "boost": true,
+    "boost_end_day": 0,
+    "boost_end_min": 945,
+    "stemp": "7.5",
+    "units": "C"
+  }
+}
+```
+
+### Defaults vs live values
+
+Use `/setup` to read or update defaults (for example `extra_options.boost_time` and `extra_options.boost_temp`). These defaults seed UI controls but do **not** toggle Boost; the live state always flows through `/boost` and WebSocket updates.
+
 ---
 
 ## Samples (history / telemetry)
 
-**GET** `/api/v2/devs/{dev_id}/{node_type}/{addr}/samples?start=<ms>&end=<ms>`
+**GET** `/api/v2/devs/{dev_id}/{type}/{addr}/samples?start=<ms>&end=<ms>`
 
 `start` and `end` are **epoch milliseconds**. The response shape varies by device and firmware; treat as opaque JSON until stabilized by capture.
 
@@ -114,16 +165,6 @@ connectivity drops.
 
 ---
 
-## Boost / Runback behavior
-
-- Timed override (accumulators only) that runs at a boost setpoint for a fixed duration, then reverts.
-- Activation paths:
-  - Immediate: `POST …/status { "boost": true }`
-  - Defaults: set via `POST …/setup { "extra_options": { "boost_time": 60, "boost_temp": "22.0" } }`
-- Related read keys often present under `setup.extra_options` and/or `status`:
-  - `boost_time`, `boost_temp`, and `boost_active`.
-
----
 
 ## WebSocket (Socket.IO)
 

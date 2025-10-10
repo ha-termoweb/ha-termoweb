@@ -19,34 +19,68 @@ Key observations from traffic captures:
 - **Temperature payloads must be strings** formatted with exactly one decimal place (e.g. `"22.0"`).
   Sending floats or integers causes the backend to reject the request.
 - The `units` field is **always uppercase** (`"C"` or `"F"`); lowercase variants fail validation.
-- Some operations require a `select: true` POST before the substantive write and `select: false`
-  afterwards. Keep the claim short-lived to avoid stepping on app sessions.
+- Selection is a mandatory gate for **every** state-changing write. Claim the node with
+  `select: true`, perform the desired operation, and release with `select: false` as soon as the
+  write completes.
 - Boost (accumulators only), lock, and similar toggles are literal booleans; do not send quoted values.
 
 These semantics apply to both heater (`htr`) and accumulator (`acm`) nodes within the Ducaheat API.
 
-### Boost presets, helper services, and duration rules
+### Selection (required gate for writes)
 
-Accumulator boost defaults are stored under the `/setup` namespace as `extra_options.boost_time`
-and `extra_options.boost_temp`. The integration keeps an in-memory cache of these values so
-entity services can honour user-defined presets even when the REST payload omits a duration. When
-`termoweb.start_boost` is invoked without an explicit runtime the coordinator falls back to the
-cached preset, which in turn synchronises with the `select.termoweb_…_boost_duration` entity.
+- **Endpoint:** `POST /api/v2/devs/{dev_id}/{type}/{addr}/select`
+- **Claim:** `{ "select": true }` → `201 {}`
+- **Release:** `{ "select": false }` → `201 {}`
+- Acquire the claim immediately before issuing a write, keep the hold short-lived, and always
+  release it even when the subsequent call fails. The backend tolerates idempotent reclaims and
+  releases, so retry logic can safely resend the same payload.
 
-Three Home Assistant services wrap the Ducaheat boost workflow:
+### Boost (start/stop)
 
-- `termoweb.configure_boost_preset` updates the default runtime and/or boost setpoint via
-  `/setup`. This service validates the payload and refuses to write unless at least one field is
-  present.
-- `termoweb.start_boost` issues a `/status` write with `boost: true` (and an optional
-  `boost_time`) and immediately applies optimistic state updates so Lovelace feedback remains
-  responsive while the REST call is in flight.
-- `termoweb.cancel_boost` performs the inverse `/status` write (`boost: false`) and clears cached
-  runtime metadata.
+- **Endpoint:** `POST /api/v2/devs/{dev_id}/{type}/{addr}/boost`
+- **Start example:**
+  ```json
+  { "boost": true, "boost_time": 60, "stemp": "7.5", "units": "C" }
+  ```
+- **Stop example:**
+  ```json
+  { "boost": false }
+  ```
+- `boost_time` is measured in minutes and must fall within **60–600** (1–10 hours).
+- `stemp` is a string with exactly one decimal place that satisfies the regex `^[0-9]+\.[0-9]$`.
+- `units` must be uppercase (`"C"` or `"F"`).
+- Selection is required prior to sending the boost payload; release selection once the REST call
+  returns.
 
-Ducaheat limits boost sessions to **1–120 minutes**. Validation is enforced centrally:
+### WebSocket notifications
 
-- The public services reject values outside this range and log `ERROR` messages for developer
-  diagnostics.
-- Button helpers and select entities derive their choices from the same validation logic so UI
-  affordances never generate invalid durations.
+- **Namespace:** `/api/v2/socket_io` (Socket.IO v2 over Engine.IO v3)
+- **Representative update:**
+  ```json
+  {
+    "path": "/{type}/{addr}/status",
+    "body": {
+      "boost": true,
+      "boost_end_day": 0,
+      "boost_end_min": 945,
+      "stemp": "7.5",
+      "units": "C"
+    }
+  }
+  ```
+- A `dev_data` snapshot with the same state often follows shortly after the incremental update.
+
+### Canonical sequence
+
+1. `select: true` → `201 {}`
+2. `POST /boost` (start or stop) → `201 {}`
+3. WebSocket `update` on `/{type}/{addr}/status`
+4. `select: false` → `201 {}`
+
+### QA checklist
+
+- Start Boost for each duration 1–10 hours (60–600 minutes) and confirm the WebSocket update includes
+  `boost_end_day` and `boost_end_min`.
+- Stop Boost and confirm both the `boost` flag and end fields flip to the expected values.
+- Validate client-side guards reject invalid `stemp` values (`"7"`, `7.5`, `"7.53"`) and lowercase
+  `units`.
