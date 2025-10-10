@@ -36,8 +36,12 @@ from ..const import (
     signal_ws_status,
 )
 from ..installation import InstallationSnapshot, ensure_snapshot
-from ..inventory import Inventory, NODE_CLASS_BY_TYPE, addresses_by_node_type
-from ..nodes import ensure_node_inventory
+from ..inventory import (
+    Inventory,
+    NODE_CLASS_BY_TYPE,
+    addresses_by_node_type,
+    resolve_record_inventory,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .ducaheat_ws import DucaheatWSClient
@@ -260,18 +264,26 @@ def _prepare_nodes_dispatch(
     else:
         source_mapping = {}
 
+    inventory_container: Inventory | None = None
     if isinstance(inventory, Inventory):
         inventory_container = inventory
     else:
-        inventory_nodes = ensure_node_inventory(source_mapping, nodes=raw_nodes)
-        inventory_container = Inventory(dev_id, raw_nodes, inventory_nodes)
+        resolution = resolve_record_inventory(
+            record_mapping,
+            dev_id=dev_id or None,
+            nodes_payload=raw_nodes,
+        )
+        if resolution.inventory is not None:
+            inventory_container = resolution.inventory
+
+    if inventory_container is None:
+        payload_for_inventory = raw_nodes if raw_nodes is not None else {}
+        inventory_container = Inventory(dev_id, payload_for_inventory, [])
+        if isinstance(record_mapping, MutableMapping):
+            record_mapping.setdefault("inventory", inventory_container)
 
     if isinstance(snapshot_obj, InstallationSnapshot):
         snapshot_obj.update_nodes(raw_nodes, inventory=inventory_container)
-        if record_mapping is not None:
-            record_mapping["node_inventory"] = list(snapshot_obj.inventory)
-    elif record_mapping is not None:
-        record_mapping["node_inventory"] = list(inventory_container.nodes)
 
     addr_map_raw, unknown_types = addresses_by_node_type(
         inventory_container.nodes, known_types=NODE_CLASS_BY_TYPE
