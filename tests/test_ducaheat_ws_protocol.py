@@ -7,7 +7,7 @@ import copy
 import logging
 import json
 from types import MappingProxyType, SimpleNamespace
-from typing import Any, AsyncIterator, Mapping
+from typing import Any, AsyncIterator, Iterable, Mapping, MutableMapping
 from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
@@ -15,7 +15,11 @@ import pytest
 
 from custom_components.termoweb.backend import ducaheat_ws
 from custom_components.termoweb.installation import InstallationSnapshot
-from custom_components.termoweb.inventory import Inventory, build_node_inventory
+from custom_components.termoweb.inventory import (
+    Inventory,
+    InventoryResolution,
+    build_node_inventory,
+)
 from homeassistant.core import HomeAssistant
 
 
@@ -139,7 +143,9 @@ def _make_client(monkeypatch: pytest.MonkeyPatch) -> ducaheat_ws.DucaheatWSClien
 
 
 @pytest.mark.asyncio
-async def test_connect_once_performs_full_handshake(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_connect_once_performs_full_handshake(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Exhaust the polling and websocket upgrade handshake."""
 
     statuses: list[str] = []
@@ -160,7 +166,9 @@ async def test_connect_once_performs_full_handshake(monkeypatch: pytest.MonkeyPa
     assert statuses[-1] == "connected"
     assert client._pending_dev_data is True
     assert all("dev_data" not in frame for frame in client._ws.sent)
-    assert client._ws.sent.count("3") == 0  # handshake should not issue pong during setup
+    assert (
+        client._ws.sent.count("3") == 0
+    )  # handshake should not issue pong during setup
     await client._disconnect("test")
 
 
@@ -217,12 +225,16 @@ def test_update_status_records_health(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_emit_sio_logs_subscribe(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+async def test_emit_sio_logs_subscribe(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """Debug logging should include subscription path summaries."""
 
     client = _make_client(monkeypatch)
     client._ws = StubWebSocket()
-    caplog.set_level(logging.DEBUG, logger="custom_components.termoweb.backend.ducaheat_ws")
+    caplog.set_level(
+        logging.DEBUG, logger="custom_components.termoweb.backend.ducaheat_ws"
+    )
 
     await client._emit_sio("subscribe", "/htr/1/status")
     await client._emit_sio("message", "pong")
@@ -235,7 +247,10 @@ async def test_emit_sio_logs_subscribe(monkeypatch: pytest.MonkeyPatch, caplog: 
         "-> 42 subscribe" in record.message and "path=/htr/1/status" in record.message
         for record in caplog.records
     )
-    assert any("-> 42 message" in record.message and "args=('pong',)" in record.message for record in caplog.records)
+    assert any(
+        "-> 42 message" in record.message and "args=('pong',)" in record.message
+        for record in caplog.records
+    )
 
 
 def test_rand_t_token_format() -> None:
@@ -248,23 +263,27 @@ def test_rand_t_token_format() -> None:
     assert token[1:].isalnum()
 
 
-def test_decode_polling_packets_additional_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_decode_polling_packets_additional_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Exercise defensive Engine.IO polling decoder branches."""
 
     # Short buffers should trigger the early break condition.
     assert ducaheat_ws._decode_polling_packets(b"\x00\x00\x00") == []
 
     # Invalid digit bytes should abort parsing without raising.
-    assert ducaheat_ws._decode_polling_packets(b"\x00\x0A") == []
+    assert ducaheat_ws._decode_polling_packets(b"\x00\x0a") == []
 
     # Missing digit markers should also result in an empty decode.
-    assert ducaheat_ws._decode_polling_packets(b"\x00\xFF\x00\x00") == []
+    assert ducaheat_ws._decode_polling_packets(b"\x00\xff\x00\x00") == []
 
     # Length overruns should be handled gracefully.
-    assert ducaheat_ws._decode_polling_packets(b"\x00\x02\xFF\x00") == []
+    assert ducaheat_ws._decode_polling_packets(b"\x00\x02\xff\x00") == []
 
     class FailingPayload(bytes):
-        def decode(self, *_: Any, **__: Any) -> str:  # pragma: no cover - exercised via test
+        def decode(
+            self, *_: Any, **__: Any
+        ) -> str:  # pragma: no cover - exercised via test
             raise ValueError
 
     class ByteLike:
@@ -281,10 +300,12 @@ def test_decode_polling_packets_additional_paths(monkeypatch: pytest.MonkeyPatch
             return result
 
     # Emulate a decode failure to reach the exception branch.
-    assert ducaheat_ws._decode_polling_packets(ByteLike(b"\x00\x01\xFF\x00")) == []
+    assert ducaheat_ws._decode_polling_packets(ByteLike(b"\x00\x01\xff\x00")) == []
 
     # Trigger gzip decompression fallback by raising from gzip.decompress.
-    monkeypatch.setattr(ducaheat_ws, "gzip", SimpleNamespace(decompress=MagicMock(side_effect=OSError)))
+    monkeypatch.setattr(
+        ducaheat_ws, "gzip", SimpleNamespace(decompress=MagicMock(side_effect=OSError))
+    )
     assert ducaheat_ws._decode_polling_packets(b"\x1f\x8bbad") == []
 
 
@@ -319,7 +340,9 @@ async def test_start_and_runner_lifecycle(monkeypatch: pytest.MonkeyPatch) -> No
     client = _make_client(monkeypatch)
     statuses: list[str] = []
     monkeypatch.setattr(client, "_disconnect", AsyncMock())
-    monkeypatch.setattr(client, "_update_status", lambda status: statuses.append(status))
+    monkeypatch.setattr(
+        client, "_update_status", lambda status: statuses.append(status)
+    )
 
     async def _connect_once() -> None:
         statuses.append("connect_once")
@@ -386,13 +409,17 @@ async def test_connect_once_open_failures(monkeypatch: pytest.MonkeyPatch) -> No
             call_count = 0
 
             if decode_return is not None:
-                patch.setattr(ducaheat_ws, "_decode_polling_packets", lambda _body: decode_return)
+                patch.setattr(
+                    ducaheat_ws, "_decode_polling_packets", lambda _body: decode_return
+                )
 
             def fake_get(url: str, *, headers: dict[str, str]) -> StubResponse:
                 nonlocal call_count
                 call_count += 1
                 if call_count == 1:
-                    return StubResponse(status=open_status, body=open_body or client._session._open_body)  # type: ignore[attr-defined]
+                    return StubResponse(
+                        status=open_status, body=open_body or client._session._open_body
+                    )  # type: ignore[attr-defined]
                 return StubResponse(status=drain_status)
 
             def fake_post(
@@ -484,7 +511,9 @@ async def test_read_loop_marks_healthy_on_engineio_pong(
 
     client = _make_client(monkeypatch)
     statuses: list[str] = []
-    monkeypatch.setattr(client, "_update_status", lambda status: statuses.append(status))
+    monkeypatch.setattr(
+        client, "_update_status", lambda status: statuses.append(status)
+    )
 
     class PongWS:
         def __init__(self) -> None:
@@ -621,21 +650,28 @@ async def test_read_loop_additional_flows(monkeypatch: pytest.MonkeyPatch) -> No
             async def _iterate() -> AsyncIterator[Any]:
                 yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="1ignore")
                 yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="42")
-                yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="42/api,[\"ping\"]")
+                yield SimpleNamespace(
+                    type=aiohttp.WSMsgType.TEXT, data='42/api,["ping"]'
+                )
                 yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="442/invalid")
                 yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="442invalid")
                 yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="442[]")
-                yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="442[\"message\",\"ping\"]")
-                yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="442[\"other\",{}]")
+                yield SimpleNamespace(
+                    type=aiohttp.WSMsgType.TEXT, data='442["message","ping"]'
+                )
+                yield SimpleNamespace(
+                    type=aiohttp.WSMsgType.TEXT, data='442["other",{}]'
+                )
                 yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="440")
                 yield SimpleNamespace(
                     type=aiohttp.WSMsgType.TEXT,
-                    data="442[\"dev_data\",{\"nodes\":{\"htr\":{\"samples\":{\"1\":{}}}}}]",
+                    data='442["dev_data",{"nodes":{"htr":{"samples":{"1":{}}}}}]',
                 )
                 yield SimpleNamespace(
                     type=aiohttp.WSMsgType.TEXT,
-                    data="442[\"update\",{\"body\":{\"temp\":1},\"path\":\"/path\"}]",
+                    data='442["update",{"body":{"temp":1},"path":"/path"}]',
                 )
+
             return _iterate()
 
     monkeypatch.setattr(client, "_dispatch_nodes", MagicMock())
@@ -665,6 +701,7 @@ async def test_read_loop_handles_errors(monkeypatch: pytest.MonkeyPatch) -> None
         def __aiter__(self) -> Any:
             async def _iterate() -> AsyncIterator[Any]:
                 yield SimpleNamespace(type=aiohttp.WSMsgType.ERROR, data=None)
+
             return _iterate()
 
         def exception(self) -> str:
@@ -689,6 +726,7 @@ async def test_read_loop_handles_close(monkeypatch: pytest.MonkeyPatch) -> None:
         def __aiter__(self) -> Any:
             async def _iterate() -> AsyncIterator[Any]:
                 yield SimpleNamespace(type=aiohttp.WSMsgType.CLOSE)
+
             return _iterate()
 
     client._ws = CloseWS()  # type: ignore[assignment]
@@ -698,16 +736,24 @@ async def test_read_loop_handles_close(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_loop_processes_update_event(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_read_loop_processes_update_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Update events should merge payloads and mark the connection healthy."""
 
     client = _make_client(monkeypatch)
     log_calls: list[Any] = []
-    monkeypatch.setattr(client, "_log_update_brief", lambda body: log_calls.append(body))
+    monkeypatch.setattr(
+        client, "_log_update_brief", lambda body: log_calls.append(body)
+    )
     statuses: list[str] = []
-    monkeypatch.setattr(client, "_update_status", lambda status: statuses.append(status))
+    monkeypatch.setattr(
+        client, "_update_status", lambda status: statuses.append(status)
+    )
     dispatched: list[dict[str, Any]] = []
-    monkeypatch.setattr(client, "_dispatch_nodes", lambda payload: dispatched.append(payload))
+    monkeypatch.setattr(
+        client, "_dispatch_nodes", lambda payload: dispatched.append(payload)
+    )
     forwarded: list[Mapping[str, Mapping[str, Any]]] = []
     monkeypatch.setattr(
         client,
@@ -723,8 +769,9 @@ async def test_read_loop_processes_update_event(monkeypatch: pytest.MonkeyPatch)
             async def _iterate() -> AsyncIterator[Any]:
                 yield SimpleNamespace(
                     type=aiohttp.WSMsgType.TEXT,
-                    data="442[\"update\",{\"body\":{\"temp\":1},\"path\":\"/api/v2/devs/device/htr/1/status\"}]",
+                    data='442["update",{"body":{"temp":1},"path":"/api/v2/devs/device/htr/1/status"}]',
                 )
+
             return _iterate()
 
     client._ws = UpdateWS()  # type: ignore[assignment]
@@ -759,11 +806,20 @@ def test_translate_path_update_variants(monkeypatch: pytest.MonkeyPatch) -> None
 
     assert client._translate_path_update({"path": "/", "body": {}}) is None
     assert client._translate_path_update({"path": "/htr", "body": {}}) is None
-    assert client._translate_path_update({"path": "/api/v2/devs/device/htr", "body": {}}) is None
+    assert (
+        client._translate_path_update({"path": "/api/v2/devs/device/htr", "body": {}})
+        is None
+    )
     assert client._translate_path_update("not a mapping") is None
     assert client._translate_path_update({"nodes": {}}) is None
-    assert client._translate_path_update({"path": "/api/v2/devs/device/htr/2", "body": {}}) is None
-    assert client._translate_path_update({"path": "/api/v2/devs/device/htr/2/status"}) is None
+    assert (
+        client._translate_path_update({"path": "/api/v2/devs/device/htr/2", "body": {}})
+        is None
+    )
+    assert (
+        client._translate_path_update({"path": "/api/v2/devs/device/htr/2/status"})
+        is None
+    )
     assert client._translate_path_update({"path": None, "body": {}}) is None
     assert (
         client._translate_path_update(
@@ -794,7 +850,9 @@ def test_translate_path_update_variants(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 @pytest.mark.asyncio
-async def test_read_loop_forwards_sample_updates(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_read_loop_forwards_sample_updates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Sample updates should be forwarded to the energy coordinator."""
 
     client = _make_client(monkeypatch)
@@ -803,13 +861,17 @@ async def test_read_loop_forwards_sample_updates(monkeypatch: pytest.MonkeyPatch
     def _handler(dev_id: str, payload: Mapping[str, Any]) -> None:
         forwarded.append((dev_id, payload))
 
-    client.hass.data[ducaheat_ws.DOMAIN]["entry"]["energy_coordinator"] = SimpleNamespace(
-        handle_ws_samples=_handler
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"]["energy_coordinator"] = (
+        SimpleNamespace(handle_ws_samples=_handler)
     )
     statuses: list[str] = []
-    monkeypatch.setattr(client, "_update_status", lambda status: statuses.append(status))
+    monkeypatch.setattr(
+        client, "_update_status", lambda status: statuses.append(status)
+    )
     dispatched: list[dict[str, Any]] = []
-    monkeypatch.setattr(client, "_dispatch_nodes", lambda payload: dispatched.append(payload))
+    monkeypatch.setattr(
+        client, "_dispatch_nodes", lambda payload: dispatched.append(payload)
+    )
 
     class UpdateWS:
         def __init__(self) -> None:
@@ -819,8 +881,9 @@ async def test_read_loop_forwards_sample_updates(monkeypatch: pytest.MonkeyPatch
             async def _iterate() -> AsyncIterator[Any]:
                 yield SimpleNamespace(
                     type=aiohttp.WSMsgType.TEXT,
-                    data="442[\"update\",{\"body\":{\"power\":10},\"path\":\"/api/v2/devs/device/htr/1/samples\"}]",
+                    data='442["update",{"body":{"power":10},"path":"/api/v2/devs/device/htr/1/samples"}]',
                 )
+
             return _iterate()
 
     client._ws = UpdateWS()  # type: ignore[assignment]
@@ -834,14 +897,18 @@ async def test_read_loop_forwards_sample_updates(monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.asyncio
-async def test_read_loop_dev_data_uses_raw_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_read_loop_dev_data_uses_raw_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Fallback to raw nodes when the normalised payload is not a mapping."""
 
     client = _make_client(monkeypatch)
     monkeypatch.setattr(client, "_normalise_nodes_payload", lambda nodes: "bad")
     monkeypatch.setattr(client, "_subscribe_feeds", AsyncMock(return_value=0))
     dispatched: list[dict[str, Any]] = []
-    monkeypatch.setattr(client, "_dispatch_nodes", lambda payload: dispatched.append(payload))
+    monkeypatch.setattr(
+        client, "_dispatch_nodes", lambda payload: dispatched.append(payload)
+    )
 
     class DevDataWS:
         def __init__(self) -> None:
@@ -851,8 +918,9 @@ async def test_read_loop_dev_data_uses_raw_snapshot(monkeypatch: pytest.MonkeyPa
             async def _iterate() -> AsyncIterator[Any]:
                 yield SimpleNamespace(
                     type=aiohttp.WSMsgType.TEXT,
-                    data="442[\"dev_data\",{\"nodes\":{\"htr\":{\"settings\":{\"1\":{}}}}}]",
+                    data='442["dev_data",{"nodes":{"htr":{"settings":{"1":{}}}}}]',
                 )
+
             return _iterate()
 
     client._ws = DevDataWS()  # type: ignore[assignment]
@@ -873,7 +941,9 @@ async def test_read_loop_merges_updates_into_existing_snapshot(
     client._nodes_raw = {"htr": {"status": {"1": {"temp": 20}}}}
     monkeypatch.setattr(client, "_forward_sample_updates", lambda updates: None)
     dispatched: list[dict[str, Any]] = []
-    monkeypatch.setattr(client, "_dispatch_nodes", lambda payload: dispatched.append(payload))
+    monkeypatch.setattr(
+        client, "_dispatch_nodes", lambda payload: dispatched.append(payload)
+    )
 
     class MergeWS:
         def __init__(self) -> None:
@@ -883,8 +953,9 @@ async def test_read_loop_merges_updates_into_existing_snapshot(
             async def _iterate() -> AsyncIterator[Any]:
                 yield SimpleNamespace(
                     type=aiohttp.WSMsgType.TEXT,
-                    data="442[\"update\",{\"body\":{\"power\":5},\"path\":\"/api/v2/devs/device/htr/1/status\"}]",
+                    data='442["update",{"body":{"power":5},"path":"/api/v2/devs/device/htr/1/status"}]',
                 )
+
             return _iterate()
 
     client._ws = MergeWS()  # type: ignore[assignment]
@@ -896,7 +967,9 @@ async def test_read_loop_merges_updates_into_existing_snapshot(
     assert dispatched and dispatched[-1]["nodes"]["htr"]["status"]["1"]["power"] == 5
 
 
-def test_normalise_nodes_payload_handles_mappings(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_normalise_nodes_payload_handles_mappings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The normaliser helper should coerce mappings and handle errors."""
 
     client = _make_client(monkeypatch)
@@ -946,7 +1019,9 @@ def test_normalise_nodes_payload_handles_mappings(monkeypatch: pytest.MonkeyPatc
     assert result == ["ok"]
 
 
-def test_collect_sample_updates_filters_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_collect_sample_updates_filters_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Sample extraction should ignore invalid keys and addresses."""
 
     client = _make_client(monkeypatch)
@@ -961,7 +1036,9 @@ def test_collect_sample_updates_filters_entries(monkeypatch: pytest.MonkeyPatch)
     assert result == {"htr": {"1": {"power": 2}}}
 
 
-def test_forward_sample_updates_handles_guard_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_forward_sample_updates_handles_guard_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Guard clauses in the sample forwarder should short-circuit cleanly."""
 
     client = _make_client(monkeypatch)
@@ -973,7 +1050,9 @@ def test_forward_sample_updates_handles_guard_paths(monkeypatch: pytest.MonkeyPa
     client._forward_sample_updates({"htr": {"1": {"power": 1}}})
 
 
-def test_forward_sample_updates_handles_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_forward_sample_updates_handles_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Exceptions raised by the coordinator should be swallowed."""
 
     client = _make_client(monkeypatch)
@@ -982,7 +1061,9 @@ def test_forward_sample_updates_handles_exception(monkeypatch: pytest.MonkeyPatc
         def handle_ws_samples(self, *_: Any, **__: Any) -> None:
             raise RuntimeError
 
-    client.hass.data[ducaheat_ws.DOMAIN]["entry"]["energy_coordinator"] = FailingCoordinator()
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"]["energy_coordinator"] = (
+        FailingCoordinator()
+    )
     client._forward_sample_updates({"htr": {"1": {"power": 1}}})
 
 
@@ -997,7 +1078,9 @@ def test_merge_nodes_overwrites_non_mapping() -> None:
     assert target["htr"]["status"]["1"] == {}
 
 
-def test_log_nodes_summary_branches(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+def test_log_nodes_summary_branches(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """Ensure node summary logging honours the configured log level."""
 
     client = _make_client(monkeypatch)
@@ -1013,14 +1096,18 @@ def test_log_nodes_summary_branches(monkeypatch: pytest.MonkeyPatch, caplog: pyt
     assert "htr=2" in caplog.text
 
 
-def test_log_update_brief_variants(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+def test_log_update_brief_variants(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """_log_update_brief should handle mapping and non-mapping payloads."""
 
     client = _make_client(monkeypatch)
     monkeypatch.setattr(ducaheat_ws._LOGGER, "isEnabledFor", lambda level: True)
 
     with caplog.at_level(logging.DEBUG):
-        client._log_update_brief({"path": "/x", "body": {"one": 1, "two": 2, "three": 3}})
+        client._log_update_brief(
+            {"path": "/x", "body": {"one": 1, "two": 2, "three": 3}}
+        )
         client._log_update_brief("not a mapping")
 
     assert "path=/x" in caplog.text
@@ -1056,9 +1143,7 @@ async def test_emit_sio_sends_payload(monkeypatch: pytest.MonkeyPatch) -> None:
 
     await client._emit_sio("sample", {"x": 1})
 
-    assert ws.sent == [
-        "42" + ducaheat_ws.DUCAHEAT_NAMESPACE + ',["sample",{"x":1}]'
-    ]
+    assert ws.sent == ["42" + ducaheat_ws.DUCAHEAT_NAMESPACE + ',["sample",{"x":1}]']
 
 
 @pytest.mark.asyncio
@@ -1075,14 +1160,15 @@ async def test_get_token_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_loop_returns_when_websocket_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_read_loop_returns_when_websocket_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The websocket reader should no-op when no connection is bound."""
 
     client = _make_client(monkeypatch)
     client._ws = None
 
     await client._read_loop_ws()
-
 
 
 @pytest.mark.asyncio
@@ -1110,7 +1196,7 @@ async def test_read_loop_handles_engineio_and_socketio_frames(
                 )
                 yield SimpleNamespace(
                     type=aiohttp.WSMsgType.TEXT,
-                    data="42[\"message\",\"ping\"]",
+                    data='42["message","ping"]',
                 )
                 yield SimpleNamespace(
                     type=aiohttp.WSMsgType.TEXT,
@@ -1118,16 +1204,17 @@ async def test_read_loop_handles_engineio_and_socketio_frames(
                 )
                 yield SimpleNamespace(
                     type=aiohttp.WSMsgType.TEXT,
-                    data="42{\"evt\":\"ignored\"}",
+                    data='42{"evt":"ignored"}',
                 )
                 yield SimpleNamespace(
                     type=aiohttp.WSMsgType.TEXT,
-                    data="42[\"dev_data\",{\"nodes\":{\"htr\":{\"settings\":{\"1\":{}}}}}]",
+                    data='42["dev_data",{"nodes":{"htr":{"settings":{"1":{}}}}}]',
                 )
                 yield SimpleNamespace(
                     type=aiohttp.WSMsgType.TEXT,
-                    data="42[\"update\",{\"body\":{\"path\":{}}}]",
+                    data='42["update",{"body":{"path":{}}}]',
                 )
+
             return _iterator()
 
     fake_ws = FakeWS()
@@ -1165,6 +1252,7 @@ async def test_namespace_ack_replays_cached_subscriptions(
                     type=aiohttp.WSMsgType.TEXT,
                     data="40/api/v2/socket_io",
                 )
+
             return _iterator()
 
     client._ws = AckWS()  # type: ignore[assignment]
@@ -1178,7 +1266,9 @@ async def test_namespace_ack_replays_cached_subscriptions(
 
     monkeypatch.setattr(client, "_emit_sio", AsyncMock(side_effect=_record_emit))
     statuses: list[str] = []
-    monkeypatch.setattr(client, "_update_status", lambda status: statuses.append(status))
+    monkeypatch.setattr(
+        client, "_update_status", lambda status: statuses.append(status)
+    )
 
     await client._read_loop_ws()
 
@@ -1212,9 +1302,10 @@ async def test_namespace_ack_processes_embedded_event(
                     type=aiohttp.WSMsgType.TEXT,
                     data=(
                         "40/api/v2/socket_io,42/api/v2/socket_io,"
-                        "[\"dev_data\",{\"nodes\":{\"htr\":{\"status\":{\"1\":{}}}}}]"
+                        '["dev_data",{"nodes":{"htr":{"status":{"1":{}}}}}]'
                     ),
                 )
+
             return _iterator()
 
     client._ws = AckWS()  # type: ignore[assignment]
@@ -1235,7 +1326,9 @@ async def test_namespace_ack_processes_embedded_event(
     subscribe_mock = AsyncMock(return_value=2)
     monkeypatch.setattr(client, "_subscribe_feeds", subscribe_mock)
     statuses: list[str] = []
-    monkeypatch.setattr(client, "_update_status", lambda status: statuses.append(status))
+    monkeypatch.setattr(
+        client, "_update_status", lambda status: statuses.append(status)
+    )
 
     await client._read_loop_ws()
 
@@ -1267,7 +1360,7 @@ async def test_namespace_ack_skips_unexpected_namespace(
                     type=aiohttp.WSMsgType.TEXT,
                     data=(
                         "40/wrong,42/api/v2/socket_io,"
-                        "[\"dev_data\",{\"nodes\":{\"htr\":{\"status\":{\"1\":{}}}}}]"
+                        '["dev_data",{"nodes":{"htr":{"status":{"1":{}}}}}]'
                     ),
                 )
 
@@ -1313,6 +1406,7 @@ async def test_namespace_ack_ignores_unexpected_namespace(
                     type=aiohttp.WSMsgType.TEXT,
                     data="40/other",  # not our namespace
                 )
+
             return _iterator()
 
     client._ws = AckWS()  # type: ignore[assignment]
@@ -1321,7 +1415,9 @@ async def test_namespace_ack_ignores_unexpected_namespace(
     emit_mock = AsyncMock()
     monkeypatch.setattr(client, "_emit_sio", emit_mock)
     statuses: list[str] = []
-    monkeypatch.setattr(client, "_update_status", lambda status: statuses.append(status))
+    monkeypatch.setattr(
+        client, "_update_status", lambda status: statuses.append(status)
+    )
 
     await client._read_loop_ws()
 
@@ -1355,7 +1451,9 @@ async def test_disconnect_closes_websocket(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_subscribe_feeds_reuses_cached_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_subscribe_feeds_reuses_cached_nodes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Cached inventory should populate subscriptions when nodes are omitted."""
 
     client = _make_client(monkeypatch)
@@ -1377,7 +1475,9 @@ async def test_subscribe_feeds_reuses_cached_nodes(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
-async def test_subscribe_feeds_uses_inventory_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_subscribe_feeds_uses_inventory_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Existing inventory metadata should drive subscription target selection."""
 
     client = _make_client(monkeypatch)
@@ -1486,21 +1586,19 @@ async def test_subscribe_feeds_uses_coordinator_fallback(
 
 
 @pytest.mark.asyncio
-async def test_subscribe_feeds_rebuilds_inventory_when_snapshot_missing(
+async def test_subscribe_feeds_prefers_coordinator_inventory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Missing snapshots should rebuild inventory and skip duplicate fallbacks."""
+    """Coordinator inventory should avoid resolver lookups."""
 
     client = _make_client(monkeypatch)
-    record = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
-    record.pop("snapshot", None)
-
-    nodes_payload = {"nodes": [{"addr": "7", "type": "htr"}]}
-    record["nodes"] = nodes_payload
-
-    client._coordinator._addrs = lambda: ["7", " ", "7"]
-
-    calls: dict[str, Any] = {}
+    inventory_nodes = build_node_inventory([{"type": "htr", "addr": "3"}])
+    coordinator_inventory = Inventory(
+        client.dev_id,
+        {"nodes": [{"type": "htr", "addr": "3"}]},
+        inventory_nodes,
+    )
+    client._coordinator._inventory = coordinator_inventory
 
     emissions: list[str] = []
 
@@ -1508,82 +1606,191 @@ async def test_subscribe_feeds_rebuilds_inventory_when_snapshot_missing(
         emissions.append(path)
 
     monkeypatch.setattr(client, "_emit_sio", _capture)
-    original_build = ducaheat_ws.build_node_inventory
 
-    def _tracking_build(payload: Any) -> list[Any]:
-        calls["payload"] = payload
-        return original_build(payload)
+    def _fail(*_: Any, **__: Any) -> InventoryResolution:
+        raise AssertionError("resolve_record_inventory should not be called")
 
-    monkeypatch.setattr(ducaheat_ws, "build_node_inventory", _tracking_build)
+    monkeypatch.setattr(ducaheat_ws, "resolve_record_inventory", _fail)
 
-    count = await client._subscribe_feeds({"htr": {"samples": {"7": {}}}})
+    count = await client._subscribe_feeds(None)
 
-    assert calls["payload"] == {"htr": {"samples": {"7": {}}}}
-    assert "/htr/7/samples" in emissions
-    assert "/htr/7/status" in emissions
     assert count == 2
-    assert "node_inventory" not in record
+    assert set(emissions) == {"/htr/3/samples", "/htr/3/status"}
 
 
 @pytest.mark.asyncio
-async def test_subscribe_feeds_handles_mapping_record(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Mapping entries should rebuild inventory using a temporary cache."""
+async def test_subscribe_feeds_passes_nodes_payload_to_resolver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Raw node payloads should be forwarded to the inventory resolver."""
 
     client = _make_client(monkeypatch)
-    mapping_record = MappingProxyType({"nodes": {"nodes": [{"addr": "8", "type": "htr"}]}})
-    client.hass.data[ducaheat_ws.DOMAIN]["entry"] = mapping_record
+    captured: dict[str, Any] = {}
+    nodes_payload = {"htr": {"samples": {"7": {}}}}
+    client._coordinator.node_inventory = ["7", " "]
 
-    calls: dict[str, Any] = {}
+    def _fake_resolve(
+        record: Mapping[str, Any],
+        *,
+        dev_id: str | None,
+        nodes_payload: Any | None,
+        node_list: Iterable[Any] | None,
+    ) -> InventoryResolution:
+        captured["record"] = record
+        captured["dev_id"] = dev_id
+        captured["nodes_payload"] = nodes_payload
+        captured["node_list"] = tuple(node_list) if node_list is not None else None
+        inventory_nodes = build_node_inventory([{"type": "htr", "addr": "7"}])
+        inventory = Inventory(
+            client.dev_id,
+            {"nodes": [{"type": "htr", "addr": "7"}]},
+            inventory_nodes,
+        )
+        return InventoryResolution(
+            inventory, "test", len(inventory_nodes), len(inventory_nodes)
+        )
 
-    original_build = ducaheat_ws.build_node_inventory
+    monkeypatch.setattr(ducaheat_ws, "resolve_record_inventory", _fake_resolve)
 
-    def _patched_build(payload: Any) -> list[Any]:
-        calls["payload"] = payload
-        return original_build(payload)
-
-    monkeypatch.setattr(ducaheat_ws, "build_node_inventory", _patched_build)
-    client._coordinator._addrs = lambda: []
-
-    emissions: list[tuple[str, str]] = []
+    emissions: list[str] = []
 
     async def _capture(event: str, path: str) -> None:
-        emissions.append((event, path))
+        emissions.append(path)
+
+    monkeypatch.setattr(client, "_emit_sio", _capture)
+
+    count = await client._subscribe_feeds(nodes_payload)
+
+    assert count == 2
+    assert set(emissions) == {"/htr/7/samples", "/htr/7/status"}
+    assert captured["nodes_payload"] is nodes_payload
+    assert captured["dev_id"] == client.dev_id
+    assert isinstance(captured["record"], Mapping)
+    assert captured["node_list"] is not None
+    assert "7" in captured["node_list"]
+
+
+@pytest.mark.asyncio
+async def test_subscribe_feeds_handles_mapping_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mapping entries should be normalised to mutable state."""
+
+    client = _make_client(monkeypatch)
+    nodes_payload = {"nodes": [{"addr": "8", "type": "htr"}]}
+    snapshot = InstallationSnapshot(dev_id="device", raw_nodes={"nodes": []})
+    mapping_record = MappingProxyType({"nodes": nodes_payload, "snapshot": snapshot})
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"] = mapping_record
+
+    inventory_nodes = build_node_inventory(nodes_payload)
+    inventory = Inventory(client.dev_id, nodes_payload, inventory_nodes)
+
+    def _fake_resolve(
+        record: Mapping[str, Any],
+        *,
+        dev_id: str | None,
+        nodes_payload: Any | None,
+        node_list: Iterable[Any] | None,
+    ) -> InventoryResolution:
+        assert isinstance(record, MutableMapping)
+        return InventoryResolution(
+            inventory, "test", len(inventory_nodes), len(inventory_nodes)
+        )
+
+    monkeypatch.setattr(ducaheat_ws, "resolve_record_inventory", _fake_resolve)
+
+    emissions: list[str] = []
+
+    async def _capture(event: str, path: str) -> None:
+        emissions.append(path)
 
     monkeypatch.setattr(client, "_emit_sio", _capture)
 
     count = await client._subscribe_feeds(None)
 
     assert count == 2
-    assert calls["payload"] == mapping_record["nodes"]
-    assert {path for _evt, path in emissions} == {"/htr/8/samples", "/htr/8/status"}
+    assert set(emissions) == {"/htr/8/samples", "/htr/8/status"}
+    entry_record = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
+    assert isinstance(entry_record, dict)
+    assert isinstance(entry_record.get("inventory"), Inventory)
+    assert entry_record.get("snapshot") is snapshot
 
 
 @pytest.mark.asyncio
-async def test_subscribe_feeds_handles_missing_record(monkeypatch: pytest.MonkeyPatch) -> None:
-    """None records should provide empty cache and nodes payload."""
+async def test_subscribe_feeds_handles_missing_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """None records should be replaced with mutable containers."""
 
     client = _make_client(monkeypatch)
     client.hass.data[ducaheat_ws.DOMAIN]["entry"] = None
 
-    calls: dict[str, Any] = {}
+    nodes_payload = {"nodes": [{"addr": "6", "type": "htr"}]}
+    inventory_nodes = build_node_inventory(nodes_payload)
+    inventory = Inventory(client.dev_id, nodes_payload, inventory_nodes)
 
-    original_build = ducaheat_ws.build_node_inventory
+    def _fake_resolve(
+        record: Mapping[str, Any],
+        *,
+        dev_id: str | None,
+        nodes_payload: Any | None,
+        node_list: Iterable[Any] | None,
+    ) -> InventoryResolution:
+        assert isinstance(record, MutableMapping)
+        return InventoryResolution(
+            inventory, "test", len(inventory_nodes), len(inventory_nodes)
+        )
 
-    def _patched_build(payload: Any) -> list[Any]:
-        calls["payload"] = payload
-        return original_build(payload)
+    monkeypatch.setattr(ducaheat_ws, "resolve_record_inventory", _fake_resolve)
 
-    monkeypatch.setattr(ducaheat_ws, "build_node_inventory", _patched_build)
-    client._coordinator._addrs = lambda: []
+    emissions: list[str] = []
+
+    async def _capture(event: str, path: str) -> None:
+        emissions.append(path)
+
+    monkeypatch.setattr(client, "_emit_sio", _capture)
+
+    count = await client._subscribe_feeds(None)
+
+    assert count == 2
+    assert set(emissions) == {"/htr/6/samples", "/htr/6/status"}
+    entry_record = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
+    assert isinstance(entry_record, dict)
+
+
+@pytest.mark.asyncio
+async def test_subscribe_feeds_logs_error_when_inventory_missing(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Inventory resolution failures should be logged and abort subscriptions."""
+
+    client = _make_client(monkeypatch)
+    caplog.set_level(logging.ERROR)
+
+    def _missing_inventory(
+        record: Mapping[str, Any],
+        *,
+        dev_id: str | None,
+        nodes_payload: Any | None,
+        node_list: Iterable[Any] | None,
+    ) -> InventoryResolution:
+        return InventoryResolution(None, "test", 0, 0)
+
+    monkeypatch.setattr(ducaheat_ws, "resolve_record_inventory", _missing_inventory)
+    emit_mock = AsyncMock()
+    monkeypatch.setattr(client, "_emit_sio", emit_mock)
 
     count = await client._subscribe_feeds(None)
 
     assert count == 0
-    assert calls["payload"] == {}
+    emit_mock.assert_not_awaited()
+    assert any("missing inventory" in message for message in caplog.messages)
 
 
 @pytest.mark.asyncio
-async def test_get_token_requires_authorization(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_get_token_requires_authorization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Missing Authorization header should raise a runtime error."""
 
     client = _make_client(monkeypatch)
