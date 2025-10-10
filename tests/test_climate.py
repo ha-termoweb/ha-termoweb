@@ -2217,6 +2217,12 @@ def test_heater_properties_and_ws_update() -> None:
         coordinator_data = {
             dev_id: {
                 "nodes": {"nodes": []},
+                "nodes_by_type": {
+                    "htr": {
+                        "addrs": [addr],
+                        "settings": {addr: settings},
+                    }
+                },
                 "htr": {"settings": {addr: settings}},
                 "version": "2.0.0",
             }
@@ -2311,9 +2317,10 @@ def test_heater_properties_and_ws_update() -> None:
         finally:
             dt_util.NOW = original_now
 
-        coordinator.data[dev_id]["nodes"] = None
+        original_nodes_by_type = coordinator.data[dev_id]["nodes_by_type"]
+        coordinator.data[dev_id]["nodes_by_type"] = None
         assert heater.available is False
-        coordinator.data[dev_id]["nodes"] = {"nodes": []}
+        coordinator.data[dev_id]["nodes_by_type"] = original_nodes_by_type
         assert heater.available is True
 
         settings["mode"] = "auto"

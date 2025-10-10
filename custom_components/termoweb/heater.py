@@ -855,10 +855,28 @@ class HeaterNodeBase(CoordinatorEntity):
         return self._device_available(self._device_record())
 
     def _device_available(self, device_entry: dict[str, Any] | None) -> bool:
-        """Return True when the device entry contains node data."""
-        if not isinstance(device_entry, dict):
+        """Return True when the device entry exposes heater inventory metadata."""
+
+        if not isinstance(device_entry, Mapping):
             return False
-        return device_entry.get("nodes") is not None
+
+        inventory = device_entry.get("inventory")
+        if isinstance(inventory, Inventory):
+            return True
+
+        nodes_by_type = device_entry.get("nodes_by_type")
+        if isinstance(nodes_by_type, Mapping):
+            return True
+
+        address_map = device_entry.get("address_map")
+        if isinstance(address_map, Mapping):
+            return True
+
+        addresses_by_type = device_entry.get("addresses_by_type")
+        if isinstance(addresses_by_type, Mapping):
+            return True
+
+        return False
 
     def _device_record(self) -> dict[str, Any] | None:
         """Return the coordinator cache entry for this device."""

@@ -645,13 +645,18 @@ def test_heater_base_async_added_without_hass() -> None:
     asyncio.run(_run())
 
 
-def test_device_available_requires_nodes_section() -> None:
+def test_device_available_accepts_inventory_metadata() -> None:
     coordinator = SimpleNamespace(hass=None)
     heater = _make_heater(coordinator)
+    inventory = Inventory("dev", {}, [])
 
     assert not heater._device_available(None)
     assert not heater._device_available({})
-    assert heater._device_available({"nodes": []})
+    assert not heater._device_available({"inventory": object()})
+    assert heater._device_available({"inventory": inventory})
+    assert heater._device_available({"nodes_by_type": {}})
+    assert heater._device_available({"address_map": {}})
+    assert heater._device_available({"addresses_by_type": {}})
 
 
 class _FakeDict(dict):
