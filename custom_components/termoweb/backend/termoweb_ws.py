@@ -1088,6 +1088,9 @@ class WebSocketClient(_WSStatusMixin):
         energy_coordinator = (
             record.get("energy_coordinator") if isinstance(record, Mapping) else None
         )
+        if pmo_addresses:
+            cleaned_map["pmo"] = list(pmo_addresses)
+
         if hasattr(energy_coordinator, "update_addresses"):
             energy_coordinator.update_addresses(cleaned_map)
 
@@ -1105,7 +1108,18 @@ class WebSocketClient(_WSStatusMixin):
                 if pmo_addresses or "pmo" in nodes_by_type:
                     bucket = self._ensure_type_bucket(dev_map, nodes_by_type, "pmo")
                     if pmo_addresses:
-                        bucket["addrs"] = list(pmo_addresses)
+                        addresses_copy = list(pmo_addresses)
+                        bucket["addrs"] = addresses_copy
+                        addr_map = dev_map.get("addr_map")
+                        if isinstance(addr_map, Mapping):
+                            updated_map = dict(addr_map)
+                            updated_map["pmo"] = list(addresses_copy)
+                            dev_map["addr_map"] = updated_map
+                        addresses_by_type = dev_map.get("addresses_by_type")
+                        if isinstance(addresses_by_type, Mapping):
+                            updated_map = dict(addresses_by_type)
+                            updated_map["pmo"] = list(addresses_copy)
+                            dev_map["addresses_by_type"] = updated_map
                 updated = dict(coordinator_data)
                 updated[self.dev_id] = dev_map
                 self._coordinator.data = updated  # type: ignore[attr-defined]
