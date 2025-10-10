@@ -181,7 +181,6 @@ class StateCoordinator(
         self._backoff = 0  # seconds
         self._dev_id = dev_id
         self._device = device or {}
-        self._nodes: dict[str, Any] = {}
         self._inventory: Inventory | None = None
         self._pending_settings: dict[tuple[str, str], PendingSetting] = {}
         self._invalid_nodes_logged = False
@@ -703,62 +702,55 @@ class StateCoordinator(
                 self._invalid_inventory_logged = True
             valid_inventory = None
 
-        payload_mapping: Mapping[str, Any] | None = None
         if isinstance(nodes, Mapping):
-            payload_mapping = nodes
-        elif valid_inventory is not None:
-            payload_source = valid_inventory.payload
-            if isinstance(payload_source, Mapping):
-                payload_mapping = payload_source
+            if valid_inventory is not None:
+                self._inventory = valid_inventory
+                self._invalid_inventory_logged = False
+                self._invalid_nodes_logged = False
+                return
 
-        if payload_mapping is not None:
-            self._nodes = dict(payload_mapping)
-            self._invalid_nodes_logged = False
-        else:
-            if nodes is not None and not isinstance(nodes, Mapping):
+            try:
+                node_list = list(build_node_inventory(nodes))
+            except ValueError as err:  # pragma: no cover - defensive
                 if not self._invalid_nodes_logged:
                     _LOGGER.debug(
-                        "Ignoring unexpected nodes payload (type=%s): %s",
-                        type(nodes).__name__,
-                        nodes,
+                        "Failed to rebuild inventory from nodes payload: %s",
+                        err,
+                        exc_info=err,
                     )
                     self._invalid_nodes_logged = True
+                self._inventory = None
             else:
+                self._inventory = Inventory(self._dev_id, nodes, node_list)
+                self._invalid_inventory_logged = False
                 self._invalid_nodes_logged = False
-            self._nodes = {}
+            return
+
+        if nodes is not None and not isinstance(nodes, Mapping):
+            if not self._invalid_nodes_logged:
+                _LOGGER.debug(
+                    "Ignoring unexpected nodes payload (type=%s): %s",
+                    type(nodes).__name__,
+                    nodes,
+                )
+                self._invalid_nodes_logged = True
+        else:
+            self._invalid_nodes_logged = False
 
         if valid_inventory is not None:
             self._inventory = valid_inventory
             self._invalid_inventory_logged = False
-        else:
-            if inventory is None:
-                self._invalid_inventory_logged = False
-            self._inventory = None
+            return
+
+        if inventory is None:
+            self._invalid_inventory_logged = False
+
+        self._inventory = None
 
     def _ensure_inventory(self) -> Inventory | None:
         """Ensure cached inventory metadata is available."""
 
-        inventory = self._inventory
-        if inventory is not None:
-            return inventory
-
-        if not isinstance(self._nodes, Mapping) or not self._nodes:
-            return None
-
-        try:
-            node_list = list(build_node_inventory(self._nodes))
-        except ValueError as err:  # pragma: no cover - defensive
-            _LOGGER.debug(
-                "Failed to build node inventory: %s",
-                err,
-                exc_info=err,
-            )
-            return None
-
-        inventory = Inventory(self._dev_id, self._nodes, node_list)
-        self._inventory = inventory
-        self._invalid_inventory_logged = False
-        return inventory
+        return self._inventory
 
     async def async_refresh_heater(self, node: str | tuple[str, str]) -> None:
         """Refresh settings for a specific node and push the update to listeners."""
@@ -843,14 +835,12 @@ class StateCoordinator(
                     "name": _device_display_name(self._device, dev_id),
                     "raw": self._device,
                     "connected": True,
-                    "nodes": self._nodes,
                 }
             else:
                 dev_data.setdefault("dev_id", dev_id)
                 if "name" not in dev_data:
                     dev_data["name"] = _device_display_name(self._device, dev_id)
                 dev_data.setdefault("raw", self._device)
-                dev_data.setdefault("nodes", self._nodes)
                 dev_data.setdefault("connected", True)
 
             node_type = resolved_type
@@ -877,7 +867,6 @@ class StateCoordinator(
                 payload_map,
             )
 
-            dev_data["nodes"] = self._nodes
             dev_data["nodes_by_type"] = {
                 n_type: {
                     "addrs": list(section["addrs"]),
@@ -998,7 +987,6 @@ class StateCoordinator(
                     "name": dev_name,
                     "raw": self._device,
                     "connected": True,
-                    "nodes": self._nodes,
                     "nodes_by_type": nodes_by_type,
                 },
             }
