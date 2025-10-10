@@ -117,17 +117,6 @@ def test_prepare_heater_platform_data_groups_nodes() -> None:
     assert resolve_name("htr", "4") == "Heater 4"
     assert resolve_name("acm", "2") == "Accumulator 2"
 
-    cached_inventory, *_ = prepare_heater_platform_data(
-        {
-            "dev_id": "dev",
-            "nodes": raw_nodes,
-            "node_inventory": list(container.nodes),
-        },
-        default_name_simple=lambda addr: f"Heater {addr}",
-    )
-    assert cached_inventory == container.nodes
-
-
 def test_prepare_heater_platform_data_skips_blank_types() -> None:
     nodes = [
         SimpleNamespace(type="  ", addr="5"),
@@ -264,77 +253,27 @@ def test_prepare_heater_platform_data_uses_coordinator_inventory() -> None:
     assert resolve_name("htr", "1") == "Lounge"
 
 
-def test_prepare_heater_platform_data_uses_coordinator_node_inventory() -> None:
-    raw_nodes = {"nodes": [{"type": "acm", "addr": "2"}]}
-    inventory_nodes = build_node_inventory(raw_nodes)
-    coordinator = SimpleNamespace(
-        dev_id="dev",
-        nodes=raw_nodes,
-        inventory=None,
-        node_inventory=list(inventory_nodes),
-    )
+def test_prepare_heater_platform_data_handles_missing_inventory(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("ERROR"):
+        with pytest.raises(ValueError):
+            prepare_heater_platform_data(
+                {"dev_id": "dev"},
+                default_name_simple=lambda addr: f"Heater {addr}",
+            )
 
-    inventory, nodes_by_type, addrs_by_type, resolve_name = (
-        prepare_heater_platform_data(
-            {"coordinator": coordinator},
-            default_name_simple=lambda addr: f"Heater {addr}",
-        )
-    )
-
-    assert list(inventory) == list(inventory_nodes)
-    assert [node.addr for node in nodes_by_type.get("acm", [])] == ["2"]
-    assert addrs_by_type["acm"] == ["2"]
-    assert resolve_name("acm", "2") == "Accumulator 2"
-
-
-def test_prepare_heater_platform_data_handles_missing_inventory() -> None:
-    inventory, nodes_by_type, addrs_by_type, resolve_name = (
-        prepare_heater_platform_data(
-            {},
-            default_name_simple=lambda addr: f"Heater {addr}",
-        )
-    )
-
-    assert inventory == ()
-    assert nodes_by_type == {}
-    assert addrs_by_type == {
-        node_type: [] for node_type in heater_module.HEATER_NODE_TYPES
-    }
-    assert resolve_name("acm", "3") == "Accumulator 3"
-    assert resolve_name("htr", "4") == "Heater 4"
+    assert any("missing inventory" in message for message in caplog.messages)
 
 
 def test_extract_inventory_accepts_mapping_inventory() -> None:
-    entry_data = {
-        "inventory": {
-            "primary": SimpleNamespace(type="htr", addr="7", name="Hall"),
-            "secondary": SimpleNamespace(type="acm", addr="8"),
-        }
-    }
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "7"}, {"type": "acm", "addr": "8"}]}
+    container = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+    entry_data = {"inventory": container}
 
     inventory = heater_module._extract_inventory(entry_data)
 
-    assert inventory is not None
-    assert sorted(node.addr for node in inventory.nodes) == ["7", "8"]
-
-
-def test_coerce_inventory_handles_iteration_failure() -> None:
-    class BadMapping(dict):
-        def values(self):  # type: ignore[override]
-            class _Values:
-                def __iter__(self_inner):
-                    raise TypeError("boom")
-
-            return _Values()
-
-    assert (
-        heater_module._coerce_inventory(
-            BadMapping({"broken": object()}),
-            dev_id="dev",
-            raw_nodes={},
-        )
-        is None
-    )
+    assert inventory is container
 
 
 def test_extract_inventory_handles_non_mapping_input() -> None:
@@ -342,19 +281,16 @@ def test_extract_inventory_handles_non_mapping_input() -> None:
     assert heater_module._extract_inventory(object()) is None
 
 
-def test_extract_inventory_value_error_fallback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        heater_module,
-        "build_node_inventory",
-        lambda raw: (_ for _ in ()).throw(ValueError("invalid")),
-    )
+def test_extract_inventory_uses_hass_data() -> None:
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
+    container = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+    hass = SimpleNamespace(data={heater_module.DOMAIN: {"entry": {"inventory": container}}})
 
-    entry_data: dict[str, Any] = {"nodes": {"nodes": []}}
+    entry_data = {"hass": hass, "entry_id": "entry"}
 
-    assert heater_module._extract_inventory(entry_data) is None
-    assert "node_inventory" not in entry_data
+    inventory = heater_module._extract_inventory(entry_data)
+
+    assert inventory is container
 
 
 def test_prepare_heater_platform_data_handles_non_mapping_name_map(

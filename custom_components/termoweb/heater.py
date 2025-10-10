@@ -635,99 +635,36 @@ def build_heater_name_map(
     return result
 
 
-def _coerce_inventory(
-    candidate: Any,
-    *,
-    dev_id: str,
-    raw_nodes: Any,
-) -> Inventory | None:
-    """Return an :class:`Inventory` instance for ``candidate`` when possible."""
-
-    if isinstance(candidate, Inventory):
-        return candidate
-
-    if isinstance(candidate, Mapping):
-        iterable: Iterable[Any] = candidate.values()
-    elif isinstance(candidate, Iterable) and not isinstance(candidate, (str, bytes)):
-        iterable = candidate
-    else:
-        return None
-
-    try:
-        nodes = list(iterable)
-    except TypeError:
-        return None
-
-    if not nodes:
-        return None
-
-    return Inventory(dev_id, raw_nodes, nodes)
-
-
 def _extract_inventory(entry_data: Mapping[str, Any] | None) -> Inventory | None:
     """Return the shared inventory stored alongside a config entry."""
 
     if not isinstance(entry_data, Mapping):
         return None
 
-    dev_id = str(entry_data.get("dev_id", "") or "").strip()
-    raw_nodes = entry_data.get("nodes")
+    candidate = entry_data.get("inventory")
+    if isinstance(candidate, Inventory):
+        return candidate
 
-    inventory = _coerce_inventory(
-        entry_data.get("inventory"),
-        dev_id=dev_id,
-        raw_nodes=raw_nodes,
-    )
-    if inventory is not None:
-        return inventory
+    hass = entry_data.get("hass")
+    entry_id = entry_data.get("entry_id")
+    domain_data: Mapping[str, Any] | None = None
+    if hass is not None and isinstance(entry_id, str) and entry_id:
+        hass_data = getattr(hass, "data", None)
+        if isinstance(hass_data, Mapping):
+            domain_bucket = hass_data.get(DOMAIN)
+            if isinstance(domain_bucket, Mapping):
+                domain_data = domain_bucket.get(entry_id)
+    if isinstance(domain_data, Mapping):
+        candidate = domain_data.get("inventory")
+        if isinstance(candidate, Inventory):
+            return candidate
 
     coordinator = entry_data.get("coordinator")
-    coordinator_dev_id = str(getattr(coordinator, "dev_id", "") or "").strip()
-    coordinator_nodes = getattr(coordinator, "nodes", None)
+    candidate = getattr(coordinator, "inventory", None)
+    if isinstance(candidate, Inventory):
+        return candidate
 
-    coordinator_inventory = _coerce_inventory(
-        getattr(coordinator, "inventory", None),
-        dev_id=coordinator_dev_id or dev_id,
-        raw_nodes=coordinator_nodes or raw_nodes,
-    )
-    if coordinator_inventory is not None:
-        return coordinator_inventory
-
-    inventory = _coerce_inventory(
-        entry_data.get("node_inventory"),
-        dev_id=dev_id,
-        raw_nodes=raw_nodes,
-    )
-    if inventory is not None:
-        return inventory
-
-    coordinator_nodes_list = getattr(coordinator, "node_inventory", None)
-    inventory = _coerce_inventory(
-        coordinator_nodes_list,
-        dev_id=coordinator_dev_id or dev_id,
-        raw_nodes=coordinator_nodes or raw_nodes,
-    )
-    if inventory is not None:
-        return inventory
-
-    fallback_raw = raw_nodes if raw_nodes is not None else coordinator_nodes
-    fallback_dev = dev_id or coordinator_dev_id
-
-    if fallback_raw is None:
-        return None
-
-    try:
-        built_nodes = list(build_node_inventory(fallback_raw))
-    except ValueError:
-        built_nodes = []
-
-    if not built_nodes:
-        return None
-
-    if isinstance(entry_data, MutableMapping):
-        entry_data.setdefault("node_inventory", list(built_nodes))
-
-    return Inventory(fallback_dev, fallback_raw, built_nodes)
+    return None
 
 
 def prepare_heater_platform_data(
@@ -745,23 +682,24 @@ def prepare_heater_platform_data(
     inventory_container = _extract_inventory(entry_data)
 
     if inventory_container is None:
-        inventory = ()
-        nodes_by_type: dict[str, list[Node]] = {}
-        explicit_names: set[tuple[str, str]] = set()
-        addrs_by_type: dict[str, list[str]] = {
-            node_type: [] for node_type in HEATER_NODE_TYPES
-        }
-        name_map: Mapping[Any, Any] = {}
-    else:
-        inventory = inventory_container.nodes
-        nodes_by_type = inventory_container.nodes_by_type
-        explicit_names = inventory_container.explicit_heater_names
-        forward_map, _ = inventory_container.heater_address_map
-        addrs_by_type = {
-            node_type: list(forward_map.get(node_type, []))
-            for node_type in HEATER_NODE_TYPES
-        }
-        name_map = inventory_container.heater_name_map(default_name_simple)
+        dev_id: str | None = None
+        if isinstance(entry_data, Mapping):
+            dev_id = entry_data.get("dev_id")  # type: ignore[assignment]
+        _LOGGER.error(
+            "TermoWeb heater setup missing inventory for device %s",
+            (dev_id or "<unknown>") if isinstance(dev_id, str) and dev_id else "<unknown>",
+        )
+        raise ValueError("TermoWeb inventory unavailable for heater platform")
+
+    inventory = inventory_container.nodes
+    nodes_by_type = inventory_container.nodes_by_type
+    explicit_names = inventory_container.explicit_heater_names
+    forward_map, _ = inventory_container.heater_address_map
+    addrs_by_type = {
+        node_type: list(forward_map.get(node_type, []))
+        for node_type in HEATER_NODE_TYPES
+    }
+    name_map = inventory_container.heater_name_map(default_name_simple)
 
     names_by_type: Mapping[str, Mapping[str, str]]
     if isinstance(name_map, Mapping):

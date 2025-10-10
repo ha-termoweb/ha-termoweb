@@ -240,9 +240,7 @@ def test_sensor_async_setup_entry_defaults_and_skips_invalid(
                 {"type": "pmo", "addr": "P1"},
             ]
         }
-        inventory = build_node_inventory(raw_nodes)
-        inventory.append(types.SimpleNamespace(type=" ", addr="extra"))
-        inventory.append(types.SimpleNamespace(type="htr", addr=" "))
+        inventory_nodes = build_node_inventory(raw_nodes)
 
         coordinator = types.SimpleNamespace(
             hass=hass,
@@ -263,7 +261,8 @@ def test_sensor_async_setup_entry_defaults_and_skips_invalid(
                     "client": types.SimpleNamespace(),
                     "dev_id": dev_id,
                     "nodes": {},
-                    "node_inventory": inventory,
+                    "inventory": Inventory(dev_id, raw_nodes, inventory_nodes),
+                    "node_inventory": inventory_nodes,
                     "energy_coordinator": energy_coord,
                 }
             }
@@ -631,7 +630,7 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
     asyncio.run(_run())
 
 
-def test_sensor_async_setup_entry_rebuilds_inventory_when_missing() -> None:
+def test_sensor_async_setup_entry_uses_cached_inventory() -> None:
     async def _run() -> None:
         hass = HomeAssistant()
         entry = types.SimpleNamespace(entry_id="entry-missing")
@@ -657,11 +656,18 @@ def test_sensor_async_setup_entry_rebuilds_inventory_when_missing() -> None:
             },
         )
 
+        inventory = Inventory(
+            dev_id,
+            nodes_meta,
+            build_node_inventory(nodes_meta),
+        )
+
         record: dict[str, Any] = {
             "coordinator": coordinator,
             "client": types.SimpleNamespace(),
             "dev_id": dev_id,
             "nodes": nodes_meta,
+            "inventory": inventory,
         }
         hass.data = {DOMAIN: {entry.entry_id: record}}
 
@@ -680,8 +686,31 @@ def test_sensor_async_setup_entry_rebuilds_inventory_when_missing() -> None:
 
         assert refresh_mock.await_count == 1
         assert len(added) == 7
-        stored_inventory = hass.data[DOMAIN][entry.entry_id]["node_inventory"]
-        assert [node.addr for node in stored_inventory] == ["A1", "B2"]
+        record_after = hass.data[DOMAIN][entry.entry_id]
+        assert record_after["inventory"] is inventory
+
+    asyncio.run(_run())
+
+
+def test_sensor_async_setup_entry_requires_inventory() -> None:
+    async def _run() -> None:
+        hass = HomeAssistant()
+        entry = types.SimpleNamespace(entry_id="entry-no-inventory")
+        dev_id = "dev-no-inventory"
+        coordinator = types.SimpleNamespace(hass=hass, data={})
+
+        hass.data = {
+            DOMAIN: {
+                entry.entry_id: {
+                    "coordinator": coordinator,
+                    "client": types.SimpleNamespace(),
+                    "dev_id": dev_id,
+                }
+            }
+        }
+
+        with pytest.raises(ValueError):
+            await async_setup_sensor_entry(hass, entry, lambda _: None)
 
     asyncio.run(_run())
 
