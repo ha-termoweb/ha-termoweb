@@ -131,109 +131,68 @@ flowchart LR
     Gateway --> Pmo
 ```
 
-### Boost control flow
+## Ducaheat selection & boost pipeline
 
-```mermaid
-flowchart LR
-    user[[Lovelace UI]]
-    climate[Climate preset: boost]
-    duration[Select: preferred boost duration]
-    helper_btns[Helper buttons: start / cancel]
-    boost_sensors[Binary + sensor entities]
+### Components
 
-    user --> climate
-    user --> duration
-    user --> helper_btns
+- **REST client** — issues mandatory `select` claims and the subsequent `/boost` writes for accumulator nodes.
+- **WebSocket client** — subscribes to `/api/v2/socket_io` and relays `update` + `dev_data` events to the coordinator.
+- **Coordinator** — serialises selection, orchestrates retries, and merges WebSocket deltas into Home Assistant state.
+- **UI layer** — renders Boost duration controls (1–10 hours) and a setpoint input that enforces one-decimal strings.
 
-    climate --> services
-    helper_btns --> services
-    duration --> services
+### HTTP data contracts
 
-    subgraph HA[TermoWeb integration]
-        services[termoweb.start_boost / cancel_boost / configure_boost_preset]
-        coord[StateCoordinator]
-        cache[Boost runtime cache]
-        rest[REST client]
-    end
+- `POST /api/v2/devs/{dev_id}/{type}/{addr}/select` — body `{ "select": true|false }`, response `201 {}`.
+- `POST /api/v2/devs/{dev_id}/{type}/{addr}/boost` — start with `{ "boost": true, "boost_time": <60-600>, "stemp": "##.#", "units": "C|F" }`; stop with `{ "boost": false }`. Requires an active selection claim.
 
-    services --> coord
-    coord --> cache
-    cache --> services
-    coord --> rest
-    rest --> cloud[(Ducaheat API)]
-    rest --> cache
-    cache --> boost_sensors
-    coord --> boost_sensors
-    boost_sensors --> user
+### WebSocket contract
+
+Representative payload emitted after a successful write:
+
+```json
+{
+  "path": "/{type}/{addr}/status",
+  "body": {
+    "boost": true,
+    "boost_end_day": 0,
+    "boost_end_min": 945,
+    "stemp": "7.5",
+    "units": "C"
+  }
+}
 ```
 
-**Front-end entities**
+### HA entity mapping
 
-- `climate.termoweb_*` exposes `preset_mode: boost` alongside the standard HVAC
-  modes. Switching to this preset calls `termoweb.start_boost` with the cached
-  default runtime.【F:custom_components/termoweb/climate.py†L982-L1269】
-- `select.termoweb_*_boost_duration` provides curated runtime options (1–120
-  minutes) that keep the cached preset synchronised with `/setup` writes.【F:custom_components/termoweb/select.py†L29-L219】
-- `button.termoweb_*_boost_minutes_*` and
-  `button.termoweb_*_boost_cancel` offer one-tap start/stop helpers that use the
-  same validation routines as the services.【F:custom_components/termoweb/button.py†L39-L296】
-- `binary_sensor.termoweb_*_boost_active`,
-  `sensor.termoweb_*_boost_minutes_remaining`, and
-  `sensor.termoweb_*_boost_end` mirror the coordinator cache so dashboards have
-  instantaneous feedback while REST calls propagate.【F:custom_components/termoweb/binary_sensor.py†L42-L99】【F:custom_components/termoweb/sensor.py†L146-L461】
+- **Controls:** Boost duration selector constrained to **1–10 hours (60–600 minutes)** plus a setpoint field that accepts strings matching `^[0-9]+\.[0-9]$`.
+- **Attributes:** expose `boost`, `boost_end_day`, `boost_end_min`, `stemp`, and `units` so dashboards mirror cloud state.
+- **Defaults:** cache `/setup` values (`extra_options.boost_time`, `boost_temp`) to pre-populate selectors without toggling Boost directly.
 
-**Backend processing**
+### Services
 
-1. User interactions call one of the `termoweb.*` helper services.【F:custom_components/termoweb/services.yaml†L53-L100】
-2. The climate entity or helper button validates duration limits (1–120 minutes)
-   before delegating to the shared coordinator logic.【F:custom_components/termoweb/climate.py†L1116-L1177】【F:custom_components/termoweb/button.py†L226-L296】
-3. `StateCoordinator` performs an optimistic local update and asks the REST
-   client to POST to either `/status` (`boost` toggles) or `/setup`
-   (`extra_options.boost_time`, `extra_options.boost_temp`).【F:custom_components/termoweb/climate.py†L1189-L1269】【F:custom_components/termoweb/api.py†L561-L661】
-4. Responses update the boost runtime cache, which fans out to the select
-   entity and sensors so Lovelace stays in sync with the backend.【F:custom_components/termoweb/__init__.py†L254-L260】【F:custom_components/termoweb/select.py†L166-L219】【F:custom_components/termoweb/sensor.py†L321-L367】
+- `termoweb.select_node(dev_id, type, addr, select: bool)`
+- `termoweb.start_boost(dev_id, type, addr, minutes: 60..600, stemp: '##.#', units: 'C|F')`
+- `termoweb.stop_boost(dev_id, type, addr)`
 
-### Example Lovelace stack
+### Control flow
 
-```yaml
-type: vertical-stack
-cards:
-  - type: thermostat
-    entity: climate.living_room_accumulator
-    name: Living room accumulator
-  - type: tile
-    entity: select.living_room_accumulator_boost_duration
-    name: Boost tools
-    state_content: current_option
-    chips:
-      - type: entity
-        entity: binary_sensor.living_room_accumulator_boost_active
-        name: Boosting
-      - type: template
-        content: >-
-          {{ states('sensor.living_room_accumulator_boost_minutes_remaining') }} min
-        icon: mdi:timer-outline
-      - type: entity
-        entity: sensor.living_room_accumulator_boost_end
-        name: Ends
-      - type: service
-        service: termoweb.start_boost
-        data:
-          entity_id: climate.living_room_accumulator
-        name: Start boost
-        icon: mdi:fire
-      - type: service
-        service: termoweb.cancel_boost
-        data:
-          entity_id: climate.living_room_accumulator
-        name: Cancel
-        icon: mdi:stop-circle-outline
-```
+1. Issue `select: true` and wait for `201 {}`.
+2. Call `/boost` to start or stop Boost.
+3. Observe the WebSocket `update` on `/{type}/{addr}/status` (followed by a `dev_data` snapshot).
+4. Release the claim with `select: false`.
 
-The stack keeps climate control centred on the thermostat card, mirrors the
-real-time boost state, and exposes single-tap start/stop actions that call the
-validated helper services. The tile’s state reflects the configured preset
-duration so users can confirm the runtime before triggering a boost.
+### UX guidance
+
+- Enforce a one-decimal string for the setpoint field and uppercase unit toggles before enabling the submit button.
+- Surface the projected end time using `boost_end_day` + `boost_end_min` to help users understand runtime.
+- Disable Boost controls when selection fails or is pending retry; surface an inline error so the user knows why actions are blocked.
+
+### Error paths
+
+- **Selection timeout:** retry the claim with exponential backoff; surface a warning and block writes until the claim succeeds.
+- **WebSocket unavailable:** complete the HTTP write, then schedule a one-off REST poll to refresh state while reconnect logic runs.
+- **Write failure after claim:** release selection explicitly before retrying to avoid dangling locks from previous attempts.
+- **Reconnect storms:** apply jittered backoff between WebSocket attempts to avoid thundering herd against the backend.
 
 ## Python class hierarchy
 
