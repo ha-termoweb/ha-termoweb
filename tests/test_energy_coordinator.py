@@ -20,12 +20,7 @@ from custom_components.termoweb.const import (
     HTR_ENERGY_UPDATE_INTERVAL,
     signal_ws_data,
 )
-from custom_components.termoweb.inventory import (
-    AccumulatorNode,
-    HeaterNode,
-    Node,
-    normalize_heater_addresses,
-)
+from custom_components.termoweb.inventory import AccumulatorNode, HeaterNode, Node
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_connect, dispatcher_send
 from homeassistant.helpers.update_coordinator import UpdateFailed
@@ -176,9 +171,15 @@ def test_inventory_addresses_by_type_merges_forward_map(
         "_heater_address_map_cache",
         ({"htr": ("1", "2")}, {"1": frozenset({"htr"}), "2": frozenset({"htr"})}),
     )
+    object.__setattr__(
+        inventory,
+        "_power_monitor_address_map_cache",
+        ({"pmo": ("P1",)}, {"P1": frozenset({"pmo"})}),
+    )
 
     addresses = coord._inventory_addresses_by_type()
     assert addresses["htr"] == ["1", "2"]
+    assert addresses["pmo"] == ["P1"]
 
 
 def test_update_nodes_builds_inventory_from_payload(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1018,7 +1019,7 @@ def test_async_refresh_heater_uses_merge_helper(
 
     assert len(calls) == 1
     cache_map, current, payload = calls[0]
-    assert cache_map == {"htr": ["A"]}
+    assert cache_map == {"htr": ["A"], "pmo": []}
     assert current == {}
     assert payload == {"htr": {"A": {"mode": "heat"}}}
 
@@ -1393,7 +1394,9 @@ def test_handle_ws_samples_branching(monkeypatch: pytest.MonkeyPatch) -> None:
 
     hass = HomeAssistant()
     client = types.SimpleNamespace()
-    coord = EnergyStateCoordinator(hass, client, "dev", {"htr": ["A"], "acm": ["B"]})
+    coord = EnergyStateCoordinator(
+        hass, client, "dev", {"htr": ["A"], "acm": ["B"], "pmo": ["P1"]}
+    )
 
     coord.handle_ws_samples("other", {})
 
@@ -1411,8 +1414,10 @@ def test_handle_ws_samples_branching(monkeypatch: pytest.MonkeyPatch) -> None:
             "nodes_by_type": {
                 "htr": {"addrs": ["A"], "energy": {}, "power": {}},
                 "acm": [],
+                "pmo": {"addrs": ["P1"], "energy": {}, "power": {}},
             },
             "htr": {"addrs": ["A"], "energy": {}, "power": {}},
+            "pmo": {"addrs": ["P1"], "energy": {}, "power": {}},
         }
     }
     coord._last = {("htr", "A"): (float("nan"), 1.0)}
@@ -1427,7 +1432,7 @@ def test_handle_ws_samples_branching(monkeypatch: pytest.MonkeyPatch) -> None:
 
     updates = {
         "": {"1": {"samples": []}},
-        "pmo": {"1": {"samples": []}},
+        "pmo": {"P1": {"samples": []}},
         "htr": {
             "A": {"samples": []},
             "unknown": {"samples": [{"t": 100.0, "counter": 500.0}]},
@@ -1500,6 +1505,39 @@ def test_handle_ws_samples_skips_empty_points() -> None:
     )
 
     assert coord._last == {}
+
+
+def test_pmo_samples_scale_and_power() -> None:
+    """Power monitor counters should convert from watt-seconds to kWh."""
+
+    hass = HomeAssistant()
+    client = types.SimpleNamespace()
+    coord = EnergyStateCoordinator(hass, client, "dev", {"pmo": ["M"]})
+    coord.data = {
+        "dev": {
+            "nodes_by_type": {
+                "pmo": {"addrs": ["M"], "energy": {}, "power": {}},
+                "htr": {"addrs": [], "energy": {}, "power": {}},
+            },
+            "pmo": {"addrs": ["M"], "energy": {}, "power": {}},
+            "htr": {"addrs": [], "energy": {}, "power": {}},
+        }
+    }
+    energy_bucket: dict[str, float] = {}
+    power_bucket: dict[str, float] = {}
+    coord._last = {("pmo", "M"): (1000.0, 1.0)}
+
+    coord._process_energy_sample(
+        "pmo",
+        "M",
+        4600.0,
+        7_200_000.0,
+        energy_bucket,
+        power_bucket,
+    )
+
+    assert energy_bucket["M"] == pytest.approx(2.0)
+    assert power_bucket["M"] == pytest.approx(1000.0)
 
 def test_heater_energy_samples_empty_on_api_error() -> None:
     async def _run() -> None:
@@ -1676,8 +1714,9 @@ def test_energy_coordinator_uses_heater_alias() -> None:
 
         await coord.async_refresh()
 
-        assert coord._addresses_by_type == {"htr": ["A"], "acm": ["B"]}
+        assert coord._addresses_by_type == {"htr": ["A"], "acm": ["B"], "pmo": []}
         assert coord._compat_aliases["heater"] == "htr"
+        assert coord._compat_aliases["pmo"] == "pmo"
 
         dev_data = coord.data["dev"]
         assert dev_data["htr"]["energy"]["A"] == pytest.approx(0.5)
@@ -1768,12 +1807,14 @@ def test_energy_state_coordinator_update_addresses_filters_duplicates() -> None:
 
     coord.update_addresses(["A", " ", "B", "A", "B ", ""])
 
-    expected_map, _ = normalize_heater_addresses(["A", " ", "B", "A", "B ", ""])
-    filtered_expected = {
-        key: list(value) for key, value in expected_map.items() if value
-    }
-    assert coord._addresses_by_type == filtered_expected
-    expected_flat = [addr for addrs in filtered_expected.values() for addr in addrs]
+    expected_map, _ = coord_module._normalize_energy_payload(["A", " ", "B", "A", "B ", ""])
+    expected_map = {key: list(value) for key, value in expected_map.items()}
+    assert coord._addresses_by_type == expected_map
+    expected_flat = [
+        addr
+        for node_type in coord_module.ENERGY_NODE_TYPES
+        for addr in expected_map.get(node_type, [])
+    ]
     assert coord._addrs == expected_flat
 
 
@@ -1786,14 +1827,16 @@ def test_energy_state_coordinator_update_addresses_ignores_invalid_types() -> No
         {" ": ["skip"], "htr": ["A"], "acm": ["", "B"], "foo": ["X"]}
     )
 
-    expected_map, _ = normalize_heater_addresses(
+    expected_map, _ = coord_module._normalize_energy_payload(
         {" ": ["skip"], "htr": ["A"], "acm": ["", "B"], "foo": ["X"]}
     )
-    filtered_expected = {
-        key: list(value) for key, value in expected_map.items() if value
-    }
-    assert coord._addresses_by_type == filtered_expected
-    expected_flat = [addr for addrs in filtered_expected.values() for addr in addrs]
+    expected_map = {key: list(value) for key, value in expected_map.items()}
+    assert coord._addresses_by_type == expected_map
+    expected_flat = [
+        addr
+        for node_type in coord_module.ENERGY_NODE_TYPES
+        for addr in expected_map.get(node_type, [])
+    ]
     assert coord._addrs == expected_flat
 
 
@@ -1804,14 +1847,16 @@ def test_energy_state_coordinator_update_addresses_accepts_map() -> None:
 
     coord.update_addresses({"htr": ["A", "A"], "acm": ["B", ""], "foo": ["X"]})
 
-    expected_map, _ = normalize_heater_addresses(
+    expected_map, _ = coord_module._normalize_energy_payload(
         {"htr": ["A", "A"], "acm": ["B", ""], "foo": ["X"]}
     )
-    filtered_expected = {
-        key: list(value) for key, value in expected_map.items() if value
-    }
-    assert coord._addresses_by_type == filtered_expected
-    expected_flat = [addr for addrs in filtered_expected.values() for addr in addrs]
+    expected_map = {key: list(value) for key, value in expected_map.items()}
+    assert coord._addresses_by_type == expected_map
+    expected_flat = [
+        addr
+        for node_type in coord_module.ENERGY_NODE_TYPES
+        for addr in expected_map.get(node_type, [])
+    ]
     assert coord._addrs == expected_flat
 
 
@@ -1824,9 +1869,13 @@ def test_energy_state_coordinator_update_addresses_uses_helper(
 
     def fake_normalize(addrs: Any) -> tuple[dict[str, list[str]], dict[str, str]]:
         calls.append(addrs)
-        return {"htr": ["A"]}, {"htr": "htr"}
+        return {"htr": ["A"], "acm": [], "pmo": []}, {
+            "htr": "htr",
+            "acm": "acm",
+            "pmo": "pmo",
+        }
 
-    monkeypatch.setattr(coord_module, "_normalize_heater_payload", fake_normalize)
+    monkeypatch.setattr(coord_module, "_normalize_energy_payload", fake_normalize)
 
     coord = EnergyStateCoordinator(hass, client, "dev", [])  # type: ignore[arg-type]
     assert calls == [[]]
@@ -1834,34 +1883,35 @@ def test_energy_state_coordinator_update_addresses_uses_helper(
     coord.update_addresses(["ignored"])
 
     assert calls[-1] == ["ignored"]
-    assert coord._addresses_by_type == {"htr": ["A"]}
-    assert coord._compat_aliases == {"htr": "htr"}
+    assert coord._addresses_by_type == {"htr": ["A"], "acm": [], "pmo": []}
+    assert coord._compat_aliases == {"htr": "htr", "acm": "acm", "pmo": "pmo"}
 
 
-def test_normalize_heater_payload_handles_none() -> None:
-    mapping, aliases = coord_module._normalize_heater_payload(None)
+def test_normalize_energy_payload_handles_none() -> None:
+    mapping, aliases = coord_module._normalize_energy_payload(None)
 
     assert mapping == {}
-    assert aliases == {"htr": "htr"}
+    assert aliases == {"htr": "htr", "acm": "acm", "pmo": "pmo"}
 
 
-def test_normalize_heater_payload_aliases() -> None:
-    mapping, aliases = coord_module._normalize_heater_payload(
-        {"heater": ["1"], "acm": ["2"]}
+def test_normalize_energy_payload_aliases() -> None:
+    mapping, aliases = coord_module._normalize_energy_payload(
+        {"heater": ["1"], "acm": ["2"], "power_monitor": ["P"]}
     )
 
-    assert mapping == {"htr": ["1"], "acm": ["2"]}
+    assert mapping == {"htr": ["1"], "acm": ["2"], "pmo": ["P"]}
     assert aliases["heater"] == "htr"
     assert aliases["acm"] == "acm"
+    assert aliases.get("power_monitor", aliases.get("pmo")) == "pmo"
 
 
-def test_normalize_heater_payload_accepts_string() -> None:
+def test_normalize_energy_payload_accepts_string() -> None:
     """String payloads should be coerced into heater address lists."""
 
-    mapping, aliases = coord_module._normalize_heater_payload(" 5 ")
+    mapping, aliases = coord_module._normalize_energy_payload(" 5 ")
 
-    assert mapping == {"htr": ["5"]}
-    assert aliases == {"htr": "htr"}
+    assert mapping == {"htr": ["5"], "acm": [], "pmo": []}
+    assert aliases == {"htr": "htr", "acm": "acm", "pmo": "pmo"}
 
 
 def test_energy_state_coordinator_async_update_adds_legacy_bucket() -> None:

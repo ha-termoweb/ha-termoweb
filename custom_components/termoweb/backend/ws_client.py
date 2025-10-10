@@ -116,6 +116,7 @@ def forward_ws_sample_updates(
             _merge_aliases(pmo_aliases)
 
     normalized_updates: dict[str, dict[str, Any]] = {}
+    lease_seconds: float | None = None
     for raw_type, section in updates.items():
         if not isinstance(section, Mapping):
             continue
@@ -123,8 +124,32 @@ def forward_ws_sample_updates(
         if not node_type:
             continue
         canonical_type = alias_map.get(node_type, node_type)
+        samples_section: Mapping[str, Any] | None = None
+        lease_candidate: Any = None
+        if "samples" in section and isinstance(section.get("samples"), Mapping):
+            samples_section = section["samples"]
+            lease_candidate = section.get("lease_seconds")
+        else:
+            samples_section = section
+            lease_candidate = section.get("lease_seconds")
+        if lease_candidate is not None:
+            try:
+                lease_value = float(lease_candidate)
+            except (TypeError, ValueError):
+                lease_value = None
+            else:
+                if lease_value > 0:
+                    lease_seconds = (
+                        max(lease_seconds or 0.0, lease_value)
+                        if lease_seconds is not None
+                        else lease_value
+                    )
+        if not isinstance(samples_section, Mapping):
+            continue
         bucket = normalized_updates.setdefault(canonical_type, {})
-        for raw_addr, payload in section.items():
+        for raw_addr, payload in samples_section.items():
+            if raw_addr == "lease_seconds":
+                continue
             addr = normalize_node_addr(raw_addr, use_default_when_falsey=True)
             if not addr:
                 continue
@@ -143,6 +168,7 @@ def forward_ws_sample_updates(
         handler(
             dev_id,
             normalized_updates,
+            lease_seconds=lease_seconds,
         )
     except Exception:  # pragma: no cover - defensive logging
         active_logger.debug(

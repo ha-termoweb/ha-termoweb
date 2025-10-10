@@ -350,7 +350,10 @@ class RESTClient:
 
         node_type, addr = self._resolve_node_descriptor(node)
         headers = await self._authed_headers()
-        path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}/settings"
+        if node_type == "pmo":
+            path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}"
+        else:
+            path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}/settings"
         data = await self._request("GET", path, headers=headers)
         self._log_non_htr_payload(
             node_type=node_type,
@@ -445,21 +448,33 @@ class RESTClient:
                 _LOGGER.debug("Unexpected htr sample shape: %s", item)
                 _LOGGER.debug("Unexpected htr sample timestamp: %r", timestamp)
                 continue
-            counter = item.get("counter")
-            if counter is None:
-                counter = item.get("value")
-            if counter is None:
-                counter = item.get("energy")
-            if counter is None:
+            counter_value = item.get("counter")
+            counter_min = item.get("counter_min")
+            counter_max = item.get("counter_max")
+            if isinstance(counter_value, dict):
+                counter_min = counter_value.get("min", counter_min)
+                counter_max = counter_value.get("max", counter_max)
+                if "value" in counter_value:
+                    counter_value = counter_value.get("value")
+                elif "counter" in counter_value:
+                    counter_value = counter_value.get("counter")
+            if counter_value is None:
+                counter_value = item.get("value")
+            if counter_value is None:
+                counter_value = item.get("energy")
+            if counter_value is None:
                 _LOGGER.debug("Unexpected htr sample shape: %s", item)
                 _LOGGER.debug("Unexpected htr sample counter: %r", item)
                 continue
-            samples.append(
-                {
-                    "t": int(float(timestamp) / timestamp_divisor),
-                    "counter": str(counter),
-                }
-            )
+            sample: dict[str, str | int] = {
+                "t": int(float(timestamp) / timestamp_divisor),
+                "counter": str(counter_value),
+            }
+            if counter_min is not None:
+                sample["counter_min"] = str(counter_min)
+            if counter_max is not None:
+                sample["counter_max"] = str(counter_max)
+            samples.append(sample)
         return samples
 
     async def set_node_settings(
@@ -725,13 +740,19 @@ class RESTClient:
         if node_type == "htr":
             return
 
+        try:
+            preview = redact_text(repr(payload))
+        except Exception:  # pragma: no cover - defensive
+            preview = "<unreprable>"
+        if len(preview) > 500:
+            preview = f"{preview[:497]}..."
         _LOGGER.debug(
             "%s node %s/%s (%s) payload: %s",
             stage,
             mask_identifier(dev_id),
             mask_identifier(addr),
             node_type,
-            redact_text(repr(payload)),
+            preview,
         )
 
     def normalise_ws_nodes(self, nodes: dict[str, Any]) -> dict[str, Any]:

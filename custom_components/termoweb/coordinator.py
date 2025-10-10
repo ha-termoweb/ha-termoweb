@@ -49,6 +49,8 @@ class RaiseUpdateFailedCoordinator(DataUpdateCoordinator[_DataT]):
 _PENDING_SETTINGS_TTL = 10.0
 _SETPOINT_TOLERANCE = 0.05
 
+ENERGY_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm", "pmo"})
+
 
 @dataclass
 class PendingSetting:
@@ -106,16 +108,18 @@ def _ensure_heater_section(
     return heater_section
 
 
-def _normalize_heater_payload(
+def _normalize_energy_payload(
     payload: Mapping[str, Iterable[Any]] | Iterable[Any] | None,
 ) -> tuple[dict[str, list[str]], dict[str, str]]:
-    """Return canonical heater address mapping and aliases for ``payload``."""
+    """Return canonical energy node address mapping and aliases for ``payload``."""
 
     if payload is None:
-        return {}, {"htr": "htr"}
+        return {}, {node_type: node_type for node_type in ENERGY_NODE_TYPES}
 
     cleaned_map: dict[str, list[str]] = {}
-    compat_aliases: dict[str, str] = {"htr": "htr"}
+    compat_aliases: dict[str, str] = {
+        node_type: node_type for node_type in ENERGY_NODE_TYPES
+    }
     if isinstance(payload, Mapping):
         sources: Iterable[tuple[Any, Iterable[Any] | Any]] = payload.items()
     else:
@@ -128,7 +132,11 @@ def _normalize_heater_payload(
         alias_target = node_type
         if node_type in {"heater", "heaters", "htr"}:
             alias_target = "htr"
-        if alias_target not in HEATER_NODE_TYPES:
+        elif node_type in {"accumulator", "accumulators", "acm"}:
+            alias_target = "acm"
+        elif node_type in {"power_monitor", "power_monitors", "pmo"}:
+            alias_target = "pmo"
+        if alias_target not in ENERGY_NODE_TYPES:
             continue
 
         compat_aliases.setdefault(alias_target, alias_target)
@@ -149,8 +157,9 @@ def _normalize_heater_payload(
             seen.add(addr)
             bucket.append(addr)
 
-    cleaned_map.setdefault("htr", [])
-    compat_aliases.setdefault("htr", "htr")
+    for node_type in ENERGY_NODE_TYPES:
+        cleaned_map.setdefault(node_type, [])
+        compat_aliases.setdefault(node_type, node_type)
     return cleaned_map, compat_aliases
 
 
@@ -208,6 +217,16 @@ class StateCoordinator(
 
         forward_map, _ = inventory.heater_address_map
         for node_type, addrs in forward_map.items():
+            bucket = addresses.setdefault(node_type, [])
+            seen = set(bucket)
+            for addr in addrs:
+                normalized = normalize_node_addr(addr)
+                if normalized and normalized not in seen:
+                    seen.add(normalized)
+                    bucket.append(normalized)
+
+        pmo_forward, _ = inventory.power_monitor_address_map
+        for node_type, addrs in pmo_forward.items():
             bucket = addresses.setdefault(node_type, [])
             seen = set(bucket)
             for addr in addrs:
@@ -1048,6 +1067,11 @@ class EnergyStateCoordinator(
         self._ws_lease: float = 0.0
         self._ws_deadline: float | None = None
         self._ws_margin_default = 60.0
+        self._counter_scales: dict[str, float] = {
+            "htr": 1000.0,
+            "acm": 1000.0,
+            "pmo": 3_600_000.0,
+        }
         self.update_addresses(addrs)
 
     def update_addresses(
@@ -1055,7 +1079,7 @@ class EnergyStateCoordinator(
     ) -> None:
         """Replace the tracked heater addresses with ``addrs``."""
 
-        cleaned_map, compat_aliases = _normalize_heater_payload(addrs)
+        cleaned_map, compat_aliases = _normalize_energy_payload(addrs)
         self._addresses_by_type = cleaned_map
         self._compat_aliases = compat_aliases
         self._addr_lookup = {
@@ -1064,7 +1088,9 @@ class EnergyStateCoordinator(
             for addr in addrs_for_type
         }
         self._addrs = [
-            addr for addrs_for_type in cleaned_map.values() for addr in addrs_for_type
+            addr
+            for node_type in ENERGY_NODE_TYPES
+            for addr in cleaned_map.get(node_type, [])
         ]
 
         valid_keys = {
@@ -1089,7 +1115,10 @@ class EnergyStateCoordinator(
     ) -> bool:
         """Update cached energy and derived power for ``addr``."""
 
-        kwh = counter / 1000.0
+        scale = float(self._counter_scales.get(node_type, 1000.0) or 1000.0)
+        if scale <= 0:
+            scale = 1000.0
+        kwh = counter / scale
         energy_bucket[addr] = kwh
         key = (node_type, addr)
         prev = self._last.get(key)
@@ -1152,6 +1181,10 @@ class EnergyStateCoordinator(
 
                     last = samples[-1]
                     counter = float_or_none(last.get("counter"))
+                    if counter is None:
+                        counter = float_or_none(last.get("counter_max"))
+                    if counter is None:
+                        counter = float_or_none(last.get("counter_min"))
                     t = float_or_none(last.get("t"))
                     if counter is None or t is None:
                         _LOGGER.debug(
@@ -1250,8 +1283,23 @@ class EnergyStateCoordinator(
                 if extracted:
                     return extracted
             t = float_or_none(payload.get("t"))
-            counter = float_or_none(payload.get("counter"))
-            if t is None or counter is None:
+            if t is None:
+                return None
+            counter_raw = payload.get("counter")
+            counter = float_or_none(counter_raw)
+            counter_min = float_or_none(payload.get("counter_min"))
+            counter_max = float_or_none(payload.get("counter_max"))
+            if isinstance(counter_raw, Mapping):
+                counter = float_or_none(counter_raw.get("value")) or float_or_none(
+                    counter_raw.get("counter")
+                )
+                counter_min = counter_min or float_or_none(counter_raw.get("min"))
+                counter_max = counter_max or float_or_none(counter_raw.get("max"))
+            if counter is None:
+                counter = counter_max or counter_min
+            if counter is None:
+                counter = float_or_none(payload.get("value"))
+            if counter is None:
                 return None
             return t, counter
         if isinstance(payload, Iterable) and not isinstance(payload, (str, bytes)):

@@ -186,13 +186,19 @@ def test_forward_ws_sample_updates_handles_power_monitors(
         hass,
         "entry",
         "dev",
-        {"power_monitor": {"7": {"power": 100}}},
+        {
+            "power_monitor": {
+                "samples": {"7": {"power": 100}},
+                "lease_seconds": 90,
+            }
+        },
     )
 
     handler.assert_called_once()
     args = handler.call_args[0]
     assert args[0] == "dev"
     assert args[1] == {"pmo": {"7": {"power": 100}}}
+    assert handler.call_args.kwargs.get("lease_seconds") == 90
 
 
 def test_forward_ws_sample_updates_skips_invalid_sections(
@@ -260,7 +266,10 @@ def test_forward_ws_sample_updates_inventory_validation(
         {
             None: {"1": {"power": 10}},
             "acm": "ignored",
-            "pmo": {"": {"power": 3}, "3": {"power": 5}},
+            "pmo": {
+                "samples": {"": {"power": 3}, "3": {"power": 5}},
+                "lease_seconds": 15,
+            },
         },
     )
 
@@ -268,6 +277,7 @@ def test_forward_ws_sample_updates_inventory_validation(
     args = handler.call_args[0]
     assert args[0] == "dev"
     assert args[1] == {"pmo": {"3": {"power": 5}}}
+    assert handler.call_args.kwargs.get("lease_seconds") == 15
 
 
 def test_termoweb_client_initialises_namespace_and_handlers(

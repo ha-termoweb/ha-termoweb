@@ -749,8 +749,11 @@ def test_forward_sample_updates_invokes_handler(monkeypatch: pytest.MonkeyPatch)
     client.hass.data[module.DOMAIN]["entry"]["energy_coordinator"] = SimpleNamespace(
         handle_ws_samples=handler
     )
-    client._forward_sample_updates({"htr": {"1": {"power": 10}}})
+    client._forward_sample_updates(
+        {"htr": {"samples": {"1": {"power": 10}}, "lease_seconds": 30}}
+    )
     handler.assert_called_once()
+    assert handler.call_args.kwargs.get("lease_seconds") == 30
 
 
 def test_forward_sample_updates_handles_missing_handler(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -758,9 +761,9 @@ def test_forward_sample_updates_handles_missing_handler(monkeypatch: pytest.Monk
 
     client, _sio, _ = _make_client(monkeypatch)
     client.hass.data = {}
-    client._forward_sample_updates({"htr": {"1": {}}})
+    client._forward_sample_updates({"htr": {"samples": {"1": {}}}})
     client.hass.data = {module.DOMAIN: {"entry": {}}}
-    client._forward_sample_updates({"htr": {"1": {}}})
+    client._forward_sample_updates({"htr": {"samples": {"1": {}}}})
 
 
 def test_apply_nodes_payload_debug_branches(
@@ -1795,15 +1798,16 @@ def test_forward_sample_updates_invokes_handler(monkeypatch: pytest.MonkeyPatch)
     client, _sio, _ = _make_client(monkeypatch)
     handler_called: dict[str, Any] = {}
     energy_handler = SimpleNamespace(
-        handle_ws_samples=lambda dev_id, payload: handler_called.update({
+        handle_ws_samples=lambda dev_id, payload, **kwargs: handler_called.update({
             "dev_id": dev_id,
             "payload": payload,
+            "lease": kwargs.get("lease_seconds"),
         })
     )
     client.hass.data[module.DOMAIN]["entry"]["energy_coordinator"] = energy_handler
     client._forward_sample_updates({"htr": {"samples": {"1": {"temp": 20}}}})
     assert handler_called["dev_id"] == "device"
-    assert handler_called["payload"]["htr"]["samples"]["1"]["temp"] == 20
+    assert handler_called["payload"]["htr"]["1"]["temp"] == 20
 
 
 def test_extract_nodes_variants(monkeypatch: pytest.MonkeyPatch) -> None:
