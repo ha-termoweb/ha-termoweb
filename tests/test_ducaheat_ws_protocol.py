@@ -135,9 +135,17 @@ def _make_client(monkeypatch: pytest.MonkeyPatch) -> ducaheat_ws.DucaheatWSClien
     )
     monkeypatch.setattr(client, "_get_token", AsyncMock(return_value="token"))
     monkeypatch.setattr(ducaheat_ws, "_rand_t", lambda: "P123456")
-    hass.data[ducaheat_ws.DOMAIN]["entry"]["snapshot"] = InstallationSnapshot(
-        dev_id="device",
-        raw_nodes={"nodes": [{"type": "htr", "addr": "1"}]},
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
+    inventory = Inventory(
+        "device",
+        raw_nodes,
+        build_node_inventory(raw_nodes),
+    )
+    hass.data[ducaheat_ws.DOMAIN]["entry"].update(
+        {
+            "inventory": inventory,
+            "nodes": raw_nodes,
+        }
     )
     return client
 
@@ -1611,9 +1619,16 @@ async def test_subscribe_feeds_handles_missing_targets(
     """When no subscription targets exist the helper should no-op."""
 
     client = _make_client(monkeypatch)
-    client.hass.data[ducaheat_ws.DOMAIN]["entry"]["snapshot"] = InstallationSnapshot(
-        dev_id="device",
-        raw_nodes={},
+    raw_nodes = {}
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"].update(
+        {
+            "nodes": raw_nodes,
+            "inventory": Inventory(
+                "device",
+                raw_nodes,
+                build_node_inventory(raw_nodes),
+            ),
+        }
     )
     emit_mock = AsyncMock()
     monkeypatch.setattr(client, "_emit_sio", emit_mock)
@@ -1631,9 +1646,16 @@ async def test_subscribe_feeds_uses_coordinator_fallback(
     """Fallback coordinator addresses should be subscribed when snapshot empty."""
 
     client = _make_client(monkeypatch)
-    client.hass.data[ducaheat_ws.DOMAIN]["entry"]["snapshot"] = InstallationSnapshot(
-        dev_id="device",
-        raw_nodes={},
+    raw_nodes = {}
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"].update(
+        {
+            "nodes": raw_nodes,
+            "inventory": Inventory(
+                "device",
+                raw_nodes,
+                build_node_inventory(raw_nodes),
+            ),
+        }
     )
     client._coordinator._addrs = lambda: ["5", " ", "5"]
 
@@ -1657,6 +1679,8 @@ async def test_subscribe_feeds_prefers_coordinator_inventory(
     """Coordinator inventory should avoid resolver lookups."""
 
     client = _make_client(monkeypatch)
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"].pop("inventory", None)
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"].pop("nodes", None)
     inventory_nodes = build_node_inventory([{"type": "htr", "addr": "3"}])
     coordinator_inventory = Inventory(
         client.dev_id,
@@ -1690,6 +1714,8 @@ async def test_subscribe_feeds_passes_nodes_payload_to_resolver(
     """Raw node payloads should be forwarded to the inventory resolver."""
 
     client = _make_client(monkeypatch)
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"].pop("inventory", None)
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"].pop("nodes", None)
     captured: dict[str, Any] = {}
     nodes_payload = {"htr": {"samples": {"7": {}}}}
     coordinator_nodes = build_node_inventory([{"type": "htr", "addr": "7"}])
@@ -1747,6 +1773,8 @@ async def test_subscribe_feeds_handles_mapping_record(
     """Mapping entries should be normalised to mutable state."""
 
     client = _make_client(monkeypatch)
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"].pop("inventory", None)
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"].pop("nodes", None)
     nodes_payload = {"nodes": [{"addr": "8", "type": "htr"}]}
     snapshot = InstallationSnapshot(dev_id="device", raw_nodes={"nodes": []})
     mapping_record = MappingProxyType({"nodes": nodes_payload, "snapshot": snapshot})
@@ -1835,6 +1863,8 @@ async def test_subscribe_feeds_logs_error_when_inventory_missing(
     """Inventory resolution failures should be logged and abort subscriptions."""
 
     client = _make_client(monkeypatch)
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"].pop("inventory", None)
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"].pop("nodes", None)
     caplog.set_level(logging.ERROR)
 
     def _missing_inventory(

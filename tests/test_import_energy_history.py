@@ -2459,12 +2459,19 @@ def test_energy_polling_matches_import(monkeypatch: pytest.MonkeyPatch) -> None:
             "uid",
             "Device A",
         )
+        raw_nodes = {"nodes": [{"type": "htr", "addr": "A"}]}
+        inventory = inventory_module.Inventory(
+            "dev",
+            raw_nodes,
+            inventory_module.build_node_inventory(raw_nodes),
+        )
         total_entity = sensor_mod.InstallationTotalEnergySensor(
             coordinator,
             "entry",
             "dev",
             "Total",
             "total_uid",
+            inventory,
         )
 
         assert energy_entity.native_value == pytest.approx(1.3)
@@ -2948,9 +2955,12 @@ def test_service_uses_snapshot_inventory(monkeypatch: pytest.MonkeyPatch) -> Non
 
         rec = hass.data[const.DOMAIN][entry.entry_id]
         rec.pop("node_inventory", None)
-        rec["snapshot"] = InstallationSnapshot(
-            dev_id="dev",
-            raw_nodes={"nodes": [{"type": "htr", "addr": "A"}]},
+        raw_nodes = {"nodes": [{"type": "htr", "addr": "A"}]}
+        rec["nodes"] = raw_nodes
+        rec["inventory"] = inventory_module.Inventory(
+            "dev",
+            raw_nodes,
+            inventory_module.build_node_inventory(raw_nodes),
         )
 
         hass.data[const.DOMAIN]["other"] = object()

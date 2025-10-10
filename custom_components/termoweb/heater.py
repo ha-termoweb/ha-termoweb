@@ -226,10 +226,19 @@ def _resolve_inventory_metadata(
 
     if isinstance(inventory_or_details, tuple) and len(inventory_or_details) == 3:
         nodes_by_type, addrs_by_type, resolver = inventory_or_details
-        mapped_nodes = {
-            node_type: list(bucket or [])
-            for node_type, bucket in dict(nodes_by_type).items()
-        }
+        mapped_nodes: dict[str, list[Node]] = {}
+        for node_type, bucket in dict(nodes_by_type).items():
+            if isinstance(bucket, Mapping):
+                values = list(bucket.values())
+            elif isinstance(bucket, (str, bytes)):
+                values = []
+            elif isinstance(bucket, Iterable):
+                values = list(bucket)
+            elif bucket is None:
+                values = []
+            else:
+                values = [bucket]
+            mapped_nodes[node_type] = values
         mapped_addrs = {
             node_type: list(dict(addrs_by_type).get(node_type, []))
             for node_type in HEATER_NODE_TYPES
@@ -938,19 +947,29 @@ class HeaterNodeBase(CoordinatorEntity):
         if self._extract_device_addresses(device_entry, node_type):
             return True
 
+        addresses_by_type = device_entry.get("addresses_by_type")
+        has_address_map = isinstance(addresses_by_type, Mapping)
+        nodes_by_type = device_entry.get("nodes_by_type")
+        has_nodes_by_type = isinstance(nodes_by_type, Mapping)
+        if has_address_map:
+            return True
+
+        has_inventory = isinstance(device_entry.get("inventory"), Inventory)
+        supporting_metadata = has_nodes_by_type or has_address_map or has_inventory
+
         settings = device_entry.get("settings")
-        if isinstance(settings, Mapping):
+        if supporting_metadata and isinstance(settings, Mapping):
             node_settings = settings.get(node_type)
             if isinstance(node_settings, Mapping) and node_settings:
                 return True
 
         legacy = device_entry.get("htr")
-        if node_type == "htr" and isinstance(legacy, Mapping):
+        if supporting_metadata and node_type == "htr" and isinstance(legacy, Mapping):
             legacy_settings = legacy.get("settings")
             if isinstance(legacy_settings, Mapping) and legacy_settings:
                 return True
 
-        return isinstance(device_entry.get("inventory"), Inventory)
+        return has_inventory
 
     def _device_record(self) -> dict[str, Any] | None:
         """Return the coordinator cache entry for this device."""

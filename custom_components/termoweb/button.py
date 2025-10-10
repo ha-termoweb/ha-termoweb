@@ -64,7 +64,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
     dev_id = data["dev_id"]
 
     inventory = _resolve_inventory(data)
-    default_name = lambda addr: f"Heater {addr}"
+    def default_name(addr: str) -> str:
+        """Return a placeholder name for heater nodes."""
+
+        return f"Heater {addr}"
     if inventory is not None:
         heater_details = heater_platform_details_from_inventory(
             inventory,

@@ -2327,6 +2327,10 @@ def test_heater_properties_and_ws_update() -> None:
             dt_util.NOW = original_now
 
         original_nodes_by_type = coordinator.data[dev_id]["nodes_by_type"]
+        coordinator.data[dev_id].pop("inventory", None)
+        coordinator.data[dev_id].pop("addresses_by_type", None)
+        coordinator.data[dev_id].pop("nodes", None)
+        coordinator.data[dev_id]["htr"] = {}
         coordinator.data[dev_id]["nodes_by_type"] = None
         assert heater.available is False
         coordinator.data[dev_id]["nodes_by_type"] = original_nodes_by_type

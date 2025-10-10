@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 import logging
 import math
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -40,7 +41,6 @@ from .heater import (
     log_skipped_nodes,
 )
 from .identifiers import build_heater_energy_unique_id
-from .installation import ensure_snapshot
 from .inventory import Inventory, normalize_node_addr, normalize_node_type
 from .utils import build_gateway_device_info, float_or_none
 
@@ -127,7 +127,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
     inventory = _resolve_inventory(data)
-    default_name = lambda addr: f"Node {addr}"
+    def default_name(addr: str) -> str:
+        """Return a placeholder name for heater nodes."""
+
+        return f"Node {addr}"
     if inventory is not None:
         heater_details = heater_platform_details_from_inventory(
             inventory,
@@ -176,14 +179,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
     energy_nodes_map.setdefault("acm", list(addrs_by_type.get("acm", [])))
     energy_nodes_map.setdefault("pmo", [])
 
-    snapshot = ensure_snapshot(data)
-    if snapshot is not None:
-        forward_pmo, _ = snapshot.power_monitor_sample_address_map
-        _merge_energy_addresses(forward_pmo)
-
-    inventory_obj = data.get("inventory")
-    if isinstance(inventory_obj, Inventory):
-        forward_pmo, _ = inventory_obj.power_monitor_sample_address_map
+    if isinstance(inventory, Inventory):
+        forward_pmo, _ = inventory.power_monitor_sample_address_map
         _merge_energy_addresses(forward_pmo)
 
     if energy_coordinator is None:
@@ -337,6 +334,12 @@ class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
         """Return the dictionary with the requested metric values."""
         heater_section = self._heater_section()
         metric = heater_section.get(self._metric_key)
+        if not isinstance(metric, Mapping):
+            device_entry = self._device_record()
+            if isinstance(device_entry, Mapping):
+                node_section = device_entry.get(self._node_type)
+                if isinstance(node_section, Mapping):
+                    metric = node_section.get(self._metric_key)
         return metric if isinstance(metric, dict) else {}
 
     def _raw_native_value(self) -> Any:
