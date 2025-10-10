@@ -1691,7 +1691,12 @@ async def test_subscribe_feeds_passes_nodes_payload_to_resolver(
     client = _make_client(monkeypatch)
     captured: dict[str, Any] = {}
     nodes_payload = {"htr": {"samples": {"7": {}}}}
-    client._coordinator.node_inventory = ["7", " "]
+    coordinator_nodes = build_node_inventory([{"type": "htr", "addr": "7"}])
+    client._coordinator._inventory = Inventory(
+        client.dev_id,
+        {"nodes": [{"type": "htr", "addr": "7"}]},
+        coordinator_nodes,
+    )
 
     def _fake_resolve(
         record: Mapping[str, Any],
@@ -1731,7 +1736,7 @@ async def test_subscribe_feeds_passes_nodes_payload_to_resolver(
     assert captured["dev_id"] == client.dev_id
     assert isinstance(captured["record"], Mapping)
     assert captured["node_list"] is not None
-    assert "7" in captured["node_list"]
+    assert any(getattr(node, "addr", None) == "7" for node in captured["node_list"])
 
 
 @pytest.mark.asyncio
