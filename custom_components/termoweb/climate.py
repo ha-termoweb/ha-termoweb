@@ -28,6 +28,7 @@ from .heater import (
     iter_heater_maps,
     log_skipped_nodes,
     resolve_boost_runtime_minutes,
+    resolve_entry_inventory,
 )
 from .identifiers import build_heater_entity_unique_id
 from .inventory import (
@@ -44,30 +45,13 @@ _LOGGER = logging.getLogger(__name__)
 _WRITE_DEBOUNCE = 0.2
 # If WS echo doesn't arrive quickly after a successful write, force a refresh
 _WS_ECHO_FALLBACK_REFRESH = 4.0
-
-
-def _resolve_inventory(entry_data: Mapping[str, Any]) -> Inventory | None:
-    """Return the Inventory attached to ``entry_data`` when available."""
-
-    candidate = entry_data.get("inventory")
-    if isinstance(candidate, Inventory):
-        return candidate
-
-    coordinator = entry_data.get("coordinator")
-    candidate = getattr(coordinator, "inventory", None)
-    if isinstance(candidate, Inventory):
-        return candidate
-
-    return None
-
-
 async def async_setup_entry(hass, entry, async_add_entities):
     """Discover heater nodes and create climate entities."""
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
 
-    inventory = _resolve_inventory(data)
+    inventory = resolve_entry_inventory(data)
 
 
     default_name_simple = lambda addr: f"Heater {addr}"
