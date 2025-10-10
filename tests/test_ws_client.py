@@ -21,6 +21,7 @@ from custom_components.termoweb.backend.sanitize import (
     mask_identifier,
     redact_token_fragment,
 )
+from custom_components.termoweb.installation import InstallationSnapshot
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
 
 
@@ -164,6 +165,109 @@ def _make_ducaheat_client(
     )
     client._dispatcher_mock = dispatcher  # type: ignore[attr-defined]
     return client
+
+
+def test_forward_ws_sample_updates_handles_power_monitors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """forward_ws_sample_updates should normalise power monitor payloads."""
+
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
+    raw_nodes = {"nodes": [{"type": "pmo", "addr": "7", "name": "PM"}]}
+    inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+    snapshot = InstallationSnapshot(dev_id="dev", raw_nodes=raw_nodes, inventory=inventory)
+    handler = MagicMock()
+    hass.data[base_ws.DOMAIN]["entry"] = {
+        "energy_coordinator": SimpleNamespace(handle_ws_samples=handler),
+        "snapshot": snapshot,
+    }
+
+    base_ws.forward_ws_sample_updates(
+        hass,
+        "entry",
+        "dev",
+        {"power_monitor": {"7": {"power": 100}}},
+    )
+
+    handler.assert_called_once()
+    args = handler.call_args[0]
+    assert args[0] == "dev"
+    assert args[1] == {"pmo": {"7": {"power": 100}}}
+
+
+def test_forward_ws_sample_updates_skips_invalid_sections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Invalid update payloads should be ignored without calling the handler."""
+
+    handler = MagicMock()
+    hass = SimpleNamespace(
+        data={
+            base_ws.DOMAIN: {
+                "entry": {
+                    "energy_coordinator": SimpleNamespace(handle_ws_samples=handler),
+                    "inventory": Inventory("dev", {}, []),
+                }
+            }
+        }
+    )
+
+    base_ws.forward_ws_sample_updates(
+        hass,
+        "entry",
+        "dev",
+        {"pmo": ["invalid"], None: {"1": {}}},
+    )
+
+    handler.assert_not_called()
+
+
+def test_forward_ws_sample_updates_inventory_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Inventory-derived alias data should tolerate malformed updates."""
+
+    raw_nodes = {"nodes": [{"type": "pmo", "addr": "3"}]}
+    inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+
+    monkeypatch.setattr(
+        Inventory,
+        "heater_sample_address_map",
+        property(lambda self: ({"htr": ["1"]}, ["bad"])),
+    )
+    monkeypatch.setattr(
+        Inventory,
+        "power_monitor_sample_address_map",
+        property(lambda self: ({"pmo": ["3"]}, ["invalid"])),
+    )
+
+    handler = MagicMock()
+    hass = SimpleNamespace(
+        data={
+            base_ws.DOMAIN: {
+                "entry": {
+                    "energy_coordinator": SimpleNamespace(handle_ws_samples=handler),
+                    "inventory": inventory,
+                }
+            }
+        }
+    )
+
+    base_ws.forward_ws_sample_updates(
+        hass,
+        "entry",
+        "dev",
+        {
+            None: {"1": {"power": 10}},
+            "acm": "ignored",
+            "pmo": {"": {"power": 3}, "3": {"power": 5}},
+        },
+    )
+
+    handler.assert_called_once()
+    args = handler.call_args[0]
+    assert args[0] == "dev"
+    assert args[1] == {"pmo": {"3": {"power": 5}}}
 
 
 def test_termoweb_client_initialises_namespace_and_handlers(
@@ -453,7 +557,12 @@ def test_dispatch_nodes_updates_hass_and_coordinator(
     """Dispatching nodes should update the coordinator and hass data buckets."""
 
     client = _make_termoweb_client(monkeypatch)
-    payload = {"nodes": {"htr": {"settings": {"1": {"temp": 20}}}}}
+    payload = {
+        "nodes": {
+            "htr": {"settings": {"1": {"temp": 20}}, "addrs": ["1"]},
+            "pmo": {"settings": {"3": {}}, "addrs": ["3"]},
+        }
+    }
     addr_map = client._dispatch_nodes(payload)
 
     client._coordinator.update_nodes.assert_called_once()  # type: ignore[attr-defined]
@@ -462,10 +571,55 @@ def test_dispatch_nodes_updates_hass_and_coordinator(
     assert isinstance(update_args[1], Inventory)
     assert update_args[1].payload is payload
     assert isinstance(addr_map, dict)
+    assert addr_map.get("pmo") == ["3"]
     entry_state = client.hass.data[module.DOMAIN]["entry"]
     assert isinstance(entry_state.get("inventory"), Inventory)
     client._dispatcher_mock.assert_called()  # type: ignore[attr-defined]
 
+    coordinator_data = getattr(client._coordinator, "data", {})  # type: ignore[attr-defined]
+    if isinstance(coordinator_data, dict):
+        dev_state = coordinator_data.get("device")
+        if isinstance(dev_state, dict):
+            nodes_by_type = dev_state.get("nodes_by_type", {})
+            if isinstance(nodes_by_type, dict):
+                pmo_section = nodes_by_type.get("pmo", {})
+                if isinstance(pmo_section, dict):
+                    assert pmo_section.get("addrs") == ["3"]
+
+
+def test_apply_heater_addresses_includes_power_monitors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_apply_heater_addresses should propagate power monitor addresses."""
+
+    client = _make_termoweb_client(monkeypatch)
+    client.hass.data[module.DOMAIN]["entry"]["energy_coordinator"] = SimpleNamespace(
+        update_addresses=MagicMock()
+    )
+    client._coordinator.data = {"device": {"nodes_by_type": {}}}  # type: ignore[attr-defined]
+
+    result = client._apply_heater_addresses(
+        {"htr": ["1"], "pmo": ["", "5"]}, inventory=None, snapshot=None
+    )
+
+    assert result == {"htr": ["1"]}
+
+    coordinator_data = getattr(client._coordinator, "data", {})  # type: ignore[attr-defined]
+    dev_state = coordinator_data.get("device") if isinstance(coordinator_data, dict) else None
+    first_addrs: list[str] | None = None
+    if isinstance(dev_state, dict):
+        nodes_by_type = dev_state.get("nodes_by_type", {})
+        first_addrs = nodes_by_type.get("pmo", {}).get("addrs")
+        assert first_addrs == ["5"]
+
+    second = client._apply_heater_addresses({"pmo": "7"}, inventory=None, snapshot=None)
+    assert second.get("htr") == []
+
+    coordinator_data = getattr(client._coordinator, "data", {})  # type: ignore[attr-defined]
+    dev_state = coordinator_data.get("device") if isinstance(coordinator_data, dict) else None
+    if isinstance(dev_state, dict):
+        nodes_by_type = dev_state.get("nodes_by_type", {})
+        assert nodes_by_type.get("pmo", {}).get("addrs") == ["7"]
 
 def test_ducaheat_brand_headers_include_expected_fields() -> None:
     """Verify Ducaheat brand headers contain required keys."""

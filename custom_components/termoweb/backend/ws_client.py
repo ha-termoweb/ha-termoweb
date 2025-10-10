@@ -40,6 +40,8 @@ from ..inventory import (
     Inventory,
     NODE_CLASS_BY_TYPE,
     addresses_by_node_type,
+    normalize_node_addr,
+    normalize_node_type,
     resolve_record_inventory,
 )
 
@@ -85,11 +87,62 @@ def forward_ws_sample_updates(
     if not callable(handler):
         return
 
+    alias_map: dict[str, str] = {"htr": "htr", "acm": "acm", "pmo": "pmo"}
+
+    def _merge_aliases(candidate: Mapping[str, str] | None) -> None:
+        if not isinstance(candidate, Mapping):
+            return
+        for raw_type, canonical in candidate.items():
+            normalized_raw = normalize_node_type(raw_type, use_default_when_falsey=True)
+            normalized_canonical = normalize_node_type(
+                canonical,
+                use_default_when_falsey=True,
+            )
+            if normalized_raw:
+                alias_map[normalized_raw] = normalized_canonical or canonical
+
+    snapshot = ensure_snapshot(record)
+    if snapshot is not None:
+        _, heater_aliases = snapshot.heater_sample_address_map
+        _, pmo_aliases = snapshot.power_monitor_sample_address_map
+        _merge_aliases(heater_aliases)
+        _merge_aliases(pmo_aliases)
+    else:
+        inventory = record.get("inventory")
+        if isinstance(inventory, Inventory):
+            _, heater_aliases = inventory.heater_sample_address_map
+            _, pmo_aliases = inventory.power_monitor_sample_address_map
+            _merge_aliases(heater_aliases)
+            _merge_aliases(pmo_aliases)
+
+    normalized_updates: dict[str, dict[str, Any]] = {}
+    for raw_type, section in updates.items():
+        if not isinstance(section, Mapping):
+            continue
+        node_type = normalize_node_type(raw_type, use_default_when_falsey=True)
+        if not node_type:
+            continue
+        canonical_type = alias_map.get(node_type, node_type)
+        bucket = normalized_updates.setdefault(canonical_type, {})
+        for raw_addr, payload in section.items():
+            addr = normalize_node_addr(raw_addr, use_default_when_falsey=True)
+            if not addr:
+                continue
+            bucket[addr] = payload
+
+    normalized_updates = {
+        node_type: dict(section)
+        for node_type, section in normalized_updates.items()
+        if section
+    }
+    if not normalized_updates:
+        return
+
     active_logger = logger or _LOGGER
     try:
         handler(
             dev_id,
-            {node_type: dict(section) for node_type, section in updates.items()},
+            normalized_updates,
         )
     except Exception:  # pragma: no cover - defensive logging
         active_logger.debug(

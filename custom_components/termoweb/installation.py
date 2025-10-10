@@ -26,6 +26,10 @@ class InstallationSnapshot:
         "_raw_nodes",
         "_sample_address_map",
         "_sample_targets",
+        "_pmo_address_map",
+        "_pmo_sample_address_map",
+        "_pmo_compat_aliases",
+        "_pmo_sample_targets",
     )
 
     def __init__(
@@ -43,6 +47,10 @@ class InstallationSnapshot:
         self._sample_address_map: dict[str, list[str]] | None = None
         self._compat_aliases: dict[str, str] | None = None
         self._sample_targets: list[tuple[str, str]] | None = None
+        self._pmo_address_map: tuple[dict[str, list[str]], dict[str, set[str]]] | None = None
+        self._pmo_sample_address_map: dict[str, list[str]] | None = None
+        self._pmo_compat_aliases: dict[str, str] | None = None
+        self._pmo_sample_targets: list[tuple[str, str]] | None = None
 
     @property
     def dev_id(self) -> str:
@@ -86,6 +94,10 @@ class InstallationSnapshot:
         self._sample_address_map = None
         self._compat_aliases = None
         self._sample_targets = None
+        self._pmo_address_map = None
+        self._pmo_sample_address_map = None
+        self._pmo_compat_aliases = None
+        self._pmo_sample_targets = None
 
     def _ensure_inventory(self) -> Inventory:
         """Return the cached node inventory container, rebuilding if required."""
@@ -122,6 +134,25 @@ class InstallationSnapshot:
         inventory = self._ensure_inventory()
         return inventory.heater_address_map
 
+    @property
+    def power_monitor_address_map(
+        self,
+    ) -> tuple[dict[str, list[str]], dict[str, set[str]]]:
+        """Return forward and reverse power monitor address maps."""
+
+        if self._pmo_address_map is None:
+            inventory = self._ensure_inventory()
+            forward, reverse = inventory.power_monitor_address_map
+            self._pmo_address_map = (
+                {node_type: list(addrs) for node_type, addrs in forward.items()},
+                {addr: set(node_types) for addr, node_types in reverse.items()},
+            )
+        forward_map, reverse_map = self._pmo_address_map
+        return (
+            {node_type: list(addrs) for node_type, addrs in forward_map.items()},
+            {addr: set(node_types) for addr, node_types in reverse_map.items()},
+        )
+
     def _ensure_sample_addresses(self) -> None:
         """Calculate canonical heater sample address data."""
 
@@ -134,6 +165,19 @@ class InstallationSnapshot:
             node_type: list(addrs) for node_type, addrs in normalized_map.items()
         }
         self._compat_aliases = dict(compat)
+
+    def _ensure_pmo_sample_addresses(self) -> None:
+        """Calculate canonical power monitor address data."""
+
+        if self._pmo_sample_address_map is not None:
+            return
+
+        inventory = self._ensure_inventory()
+        normalized_map, compat = inventory.power_monitor_sample_address_map
+        self._pmo_sample_address_map = {
+            node_type: list(addrs) for node_type, addrs in normalized_map.items()
+        }
+        self._pmo_compat_aliases = dict(compat)
 
     @property
     def heater_sample_address_map(self) -> tuple[dict[str, list[str]], dict[str, str]]:
@@ -153,6 +197,27 @@ class InstallationSnapshot:
             inventory = self._ensure_inventory()
             self._sample_targets = inventory.heater_sample_targets
         return list(self._sample_targets)
+
+    @property
+    def power_monitor_sample_address_map(
+        self,
+    ) -> tuple[dict[str, list[str]], dict[str, str]]:
+        """Return normalised power monitor addresses suitable for samples."""
+
+        self._ensure_pmo_sample_addresses()
+        return (
+            {k: list(v) for k, v in (self._pmo_sample_address_map or {}).items()},
+            dict(self._pmo_compat_aliases or {}),
+        )
+
+    @property
+    def power_monitor_sample_targets(self) -> list[tuple[str, str]]:
+        """Return ordered power monitor sample subscription targets."""
+
+        if self._pmo_sample_targets is None:
+            inventory = self._ensure_inventory()
+            self._pmo_sample_targets = inventory.power_monitor_sample_targets
+        return list(self._pmo_sample_targets)
 
     def heater_name_map(
         self, default_factory: Callable[[str], str] | None = None

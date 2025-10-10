@@ -30,6 +30,12 @@ _SNAPSHOT_NAME_CANDIDATE_KEYS = (
 )
 
 
+_NODE_TYPE_ALIASES: dict[str, str] = {
+    "power_monitor": "pmo",
+    "power_monitors": "pmo",
+}
+
+
 def _default_heater_name(addr: str) -> str:
     """Return the default fallback name for a heater address."""
 
@@ -55,7 +61,9 @@ __all__ = [
     "build_node_inventory",
     "heater_platform_details_from_inventory",
     "heater_sample_subscription_targets",
+    "normalize_power_monitor_addresses",
     "normalize_heater_addresses",
+    "power_monitor_sample_subscription_targets",
     "normalize_node_addr",
     "normalize_node_type",
     "parse_heater_energy_unique_id",
@@ -96,6 +104,13 @@ class Inventory:
         tuple[dict[str, tuple[str, ...]], dict[str, str]] | None
     )
     _heater_sample_targets_cache: tuple[tuple[str, str], ...] | None
+    _power_monitor_address_map_cache: (
+        tuple[dict[str, tuple[str, ...]], dict[str, frozenset[str]]] | None
+    )
+    _power_monitor_sample_address_cache: (
+        tuple[dict[str, tuple[str, ...]], dict[str, str]] | None
+    )
+    _power_monitor_sample_targets_cache: tuple[tuple[str, str], ...] | None
     _heater_name_map_cache: dict[int, dict[Any, Any]]
     _heater_name_map_factories: dict[int, Callable[[str], str]]
 
@@ -116,6 +131,9 @@ class Inventory:
         object.__setattr__(self, "_heater_address_map_cache", None)
         object.__setattr__(self, "_heater_sample_address_cache", None)
         object.__setattr__(self, "_heater_sample_targets_cache", None)
+        object.__setattr__(self, "_power_monitor_address_map_cache", None)
+        object.__setattr__(self, "_power_monitor_sample_address_cache", None)
+        object.__setattr__(self, "_power_monitor_sample_targets_cache", None)
         object.__setattr__(self, "_heater_name_map_cache", {})
         object.__setattr__(self, "_heater_name_map_factories", {})
 
@@ -221,6 +239,40 @@ class Inventory:
         forward_cache, reverse_cache = cached
         return (
             {node_type: list(addresses) for node_type, addresses in forward_cache.items()},
+                {addr: set(node_types) for addr, node_types in reverse_cache.items()},
+        )
+
+    @property
+    def power_monitor_address_map(
+        self,
+    ) -> tuple[dict[str, list[str]], dict[str, set[str]]]:
+        """Return forward and reverse power monitor address mappings."""
+
+        cached = self._power_monitor_address_map_cache
+        if cached is None:
+            forward_raw, _ = addresses_by_node_type(
+                self._nodes,
+                known_types=("pmo",),
+            )
+            filtered_forward: dict[str, tuple[str, ...]] = {}
+            reverse_map: dict[str, set[str]] = {}
+            for node_type, addresses in forward_raw.items():
+                if node_type != "pmo":
+                    continue
+                normalized = tuple(addr for addr in addresses if addr)
+                filtered_forward[node_type] = normalized
+                for addr in normalized:
+                    reverse_map.setdefault(addr, set()).add(node_type)
+            filtered_forward.setdefault("pmo", tuple())
+            cached = (
+                filtered_forward,
+                {addr: frozenset(node_types) for addr, node_types in reverse_map.items()},
+            )
+            object.__setattr__(self, "_power_monitor_address_map_cache", cached)
+
+        forward_cache, reverse_cache = cached
+        return (
+            {node_type: list(addresses) for node_type, addresses in forward_cache.items()},
             {addr: set(node_types) for addr, node_types in reverse_cache.items()},
         )
 
@@ -241,6 +293,25 @@ class Inventory:
                 dict(compat),
             )
             object.__setattr__(self, "_heater_sample_address_cache", cached)
+        return cached
+
+    def _ensure_power_monitor_sample_addresses(
+        self,
+    ) -> tuple[dict[str, tuple[str, ...]], dict[str, str]]:
+        """Return cached normalised power monitor address data for samples."""
+
+        cached = self._power_monitor_sample_address_cache
+        if cached is None:
+            forward_map, _ = self.power_monitor_address_map
+            normalized_map, compat = normalize_power_monitor_addresses(forward_map)
+            cached = (
+                {
+                    node_type: tuple(addresses)
+                    for node_type, addresses in normalized_map.items()
+                },
+                dict(compat),
+            )
+            object.__setattr__(self, "_power_monitor_sample_address_cache", cached)
         return cached
 
     @property
@@ -279,6 +350,44 @@ class Inventory:
                     validated.append((node_clean, addr_clean))
             cached = tuple(validated)
             object.__setattr__(self, "_heater_sample_targets_cache", cached)
+        return [tuple(pair) for pair in cached]
+
+    @property
+    def power_monitor_sample_address_map(
+        self,
+    ) -> tuple[dict[str, list[str]], dict[str, str]]:
+        """Return normalised power monitor addresses and compatibility aliases."""
+
+        forward_cache, compat_cache = self._ensure_power_monitor_sample_addresses()
+        return (
+            {
+                node_type: list(addresses)
+                for node_type, addresses in forward_cache.items()
+            },
+            dict(compat_cache),
+        )
+
+    @property
+    def power_monitor_sample_targets(self) -> list[tuple[str, str]]:
+        """Return ordered power monitor sample subscription targets."""
+
+        cached = self._power_monitor_sample_targets_cache
+        if cached is None:
+            normalized_map, _ = self._ensure_power_monitor_sample_addresses()
+            raw_targets = power_monitor_sample_subscription_targets(normalized_map)
+            validated: list[tuple[str, str]] = []
+            for item in raw_targets:
+                if not isinstance(item, tuple) or len(item) != 2:
+                    continue
+                node_type, addr = item
+                if not isinstance(node_type, str) or not isinstance(addr, str):
+                    continue
+                node_clean = node_type.strip()
+                addr_clean = addr.strip()
+                if node_clean and addr_clean:
+                    validated.append((node_clean, addr_clean))
+            cached = tuple(validated)
+            object.__setattr__(self, "_power_monitor_sample_targets_cache", cached)
         return [tuple(pair) for pair in cached]
 
     def heater_name_map(
@@ -529,12 +638,13 @@ def normalize_node_type(
 ) -> str:
     """Return ``value`` as a normalised node type string."""
 
-    return _normalize_node_identifier(
+    normalized = _normalize_node_identifier(
         value,
         default=default,
         use_default_when_falsey=use_default_when_falsey,
         lowercase=True,
     )
+    return _NODE_TYPE_ALIASES.get(normalized, normalized)
 
 
 def normalize_node_addr(
@@ -811,6 +921,62 @@ def normalize_heater_addresses(
     return cleaned_map, compat_aliases
 
 
+def normalize_power_monitor_addresses(
+    addrs: Iterable[Any] | Mapping[Any, Iterable[Any]] | None,
+) -> tuple[dict[str, list[str]], dict[str, str]]:
+    """Return canonical power monitor addresses and compatibility aliases."""
+
+    if addrs is None:
+        sources: Iterable[tuple[Any, Iterable[Any] | Any]] = []
+    elif isinstance(addrs, Mapping):
+        sources = addrs.items()
+    else:
+        sources = [("pmo", addrs)]
+
+    cleaned_map: dict[str, list[str]] = {}
+    compat_aliases: dict[str, str] = {"pmo": "pmo"}
+    for alias, target in _NODE_TYPE_ALIASES.items():
+        if target == "pmo":
+            compat_aliases.setdefault(alias, "pmo")
+
+    for raw_type, values in sources:
+        raw_type_normalized = _normalize_node_identifier(
+            raw_type,
+            use_default_when_falsey=True,
+            lowercase=True,
+        )
+        node_type = normalize_node_type(
+            raw_type,
+            use_default_when_falsey=True,
+        )
+        if not node_type or node_type != "pmo":
+            continue
+
+        if raw_type_normalized and raw_type_normalized != "pmo":
+            compat_aliases[raw_type_normalized] = "pmo"
+
+        if isinstance(values, str) or not isinstance(values, Iterable):
+            candidates = [values]
+        else:
+            candidates = list(values)
+
+        bucket = cleaned_map.setdefault("pmo", [])
+        seen: set[str] = set(bucket)
+        for candidate in candidates:
+            addr = normalize_node_addr(
+                candidate,
+                use_default_when_falsey=True,
+            )
+            if not addr or addr in seen:
+                continue
+            seen.add(addr)
+            bucket.append(addr)
+
+    cleaned_map.setdefault("pmo", [])
+
+    return cleaned_map, compat_aliases
+
+
 def heater_sample_subscription_targets(
     addrs: Mapping[Any, Iterable[Any]] | Iterable[Any] | None,
 ) -> list[tuple[str, str]]:
@@ -827,6 +993,15 @@ def heater_sample_subscription_targets(
         for node_type in order
         for addr in normalized_map.get(node_type, []) or []
     ]
+
+
+def power_monitor_sample_subscription_targets(
+    addrs: Mapping[Any, Iterable[Any]] | Iterable[Any] | None,
+) -> list[tuple[str, str]]:
+    """Return canonical power monitor sample subscription target pairs."""
+
+    normalized_map, _ = normalize_power_monitor_addresses(addrs)
+    return [("pmo", addr) for addr in normalized_map.get("pmo", []) if addr]
 
 
 class Node:
@@ -937,6 +1112,16 @@ class PowerMonitorNode(Node):
         """Return the reported power level (stub)."""
 
         raise NotImplementedError
+
+    def default_name(self) -> str:
+        """Return the fallback friendly name for the power monitor."""
+
+        return self.name or f"Power Monitor {self.addr}"
+
+    def sample_target(self) -> tuple[str, str]:
+        """Return the canonical ``(node_type, addr)`` sample target."""
+
+        return (self.type, self.addr)
 
 
 class ThermostatNode(Node):

@@ -119,6 +119,12 @@ def test_power_monitor_stub() -> None:
     with pytest.raises(NotImplementedError):
         node.power_level()
 
+    assert node.sample_target() == ("pmo", "P1")
+    assert node.default_name() == "Monitor"
+
+    node.name = ""
+    assert node.default_name() == "Power Monitor P1"
+
 
 def test_thermostat_stub() -> None:
     node = ThermostatNode(name="Thermostat", addr="T1")

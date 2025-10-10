@@ -10,7 +10,12 @@ import pytest
 
 import custom_components.termoweb.inventory as inventory_module
 from custom_components.termoweb.installation import InstallationSnapshot
-from custom_components.termoweb.inventory import Inventory, Node
+from custom_components.termoweb.inventory import (
+    Inventory,
+    Node,
+    PowerMonitorNode,
+    normalize_power_monitor_addresses,
+)
 
 
 class DummyNode:
@@ -55,6 +60,8 @@ def heater_inventory(sample_payload: dict[str, Any]) -> Inventory:
         Node(name=None, addr=" 2 ", node_type="acm"),
         SimpleNamespace(type="htr", addr="", name="Ignored"),
         Node(name="Thermostat", addr="9", node_type="thm"),
+        PowerMonitorNode(name="Monitor", addr="3"),
+        Node(name="Alias Monitor", addr="4", node_type="power_monitor"),
     ]
     return Inventory("abc123", sample_payload, nodes)
 
@@ -199,6 +206,89 @@ def test_inventory_heater_sample_alias_handling(heater_inventory: Inventory) -> 
 
     assert forward == {"htr": ["10"], "acm": ["2"]}
     assert compat == {"heater": "htr", "htr": "htr"}
+
+
+def test_inventory_power_monitor_metadata(heater_inventory: Inventory) -> None:
+    """Power monitor caches should expose canonical metadata and aliases."""
+
+    forward, reverse = heater_inventory.power_monitor_address_map
+
+    assert forward == {"pmo": ["3", "4"]}
+    assert reverse == {"3": {"pmo"}, "4": {"pmo"}}
+
+    forward["pmo"].append("bogus")
+    reverse.setdefault("5", set()).add("pmo")
+
+    cached_forward, cached_reverse = heater_inventory.power_monitor_address_map
+    assert cached_forward == {"pmo": ["3", "4"]}
+    assert cached_reverse == {"3": {"pmo"}, "4": {"pmo"}}
+
+    sample_map, compat = heater_inventory.power_monitor_sample_address_map
+    assert sample_map == {"pmo": ["3", "4"]}
+    assert compat.get("pmo") == "pmo"
+    assert compat.get("power_monitor") == "pmo"
+
+    sample_map["pmo"].append("ignored")
+    compat["alias"] = "pmo"
+
+    cached_map, cached_compat = heater_inventory.power_monitor_sample_address_map
+    assert cached_map == {"pmo": ["3", "4"]}
+    assert cached_compat.get("power_monitor") == "pmo"
+
+    targets = heater_inventory.power_monitor_sample_targets
+    assert targets == [("pmo", "3"), ("pmo", "4")]
+    targets.append(("pmo", "extra"))
+
+    cached_targets = heater_inventory.power_monitor_sample_targets
+    assert cached_targets == [("pmo", "3"), ("pmo", "4")]
+
+
+def test_inventory_power_monitor_targets_filter_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Power monitor targets should drop malformed subscription entries."""
+
+    called: list[Any] = []
+
+    def _fake_targets(_map: Any) -> list[Any]:
+        called.append(_map)
+        return [None, "bad", ("pmo", " 3 "), ("pmo", None), ("pmo", "4")]
+
+    monkeypatch.setattr(
+        inventory_module,
+        "power_monitor_sample_subscription_targets",
+        _fake_targets,
+    )
+    inventory = Inventory(
+        "dev",
+        {"nodes": []},
+        [PowerMonitorNode(name="One", addr="3"), PowerMonitorNode(name="Two", addr="4")],
+    )
+
+    assert inventory.power_monitor_sample_targets == [("pmo", "3"), ("pmo", "4")]
+    assert called
+
+
+def test_normalize_power_monitor_addresses_variants() -> None:
+    """normalise helper should handle None, iterables and aliases."""
+
+    empty_map, compat = normalize_power_monitor_addresses(None)
+    assert empty_map == {"pmo": []}
+    assert compat["power_monitor"] == "pmo"
+
+    list_map, _ = normalize_power_monitor_addresses(["A", "A", " "])
+    assert list_map == {"pmo": ["A"]}
+
+    alias_map, alias_compat = normalize_power_monitor_addresses({"power_monitor": ["B"]})
+    assert alias_map == {"pmo": ["B"]}
+    assert alias_compat["power_monitor"] == "pmo"
+
+    string_map, _ = normalize_power_monitor_addresses("C")
+    assert string_map == {"pmo": ["C"]}
+
+    ignored_map, ignored_compat = normalize_power_monitor_addresses({"ignored": ["D"]})
+    assert ignored_map == {"pmo": []}
+    assert "ignored" not in ignored_compat
 
 
 def test_inventory_heater_name_map_caches_by_factory(
