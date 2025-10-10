@@ -2080,6 +2080,43 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                         err,
                         exc_info=err,
                     )
+        if section == "settings":
+            canonical_type = normalize_node_type(
+                node_type, use_default_when_falsey=True
+            ) or node_type
+            if canonical_type:
+                settings_map: MutableMapping[str, Any] = dev_map.setdefault(
+                    "settings", {}
+                )
+                existing_bucket = settings_map.get(canonical_type)
+                if isinstance(existing_bucket, MutableMapping):
+                    settings_bucket = existing_bucket
+                elif isinstance(existing_bucket, Mapping):
+                    settings_bucket = dict(existing_bucket)
+                    settings_map[canonical_type] = settings_bucket
+                else:
+                    settings_bucket = {}
+                    settings_map[canonical_type] = settings_bucket
+                normalised_addr = normalize_node_addr(
+                    addr,
+                    use_default_when_falsey=True,
+                )
+                if not normalised_addr and isinstance(addr, str):
+                    stripped = addr.strip()
+                    normalised_addr = stripped or None
+                if not normalised_addr and addr is not None and not isinstance(addr, str):
+                    candidate = str(addr).strip()
+                    normalised_addr = candidate or None
+                if normalised_addr:
+                    existing_payload = settings_bucket.get(normalised_addr)
+                    if (
+                        isinstance(existing_payload, MutableMapping)
+                        and isinstance(value, Mapping)
+                    ):
+                        existing_payload.update(value)
+                        section_map[addr] = existing_payload
+                    else:
+                        settings_bucket[normalised_addr] = value
         raw_bucket = self._nodes_raw.setdefault(node_type, {})
         raw_section = raw_bucket.setdefault(section, {})
         if isinstance(raw_section, dict):

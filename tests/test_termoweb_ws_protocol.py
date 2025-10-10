@@ -949,7 +949,9 @@ def test_dispatch_nodes_with_inventory(monkeypatch: pytest.MonkeyPatch, caplog: 
     energy = SimpleNamespace(update_addresses=MagicMock(), handle_ws_samples=MagicMock())
     record["energy_coordinator"] = energy
     client._coordinator.update_nodes = MagicMock()
-    client._coordinator.data = {"device": {"nodes_by_type": {}, "addresses_by_type": {}}}
+    client._coordinator.data = {
+        "device": {"nodes_by_type": {}, "addresses_by_type": {}, "settings": {}}
+    }
     nodes_payload = {"nodes": [{"type": "htr", "addr": "1"}]}
     client._inventory = Inventory(
         client.dev_id,
@@ -1128,6 +1130,60 @@ def test_handle_event_includes_addr_map(monkeypatch: pytest.MonkeyPatch) -> None
     assert settings_payload["addr_map"] == {"htr": ["2"]}
 
 
+def test_update_legacy_settings_updates_settings_map(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Settings updates should refresh both legacy and normalized caches."""
+
+    client, _sio, _ = _make_client(monkeypatch)
+    dev_map: dict[str, Any] = {
+        "nodes_by_type": {
+            "htr": {
+                "settings": {"1": {"mode": "manual"}},
+                "advanced": {},
+                "samples": {},
+                "addrs": [],
+            }
+        },
+        "settings": {"htr": {"1": {"mode": "manual"}}},
+    }
+    nodes_by_type = dev_map["nodes_by_type"]
+
+    updated = module.TermoWebWSClient._update_legacy_section(
+        client,
+        node_type="htr",
+        addr=" 01 ",
+        section="settings",
+        body={"mode": "auto"},
+        dev_map=dev_map,
+        nodes_by_type=nodes_by_type,
+    )
+
+    assert updated is True
+    legacy_bucket = nodes_by_type["htr"]["settings"]
+    assert " 01 " in legacy_bucket
+    assert legacy_bucket[" 01 "]["mode"] == "auto"
+
+    settings_map = dev_map["settings"]["htr"]
+    assert settings_map["1"]["mode"] == "manual"
+    assert settings_map["01"]["mode"] == "auto"
+
+    settings_map["01"]["pending"] = {"mode": "auto"}
+
+    updated_again = module.TermoWebWSClient._update_legacy_section(
+        client,
+        node_type="htr",
+        addr=" 01 ",
+        section="settings",
+        body={"mode": "eco"},
+        dev_map=dev_map,
+        nodes_by_type=nodes_by_type,
+    )
+
+    assert updated_again is True
+    assert settings_map["01"]["mode"] == "eco"
+    assert settings_map["01"]["pending"] == {"mode": "auto"}
+    assert legacy_bucket[" 01 "]["pending"] == {"mode": "auto"}
+
+
 def test_ensure_type_bucket_and_build_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
     """Helper methods should populate node buckets and snapshot structures."""
 
@@ -1146,7 +1202,7 @@ def test_apply_heater_addresses_updates_coordinator(monkeypatch: pytest.MonkeyPa
     """Applying heater addresses should update the coordinator data map."""
 
     client, _sio, _ = _make_client(monkeypatch)
-    client._coordinator.data = {"device": {}}
+    client._coordinator.data = {"device": {"settings": {}}}
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}, {"type": "acm", "addr": "2"}]}
     inventory = Inventory(
         client.dev_id,
@@ -1170,7 +1226,9 @@ def test_apply_heater_addresses_includes_power_monitors(
     energy_coordinator = SimpleNamespace(update_addresses=MagicMock())
     record = client.hass.data[module.DOMAIN]["entry"]
     record["energy_coordinator"] = energy_coordinator
-    client._coordinator.data = {"device": {"nodes_by_type": {}, "addresses_by_type": {}}}
+    client._coordinator.data = {
+        "device": {"nodes_by_type": {}, "addresses_by_type": {}, "settings": {}}
+    }
 
     nodes_payload = {
         "nodes": [
@@ -1206,7 +1264,7 @@ def test_apply_heater_addresses_skips_empty_non_heater(monkeypatch: pytest.Monke
     """Empty address lists for non-heaters should not populate coordinator buckets."""
 
     client, _sio, _ = _make_client(monkeypatch)
-    client._coordinator.data = {"device": {"nodes_by_type": {}}}
+    client._coordinator.data = {"device": {"nodes_by_type": {}, "settings": {}}}
     normalized = client._apply_heater_addresses({"acm": []}, inventory=None)
     assert normalized["htr"] == []
     assert "acm" not in client._coordinator.data["device"]["nodes_by_type"]
