@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from conftest import FakeCoordinator, _install_stubs
+from conftest import FakeCoordinator, _install_stubs, build_coordinator_device_state
 
 _install_stubs()
 
@@ -55,11 +55,10 @@ def test_select_setup_and_selection(
         dev_id = "dev-select"
         node = heater_node_factory("07")
         settings = {"boost_time": 120, "prog": [0] * 168}
-        record = {
-            "nodes": {},
-            "nodes_by_type": {"acm": {"settings": {node.addr: settings}}},
-            "htr": {"settings": {}},
-        }
+        record = build_coordinator_device_state(
+            nodes={},
+            settings={"acm": {node.addr: settings}, "htr": {}},
+        )
         coordinator = FakeCoordinator(
             hass,
             dev_id=dev_id,
@@ -194,11 +193,10 @@ def test_select_restores_last_state(
         entry = types.SimpleNamespace(entry_id="entry-restore")
         dev_id = "dev-restore"
         node = heater_node_factory("09")
-        record = {
-            "nodes": {},
-            "nodes_by_type": {"acm": {"settings": {node.addr: {"boost_time": 90}}}},
-            "htr": {"settings": {}},
-        }
+        record = build_coordinator_device_state(
+            nodes={},
+            settings={"acm": {node.addr: {"boost_time": 90}}, "htr": {}},
+        )
         coordinator = FakeCoordinator(
             hass,
             dev_id=dev_id,
@@ -287,11 +285,10 @@ def test_select_filters_nodes_and_handles_fallback(
         disabled_acm = heater_node_factory("02", supports_boost=False)
         enabled_acm = heater_node_factory("03")
 
-        record = {
-            "nodes": {},
-            "nodes_by_type": {"acm": {"settings": {enabled_acm.addr: {}}}},
-            "htr": {"settings": {}},
-        }
+        record = build_coordinator_device_state(
+            nodes={},
+            settings={"acm": {enabled_acm.addr: {}}, "htr": {}},
+        )
         coordinator = FakeCoordinator(
             hass,
             dev_id=dev_id,
