@@ -38,9 +38,12 @@ def test_binary_sensor_setup_and_dispatch(
         entry = types.SimpleNamespace(entry_id="entry-1")
         dev_id = "device-123"
 
+        inventory = Inventory(dev_id, {"nodes": []}, [])
+
         coordinator = FakeCoordinator(
             hass,
             dev_id=dev_id,
+            inventory=inventory,
             data={
                 dev_id: {
                     "name": "Living Room",  # attributes
@@ -63,6 +66,7 @@ def test_binary_sensor_setup_and_dispatch(
                 }
             },
             extra={"version": "2.1.0"},
+            inventory=inventory,
         )
 
         added: list = []
@@ -139,6 +143,26 @@ def test_binary_sensor_setup_and_dispatch(
     asyncio.run(_run())
 
 
+def test_binary_sensor_setup_requires_inventory(heater_hass_data) -> None:
+    async def _run() -> None:
+        hass = HomeAssistant()
+        entry = types.SimpleNamespace(entry_id="entry-missing")
+        dev_id = "device-missing"
+        coordinator = FakeCoordinator(hass, dev_id=dev_id, inventory=None, data={})
+
+        heater_hass_data(
+            hass,
+            entry.entry_id,
+            dev_id,
+            coordinator,
+        )
+
+        with pytest.raises(ValueError):
+            await async_setup_binary_sensor_entry(hass, entry, lambda _: None)
+
+    asyncio.run(_run())
+
+
 def test_refresh_button_device_info_and_press(heater_hass_data) -> None:
     async def _run() -> None:
         hass = HomeAssistant()
@@ -149,11 +173,14 @@ def test_refresh_button_device_info_and_press(heater_hass_data) -> None:
             async_request_refresh=AsyncMock(),
         )
 
+        inventory = Inventory(dev_id, {"nodes": []}, [])
+
         heater_hass_data(
             hass,
             entry.entry_id,
             dev_id,
             coordinator,
+            inventory=inventory,
         )
 
         added: list = []

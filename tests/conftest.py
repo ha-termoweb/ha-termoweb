@@ -1508,7 +1508,10 @@ def heater_hass_data() -> Callable[..., dict[str, Any]]:
         boost_runtime: Mapping[str, Mapping[str, int]] | None = None,
         ws_state: Mapping[str, Any] | None = None,
         extra: Mapping[str, Any] | None = None,
+        inventory: "Inventory" | None = None,
     ) -> dict[str, Any]:
+        from custom_components.termoweb.inventory import Inventory
+
         entry_data: dict[str, Any] = {
             "coordinator": coordinator,
             "dev_id": dev_id,
@@ -1521,6 +1524,17 @@ def heater_hass_data() -> Callable[..., dict[str, Any]]:
             entry_data["ws_state"] = dict(ws_state)
         if extra:
             entry_data.update(dict(extra))
+        container = inventory
+        if container is None:
+            candidate = entry_data.get("inventory")
+            if isinstance(candidate, Inventory):
+                container = candidate
+        if container is None:
+            candidate = getattr(coordinator, "inventory", None)
+            if isinstance(candidate, Inventory):
+                container = candidate
+        if container is not None:
+            entry_data["inventory"] = container
         hass.data.setdefault(DOMAIN, {})[entry_id] = entry_data
         return entry_data
 
