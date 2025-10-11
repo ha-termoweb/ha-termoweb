@@ -30,6 +30,7 @@ from custom_components.termoweb.backend.ws_client import (
     _WsLeaseMixin,
     forward_ws_sample_updates,
     resolve_ws_update_section,
+    translate_path_update,
 )
 from custom_components.termoweb.backend.ws_health import WsHealthTracker
 from custom_components.termoweb.const import (
@@ -1236,61 +1237,10 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
     def _translate_path_update(self, payload: Any) -> dict[str, Any] | None:
         """Translate ``{"path": ..., "body": ...}`` websocket frames into nodes."""
 
-        if not isinstance(payload, Mapping):
-            return None
-        if "nodes" in payload:
-            return None
-        path = payload.get("path")
-        body = payload.get("body")
-        if not isinstance(path, str) or body is None:
-            return None
-
-        path = path.split("?", 1)[0]
-        segments = [segment for segment in path.split("/") if segment]
-        if not segments:
-            return None
-
-        try:
-            devs_idx = segments.index("devs")
-        except ValueError:
-            devs_idx = -1
-
-        if devs_idx >= 0:
-            relevant = segments[devs_idx + 1 :]
-            node_type_idx = 1
-            addr_idx = 2
-            section_idx = 3
-            if len(relevant) <= addr_idx:
-                return None
-        else:
-            relevant = segments
-            node_type_idx = 0
-            addr_idx = 1
-            section_idx = 2
-            if len(relevant) <= addr_idx:
-                return None
-
-        node_type = normalize_node_type(relevant[node_type_idx])
-        addr = normalize_node_addr(relevant[addr_idx])
-        if not node_type or not addr:
-            return None
-
-        section = relevant[section_idx] if len(relevant) > section_idx else None
-        remainder = (
-            relevant[section_idx + 1 :] if len(relevant) > section_idx + 1 else []
+        return translate_path_update(
+            payload,
+            resolve_section=self._resolve_update_section,
         )
-
-        target_section, nested_key = self._resolve_update_section(section)
-        if target_section is None:
-            return None
-
-        payload_body: Any = body
-        for segment in reversed(remainder):
-            payload_body = {segment: payload_body}
-        if nested_key:
-            payload_body = {nested_key: payload_body}
-
-        return {node_type: {target_section: {addr: payload_body}}}
 
     @staticmethod
     def _resolve_update_section(section: str | None) -> tuple[str | None, str | None]:

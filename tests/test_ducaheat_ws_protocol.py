@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 import aiohttp
 import pytest
 
-from custom_components.termoweb.backend import ducaheat_ws
+from custom_components.termoweb.backend import ducaheat_ws, ws_client
 from custom_components.termoweb.inventory import (
     Inventory,
     InventoryResolution,
@@ -968,49 +968,43 @@ def test_translate_path_update_variants(monkeypatch: pytest.MonkeyPatch) -> None
     """Path-based websocket updates should translate into node payloads."""
 
     client = _make_client(monkeypatch)
+    translate = lambda payload: ws_client.translate_path_update(
+        payload,
+        resolve_section=ducaheat_ws.DucaheatWSClient._resolve_update_section,
+    )
     payload = {
         "path": "/api/v2/devs/device/htr/2/settings/setup",
         "body": {"mode": "auto"},
     }
 
-    translated = client._translate_path_update(payload)
+    translated = translate(payload)
 
     assert translated == {"htr": {"settings": {"2": {"setup": {"mode": "auto"}}}}}
+    assert client._translate_path_update(payload) == translated
 
-    nested = client._translate_path_update(
+    nested = translate(
         {"path": "/api/v2/devs/device/htr/2/setup", "body": {"mode": "eco"}}
     )
     assert nested == {"htr": {"settings": {"2": {"setup": {"mode": "eco"}}}}}
+    assert client._translate_path_update(
+        {"path": "/api/v2/devs/device/htr/2/setup", "body": {"mode": "eco"}}
+    ) == nested
 
-    assert client._translate_path_update({"path": "/", "body": {}}) is None
-    assert client._translate_path_update({"path": "/htr", "body": {}}) is None
-    assert (
-        client._translate_path_update({"path": "/api/v2/devs/device/htr", "body": {}})
-        is None
-    )
-    assert client._translate_path_update("not a mapping") is None
-    assert client._translate_path_update({"nodes": {}}) is None
-    assert (
-        client._translate_path_update({"path": "/api/v2/devs/device/htr/2", "body": {}})
-        is None
-    )
-    assert (
-        client._translate_path_update({"path": "/api/v2/devs/device/htr/2/status"})
-        is None
-    )
-    assert client._translate_path_update({"path": None, "body": {}}) is None
-    assert (
-        client._translate_path_update(
-            {"path": "/api/v2/devs/device/htr//status", "body": {"temp": 1}}
-        )
-        is None
-    )
-    assert (
-        client._translate_path_update(
-            {"path": "/api/v2/devs/device/htr/ /status", "body": {"temp": 1}}
-        )
-        is None
-    )
+    invalid_payloads = [
+        {"path": "/", "body": {}},
+        {"path": "/htr", "body": {}},
+        {"path": "/api/v2/devs/device/htr", "body": {}},
+        "not a mapping",
+        {"nodes": {}},
+        {"path": "/api/v2/devs/device/htr/2", "body": {}},
+        {"path": "/api/v2/devs/device/htr/2/status"},
+        {"path": None, "body": {}},
+        {"path": "/api/v2/devs/device/htr//status", "body": {"temp": 1}},
+        {"path": "/api/v2/devs/device/htr/ /status", "body": {"temp": 1}},
+    ]
+    for payload in invalid_payloads:
+        assert translate(payload) is None
+        assert client._translate_path_update(payload) is None
 
     assert ducaheat_ws.DucaheatWSClient._resolve_update_section(None) == (None, None)
     assert ducaheat_ws.DucaheatWSClient._resolve_update_section("ADVANCED_SETUP") == (
