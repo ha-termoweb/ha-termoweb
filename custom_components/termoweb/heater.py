@@ -9,7 +9,6 @@ import logging
 from typing import Any, Final, cast
 
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import dispatcher
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -30,6 +29,7 @@ from .inventory import (
     heater_platform_details_from_inventory,
     normalize_node_addr,
     normalize_node_type,
+    resolve_record_inventory,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -450,9 +450,7 @@ def derive_boost_state(
 
     placeholder_iso = boost_end_iso.strip() if isinstance(boost_end_iso, str) else None
     placeholder_detected = False
-    if boost_end_dt is not None and boost_end_dt.year <= 1971:
-        placeholder_detected = True
-    elif placeholder_iso and placeholder_iso.startswith("1970-"):
+    if (boost_end_dt is not None and boost_end_dt.year <= 1971) or (placeholder_iso and placeholder_iso.startswith("1970-")):
         placeholder_detected = True
 
     if placeholder_detected:
@@ -1000,29 +998,17 @@ class HeaterNodeBase(CoordinatorEntity):
         if self._extract_device_addresses(device_entry, node_type):
             return True
 
-        addresses_by_type = device_entry.get("addresses_by_type")
-        has_address_map = isinstance(addresses_by_type, Mapping)
-        nodes_by_type = device_entry.get("nodes_by_type")
-        has_nodes_by_type = isinstance(nodes_by_type, Mapping)
-        if has_address_map:
-            return True
-
-        has_inventory = isinstance(device_entry.get("inventory"), Inventory)
-        supporting_metadata = has_nodes_by_type or has_address_map or has_inventory
+        resolution = resolve_record_inventory(device_entry)
+        inventory = resolution.inventory if resolution is not None else None
+        supporting_metadata = isinstance(inventory, Inventory)
 
         settings = device_entry.get("settings")
-        if supporting_metadata and isinstance(settings, Mapping):
+        if isinstance(settings, Mapping):
             node_settings = settings.get(node_type)
             if isinstance(node_settings, Mapping) and node_settings:
                 return True
 
-        legacy = device_entry.get("htr")
-        if supporting_metadata and node_type == "htr" and isinstance(legacy, Mapping):
-            legacy_settings = legacy.get("settings")
-            if isinstance(legacy_settings, Mapping) and legacy_settings:
-                return True
-
-        return has_inventory
+        return supporting_metadata
 
     def _device_record(self) -> dict[str, Any] | None:
         """Return the coordinator cache entry for this device."""
@@ -1054,16 +1040,6 @@ class HeaterNodeBase(CoordinatorEntity):
             node_settings = cached_settings.get(node_type)
             if isinstance(node_settings, Mapping):
                 settings = node_settings
-
-        if not settings:
-            legacy = record.get("htr")
-            if isinstance(legacy, Mapping):
-                legacy_settings = legacy.get("settings")
-                if isinstance(legacy_settings, Mapping):
-                    settings = legacy_settings
-                legacy_addrs = legacy.get("addrs")
-                if not addresses and isinstance(legacy_addrs, Iterable):
-                    addresses = self._normalise_addresses(legacy_addrs)
 
         if not addresses and settings:
             addresses = list(settings)
@@ -1110,25 +1086,14 @@ class HeaterNodeBase(CoordinatorEntity):
                 seen.add(addr)
                 addresses.append(addr)
 
-        addresses_by_type = device_entry.get("addresses_by_type")
-        if isinstance(addresses_by_type, Mapping):
-            _add(addresses_by_type.get(node_type, ()))
-
-        if not addresses:
-            heater_map = device_entry.get("heater_address_map")
-            if isinstance(heater_map, Mapping):
-                forward = heater_map.get("forward")
-                if isinstance(forward, Mapping):
-                    _add(forward.get(node_type, ()))
-
-        if not addresses:
-            inventory = device_entry.get("inventory")
-            if isinstance(inventory, Inventory):
-                forward_map, _ = inventory.heater_address_map
-                _add(forward_map.get(node_type, ()))
-                if not addresses:
-                    node_bucket = inventory.nodes_by_type.get(node_type, [])
-                    _add(getattr(node, "addr", "") for node in node_bucket)
+        resolution = resolve_record_inventory(device_entry)
+        inventory = resolution.inventory if resolution is not None else None
+        if isinstance(inventory, Inventory):
+            forward_map, _ = inventory.heater_address_map
+            _add(forward_map.get(node_type, ()))
+            if not addresses:
+                node_bucket = inventory.nodes_by_type.get(node_type, [])
+                _add(getattr(node, "addr", "") for node in node_bucket)
 
         return addresses
 
