@@ -182,7 +182,6 @@ class WebSocketClient(_WSStatusMixin):
         self._connected_since: float | None = None
         self._healthy_since: float | None = None
         self._last_event_at: float | None = None
-        self._last_payload_at: float | None = None
         self._stats = WSStats()
 
         self._handshake_payload: dict[str, Any] | None = None
@@ -603,11 +602,14 @@ class WebSocketClient(_WSStatusMixin):
                 if self._disconnected.is_set():
                     break
                 continue
-            last_event = self._last_event_at or self._stats.last_event_ts
-            if not last_event:
+            tracker = self._ws_health_tracker()
+            last_payload = tracker.last_payload_at or tracker.last_heartbeat_at
+            if not last_payload:
+                last_payload = self._last_event_at or self._stats.last_event_ts
+            if not last_payload:
                 continue
             now = time.time()
-            idle_for = now - last_event
+            idle_for = now - last_payload
             self._refresh_ws_payload_state(now=now, reason="idle_monitor")
             if idle_for >= self._payload_idle_window:
                 _LOGGER.info("WS: idle for %.0fs; refreshing websocket lease", idle_for)
@@ -725,6 +727,10 @@ class WebSocketClient(_WSStatusMixin):
 
         self._dispatch_nodes(nodes)
         if sample_updates:
+            self._mark_ws_payload(
+                timestamp=time.time(),
+                stale_after=self._payload_idle_window,
+            )
             self._forward_sample_updates(sample_updates)
         self._mark_event(paths=None, count_event=True)
 
@@ -944,6 +950,11 @@ class WebSocketClient(_WSStatusMixin):
         )
         if unknown_types:  # pragma: no cover - diagnostic payload
             payload_copy.setdefault("unknown_types", sorted(unknown_types))
+
+        self._mark_ws_payload(
+            timestamp=time.time(),
+            stale_after=self._payload_idle_window,
+        )
 
         def _send() -> None:
             """Fire the dispatcher signal with the latest node payload."""
@@ -1431,7 +1442,6 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._stop_event = asyncio.Event()
         self._handshake_logged = False
         self._last_event_at: float | None = None
-        self._last_payload_at: float | None = None
         self._last_heartbeat_at: float | None = None
 
         self._handshake_payload: dict[str, Any] | None = None
@@ -1548,8 +1558,9 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
     async def maybe_restart_after_write(self) -> None:
         """Restart the websocket if writes follow long periods of inactivity."""
 
-        last_payload = self._last_payload_at
-        if last_payload is None:
+        tracker = self._ws_health_tracker()
+        last_payload = tracker.last_payload_at or tracker.last_heartbeat_at
+        if not last_payload:
             last_payload = self._stats.last_event_ts or self._last_event_at
         if not last_payload:
             return
@@ -1967,6 +1978,11 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         if updated_nodes:
             self._nodes = self._build_nodes_snapshot(self._nodes_raw)
         self._mark_event(paths=paths)
+        payload_ts = self._stats.last_event_ts or time.time()
+        self._mark_ws_payload(
+            timestamp=payload_ts,
+            stale_after=self._payload_idle_window,
+        )
         payload_base = {
             "dev_id": self.dev_id,
             "ts": self._stats.last_event_ts,
@@ -2029,15 +2045,6 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             updated_addrs=updated_addrs,
             sample_addrs=sample_addrs,
         )
-
-    def _mark_event(
-        self, *, paths: list[str] | None, count_event: bool = False
-    ) -> None:
-        """Record payload batches and update the payload timestamp."""
-
-        super()._mark_event(paths=paths, count_event=count_event)
-        tracker = self._ws_health_tracker()
-        self._last_payload_at = tracker.last_payload_at
 
     def _update_legacy_section(
         self,
@@ -2249,7 +2256,10 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 if self._disconnected.is_set():
                     break
                 continue
-            last_payload = self._last_payload_at
+            tracker = self._ws_health_tracker()
+            last_payload = tracker.last_payload_at or tracker.last_heartbeat_at
+            if not last_payload:
+                last_payload = self._stats.last_event_ts or self._last_event_at
             now = time.time()
             idle_for: float | None = None
             if last_payload:
