@@ -1548,6 +1548,62 @@ def test_set_node_settings_translates_heat(monkeypatch) -> None:
     asyncio.run(_run())
 
 
+def test_build_acm_extra_options_payload_with_boost_time_only() -> None:
+    client = RESTClient(FakeSession(), "user", "pass")
+
+    payload = client._build_acm_extra_options_payload(180, None)
+
+    assert payload == {"extra_options": {"boost_time": 180}}
+
+
+def test_build_acm_extra_options_payload_with_boost_temp_only() -> None:
+    client = RESTClient(FakeSession(), "user", "pass")
+
+    payload = client._build_acm_extra_options_payload(None, 23.0)
+
+    assert payload == {"extra_options": {"boost_temp": "23.0"}}
+
+
+def test_build_acm_extra_options_payload_missing_inputs() -> None:
+    client = RESTClient(FakeSession(), "user", "pass")
+
+    with pytest.raises(ValueError, match="must be provided"):
+        client._build_acm_extra_options_payload(None, None)
+
+
+def test_build_acm_extra_options_payload_rejects_invalid_boost_temp() -> None:
+    client = RESTClient(FakeSession(), "user", "pass")
+
+    with pytest.raises(ValueError, match="Invalid boost_temp value"):
+        client._build_acm_extra_options_payload(None, "invalid")
+
+
+@pytest.mark.asyncio
+async def test_set_acm_extra_options_forwards_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = FakeSession()
+    client = RESTClient(session, "user", "pass")
+
+    sentinel_payload: dict[str, Any] = {"extra_options": {"boost_time": 120}}
+    request_mock = AsyncMock(return_value={"ok": True})
+    headers_mock = AsyncMock(return_value={"Authorization": "Bearer token"})
+
+    monkeypatch.setattr(client, "_build_acm_extra_options_payload", lambda *args: sentinel_payload)
+    monkeypatch.setattr(client, "_request", request_mock)
+    monkeypatch.setattr(client, "authed_headers", headers_mock)
+    monkeypatch.setattr(client, "_log_non_htr_payload", lambda **_: None)
+
+    response = await client.set_acm_extra_options("dev123", 9, boost_time=120)
+
+    assert response == {"ok": True}
+    assert request_mock.await_count == 1
+    await_call = request_mock.await_args
+    assert await_call.args[0] == "POST"
+    assert await_call.args[1] == "/api/v2/devs/dev123/acm/9/setup"
+    assert await_call.kwargs["json"] is sentinel_payload
+    assert await_call.kwargs["headers"] == {"Authorization": "Bearer token"}
+    assert headers_mock.await_count == 1
+
+
 def test_ducaheat_get_node_settings_normalises_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
