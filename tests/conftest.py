@@ -141,13 +141,15 @@ def build_coordinator_device_state(
     """Return a coordinator device record with normalised heater metadata."""
 
     from custom_components.termoweb.inventory import (
+        build_node_inventory,
         normalize_node_addr,
         normalize_node_type,
     )
 
     record: dict[str, Any] = {}
     if nodes is not None:
-        record["nodes"] = nodes
+        record["inventory_payload"] = nodes
+        record["node_inventory"] = list(build_node_inventory(nodes))
     if extra:
         record.update(dict(extra))
 

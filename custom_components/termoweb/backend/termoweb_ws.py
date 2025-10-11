@@ -924,10 +924,8 @@ class WebSocketClient(_WSStatusMixin):
                 snapshot_payload.setdefault("htr", nodes_by_type["htr"])
             snapshot_payload["nodes"] = deepcopy(raw_nodes_payload)
 
-        if isinstance(record, MutableMapping):
-            record["nodes"] = raw_nodes_payload
-            if isinstance(inventory, Inventory):
-                record["inventory"] = inventory
+        if isinstance(record, MutableMapping) and isinstance(inventory, Inventory):
+            record["inventory"] = inventory
 
         self._apply_heater_addresses(
             addr_map,
@@ -1211,7 +1209,6 @@ class WebSocketClient(_WSStatusMixin):
             resolution = resolve_record_inventory(
                 record_mapping,
                 dev_id=self.dev_id,
-                nodes_payload=record_mapping.get("nodes") if isinstance(record_mapping, Mapping) else None,
             )
             if resolution.inventory is not None:
                 inventory_container = _bind_inventory(resolution.inventory)

@@ -1634,7 +1634,9 @@ async def test_subscribe_feeds_reuses_cached_nodes(
     assert count == 2
     assert {path for _evt, path in emissions} == {"/htr/1/samples", "/htr/1/status"}
     bucket = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
-    assert bucket["nodes"] == client._latest_nodes
+    inventory = bucket.get("inventory")
+    assert isinstance(inventory, Inventory)
+    assert any(node.addr == "1" for node in getattr(inventory, "nodes", ()))
 
 
 @pytest.mark.asyncio

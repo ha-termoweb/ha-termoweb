@@ -69,7 +69,11 @@ def _make_coordinator(
 ) -> FakeCoordinator:
     base_record = dict(record)
 
-    raw_nodes = base_record.get("nodes")
+    raw_nodes = base_record.get("inventory_payload")
+    if raw_nodes is None:
+        inventory_container = base_record.get("inventory")
+        if isinstance(inventory_container, Inventory):
+            raw_nodes = getattr(inventory_container, "payload", None)
     nodes_payload = raw_nodes if isinstance(raw_nodes, Mapping) else None
 
     raw_settings: dict[str, dict[str, Any]] = {}
@@ -153,7 +157,7 @@ def _make_coordinator(
         client=client,
         dev_id=dev_id,
         dev=normalised,
-        nodes=normalised.get("nodes", {}),
+        nodes=normalised.get("inventory_payload", {}),
         inventory=inventory,
         inventory_payload=inventory_payload,
         inventory_nodes=inventory_nodes,

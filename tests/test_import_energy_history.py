@@ -1074,7 +1074,9 @@ def test_async_import_energy_history_rebuilds_missing_inventory(
                 entry.entry_id: {
                     "client": client,
                     "dev_id": "dev",
-                    "nodes": nodes_payload,
+                    "node_inventory": list(
+                        inventory_module.build_node_inventory(nodes_payload)
+                    ),
                 }
             }
         }
@@ -3044,7 +3046,6 @@ def test_service_uses_snapshot_inventory(monkeypatch: pytest.MonkeyPatch) -> Non
         rec = hass.data[const.DOMAIN][entry.entry_id]
         rec.pop("node_inventory", None)
         raw_nodes = {"nodes": [{"type": "htr", "addr": "A"}]}
-        rec["nodes"] = raw_nodes
         rec["inventory"] = inventory_module.Inventory(
             "dev",
             raw_nodes,

@@ -61,12 +61,12 @@ __all__ = [
     "build_node_inventory",
     "heater_platform_details_from_inventory",
     "heater_sample_subscription_targets",
-    "normalize_power_monitor_addresses",
     "normalize_heater_addresses",
-    "power_monitor_sample_subscription_targets",
     "normalize_node_addr",
     "normalize_node_type",
+    "normalize_power_monitor_addresses",
     "parse_heater_energy_unique_id",
+    "power_monitor_sample_subscription_targets",
     "resolve_record_inventory",
 ]
 
@@ -484,8 +484,6 @@ def resolve_record_inventory(
                 resolved_dev_id = str(record_dev)
 
     payload_candidate = nodes_payload
-    if mapping is not None and payload_candidate is None and "nodes" in mapping:
-        payload_candidate = mapping.get("nodes")
 
     nodes_candidate: Iterable[Any] | None = node_list
     if mapping is not None and nodes_candidate is None and "node_inventory" in mapping:
@@ -550,6 +548,8 @@ def resolve_record_inventory(
             payload=payload_candidate,
         )
         if result is not None:
+            if mutable is not None:
+                mutable.pop("node_inventory", None)
             return result
 
     snapshot = mapping.get("snapshot") if mapping is not None else None
@@ -573,8 +573,6 @@ def resolve_record_inventory(
                 return result
 
     payload_for_build = payload_candidate
-    if mapping is not None and payload_for_build is None and "nodes" in mapping:
-        payload_for_build = mapping.get("nodes")
 
     if payload_for_build is not None:
         try:
