@@ -162,7 +162,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._task: asyncio.Task | None = None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._stats = WSStats()
-        self._latest_nodes: Mapping[str, Any] | None = None
         self._nodes_raw: dict[str, Any] | None = None
         self._subscription_paths: set[str] = set()
         self._pending_dev_data = False
@@ -500,7 +499,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                 else None
                             )
                             if isinstance(nodes, dict):
-                                self._latest_nodes = nodes
                                 self._log_nodes_summary(nodes)
                                 normalised = self._normalise_nodes_payload(nodes)
                                 if isinstance(normalised, dict):
@@ -1243,12 +1241,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
     async def _subscribe_feeds(self, nodes: Mapping[str, Any] | None) -> int:
         """Subscribe to heater status and sample feeds."""
 
-        resolved_nodes: Mapping[str, Any] | None = (
-            nodes if isinstance(nodes, Mapping) else None
-        )
-        if resolved_nodes is None and isinstance(self._latest_nodes, Mapping):
-            resolved_nodes = self._latest_nodes
-
         try:
             domain_bucket = self.hass.data.setdefault(DOMAIN, {})
             existing_record = domain_bucket.get(self.entry_id)
@@ -1261,9 +1253,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 if isinstance(existing_record, Mapping):
                     record_mapping.update(existing_record)
                 domain_bucket[self.entry_id] = record_mapping
-
-            if isinstance(resolved_nodes, Mapping):
-                record_mapping["nodes"] = resolved_nodes
 
             inventory_container: Inventory | None = (
                 self._inventory if isinstance(self._inventory, Inventory) else None
@@ -1278,14 +1267,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             if isinstance(coordinator_inventory, Inventory):
                 coordinator_nodes = coordinator_inventory.nodes
 
-            nodes_payload: Any | None
-            if isinstance(resolved_nodes, Mapping):
-                nodes_payload = resolved_nodes
-            else:
-                nodes_payload = record_mapping.get("nodes")
-
             should_resolve = inventory_container is None and (
-                nodes_payload is not None
+                isinstance(nodes, Mapping)
                 or not isinstance(coordinator_inventory, Inventory)
             )
 
@@ -1293,7 +1276,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 resolution = resolve_record_inventory(
                     record_mapping,
                     dev_id=self.dev_id,
-                    nodes_payload=nodes_payload,
+                    nodes_payload=nodes if isinstance(nodes, Mapping) else None,
                     node_list=coordinator_nodes,
                 )
                 inventory_container = resolution.inventory
