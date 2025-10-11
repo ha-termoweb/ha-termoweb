@@ -1436,16 +1436,16 @@ def test_heater_sample_targets_use_record_inventory(
     assert client._inventory is inventory
 
 
-def test_heater_sample_targets_build_from_record_node_inventory(
+def test_heater_sample_targets_build_from_record_raw_nodes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Cached node inventory should seed rebuilds when inventory is missing."""
+    """Raw node payloads should seed inventory rebuilds when cached inventory is missing."""
 
     client, _sio, _ = _make_client(monkeypatch)
     record = client.hass.data[module.DOMAIN]["entry"]
     raw_nodes = {"nodes": [{"type": "htr", "addr": "13"}]}
     record.clear()
-    record["node_inventory"] = module.build_node_inventory(raw_nodes)
+    record["nodes"] = raw_nodes
     record.pop("inventory", None)
 
     client._inventory = None
@@ -1454,7 +1454,7 @@ def test_heater_sample_targets_build_from_record_node_inventory(
 
     assert targets == [("htr", "13")]
     assert isinstance(client._inventory, Inventory)
-    assert client._inventory.payload == {}
+    assert client._inventory.payload == raw_nodes
     assert any(node.addr == "13" for node in client._inventory.nodes)
 
 

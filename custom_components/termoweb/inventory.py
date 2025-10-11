@@ -263,7 +263,7 @@ class Inventory:
                 filtered_forward[node_type] = normalized
                 for addr in normalized:
                     reverse_map.setdefault(addr, set()).add(node_type)
-            filtered_forward.setdefault("pmo", tuple())
+            filtered_forward.setdefault("pmo", ())
             cached = (
                 filtered_forward,
                 {addr: frozenset(node_types) for addr, node_types in reverse_map.items()},
@@ -486,8 +486,6 @@ def resolve_record_inventory(
     payload_candidate = nodes_payload
 
     nodes_candidate: Iterable[Any] | None = node_list
-    if mapping is not None and nodes_candidate is None and "node_inventory" in mapping:
-        nodes_candidate = mapping.get("node_inventory")
 
     def _node_pairs(items: Iterable[Any]) -> set[tuple[str, str]]:
         pairs: set[tuple[str, str]] = set()
@@ -543,13 +541,11 @@ def resolve_record_inventory(
         nodes_tuple, raw_count = node_info
         result = _finalize(
             nodes_tuple,
-            source="node_inventory",
+            source="node_list",
             raw_count=raw_count,
             payload=payload_candidate,
         )
         if result is not None:
-            if mutable is not None:
-                mutable.pop("node_inventory", None)
             return result
 
     snapshot = mapping.get("snapshot") if mapping is not None else None
