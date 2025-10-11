@@ -184,7 +184,12 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._payload_stale_after = self._default_payload_window
         self._payload_window_hint: float | None = None
         self._payload_window_source: str = "default"
-        self._reset_payload_window(source="default")
+        self._suppress_default_cadence_hint = True
+        try:
+            self._reset_payload_window(source="default")
+        finally:
+            self._suppress_default_cadence_hint = False
+        self._pending_default_cadence_hint = True
 
     @property
     def _ws_health(self) -> WsHealthTracker:
@@ -869,7 +874,12 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._payload_window_hint = hint
         self._payload_window_source = source
 
-        tracker = self._ws_health_tracker()
+        previous_suppression = getattr(self, "_suppress_default_cadence_hint", False)
+        self._suppress_default_cadence_hint = True
+        try:
+            tracker = self._ws_health_tracker()
+        finally:
+            self._suppress_default_cadence_hint = previous_suppression
         staleness_changed = tracker.set_payload_window(window)
 
         state = self._ws_state_bucket()
@@ -900,8 +910,15 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._payload_stale_after = self._default_payload_window
         self._payload_window_hint = None
         self._payload_window_source = source
-        tracker = self._ws_health_tracker()
+        previous_suppression = getattr(self, "_suppress_default_cadence_hint", False)
+        self._suppress_default_cadence_hint = True
+        try:
+            tracker = self._ws_health_tracker()
+        finally:
+            self._suppress_default_cadence_hint = previous_suppression
         staleness_changed = tracker.set_payload_window(self._payload_stale_after)
+
+        self._pending_default_cadence_hint = True
 
         state = self._ws_state_bucket()
         state["payload_stale_after"] = tracker.payload_stale_after
@@ -1243,8 +1260,13 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._pending_dev_data = False
         self._ping_interval = None
         self._ping_timeout = None
-        self._reset_payload_window(source="disconnect")
-        tracker = self._ws_health
+        previous_suppression = getattr(self, "_suppress_default_cadence_hint", False)
+        self._suppress_default_cadence_hint = True
+        try:
+            self._reset_payload_window(source="disconnect")
+            tracker = self._ws_health
+        finally:
+            self._suppress_default_cadence_hint = previous_suppression
         tracker.last_payload_at = None
         tracker.last_heartbeat_at = None
         tracker.healthy_since = None

@@ -897,6 +897,49 @@ async def test_async_register_diagnostics_when_ready_handles_cancelled(
     assert "Diagnostics registration attempts cancelled" in caplog.text
 
 
+@pytest.mark.asyncio
+async def test_async_register_diagnostics_when_ready_uses_run_in_executor(
+    termoweb_init: Any,
+    stub_hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog,
+) -> None:
+    diagnostics_module = types.ModuleType("custom_components.termoweb.diagnostics")
+    monkeypatch.setitem(
+        sys.modules, "custom_components.termoweb.diagnostics", diagnostics_module
+    )
+
+    run_calls: list[tuple[Any, Any, Any]] = []
+
+    loop = asyncio.get_running_loop()
+
+    async def fake_run_in_executor(
+        executor: Any, func: Callable[[str], Any], module: str
+    ) -> types.ModuleType:
+        run_calls.append((executor, func, module))
+        assert executor is None
+        return diagnostics_module
+
+    monkeypatch.setattr(loop, "run_in_executor", fake_run_in_executor)
+
+    def fake_register(_: HomeAssistant, module: types.ModuleType) -> bool:
+        return module is diagnostics_module
+
+    monkeypatch.setattr(termoweb_init, "_register_diagnostics_platform", fake_register)
+
+    stub_hass.async_add_executor_job = None  # type: ignore[assignment]
+    stub_hass.config.components = {"diagnostics"}
+
+    with caplog.at_level(logging.DEBUG, logger=termoweb_init.__name__):
+        await termoweb_init._async_register_diagnostics_when_ready(stub_hass)
+
+    assert run_calls
+    executor, func, module = run_calls[0]
+    assert executor is None
+    assert func is termoweb_init.import_module
+    assert module == "custom_components.termoweb.diagnostics"
+
+
 def test_build_heater_address_map_filters_invalid_nodes(termoweb_init: Any) -> None:
     inventory = [
         SimpleNamespace(type="htr", addr="A"),
@@ -1338,6 +1381,167 @@ def test_recalc_poll_interval_transitions(
     asyncio.run(_run())
 
 
+def test_recalc_poll_interval_edge_cases(
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class PollClient(BaseFakeClient):
+        async def list_devices(self) -> list[dict[str, Any]]:
+            return [{"dev_id": "dev-edge"}]
+
+    monkeypatch.setattr(termoweb_init, "RESTClient", PollClient)
+    entry = ConfigEntry("poll-edge", data={"username": "user", "password": "pw"})
+    stub_hass.config_entries.add(entry)
+
+    async def _run() -> None:
+        assert await termoweb_init.async_setup_entry(stub_hass, entry)
+        await _drain_tasks(stub_hass)
+
+        record = termoweb_init._test_helpers.get_record(stub_hass, entry)
+        coordinator: FakeCoordinator = record["coordinator"]
+        base_interval = record["base_poll_interval"]
+
+        scheduled: list[float] = []
+        callbacks: list[Callable[[Any], None]] = []
+        cancellations: list[bool] = []
+
+        def fake_async_call_later(
+            _hass: HomeAssistant, delay: float, callback: Callable[[Any], None]
+        ) -> Callable[[], None]:
+            scheduled.append(delay)
+            callbacks.append(callback)
+
+            def _cancel() -> None:
+                cancellations.append(True)
+
+            return _cancel
+
+        monkeypatch.setattr(termoweb_init, "async_call_later", fake_async_call_later)
+
+        current_time = {"value": 1_000.0}
+
+        def fake_time() -> float:
+            return current_time["value"]
+
+        monkeypatch.setattr(termoweb_init.time, "time", fake_time)
+
+        # (a) Completed tasks resume polling even when task dict is populated
+        loop = asyncio.get_running_loop()
+        done_task = loop.create_future()
+        done_task.set_result(None)
+        record["ws_tasks"]["dev-edge"] = done_task
+        record["ws_trackers"].clear()
+        record["poll_suspended"] = True
+        record["stretched"] = True
+        coordinator.update_interval = None
+        record["recalc_poll"]()
+        assert record["poll_suspended"] is False
+        assert record["stretched"] is False
+        assert coordinator.update_interval == timedelta(seconds=base_interval)
+
+        record["ws_tasks"].clear()
+
+        # (b) Missing trackers mark payloads stale and keep polling active
+        orphan_event = asyncio.Event()
+        orphan_task = asyncio.create_task(orphan_event.wait())
+        record["ws_tasks"]["dev-missing"] = orphan_task
+        record["ws_trackers"].clear()
+        record["poll_suspended"] = False
+        record["stretched"] = False
+        coordinator.update_interval = timedelta(seconds=base_interval)
+        record["recalc_poll"]()
+        orphan_event.set()
+        await orphan_task
+        record["ws_tasks"].clear()
+
+        # (c) Trackers without payload timestamps trigger the empty timestamp branch
+        tracker_event = asyncio.Event()
+        tracker_task = asyncio.create_task(tracker_event.wait())
+        no_payload_tracker = WsHealthTracker("dev-no-payload")
+        no_payload_tracker.update_status("healthy")
+        record["ws_tasks"]["dev-no-payload"] = tracker_task
+        record["ws_trackers"]["dev-no-payload"] = no_payload_tracker
+        record["poll_suspended"] = False
+        coordinator.update_interval = timedelta(seconds=base_interval)
+        record["recalc_poll"]()
+        tracker_event.set()
+        await tracker_task
+        record["ws_tasks"].clear()
+        record["ws_trackers"].clear()
+
+        # (d) Trackers with legacy call signatures raise TypeError paths
+        legacy_event = asyncio.Event()
+        legacy_task = asyncio.create_task(legacy_event.wait())
+
+        class LegacyTracker:
+            status = "healthy"
+
+            def __init__(self, timestamp: float) -> None:
+                self.last_payload_at = timestamp
+
+            def is_payload_stale(self) -> bool:
+                return True
+
+            def stale_deadline(self, _now: float) -> float:
+                return self.last_payload_at + 10
+
+        current_time["value"] = 2_000.0
+        legacy_tracker = LegacyTracker(current_time["value"])
+        record["ws_tasks"]["dev-legacy"] = legacy_task
+        record["ws_trackers"]["dev-legacy"] = legacy_tracker
+        record["poll_suspended"] = False
+        record["stretched"] = False
+        coordinator.update_interval = timedelta(seconds=base_interval)
+        record["recalc_poll"]()
+        legacy_event.set()
+        await legacy_task
+        record["ws_tasks"].clear()
+        record["ws_trackers"].clear()
+
+        # (e) Healthy trackers schedule resume callbacks using async_call_later
+        resume_event = asyncio.Event()
+        resume_task = asyncio.create_task(resume_event.wait())
+
+        class FreshTracker:
+            status = "healthy"
+
+            def __init__(self, timestamp: float) -> None:
+                self.last_payload_at = timestamp
+
+            def is_payload_stale(self, now: float | None = None) -> bool:
+                return False
+
+            def stale_deadline(self) -> float:
+                return self.last_payload_at + 30
+
+        current_time["value"] = 3_000.0
+        fresh_tracker = FreshTracker(current_time["value"])
+        record["ws_tasks"]["dev-fresh"] = resume_task
+        record["ws_trackers"]["dev-fresh"] = fresh_tracker
+        record["poll_suspended"] = False
+        record["stretched"] = False
+        coordinator.update_interval = timedelta(seconds=base_interval)
+        record["recalc_poll"]()
+        assert record["poll_suspended"] is True
+        assert record["stretched"] is True
+        assert record["poll_resume_unsub"] is not None
+        assert scheduled and scheduled[-1] == 30
+
+        resume_event.set()
+        await resume_task
+        record["ws_tasks"].clear()
+        record["ws_trackers"].clear()
+
+        resume_callback = callbacks[-1]
+        assert callable(resume_callback)
+        resume_callback(None)
+        assert record["poll_suspended"] is False
+        assert record["poll_resume_unsub"] is None
+
+        assert cancellations in ([], [True])
+
+    asyncio.run(_run())
+
+
 def test_ws_status_dispatcher_filters_entry(
     termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1407,6 +1611,32 @@ def test_ws_status_dispatcher_filters_entry(
         assert coordinator1.update_interval == timedelta(seconds=base_interval)
         other_event.set()
         await other_task
+
+        # Status-only updates still trigger recalculation
+        record1["ws_tasks"].clear()
+        record1["ws_state"].clear()
+        record1["ws_trackers"].clear()
+        status_event = asyncio.Event()
+        status_task = asyncio.create_task(status_event.wait())
+        record1["ws_tasks"]["dev-1"] = status_task
+        status_tracker = WsHealthTracker("dev-1")
+        status_tracker.update_status("healthy")
+        status_tracker.mark_payload(stale_after=300)
+        record1["ws_trackers"]["dev-1"] = status_tracker
+        cb1({"reason": "status"})
+        status_event.set()
+        await status_task
+
+        # Non-mapping payloads still trigger recalculation for the owning entry
+        record1["ws_tasks"].clear()
+        record1["ws_state"].clear()
+        record1["ws_trackers"].clear()
+        fallback_event = asyncio.Event()
+        fallback_task = asyncio.create_task(fallback_event.wait())
+        record1["ws_tasks"]["dev-1"] = fallback_task
+        cb1(object())
+        fallback_event.set()
+        await fallback_task
 
     asyncio.run(_run())
 
@@ -1925,3 +2155,23 @@ async def test_shutdown_entry_handles_client_without_stop(termoweb_init: Any) ->
     rec: dict[str, object] = {"ws_clients": {"dev": object()}}
     await termoweb_init._async_shutdown_entry(rec)
     assert rec["_shutdown_complete"] is True
+
+
+@pytest.mark.asyncio
+async def test_shutdown_entry_cancels_poll_timer(termoweb_init: Any) -> None:
+    cancelled: list[bool] = []
+
+    def fake_cancel() -> None:
+        cancelled.append(True)
+
+    rec: dict[str, object] = {
+        "ws_clients": {},
+        "ws_tasks": {},
+        "poll_resume_unsub": fake_cancel,
+    }
+
+    await termoweb_init._async_shutdown_entry(rec)
+
+    assert rec["_shutdown_complete"] is True
+    assert rec["poll_resume_unsub"] is None
+    assert cancelled == [True]
