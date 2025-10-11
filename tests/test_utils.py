@@ -138,6 +138,30 @@ def test_build_gateway_device_info_uses_brand_and_version() -> None:
     assert info["sw_version"] == "7"
 
 
+def test_build_gateway_device_info_respects_include_version_flag() -> None:
+    hass = types.SimpleNamespace(
+        data={
+            DOMAIN: {
+                "entry": {
+                    "brand": "Ducaheat",
+                    "version": "9.1",
+                    "coordinator": types.SimpleNamespace(
+                        data={"dev": {"raw": {"model": "Controller"}}}
+                    ),
+                }
+            }
+        }
+    )
+
+    info = build_gateway_device_info(
+        hass, "entry", "dev", include_version=False
+    )
+
+    assert info["manufacturer"] == "Ducaheat"
+    assert info["model"] == "Controller"
+    assert "sw_version" not in info
+
+
 def test_build_gateway_device_info_uses_gateway_model_from_coordinator() -> None:
     hass = types.SimpleNamespace(
         data={
