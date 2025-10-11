@@ -671,6 +671,60 @@ class WebSocketClient(_WSCommon):
         if nodes is None:
             _LOGGER.debug("WS: %s without nodes", event)
             return
+        raw_store = getattr(self, "_nodes_raw", None)
+        if isinstance(raw_store, MutableMapping):
+            if not merge:
+                raw_store.clear()
+            for node_type, type_payload in nodes.items():
+                if not isinstance(node_type, str) or not isinstance(
+                    type_payload, Mapping
+                ):
+                    continue
+                existing_bucket = raw_store.get(node_type)
+                if isinstance(existing_bucket, MutableMapping):
+                    node_bucket = existing_bucket
+                elif isinstance(existing_bucket, Mapping):
+                    node_bucket = dict(existing_bucket)
+                    raw_store[node_type] = node_bucket
+                else:
+                    node_bucket = {}
+                    raw_store[node_type] = node_bucket
+                if not merge:
+                    node_bucket.clear()
+                for section, section_payload in type_payload.items():
+                    if not isinstance(section, str):
+                        continue
+                    if isinstance(section_payload, Mapping):
+                        existing_section = node_bucket.get(section)
+                        if isinstance(existing_section, MutableMapping):
+                            section_bucket = existing_section
+                        elif isinstance(existing_section, Mapping):
+                            section_bucket = dict(existing_section)
+                            node_bucket[section] = section_bucket
+                        else:
+                            section_bucket = {}
+                            node_bucket[section] = section_bucket
+                        if not merge:
+                            section_bucket.clear()
+                        for addr, value in section_payload.items():
+                            if isinstance(value, Mapping):
+                                existing_payload = section_bucket.get(addr)
+                                if isinstance(existing_payload, MutableMapping):
+                                    target_payload = existing_payload
+                                elif isinstance(existing_payload, Mapping):
+                                    target_payload = dict(existing_payload)
+                                    section_bucket[addr] = target_payload
+                                else:
+                                    target_payload = {}
+                                    section_bucket[addr] = target_payload
+                                if not merge:
+                                    target_payload.clear()
+                                for key, item in value.items():
+                                    target_payload[key] = deepcopy(item)
+                            else:
+                                section_bucket[addr] = deepcopy(value)
+                    else:
+                        node_bucket[section] = deepcopy(section_payload)
         normaliser = getattr(self._client, "normalise_ws_nodes", None)
         if callable(normaliser):
             try:
