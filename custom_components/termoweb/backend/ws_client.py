@@ -316,6 +316,17 @@ class _WSStatusMixin:
 
         cached = getattr(self, "_ws_tracker", None)
         if isinstance(cached, WsHealthTracker):
+            if (
+                getattr(self, "_pending_default_cadence_hint", False)
+                and hasattr(self, "_apply_payload_window_hint")
+                and not getattr(self, "_suppress_default_cadence_hint", False)
+            ):
+                self._pending_default_cadence_hint = False
+                self._apply_payload_window_hint(
+                    source="cadence",
+                    lease_seconds=120,
+                    candidates=[30, 75, "90"],
+                )
             return cached
 
         hass_data = getattr(self.hass, "data", None)
@@ -351,7 +362,19 @@ class _WSStatusMixin:
         ):
             tracker.last_heartbeat_at = float(legacy_heartbeat)
         setattr(self, "_ws_tracker", tracker)
-        if created and hasattr(self, "_apply_payload_window_hint"):
+        should_apply_hint = created and hasattr(self, "_apply_payload_window_hint")
+        if should_apply_hint and getattr(self, "_suppress_default_cadence_hint", False):
+            should_apply_hint = False
+        if should_apply_hint:
+            self._apply_payload_window_hint(
+                source="cadence",
+                lease_seconds=120,
+                candidates=[30, 75, "90"],
+            )
+        elif getattr(self, "_pending_default_cadence_hint", False) and hasattr(
+            self, "_apply_payload_window_hint"
+        ):
+            self._pending_default_cadence_hint = False
             self._apply_payload_window_hint(
                 source="cadence",
                 lease_seconds=120,
