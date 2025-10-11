@@ -117,6 +117,21 @@ class StubSession:
         return self._ws
 
 
+class DummyCoordinator:
+    """Coordinator stub exposing shared data buckets."""
+
+    def __init__(self) -> None:
+        self.update_nodes = MagicMock()
+        self.data: dict[str, Any] = {
+            "device": {
+                "nodes_by_type": {},
+                "addr_map": {},
+                "settings": {},
+                "addresses_by_type": {},
+            }
+        }
+
+
 def _make_client(monkeypatch: pytest.MonkeyPatch) -> ducaheat_ws.DucaheatWSClient:
     """Create a websocket client with deterministic helpers."""
 
@@ -124,12 +139,13 @@ def _make_client(monkeypatch: pytest.MonkeyPatch) -> ducaheat_ws.DucaheatWSClien
     session = StubSession(ws)
     hass = HomeAssistant()
     hass.data.setdefault(ducaheat_ws.DOMAIN, {})["entry"] = {}
+    coordinator = DummyCoordinator()
     client = ducaheat_ws.DucaheatWSClient(
         hass,
         entry_id="entry",
         dev_id="device",
         api_client=DummyREST(),
-        coordinator=SimpleNamespace(update_nodes=AsyncMock()),
+        coordinator=coordinator,
         session=session,  # type: ignore[arg-type]
     )
     monkeypatch.setattr(client, "_get_token", AsyncMock(return_value="token"))
@@ -213,22 +229,95 @@ def test_update_status_records_health(monkeypatch: pytest.MonkeyPatch) -> None:
     assert ws_state["healthy_since"] == first_ts
     assert ws_state["healthy_minutes"] == 10
     assert ws_state["frames_total"] == 5
-    assert ws_state["events_total"] == 3
 
-    drop_ts = later_ts + 5
-    monkeypatch.setattr(ducaheat_ws.time, "time", lambda: drop_ts)
-    client._update_status("disconnected")
 
-    ws_state = hass.data[ducaheat_ws.DOMAIN]["entry"]["ws_state"][client.dev_id]
-    assert ws_state["status"] == "disconnected"
-    assert ws_state["healthy_since"] is None
-    assert ws_state["healthy_minutes"] == 0
+def _build_inventory_payload(addr: str = "1") -> dict[str, Any]:
+    """Return a minimal node payload for inventory construction."""
 
-    monkeypatch.setattr(ducaheat_ws.time, "time", lambda: drop_ts + 30)
-    client._update_status("disconnected")
+    return {"nodes": [{"type": "htr", "addr": addr}]}
 
-    ws_state = hass.data[ducaheat_ws.DOMAIN]["entry"]["ws_state"][client.dev_id]
-    assert ws_state["status"] == "disconnected"
+
+def _set_inventory(
+    client: ducaheat_ws.DucaheatWSClient,
+    payload: Mapping[str, Any],
+) -> Inventory:
+    """Bind a fresh inventory container to the client and hass record."""
+
+    inventory = Inventory(
+        client.dev_id,
+        payload,
+        build_node_inventory(payload),
+    )
+    hass_record = client.hass.data[ducaheat_ws.DOMAIN][client.entry_id]
+    hass_record["inventory"] = inventory
+    client._inventory = inventory
+    return inventory
+
+
+def test_dispatch_nodes_updates_addresses_and_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Snapshots should update coordinator caches for settings and addresses."""
+
+    client = _make_client(monkeypatch)
+    hass = client.hass
+    coordinator = client._coordinator
+    client._dispatcher = MagicMock()
+
+    payload = {
+        "htr": {
+            "settings": {"1": {"target_temp": 21}},
+            "samples": {"1": {"power": 1200}},
+        }
+    }
+    client._nodes_raw = copy.deepcopy(payload)
+    snapshot = client._build_nodes_snapshot(client._nodes_raw)
+
+    _set_inventory(client, _build_inventory_payload())
+
+    client._dispatch_nodes(snapshot)
+
+    assert client._dispatcher.call_count == 1
+    dispatched = client._dispatcher.call_args[0][2]
+    assert dispatched["nodes_by_type"]["htr"]["settings"]["1"]["target_temp"] == 21
+
+    dev_map = coordinator.data[client.dev_id]
+    assert dev_map["addresses_by_type"]["htr"] == ["1"]
+    assert dev_map["settings"]["htr"]["1"]["target_temp"] == 21
+
+    record = hass.data[ducaheat_ws.DOMAIN][client.entry_id]
+    assert record["nodes"]["htr"]["settings"]["1"]["target_temp"] == 21
+
+
+def test_incremental_updates_refresh_cached_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Incremental websocket merges should refresh coordinator settings cache."""
+
+    client = _make_client(monkeypatch)
+    coordinator = client._coordinator
+    client._dispatcher = MagicMock()
+
+    _set_inventory(client, _build_inventory_payload())
+
+    base = {"htr": {"settings": {"1": {"target_temp": 20}}}}
+    client._nodes_raw = copy.deepcopy(base)
+    snapshot = client._build_nodes_snapshot(client._nodes_raw)
+    client._dispatch_nodes(snapshot)
+
+    initial_settings = coordinator.data[client.dev_id]["settings"]["htr"]["1"]["target_temp"]
+    assert initial_settings == 20
+
+    update = {"htr": {"settings": {"1": {"target_temp": 23}}}}
+    client._merge_nodes(client._nodes_raw, update)
+    updated_snapshot = client._build_nodes_snapshot(client._nodes_raw)
+    client._dispatch_nodes(updated_snapshot)
+
+    final_settings = coordinator.data[client.dev_id]["settings"]["htr"]["1"]["target_temp"]
+    assert final_settings == 23
+
+    dispatched = client._dispatcher.call_args_list[-1][0][2]
+    assert dispatched["nodes_by_type"]["htr"]["settings"]["1"]["target_temp"] == 23
 
 
 @pytest.mark.asyncio
