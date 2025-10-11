@@ -23,6 +23,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import entity_registry as entity_registry_mod
 
+from custom_components.termoweb.backend.ws_health import WsHealthTracker
 from custom_components.termoweb.identifiers import build_heater_energy_unique_id
 from custom_components.termoweb.inventory import build_heater_address_map
 
@@ -1257,99 +1258,82 @@ def test_recalc_poll_interval_transitions(
             await asyncio.gather(*record["ws_tasks"].values(), return_exceptions=True)
         record["ws_tasks"].clear()
         record["ws_state"].clear()
+        record["ws_trackers"].clear()
 
         base_interval = record["base_poll_interval"]
+        current_time = 1_000.0
+
+        def fake_time() -> float:
+            return current_time
+
+        monkeypatch.setattr(termoweb_init.time, "time", fake_time)
+
+        scheduled: list[float | str] = []
+
+        def fake_async_call_later(_hass: Any, delay: float, _cb: Callable[[Any], None]):
+            scheduled.append(delay)
+
+            def _cancel() -> None:
+                scheduled.append("cancelled")
+
+            return _cancel
+
+        monkeypatch.setattr(termoweb_init, "async_call_later", fake_async_call_later)
 
         # (a) No running tasks with stretched=True restores base interval
         record["stretched"] = True
+        record["poll_suspended"] = True
         coordinator.update_interval = timedelta(seconds=999)
         record["recalc_poll"]()
         assert record["stretched"] is False
         assert coordinator.update_interval == timedelta(seconds=base_interval)
 
-        # (b) Healthy tasks below 5 minutes keep base polling interval
+        # (b) Healthy trackers with fresh payloads suspend polling
         healthy_event = asyncio.Event()
         healthy_task = asyncio.create_task(healthy_event.wait())
+        tracker = WsHealthTracker("dev-healthy")
+        tracker.update_status("healthy", healthy_since=current_time, timestamp=current_time)
+        tracker.mark_payload(timestamp=current_time, stale_after=300)
         record["ws_tasks"]["dev-healthy"] = healthy_task
-        record["ws_state"]["dev-healthy"] = {
-            "status": "healthy",
-            "healthy_minutes": 4,
-        }
+        record["ws_trackers"]["dev-healthy"] = tracker
         record["stretched"] = False
+        record["poll_suspended"] = False
         coordinator.update_interval = timedelta(seconds=base_interval)
+        current_time = 1_010.0
         record["recalc_poll"]()
+        assert record["poll_suspended"] is True
+        assert record["stretched"] is True
+        assert coordinator.update_interval is None
+        assert scheduled and scheduled[0] > 0
+
+        # (c) Stale payloads resume the base polling interval
+        current_time = 1_400.0
+        record["recalc_poll"]()
+        assert record["poll_suspended"] is False
         assert record["stretched"] is False
         assert coordinator.update_interval == timedelta(seconds=base_interval)
+        assert scheduled[-1] == "cancelled"
 
-        # (c) Healthy tasks meeting 5 minute threshold stretch polling interval
-        record["ws_state"]["dev-healthy"]["healthy_minutes"] = 5
+        # (d) Fresh payloads restore suspension after a resume
+        tracker.mark_payload(timestamp=current_time, stale_after=300)
+        tracker.update_status("healthy", healthy_since=current_time, timestamp=current_time)
+        current_time = 1_410.0
         record["recalc_poll"]()
+        assert record["poll_suspended"] is True
         assert record["stretched"] is True
-        assert coordinator.update_interval == timedelta(
-            seconds=termoweb_init.STRETCHED_POLL_INTERVAL
-        )
+        assert coordinator.update_interval is None
+
+        # (e) Unhealthy status resumes polling immediately
+        tracker.update_status("degraded", timestamp=current_time + 5, reset_health=True)
+        current_time = 1_420.0
+        record["recalc_poll"]()
+        assert record["poll_suspended"] is False
+        assert record["stretched"] is False
+        assert coordinator.update_interval == timedelta(seconds=base_interval)
+        assert scheduled[-1] == "cancelled"
+
         healthy_event.set()
         await healthy_task
-
-        # (d) Healthy tasks rely on healthy_since when minutes invalid
-        record["ws_tasks"].clear()
-        record["ws_state"].clear()
-        fallback_event = asyncio.Event()
-        fallback_task = asyncio.create_task(fallback_event.wait())
-        record["ws_tasks"]["dev-fallback"] = fallback_task
-        record["ws_state"]["dev-fallback"] = {
-            "status": "healthy",
-            "healthy_minutes": "bad",
-            "healthy_since": 1000.0,
-        }
-        record["stretched"] = False
-        coordinator.update_interval = timedelta(seconds=base_interval)
-        original_time = termoweb_init.time.time
-        monkeypatch.setattr(termoweb_init.time, "time", lambda: 1301.0)
-        record["recalc_poll"]()
-        assert record["stretched"] is True
-        assert coordinator.update_interval == timedelta(
-            seconds=termoweb_init.STRETCHED_POLL_INTERVAL
-        )
-        fallback_event.set()
-        await fallback_task
-        monkeypatch.setattr(termoweb_init.time, "time", original_time)
-
-        # (e) Invalid healthy_since values prevent stretching
-        record["ws_tasks"].clear()
-        record["ws_state"].clear()
-        invalid_event = asyncio.Event()
-        invalid_task = asyncio.create_task(invalid_event.wait())
-        record["ws_tasks"]["dev-invalid"] = invalid_task
-        record["ws_state"]["dev-invalid"] = {
-            "status": "healthy",
-            "healthy_minutes": "bad",
-            "healthy_since": "invalid",
-        }
-        record["stretched"] = False
-        coordinator.update_interval = timedelta(seconds=base_interval)
-        record["recalc_poll"]()
-        assert record["stretched"] is False
-        assert coordinator.update_interval == timedelta(seconds=base_interval)
-        invalid_event.set()
-        await invalid_task
-
-        # (f) Unhealthy status reverts stretched polling
-        record["ws_tasks"].clear()
-        record["ws_state"].clear()
-        unhealthy_event = asyncio.Event()
-        unhealthy_task = asyncio.create_task(unhealthy_event.wait())
-        record["ws_tasks"]["dev-bad"] = unhealthy_task
-        record["ws_state"]["dev-bad"] = {"status": "degraded"}
-        record["stretched"] = True
-        coordinator.update_interval = timedelta(
-            seconds=termoweb_init.STRETCHED_POLL_INTERVAL
-        )
-        record["recalc_poll"]()
-        assert record["stretched"] is False
-        assert coordinator.update_interval == timedelta(seconds=base_interval)
-        unhealthy_event.set()
-        await unhealthy_task
 
     asyncio.run(_run())
 
@@ -1387,38 +1371,38 @@ def test_ws_status_dispatcher_filters_entry(
             await asyncio.gather(*record1["ws_tasks"].values(), return_exceptions=True)
         record1["ws_tasks"].clear()
         record1["ws_state"].clear()
+        record1["ws_trackers"].clear()
 
         # Matching payload triggers recalc for entry1
         healthy_event = asyncio.Event()
         healthy_task = asyncio.create_task(healthy_event.wait())
         record1["ws_tasks"]["dev-1"] = healthy_task
-        record1["ws_state"]["dev-1"] = {
-            "status": "healthy",
-            "healthy_minutes": 5,
-        }
+        healthy_tracker = WsHealthTracker("dev-1")
+        healthy_tracker.update_status("healthy")
+        healthy_tracker.mark_payload(stale_after=300)
+        record1["ws_trackers"]["dev-1"] = healthy_tracker
         record1["stretched"] = False
         coordinator1.update_interval = timedelta(seconds=base_interval)
-        cb1({"entry_id": entry1.entry_id})
+        cb1({"entry_id": entry1.entry_id, "payload_changed": True})
         assert record1["stretched"] is True
-        assert coordinator1.update_interval == timedelta(
-            seconds=termoweb_init.STRETCHED_POLL_INTERVAL
-        )
+        assert coordinator1.update_interval is None
         healthy_event.set()
         await healthy_task
 
         # Mismatching payload (other entry callback) does not affect entry1
         record1["ws_tasks"].clear()
         record1["ws_state"].clear()
+        record1["ws_trackers"].clear()
         other_event = asyncio.Event()
         other_task = asyncio.create_task(other_event.wait())
         record1["ws_tasks"]["dev-1"] = other_task
-        record1["ws_state"]["dev-1"] = {
-            "status": "healthy",
-            "healthy_minutes": 5,
-        }
+        other_tracker = WsHealthTracker("dev-1")
+        other_tracker.update_status("healthy")
+        other_tracker.mark_payload(stale_after=300)
+        record1["ws_trackers"]["dev-1"] = other_tracker
         record1["stretched"] = False
         coordinator1.update_interval = timedelta(seconds=base_interval)
-        cb2({"entry_id": entry1.entry_id})
+        cb2({"entry_id": entry1.entry_id, "payload_changed": True})
         assert record1["stretched"] is False
         assert coordinator1.update_interval == timedelta(seconds=base_interval)
         other_event.set()

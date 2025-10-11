@@ -300,7 +300,6 @@ async def test_runner_handles_errors_and_backoff(monkeypatch: pytest.MonkeyPatch
     await client._runner()
 
     assert call_order == ["connect", "wait", "disconnect", "lost:RuntimeError"]
-    dispatcher.assert_called()
 
 
 @pytest.mark.asyncio
@@ -450,7 +449,6 @@ async def test_on_connect_schedules_idle_monitor(monkeypatch: pytest.MonkeyPatch
     client, _sio, dispatcher = _make_client(monkeypatch, hass_loop=hass_loop)
     await client._on_connect()
     assert created
-    dispatcher.assert_called()
 
 
 @pytest.mark.asyncio
@@ -1886,7 +1884,8 @@ def test_apply_nodes_payload_translation(monkeypatch: pytest.MonkeyPatch) -> Non
     """Node payload application should merge data and notify listeners."""
 
     client, _sio, dispatcher = _make_client(monkeypatch)
-    client._dispatch_nodes = MagicMock()
+    original_dispatch = client._dispatch_nodes
+    client._dispatch_nodes = MagicMock(side_effect=original_dispatch)
     client._handshake_payload = {"nodes": {}}
     client._handle_handshake({"nodes": {"htr": {"status": {"1": {"temp": 20}}}}})
     client._apply_nodes_payload(

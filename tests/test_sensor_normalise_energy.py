@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import importlib
 from types import SimpleNamespace
+from typing import Callable
 
 import pytest
 
@@ -14,50 +16,61 @@ class _ScaleStub(SimpleNamespace):
     """Coordinator stub that exposes a custom energy scale."""
 
 
+def _energy_coordinator_factory() -> EnergyStateCoordinator:
+    module = importlib.import_module("custom_components.termoweb.sensor")
+    energy_cls = module._normalise_energy_value.__globals__["EnergyStateCoordinator"]
+    instance = object.__new__(energy_cls)
+    setattr(instance, "_termoweb_energy_scale", "kWh")
+    return instance
+
+
 @pytest.mark.parametrize(
-    ("coordinator", "raw", "expected"),
+    ("coordinator_factory", "raw", "expected"),
     [
-        pytest.param(object(), True, None, id="bool_true"),
-        pytest.param(object(), False, None, id="bool_false"),
+        pytest.param(lambda: object(), True, None, id="bool_true"),
+        pytest.param(lambda: object(), False, None, id="bool_false"),
         pytest.param(
-            object.__new__(EnergyStateCoordinator),
+            _energy_coordinator_factory,
             5,
             5.0,
             id="energy_coordinator_defaults_to_kwh",
         ),
         pytest.param(
-            object(),
+            lambda: object(),
             "1200",
             1.2,
             id="integer_string_interpreted_as_wh",
         ),
         pytest.param(
-            _ScaleStub(_termoweb_energy_scale=0.5),
+            lambda: _ScaleStub(_termoweb_energy_scale=0.5),
             4,
             2.0,
             id="numeric_scale_attribute",
         ),
         pytest.param(
-            _ScaleStub(_termoweb_energy_scale="2"),
+            lambda: _ScaleStub(_termoweb_energy_scale="2"),
             4,
             8.0,
             id="string_numeric_scale_attribute",
         ),
         pytest.param(
-            _ScaleStub(_termoweb_energy_scale="wh"),
+            lambda: _ScaleStub(_termoweb_energy_scale="wh"),
             500,
             0.5,
             id="textual_scale_wh",
         ),
         pytest.param(
-            object(),
+            lambda: object(),
             "not-a-number",
             None,
             id="invalid_string_returns_none",
         ),
     ],
 )
-def test_normalise_energy_value(coordinator: object, raw: object, expected: float | None) -> None:
+def test_normalise_energy_value(
+    coordinator_factory: Callable[[], object], raw: object, expected: float | None
+) -> None:
     """Ensure ``_normalise_energy_value`` handles diverse inputs."""
 
+    coordinator = coordinator_factory()
     assert _normalise_energy_value(coordinator, raw) == expected

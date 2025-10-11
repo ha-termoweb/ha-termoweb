@@ -80,6 +80,43 @@ class StubWebSocket:
         self.closed = True
 
 
+class QueueWebSocket:
+    """Queue-based websocket stub providing receive semantics."""
+
+    def __init__(self, frames: Iterable[SimpleNamespace]) -> None:
+        self.closed = False
+        self.sent: list[str] = []
+        self._frames = list(frames)
+        self._index = 0
+
+    def __aiter__(self) -> Any:
+        async def _iterate() -> AsyncIterator[Any]:
+            for frame in self._frames[self._index :]:
+                yield frame
+
+        return _iterate()
+
+    async def receive(self) -> Any:
+        if self._index < len(self._frames):
+            frame = self._frames[self._index]
+            self._index += 1
+            return frame
+        return SimpleNamespace(type=aiohttp.WSMsgType.CLOSE, data=None)
+
+    async def send_str(self, payload: str) -> None:
+        self.sent.append(payload)
+
+
+async def _run_read_loop(client: Any) -> None:
+    """Execute ``_read_loop_ws`` and ignore websocket closure errors."""
+
+    try:
+        await client._read_loop_ws()
+    except RuntimeError as err:
+        if "websocket closed" not in str(err).lower():
+            raise
+
+
 class StubSession:
     """Sequence driven aiohttp session stub for handshake operations."""
 
@@ -140,6 +177,7 @@ def _make_client(monkeypatch: pytest.MonkeyPatch) -> ducaheat_ws.DucaheatWSClien
     hass = HomeAssistant()
     hass.data.setdefault(ducaheat_ws.DOMAIN, {})["entry"] = {}
     coordinator = DummyCoordinator()
+    monkeypatch.setattr(ducaheat_ws, "resolved_nodes", None, raising=False)
     client = ducaheat_ws.DucaheatWSClient(
         hass,
         entry_id="entry",
@@ -629,20 +667,18 @@ async def test_read_loop_marks_healthy_on_engineio_pong(
         client, "_update_status", lambda status: statuses.append(status)
     )
 
-    class PongWS:
+    class PongWS(QueueWebSocket):
         def __init__(self) -> None:
-            self.closed = False
-
-        def __aiter__(self) -> Any:
-            async def _iterate() -> AsyncIterator[Any]:
-                yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="3")
-                yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="43")
-
-            return _iterate()
+            super().__init__(
+                [
+                    SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="3"),
+                    SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="43"),
+                ]
+            )
 
     client._ws = PongWS()  # type: ignore[assignment]
 
-    await client._read_loop_ws()
+    await _run_read_loop(client)
 
     assert statuses and statuses[-1] == "healthy"
 
@@ -666,21 +702,16 @@ async def test_read_loop_updates_ws_state_on_dev_data(
         separators=(",", ":"),
     )
 
-    class DevDataWS:
+    class DevDataWS(QueueWebSocket):
         def __init__(self, frame: str) -> None:
-            self._frame = frame
-            self.closed = False
-
-        def __aiter__(self) -> Any:
-            async def _iterate() -> AsyncIterator[Any]:
-                yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data=self._frame)
-
-            return _iterate()
+            super().__init__(
+                [SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data=frame)]
+            )
 
     frame = f"42{client._namespace},{payload}"
     client._ws = DevDataWS(frame)  # type: ignore[assignment]
 
-    await client._read_loop_ws()
+    await _run_read_loop(client)
 
     ws_state = hass.data[ducaheat_ws.DOMAIN]["entry"]["ws_state"][client.dev_id]
     assert ws_state["status"] == "healthy"
@@ -710,21 +741,16 @@ async def test_read_loop_handles_stringified_dev_data(
     wrapped = json.dumps({"nodes": nodes}, separators=(",", ":"))
     payload = json.dumps(["dev_data", wrapped], separators=(",", ":"))
 
-    class DevDataWS:
+    class DevDataWS(QueueWebSocket):
         def __init__(self, frame: str) -> None:
-            self._frame = frame
-            self.closed = False
-
-        def __aiter__(self) -> Any:
-            async def _iterate() -> AsyncIterator[Any]:
-                yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data=self._frame)
-
-            return _iterate()
+            super().__init__(
+                [SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data=frame)]
+            )
 
     frame = f"42{client._namespace},{payload}"
     client._ws = DevDataWS(frame)  # type: ignore[assignment]
 
-    await client._read_loop_ws()
+    await _run_read_loop(client)
 
     assert isinstance(client._nodes_raw, dict)
     assert client._nodes_raw["htr"]["status"]["1"]["power"] == 5
@@ -796,40 +822,39 @@ async def test_read_loop_additional_flows(monkeypatch: pytest.MonkeyPatch) -> No
     client = _make_client(monkeypatch)
     send_history: list[str] = []
 
-    class RichWS:
+    class RichWS(QueueWebSocket):
         def __init__(self) -> None:
-            self.closed = False
+            super().__init__(
+                [
+                    SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="1ignore"),
+                    SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="42"),
+                    SimpleNamespace(
+                        type=aiohttp.WSMsgType.TEXT, data='42/api,["ping"]'
+                    ),
+                    SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="442/invalid"),
+                    SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="442invalid"),
+                    SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="442[]"),
+                    SimpleNamespace(
+                        type=aiohttp.WSMsgType.TEXT, data='442["message","ping"]'
+                    ),
+                    SimpleNamespace(
+                        type=aiohttp.WSMsgType.TEXT, data='442["other",{}]'
+                    ),
+                    SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="440"),
+                    SimpleNamespace(
+                        type=aiohttp.WSMsgType.TEXT,
+                        data='442["dev_data",{"nodes":{"htr":{"samples":{"1":{}}}}}]',
+                    ),
+                    SimpleNamespace(
+                        type=aiohttp.WSMsgType.TEXT,
+                        data='442["update",{"body":{"temp":1},"path":"/path"}]',
+                    ),
+                ]
+            )
 
         async def send_str(self, payload: str) -> None:
             send_history.append(payload)
-
-        def __aiter__(self) -> Any:
-            async def _iterate() -> AsyncIterator[Any]:
-                yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="1ignore")
-                yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="42")
-                yield SimpleNamespace(
-                    type=aiohttp.WSMsgType.TEXT, data='42/api,["ping"]'
-                )
-                yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="442/invalid")
-                yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="442invalid")
-                yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="442[]")
-                yield SimpleNamespace(
-                    type=aiohttp.WSMsgType.TEXT, data='442["message","ping"]'
-                )
-                yield SimpleNamespace(
-                    type=aiohttp.WSMsgType.TEXT, data='442["other",{}]'
-                )
-                yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="440")
-                yield SimpleNamespace(
-                    type=aiohttp.WSMsgType.TEXT,
-                    data='442["dev_data",{"nodes":{"htr":{"samples":{"1":{}}}}}]',
-                )
-                yield SimpleNamespace(
-                    type=aiohttp.WSMsgType.TEXT,
-                    data='442["update",{"body":{"temp":1},"path":"/path"}]',
-                )
-
-            return _iterate()
+            await super().send_str(payload)
 
     monkeypatch.setattr(client, "_dispatch_nodes", MagicMock())
     emit_mock = AsyncMock()
@@ -838,7 +863,7 @@ async def test_read_loop_additional_flows(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(client, "_update_status", lambda status: updates.append(status))
     client._ws = RichWS()  # type: ignore[assignment]
 
-    await client._read_loop_ws()
+    await _run_read_loop(client)
 
     assert send_history.count("3/api") == 1
     assert any(call.args == ("message", "pong") for call in emit_mock.await_args_list)
@@ -851,15 +876,11 @@ async def test_read_loop_handles_errors(monkeypatch: pytest.MonkeyPatch) -> None
 
     client = _make_client(monkeypatch)
 
-    class ErrorWS:
+    class ErrorWS(QueueWebSocket):
         def __init__(self) -> None:
-            self.closed = False
-
-        def __aiter__(self) -> Any:
-            async def _iterate() -> AsyncIterator[Any]:
-                yield SimpleNamespace(type=aiohttp.WSMsgType.ERROR, data=None)
-
-            return _iterate()
+            super().__init__(
+                [SimpleNamespace(type=aiohttp.WSMsgType.ERROR, data=None)]
+            )
 
         def exception(self) -> str:
             return "boom"
@@ -876,15 +897,11 @@ async def test_read_loop_handles_close(monkeypatch: pytest.MonkeyPatch) -> None:
 
     client = _make_client(monkeypatch)
 
-    class CloseWS:
+    class CloseWS(QueueWebSocket):
         def __init__(self) -> None:
-            self.closed = False
-
-        def __aiter__(self) -> Any:
-            async def _iterate() -> AsyncIterator[Any]:
-                yield SimpleNamespace(type=aiohttp.WSMsgType.CLOSE)
-
-            return _iterate()
+            super().__init__(
+                [SimpleNamespace(type=aiohttp.WSMsgType.CLOSE, data=None)]
+            )
 
     client._ws = CloseWS()  # type: ignore[assignment]
 
@@ -918,22 +935,20 @@ async def test_read_loop_processes_update_event(
         lambda updates: forwarded.append(updates),
     )
 
-    class UpdateWS:
+    class UpdateWS(QueueWebSocket):
         def __init__(self) -> None:
-            self.closed = False
-
-        def __aiter__(self) -> Any:
-            async def _iterate() -> AsyncIterator[Any]:
-                yield SimpleNamespace(
-                    type=aiohttp.WSMsgType.TEXT,
-                    data='442["update",{"body":{"temp":1},"path":"/api/v2/devs/device/htr/1/status"}]',
-                )
-
-            return _iterate()
+            super().__init__(
+                [
+                    SimpleNamespace(
+                        type=aiohttp.WSMsgType.TEXT,
+                        data='442["update",{"body":{"temp":1},"path":"/api/v2/devs/device/htr/1/status"}]',
+                    )
+                ]
+            )
 
     client._ws = UpdateWS()  # type: ignore[assignment]
 
-    await client._read_loop_ws()
+    await _run_read_loop(client)
 
     assert log_calls and log_calls[0]["body"]["temp"] == 1
     assert statuses and statuses[-1] == "healthy"
@@ -1030,22 +1045,20 @@ async def test_read_loop_forwards_sample_updates(
         client, "_dispatch_nodes", lambda payload: dispatched.append(payload)
     )
 
-    class UpdateWS:
+    class UpdateWS(QueueWebSocket):
         def __init__(self) -> None:
-            self.closed = False
-
-        def __aiter__(self) -> Any:
-            async def _iterate() -> AsyncIterator[Any]:
-                yield SimpleNamespace(
-                    type=aiohttp.WSMsgType.TEXT,
-                    data='442["update",{"body":{"power":10},"path":"/api/v2/devs/device/htr/1/samples"}]',
-                )
-
-            return _iterate()
+            super().__init__(
+                [
+                    SimpleNamespace(
+                        type=aiohttp.WSMsgType.TEXT,
+                        data='442["update",{"body":{"power":10},"path":"/api/v2/devs/device/htr/1/samples"}]',
+                    )
+                ]
+            )
 
     client._ws = UpdateWS()  # type: ignore[assignment]
 
-    await client._read_loop_ws()
+    await _run_read_loop(client)
 
     assert statuses and statuses[-1] == "healthy"
     assert dispatched and dispatched[-1]["nodes"]["htr"]["samples"]["1"]["power"] == 10
@@ -1068,22 +1081,20 @@ async def test_read_loop_dev_data_uses_raw_snapshot(
         client, "_dispatch_nodes", lambda payload: dispatched.append(payload)
     )
 
-    class DevDataWS:
+    class DevDataWS(QueueWebSocket):
         def __init__(self) -> None:
-            self.closed = False
-
-        def __aiter__(self) -> Any:
-            async def _iterate() -> AsyncIterator[Any]:
-                yield SimpleNamespace(
-                    type=aiohttp.WSMsgType.TEXT,
-                    data='442["dev_data",{"nodes":{"htr":{"settings":{"1":{}}}}}]',
-                )
-
-            return _iterate()
+            super().__init__(
+                [
+                    SimpleNamespace(
+                        type=aiohttp.WSMsgType.TEXT,
+                        data='442["dev_data",{"nodes":{"htr":{"settings":{"1":{}}}}}]',
+                    )
+                ]
+            )
 
     client._ws = DevDataWS()  # type: ignore[assignment]
 
-    await client._read_loop_ws()
+    await _run_read_loop(client)
 
     assert dispatched and dispatched[-1] == {"nodes": {"htr": {"settings": {"1": {}}}}}
     assert client._nodes_raw is None
@@ -1103,22 +1114,20 @@ async def test_read_loop_merges_updates_into_existing_snapshot(
         client, "_dispatch_nodes", lambda payload: dispatched.append(payload)
     )
 
-    class MergeWS:
+    class MergeWS(QueueWebSocket):
         def __init__(self) -> None:
-            self.closed = False
-
-        def __aiter__(self) -> Any:
-            async def _iterate() -> AsyncIterator[Any]:
-                yield SimpleNamespace(
-                    type=aiohttp.WSMsgType.TEXT,
-                    data='442["update",{"body":{"power":5},"path":"/api/v2/devs/device/htr/1/status"}]',
-                )
-
-            return _iterate()
+            super().__init__(
+                [
+                    SimpleNamespace(
+                        type=aiohttp.WSMsgType.TEXT,
+                        data='442["update",{"body":{"power":5},"path":"/api/v2/devs/device/htr/1/status"}]',
+                    )
+                ]
+            )
 
     client._ws = MergeWS()  # type: ignore[assignment]
 
-    await client._read_loop_ws()
+    await _run_read_loop(client)
 
     assert client._nodes_raw["htr"]["status"]["1"]["temp"] == 20
     assert client._nodes_raw["htr"]["status"]["1"]["power"] == 5
@@ -1326,7 +1335,7 @@ async def test_read_loop_returns_when_websocket_missing(
     client = _make_client(monkeypatch)
     client._ws = None
 
-    await client._read_loop_ws()
+    await _run_read_loop(client)
 
 
 @pytest.mark.asyncio
@@ -1339,41 +1348,40 @@ async def test_read_loop_handles_engineio_and_socketio_frames(
     send_history: list[str] = []
     client._ws = SimpleNamespace(closed=False)
 
-    class FakeWS:
+    class FakeWS(QueueWebSocket):
         def __init__(self) -> None:
-            self.closed = False
+            super().__init__(
+                [
+                    SimpleNamespace(
+                        type=aiohttp.WSMsgType.TEXT,
+                        data="2",
+                    ),
+                    SimpleNamespace(
+                        type=aiohttp.WSMsgType.TEXT,
+                        data='42["message","ping"]',
+                    ),
+                    SimpleNamespace(
+                        type=aiohttp.WSMsgType.TEXT,
+                        data="40",
+                    ),
+                    SimpleNamespace(
+                        type=aiohttp.WSMsgType.TEXT,
+                        data='42{"evt":"ignored"}',
+                    ),
+                    SimpleNamespace(
+                        type=aiohttp.WSMsgType.TEXT,
+                        data='42["dev_data",{"nodes":{"htr":{"settings":{"1":{}}}}}]',
+                    ),
+                    SimpleNamespace(
+                        type=aiohttp.WSMsgType.TEXT,
+                        data='42["update",{"body":{"path":{}}}]',
+                    ),
+                ]
+            )
 
         async def send_str(self, payload: str) -> None:
             send_history.append(payload)
-
-        def __aiter__(self) -> Any:
-            async def _iterator() -> Any:
-                yield SimpleNamespace(
-                    type=aiohttp.WSMsgType.TEXT,
-                    data="2",
-                )
-                yield SimpleNamespace(
-                    type=aiohttp.WSMsgType.TEXT,
-                    data='42["message","ping"]',
-                )
-                yield SimpleNamespace(
-                    type=aiohttp.WSMsgType.TEXT,
-                    data="40",
-                )
-                yield SimpleNamespace(
-                    type=aiohttp.WSMsgType.TEXT,
-                    data='42{"evt":"ignored"}',
-                )
-                yield SimpleNamespace(
-                    type=aiohttp.WSMsgType.TEXT,
-                    data='42["dev_data",{"nodes":{"htr":{"settings":{"1":{}}}}}]',
-                )
-                yield SimpleNamespace(
-                    type=aiohttp.WSMsgType.TEXT,
-                    data='42["update",{"body":{"path":{}}}]',
-                )
-
-            return _iterator()
+            await super().send_str(payload)
 
     fake_ws = FakeWS()
     client._ws = fake_ws  # type: ignore[assignment]
@@ -1383,7 +1391,7 @@ async def test_read_loop_handles_engineio_and_socketio_frames(
     emit_mock = AsyncMock()
     monkeypatch.setattr(client, "_emit_sio", emit_mock)
     monkeypatch.setattr(client, "_update_status", lambda status: None)
-    await client._read_loop_ws()
+    await _run_read_loop(client)
 
     assert any(frame == "3" for frame in send_history)
     assert any(call.args == ("dev_data",) for call in emit_mock.await_args_list)
@@ -1397,21 +1405,19 @@ async def test_namespace_ack_replays_cached_subscriptions(
 
     client = _make_client(monkeypatch)
 
-    class AckWS:
+    class AckWS(QueueWebSocket):
         def __init__(self) -> None:
-            self.closed = False
+            super().__init__(
+                [
+                    SimpleNamespace(
+                        type=aiohttp.WSMsgType.TEXT,
+                        data="40/api/v2/socket_io",
+                    )
+                ]
+            )
 
         async def send_str(self, payload: str) -> None:
-            return None
-
-        def __aiter__(self) -> Any:
-            async def _iterator() -> Any:
-                yield SimpleNamespace(
-                    type=aiohttp.WSMsgType.TEXT,
-                    data="40/api/v2/socket_io",
-                )
-
-            return _iterator()
+            await super().send_str(payload)
 
     client._ws = AckWS()  # type: ignore[assignment]
     client._pending_dev_data = True
@@ -1428,7 +1434,7 @@ async def test_namespace_ack_replays_cached_subscriptions(
         client, "_update_status", lambda status: statuses.append(status)
     )
 
-    await client._read_loop_ws()
+    await _run_read_loop(client)
 
     assert client._pending_dev_data is False
     assert statuses and statuses[-1] == "healthy"
@@ -1447,24 +1453,22 @@ async def test_namespace_ack_processes_embedded_event(
 
     client = _make_client(monkeypatch)
 
-    class AckWS:
+    class AckWS(QueueWebSocket):
         def __init__(self) -> None:
-            self.closed = False
+            super().__init__(
+                [
+                    SimpleNamespace(
+                        type=aiohttp.WSMsgType.TEXT,
+                        data=(
+                            "40/api/v2/socket_io,42/api/v2/socket_io,"
+                            '["dev_data",{"nodes":{"htr":{"status":{"1":{}}}}}]'
+                        ),
+                    )
+                ]
+            )
 
         async def send_str(self, payload: str) -> None:
-            return None
-
-        def __aiter__(self) -> Any:
-            async def _iterator() -> Any:
-                yield SimpleNamespace(
-                    type=aiohttp.WSMsgType.TEXT,
-                    data=(
-                        "40/api/v2/socket_io,42/api/v2/socket_io,"
-                        '["dev_data",{"nodes":{"htr":{"status":{"1":{}}}}}]'
-                    ),
-                )
-
-            return _iterator()
+            await super().send_str(payload)
 
     client._ws = AckWS()  # type: ignore[assignment]
     client._pending_dev_data = True
@@ -1488,7 +1492,7 @@ async def test_namespace_ack_processes_embedded_event(
         client, "_update_status", lambda status: statuses.append(status)
     )
 
-    await client._read_loop_ws()
+    await _run_read_loop(client)
 
     assert emit_calls and emit_calls[0] == ("dev_data",)
     subscribe_mock.assert_awaited_once()
@@ -1505,24 +1509,22 @@ async def test_namespace_ack_skips_unexpected_namespace(
 
     client = _make_client(monkeypatch)
 
-    class UnexpectedNamespaceWS:
+    class UnexpectedNamespaceWS(QueueWebSocket):
         def __init__(self) -> None:
-            self.closed = False
+            super().__init__(
+                [
+                    SimpleNamespace(
+                        type=aiohttp.WSMsgType.TEXT,
+                        data=(
+                            "40/wrong,42/api/v2/socket_io,"
+                            '["dev_data",{"nodes":{"htr":{"status":{"1":{}}}}}]'
+                        ),
+                    )
+                ]
+            )
 
         async def send_str(self, payload: str) -> None:
-            return None
-
-        def __aiter__(self) -> Any:
-            async def _iterator() -> Any:
-                yield SimpleNamespace(
-                    type=aiohttp.WSMsgType.TEXT,
-                    data=(
-                        "40/wrong,42/api/v2/socket_io,"
-                        '["dev_data",{"nodes":{"htr":{"status":{"1":{}}}}}]'
-                    ),
-                )
-
-            return _iterator()
+            await super().send_str(payload)
 
     client._ws = UnexpectedNamespaceWS()  # type: ignore[assignment]
     client._pending_dev_data = False
@@ -1536,7 +1538,7 @@ async def test_namespace_ack_skips_unexpected_namespace(
     monkeypatch.setattr(client, "_subscribe_feeds", subscribe_mock)
     monkeypatch.setattr(client, "_update_status", lambda status: None)
 
-    await client._read_loop_ws()
+    await _run_read_loop(client)
 
     dispatch.assert_called_once()
     subscribe_mock.assert_awaited_once()
@@ -1551,21 +1553,19 @@ async def test_namespace_ack_ignores_unexpected_namespace(
 
     client = _make_client(monkeypatch)
 
-    class AckWS:
+    class AckWS(QueueWebSocket):
         def __init__(self) -> None:
-            self.closed = False
+            super().__init__(
+                [
+                    SimpleNamespace(
+                        type=aiohttp.WSMsgType.TEXT,
+                        data="40/other",
+                    )
+                ]
+            )
 
         async def send_str(self, payload: str) -> None:
-            return None
-
-        def __aiter__(self) -> Any:
-            async def _iterator() -> Any:
-                yield SimpleNamespace(
-                    type=aiohttp.WSMsgType.TEXT,
-                    data="40/other",  # not our namespace
-                )
-
-            return _iterator()
+            await super().send_str(payload)
 
     client._ws = AckWS()  # type: ignore[assignment]
     client._pending_dev_data = True
@@ -1577,7 +1577,7 @@ async def test_namespace_ack_ignores_unexpected_namespace(
         client, "_update_status", lambda status: statuses.append(status)
     )
 
-    await client._read_loop_ws()
+    await _run_read_loop(client)
 
     assert client._pending_dev_data is True
     emit_mock.assert_not_awaited()
@@ -1626,6 +1626,9 @@ async def test_subscribe_feeds_stores_inventory_only(
         client,
         "_emit_sio",
         AsyncMock(side_effect=lambda evt, path: emissions.append((evt, path))),
+    )
+    monkeypatch.setattr(
+        ducaheat_ws, "resolved_nodes", nodes_payload, raising=False
     )
 
     count = await client._subscribe_feeds(nodes_payload)
