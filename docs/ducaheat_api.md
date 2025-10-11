@@ -85,7 +85,7 @@ Unlike TermoWeb’s consolidated `/settings` endpoint, Ducaheat exposes discrete
 | `POST /api/v2/devs/{dev_id}/{type}/{addr}/prog_temps` | Update named preset temperatures. | `{ "comfort": "21.0", "eco": "18.0", "antifrost": "7.0" }` | All temperature values are one-decimal strings in uppercase units context. |
 | `POST /api/v2/devs/{dev_id}/{type}/{addr}/setup` | Write advanced configuration and feature toggles. | `{ "extra_options": { "boost_time": 60, "boost_temp": "22.0" } }` | Nested objects follow the GET schema; keep temperature values as strings with uppercase units. Use this endpoint to manage defaults, not to toggle Boost. |
 | `POST /api/v2/devs/{dev_id}/{type}/{addr}/lock` | Toggle the child lock. | `{ "lock": true }` | Boolean literal. |
-| `POST /api/v2/devs/{dev_id}/{type}/{addr}/select` | Claim ownership prior to issuing writes. | `{ "select": true }` | Selection is mandatory before any state-changing write; release with `{ "select": false }` afterwards. |
+| `POST /api/v2/devs/{dev_id}/{type}/{addr}/select` | Claim ownership prior to issuing writes. | `{ "select": true }` | Selection must wrap every write: acquire immediately before the target POST and release with `{ "select": false }` right after, even when the write fails. |
 | `POST /api/v2/devs/{dev_id}/{type}/{addr}/boost` | Start or stop Boost after a successful selection claim. | `{ "boost": true, "boost_time": 60, "stemp": "7.5", "units": "C" }`<br>`{ "boost": false }` | `boost_time` is minutes 60–600 (1–10 h). `stemp` must match `^[0-9]+\.[0-9]$`. `units` is uppercase `"C"`/`"F"`. |
 
 > **Temperature formatting:** Every captured request encodes degrees as strings with exactly one decimal place while keeping
@@ -97,7 +97,7 @@ Unlike TermoWeb’s consolidated `/settings` endpoint, Ducaheat exposes discrete
 - **Endpoint:** `POST /api/v2/devs/{dev_id}/{type}/{addr}/select`
 - **Claim:** `{ "select": true }` → `201 {}`
 - **Release:** `{ "select": false }` → `201 {}`
-- Acquire the claim immediately before any state-changing write, retry safely if the response is lost, and always release even when the subsequent call fails.
+- Wrap **every** write—`/status`, `/prog`, `/setup`, `/boost`, etc.—in a selection claim. The mobile app issues `select → write → select(false)` pairs around each POST to a node. Acquire immediately before the write, retry safely if the response is lost, and always release even when the subsequent call fails so other clients can progress.
 
 ### Boost control endpoint
 
@@ -148,7 +148,26 @@ Use `/setup` to read or update defaults (for example `extra_options.boost_time` 
 
 **GET** `/api/v2/devs/{dev_id}/{type}/{addr}/samples?start=<ms>&end=<ms>`
 
-`start` and `end` are **epoch milliseconds**. The response shape varies by device and firmware; treat as opaque JSON until stabilized by capture.
+`start` and `end` use different epochs per node family:
+
+- Heater (`htr`) nodes expect **epoch milliseconds**.
+- Power monitor (`pmo`) nodes expect **epoch seconds**.
+- Other node types currently align with the `htr` millisecond convention until captures prove otherwise.
+
+The response shape varies by device and firmware; treat as opaque JSON until stabilized by capture.
+
+### WebSocket session lifecycle
+
+The Socket.IO handshake observed in captures follows this sequence:
+
+1. Polling transport open.
+2. `POST 40/ns` to acknowledge the namespace.
+3. Drain initial polling responses.
+4. Upgrade to WebSocket.
+5. Exchange `2probe`, `3probe`, and `5` heartbeats.
+6. Upon receiving `40/ns`, emit `dev_data` and subscribe to `/{type}/{addr}/{status|samples}` channels.
+
+Keepalives (`2` pings / `3` pongs) match the standard Socket.IO cadence and require no special handling beyond the default client implementation.
 
 ## Power monitor (pmo) nodes
 
