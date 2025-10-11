@@ -327,9 +327,11 @@ class _WSStatusMixin:
         entry_bucket = domain_bucket.setdefault(self.entry_id, {})
         trackers = entry_bucket.setdefault("ws_trackers", {})
         tracker = trackers.get(self.dev_id)
+        created = False
         if not isinstance(tracker, WsHealthTracker):
             tracker = WsHealthTracker(self.dev_id)
             trackers[self.dev_id] = tracker
+            created = True
         legacy_status = getattr(self, "_status", None)
         if (
             isinstance(legacy_status, str)
@@ -349,6 +351,12 @@ class _WSStatusMixin:
         ):
             tracker.last_heartbeat_at = float(legacy_heartbeat)
         setattr(self, "_ws_tracker", tracker)
+        if created and hasattr(self, "_apply_payload_window_hint"):
+            self._apply_payload_window_hint(
+                source="cadence",
+                lease_seconds=120,
+                candidates=[30, 75, "90"],
+            )
         return tracker
 
     def _notify_ws_status(
