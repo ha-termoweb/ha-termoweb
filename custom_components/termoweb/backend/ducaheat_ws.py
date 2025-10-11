@@ -30,6 +30,7 @@ from custom_components.termoweb.backend.ws_client import (
     forward_ws_sample_updates,
     resolve_ws_update_section,
 )
+from custom_components.termoweb.backend.ws_health import WsHealthTracker
 from custom_components.termoweb.const import (
     ACCEPT_LANGUAGE,
     API_BASE,
@@ -172,6 +173,16 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._healthy_since: float | None = None
         self._last_event_at: float | None = None
         self._payload_stale_after = 240.0
+        tracker = self._ws_health_tracker()
+        if tracker.set_payload_window(self._payload_stale_after):
+            state = self._ws_state_bucket()
+            state["payload_stale"] = tracker.payload_stale
+
+    @property
+    def _ws_health(self) -> WsHealthTracker:
+        """Return the shared websocket health tracker for this client."""
+
+        return self._ws_health_tracker()
 
     def _status_should_reset_health(self, status: str) -> bool:
         """Return True when a status transition should reset health."""
@@ -398,7 +409,34 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         if ws is None:
             return
         try:
-            async for msg in ws:
+            while True:
+                tracker = self._ws_health
+                if tracker.payload_stale and tracker.status == "healthy":
+                    self._update_status("connected")
+                deadline = tracker.stale_deadline()
+                timeout: float | None = None
+                if isinstance(deadline, (int, float)):
+                    remaining = deadline - time.time()
+                    if remaining <= 0:
+                        now = time.time()
+                        self._refresh_ws_payload_state(now=now, reason="payload_timeout")
+                        if tracker.payload_stale and tracker.status == "healthy":
+                            self._update_status("connected")
+                        remaining = 1.0
+                    timeout = max(1.0, remaining)
+                try:
+                    if timeout is None:
+                        msg = await ws.receive()
+                    else:
+                        msg = await asyncio.wait_for(ws.receive(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    now = time.time()
+                    self._refresh_ws_payload_state(now=now, reason="payload_timeout")
+                    tracker = self._ws_health
+                    if tracker.payload_stale and tracker.status == "healthy":
+                        self._update_status("connected")
+                    continue
+
                 if msg.type == aiohttp.WSMsgType.TEXT:
                     data = msg.data
                     self._stats.frames_total += 1
@@ -1244,6 +1282,22 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
     def _forward_sample_updates(self, updates: Mapping[str, Mapping[str, Any]]) -> None:
         """Forward websocket heater sample updates to the energy coordinator."""
 
+        has_payload = False
+        for node_payload in updates.values():
+            if not isinstance(node_payload, Mapping):
+                continue
+            samples = node_payload.get("samples")
+            if isinstance(samples, Mapping) and any(samples):
+                has_payload = True
+                break
+            if node_payload.get("lease_seconds") is not None:
+                has_payload = True
+                break
+        if has_payload:
+            self._mark_ws_payload(
+                timestamp=time.time(),
+                stale_after=self._payload_stale_after,
+            )
         forward_ws_sample_updates(
             self.hass,
             self.entry_id,
@@ -1390,6 +1444,21 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._pending_dev_data = False
         self._ping_interval = None
         self._ping_timeout = None
+        tracker = self._ws_health
+        tracker.last_payload_at = None
+        tracker.last_heartbeat_at = None
+        tracker.healthy_since = None
+        state = self._ws_state_bucket()
+        state["last_payload_at"] = tracker.last_payload_at
+        state["last_heartbeat_at"] = tracker.last_heartbeat_at
+        changed = tracker.refresh_payload_state(now=time.time())
+        state["payload_stale"] = tracker.payload_stale
+        if changed:
+            self._notify_ws_status(
+                tracker,
+                reason=reason,
+                payload_changed=True,
+            )
 
     async def _get_token(self) -> str:
         headers = await self._client.authed_headers()
