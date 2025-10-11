@@ -1104,7 +1104,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             inventory=inventory,
         )
 
-        nodes_copy = deepcopy(payload.get("nodes", raw_nodes_payload))
         nodes_by_type_copy: dict[str, Any]
         if isinstance(nodes_by_type_payload, Mapping):
             nodes_by_type_copy = deepcopy(nodes_by_type_payload)
@@ -1116,7 +1115,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         payload_copy = {
             "dev_id": self.dev_id,
             "node_type": None,
-            "nodes": nodes_copy,
             "nodes_by_type": nodes_by_type_copy,
             "addr_map": {node_type: list(addrs) for node_type, addrs in normalized_addresses.items()},
         }

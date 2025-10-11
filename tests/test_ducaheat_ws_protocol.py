@@ -273,12 +273,13 @@ def test_dispatch_nodes_updates_addresses_and_settings(
     client._nodes_raw = copy.deepcopy(payload)
     snapshot = client._build_nodes_snapshot(client._nodes_raw)
 
-    _set_inventory(client, _build_inventory_payload())
+    inventory = _set_inventory(client, _build_inventory_payload())
 
     client._dispatch_nodes(snapshot)
 
     assert client._dispatcher.call_count == 1
     dispatched = client._dispatcher.call_args[0][2]
+    assert "nodes" not in dispatched
     assert dispatched["nodes_by_type"]["htr"]["settings"]["1"]["target_temp"] == 21
 
     dev_map = coordinator.data[client.dev_id]
@@ -286,7 +287,7 @@ def test_dispatch_nodes_updates_addresses_and_settings(
     assert dev_map["settings"]["htr"]["1"]["target_temp"] == 21
 
     record = hass.data[ducaheat_ws.DOMAIN][client.entry_id]
-    assert record["nodes"]["htr"]["settings"]["1"]["target_temp"] == 21
+    assert record.get("inventory") is inventory
 
 
 def test_incremental_updates_refresh_cached_settings(
@@ -317,6 +318,7 @@ def test_incremental_updates_refresh_cached_settings(
     assert final_settings == 23
 
     dispatched = client._dispatcher.call_args_list[-1][0][2]
+    assert "nodes" not in dispatched
     assert dispatched["nodes_by_type"]["htr"]["settings"]["1"]["target_temp"] == 23
 
 
@@ -692,7 +694,7 @@ async def test_read_loop_updates_ws_state_on_dev_data(
     client._coordinator.update_nodes.assert_called_once()
     update_args, update_kwargs = client._coordinator.update_nodes.call_args
     assert not update_kwargs
-    assert update_args[0] == {"htr": {"status": {"1": {"power": 1}}}}
+    assert update_args[0] is None
     assert isinstance(update_args[1], Inventory)
 
 

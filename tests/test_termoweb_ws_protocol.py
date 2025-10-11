@@ -965,7 +965,7 @@ def test_dispatch_nodes_with_inventory(monkeypatch: pytest.MonkeyPatch, caplog: 
     client._coordinator.update_nodes.assert_called_once()
     update_args, update_kwargs = client._coordinator.update_nodes.call_args
     assert not update_kwargs
-    assert update_args[0] == {"nodes": {"htr": {"settings": {"1": {}}}}}
+    assert update_args[0] is None
     assert isinstance(update_args[1], Inventory)
     dispatcher.assert_called()
     dev_map = client._coordinator.data["device"]
@@ -988,7 +988,7 @@ def test_dispatch_nodes_handles_unknown_types(monkeypatch: pytest.MonkeyPatch) -
     client._coordinator.update_nodes.assert_called_once()
     update_args, update_kwargs = client._coordinator.update_nodes.call_args
     assert not update_kwargs
-    assert update_args[0] == {"nodes": {}}
+    assert update_args[0] is None
     assert isinstance(update_args[1], Inventory)
     dispatcher.assert_called()
 
