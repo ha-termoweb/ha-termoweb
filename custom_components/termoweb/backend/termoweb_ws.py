@@ -1438,7 +1438,6 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._last_heartbeat_at: float | None = None
 
         self._handshake_payload: dict[str, Any] | None = None
-        self._nodes: dict[str, Any] = {}
         self._nodes_raw: dict[str, Any] = {}
 
         self._inventory: Inventory | None = inventory
@@ -1461,25 +1460,6 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._write_hook_installed = False
         self._write_hook_original: Callable[..., Awaitable[Any]] | None = None
         self._install_write_hook()
-
-    @staticmethod
-    def _build_nodes_snapshot(nodes: dict[str, Any]) -> dict[str, Any]:
-        """Return a snapshot compatible with legacy dispatcher consumers."""
-
-        nodes_copy = deepcopy(nodes)
-        nodes_by_type: dict[str, Any] = {
-            node_type: payload
-            for node_type, payload in nodes_copy.items()
-            if isinstance(payload, dict)
-        }
-        snapshot: dict[str, Any] = {
-            "nodes": nodes_copy,
-            "nodes_by_type": nodes_by_type,
-        }
-        snapshot.update(nodes_by_type)
-        if "htr" in nodes_by_type:
-            snapshot.setdefault("htr", nodes_by_type["htr"])
-        return snapshot
 
     # ------------------------------------------------------------------
     # Public control
@@ -1915,7 +1895,6 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                     "name": f"Device {self.dev_id}",
                     "raw": {},
                     "connected": True,
-                    "nodes": None,
                     "nodes_by_type": {"htr": htr_bucket},
                     "htr": htr_bucket,
                 }
@@ -1924,10 +1903,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 self._coordinator.data = cur  # type: ignore[attr-defined]
             nodes_by_type: dict[str, Any] = dev_map.setdefault("nodes_by_type", {})
             if path.endswith("/mgr/nodes"):
-                if isinstance(body, dict):
-                    dev_map["nodes"] = body
-                    self._nodes_raw = deepcopy(body)
-                    self._nodes = self._build_nodes_snapshot(self._nodes_raw)
+                if isinstance(body, Mapping):
                     type_to_addrs = self._dispatch_nodes(body)
                     for node_type, addrs in type_to_addrs.items():
                         bucket = self._ensure_type_bucket(
@@ -1968,8 +1944,6 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             key = path.strip("/").replace("/", "_")
             raw[key] = body
 
-        if updated_nodes:
-            self._nodes = self._build_nodes_snapshot(self._nodes_raw)
         self._mark_event(paths=paths)
         payload_ts = self._stats.last_event_ts or time.time()
         self._mark_ws_payload(

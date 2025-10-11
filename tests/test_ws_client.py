@@ -692,6 +692,7 @@ def test_dispatch_nodes_updates_hass_and_coordinator(
     if isinstance(coordinator_data, dict):
         dev_state = coordinator_data.get("device")
         if isinstance(dev_state, dict):
+            assert "nodes" not in dev_state
             nodes_by_type = dev_state.get("nodes_by_type", {})
             if isinstance(nodes_by_type, dict):
                 pmo_section = nodes_by_type.get("pmo", {})
