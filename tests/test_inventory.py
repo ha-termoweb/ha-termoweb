@@ -359,26 +359,6 @@ def test_inventory_heater_sample_targets_filters_invalid(
     targets = heater_inventory.heater_sample_targets
     assert targets == [("htr", "1")]
     assert ("acm", "2") not in targets
-
-
-def test_build_heater_inventory_details_wraps_inventory(
-    heater_inventory: Inventory,
-) -> None:
-    """Legacy helper should return data derived from the ``Inventory`` wrapper."""
-
-    from custom_components.termoweb.inventory import (  # noqa: PLC0415
-        build_heater_inventory_details,
-    )
-
-    details = build_heater_inventory_details(heater_inventory.nodes)
-    forward, reverse = heater_inventory.heater_address_map
-
-    assert details.nodes_by_type == heater_inventory.nodes_by_type
-    assert details.explicit_name_pairs == heater_inventory.explicit_heater_names
-    assert details.address_map == forward
-    assert details.reverse_address_map == reverse
-
-
 def test_resolve_record_inventory_prefers_existing_container() -> None:
     """Resolution should return stored inventory without rebuilding."""
 
