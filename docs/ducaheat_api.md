@@ -1,351 +1,156 @@
-# Ducaheat (Ducasa) Cloud API — Tevolve v2 (Unofficial)
+# Ducaheat (Ducasa) Cloud API — Tevolve v2 (Unofficial, updated)
+**Updated:** 2025-10-11
 
-This document summarizes the Ducaheat backend as implemented by the mobile app (v1.40.1) and verified against captured WebSocket traffic. It diverges from the consolidated **TermoWeb** contract: Ducaheat uses **segmented endpoints** per function and a **different Socket.IO path**.
-
-**Base host:** `https://api-tevolve.termoweb.net`  
-**Frontend:** `https://ducaheat.termoweb.net`  
-**Auth client (Basic):** `5c49dce977510351506c42db:tevolve` → Base64 `NWM0OWRjZTk3NzUxMDM1MTUwNmM0MmRiOnRldm9sdmU=`
+This revision preserves correct details from the existing docs and adds/clarifies items that were **observed in the attached protocol dump** (`ducaheat_htr_dump.jsonl`). It removes unverified claims.
 
 ---
 
-## Auth
+## Base & Auth
 
-**POST** `/client/token`  (HTTP Basic + form)
-
-Form fields:
-```
-grant_type=password&username=<email>&password=<password>
-```
-
-Response:
-```json
-{ "access_token":"…", "token_type":"Bearer", "expires_in":3600, "refresh_token":"…" }
-```
-
-Use the `access_token` as `Authorization: Bearer …` for all API calls.
+- **Host:** `https://api-tevolve.termoweb.net`
+- **Auth:** OAuth2 password grant at **POST** `/client/token` using the Ducaheat app client (HTTP Basic). Response contains `access_token` for `Authorization: Bearer ...`.
 
 ---
 
-## Snapshot payload (`dev_data`)
+## Key findings from the capture (ground truth)
 
-The Socket.IO channel emits a `dev_data` event that delivers the complete gateway snapshot. The object mirrors what the mobile
-app fetches via REST:
+- **Selection gate is in use for heaters (`htr`)**: app issues `POST .../htr/{addr}/select` with `{"select": true}` **before** writes and `{"select": false}` after.
+- **Segmented writes are used on heaters:** `POST .../htr/{addr}/status` and `POST .../htr/{addr}/prog` are present.
+- **Preset temperatures are written via `/status`**: payloads include `comf_temp, eco_temp, ice_temp` along with `units` when updating presets.
+- **Weekly program resolution in this dump is 24 slots per day**, days `0, 1, 2, 3, 4, 5, 6` (example bodies are hourly with 24 integers per day).
+- **Ancillary reads in use:** `GET .../mgr/nodes` (node inventory) and `GET .../mgr/rtc/time` (gateway RTC).
+- **Power‑monitor telemetry:** `GET .../pmo/{addr}/samples?start=<sec>&end=<sec>` observed with **epoch seconds**.
 
-- `geoData` / `geo_data` — duplicated structures with coarse location metadata (country, administrative division, time zone,
-  optional coarse coordinates). Clients should not rely on either variant being preferred.
-- `away_status` — `{ "enabled": <bool>, "away": <bool>, "forced": <bool> }`.
-- `nodes` — array of node descriptions (see below).
-- `htr_system` — heater fleet level settings. Observed keys include `power_limit` and `setup.power_limit`,
-  `setup.refresh_period`, and `setup.extra_nrg_conf.enabled`.
-- `pmo_system` — power-management metadata with `main_circuit_pmos`, `max_power_config.profiles`, and
-  `max_power_config.slots` (each slot: `{ "m": <minute_offset>, "i": <profile_index> }`).
-- `discovery` — e.g., `{ "discovery": "off" }`.
-- `connected` — gateway connection boolean.
+> The dump does **not** include `/prog_temps` calls, `/acm` samples, or `/htr` samples. Those behaviours remain as previously documented but are unverified in this dataset.
 
-Every node object includes `name`, `addr`, `type`, `installed`, `lost`, `uid`, `level`, and `parent`. Additional sections vary
-by node type and match the REST resources for that node.
+---
 
-## Heater and accumulator node model (read)
+## Snapshot (`dev_data`) and node model
+The app consumes a gateway snapshot over Socket.IO (`dev_data`) and REST endpoints for details. Snapshot objects include
+fleet/system sections (`htr_system`, `pmo_system`), gateway `geoData/geo_data`, `away_status`, `discovery`, `connected`, and an array of `nodes` with core identity and capabilities.
+
+Each thermal node (`htr` or `acm`) has a consolidated REST read at:
 
 **GET** `/api/v2/devs/{dev_id}/{type}/{addr}`
 
-Applies to heater (`htr`) and accumulator (`acm`) nodes. The response is a consolidated object with nested sections such as
-`status`, `setup`, `prog`, `prog_temps`, and `version`. Keys are model‑dependent; the app treats unknown keys leniently.
-
-- `prog.sync_status` reflects synchronization with the cloud. `prog.prog` is an object keyed by weekday (`"0"` … `"6"`). Each
-  weekday value is an array of slot states. Recent captures show 49 integer entries per day, which map 30-minute resolution
-  slots to mode identifiers.
-- `setup` contains operational metadata. Observed keys include:
-  - `operational_mode` (integer)
-  - `control_mode` (integer)
-  - `units` (`"C"` / `"F"`)
-  - `offset`, `priority`, `away_offset`, `min_stemp`, `max_stemp` as strings (one decimal)
-  - `window_mode_enabled`, `true_radiant_enabled`, `frost_protect` (booleans)
-  - `resistor_mode`, `prog_resolution` (integers)
-  - `charging_conf.slot_1` / `slot_2` with `start`/`end` minute offsets and `active_days` array (seven booleans)
-  - `factory_options` describing hardware capabilities (`resistor_available`, `ventilation_available`, `ventilation_type`).
-- `status` contains real-time telemetry, all keyed as strings or booleans where appropriate. Observed keys: `mode`, `heating`,
-  `ventilation`, `charging`, `ice_temp`, `eco_temp`, `comf_temp`, `units`, `stemp`, `mtemp`, `pcb_temp`, `power`, `locked`,
-  `window_open`, `true_radiant`, `presence`, `current_charge_per`, `target_charge_per`, and `error_code`. Accumulators also
-  expose `boost`, `boost_end_day`, and `boost_end_min`.
-- `version` enumerates firmware and hardware revisions (`hw_version`, `fw_version`, `pid`, `uid`).
+with sections like `status`, `setup`, `prog`, `prog_temps` (presence may vary by model/firmware). Echo the shape you read back to the server when writing program structures.
 
 ---
 
-## Writes are segmented
+## Writes — segmented endpoints
 
-Unlike TermoWeb’s consolidated `/settings` endpoint, Ducaheat exposes discrete resources per write. There is **no**
-`/acm/.../settings` endpoint; the mobile apps persist accumulator state through the endpoints below.
+> **Always claim selection immediately before a write and release afterward.**
 
-| Endpoint | Purpose | Example body | Value types / notes |
-| --- | --- | --- | --- |
-| `POST /api/v2/devs/{dev_id}/{type}/{addr}/status` | Change operating mode, setpoint, and display units. | `{ "mode": "manual", "stemp": "22.0", "units": "C" }` | Temperatures must be strings with one decimal place (`"22.0"`). Units are uppercase (`"C"` / `"F"`). Selection must be active before sending writes. Returns `201 {}`. |
-| `POST /api/v2/devs/{dev_id}/{type}/{addr}/mode` | Explicitly set the operating mode when no setpoint change is required. | `{ "mode": "manual" }` | Use when the app issues a mode-only write. |
-| `POST /api/v2/devs/{dev_id}/{type}/{addr}/prog` | Persist the weekly program definition. | *(mirrors GET payload)* | Send the `prog` object echoed by the read call; structure varies by model. |
-| `POST /api/v2/devs/{dev_id}/{type}/{addr}/prog_temps` | Update named preset temperatures. | `{ "comfort": "21.0", "eco": "18.0", "antifrost": "7.0" }` | All temperature values are one-decimal strings in uppercase units context. |
-| `POST /api/v2/devs/{dev_id}/{type}/{addr}/setup` | Write advanced configuration and feature toggles. | `{ "extra_options": { "boost_time": 60, "boost_temp": "22.0" } }` | Nested objects follow the GET schema; keep temperature values as strings with uppercase units. Use this endpoint to manage defaults, not to toggle Boost. |
-| `POST /api/v2/devs/{dev_id}/{type}/{addr}/lock` | Toggle the child lock. | `{ "lock": true }` | Boolean literal. |
-| `POST /api/v2/devs/{dev_id}/{type}/{addr}/select` | Claim ownership prior to issuing writes. | `{ "select": true }` | Selection must wrap every write: acquire immediately before the target POST and release with `{ "select": false }` right after, even when the write fails. |
-| `POST /api/v2/devs/{dev_id}/{type}/{addr}/boost` | Start or stop Boost after a successful selection claim. | `{ "boost": true, "boost_time": 60, "stemp": "7.5", "units": "C" }`<br>`{ "boost": false }` | `boost_time` is minutes 60–600 (1–10 h). `stemp` must match `^[0-9]+\.[0-9]$`. `units` is uppercase `"C"`/`"F"`. |
+### Change live status
+**POST** `/api/v2/devs/{dev_id}/{type}/{addr}/status`
 
-> **Temperature formatting:** Every captured request encodes degrees as strings with exactly one decimal place while keeping
-> the `units` field uppercase (`"C"`/`"F"`). Back-end writes fail when the decimal precision or unit casing diverges from the
-> mobile app.
+Used for mode/setpoint/units. In the capture it is also used on `htr` to update **preset temperatures**:
 
-### Selection (required gate for writes)
+Examples observed:
+```json
+{"mode":"off"}
+{"mode":"manual","stemp":"20.5","units":"C"}
+{"ice_temp":"5.0","eco_temp":"17.5","comf_temp":"20.5","units":"C"}
+```
 
-- **Endpoint:** `POST /api/v2/devs/{dev_id}/{type}/{addr}/select`
-- **Claim:** `{ "select": true }` → `201 {}`
-- **Release:** `{ "select": false }` → `201 {}`
-- Wrap **every** write—`/status`, `/prog`, `/setup`, `/boost`, etc.—in a selection claim. The mobile app issues `select → write → select(false)` pairs around each POST to a node. Acquire immediately before the write, retry safely if the response is lost, and always release even when the subsequent call fails so other clients can progress.
+Formatting rules:
+- Temperatures are **strings with exactly one decimal**, e.g. `"22.0"`.
+- Units are **uppercase** `"C"` or `"F"`.
+- Returns `201 {}` on success.
 
-### Boost control endpoint
+### Change mode only
+**POST** `/api/v2/devs/{dev_id}/{type}/{addr}/mode`
 
-- **Endpoint:** `POST /api/v2/devs/{dev_id}/{type}/{addr}/boost` (confirmed for accumulator type `acm`; other `{type}` segments follow the same pattern).
-- **Start example:**
-  ```json
-  { "boost": true, "boost_time": 60, "stemp": "7.5", "units": "C" }
-  ```
-- **Stop example:**
-  ```json
-  { "boost": false }
-  ```
-- `boost_time` is supplied in minutes and must be between **60** and **600** (1–10 hours).
-- `stemp` is a string that matches `^[0-9]+\.[0-9]$`.
-- `units` must be uppercase (`"C"` or `"F"`).
-- The server rejects boost writes sent without an active selection claim.
+`{"mode":"auto"|"manual"|"off"}`
 
-### Validation invariants
+### Weekly program
+**POST** `/api/v2/devs/{dev_id}/{type}/{addr}/prog`
 
-- Reject payloads where `stemp` is missing, numeric, or includes more than one decimal place.
-- Guard against lowercase `units`; only uppercase `C` or `F` are accepted.
-- Enforce the `boost_time` range (60–600).
-
-### WebSocket updates
-
-Boost changes trigger a Socket.IO `update` for `/{type}/{addr}/status` followed by a `dev_data` snapshot. The update body mirrors REST fields:
+Send the **full** program object echoed from GET. In this dump, `htr` days `"0"..."6"` each carry **24** integers (hourly). Example (truncated):
 
 ```json
-{
-  "path": "/{type}/{addr}/status",
-  "body": {
-    "boost": true,
-    "boost_end_day": 0,
-    "boost_end_min": 945,
-    "stemp": "7.5",
-    "units": "C"
-  }
-}
+{"prog":{"0":[2,2,2,2,...,2],"1":[...],"2":[...]}}
 ```
 
-### Defaults vs live values
+> Older notes refer to 30‑minute resolution. This capture shows **hourly (24‑slot)** payloads for the tested heater.
 
-Use `/setup` to read or update defaults (for example `extra_options.boost_time` and `extra_options.boost_temp`). These defaults seed UI controls but do **not** toggle Boost; the live state always flows through `/boost` and WebSocket updates.
+### Program preset temperatures
+**POST** `/api/v2/devs/{dev_id}/{type}/{addr}/prog_temps`
 
----
+Not observed in this dump. The app used `/status` with keys `ice_temp`, `eco_temp`, `comf_temp`. Keep this endpoint for compatibility where devices expose it; prefer the capture‑proven `/status` shape for `htr` preset updates.
 
-## Samples (history / telemetry)
+### Advanced setup & lock
+**POST** `/api/v2/devs/{dev_id}/{type}/{addr}/setup` — defaults like `extra_options.boost_time` / `boost_temp` (strings for temps).  
+**POST** `/api/v2/devs/{dev_id}/{type}/{addr}/lock` — `{"lock": true|false}`.
 
-**GET** `/api/v2/devs/{dev_id}/{type}/{addr}/samples?start=<ms>&end=<ms>`
+### Selection (required gate)
+**POST** `/api/v2/devs/{dev_id}/{type}/{addr}/select`
+- Claim: `{"select": true}` → `201 {}`
+- Release: `{"select": false}` → `201 {}`
 
-`start` and `end` use different epochs per node family:
+Apply `select → write → deselect` around **every** write.
 
-- Heater (`htr`) nodes expect **epoch milliseconds**.
-- Power monitor (`pmo`) nodes expect **epoch seconds**.
-- Other node types currently align with the `htr` millisecond convention until captures prove otherwise.
+### Boost (accumulator)
+**POST** `/api/v2/devs/{dev_id}/acm/{addr}/boost`
 
-The response shape varies by device and firmware; treat as opaque JSON until stabilized by capture.
+Start: `{"boost": true, "boost_time": 60..600, "stemp": "##.#", "units": "C|F"}`  
+Stop: `{"boost": false}`
 
-### WebSocket session lifecycle
-
-The Socket.IO handshake observed in captures follows this sequence:
-
-1. Polling transport open.
-2. `POST 40/ns` to acknowledge the namespace.
-3. Drain initial polling responses.
-4. Upgrade to WebSocket.
-5. Exchange `2probe`, `3probe`, and `5` heartbeats.
-6. Upon receiving `40/ns`, emit `dev_data` and subscribe to `/{type}/{addr}/{status|samples}` channels.
-
-Keepalives (`2` pings / `3` pongs) match the standard Socket.IO cadence and require no special handling beyond the default client implementation.
-
-## Power monitor (pmo) nodes
-
-**Read**
-- `GET /api/v2/devs/{dev_id}/pmo/{addr}` → object with:
-  - `power_limit` — wrapper object with a stringified limit.
-  - `setup` — `{ "power_limit": <int>, "reverse": <bool>, "circuit_type": <int> }`
-  - `version` — `{ "hw_version", "fw_version", "pid", "uid" }`
-
-**Samples**
-- `GET /api/v2/devs/{dev_id}/pmo/{addr}/samples?start=<sec>&end=<sec>`
-  - **Epoch seconds** for `start`/`end` (contrast: thermal nodes use **milliseconds**).
-  - 200 with `{ "samples": [ … ] }` or 204/empty-array for empty ranges.
-  - Typical item keys include `t` (epoch seconds), `counter`, `max`, `min` (stringified numeric values). Treat shape as opaque.
-
-**WebSocket**
-- `pmo` participates in `dev_data` snapshots (see `pmo_system` block), but no dedicated `update`/`status` events observed.
-- Handle `pmo` primarily over REST + samples.
-
-**Selection**
-- Not required for `pmo` reads or samples.
-
-> **Contrast with heaters/accumulators:** thermal nodes (`htr`, `acm`) require a selection gate before writes, expose samples in epoch **milliseconds**, and surface `update` deltas for live telemetry. Power monitors do not currently require selection, surface samples in epoch **seconds**, and rely on snapshot metadata rather than Socket.IO deltas.
+Not present in this heater‑focused dump; documented here for completeness.
 
 ---
 
+## Samples (history/telemetry)
 
-## WebSocket (Socket.IO)
+- **Power monitor (`pmo`)**: `GET .../pmo/{addr}/samples?start=<sec>&end=<sec>` — **epoch seconds** observed.  
+- **Heater/Accumulator (`htr`/`acm`)**: Not present in this dump; prior docs treat thermal nodes as **epoch milliseconds**.
 
-The Ducaheat app speaks **Engine.IO v3 + Socket.IO v2**. The mobile capture shows that the backend is strict about the upgrade
-sequence, namespace, and heartbeat cadence; mirroring the flow below keeps the session alive indefinitely.
+---
 
-### Endpoint & headers
+## WebSocket (Engine.IO v3 + Socket.IO v2)
 
-- **HTTP host:** `https://api-tevolve.termoweb.net`
-- **Handshake path:** `/socket.io?token=<access_token>&dev_id=<dev_id>`
+- **Endpoint:** `/socket.io?token=<access_token>&dev_id=<dev_id>`
 - **Namespace:** `/api/v2/socket_io`
-- **Mandatory headers:**
-  - `User-Agent: Ducaheat/<app-version>`
-  - `X-Requested-With: net.termoweb.ducaheat.app`
-  - `Origin: https://localhost` (even though no page lives at that URL; omit only if the integration can tolerate stricter
-    CORS policies in the future).
-  - Copy the app’s `Accept-Language` and `Accept` headers if available. The capture shows `Accept: */*`.
-
-### Engine.IO handshake
-
-1. **GET polling open** – `transport=polling&EIO=3&t=<random>`.
-   - Expect HTTP `200` with a payload that contains multiple Engine.IO packets. The first packet is `0{"sid":"<sid>","upgrades":["websocket"],"pingInterval":<ms>,"pingTimeout":<ms>}`.
-   - Persist the `sid`, `pingInterval`, and `pingTimeout`. The capture shows `pingInterval=25000` ms and `pingTimeout=50000` ms,
-     but the client must trust the values returned by the server at runtime.
-   - The HTTP response includes `Set-Cookie: io=<sid>` and `Set-Cookie: server_id=…`. Keep the same HTTP client session for all
-     follow-up requests so those cookies are resent automatically.
-   - Raw body example (101 bytes, no gzip):
-
-     ```
-     0{"sid":"f17Ht9TSWZcSC1Y1Vow7","upgrades":["websocket"],"pingInterval":25000,"pingTimeout":50000}
-     ```
-2. **POST namespace join (polling)** – repeat the query parameters above plus `sid=<sid>` and POST `40/api/v2/socket_io` as the
-   body (content type `text/plain;charset=UTF-8`). This registers the namespace while still on HTTP long-polling.
-   - Engine.IO polling frames must include a length prefix. The POST body in the capture is the ASCII text `18:40/api/v2/socket_io`.
-   - Expect HTTP `200` with a 2-byte body (`ok`). Cookies from the GET are echoed back.
-3. **GET polling drain** – GET once more with the same query (new `t` value). The server usually responds with a no-op packet.
-   - Continue to send the `sid` query parameter. Skipping this step leaves unread packets queued on the polling transport.
-
-> **Captured request headers:**
-> ```
-> GET /socket.io/?token=<token>&dev_id=<dev>&EIO=3&transport=polling&t=PcpSY7k HTTP/2
-> Origin: https://localhost
-> User-Agent: Mozilla/5.0 (Linux; Android 15; …)
-> X-Requested-With: net.termoweb.ducaheat.app
-> Accept: */*
-> Accept-Language: en-US,en;q=0.9
-> Accept-Encoding: gzip, deflate, br, zstd
-> ```
->
-> The POST uses the same header set plus `Content-Type: text/plain;charset=UTF-8` and the polling body described above.
-
-### Upgrade to WebSocket
-
-4. **WebSocket connect** – switch `transport=websocket` and reuse the `sid`. Re-send the headers listed above except for
-   hop-by-hop values (drop `Connection`, `Accept-Encoding`, etc.).
-   - The upgrade request mirrors the capture:
-
-     ```
-     GET /socket.io/?…&transport=websocket&sid=f17Ht9TSWZcSC1Y1Vow7 HTTP/1.1
-     Connection: Upgrade
-     Upgrade: websocket
-     Sec-WebSocket-Version: 13
-     Sec-WebSocket-Key: <base64>
-     Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
-     ```
-   - The server answers `101 Switching Protocols`, reissues the `io` and `server_id` cookies, and enables permessage-deflate. Do
-     not set an Engine.IO heartbeat on the client socket; the server controls ping cadence.
-5. **Probe** – immediately send the Engine.IO probe string `2probe` and wait for `3probe`.
-6. **Upgrade confirm** – send `5` to finalize the upgrade. The server will reply with `40/api/v2/socket_io` to acknowledge the
-   namespace. Treat absence of the `40` ack as a fatal error.
-7. **Namespace enter (redundant but required)** – send `40/api/v2/socket_io` once more after the upgrade. The capture shows the
-   mobile app doing this; reproducing it avoids sporadic “unknown namespace” errors on reconnect.
-
-### Initial payloads & subscriptions
-
-8. **Request snapshot** – send a Socket.IO event `42/api/v2/socket_io,["dev_data"]` immediately after the namespace join. The
-   server responds with `42/api/v2/socket_io,["dev_data",{...}]` containing the full gateway state described earlier.
-9. **Sample subscriptions** – for every heater or accumulator that exposes energy samples, emit `42/api/v2/socket_io,["subscribe","/<node_type>/<addr>/samples"]`. The backend acknowledges silently; subsequent `update` events carry sampled values.
-
-### Runtime events
-
-The active session surfaces the following Socket.IO events (all scoped to `/api/v2/socket_io`):
-
-- `dev_handshake` — initial device permissions. Rare in recent builds but historically emitted before the first `dev_data`.
-- `dev_data` — complete gateway snapshot. Treat the body as authoritative and refresh caches when received.
-- `update` — incremental node delta. The payload is an object with:
-  - `path` — e.g., `/htr/2/status` or `/acm/1/prog`
-  - `body` — JSON structure matching the REST endpoint for that resource.
-- `message` — vendor heartbeat. Payload `"ping"` must be answered with `"pong"` by sending `42/api/v2/socket_io,["message","pong"]`.
-- `samples` — optional stream of historical datapoints for subscribed nodes. Payloads match the REST `/samples` response for
-  that node type.
-
-### Heartbeats & timeouts
-
-Engine.IO and Socket.IO layer pings are independent, and both are mandatory:
-
-| Incoming frame | Meaning | Required response |
-| --- | --- | --- |
-| `2` | Engine.IO ping | Reply `3` immediately. Failure triggers a disconnect after `pingTimeout`.
-| `4` frame whose payload is `"2"` | Socket.IO ping (global namespace) | Reply with a bare `3` frame (Socket.IO pong).
-| `4` frame whose payload starts with `"2/"` | Socket.IO ping (namespace) | Reply `3/<namespace>` (e.g., `3/api/v2/socket_io`).
-| `42/api/v2/socket_io,["message","ping"]` | Application keep-alive | Respond with `42/api/v2/socket_io,["message","pong"]` within the Engine.IO interval.
-
-Timers:
-
-- Use the `pingInterval` from the handshake as the maximum idle period between Engine.IO pings. Start a watchdog at 80% of that
-  value (e.g., 20s if the server advertises 25s). If no ping arrives within the watchdog window, proactively reconnect.
-- Treat `pingTimeout` as the grace period to deliver the pong. The capture shows the server closing the socket roughly 5 s after
-  the timeout elapses if the client stays silent.
-- Expect a fresh Socket.IO ping every other Engine.IO cycle. Missing a namespace pong does not immediately drop the socket, but
-  subsequent events stall until the pong is received.
-
-### Session lifecycle
-
-- The server does not emit an explicit “welcome” beyond the `40` ack. Consider the socket healthy only after receiving either
-  `dev_data` or `update` with a non-empty body.
-- On reconnect, redo the full polling + upgrade dance with a new token. Reusing an expired `sid` results in HTTP 400 responses
-  from the polling endpoints.
-- Send `close` frames with code `1001` (`GOING_AWAY`) when shutting down to match the app’s behavior.
+- **Flow (as implemented by the app and integration):** polling open → join namespace (polling) → drain → WebSocket upgrade → `2probe/3probe/5` → namespace ack → request `["dev_data"]` → subscribe to `"/{type}/{addr}/{status|samples}"`.
+- **Keepalives:** reply Engine.IO `2` with `3`; reply Socket.IO pings; answer app `"ping"` with `"pong"` events.
 
 ---
 
-## Example cURL flow
+## Other endpoints seen in the dump
+
+- `GET /api/v2/devs/{dev_id}/mgr/nodes` — node inventory
+- `GET /api/v2/devs/{dev_id}/mgr/rtc/time` — gateway RTC
+- `GET /api/v2/grouped_devs` — grouped device metadata
+- `GET /api/v2/user/preferences`, `GET /api/v2/users/{user_id}/privacy` — user settings
+- `GET /client-data/15/*` and `GET /assets/maxPowerConfig.json` — static app resources
+- `GET /api/v2/devs/{dev_id}/pmo/{addr}/power` — instantaneous power (shape varies)
+
+---
+
+## cURL examples (reflecting capture)
 
 ```bash
-# 1) Token
+# Token
 TOK=$(curl -sS -u '5c49dce977510351506c42db:tevolve'   -d 'grant_type=password&username=EMAIL&password=PASS'   https://api-tevolve.termoweb.net/client/token | jq -r .access_token)
 
-# 2) Read accumulator 2
-curl -sS -H "Authorization: Bearer $TOK"   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/acm/2
+# Select → write → deselect (heater)
+curl -sS -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json'   -d '{"select": true}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV/htr/$ADDR/select
 
-# 3) (Optional) Select before write
-curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"   -d '{"select": true}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/acm/2/select
+curl -sS -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json'   -d '{"mode":"manual","stemp":"21.0","units":"C"}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV/htr/$ADDR/status
 
-# 4) Set manual 22.0°C
-curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"   -d '{"mode":"manual","stemp":"22.0","units":"C"}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/acm/2/status
+curl -sS -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json'   -d '{"select": false}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV/htr/$ADDR/select
 
-# 5) Start Boost now
-curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"   -d '{"boost": true}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/acm/2/status
+# Program (24 slots per day in this capture)
+curl -sS -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json'   -d '{"prog":{"0":[2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]}}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV/htr/$ADDR/prog
 
-# 6) Configure default Boost time
-curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"   -d '{"extra_options":{"boost_time":60,"boost_temp":"22.0"}}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/acm/2/setup
-
-# 7) De-select after write
-curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json"   -d '{"select": false}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV_ID/acm/2/select
+# PMO samples (epoch seconds)
+curl -sS -H "Authorization: Bearer $TOK"   "https://api-tevolve.termoweb.net/api/v2/devs/$DEV/pmo/$PMO_ADDR/samples?start=1759269600&end=1761955200"
 ```
 
 ---
 
-## Notes and caveats
+## Validation invariants
 
-- REST and websocket calls include `User-Agent: Ducaheat/...` plus `X-Requested-With: net.termoweb.ducaheat.app` (and `Origin: https://localhost` for Socket.IO) to match the Android hybrid app environment.
-- Treat unknown keys as forward‑compatible; the app is tolerant of additional fields.
-- Program payload (`/prog`) structure varies by model/firmware. Capture the GET shape first and write it back unchanged after edits.
-- Some deployments may accept `/acm/{addr}/boost` as a synonym for boosting, but `/status` with `{ "boost": true }` is consistently present in the app bundle.
+- Temperatures **must** be strings with **one decimal**; **units uppercase**.
+- Claim selection before **every** write; release after, including on failure.
+- For weekly programs, **echo the GET shape** and write the whole object.
