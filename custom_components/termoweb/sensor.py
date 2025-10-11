@@ -38,9 +38,17 @@ from .heater import (
     iter_heater_nodes,
     log_skipped_nodes,
 )
-from .identifiers import build_heater_energy_unique_id
-from .inventory import normalize_node_addr, normalize_node_type
-from .utils import build_gateway_device_info, float_or_none
+from .identifiers import (
+    build_heater_energy_unique_id,
+    build_power_monitor_energy_unique_id,
+    build_power_monitor_power_unique_id,
+)
+from .inventory import PowerMonitorNode, normalize_node_addr, normalize_node_type
+from .utils import (
+    build_gateway_device_info,
+    build_power_monitor_device_info,
+    float_or_none,
+)
 
 _WH_TO_KWH = 1 / 1000.0
 
@@ -154,10 +162,82 @@ async def async_setup_entry(hass, entry, async_add_entities):
     energy_nodes_map.setdefault("acm", list(addrs_by_type.get("acm", [])))
     energy_nodes_map.setdefault("pmo", [])
 
+    power_monitor_names: dict[str, str] = {}
+
+    def _fallback_power_monitor_name(addr: str) -> str:
+        """Return a default label for a power monitor address."""
+
+        try:
+            fallback_node = PowerMonitorNode(name=None, addr=addr)
+            candidate = fallback_node.default_name()
+        except Exception:  # pragma: no cover - defensive fallback
+            candidate = None
+        if isinstance(candidate, str):
+            trimmed = candidate.strip()
+            if trimmed:
+                return trimmed
+        return f"Power Monitor {addr}"
+
+    def _register_power_monitor_node(node: Any) -> None:
+        """Add a named power monitor derived from ``node``."""
+
+        addr = normalize_node_addr(getattr(node, "addr", None), use_default_when_falsey=True)
+        if not addr:
+            return
+        raw_name = getattr(node, "name", None)
+        trimmed = raw_name.strip() if isinstance(raw_name, str) else None
+        if trimmed:
+            power_monitor_names[addr] = trimmed
+            return
+        default_name = None
+        default_factory = getattr(node, "default_name", None)
+        if callable(default_factory):
+            try:
+                default_name = default_factory()
+            except Exception:  # pragma: no cover - defensive fallback
+                default_name = None
+        if isinstance(default_name, str):
+            default_trimmed = default_name.strip()
+            if default_trimmed:
+                power_monitor_names.setdefault(addr, default_trimmed)
+                return
+        power_monitor_names.setdefault(addr, _fallback_power_monitor_name(addr))
+
+    def _integrate_power_monitor_addresses(
+        source: Mapping[str, Iterable[str]] | None,
+    ) -> None:
+        """Merge addresses from ``source`` into the energy map and names."""
+
+        if not isinstance(source, Mapping):
+            return
+        _merge_energy_addresses(source)
+        for values in source.values():
+            if isinstance(values, (str, bytes)) or not isinstance(values, Iterable):
+                candidates = [values]
+            else:
+                candidates = list(values)
+            for candidate in candidates:
+                addr = normalize_node_addr(candidate, use_default_when_falsey=True)
+                if not addr:
+                    continue
+                power_monitor_names.setdefault(addr, _fallback_power_monitor_name(addr))
+
+    if inventory is not None:
+        nodes_by_type_map = getattr(inventory, "nodes_by_type", None)
+        if isinstance(nodes_by_type_map, Mapping):
+            for candidate in nodes_by_type_map.get("pmo", []) or []:
+                _register_power_monitor_node(candidate)
+
+        address_map = getattr(inventory, "power_monitor_address_map", None)
+        if isinstance(address_map, tuple) and address_map:
+            _integrate_power_monitor_addresses(address_map[0])
+
     sample_map = getattr(inventory, "power_monitor_sample_address_map", None)
     if isinstance(sample_map, tuple) and sample_map:
-        forward_pmo = sample_map[0]
-        _merge_energy_addresses(forward_pmo)
+        _integrate_power_monitor_addresses(sample_map[0])
+
+    if power_monitor_names:
+        _merge_energy_addresses({"pmo": list(power_monitor_names)})
 
     if energy_coordinator is None:
         energy_coordinator = EnergyStateCoordinator(
@@ -206,7 +286,38 @@ async def async_setup_entry(hass, entry, async_add_entities):
             )
         )
 
-    log_skipped_nodes("sensor", heater_details, logger=_LOGGER)
+    for addr_str, base_name in sorted(power_monitor_names.items()):
+        energy_unique_id = build_power_monitor_energy_unique_id(dev_id, addr_str)
+        power_unique_id = build_power_monitor_power_unique_id(dev_id, addr_str)
+        new_entities.append(
+            PowerMonitorEnergySensor(
+                energy_coordinator,
+                entry.entry_id,
+                dev_id,
+                addr_str,
+                f"{base_name} Energy",
+                energy_unique_id,
+                base_name,
+            )
+        )
+        new_entities.append(
+            PowerMonitorPowerSensor(
+                energy_coordinator,
+                entry.entry_id,
+                dev_id,
+                addr_str,
+                f"{base_name} Power",
+                power_unique_id,
+                base_name,
+            )
+        )
+
+    log_skipped_nodes(
+        "sensor",
+        heater_details,
+        logger=_LOGGER,
+        skipped_types=("thm",),
+    )
 
     uid_total = f"{DOMAIN}:{dev_id}:energy_total"
     new_entities.append(
@@ -533,6 +644,171 @@ def _create_boost_sensors(
     return (minutes, end)
 
 
+class PowerMonitorSensorBase(CoordinatorEntity, SensorEntity):
+    """Base helper exposing shared behaviour for power monitor sensors."""
+
+    _metric_key: str
+
+    def __init__(
+        self,
+        coordinator: Any,
+        entry_id: str,
+        dev_id: str,
+        addr: str,
+        name: str,
+        unique_id: str,
+        device_name: str,
+    ) -> None:
+        """Initialise the power monitor sensor base entity."""
+
+        super().__init__(coordinator)
+        self._entry_id = entry_id
+        self._dev_id = dev_id
+        normalized_addr = normalize_node_addr(addr, use_default_when_falsey=True)
+        self._addr = normalized_addr or str(addr)
+        self._attr_name = name
+        self._attr_unique_id = unique_id
+        self._device_name = device_name
+
+    def _device_record(self) -> Mapping[str, Any] | None:
+        """Return the cached coordinator data for this device."""
+
+        data = getattr(self.coordinator, "data", None)
+        if not isinstance(data, Mapping):
+            return None
+        record = data.get(self._dev_id)
+        return record if isinstance(record, Mapping) else None
+
+    def _metric_bucket(self) -> Mapping[str, Any]:
+        """Return the metric bucket for this power monitor."""
+
+        record = self._device_record()
+        if not isinstance(record, Mapping):
+            return {}
+
+        direct_bucket = record.get("pmo")
+        if isinstance(direct_bucket, Mapping):
+            direct_metric = direct_bucket.get(self._metric_key)
+            if isinstance(direct_metric, Mapping):
+                return direct_metric
+
+        nodes_by_type = record.get("nodes_by_type")
+        if isinstance(nodes_by_type, Mapping):
+            pmo_section = nodes_by_type.get("pmo")
+            if isinstance(pmo_section, Mapping):
+                metric = pmo_section.get(self._metric_key)
+                if isinstance(metric, Mapping):
+                    return metric
+
+        return {}
+
+    def _tracked_addresses(self) -> set[str]:
+        """Return addresses tracked for this power monitor."""
+
+        record = self._device_record()
+        if not isinstance(record, Mapping):
+            return set()
+
+        addresses: set[str] = set()
+        candidates = []
+
+        direct_bucket = record.get("pmo")
+        if isinstance(direct_bucket, Mapping):
+            candidates.append(direct_bucket.get("addrs"))
+
+        nodes_by_type = record.get("nodes_by_type")
+        if isinstance(nodes_by_type, Mapping):
+            pmo_section = nodes_by_type.get("pmo")
+            if isinstance(pmo_section, Mapping):
+                candidates.append(pmo_section.get("addrs"))
+
+        for raw in candidates:
+            if isinstance(raw, (str, bytes)):
+                raw_iterable: Iterable[Any] = [raw]
+            elif isinstance(raw, Iterable):
+                raw_iterable = raw
+            else:
+                continue
+            for item in raw_iterable:
+                addr = normalize_node_addr(item, use_default_when_falsey=True)
+                if addr:
+                    addresses.add(addr)
+
+        return addresses
+
+    def _coerce_native_value(self, raw: Any) -> float | None:
+        """Convert a metric payload value to ``float`` if possible."""
+
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
+
+    @property
+    def should_poll(self) -> bool:
+        """Coordinator updates push new data for power monitors."""
+
+        return False
+
+    @property
+    def available(self) -> bool:
+        """Return True when the coordinator tracks this power monitor."""
+
+        bucket = self._metric_bucket()
+        if self._addr in bucket:
+            return True
+        return self._addr in self._tracked_addresses()
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the processed metric value for Home Assistant."""
+
+        bucket = self._metric_bucket()
+        raw = bucket.get(self._addr)
+        if raw is None:
+            return None
+        return self._coerce_native_value(raw)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return identifiers for the power monitor metric."""
+
+        return {"dev_id": self._dev_id, "addr": self._addr}
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return the Home Assistant device metadata for the power monitor."""
+
+        return build_power_monitor_device_info(
+            self.hass,
+            self._entry_id,
+            self._dev_id,
+            self._addr,
+            name=self._device_name,
+        )
+
+
+class PowerMonitorEnergySensor(PowerMonitorSensorBase):
+    """Energy consumption sensor for a power monitor."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = "kWh"
+    _metric_key = "energy"
+
+    def _coerce_native_value(self, raw: Any) -> float | None:  # type: ignore[override]
+        """Normalise the raw energy metric into kWh."""
+
+        return _normalise_energy_value(self.coordinator, raw)
+
+
+class PowerMonitorPowerSensor(PowerMonitorSensorBase):
+    """Power sensor for a power monitor."""
+
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "W"
+    _metric_key = "power"
 class InstallationTotalEnergySensor(
     GatewayDispatcherEntity, CoordinatorEntity, SensorEntity
 ):
