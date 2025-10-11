@@ -886,7 +886,7 @@ def test_translate_nodes_list_merges_nested_updates(monkeypatch: pytest.MonkeyPa
 
 
 def test_apply_nodes_payload_merges_and_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Applying node payloads should build snapshots and dispatch updates."""
+    """Applying node payloads should normalize and dispatch updates."""
 
     client, _sio, dispatcher = _make_client(monkeypatch)
     client._collect_update_addresses = MagicMock(return_value=[("htr", "1")])  # type: ignore[attr-defined]
@@ -1123,6 +1123,15 @@ def test_handle_event_includes_addr_map(monkeypatch: pytest.MonkeyPatch) -> None
     )
     assert settings_payload is not None
     assert settings_payload["addr_map"] == {"htr": ["2"]}
+
+    dev_state = client._coordinator.data.get("device")
+    assert isinstance(dev_state, Mapping)
+    assert "nodes" not in dev_state
+    nodes_by_type = dev_state.get("nodes_by_type")
+    assert isinstance(nodes_by_type, Mapping)
+    htr_bucket = nodes_by_type.get("htr")
+    assert isinstance(htr_bucket, Mapping)
+    assert htr_bucket.get("addrs") == ["2"]
 
 
 def test_update_legacy_settings_updates_settings_map(monkeypatch: pytest.MonkeyPatch) -> None:
