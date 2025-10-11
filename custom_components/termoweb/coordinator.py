@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, MutableMapping
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import logging
@@ -323,15 +324,18 @@ class StateCoordinator(
 
         normalised: dict[str, dict[str, Any]] = {}
         for node_type, bucket in settings_by_type.items():
-            if not isinstance(bucket, Mapping):
+            normalized_type = normalize_node_type(
+                node_type, use_default_when_falsey=True
+            )
+            if not normalized_type or not isinstance(bucket, Mapping):
                 continue
             dest: dict[str, Any] = {}
             for raw_addr, payload in bucket.items():
                 addr = normalize_node_addr(raw_addr, use_default_when_falsey=True)
                 if not addr:
                     continue
-                dest[addr] = payload
-            normalised[node_type] = dest
+                dest[addr] = deepcopy(payload)
+            normalised[normalized_type] = dest
         return normalised
 
     def _assemble_device_record(
