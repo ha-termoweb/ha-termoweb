@@ -1908,11 +1908,18 @@ def test_rest_set_acm_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
             "4",
             boost=True,
             boost_time=45,
+            stemp=21.5,
+            units="c",
         )
         assert result == {"ok": True}
         path2, kwargs2 = session.request_calls[1][1:3]
         assert path2 == "https://api.termoweb.fake/api/v2/devs/dev/acm/4/boost"
-        assert kwargs2["json"] == {"boost": True, "boost_time": 45}
+        assert kwargs2["json"] == {
+            "boost": True,
+            "boost_time": 45,
+            "stemp": "21.5",
+            "units": "C",
+        }
 
         with pytest.raises(ValueError):
             await client.set_acm_extra_options("dev", "4")
@@ -2103,6 +2110,8 @@ def test_ducaheat_acm_boost_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
             "7",
             boost=True,
             boost_time=30,
+            stemp=20.0,
+            units="f",
         )
         assert result_start["boost_state"]["boost_active"] is True
         assert result_start["boost_state"]["boost_minutes_delta"] == 30
@@ -2111,7 +2120,12 @@ def test_ducaheat_acm_boost_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
         assert select_call_2[1] == "https://api.termoweb.fake/api/v2/devs/dev/acm/7/select"
         assert select_call_2[2]["json"] == {"select": True}
         assert boost_call_2[1] == "https://api.termoweb.fake/api/v2/devs/dev/acm/7/boost"
-        assert boost_call_2[2]["json"] == {"boost": True, "boost_time": 30}
+        assert boost_call_2[2]["json"] == {
+            "boost": True,
+            "boost_time": 30,
+            "stemp": "20.0",
+            "units": "F",
+        }
         assert release_call_2[1] == "https://api.termoweb.fake/api/v2/devs/dev/acm/7/select"
         assert release_call_2[2]["json"] == {"select": False}
 

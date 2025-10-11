@@ -69,13 +69,29 @@ def validate_boost_minutes(value: int | None) -> int | None:
     return minutes
 
 
-def build_acm_boost_payload(boost: bool, boost_time: int | None) -> dict[str, Any]:
+def build_acm_boost_payload(
+    boost: bool,
+    boost_time: int | None,
+    *,
+    stemp: str | None = None,
+    units: str | None = None,
+) -> dict[str, Any]:
     """Return a validated accumulator boost payload."""
 
     payload: dict[str, Any] = {"boost": bool(boost)}
     minutes = validate_boost_minutes(boost_time)
     if minutes is not None:
         payload["boost_time"] = minutes
+    if stemp is not None:
+        temp_str = str(stemp).strip()
+        if not temp_str:
+            raise ValueError("stemp must be a non-empty string when provided")
+        payload["stemp"] = temp_str
+    if units is not None:
+        unit = str(units).strip().upper()
+        if unit not in {"C", "F"}:
+            raise ValueError(f"Invalid units: {units!r}")
+        payload["units"] = unit
     return payload
 
 

@@ -302,13 +302,21 @@ async def test_ducaheat_set_acm_boost_state_claims_select(
     monkeypatch.setattr(ducaheat_rest_client, "get_rtc_time", rtc_mock)
 
     result = await ducaheat_rest_client.set_acm_boost_state(
-        "dev", "3", boost=True, boost_time=15
+        "dev",
+        "3",
+        boost=True,
+        boost_time=15,
+        stemp=21.2,
+        units="c",
     )
 
     assert result["boost"] is True
     assert calls == [
         ("/api/v2/devs/dev/acm/3/select", {"select": True}),
-        ("/api/v2/devs/dev/acm/3/boost", {"boost": True, "boost_time": 15}),
+        (
+            "/api/v2/devs/dev/acm/3/boost",
+            {"boost": True, "boost_time": 15, "stemp": "21.2", "units": "C"},
+        ),
         ("/api/v2/devs/dev/acm/3/select", {"select": False}),
     ]
     rtc_mock.assert_awaited_once_with("dev")
@@ -409,6 +417,12 @@ def test_validate_boost_minutes_and_payload() -> None:
     assert validate_boost_minutes(15) == 15
     assert build_acm_boost_payload(True, None) == {"boost": True}
     assert build_acm_boost_payload(False, 30) == {"boost": False, "boost_time": 30}
+    assert build_acm_boost_payload(
+        True,
+        20,
+        stemp="21.0",
+        units="c",
+    ) == {"boost": True, "boost_time": 20, "stemp": "21.0", "units": "C"}
 
     with pytest.raises(ValueError):
         validate_boost_minutes(0)
@@ -416,6 +430,10 @@ def test_validate_boost_minutes_and_payload() -> None:
         validate_boost_minutes("bad")
     with pytest.raises(ValueError):
         build_acm_boost_payload(True, 0)
+    with pytest.raises(ValueError):
+        build_acm_boost_payload(True, 10, stemp="  ")
+    with pytest.raises(ValueError):
+        build_acm_boost_payload(True, 10, units="kelvin")
 
 
 def test_ducaheat_log_segmented_post_noop_when_not_debug(

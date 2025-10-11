@@ -630,11 +630,31 @@ class RESTClient:
         *,
         boost: bool,
         boost_time: int | None = None,
+        stemp: float | None = None,
+        units: str | None = None,
     ) -> Any:
         """Start or stop an accumulator boost session."""
 
         node_type, addr_str = self._resolve_node_descriptor(("acm", addr))
-        payload = build_acm_boost_payload(boost, boost_time)
+        formatted_temp: str | None = None
+        if stemp is not None:
+            try:
+                formatted_temp = self._ensure_temperature(stemp)
+            except ValueError as err:
+                raise ValueError(f"Invalid stemp value: {stemp!r}") from err
+
+        unit_value: str | None = None
+        if units is not None:
+            unit_value = str(units).strip().upper()
+            if unit_value not in {"C", "F"}:
+                raise ValueError(f"Invalid units: {units!r}")
+
+        payload = build_acm_boost_payload(
+            boost,
+            boost_time,
+            stemp=formatted_temp,
+            units=unit_value,
+        )
 
         headers = await self._authed_headers()
         path = f"/api/v2/devs/{dev_id}/{node_type}/{addr_str}/boost"
