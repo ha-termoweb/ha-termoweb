@@ -292,6 +292,42 @@ class _StubServices:
 
 
 @pytest.mark.asyncio
+async def test_ws_debug_probe_service_skips_when_registered(
+    termoweb_init: Any,
+) -> None:
+    class TrackingServices(_StubServices):
+        def __init__(self) -> None:
+            super().__init__()
+            self.register_calls: list[tuple[str, str, Callable[[ServiceCall], Any]]] = []
+
+        def async_register(
+            self,
+            domain: str,
+            service: str,
+            handler: Callable[[ServiceCall], Any],
+        ) -> None:
+            self.register_calls.append((domain, service, handler))
+            super().async_register(domain, service, handler)
+
+    services = TrackingServices()
+    existing_handler = lambda call: None
+    services._handlers[(termoweb_init.DOMAIN, "ws_debug_probe")] = existing_handler
+
+    hass = SimpleNamespace(
+        services=services,
+        data={},
+        loop=asyncio.get_running_loop(),
+    )
+
+    await termoweb_init.async_register_ws_debug_probe_service(hass)
+
+    assert services.register_calls == []
+    assert (
+        services._handlers[(termoweb_init.DOMAIN, "ws_debug_probe")] is existing_handler
+    )
+
+
+@pytest.mark.asyncio
 async def test_ws_debug_probe_service_handles_client_matrix(
     termoweb_init: Any,
 ) -> None:
