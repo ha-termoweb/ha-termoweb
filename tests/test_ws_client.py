@@ -200,6 +200,69 @@ def test_forward_ws_sample_updates_handles_power_monitors(
     assert handler.call_args.kwargs.get("lease_seconds") == 90
 
 
+def test_forward_ws_sample_updates_uses_coordinator_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Coordinator inventory aliases and logging should be applied."""
+
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "5"}]}
+    inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+
+    monkeypatch.setattr(
+        Inventory,
+        "heater_sample_address_map",
+        property(lambda self: ({"htr": ["5"]}, {"heater": "htr"})),
+    )
+    monkeypatch.setattr(
+        Inventory,
+        "power_monitor_sample_address_map",
+        property(lambda self: ({}, {})),
+    )
+
+    handler = MagicMock(side_effect=RuntimeError("boom"))
+    hass = SimpleNamespace(
+        data={
+            base_ws.DOMAIN: {
+                "entry": {
+                    "energy_coordinator": SimpleNamespace(handle_ws_samples=handler),
+                    "coordinator": SimpleNamespace(inventory=inventory),
+                }
+            }
+        }
+    )
+
+    logger = logging.getLogger("test_forward_ws_samples")
+    caplog.set_level(logging.DEBUG, logger=logger.name)
+
+    base_ws.forward_ws_sample_updates(
+        hass,
+        "entry",
+        "dev",
+        {
+            "heater": {
+                "samples": {"5": {"temp": 21}, "lease_seconds": 10},
+                "lease_seconds": 30,
+            },
+            "acm": {"lease_seconds": -5},
+        },
+        logger=logger,
+        log_prefix="tester",
+    )
+
+    handler.assert_called_once()
+    args = handler.call_args[0]
+    assert args[0] == "dev"
+    assert args[1] == {"htr": {"5": {"temp": 21}}}
+    assert handler.call_args.kwargs.get("lease_seconds") == 30
+    assert any(
+        record.name == logger.name
+        and record.levelno == logging.DEBUG
+        and record.message == "tester: forwarding heater samples failed"
+        for record in caplog.records
+    )
+
+
 def test_forward_ws_sample_updates_skips_invalid_sections(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
