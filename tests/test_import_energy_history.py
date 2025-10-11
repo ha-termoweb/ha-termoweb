@@ -157,6 +157,86 @@ def test_resolve_statistics_helpers_fallback(monkeypatch: pytest.MonkeyPatch) ->
     assert helpers.async_fn is _async_helper
 
 
+def test_resolve_statistics_helpers_targets_recorder_instance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Recorder helpers should retain executor and target selection."""
+
+    energy_module = importlib.import_module("custom_components.termoweb.energy")
+    reset_cache = getattr(energy_module, "_reset_integration_dependencies_cache", None)
+    if reset_cache is not None:
+        reset_cache()
+
+    stats_module = types.ModuleType("homeassistant.components.recorder.statistics")
+
+    def _sync_helper(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def _async_helper(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    stats_module.sync_helper = _sync_helper  # type: ignore[attr-defined]
+    stats_module.async_helper = _async_helper  # type: ignore[attr-defined]
+
+    recorder_instance = types.SimpleNamespace(
+        async_add_executor_job=AsyncMock(name="async_add_executor_job")
+    )
+
+    recorder_module = types.ModuleType("homeassistant.components.recorder")
+
+    def _get_instance(hass: Any) -> Any:
+        return recorder_instance
+
+    recorder_module.get_instance = _get_instance  # type: ignore[attr-defined]
+    recorder_module.statistics = stats_module  # type: ignore[attr-defined]
+
+    components_module = types.ModuleType("homeassistant.components")
+    components_module.recorder = recorder_module  # type: ignore[attr-defined]
+
+    homeassistant_module = sys.modules.setdefault(
+        "homeassistant", types.ModuleType("homeassistant")
+    )
+    homeassistant_module.components = components_module  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, "homeassistant.components", components_module)
+    monkeypatch.setitem(
+        sys.modules, "homeassistant.components.recorder", recorder_module
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.components.recorder.statistics",
+        stats_module,
+    )
+
+    setattr(energy_module, "_RECORDER_IMPORTS", None)
+
+    hass = types.SimpleNamespace()
+
+    helpers_hass = energy_module._resolve_statistics_helpers(
+        hass,
+        sync_name="sync_helper",
+        async_name="async_helper",
+        sync_uses_instance=False,
+    )
+
+    assert helpers_hass.executor is recorder_instance.async_add_executor_job
+    assert helpers_hass.sync_target is hass
+    assert helpers_hass.sync is _sync_helper
+    assert helpers_hass.async_fn is _async_helper
+
+    helpers_instance = energy_module._resolve_statistics_helpers(
+        hass,
+        sync_name="sync_helper",
+        async_name="async_helper",
+        sync_uses_instance=True,
+    )
+
+    assert helpers_instance.executor is recorder_instance.async_add_executor_job
+    assert helpers_instance.sync_target is recorder_instance
+    assert helpers_instance.sync is _sync_helper
+    assert helpers_instance.async_fn is _async_helper
+
+
 @pytest.mark.asyncio
 async def test_get_last_statistics_compat_uses_modern_signature(
     monkeypatch: pytest.MonkeyPatch,
