@@ -708,10 +708,6 @@ custom_components/termoweb/heater.py :: log_skipped_nodes
     Log skipped TermoWeb nodes for a given platform.
 custom_components/termoweb/heater.py :: build_heater_name_map
     Return a mapping of heater node identifiers to friendly names.
-custom_components/termoweb/heater.py :: prepare_heater_platform_data
-    Return node metadata and name resolution helpers for a config entry.
-custom_components/termoweb/heater.py :: prepare_heater_platform_data.resolve_name
-    Resolve the friendly name for ``addr`` of the given node type.
 custom_components/termoweb/heater.py :: HeaterNodeBase.__init__
     Initialise a heater entity tied to a TermoWeb device.
 custom_components/termoweb/heater.py :: HeaterNodeBase.async_added_to_hass

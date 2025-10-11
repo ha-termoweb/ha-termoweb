@@ -184,9 +184,7 @@ def test_power_monitor_sensors_register_device_info() -> None:
     asyncio.run(_run())
 
 
-def test_sensor_async_setup_entry_ignores_blank_addresses(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_sensor_async_setup_entry_ignores_blank_addresses() -> None:
     async def _run() -> None:
         hass = HomeAssistant()
         entry = types.SimpleNamespace(entry_id="entry-skip")
@@ -218,15 +216,6 @@ def test_sensor_async_setup_entry_ignores_blank_addresses(
         record["inventory"] = inventory
         record["node_inventory"] = list(inventory.nodes)
 
-        def _fail_prepare(*_args: Any, **_kwargs: Any) -> tuple[Any, ...]:
-            raise AssertionError("prepare_heater_platform_data should not run")
-
-        monkeypatch.setattr(
-            heater_module,
-            "prepare_heater_platform_data",
-            _fail_prepare,
-        )
-
         added: list[Any] = []
 
         def _add_entities(entities: list[Any]) -> None:
@@ -244,9 +233,7 @@ def test_sensor_async_setup_entry_ignores_blank_addresses(
     asyncio.run(_run())
 
 
-def test_sensor_async_setup_entry_handles_boolean_boost_flag(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_sensor_async_setup_entry_handles_boolean_boost_flag() -> None:
     async def _run() -> None:
         hass = HomeAssistant()
         entry = types.SimpleNamespace(entry_id="entry-boost-bool")
@@ -280,15 +267,6 @@ def test_sensor_async_setup_entry_handles_boolean_boost_flag(
         record = hass.data[DOMAIN][entry.entry_id]
         record["inventory"] = inventory
         record["node_inventory"] = list(inventory.nodes)
-
-        def _fail_prepare(*_args: Any, **_kwargs: Any) -> tuple[Any, ...]:
-            raise AssertionError("prepare_heater_platform_data should not run")
-
-        monkeypatch.setattr(
-            heater_module,
-            "prepare_heater_platform_data",
-            _fail_prepare,
-        )
 
         added: list[Any] = []
 
@@ -384,13 +362,6 @@ def test_sensor_async_setup_entry_creates_entities_and_reuses_coordinator() -> N
         ]
 
         with (
-            patch.object(
-                heater_module,
-                "prepare_heater_platform_data",
-                side_effect=AssertionError(
-                    "prepare_heater_platform_data should not run"
-                ),
-            ),
             patch.object(
                 EnergyStateCoordinator,
                 "async_config_entry_first_refresh",
