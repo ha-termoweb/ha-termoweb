@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping, MutableMapping, Callable
+from collections.abc import Iterable, Mapping, MutableMapping, Callable
 from dataclasses import dataclass
 import logging
 import time
@@ -23,6 +23,7 @@ from ..const import (
     signal_ws_status,
 )
 from ..inventory import (
+    HEATER_NODE_TYPES,
     NODE_CLASS_BY_TYPE,
     Inventory,
     addresses_by_node_type,
@@ -612,6 +613,196 @@ class _WSCommon(_WSStatusMixin):
         """Initialise shared websocket state."""
 
         self._inventory: Inventory | None = inventory
+
+    def _ensure_type_bucket(
+        self,
+        nodes_by_type: MutableMapping[str, Any],
+        node_type: str,
+        *,
+        dev_map: MutableMapping[str, Any] | None = None,
+    ) -> MutableMapping[str, Any]:
+        """Return the node bucket for ``node_type`` with default sections."""
+
+        if not isinstance(nodes_by_type, MutableMapping):
+            return {}
+
+        normalized_type = normalize_node_type(node_type)
+        if not normalized_type:
+            return {}
+
+        existing = nodes_by_type.get(normalized_type)
+        if isinstance(existing, MutableMapping):
+            bucket: MutableMapping[str, Any] = existing
+        elif isinstance(existing, Mapping):
+            bucket = dict(existing)
+            nodes_by_type[normalized_type] = bucket
+        else:
+            bucket = {}
+            nodes_by_type[normalized_type] = bucket
+
+        addrs = bucket.get("addrs")
+        if isinstance(addrs, Iterable) and not isinstance(addrs, (list, str, bytes)):
+            bucket["addrs"] = list(addrs)
+        elif not isinstance(addrs, list):
+            bucket.setdefault("addrs", [])
+
+        for section in ("settings", "samples", "status", "advanced"):
+            section_payload = bucket.get(section)
+            if isinstance(section_payload, MutableMapping):
+                continue
+            if isinstance(section_payload, Mapping):
+                bucket[section] = dict(section_payload)
+            else:
+                bucket[section] = {}
+
+        if not isinstance(dev_map, MutableMapping):
+            return bucket
+
+        addresses_section = dev_map.get("addresses_by_type")
+        if isinstance(addresses_section, MutableMapping):
+            addresses_map: MutableMapping[str, Any] = addresses_section
+        elif isinstance(addresses_section, Mapping):
+            addresses_map = dict(addresses_section)
+            dev_map["addresses_by_type"] = addresses_map
+        else:
+            addresses_map = {}
+            dev_map["addresses_by_type"] = addresses_map
+
+        if normalized_type in HEATER_NODE_TYPES:
+            addresses = addresses_map.get(normalized_type)
+            if isinstance(addresses, list):
+                pass
+            elif isinstance(addresses, Iterable) and not isinstance(addresses, (str, bytes)):
+                addresses_map[normalized_type] = list(addresses)
+            else:
+                addresses_map[normalized_type] = []
+
+        settings_section = dev_map.get("settings")
+        if isinstance(settings_section, MutableMapping):
+            settings_map: MutableMapping[str, Any] = settings_section
+        elif isinstance(settings_section, Mapping):
+            settings_map = dict(settings_section)
+            dev_map["settings"] = settings_map
+        else:
+            settings_map = {}
+            dev_map["settings"] = settings_map
+
+        existing_settings = settings_map.get(normalized_type)
+        if isinstance(existing_settings, MutableMapping):
+            pass
+        elif isinstance(existing_settings, Mapping):
+            settings_map[normalized_type] = dict(existing_settings)
+        else:
+            settings_map[normalized_type] = {}
+
+        nodes_section = dev_map.get("nodes_by_type")
+        if isinstance(nodes_section, MutableMapping):
+            nodes_section.setdefault(normalized_type, bucket)
+        elif isinstance(nodes_section, Mapping):
+            nodes_map = dict(nodes_section)
+            nodes_map.setdefault(normalized_type, bucket)
+            dev_map["nodes_by_type"] = nodes_map
+        else:
+            dev_map["nodes_by_type"] = {normalized_type: bucket}
+
+        return bucket
+
+    def _apply_heater_addresses(
+        self,
+        normalized_map: Mapping[Any, Iterable[Any]] | None,
+        *,
+        inventory: Inventory | None = None,
+        log_prefix: str = "WS",
+        logger: logging.Logger | None = None,
+    ) -> dict[str, list[str]]:
+        """Update entry and coordinator state with heater address data."""
+
+        cleaned_map: dict[str, list[str]] = {}
+        if isinstance(normalized_map, Mapping):
+            for raw_type, addrs in normalized_map.items():
+                node_type = normalize_node_type(raw_type)
+                if not node_type or node_type not in HEATER_NODE_TYPES:
+                    continue
+                if isinstance(addrs, (str, bytes)):
+                    addr_iterable: Iterable[Any] = [addrs]
+                else:
+                    addr_iterable = addrs or []
+                addresses: list[str] = []
+                for candidate in addr_iterable:
+                    addr = normalize_node_addr(candidate)
+                    if not addr or addr in addresses:
+                        continue
+                    addresses.append(addr)
+                if addresses:
+                    cleaned_map[node_type] = addresses
+                else:
+                    cleaned_map.setdefault(node_type, [])
+
+        cleaned_map.setdefault("htr", [])
+
+        record_container = self.hass.data.get(DOMAIN, {})
+        record_raw = (
+            record_container.get(self.entry_id)
+            if isinstance(record_container, dict)
+            else None
+        )
+        record = record_raw if isinstance(record_raw, Mapping) else None
+        record_mutable: MutableMapping[str, Any] | None = (
+            record_raw if isinstance(record_raw, MutableMapping) else None
+        )
+
+        if isinstance(inventory, Inventory):
+            inventory_container: Inventory | None = inventory
+        elif inventory is None:
+            inventory_container = (
+                self._inventory if isinstance(self._inventory, Inventory) else None
+            )
+        else:
+            active_logger = logger or _LOGGER
+            active_logger.debug(
+                "%s: ignoring unexpected inventory container (type=%s): %s",
+                log_prefix,
+                type(inventory).__name__,
+                inventory,
+            )
+            inventory_container = None
+
+        if isinstance(inventory_container, Inventory):
+            if isinstance(record_mutable, MutableMapping):
+                record_mutable["inventory"] = inventory_container
+            if not isinstance(self._inventory, Inventory):
+                self._inventory = inventory_container
+
+        pmo_addresses: list[str] = []
+        if isinstance(inventory_container, Inventory):
+            forward_map, _ = inventory_container.power_monitor_address_map
+            pmo_addresses = list(forward_map.get("pmo", []))
+        elif isinstance(normalized_map, Mapping):
+            raw_addrs = normalized_map.get("pmo")
+            if isinstance(raw_addrs, (str, bytes)):
+                candidates: Iterable[Any] = [raw_addrs]
+            elif isinstance(raw_addrs, Iterable):
+                candidates = raw_addrs
+            else:
+                candidates = []
+            seen: set[str] = set()
+            for candidate in candidates:
+                addr = normalize_node_addr(candidate, use_default_when_falsey=True)
+                if not addr or addr in seen:
+                    continue
+                seen.add(addr)
+                pmo_addresses.append(addr)
+
+        energy_coordinator = (
+            record.get("energy_coordinator") if isinstance(record, Mapping) else None
+        )
+        if pmo_addresses:
+            cleaned_map["pmo"] = list(pmo_addresses)
+
+        if hasattr(energy_coordinator, "update_addresses"):
+            energy_coordinator.update_addresses(cleaned_map)
+
+        return cleaned_map
 
     def _dispatch_nodes(self, payload: dict[str, Any]) -> None:
         raw_nodes = payload.get("nodes") if "nodes" in payload else payload
