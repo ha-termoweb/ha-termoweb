@@ -113,10 +113,10 @@ def test_diagnostics_with_cached_inventory(caplog: pytest.LogCaptureFixture) -> 
     )
 
 
-def test_diagnostics_uses_raw_nodes_fallback(
+def test_diagnostics_with_inventory_missing_version(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Diagnostics fall back to raw node payloads and helper version."""
+    """Diagnostics rely on stored inventory and fetch helper version."""
 
     hass = HomeAssistant()
     hass.version = "2025.5.1"
@@ -132,8 +132,14 @@ def test_diagnostics_uses_raw_nodes_fallback(
         ]
     }
 
+    inventory = Inventory(
+        "dev-two",
+        raw_nodes,
+        build_node_inventory(raw_nodes),
+    )
+
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {"nodes": raw_nodes}
+    hass.data[DOMAIN][entry.entry_id] = {"inventory": inventory}
 
     with caplog.at_level(logging.DEBUG):
         diagnostics = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
@@ -148,7 +154,7 @@ def test_diagnostics_uses_raw_nodes_fallback(
     assert "time_zone" not in diagnostics["home_assistant"]
 
     assert (
-        "Diagnostics inventory source for entry-two: raw_nodes (raw=1, filtered=1)"
+        "Diagnostics inventory source for entry-two: inventory (raw=1, filtered=1)"
         in caplog.text
     )
 

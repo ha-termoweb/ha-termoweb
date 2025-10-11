@@ -42,14 +42,7 @@ async def async_get_config_entry_diagnostics(
         if isinstance(candidate, Mapping):
             record = candidate
 
-    nodes_payload: Any | None = None
-    if isinstance(record, Mapping):
-        if "nodes" in record:
-            nodes_payload = record.get("nodes")
-        elif "raw_nodes" in record:
-            nodes_payload = record.get("raw_nodes")
-
-    resolution = resolve_record_inventory(record, nodes_payload=nodes_payload)
+    resolution = resolve_record_inventory(record)
     inventory_container = resolution.inventory
     inventory_source_label = resolution.source
     if inventory_container is not None:
