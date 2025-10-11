@@ -15,7 +15,7 @@ import voluptuous as vol
 from . import async_list_devices, create_rest_client
 from .api import BackendAuthError, BackendRateLimitError
 from .const import (
-    BRAND_DUCAHEAT as CONST_BRAND_DUCAHEAT,
+    BRAND_DUCAHEAT,
     BRAND_LABELS,
     BRAND_TERMOWEB,
     CONF_BRAND,
@@ -28,7 +28,7 @@ from .const import (
 )
 from .utils import async_get_integration_version
 
-BRAND_DUCAHEAT = CONST_BRAND_DUCAHEAT
+__all__ = ["BRAND_DUCAHEAT"]
 
 _LOGGER = logging.getLogger(__name__)
 
