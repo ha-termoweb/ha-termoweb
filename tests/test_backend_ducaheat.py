@@ -245,6 +245,145 @@ async def test_ducaheat_rest_set_htr_mode_uses_status_segment(
 
 
 @pytest.mark.asyncio
+async def test_ducaheat_rest_set_htr_full_segment_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure heater updates emit status, prog, and prog_temps segments."""
+
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+
+    monkeypatch.setattr(
+        client,
+        "authed_headers",
+        AsyncMock(return_value={"Authorization": "token"}),
+    )
+
+    select_calls: list[bool] = []
+
+    async def fake_select(**kwargs: Any) -> None:
+        select_calls.append(bool(kwargs.get("select")))
+
+    monkeypatch.setattr(client, "_select_segmented_node", AsyncMock(side_effect=fake_select))
+
+    async def fake_post_segmented(
+        path: str,
+        *,
+        headers: Mapping[str, str],
+        payload: Mapping[str, Any],
+        dev_id: str,
+        addr: str,
+        node_type: str,
+        ignore_statuses: Iterable[int] | None = None,
+    ) -> dict[str, Any]:
+        return {"segment": path.rsplit("/", 1)[-1], "payload": dict(payload)}
+
+    monkeypatch.setattr(client, "_post_segmented", fake_post_segmented)
+
+    prog_calls: list[list[int]] = []
+
+    def fake_serialise_prog(self, prog: list[int]) -> dict[str, Any]:
+        prog_calls.append(list(prog))
+        return {"prog": {"serialised": True}}
+
+    monkeypatch.setattr(DucaheatRESTClient, "_serialise_prog", fake_serialise_prog)
+
+    ptemp_calls: list[list[float]] = []
+
+    def fake_serialise_prog_temps(self, ptemp: list[float]) -> dict[str, str]:
+        ptemp_calls.append(list(ptemp))
+        return {"cold": "10.0", "night": "15.0", "day": "20.0"}
+
+    monkeypatch.setattr(
+        DucaheatRESTClient, "_serialise_prog_temps", fake_serialise_prog_temps
+    )
+
+    weekly_prog = [1] * 168
+    preset_temps = [10.0, 15.0, 20.0]
+
+    responses = await client.set_node_settings(
+        "dev",
+        ("htr", "1"),
+        mode="heat",
+        stemp=21,
+        prog=weekly_prog,
+        ptemp=preset_temps,
+        units=" f ",
+    )
+
+    assert set(responses) == {"status", "prog", "prog_temps"}
+    assert responses["status"]["payload"] == {
+        "mode": "manual",
+        "stemp": "21.0",
+        "units": "F",
+    }
+    assert responses["prog"] == {"segment": "prog", "payload": {"prog": {"serialised": True}}}
+    assert responses["prog_temps"] == {
+        "segment": "prog_temps",
+        "payload": {"cold": "10.0", "night": "15.0", "day": "20.0"},
+    }
+
+    assert prog_calls == [weekly_prog]
+    assert ptemp_calls == [preset_temps]
+
+    assert select_calls == [True, False]
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_rest_set_htr_units_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure unit-only updates send a single status segment and release."""
+
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+
+    monkeypatch.setattr(
+        client,
+        "authed_headers",
+        AsyncMock(return_value={"Authorization": "token"}),
+    )
+
+    select_calls: list[bool] = []
+
+    async def fake_select(**kwargs: Any) -> None:
+        select_calls.append(bool(kwargs.get("select")))
+
+    monkeypatch.setattr(client, "_select_segmented_node", AsyncMock(side_effect=fake_select))
+
+    payloads: dict[str, Mapping[str, Any]] = {}
+
+    async def fake_post_segmented(
+        path: str,
+        *,
+        headers: Mapping[str, str],
+        payload: Mapping[str, Any],
+        dev_id: str,
+        addr: str,
+        node_type: str,
+        ignore_statuses: Iterable[int] | None = None,
+    ) -> dict[str, Any]:
+        payloads[path] = dict(payload)
+        return {"segment": path.rsplit("/", 1)[-1], "payload": dict(payload)}
+
+    monkeypatch.setattr(client, "_post_segmented", fake_post_segmented)
+
+    serialise_prog = AsyncMock()
+    serialise_prog_temps = AsyncMock()
+    monkeypatch.setattr(client, "_serialise_prog", serialise_prog)
+    monkeypatch.setattr(client, "_serialise_prog_temps", serialise_prog_temps)
+
+    responses = await client.set_node_settings("dev", ("htr", "9"), units="F")
+
+    assert responses == {"status": {"segment": "status", "payload": {"units": "F"}}}
+    assert payloads == {
+        "/api/v2/devs/dev/htr/9/status": {"units": "F"}
+    }
+    assert select_calls == [True, False]
+
+    serialise_prog.assert_not_called()
+    serialise_prog_temps.assert_not_called()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "kwargs",
     [
