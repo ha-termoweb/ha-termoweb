@@ -161,20 +161,6 @@ class DucaheatRESTClient(RESTClient):
                 if mode_value == "heat":
                     mode_value = "manual"
 
-            status_payload: dict[str, Any] = {}
-            status_includes_mode = False
-            if mode_value is not None:
-                status_payload["mode"] = mode_value
-                status_includes_mode = True
-            if stemp is not None:
-                try:
-                    status_payload["stemp"] = self._ensure_temperature(stemp)
-                except ValueError as err:
-                    raise ValueError(f"Invalid stemp value: {stemp}") from err
-                status_payload["units"] = self._ensure_units(units)
-            elif units is not None and mode is None and prog is None and ptemp is None:
-                status_payload["units"] = self._ensure_units(units)
-
             selection_claimed = False
             try:
                 await self._select_segmented_node(
@@ -185,6 +171,25 @@ class DucaheatRESTClient(RESTClient):
                     select=True,
                 )
                 selection_claimed = True
+
+                status_payload: dict[str, Any] = {}
+                status_includes_mode = False
+                if mode_value is not None:
+                    status_payload["mode"] = mode_value
+                    status_includes_mode = True
+                if stemp is not None:
+                    try:
+                        status_payload["stemp"] = self._ensure_temperature(stemp)
+                    except ValueError as err:
+                        raise ValueError(f"Invalid stemp value: {stemp}") from err
+                    status_payload["units"] = self._ensure_units(units)
+                elif (
+                    units is not None
+                    and mode is None
+                    and prog is None
+                    and ptemp is None
+                ):
+                    status_payload["units"] = self._ensure_units(units)
 
                 segment_plan: list[tuple[str, dict[str, Any]]] = []
                 if status_payload:
