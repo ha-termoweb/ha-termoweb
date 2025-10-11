@@ -1,4 +1,5 @@
 """Shared websocket helpers."""
+
 from __future__ import annotations
 
 import asyncio
@@ -33,6 +34,8 @@ from ..inventory import (
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .ducaheat_ws import DucaheatWSClient
     from .termoweb_ws import TermoWebWSClient
+
+from .ws_health import WsHealthTracker
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -164,6 +167,7 @@ def forward_ws_sample_updates(
             exc_info=True,
         )
 
+
 DUCAHEAT_NAMESPACE = "/api/v2/socket_io"
 
 
@@ -236,53 +240,189 @@ class _WSStatusMixin:
         setattr(self, "_ws_state", ws_state)
         return ws_state
 
+    def _ws_health_tracker(self) -> WsHealthTracker:
+        """Return the :class:`WsHealthTracker` for this websocket client."""
+
+        cached = getattr(self, "_ws_tracker", None)
+        if isinstance(cached, WsHealthTracker):
+            return cached
+
+        hass_data = getattr(self.hass, "data", None)
+        if hass_data is None:
+            hass_data = {}
+            setattr(self.hass, "data", hass_data)  # type: ignore[attr-defined]
+
+        domain_bucket = hass_data.setdefault(DOMAIN, {})
+        entry_bucket = domain_bucket.setdefault(self.entry_id, {})
+        trackers = entry_bucket.setdefault("ws_trackers", {})
+        tracker = trackers.get(self.dev_id)
+        if not isinstance(tracker, WsHealthTracker):
+            tracker = WsHealthTracker(self.dev_id)
+            trackers[self.dev_id] = tracker
+        legacy_status = getattr(self, "_status", None)
+        if (
+            isinstance(legacy_status, str)
+            and legacy_status
+            and tracker.status == "stopped"
+        ):
+            tracker.status = legacy_status
+        legacy_since = getattr(self, "_healthy_since", None)
+        if tracker.healthy_since is None and isinstance(legacy_since, (int, float)):
+            tracker.healthy_since = float(legacy_since)
+        legacy_payload = getattr(self, "_last_payload_at", None)
+        if tracker.last_payload_at is None and isinstance(legacy_payload, (int, float)):
+            tracker.last_payload_at = float(legacy_payload)
+        legacy_heartbeat = getattr(self, "_last_heartbeat_at", None)
+        if tracker.last_heartbeat_at is None and isinstance(
+            legacy_heartbeat, (int, float)
+        ):
+            tracker.last_heartbeat_at = float(legacy_heartbeat)
+        setattr(self, "_ws_tracker", tracker)
+        return tracker
+
+    def _notify_ws_status(
+        self,
+        tracker: WsHealthTracker,
+        *,
+        reason: str,
+        health_changed: bool = False,
+        payload_changed: bool = False,
+    ) -> None:
+        """Dispatch websocket status updates with tracker metadata."""
+
+        dispatcher = getattr(self, "_dispatcher_mock", None)
+        if dispatcher is None:
+            dispatcher = async_dispatcher_send
+
+        payload: dict[str, Any] = {
+            "dev_id": self.dev_id,
+            "status": tracker.status,
+            "reason": reason,
+        }
+        if health_changed:
+            payload["health_changed"] = True
+        if payload_changed:
+            payload["payload_changed"] = True
+        payload["payload_stale"] = tracker.payload_stale
+
+        dispatcher(self.hass, signal_ws_status(self.entry_id), payload)
+
+    def _mark_ws_payload(
+        self,
+        *,
+        timestamp: float | None = None,
+        stale_after: float | None = None,
+        reason: str = "payload",
+    ) -> None:
+        """Update tracker payload timestamps and emit changes if required."""
+
+        tracker = self._ws_health_tracker()
+        changed = tracker.mark_payload(timestamp=timestamp, stale_after=stale_after)
+        setattr(self, "_last_payload_at", tracker.last_payload_at)
+        state = self._ws_state_bucket()
+        state["last_payload_at"] = tracker.last_payload_at
+        state["last_heartbeat_at"] = tracker.last_heartbeat_at
+        state["payload_stale"] = tracker.payload_stale
+        if changed:
+            self._notify_ws_status(
+                tracker,
+                reason=reason,
+                payload_changed=True,
+            )
+
+    def _mark_ws_heartbeat(
+        self,
+        *,
+        timestamp: float | None = None,
+        reason: str = "heartbeat",
+    ) -> None:
+        """Record a websocket heartbeat and emit staleness changes."""
+
+        tracker = self._ws_health_tracker()
+        changed = tracker.mark_heartbeat(timestamp=timestamp)
+        state = self._ws_state_bucket()
+        state["last_heartbeat_at"] = tracker.last_heartbeat_at
+        state["payload_stale"] = tracker.payload_stale
+        if changed:
+            self._notify_ws_status(
+                tracker,
+                reason=reason,
+                payload_changed=True,
+            )
+
+    def _refresh_ws_payload_state(
+        self,
+        *,
+        now: float | None = None,
+        reason: str = "refresh",
+    ) -> None:
+        """Re-evaluate payload staleness and emit notifications if it changed."""
+
+        tracker = self._ws_health_tracker()
+        changed = tracker.refresh_payload_state(now=now)
+        state = self._ws_state_bucket()
+        state["payload_stale"] = tracker.payload_stale
+        if changed:
+            self._notify_ws_status(
+                tracker,
+                reason=reason,
+                payload_changed=True,
+            )
+
     def _update_status(self, status: str) -> None:
         """Publish websocket status updates to Home Assistant listeners."""
 
-        current = getattr(self, "_status", None)
-        if status == current and status not in {"healthy", "connected"}:
-            return
-
+        tracker = self._ws_health_tracker()
         now = time.time()
-        if status == "healthy":
-            healthy_since = getattr(self, "_healthy_since", None)
-            if healthy_since is None:
-                last_event = getattr(self, "_last_event_at", None)
-                stats = getattr(self, "_stats", None)
-                if last_event is None and stats is not None:
-                    last_event = getattr(stats, "last_event_ts", None)
-                setattr(self, "_healthy_since", last_event or now)
-        elif self._status_should_reset_health(status):
-            setattr(self, "_healthy_since", None)
-
-        setattr(self, "_status", status)
 
         stats = getattr(self, "_stats", None)
         last_event_ts = getattr(stats, "last_event_ts", None) if stats else None
         last_event_at = getattr(self, "_last_event_at", None)
-        healthy_since = getattr(self, "_healthy_since", None)
+
+        healthy_since = tracker.healthy_since
+        reset_health = False
+        if status == "healthy" and healthy_since is None:
+            candidate = last_event_at or last_event_ts or now
+            healthy_since = candidate
+        elif self._status_should_reset_health(status):
+            healthy_since = None
+            reset_health = True
+
+        status_changed, health_changed = tracker.update_status(
+            status,
+            healthy_since=healthy_since,
+            timestamp=now,
+            reset_health=reset_health,
+        )
+
+        setattr(self, "_status", tracker.status)
+        setattr(self, "_healthy_since", tracker.healthy_since)
+
+        payload_changed = tracker.refresh_payload_state(now=now)
 
         state = self._ws_state_bucket()
-        state["status"] = status
+        state["status"] = tracker.status
         state["last_event_at"] = last_event_ts or last_event_at or None
-        state["healthy_since"] = healthy_since
-        state["healthy_minutes"] = (
-            int((now - healthy_since) / 60) if healthy_since else 0
-        )
+        state["healthy_since"] = tracker.healthy_since
+        state["healthy_minutes"] = tracker.healthy_minutes(now=now)
         state["frames_total"] = getattr(stats, "frames_total", 0) if stats else 0
         state["events_total"] = getattr(stats, "events_total", 0) if stats else 0
+        state["last_payload_at"] = tracker.last_payload_at
+        state["last_heartbeat_at"] = tracker.last_heartbeat_at
+        state["payload_stale"] = tracker.payload_stale
 
-        dispatcher = getattr(self, "_dispatcher_mock", None)
-        if dispatcher is None:
-            dispatcher = getattr(self, "_dispatcher", None)
-        if dispatcher is None:
-            dispatcher = async_dispatcher_send
-
-        dispatcher(
-            self.hass,
-            signal_ws_status(self.entry_id),
-            {"dev_id": self.dev_id, "status": status},
-        )
+        if (
+            status_changed
+            or health_changed
+            or payload_changed
+            or status in {"healthy", "connected"}
+        ):
+            self._notify_ws_status(
+                tracker,
+                reason="status",
+                health_changed=health_changed,
+                payload_changed=payload_changed,
+            )
 
 
 @dataclass
@@ -308,9 +448,7 @@ def _prepare_nodes_dispatch(
 
     record_container = hass.data.get(DOMAIN, {})
     record_raw = (
-        record_container.get(entry_id)
-        if isinstance(record_container, dict)
-        else None
+        record_container.get(entry_id) if isinstance(record_container, dict) else None
     )
     record_mapping = record_raw if isinstance(record_raw, Mapping) else None
     record_mutable: MutableMapping[str, Any] | None = (
@@ -510,6 +648,7 @@ __all__ = [
     "WebSocketClient",
     "forward_ws_sample_updates",
     "resolve_ws_update_section",
+    "WsHealthTracker",
 ]
 
 time_mod = time.monotonic

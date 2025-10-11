@@ -172,6 +172,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._status: str = "stopped"
         self._healthy_since: float | None = None
         self._last_event_at: float | None = None
+        self._payload_stale_after = 240.0
 
     def _status_should_reset_health(self, status: str) -> bool:
         """Return True when a status transition should reset health."""
@@ -387,6 +388,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         now = timestamp or time.time()
         self._stats.last_event_ts = now
         self._last_event_at = now
+        self._mark_ws_heartbeat(timestamp=now)
         state = self._ws_state_bucket()
         state["last_event_at"] = now
         state["frames_total"] = self._stats.frames_total
@@ -901,7 +903,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                             updated_map["pmo"] = list(merged_addrs)
                             dev_map["addr_map"] = updated_map
 
-                if (pmo_addresses or "pmo" in nodes_by_type) and "pmo" not in cleaned_map:
+                if (
+                    pmo_addresses or "pmo" in nodes_by_type
+                ) and "pmo" not in cleaned_map:
                     bucket = self._ensure_type_bucket(dev_map, nodes_by_type, "pmo")
                     merged_addrs = _merge_addresses(bucket.get("addrs"), pmo_addresses)
                     bucket["addrs"] = merged_addrs
@@ -951,7 +955,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             and isinstance(value, MutableMapping)
         ):
             coordinator = getattr(self, "_coordinator", None)
-            apply_helper = getattr(coordinator, "_apply_accumulator_boost_metadata", None)
+            apply_helper = getattr(
+                coordinator, "_apply_accumulator_boost_metadata", None
+            )
             if callable(apply_helper):
                 now = None
                 estimate = getattr(coordinator, "_device_now_estimate", None)
@@ -968,9 +974,10 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                         exc_info=err,
                     )
         if section == "settings":
-            canonical_type = normalize_node_type(
-                node_type, use_default_when_falsey=True
-            ) or node_type
+            canonical_type = (
+                normalize_node_type(node_type, use_default_when_falsey=True)
+                or node_type
+            )
             if canonical_type:
                 settings_map: MutableMapping[str, Any] = dev_map.setdefault(
                     "settings", {}
@@ -991,14 +998,17 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 if not normalised_addr and isinstance(addr, str):
                     stripped = addr.strip()
                     normalised_addr = stripped or None
-                if not normalised_addr and addr is not None and not isinstance(addr, str):
+                if (
+                    not normalised_addr
+                    and addr is not None
+                    and not isinstance(addr, str)
+                ):
                     candidate = str(addr).strip()
                     normalised_addr = candidate or None
                 if normalised_addr:
                     existing_payload = settings_bucket.get(normalised_addr)
-                    if (
-                        isinstance(existing_payload, MutableMapping)
-                        and isinstance(value, Mapping)
+                    if isinstance(existing_payload, MutableMapping) and isinstance(
+                        value, Mapping
                     ):
                         existing_payload.update(value)
                         section_map[addr] = existing_payload
@@ -1116,12 +1126,19 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             "dev_id": self.dev_id,
             "node_type": None,
             "nodes_by_type": nodes_by_type_copy,
-            "addr_map": {node_type: list(addrs) for node_type, addrs in normalized_addresses.items()},
+            "addr_map": {
+                node_type: list(addrs)
+                for node_type, addrs in normalized_addresses.items()
+            },
         }
 
         if unknown_types:
             payload_copy["unknown_types"] = sorted(unknown_types)
 
+        self._mark_ws_payload(
+            timestamp=time.time(),
+            stale_after=self._payload_stale_after,
+        )
         self._dispatcher(self.hass, signal_ws_data(self.entry_id), payload_copy)
 
     @staticmethod
