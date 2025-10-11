@@ -1074,8 +1074,8 @@ class DucaheatRESTClient(RESTClient):
 
     def _serialise_prog_temps(self, ptemp: list[float]) -> dict[str, str]:
         """Serialise preset temperatures into the API schema."""
-        antifrost, eco, comfort = self._ensure_ptemp(ptemp)
-        return {"antifrost": antifrost, "eco": eco, "comfort": comfort}
+        cold, night, day = self._ensure_ptemp(ptemp)
+        return {"cold": cold, "night": night, "day": day}
 
     def _safe_temperature(self, value: Any) -> str | None:
         """Defensively format inbound temperature values."""
