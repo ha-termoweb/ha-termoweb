@@ -921,25 +921,23 @@ class WebSocketClient(_WSStatusMixin):
             inventory=inventory,
         )
 
-        nodes_by_type_payload: Mapping[str, Any] | None = None
-        if isinstance(payload, Mapping):
-            candidate = payload.get("nodes_by_type")
-            if isinstance(candidate, Mapping):
-                nodes_by_type_payload = candidate
-
-        if isinstance(nodes_by_type_payload, Mapping):
-            nodes_by_type_copy = deepcopy(nodes_by_type_payload)
-        else:
-            nodes_by_type_copy = {
-                node_type: {"addrs": list(addrs)}
-                for node_type, addrs in addr_map_payload.items()
-            }
+        addresses_by_type: dict[str, list[str]] = {}
+        if isinstance(inventory, Inventory):
+            try:
+                addresses_by_type = {
+                    node_type: list(addrs)
+                    for node_type, addrs in inventory.addresses_by_type.items()
+                }
+            except Exception:  # pragma: no cover - defensive cache guard
+                addresses_by_type = dict(addr_map_payload)
+        if not addresses_by_type:
+            addresses_by_type = dict(addr_map_payload)
 
         payload_copy: dict[str, Any] = {
             "dev_id": self.dev_id,
             "node_type": None,
-            "nodes_by_type": nodes_by_type_copy,
             "addr_map": addr_map_payload,
+            "addresses_by_type": addresses_by_type,
         }
         if unknown_types:  # pragma: no cover - diagnostic payload
             payload_copy["unknown_types"] = sorted(unknown_types)
@@ -964,28 +962,6 @@ class WebSocketClient(_WSStatusMixin):
             _send()
 
         return addr_map_payload
-
-    def _ensure_type_bucket(
-        self, dev_map: dict[str, Any], nodes_by_type: dict[str, Any], node_type: str
-    ) -> dict[str, Any]:
-        """Return the node bucket for ``node_type`` with default sections."""
-        bucket = nodes_by_type.get(node_type)
-        if bucket is None:
-            bucket = {
-                "addrs": [],
-                "settings": {},
-                "advanced": {},
-                "samples": {},
-            }
-            nodes_by_type[node_type] = bucket
-        else:
-            bucket.setdefault("addrs", [])
-            bucket.setdefault("settings", {})
-            bucket.setdefault("advanced", {})
-            bucket.setdefault("samples", {})
-        if node_type == "htr":
-            dev_map["htr"] = bucket
-        return bucket
 
     def _apply_heater_addresses(
         self,
@@ -1781,37 +1757,31 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 self.dev_id
             ) or {}
             if not dev_map:
-                htr_bucket: dict[str, Any] = {
-                    "addrs": [],
-                    "settings": {},
-                    "advanced": {},
-                    "samples": {},
-                }
                 dev_map = {
                     "dev_id": self.dev_id,
                     "name": f"Device {self.dev_id}",
                     "raw": {},
                     "connected": True,
-                    "nodes_by_type": {"htr": htr_bucket},
-                    "htr": htr_bucket,
                 }
                 cur = dict(self._coordinator.data or {})
                 cur[self.dev_id] = dev_map
                 self._coordinator.data = cur  # type: ignore[attr-defined]
-            nodes_by_type: dict[str, Any] = dev_map.setdefault("nodes_by_type", {})
+            dev_map.setdefault("addresses_by_type", {})
+            dev_map.setdefault("settings", {})
             if path.endswith("/mgr/nodes"):
                 if isinstance(body, Mapping):
                     type_to_addrs = self._dispatch_nodes(body)
-                    for node_type, addrs in type_to_addrs.items():
-                        bucket = self._ensure_type_bucket(
-                            dev_map, nodes_by_type, node_type
-                        )
-                        bucket["addrs"] = list(addrs)
-                        if isinstance(addrs, Iterable) and not isinstance(
-                            addrs, (str, bytes)
-                        ):
-                            for addr_candidate in addrs:
-                                _record_addr(node_type, addr_candidate)
+                    if isinstance(type_to_addrs, Mapping):
+                        dev_map["addresses_by_type"] = {
+                            node_type: list(addrs)
+                            for node_type, addrs in type_to_addrs.items()
+                        }
+                        for node_type, addrs in type_to_addrs.items():
+                            if isinstance(addrs, Iterable) and not isinstance(
+                                addrs, (str, bytes)
+                            ):
+                                for addr_candidate in addrs:
+                                    _record_addr(node_type, addr_candidate)
                     updated_nodes = True
                 continue
             node_type, addr = _extract_type_addr(path)
@@ -1828,7 +1798,6 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                         section=section,
                         body=body,
                         dev_map=dev_map,
-                        nodes_by_type=nodes_by_type,
                     ):
                         recorded_addr = _record_addr(node_type, addr)
                         if section == "samples":
@@ -1918,16 +1887,10 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         section: str,
         body: Any,
         dev_map: dict[str, Any],
-        nodes_by_type: dict[str, Any],
     ) -> bool:
         """Store legacy section updates and mirror them in raw state."""
 
-        bucket = self._ensure_type_bucket(dev_map, nodes_by_type, node_type)
-        section_map: dict[str, Any] = bucket.setdefault(section, {})
-        if not isinstance(section_map, dict):
-            return False
         value: Any = dict(body) if isinstance(body, Mapping) else body
-        section_map[addr] = value
         if (
             section == "settings"
             and normalize_node_type(node_type) == "acm"
@@ -1990,7 +1953,6 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                         value, Mapping
                     ):
                         existing_payload.update(value)
-                        section_map[addr] = existing_payload
                     else:
                         settings_bucket[normalised_addr] = value
         raw_store = getattr(self, "_nodes_raw", None)

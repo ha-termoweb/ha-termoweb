@@ -936,7 +936,7 @@ def test_dispatch_nodes_with_inventory(monkeypatch: pytest.MonkeyPatch, caplog: 
     record["energy_coordinator"] = energy
     client._coordinator.update_nodes = MagicMock()
     client._coordinator.data = {
-        "device": {"nodes_by_type": {}, "addresses_by_type": {}, "settings": {}}
+        "device": {"addresses_by_type": {}, "settings": {}}
     }
     nodes_payload = {"nodes": [{"type": "htr", "addr": "1"}]}
     client._inventory = Inventory(
@@ -957,9 +957,7 @@ def test_dispatch_nodes_with_inventory(monkeypatch: pytest.MonkeyPatch, caplog: 
     _, _, payload = dispatcher.call_args[0]
     assert "nodes" not in payload
     assert payload["addr_map"] == {"htr": ["1"]}
-    nodes_by_type = payload.get("nodes_by_type")
-    assert isinstance(nodes_by_type, Mapping)
-    assert nodes_by_type["htr"]["addrs"] == ["1"]
+    assert payload["addresses_by_type"] == {"htr": ["1"]}
     assert client._inventory.addresses_by_type["htr"] == ["1"]
 
 
@@ -985,6 +983,7 @@ def test_dispatch_nodes_handles_unknown_types(monkeypatch: pytest.MonkeyPatch) -
     _, _, payload = dispatcher.call_args[0]
     assert "nodes" not in payload
     assert payload["addr_map"] == {"foo": []}
+    assert payload["addresses_by_type"] == {"foo": []}
     assert payload.get("unknown_types") == ["unknown"]
 
 
@@ -1056,15 +1055,6 @@ def test_handle_event_includes_addr_map(monkeypatch: pytest.MonkeyPatch) -> None
         lambda self, payload: {"htr": ["2"]},
     )
 
-    def _fake_bucket(
-        self: Any, dev_map: dict[str, Any], nodes_by_type: dict[str, Any], node_type: str
-    ) -> dict[str, Any]:
-        return nodes_by_type.setdefault(
-            node_type,
-            {"settings": {}, "advanced": {}, "samples": {}, "addrs": []},
-        )
-
-    monkeypatch.setattr(module.TermoWebWSClient, "_ensure_type_bucket", _fake_bucket)
     monkeypatch.setattr(
         module.TermoWebWSClient,
         "_update_legacy_section",
@@ -1126,29 +1116,16 @@ def test_handle_event_includes_addr_map(monkeypatch: pytest.MonkeyPatch) -> None
     dev_state = client._coordinator.data.get("device")
     assert isinstance(dev_state, Mapping)
     assert "nodes" not in dev_state
-    nodes_by_type = dev_state.get("nodes_by_type")
-    assert isinstance(nodes_by_type, Mapping)
-    htr_bucket = nodes_by_type.get("htr")
-    assert isinstance(htr_bucket, Mapping)
-    assert htr_bucket.get("addrs") == ["2"]
+    addresses_by_type = dev_state.get("addresses_by_type")
+    assert isinstance(addresses_by_type, Mapping)
+    assert addresses_by_type.get("htr") == ["2"]
 
 
 def test_update_legacy_settings_updates_settings_map(monkeypatch: pytest.MonkeyPatch) -> None:
     """Settings updates should refresh both legacy and normalized caches."""
 
     client, _sio, _ = _make_client(monkeypatch)
-    dev_map: dict[str, Any] = {
-        "nodes_by_type": {
-            "htr": {
-                "settings": {"1": {"mode": "manual"}},
-                "advanced": {},
-                "samples": {},
-                "addrs": [],
-            }
-        },
-        "settings": {"htr": {"1": {"mode": "manual"}}},
-    }
-    nodes_by_type = dev_map["nodes_by_type"]
+    dev_map: dict[str, Any] = {"settings": {"htr": {"1": {"mode": "manual"}}}}
 
     updated = module.TermoWebWSClient._update_legacy_section(
         client,
@@ -1157,14 +1134,9 @@ def test_update_legacy_settings_updates_settings_map(monkeypatch: pytest.MonkeyP
         section="settings",
         body={"mode": "auto"},
         dev_map=dev_map,
-        nodes_by_type=nodes_by_type,
     )
 
     assert updated is True
-    legacy_bucket = nodes_by_type["htr"]["settings"]
-    assert " 01 " in legacy_bucket
-    assert legacy_bucket[" 01 "]["mode"] == "auto"
-
     settings_map = dev_map["settings"]["htr"]
     assert settings_map["1"]["mode"] == "manual"
     assert settings_map["01"]["mode"] == "auto"
@@ -1178,27 +1150,11 @@ def test_update_legacy_settings_updates_settings_map(monkeypatch: pytest.MonkeyP
         section="settings",
         body={"mode": "eco"},
         dev_map=dev_map,
-        nodes_by_type=nodes_by_type,
     )
 
     assert updated_again is True
     assert settings_map["01"]["mode"] == "eco"
     assert settings_map["01"]["pending"] == {"mode": "auto"}
-    assert legacy_bucket[" 01 "]["pending"] == {"mode": "auto"}
-
-
-def test_ensure_type_bucket_and_build_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Helper methods should populate node buckets and snapshot structures."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    dev_map: dict[str, Any] = {}
-    nodes_by_type: dict[str, Any] = {}
-    bucket = client._ensure_type_bucket(dev_map, nodes_by_type, "htr")
-    assert "settings" in bucket and dev_map["htr"] is bucket
-    bucket_again = client._ensure_type_bucket(dev_map, nodes_by_type, "htr")
-    assert bucket_again is bucket
-
-
 def test_apply_heater_addresses_normalises_from_inventory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
