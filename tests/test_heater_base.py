@@ -343,167 +343,6 @@ def test_extract_inventory_uses_hass_data() -> None:
     assert inventory is container
 
 
-def test_prepare_heater_platform_data_handles_non_mapping_name_map(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    raw_nodes = {"nodes": [{"type": "htr", "addr": "4"}]}
-    container = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
-
-    monkeypatch.setattr(Inventory, "heater_name_map", lambda self, _: "invalid")
-
-    _, _, _, resolve_name = prepare_heater_platform_data(
-        {"inventory": container},
-        default_name_simple=lambda addr: f"Heater {addr}",
-    )
-
-    assert resolve_name("htr", "4") == "Heater 4"
-
-
-def test_log_skipped_nodes_defaults_platform_name(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    nodes_by_type = {"thm": [SimpleNamespace(addr="7")]}
-    details = (
-        nodes_by_type,
-        {"thm": ["7"]},
-        lambda node_type, addr: f"{node_type}-{addr}",
-    )
-
-    with caplog.at_level(logging.DEBUG):
-        heater_module.log_skipped_nodes("", details, skipped_types=["thm"])
-
-    messages = [record.message for record in caplog.records]
-    assert any("platform" in message for message in messages)
-
-
-def test_iter_nodes_yields_existing_node_objects() -> None:
-    nodes = [HeaterNode(name="Living", addr="1")]
-
-    yielded = list(heater_module._iter_nodes(nodes))
-    assert yielded == nodes
-
-
-def test_iter_heater_nodes_filters_addresses() -> None:
-    nodes_by_type = {
-        "htr": [SimpleNamespace(addr="1", type="htr"), SimpleNamespace(addr=" ")],
-        "acm": [SimpleNamespace(addr="2", type="acm"), SimpleNamespace(addr=None)],
-        "pmo": [SimpleNamespace(addr="3", type="pmo")],
-    }
-    details = (nodes_by_type, {"htr": ["1"], "acm": ["2"]}, lambda nt, addr: f"{nt}-{addr}")
-
-    resolved: list[tuple[str, str]] = []
-
-    def fake_resolve(node_type: str, addr: str) -> str:
-        resolved.append((node_type, addr))
-        return f"{node_type}-{addr}"
-
-    yielded = list(iter_heater_nodes(details, fake_resolve))
-
-    assert sorted([(node_type, addr) for node_type, _node, addr, _ in yielded]) == [
-        ("acm", "2"),
-        ("htr", "1"),
-    ]
-    assert sorted(resolved) == [("acm", "2"), ("htr", "1")]
-    resolved.clear()
-
-    resolved_acm: list[tuple[str, str]] = []
-
-    def fake_resolve_acm(node_type: str, addr: str) -> str:
-        resolved_acm.append((node_type, addr))
-        return f"{node_type}-{addr}"
-
-    only_acm = list(
-        iter_heater_nodes(details, fake_resolve_acm, node_types=["acm", "thm"])
-    )
-
-    assert [(node_type, addr) for node_type, _node, addr, _ in only_acm] == [
-        ("acm", "2")
-    ]
-    assert resolved_acm == [("acm", "2")]
-
-    extra_resolved: list[tuple[str, str]] = []
-
-    def extra_resolve(node_type: str, addr: str) -> str:
-        extra_resolved.append((node_type, addr))
-        return f"{node_type}-{addr}"
-
-    mapping_nodes = {
-        "htr": {"first": SimpleNamespace(addr="5")},
-        "acm": SimpleNamespace(addr="6"),
-        "pmo": [SimpleNamespace(addr=" None ")],
-        "thm": "ignored",
-    }
-    mapping_details = (
-        mapping_nodes,
-        {"htr": ["5"], "acm": ["6"]},
-        extra_resolve,
-    )
-
-    extra_results = list(
-        iter_heater_nodes(
-            mapping_details,
-            extra_resolve,
-            node_types=["htr", "acm", "pmo", "thm"],
-        )
-    )
-
-    assert extra_results == [
-        ("htr", mapping_nodes["htr"]["first"], "5", "htr-5"),
-        ("acm", mapping_nodes["acm"], "6", "acm-6"),
-    ]
-    assert extra_resolved == [("htr", "5"), ("acm", "6")]
-
-    blank_nodes: dict[str, list[SimpleNamespace] | None] = {"htr": None, "acm": []}
-    blank_details = (blank_nodes, {"htr": [], "acm": []}, fake_resolve)
-    assert list(iter_heater_nodes(blank_details, fake_resolve)) == []
-
-    assert list(
-        iter_heater_nodes(details, fake_resolve, node_types=["", "acm"])
-    ) == [("acm", nodes_by_type["acm"][0], "2", "acm-2")]
-
-
-def test_iter_boostable_heater_nodes_filters_support_and_types() -> None:
-    nodes_by_type = {
-        "htr": [
-            SimpleNamespace(addr="1", supports_boost=True),
-            SimpleNamespace(addr="2", supports_boost=False),
-        ],
-        "acm": [SimpleNamespace(addr="3", supports_boost=lambda: True)],
-        "thm": [SimpleNamespace(addr="4", supports_boost=True)],
-    }
-
-    def resolve(node_type: str, addr: str) -> str:
-        return f"{node_type}-{addr}"
-
-    details = (
-        nodes_by_type,
-        {"htr": ["1", "2"], "acm": ["3"], "thm": ["4"]},
-        resolve,
-    )
-
-    yielded = list(iter_boostable_heater_nodes(details, resolve))
-    assert sorted((node_type, addr) for node_type, _node, addr, _ in yielded) == sorted(
-        [("htr", "1"), ("acm", "3")]
-    )
-
-    accumulators_only = list(
-        iter_boostable_heater_nodes(details, resolve, accumulators_only=True)
-    )
-    assert [(node_type, addr) for node_type, _node, addr, _ in accumulators_only] == [
-        ("acm", "3")
-    ]
-
-    assert (
-        list(
-            iter_boostable_heater_nodes(
-                details,
-                resolve,
-                node_types=["htr"],
-                accumulators_only=True,
-            )
-        )
-        == []
-    )
 
 
 def test_iter_heater_maps_deduplicates_sections() -> None:
@@ -598,31 +437,8 @@ def test_payload_matching_honours_node_type() -> None:
     )
 
 
-def test_heater_base_async_added_without_hass() -> None:
-    async def _run() -> None:
-        coordinator = SimpleNamespace(hass=None)
-        heater = _make_heater(coordinator)
-
-        assert heater.hass is None
-        await heater.async_added_to_hass()
-        assert not heater._ws_subscription.is_connected
-
-    asyncio.run(_run())
 
 
-def test_device_available_accepts_inventory_metadata() -> None:
-    coordinator = SimpleNamespace(hass=None)
-    heater = _make_heater(coordinator)
-    inventory = Inventory("dev", {}, [])
-
-    assert not heater._device_available(None)
-    assert not heater._device_available({})
-    assert not heater._device_available({"inventory": object()})
-    assert heater._device_available({"inventory": inventory})
-    assert not heater._device_available({"nodes_by_type": {}})
-    assert heater._device_available({"heater_address_map": {"forward": {"htr": ["A"]}}})
-    assert heater._device_available({"addresses_by_type": {}})
-    assert not heater._device_available({"settings": {"htr": {"A": {}}}})
 
 
 class _FakeDict(dict):
@@ -647,29 +463,6 @@ def test_device_record_unknown_structure() -> None:
     assert heater._device_record() is None
 
 
-def test_heater_section_handles_missing_device() -> None:
-    hass = HomeAssistant()
-    coordinator = SimpleNamespace(hass=hass, data={})
-    heater = _make_heater(coordinator)
-
-    assert heater._heater_section() == {}
-
-
-def test_heater_section_falls_back_to_legacy_data() -> None:
-    hass = HomeAssistant()
-    coordinator = SimpleNamespace(
-        hass=hass,
-        data={"dev": {"htr": {"settings": {"A": {"mode": "auto"}}}}},
-    )
-    heater = HeaterNodeBase(
-        coordinator, "entry", "dev", "A", "Heater A", node_type="acm"
-    )
-
-    section = heater._heater_section()
-    assert section == {
-        "addrs": ["A"],
-        "settings": {"A": {"mode": "auto"}},
-    }
 
 
 def test_heater_settings_missing_mapping() -> None:

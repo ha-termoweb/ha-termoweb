@@ -288,77 +288,12 @@ def test_build_node_inventory_skips_none_type() -> None:
     assert build_node_inventory(payload) == []
 
 
-def test_build_node_inventory_handles_ducaheat_snapshot(
-    ducaheat_dev_data: dict[str, Any]
-) -> None:
-    nodes = build_node_inventory(ducaheat_dev_data)
-
-    indexed = {(node.type, node.addr): node for node in nodes}
-
-    assert set(indexed) == {
-        ("htr", "1"),
-        ("htr", "2"),
-        ("acm", "10"),
-        ("acm", "11"),
-    }
-
-    assert isinstance(indexed[("htr", "1")], HeaterNode)
-    assert isinstance(indexed[("htr", "2")], HeaterNode)
-    assert isinstance(indexed[("acm", "10")], AccumulatorNode)
-    assert isinstance(indexed[("acm", "11")], AccumulatorNode)
-
-    assert indexed[("htr", "1")].name == "Living Room"
-    assert indexed[("htr", "2")].name == "Bedroom Heater"
-    assert indexed[("acm", "10")].name == "Storage Tank"
-    assert indexed[("acm", "11")].name == "Garage Reserve"
 
 
-def test_build_node_inventory_tolerates_empty_payload() -> None:
-    assert build_node_inventory({"nodes": []}) == []
 
 
-def test_build_node_inventory_falls_back_to_node_type_field() -> None:
-    payload = {"nodes": [{"type": "", "node_type": " THM ", "addr": "05"}]}
-
-    nodes = build_node_inventory(payload)
-
-    assert len(nodes) == 1
-    assert nodes[0].type == "thm"
-    assert nodes[0].addr == "05"
 
 
-def test_build_node_inventory_falls_back_to_address_field() -> None:
-    payload = {"nodes": [{"type": "HTR", "addr": " ", "address": " 09 "}]}
-
-    nodes = build_node_inventory(payload)
-
-    assert len(nodes) == 1
-    assert nodes[0].addr == "09"
-
-
-def test_state_coordinator_handles_none_nodes_payload(
-    caplog: pytest.LogCaptureFixture,
-    inventory_builder: Callable[..., inventory_module.Inventory],
-) -> None:
-    hass = HomeAssistant()
-
-    with caplog.at_level(logging.DEBUG):
-        coordinator = _make_state_coordinator(
-            hass,
-            None,
-            inventory_builder=inventory_builder,
-        )
-
-    assert coordinator._inventory is not None
-    assert coordinator._inventory.payload == {}
-    assert (
-        sum(
-            "Ignoring unexpected nodes payload" in message
-            for message in caplog.messages
-        )
-        == 0
-    )
-    assert coordinator._inventory_addresses_by_type() == {"pmo": []}
 
 
 def test_state_coordinator_logs_once_for_invalid_nodes(

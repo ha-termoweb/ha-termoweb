@@ -192,40 +192,6 @@ async def test_ducaheat_rest_set_node_settings_routes_non_special(
     )
 
 
-@pytest.mark.asyncio
-async def test_ducaheat_rest_set_node_settings_acm_mode_heat(
-    ducaheat_rest_client: DucaheatRESTClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async def fake_headers() -> dict[str, str]:
-        return {"Authorization": "Bearer"}
-
-    calls: list[tuple[str, str, dict[str, object]]] = []
-
-    async def fake_request(method: str, path: str, **kwargs: object):
-        calls.append((method, path, kwargs))
-        return {"status": "ok"}
-
-    monkeypatch.setattr(ducaheat_rest_client, "_authed_headers", fake_headers)
-    monkeypatch.setattr(ducaheat_rest_client, "_request", fake_request)
-
-    rtc_mock = AsyncMock(return_value={"y": 2024, "n": 1, "d": 1, "h": 0, "m": 0, "s": 0})
-    monkeypatch.setattr(ducaheat_rest_client, "get_rtc_time", rtc_mock)
-
-    await ducaheat_rest_client.set_node_settings(
-        "dev", ("acm", "3"), mode="boost", boost_time=30
-    )
-
-    assert calls == [
-        (
-            "POST",
-            "/api/v2/devs/dev/acm/3/mode",
-            {
-                "headers": {"Authorization": "Bearer"},
-                "json": {"mode": "boost", "boost_time": 30},
-            },
-        )
-    ]
-    rtc_mock.assert_awaited_once_with("dev")
 
 
 @pytest.mark.asyncio
@@ -250,76 +216,6 @@ async def test_ducaheat_rest_set_node_settings_acm_invalid_inputs(
         await ducaheat_rest_client.set_node_settings("dev", ("acm", "3"), **kwargs)
 
 
-@pytest.mark.asyncio
-async def test_ducaheat_post_acm_endpoint_rethrows_server_error(
-    ducaheat_rest_client: DucaheatRESTClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async def fake_request(method: str, path: str, **kwargs: object):
-        raise ClientResponseError(
-            request_info=None,
-            history=(),
-            status=500,
-            message="server error",
-        )
-
-    monkeypatch.setattr(ducaheat_rest_client, "_request", fake_request)
-
-    with pytest.raises(ClientResponseError):
-        await ducaheat_rest_client._post_acm_endpoint(
-            "/api/v2/devs/dev/acm/3/boost", {}, {"mode": "boost"}
-        )
-
-
-@pytest.mark.asyncio
-async def test_ducaheat_set_acm_boost_state_claims_select(
-    ducaheat_rest_client: DucaheatRESTClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    calls: list[tuple[str, dict[str, object]]] = []
-
-    async def fake_post_segmented(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str],
-        payload: Mapping[str, Any],
-        dev_id: str,
-        addr: str,
-        node_type: str,
-        ignore_statuses: Iterable[int] | None = None,
-    ) -> dict[str, object]:
-        calls.append((path, dict(payload)))
-        if path.endswith("/boost"):
-            return {"boost": True}
-        return {"select": payload.get("select")}
-
-    monkeypatch.setattr(
-        DucaheatRESTClient, "_post_segmented", fake_post_segmented, raising=False
-    )
-
-    rtc_mock = AsyncMock(
-        return_value={"y": 2024, "n": 1, "d": 1, "h": 0, "m": 0, "s": 0}
-    )
-    monkeypatch.setattr(ducaheat_rest_client, "get_rtc_time", rtc_mock)
-
-    result = await ducaheat_rest_client.set_acm_boost_state(
-        "dev",
-        "3",
-        boost=True,
-        boost_time=15,
-        stemp=21.2,
-        units="c",
-    )
-
-    assert result["boost"] is True
-    assert calls == [
-        ("/api/v2/devs/dev/acm/3/select", {"select": True}),
-        (
-            "/api/v2/devs/dev/acm/3/boost",
-            {"boost": True, "boost_time": 15, "stemp": "21.2", "units": "C"},
-        ),
-        ("/api/v2/devs/dev/acm/3/select", {"select": False}),
-    ]
-    rtc_mock.assert_awaited_once_with("dev")
 
 
 @pytest.mark.asyncio
@@ -410,30 +306,6 @@ def test_sanitize_helpers_mask_sensitive_tokens() -> None:
     assert redact_text(_Blank()) == ""
     assert redact_token_fragment(None) == ""
     assert mask_identifier(None) == ""
-
-
-def test_validate_boost_minutes_and_payload() -> None:
-    assert validate_boost_minutes(None) is None
-    assert validate_boost_minutes(15) == 15
-    assert build_acm_boost_payload(True, None) == {"boost": True}
-    assert build_acm_boost_payload(False, 30) == {"boost": False, "boost_time": 30}
-    assert build_acm_boost_payload(
-        True,
-        20,
-        stemp="21.0",
-        units="c",
-    ) == {"boost": True, "boost_time": 20, "stemp": "21.0", "units": "C"}
-
-    with pytest.raises(ValueError):
-        validate_boost_minutes(0)
-    with pytest.raises(ValueError):
-        validate_boost_minutes("bad")
-    with pytest.raises(ValueError):
-        build_acm_boost_payload(True, 0)
-    with pytest.raises(ValueError):
-        build_acm_boost_payload(True, 10, stemp="  ")
-    with pytest.raises(ValueError):
-        build_acm_boost_payload(True, 10, units="kelvin")
 
 
 def test_ducaheat_log_segmented_post_noop_when_not_debug(

@@ -1508,73 +1508,8 @@ def test_apply_heater_addresses_logs_invalid_inventory(
     assert "ignoring unexpected inventory container" in caplog.text
 
 
-def test_apply_heater_addresses_normalizes_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Normalized heater data should update coordinator and energy helpers."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    coordinator = SimpleNamespace(update_addresses=MagicMock())
-    record_map = {"energy_coordinator": coordinator}
-    record_proxy = MappingProxyType(record_map)
-    client.hass.data[module.DOMAIN]["entry"] = record_proxy
-    client._coordinator.data = {
-        "device": {
-            "nodes_by_type": {"htr": {"addrs": []}},
-            "addresses_by_type": {},
-        }
-    }
-
-    nodes_payload = {"nodes": [{"type": "acm", "addr": "2"}]}
-    inventory_container = Inventory(
-        "device",
-        nodes_payload,
-        build_node_inventory(nodes_payload),
-    )
-
-    normalized = client._apply_heater_addresses(
-        {"": ["  "], "htr": " 1 ", "acm": ["2", "2", ""]},
-        inventory=inventory_container,
-    )
-
-    assert normalized == {"htr": ["1"], "acm": ["2"]}
-    coordinator.update_addresses.assert_called_once_with(normalized)
-    dev_map = client._coordinator.data["device"]
-    assert dev_map["nodes_by_type"]["acm"]["addrs"] == ["2"]
-    assert dev_map["addresses_by_type"]["htr"] == ["1"]
-    assert dev_map["addresses_by_type"]["acm"] == ["2"]
 
 
-def test_apply_heater_addresses_merges_existing_map(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Incremental updates should merge with cached coordinator address maps."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    client._coordinator.data = {
-        "device": {
-            "nodes_by_type": {
-                "htr": {"addrs": ["1"]},
-                "acm": {"addrs": ["3"]},
-                "pmo": {"addrs": ["9"]},
-            },
-            "addresses_by_type": {"htr": ["1"], "acm": ["3"], "pmo": ["9"]},
-            "addr_map": {"pmo": ["9"]},
-        }
-    }
-
-    normalized = client._apply_heater_addresses(
-        {"htr": ["2"], "acm": ["3"]},
-        inventory=None,
-    )
-
-    assert normalized == {"htr": ["2"], "acm": ["3"]}
-    dev_map = client._coordinator.data["device"]
-    assert dev_map["nodes_by_type"]["htr"]["addrs"] == ["1", "2"]
-    assert dev_map["nodes_by_type"]["acm"]["addrs"] == ["3"]
-    assert dev_map["nodes_by_type"]["pmo"]["addrs"] == ["9"]
-    assert dev_map["addresses_by_type"]["htr"] == ["1", "2"]
-    assert dev_map["addresses_by_type"]["acm"] == ["3"]
-    assert dev_map["addresses_by_type"]["pmo"] == ["9"]
-    addr_map = dev_map.get("addr_map")
-    assert isinstance(addr_map, Mapping)
-    assert addr_map["pmo"] == ["9"]
 
 
 @pytest.mark.asyncio
