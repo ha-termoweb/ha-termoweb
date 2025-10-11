@@ -14,7 +14,7 @@ _install_stubs()
 
 from custom_components.termoweb import boost as boost_module, heater as heater_module
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
-from custom_components.termoweb.const import DOMAIN
+from custom_components.termoweb.const import DOMAIN, signal_ws_data
 from custom_components.termoweb.binary_sensor import HeaterBoostActiveBinarySensor
 from custom_components.termoweb.sensor import (
     HeaterBoostEndSensor,
@@ -78,6 +78,34 @@ def test_heater_async_will_remove_without_listener_resets_unsub() -> None:
 
     unsub.assert_called_once_with()
     assert getattr(heater, "_async_unsub_coordinator_update") is None
+
+
+@pytest.mark.asyncio
+async def test_async_added_to_hass_without_coordinator_listener(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hass = HomeAssistant()
+    coordinator = SimpleNamespace(hass=hass)
+    heater = HeaterNodeBase(coordinator, "entry", "dev", "1", "Heater 1")
+    heater.hass = hass
+
+    recorded: list[tuple[HomeAssistant, str, Any]] = []
+
+    def _record_subscribe(self, hass_param, signal, handler):
+        recorded.append((hass_param, signal, handler))
+
+    monkeypatch.setattr(
+        heater_module.DispatcherSubscriptionHelper,
+        "subscribe",
+        _record_subscribe,
+    )
+
+    await heater.async_added_to_hass()
+
+    assert getattr(heater, "_async_unsub_coordinator_update", None) is None
+    assert recorded == [
+        (hass, signal_ws_data("entry"), heater._handle_ws_message),
+    ]
 
 
 def test_heater_handle_ws_event_skips_removed_entity() -> None:
