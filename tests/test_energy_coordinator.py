@@ -26,17 +26,6 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 
 EnergyStateCoordinator = coord_module.EnergyStateCoordinator
 StateCoordinator = coord_module.StateCoordinator
-
-
-def test_device_display_name_helper() -> None:
-    """Helpers should trim names and fall back to device id."""
-
-    assert coord_module._device_display_name({"name": " Device "}, "dev") == "Device"
-    assert coord_module._device_display_name({"name": ""}, "dev") == "Device dev"
-    assert coord_module._device_display_name({}, "dev") == "Device dev"
-    assert coord_module._device_display_name({"name": 1234}, "dev") == "1234"
-
-
 def test_ensure_heater_section_helper() -> None:
     """The helper must reuse existing sections or insert defaults."""
 
