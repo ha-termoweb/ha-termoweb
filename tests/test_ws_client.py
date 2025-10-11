@@ -391,6 +391,31 @@ def test_forward_ws_sample_updates_inventory_validation(
     assert handler.call_args.kwargs.get("lease_seconds") == 15
 
 
+def test_getattr_exposes_ducaheat_ws_client() -> None:
+    """__getattr__ should expose the Ducaheat websocket client class."""
+
+    cls = base_ws.__getattr__("DucaheatWSClient")
+    assert cls.__name__ == ducaheat_ws.DucaheatWSClient.__name__
+    assert cls.__module__ == ducaheat_ws.DucaheatWSClient.__module__
+
+
+def test_getattr_exposes_termoweb_ws_client() -> None:
+    """__getattr__ should expose the TermoWeb websocket client class."""
+
+    cls = base_ws.__getattr__("TermoWebWSClient")
+    assert cls.__name__ == module.TermoWebWSClient.__name__
+    assert cls.__module__ == module.TermoWebWSClient.__module__
+
+
+def test_getattr_raises_for_unknown_client() -> None:
+    """Unknown attributes should raise AttributeError via __getattr__."""
+
+    with pytest.raises(AttributeError) as exc_info:
+        base_ws.__getattr__("UnknownClient")
+
+    assert exc_info.value.args == ("UnknownClient",)
+
+
 def test_termoweb_client_initialises_namespace_and_handlers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
