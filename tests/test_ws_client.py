@@ -166,6 +166,55 @@ def _make_ducaheat_client(
     return client
 
 
+def test_forward_ws_sample_updates_guards_and_invalid_lease() -> None:
+    """Guard clauses and invalid lease values should be handled safely."""
+
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
+    base_ws.forward_ws_sample_updates(
+        hass,
+        "entry",
+        "dev",
+        {"pmo": {"samples": {"7": {"power": 1}}}},
+    )
+
+    hass.data[base_ws.DOMAIN]["entry"] = {
+        "energy_coordinator": SimpleNamespace(),
+    }
+    base_ws.forward_ws_sample_updates(
+        hass,
+        "entry",
+        "dev",
+        {"pmo": {"samples": {"7": {"power": 2}}}},
+    )
+
+    class CoordinatorStub:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, Any], Any]] = []
+
+        def handle_ws_samples(
+            self,
+            dev_id: str,
+            updates: dict[str, dict[str, Any]],
+            *,
+            lease_seconds: float | None = None,
+        ) -> None:
+            self.calls.append((dev_id, updates, lease_seconds))
+
+    coordinator = CoordinatorStub()
+    hass.data[base_ws.DOMAIN]["entry"]["energy_coordinator"] = coordinator
+
+    base_ws.forward_ws_sample_updates(
+        hass,
+        "entry",
+        "dev",
+        {"pmo": {"samples": {"7": {"power": 3}}, "lease_seconds": "bad"}},
+    )
+
+    assert coordinator.calls == [
+        ("dev", {"pmo": {"7": {"power": 3}}}, None),
+    ]
+
+
 def test_forward_ws_sample_updates_handles_power_monitors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
