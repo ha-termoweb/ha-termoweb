@@ -26,12 +26,10 @@ from .heater import (
     BoostButtonMetadata,
     HeaterNodeBase,
     format_boost_duration_label,
-    heater_platform_details_for_entry,
     iter_boost_button_metadata,
-    iter_boostable_heater_nodes,
-    log_skipped_nodes,
 )
 from .identifiers import build_heater_entity_unique_id
+from .inventory import boostable_accumulator_details_for_entry
 from .utils import build_gateway_device_info
 
 _LOGGER = logging.getLogger(__name__)
@@ -49,20 +47,19 @@ async def async_setup_entry(hass, entry, async_add_entities):
         """Return a placeholder name for heater nodes."""
 
         return f"Heater {addr}"
-    heater_details = heater_platform_details_for_entry(
-        data,
-        default_name_simple=default_name,
-    )
-
     entities: list[ButtonEntity] = [
         StateRefreshButton(coordinator, entry.entry_id, dev_id)
     ]
 
+    _, accumulator_nodes = boostable_accumulator_details_for_entry(
+        data,
+        default_name_simple=default_name,
+        platform_name="button",
+        logger=_LOGGER,
+    )
+
     boost_entities: list[ButtonEntity] = []
-    for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
-        heater_details,
-        accumulators_only=True,
-    ):
+    for node_type, addr_str, base_name in accumulator_nodes:
 
         boost_entities.extend(
             _create_boost_button_entities(
@@ -77,7 +74,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     if boost_entities:
         entities.extend(boost_entities)
-    log_skipped_nodes("button", heater_details, logger=_LOGGER)
 
     async_add_entities(entities)
 

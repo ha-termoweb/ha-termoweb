@@ -6,7 +6,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
 import logging
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from .const import DOMAIN
 
@@ -54,6 +54,7 @@ __all__ = [
     "PowerMonitorNode",
     "ThermostatNode",
     "_normalize_node_identifier",
+    "boostable_accumulator_details_for_entry",
     "addresses_by_node_type",
     "build_heater_address_map",
     "build_node_inventory",
@@ -73,6 +74,10 @@ _LOGGER = logging.getLogger(__name__)
 
 
 HEATER_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm"})
+
+
+if TYPE_CHECKING:
+    from .heater import HeaterPlatformDetails
 
 
 @dataclass(frozen=True, slots=True)
@@ -848,6 +853,41 @@ def heater_platform_details_from_inventory(
         return _default_name(addr_str, node_type_norm)
 
     return nodes_by_type, addrs_by_type, resolve_name
+
+
+def boostable_accumulator_details_for_entry(
+    entry_data: Mapping[str, Any] | None,
+    *,
+    default_name_simple: Callable[[str], str],
+    platform_name: str,
+    logger: logging.Logger | None = None,
+    accumulators_only: bool = True,
+) -> tuple[HeaterPlatformDetails, list[tuple[str, str, str]]]:
+    """Return boostable accumulator metadata for a config entry."""
+
+    from .heater import (
+        HeaterPlatformDetails,
+        heater_platform_details_for_entry,
+        iter_boostable_heater_nodes,
+        log_skipped_nodes,
+    )
+
+    details = heater_platform_details_for_entry(
+        entry_data,
+        default_name_simple=default_name_simple,
+    )
+
+    metadata: list[tuple[str, str, str]] = [
+        (node_type, addr_str, base_name)
+        for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
+            details,
+            accumulators_only=accumulators_only,
+        )
+    ]
+
+    log_skipped_nodes(platform_name, details, logger=logger)
+
+    return details, metadata
 
 
 def normalize_heater_addresses(
