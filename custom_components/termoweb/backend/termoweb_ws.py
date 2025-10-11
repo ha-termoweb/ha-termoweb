@@ -2132,9 +2132,16 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         base = self._api_base().rstrip("/")
         parsed = urlsplit(base if base else API_BASE)
         scheme = parsed.scheme or "https"
-        netloc = parsed.netloc or parsed.path
-        path = parsed.path.rstrip("/")
-        return urlunsplit((scheme, netloc, path or "", "", ""))
+        if parsed.netloc:
+            netloc = parsed.netloc
+            path = parsed.path.rstrip("/")
+        else:
+            path_parts = parsed.path.split("/", 1)
+            netloc = path_parts[0]
+            path = ""
+            if len(path_parts) > 1 and path_parts[1]:
+                path = "/" + path_parts[1].rstrip("/")
+        return urlunsplit((scheme, netloc, path, "", ""))
 
 
 __all__ = [
