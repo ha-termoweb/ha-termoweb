@@ -443,7 +443,7 @@ def test_request_refreshes_once_then_raises() -> None:
         )
 
         client = RESTClient(session, "user", "pass")
-        headers = await client._authed_headers()
+        headers = await client.authed_headers()
         session.clear_calls()
 
         with pytest.raises(api.BackendAuthError):
@@ -460,17 +460,26 @@ def test_request_refreshes_once_then_raises() -> None:
 
 
 @pytest.mark.asyncio
-async def test_authed_headers_public_wrapper(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_authed_headers_builds_expected_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     session = FakeSession()
     client = RESTClient(session, "user", "pass")
-    sentinel = {"Authorization": "Bearer sentinel"}
-    fake_headers = AsyncMock(return_value=sentinel)
-    monkeypatch.setattr(client, "_authed_headers", fake_headers)
+    ensure_mock = AsyncMock(return_value="token")
+    monkeypatch.setattr(client, "_ensure_token", ensure_mock)
 
     headers = await client.authed_headers()
 
-    assert headers is sentinel
-    assert fake_headers.await_count == 1
+    assert ensure_mock.await_count == 1
+    expected = {
+        "Authorization": "Bearer token",
+        "Accept": "application/json",
+        "User-Agent": client.user_agent,
+        "Accept-Language": api.ACCEPT_LANGUAGE,
+    }
+    if client.requested_with:
+        expected["X-Requested-With"] = client.requested_with
+    assert headers == expected
 
 
 @pytest.mark.asyncio
@@ -515,7 +524,7 @@ def test_request_rate_limit_error() -> None:
         )
 
         client = RESTClient(session, "user", "pass")
-        headers = await client._authed_headers()
+        headers = await client.authed_headers()
         session.clear_calls()
 
         with pytest.raises(api.BackendRateLimitError):
@@ -547,7 +556,7 @@ def test_request_5xx_surfaces_client_error() -> None:
         )
 
         client = RESTClient(session, "user", "pass")
-        headers = await client._authed_headers()
+        headers = await client.authed_headers()
         session.clear_calls()
 
         with pytest.raises(aiohttp.ClientResponseError) as err:
@@ -572,7 +581,7 @@ def test_request_timeout_propagates() -> None:
         session.queue_request(asyncio.TimeoutError())
 
         client = RESTClient(session, "user", "pass")
-        headers = await client._authed_headers()
+        headers = await client.authed_headers()
         session.clear_calls()
 
         with pytest.raises(asyncio.TimeoutError):
@@ -691,7 +700,7 @@ def test_request_text_exception_fallback() -> None:
         )
 
         client = RESTClient(session, "user", "pw")
-        headers = await client._authed_headers()
+        headers = await client.authed_headers()
         session.clear_calls()
 
         result = await client._request("GET", "/api/data", headers=headers)
@@ -720,7 +729,7 @@ def test_request_returns_plain_text() -> None:
         )
 
         client = RESTClient(session, "user", "pw")
-        headers = await client._authed_headers()
+        headers = await client.authed_headers()
         session.clear_calls()
 
         result = await client._request("GET", "/api/plain", headers=headers)
@@ -1041,7 +1050,7 @@ def test_get_node_settings_acm_logs(
         async def fake_headers() -> dict[str, str]:
             return {"Authorization": "Bearer tok"}
 
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "authed_headers", fake_headers)
 
         caplog.set_level(logging.DEBUG, logger=api.__name__)
         node = AccumulatorNode(name="Store", addr="7")
@@ -1078,7 +1087,7 @@ def test_get_node_settings_pmo_uses_device_endpoint(monkeypatch) -> None:
             return {"Authorization": "Bearer tok"}
 
         monkeypatch.setattr(client, "_request", fake_request)
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "authed_headers", fake_headers)
 
         payload = await client.get_node_settings("dev", ("pmo", "4"))
 
@@ -1112,7 +1121,7 @@ def test_get_node_samples_logs_for_unknown_type(
         async def fake_headers() -> dict[str, str]:
             return {"Authorization": "Bearer tok"}
 
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "authed_headers", fake_headers)
 
         caplog.set_level(logging.DEBUG, logger=api.__name__)
         samples = await client.get_node_samples("dev", ("pmo", "4"), 0, 5)
@@ -1228,7 +1237,7 @@ def test_request_final_auth_error_after_retries(monkeypatch) -> None:
         )
 
         client = RESTClient(session, "user", "pass")
-        headers = await client._authed_headers()
+        headers = await client.authed_headers()
         monkeypatch.setattr(api, "range", lambda _n: (0, 0), raising=False)
 
         with pytest.raises(api.BackendAuthError) as err:
@@ -1374,7 +1383,7 @@ def test_get_node_samples_malformed_items(monkeypatch, caplog) -> None:
                 ]
             }
 
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "authed_headers", fake_headers)
         monkeypatch.setattr(client, "_request", fake_request)
 
         with caplog.at_level("DEBUG"):
@@ -1400,7 +1409,7 @@ def test_get_node_samples_unexpected_payload(monkeypatch, caplog) -> None:
         async def fake_request(method: str, path: str, **kwargs: Any) -> Any:
             return "garbled"
 
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "authed_headers", fake_headers)
         monkeypatch.setattr(client, "_request", fake_request)
 
         with caplog.at_level("DEBUG"):
@@ -1467,7 +1476,7 @@ def test_list_devices_unexpected_dict_payload(monkeypatch, caplog) -> None:
         async def fake_request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
             return {"weird": []}
 
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "authed_headers", fake_headers)
         monkeypatch.setattr(client, "_request", fake_request)
 
         with caplog.at_level("DEBUG"):
@@ -1491,7 +1500,7 @@ def test_list_devices_unexpected_string_payload(monkeypatch, caplog) -> None:
         async def fake_request(method: str, path: str, **kwargs: Any) -> str:
             return "oops"
 
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "authed_headers", fake_headers)
         monkeypatch.setattr(client, "_request", fake_request)
 
         with caplog.at_level("DEBUG"):
@@ -1518,7 +1527,7 @@ def test_set_htr_settings_translates_heat(monkeypatch) -> None:
             captured["json"] = kwargs.get("json")
             return {}
 
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "authed_headers", fake_headers)
         monkeypatch.setattr(client, "_request", fake_request)
 
         await client.set_htr_settings("dev", 1, mode="heat", stemp=21.0)
@@ -1581,7 +1590,7 @@ def test_ducaheat_get_node_settings_normalises_payload(
         async def fake_headers() -> dict[str, str]:
             return {"Authorization": "Bearer token"}
 
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "authed_headers", fake_headers)
 
         data = await client.get_node_settings("dev", ("htr", "A1"))
 
@@ -1636,7 +1645,7 @@ def test_ducaheat_get_node_settings_acm_merges_capabilities(
         async def fake_headers() -> dict[str, str]:
             return {"Authorization": "Bearer token"}
 
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "authed_headers", fake_headers)
 
         data = await client.get_node_settings("dev", ("acm", "2"))
 
@@ -1720,7 +1729,7 @@ def test_ducaheat_get_node_settings_acm_handles_half_hour_prog(
         async def fake_headers() -> dict[str, str]:
             return {"Authorization": "Bearer token"}
 
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "authed_headers", fake_headers)
 
         data = await client.get_node_settings("dev", ("acm", "2"))
 
@@ -1753,7 +1762,7 @@ def test_ducaheat_set_htr_settings_invalid_stemp(monkeypatch) -> None:
         async def fake_headers() -> dict[str, str]:
             return {"Authorization": "Bearer token"}
 
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "authed_headers", fake_headers)
 
         with pytest.raises(ValueError) as exc:
             await client.set_htr_settings("dev", "A1", stemp="bad")
@@ -1780,7 +1789,7 @@ def test_ducaheat_set_htr_settings_invalid_units(monkeypatch) -> None:
         async def fake_headers() -> dict[str, str]:
             return {"Authorization": "Bearer token"}
 
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "authed_headers", fake_headers)
 
         with pytest.raises(ValueError) as exc:
             await client.set_htr_settings("dev", "A1", stemp=21.0, units="K")
@@ -1803,7 +1812,7 @@ def test_ducaheat_set_acm_settings_short_prog(monkeypatch) -> None:
         async def fake_headers() -> dict[str, str]:
             return {"Authorization": "Bearer token"}
 
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "authed_headers", fake_headers)
 
         with pytest.raises(ValueError) as exc:
             await client.set_node_settings("dev", ("acm", "5"), prog=[0] * 24)
@@ -1836,7 +1845,7 @@ def test_ducaheat_set_acm_settings_client_error(monkeypatch) -> None:
         async def fake_headers() -> dict[str, str]:
             return {"Authorization": "Bearer token"}
 
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "authed_headers", fake_headers)
 
         with pytest.raises(DucaheatRequestError) as exc:
             await client.set_node_settings("dev", ("acm", "5"), mode="boost")
@@ -1861,7 +1870,7 @@ def test_rest_client_set_node_settings_rejects_boost_time(
         async def fake_headers() -> dict[str, str]:
             return {"Authorization": "Bearer token"}
 
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "authed_headers", fake_headers)
 
         with pytest.raises(ValueError):
             await client.set_node_settings(
@@ -1892,7 +1901,7 @@ def test_ducaheat_get_node_samples_converts_ms(monkeypatch) -> None:
         async def fake_headers() -> dict[str, str]:
             return {"Authorization": "Bearer token"}
 
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "authed_headers", fake_headers)
 
         samples = await client.get_node_samples("dev", ("htr", "A"), 10, 20)
         assert samples == [{"t": 1234, "counter": "7.5"}]

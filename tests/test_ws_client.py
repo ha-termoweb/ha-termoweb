@@ -37,9 +37,6 @@ class DummyREST:
     async def authed_headers(self) -> dict[str, str]:
         return self._headers
 
-    async def _authed_headers(self) -> dict[str, str]:
-        return await self.authed_headers()
-
     async def refresh_token(self) -> None:
         self._access_token = None
         await self._ensure_token()
@@ -896,7 +893,7 @@ async def test_termoweb_get_token_from_rest(monkeypatch: pytest.MonkeyPatch) -> 
 
     client = _make_termoweb_client(monkeypatch)
     rest_client = client._client
-    rest_client._authed_headers = AsyncMock(  # type: ignore[attr-defined]
+    rest_client.authed_headers = AsyncMock(  # type: ignore[attr-defined]
         return_value={"Authorization": "Bearer newtoken"}
     )
     token = await client._get_token()
@@ -911,7 +908,7 @@ async def test_termoweb_get_token_missing_header(
 
     client = _make_termoweb_client(monkeypatch)
     rest_client = client._client
-    rest_client._authed_headers = AsyncMock(return_value={})  # type: ignore[attr-defined]
+    rest_client.authed_headers = AsyncMock(return_value={})  # type: ignore[attr-defined]
     with pytest.raises(RuntimeError):
         await client._get_token()
 

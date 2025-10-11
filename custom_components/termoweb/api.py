@@ -277,21 +277,6 @@ class RESTClient:
                 self._token_expiry_monotonic = now_mono + ttl
                 return token
 
-    async def _authed_headers(self) -> dict[str, str]:
-        """Return HTTP headers including a valid bearer token."""
-        token = await self._ensure_token()
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
-            "User-Agent": self._user_agent,
-            "Accept-Language": ACCEPT_LANGUAGE,
-        }
-        if self._requested_with:
-            headers["X-Requested-With"] = self._requested_with
-        if self._is_ducaheat:
-            headers["X-SerialId"] = DUCAHEAT_SERIAL_ID
-        return headers
-
     @property
     def user_agent(self) -> str:
         """Return the configured User-Agent string."""
@@ -309,7 +294,18 @@ class RESTClient:
     async def authed_headers(self) -> dict[str, str]:
         """Return HTTP headers including a valid bearer token."""
 
-        return await self._authed_headers()
+        token = await self._ensure_token()
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+            "User-Agent": self._user_agent,
+            "Accept-Language": ACCEPT_LANGUAGE,
+        }
+        if self._requested_with:
+            headers["X-Requested-With"] = self._requested_with
+        if self._is_ducaheat:
+            headers["X-SerialId"] = DUCAHEAT_SERIAL_ID
+        return headers
 
     async def refresh_token(self) -> None:
         """Refresh the cached bearer token immediately."""
@@ -324,7 +320,7 @@ class RESTClient:
 
     async def list_devices(self) -> list[dict[str, Any]]:
         """Return normalized device list: [{'dev_id', ...}, ...]."""
-        headers = await self._authed_headers()
+        headers = await self.authed_headers()
         data = await self._request("GET", DEVS_PATH, headers=headers)
 
         if isinstance(data, list):
@@ -341,7 +337,7 @@ class RESTClient:
 
     async def get_nodes(self, dev_id: str) -> Any:
         """Return raw nodes payload for a device (shape varies by firmware)."""
-        headers = await self._authed_headers()
+        headers = await self.authed_headers()
         path = NODES_PATH_FMT.format(dev_id=dev_id)
         return await self._request("GET", path, headers=headers)
 
@@ -349,7 +345,7 @@ class RESTClient:
         """Return settings/state for a node."""
 
         node_type, addr = self._resolve_node_descriptor(node)
-        headers = await self._authed_headers()
+        headers = await self.authed_headers()
         if node_type == "pmo":
             path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}"
         else:
@@ -367,7 +363,7 @@ class RESTClient:
     async def get_rtc_time(self, dev_id: str) -> dict[str, Any]:
         """Return RTC metadata for a device's manager endpoint."""
 
-        headers = await self._authed_headers()
+        headers = await self.authed_headers()
         path = f"/api/v2/devs/{dev_id}/mgr/rtc/time"
         data = await self._request("GET", path, headers=headers)
         if isinstance(data, dict):
@@ -552,7 +548,7 @@ class RESTClient:
         if ptemp is not None:
             payload["ptemp"] = self._ensure_ptemp(ptemp)
 
-        headers = await self._authed_headers()
+        headers = await self.authed_headers()
         path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}/settings"
         self._log_non_htr_payload(
             node_type=node_type,
@@ -604,7 +600,7 @@ class RESTClient:
         node_type, addr_str = self._resolve_node_descriptor(("acm", addr))
         payload = self._build_acm_extra_options_payload(boost_time, boost_temp)
 
-        headers = await self._authed_headers()
+        headers = await self.authed_headers()
         path = f"/api/v2/devs/{dev_id}/{node_type}/{addr_str}/setup"
         self._log_non_htr_payload(
             node_type=node_type,
@@ -656,7 +652,7 @@ class RESTClient:
             units=unit_value,
         )
 
-        headers = await self._authed_headers()
+        headers = await self.authed_headers()
         path = f"/api/v2/devs/{dev_id}/{node_type}/{addr_str}/boost"
         self._log_non_htr_payload(
             node_type=node_type,
@@ -684,7 +680,7 @@ class RESTClient:
     ) -> list[dict[str, str | int]]:
         """Return heater samples as list of {"t", "counter"} dicts."""
         node_type, addr = self._resolve_node_descriptor(node)
-        headers = await self._authed_headers()
+        headers = await self.authed_headers()
         path = NODE_SAMPLES_PATH_FMT.format(
             dev_id=dev_id, node_type=node_type, addr=addr
         )

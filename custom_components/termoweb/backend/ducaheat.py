@@ -110,7 +110,7 @@ class DucaheatRESTClient(RESTClient):
         """Fetch and normalise node settings for the Ducaheat API."""
 
         node_type, addr = self._resolve_node_descriptor(node)
-        headers = await self._authed_headers()
+        headers = await self.authed_headers()
         path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}"
         payload = await self._request("GET", path, headers=headers)
 
@@ -151,7 +151,7 @@ class DucaheatRESTClient(RESTClient):
 
         node_type, addr = self._resolve_node_descriptor(node)
         if node_type == "htr":
-            headers = await self._authed_headers()
+            headers = await self.authed_headers()
             base = f"/api/v2/devs/{dev_id}/htr/{addr}"
             responses: dict[str, Any] = {}
 
@@ -257,7 +257,7 @@ class DucaheatRESTClient(RESTClient):
                 dev_id, (node_type, addr), start, stop
             )
 
-        headers = await self._authed_headers()
+        headers = await self.authed_headers()
         path = f"/api/v2/devs/{dev_id}/htr/{addr}/samples"
         params = {"start": int(start * 1000), "end": int(stop * 1000)}
         data = await self._request("GET", path, headers=headers, params=params)
@@ -608,7 +608,7 @@ class DucaheatRESTClient(RESTClient):
     ) -> dict[str, Any]:
         """Apply segmented writes for accumulator nodes."""
 
-        headers = await self._authed_headers()
+        headers = await self.authed_headers()
         base = f"/api/v2/devs/{dev_id}/acm/{addr}"
         responses: dict[str, Any] = {}
 
@@ -958,7 +958,7 @@ class DucaheatRESTClient(RESTClient):
         """Write default boost configuration using segmented endpoints."""
 
         node_type, addr_str = self._resolve_node_descriptor(("acm", addr))
-        headers = await self._authed_headers()
+        headers = await self.authed_headers()
         payload = self._build_acm_extra_options_payload(boost_time, boost_temp)
         return await self._post_acm_endpoint(
             f"/api/v2/devs/{dev_id}/{node_type}/{addr_str}/setup",
@@ -981,7 +981,7 @@ class DucaheatRESTClient(RESTClient):
         """Toggle an accumulator boost session via segmented endpoints."""
 
         node_type, addr_str = self._resolve_node_descriptor(("acm", addr))
-        headers = await self._authed_headers()
+        headers = await self.authed_headers()
         formatted_temp: str | None = None
         if stemp is not None:
             try:
