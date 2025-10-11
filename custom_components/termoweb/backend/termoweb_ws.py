@@ -1321,7 +1321,7 @@ class WebSocketClient(_WSStatusMixin):
 
     async def _get_token(self) -> str:
         """Reuse the REST client token for websocket authentication."""
-        headers = await self._client._authed_headers()  # noqa: SLF001
+        headers = await self._client.authed_headers()
         auth_header = (
             headers.get("Authorization") if isinstance(headers, dict) else None
         )

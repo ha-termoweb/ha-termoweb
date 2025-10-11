@@ -2004,7 +2004,7 @@ def ducaheat_rest_harness(
             rtc_calls.append(dev_id)
             return dict(rtc_template)
 
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "authed_headers", fake_headers)
         monkeypatch.setattr(client, "_request", fake_request)
         monkeypatch.setattr(client, "_post_segmented", fake_post_segmented)
         monkeypatch.setattr(client, "get_rtc_time", fake_rtc)

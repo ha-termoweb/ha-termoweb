@@ -62,7 +62,7 @@ class DummyClient:
     ) -> list[dict[str, object]]:
         return []
 
-    async def _authed_headers(self) -> dict[str, str]:  # pragma: no cover - stub
+    async def authed_headers(self) -> dict[str, str]:  # pragma: no cover - stub
         return {"Authorization": "Bearer token"}
 
 
@@ -73,7 +73,7 @@ def ducaheat_rest_client(monkeypatch: pytest.MonkeyPatch) -> DucaheatRESTClient:
     async def fake_headers() -> dict[str, str]:
         return {"Authorization": "Bearer token"}
 
-    monkeypatch.setattr(client, "_authed_headers", fake_headers)
+    monkeypatch.setattr(client, "authed_headers", fake_headers)
     return client
 
 
@@ -210,7 +210,7 @@ async def test_ducaheat_rest_set_node_settings_acm_invalid_inputs(
     async def fake_headers() -> dict[str, str]:
         return {}
 
-    monkeypatch.setattr(ducaheat_rest_client, "_authed_headers", fake_headers)
+    monkeypatch.setattr(ducaheat_rest_client, "authed_headers", fake_headers)
 
     with pytest.raises(ValueError):
         await ducaheat_rest_client.set_node_settings("dev", ("acm", "3"), **kwargs)

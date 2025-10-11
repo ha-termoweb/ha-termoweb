@@ -44,8 +44,6 @@ custom_components/termoweb/api.py :: RESTClient._request
     Perform an HTTP request.
 custom_components/termoweb/api.py :: RESTClient._ensure_token
     Ensure a bearer token is present; fetch if missing.
-custom_components/termoweb/api.py :: RESTClient._authed_headers
-    Return HTTP headers including a valid bearer token.
 custom_components/termoweb/api.py :: RESTClient.user_agent
     Return the configured User-Agent string.
 custom_components/termoweb/api.py :: RESTClient.requested_with

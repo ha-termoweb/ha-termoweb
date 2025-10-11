@@ -36,7 +36,7 @@ def test_ducaheat_acm_request_error(monkeypatch: pytest.MonkeyPatch) -> None:
                 message="malformed",
             )
 
-        monkeypatch.setattr(client, "_authed_headers", fake_headers)
+        monkeypatch.setattr(client, "authed_headers", fake_headers)
         monkeypatch.setattr(client, "_request", fake_request)
         mock_rtc = AsyncMock(return_value={})
         monkeypatch.setattr(client, "get_rtc_time", mock_rtc)

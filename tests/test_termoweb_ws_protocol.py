@@ -36,7 +36,7 @@ class DummyREST:
         self._session = SimpleNamespace(closed=True)
         self._ensure_token = AsyncMock()
         headers = authed_headers or {"Authorization": "Bearer token"}
-        self._authed_headers = AsyncMock(return_value=headers)
+        self.authed_headers = AsyncMock(return_value=headers)
         self.api_base = api_base
         self.user_agent = "agent"
         self.requested_with = requested_with
