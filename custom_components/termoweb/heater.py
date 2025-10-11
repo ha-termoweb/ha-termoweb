@@ -813,29 +813,6 @@ def heater_platform_details_for_entry(
     )
 
 
-def prepare_heater_platform_data(
-    entry_data: dict[str, Any],
-    *,
-    default_name_simple: Callable[[str], str],
-) -> tuple[
-    tuple[Node, ...],
-    dict[str, list[Node]],
-    dict[str, list[str]],
-    Callable[[str, str], str],
-]:
-    """Return node metadata and name resolution helpers for a config entry."""
-    details = heater_platform_details_for_entry(
-        entry_data,
-        default_name_simple=default_name_simple,
-    )
-
-    inventory_nodes = details.inventory.nodes
-    nodes_by_type = details.nodes_by_type
-    addrs_by_type = details.addrs_by_type
-
-    return inventory_nodes, dict(nodes_by_type), addrs_by_type, details.resolve_name
-
-
 class HeaterNodeBase(CoordinatorEntity):
     """Base entity implementing common TermoWeb heater behaviour."""
 

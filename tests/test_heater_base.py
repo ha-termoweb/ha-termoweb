@@ -23,7 +23,6 @@ HeaterNodeBase = heater_module.HeaterNodeBase
 build_heater_name_map = heater_module.build_heater_name_map
 iter_heater_nodes = heater_module.iter_heater_nodes
 iter_boostable_heater_nodes = heater_module.iter_boostable_heater_nodes
-prepare_heater_platform_data = heater_module.prepare_heater_platform_data
 heater_platform_details_for_entry = heater_module.heater_platform_details_for_entry
 
 
@@ -74,7 +73,7 @@ def test_heater_hass_accessors_fall_back_to_coordinator() -> None:
     assert heater._hass_for_runtime() is override
 
 
-def test_prepare_heater_platform_data_groups_nodes() -> None:
+def test_heater_platform_details_for_entry_groups_nodes() -> None:
     raw_nodes = {
         "nodes": [
             {"type": "HTR", "addr": "1", "name": " Lounge "},
@@ -89,14 +88,14 @@ def test_prepare_heater_platform_data_groups_nodes() -> None:
     container = Inventory("dev", raw_nodes, inventory_nodes)
     entry_data = {"inventory": container}
 
-    inventory, nodes_by_type, addrs_by_type, resolve_name = (
-        prepare_heater_platform_data(
-            entry_data,
-            default_name_simple=lambda addr: f"Heater {addr}",
-        )
+    details = heater_platform_details_for_entry(
+        entry_data,
+        default_name_simple=lambda addr: f"Heater {addr}",
     )
 
-    assert inventory == container.nodes
+    assert details.inventory is container
+    nodes_by_type = details.nodes_by_type
+    addrs_by_type = details.addrs_by_type
     htr_nodes = nodes_by_type.get("htr", [])
     assert [node.addr for node in htr_nodes] == ["1", "4", "4"]
     assert all(hasattr(node, "addr") for node in htr_nodes)
@@ -113,28 +112,30 @@ def test_prepare_heater_platform_data_groups_nodes() -> None:
         for node_type in heater_module.HEATER_NODE_TYPES
     }
     assert helper_reverse == {"1": {"htr"}, "2": {"acm"}, "4": {"htr"}}
+    resolve_name = details.resolve_name
     assert resolve_name("htr", "1") == "Lounge"
     assert resolve_name("htr", "4") == "Heater 4"
     assert resolve_name("acm", "2") == "Accumulator 2"
 
-def test_prepare_heater_platform_data_skips_blank_types() -> None:
+
+def test_heater_platform_details_for_entry_skips_blank_types() -> None:
     nodes = [
         SimpleNamespace(type="  ", addr="5"),
         SimpleNamespace(type="htr", addr="6"),
     ]
     container = Inventory("dev", {"nodes": nodes}, nodes)
 
-    inventory, nodes_by_type, addrs_by_type, _ = prepare_heater_platform_data(
+    details = heater_platform_details_for_entry(
         {"inventory": container},
         default_name_simple=lambda addr: f"Heater {addr}",
     )
 
-    assert inventory == container.nodes
-    assert [node.addr for node in nodes_by_type.get("htr", [])] == ["6"]
-    assert addrs_by_type["htr"] == ["6"]
+    assert details.inventory is container
+    assert [node.addr for node in details.nodes_by_type.get("htr", [])] == ["6"]
+    assert details.addrs_by_type["htr"] == ["6"]
 
 
-def test_prepare_heater_platform_data_passes_inventory_to_name_map(
+def test_heater_platform_details_for_entry_passes_inventory_to_name_map(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     raw_nodes = {
@@ -167,18 +168,19 @@ def test_prepare_heater_platform_data_passes_inventory_to_name_map(
 
     monkeypatch.setattr(Inventory, "heater_name_map", fake_name_map)
 
-    inventory, _, _, resolve_name = prepare_heater_platform_data(
+    details = heater_platform_details_for_entry(
         {"inventory": container},
         default_name_simple=lambda addr: f"Heater {addr}",
     )
 
-    assert inventory == container.nodes
+    assert details.inventory is container
     assert calls
     recorded_inventory, recorded_factory = calls[0]
     assert recorded_inventory is container
     assert callable(recorded_factory)
     assert recorded_factory("9") == "Heater 9"
 
+    resolve_name = details.resolve_name
     assert resolve_name("htr", "9") == "By Type 9"
     assert resolve_name("htr", "7") == "Pair 7"
     assert resolve_name("htr", "6") == "Legacy 6"
@@ -219,7 +221,7 @@ def test_build_heater_name_map_accepts_iterables_of_dicts() -> None:
     assert result.get("htr", {}).get("1") == "Heater 1"
 
 
-def test_prepare_heater_platform_data_resolves_normalized_inputs() -> None:
+def test_heater_platform_details_for_entry_resolves_normalized_inputs() -> None:
     raw_nodes = {
         "nodes": [
             {"type": " hTr ", "addr": " 8 ", "name": "Hall"},
@@ -227,10 +229,10 @@ def test_prepare_heater_platform_data_resolves_normalized_inputs() -> None:
     }
     container = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
 
-    _, _, _, resolve_name = prepare_heater_platform_data(
+    resolve_name = heater_platform_details_for_entry(
         {"inventory": container},
         default_name_simple=lambda addr: f"Heater {addr}",
-    )
+    ).resolve_name
 
     assert resolve_name(" HTR ", " 8 ") == "Hall"
 
@@ -246,25 +248,17 @@ def test_heater_platform_details_for_entry_prefers_inventory(
     }
     container = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
 
-    def _fail_prepare(*_args: Any, **_kwargs: Any) -> None:
-        raise AssertionError("prepare_heater_platform_data should not run")
-
-    monkeypatch.setattr(
-        heater_module,
-        "prepare_heater_platform_data",
-        _fail_prepare,
-    )
-
-    nodes_by_type, addrs_by_type, resolve_name = heater_platform_details_for_entry(
+    details = heater_platform_details_for_entry(
         {"inventory": container},
         default_name_simple=lambda addr: f"Heater {addr}",
     )
 
-    assert nodes_by_type == container.nodes_by_type
-    assert addrs_by_type == {
+    assert details.nodes_by_type == container.nodes_by_type
+    assert details.addrs_by_type == {
         node_type: list(container.heater_address_map[0].get(node_type, []))
         for node_type in heater_module.HEATER_NODE_TYPES
     }
+    resolve_name = details.resolve_name
     assert resolve_name("htr", "1") == "Lounge"
     assert resolve_name("acm", "2") == "Accumulator 2"
 
@@ -285,30 +279,28 @@ def test_heater_platform_details_for_entry_rejects_non_mapping_entry() -> None:
         )
 
 
-def test_prepare_heater_platform_data_uses_coordinator_inventory() -> None:
+def test_heater_platform_details_for_entry_uses_coordinator_inventory() -> None:
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1", "name": " Lounge "}]}
     container = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
     coordinator = SimpleNamespace(inventory=container)
 
-    inventory, nodes_by_type, addrs_by_type, resolve_name = (
-        prepare_heater_platform_data(
-            {"coordinator": coordinator},
-            default_name_simple=lambda addr: f"Heater {addr}",
-        )
+    details = heater_platform_details_for_entry(
+        {"coordinator": coordinator},
+        default_name_simple=lambda addr: f"Heater {addr}",
     )
 
-    assert inventory == container.nodes
-    assert nodes_by_type["htr"][0].name == "Lounge"
-    assert addrs_by_type["htr"] == ["1"]
-    assert resolve_name("htr", "1") == "Lounge"
+    assert details.inventory is container
+    assert details.nodes_by_type["htr"][0].name == "Lounge"
+    assert details.addrs_by_type["htr"] == ["1"]
+    assert details.resolve_name("htr", "1") == "Lounge"
 
 
-def test_prepare_heater_platform_data_handles_missing_inventory(
+def test_heater_platform_details_for_entry_logs_missing_inventory(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     with caplog.at_level("ERROR"):
         with pytest.raises(ValueError):
-            prepare_heater_platform_data(
+            heater_platform_details_for_entry(
                 {"dev_id": "dev"},
                 default_name_simple=lambda addr: f"Heater {addr}",
             )
