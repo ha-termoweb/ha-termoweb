@@ -93,3 +93,17 @@ def test_backend_requires_create_override() -> None:
     client = DummyHttpClient()
     with pytest.raises(TypeError):
         InvalidBackend(brand="termoweb", client=client)
+
+
+def test_backend_module_exports_expected_classes() -> None:
+    """The backend module exposes the concrete backend implementations."""
+
+    backend_module = __import__(
+        Backend.__module__.rsplit(".", 1)[0], fromlist=["DucaheatBackend", "TermoWebBackend"]
+    )
+
+    assert getattr(backend_module, "DucaheatBackend") is DucaheatBackend
+    assert getattr(backend_module, "TermoWebBackend") is TermoWebBackend
+
+    with pytest.raises(AttributeError):
+        getattr(backend_module, "MissingThing")

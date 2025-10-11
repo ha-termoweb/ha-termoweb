@@ -15,6 +15,7 @@ from .heater import (
     BOOST_DURATION_OPTIONS,
     DEFAULT_BOOST_DURATION,
     HeaterNodeBase,
+    format_boost_duration_label,
     get_boost_runtime_minutes,
     heater_platform_details_for_entry,
     iter_boostable_heater_nodes,
@@ -79,7 +80,10 @@ class AccumulatorBoostDurationSelect(RestoreEntity, HeaterNodeBase, SelectEntity
     _attr_icon = "mdi:timer-cog-outline"
     _attr_translation_key = "accumulator_boost_duration"
 
-    _OPTION_MAP = {str(option): option for option in BOOST_DURATION_OPTIONS}
+    _OPTION_MAP = {
+        format_boost_duration_label(option): option
+        for option in BOOST_DURATION_OPTIONS
+    }
     _REVERSE_OPTION_MAP = {value: key for key, value in _OPTION_MAP.items()}
 
     def __init__(
@@ -164,8 +168,10 @@ class AccumulatorBoostDurationSelect(RestoreEntity, HeaterNodeBase, SelectEntity
         resolved = self._validate_minutes(minutes)
         option = self._REVERSE_OPTION_MAP.get(resolved)
         if option is None:
-            option = str(DEFAULT_BOOST_DURATION)
             resolved = DEFAULT_BOOST_DURATION
+            option = self._REVERSE_OPTION_MAP.get(resolved)
+            if option is None:
+                option = format_boost_duration_label(resolved)
         self._attr_current_option = option
         if persist and self.hass is not None:
             set_boost_runtime_minutes(

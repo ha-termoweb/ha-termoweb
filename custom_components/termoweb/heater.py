@@ -50,12 +50,57 @@ class BoostButtonMetadata:
     icon: str
 
 
-BOOST_BUTTON_METADATA: Final[tuple[BoostButtonMetadata, ...]] = (
-    BoostButtonMetadata(30, "30", "Boost 30 minutes", "mdi:timer-play"),
-    BoostButtonMetadata(60, "60", "Boost 60 minutes", "mdi:timer-play"),
-    BoostButtonMetadata(120, "120", "Boost 120 minutes", "mdi:timer-play"),
-    BoostButtonMetadata(None, "cancel", "Cancel boost", "mdi:timer-off"),
-)
+_BOOST_HOUR_ICON_SUFFIXES: Final[dict[int, str]] = {
+    1: "one",
+    2: "two",
+    3: "three",
+    4: "four",
+    5: "five",
+    6: "six",
+    7: "seven",
+    8: "eight",
+    9: "nine",
+    10: "ten",
+}
+
+
+def format_boost_duration_label(minutes: int) -> str:
+    """Return a human-readable label for boost durations."""
+
+    if minutes <= 0:
+        return "0 minutes"
+    if minutes % 60:
+        return f"{minutes} minutes"
+    hours = minutes // 60
+    suffix = "hour" if hours == 1 else "hours"
+    return f"{hours} {suffix}"
+
+
+def _build_boost_button_metadata() -> tuple[BoostButtonMetadata, ...]:
+    """Return the configured metadata describing boost helper buttons."""
+
+    entries: list[BoostButtonMetadata] = []
+    for hours in range(1, 11):
+        minutes = hours * 60
+        icon_suffix = _BOOST_HOUR_ICON_SUFFIXES.get(hours)
+        icon = (
+            f"mdi:clock-time-{icon_suffix}-outline"
+            if icon_suffix is not None
+            else "mdi:clock-outline"
+        )
+        entries.append(
+            BoostButtonMetadata(
+                minutes,
+                str(minutes),
+                f"Boost {format_boost_duration_label(minutes)}",
+                icon,
+            )
+        )
+    entries.append(BoostButtonMetadata(None, "cancel", "Cancel boost", "mdi:timer-off"))
+    return tuple(entries)
+
+
+BOOST_BUTTON_METADATA: Final[tuple[BoostButtonMetadata, ...]] = _build_boost_button_metadata()
 BOOST_DURATION_OPTIONS: Final[tuple[int, ...]] = tuple(
     option.minutes for option in BOOST_BUTTON_METADATA if option.minutes is not None
 )

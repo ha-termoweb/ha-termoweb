@@ -156,12 +156,7 @@ def _make_client(monkeypatch: pytest.MonkeyPatch) -> ducaheat_ws.DucaheatWSClien
         raw_nodes,
         build_node_inventory(raw_nodes),
     )
-    hass.data[ducaheat_ws.DOMAIN]["entry"].update(
-        {
-            "inventory": inventory,
-            "nodes": raw_nodes,
-        }
-    )
+    hass.data[ducaheat_ws.DOMAIN]["entry"]["inventory"] = inventory
     return client
 
 
@@ -1545,7 +1540,7 @@ async def test_namespace_ack_skips_unexpected_namespace(
 
     dispatch.assert_called_once()
     subscribe_mock.assert_awaited_once()
-    assert client._latest_nodes == {"htr": {"status": {"1": {}}}}
+    assert client._nodes_raw == {"htr": {"status": {"1": {}}}}
 
 
 @pytest.mark.asyncio
@@ -1614,13 +1609,17 @@ async def test_disconnect_closes_websocket(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_subscribe_feeds_reuses_cached_nodes(
+async def test_subscribe_feeds_stores_inventory_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Cached inventory should populate subscriptions when nodes are omitted."""
+    """Subscription state should persist the resolved inventory without nodes."""
 
     client = _make_client(monkeypatch)
-    client._latest_nodes = {"htr": {"samples": {"1": {}}}}
+    bucket = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
+    bucket.pop("inventory", None)
+    client._inventory = None
+
+    nodes_payload = {"htr": {"status": {"1": {}}}}
 
     emissions: list[tuple[str, str]] = []
     monkeypatch.setattr(
@@ -1629,12 +1628,14 @@ async def test_subscribe_feeds_reuses_cached_nodes(
         AsyncMock(side_effect=lambda evt, path: emissions.append((evt, path))),
     )
 
-    count = await client._subscribe_feeds(None)
+    count = await client._subscribe_feeds(nodes_payload)
 
     assert count == 2
     assert {path for _evt, path in emissions} == {"/htr/1/samples", "/htr/1/status"}
     bucket = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
-    assert bucket["nodes"] == client._latest_nodes
+    inventory = bucket.get("inventory")
+    assert isinstance(inventory, Inventory)
+    assert any(node.addr == "1" for node in getattr(inventory, "nodes", ()))
 
 
 @pytest.mark.asyncio
@@ -1709,16 +1710,11 @@ async def test_subscribe_feeds_handles_missing_targets(
     """When no subscription targets exist the helper should no-op."""
 
     client = _make_client(monkeypatch)
-    raw_nodes = {}
-    client.hass.data[ducaheat_ws.DOMAIN]["entry"].update(
-        {
-            "nodes": raw_nodes,
-            "inventory": Inventory(
-                "device",
-                raw_nodes,
-                build_node_inventory(raw_nodes),
-            ),
-        }
+    payload = {"nodes": []}
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"]["inventory"] = Inventory(
+        "device",
+        payload,
+        build_node_inventory(payload),
     )
     emit_mock = AsyncMock()
     monkeypatch.setattr(client, "_emit_sio", emit_mock)
@@ -1736,16 +1732,11 @@ async def test_subscribe_feeds_uses_coordinator_fallback(
     """Fallback coordinator addresses should be subscribed when snapshot empty."""
 
     client = _make_client(monkeypatch)
-    raw_nodes = {}
-    client.hass.data[ducaheat_ws.DOMAIN]["entry"].update(
-        {
-            "nodes": raw_nodes,
-            "inventory": Inventory(
-                "device",
-                raw_nodes,
-                build_node_inventory(raw_nodes),
-            ),
-        }
+    payload = {"nodes": []}
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"]["inventory"] = Inventory(
+        "device",
+        payload,
+        build_node_inventory(payload),
     )
     client._coordinator._addrs = lambda: ["5", " ", "5"]
 

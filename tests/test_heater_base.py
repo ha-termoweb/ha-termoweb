@@ -13,6 +13,7 @@ from conftest import _install_stubs, make_ws_payload
 _install_stubs()
 
 from custom_components.termoweb import heater as heater_module
+from custom_components.termoweb.heater import _resolve_inventory_metadata
 from custom_components.termoweb import identifiers as identifiers_module
 from custom_components.termoweb.inventory import (
     HeaterNode,
@@ -54,6 +55,30 @@ def test_build_heater_entity_unique_id_normalises_inputs() -> None:
 
 def _make_heater(coordinator: SimpleNamespace) -> HeaterNodeBase:
     return HeaterNodeBase(coordinator, "entry", "dev", "A", "Heater A")
+
+
+def test_resolve_inventory_metadata_requires_resolver_for_inventory() -> None:
+    """Inventory instances must include a resolver."""
+
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
+    inventory_nodes = build_node_inventory(raw_nodes)
+    inventory = Inventory("dev", raw_nodes, inventory_nodes)
+
+    with pytest.raises(ValueError):
+        _resolve_inventory_metadata(inventory, None)
+
+
+def test_resolve_inventory_metadata_requires_resolver_for_tuples() -> None:
+    """Inventory tuples must include a resolver."""
+
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
+    inventory_nodes = build_node_inventory(raw_nodes)
+    inventory = Inventory("dev", raw_nodes, inventory_nodes)
+    nodes_by_type = inventory.nodes_by_type
+    addrs_by_type, _ = inventory.heater_address_map
+
+    with pytest.raises(ValueError):
+        _resolve_inventory_metadata((nodes_by_type, addrs_by_type, None), None)
 
 
 def test_heater_hass_accessors_fall_back_to_coordinator() -> None:

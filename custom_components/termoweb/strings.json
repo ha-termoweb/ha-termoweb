@@ -32,8 +32,8 @@
       "force_refresh": {
         "name": "Force refresh"
       },
-      "accumulator_boost_minutes": {
-        "name": "Boost {minutes} minutes"
+      "accumulator_boost_hours": {
+        "name": "Boost {hours_label}"
       },
       "accumulator_boost_cancel": {
         "name": "Cancel boost"

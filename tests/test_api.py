@@ -617,6 +617,53 @@ def test_request_preview_logs_json_fallback(caplog) -> None:
     assert preview_logs
 
 
+def test_request_preview_truncates_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    class StubLogger:
+        def __init__(self) -> None:
+            self.debug_calls: list[tuple[str, tuple[Any, ...]]] = []
+
+        def debug(self, msg: str, *args: Any) -> None:
+            self.debug_calls.append((msg, args))
+
+    stub_logger = StubLogger()
+    monkeypatch.setattr(api, "_LOGGER", stub_logger)
+    monkeypatch.setattr(api, "API_LOG_PREVIEW", True)
+
+    long_body = "Bearer secret-token " + ("0123456789" * 30)
+
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(
+                200,
+                {"ok": True},
+                headers={"Content-Type": "text/plain"},
+                text_data=long_body,
+            )
+        )
+
+        client = RESTClient(session, "user", "pass")
+        result = await client._request("GET", "/api/preview", headers={})
+        assert result == long_body
+
+    asyncio.run(_run())
+
+    preview_call = next(
+        (
+            call
+            for call in stub_logger.debug_calls
+            if "body[0:200]" in call[0]
+        ),
+        None,
+    )
+    assert preview_call is not None, "Expected preview log entry"
+    snippet = preview_call[1][-1]
+    assert isinstance(snippet, str)
+    assert len(snippet) == 200
+    assert snippet.startswith("Bearer ***")
+    assert "secret-token" not in snippet
+
+
 def test_api_base_property_returns_sanitized() -> None:
     session = FakeSession()
     client = RESTClient(session, "user", "pw", api_base="https://api.example.com/")
