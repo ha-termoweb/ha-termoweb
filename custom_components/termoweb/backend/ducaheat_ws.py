@@ -9,6 +9,7 @@ from copy import deepcopy
 import gzip
 import json
 import logging
+import math
 import random
 import string
 import time
@@ -51,6 +52,13 @@ from custom_components.termoweb.inventory import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+_PAYLOAD_WINDOW_DEFAULT = 240.0
+_PAYLOAD_WINDOW_MIN = 30.0
+_PAYLOAD_WINDOW_MAX = 900.0
+_PAYLOAD_WINDOW_MARGIN_RATIO = 0.25
+_PAYLOAD_WINDOW_MARGIN_FLOOR = 15.0
+_CADENCE_KEYS = ("lease_seconds", "cadence_seconds", "poll_seconds")
 
 
 def _rand_t() -> str:
@@ -172,11 +180,11 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._status: str = "stopped"
         self._healthy_since: float | None = None
         self._last_event_at: float | None = None
-        self._payload_stale_after = 240.0
-        tracker = self._ws_health_tracker()
-        if tracker.set_payload_window(self._payload_stale_after):
-            state = self._ws_state_bucket()
-            state["payload_stale"] = tracker.payload_stale
+        self._default_payload_window = _PAYLOAD_WINDOW_DEFAULT
+        self._payload_stale_after = self._default_payload_window
+        self._payload_window_hint: float | None = None
+        self._payload_window_source: str = "default"
+        self._reset_payload_window(source="default")
 
     @property
     def _ws_health(self) -> WsHealthTracker:
@@ -1058,6 +1066,146 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             raw_section[addr] = deepcopy(body)
         return True
 
+    def _normalise_cadence_value(self, value: Any) -> float | None:
+        """Return a positive cadence hint in seconds."""
+
+        if value is None:
+            return None
+        try:
+            candidate = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(candidate) or candidate <= 0:
+            return None
+        return candidate
+
+    def _extract_cadence_candidates(self, payload: Mapping[str, Any]) -> list[float]:
+        """Return cadence hints discovered in a mapping payload."""
+
+        values: list[float] = []
+        stack: list[Mapping[str, Any]] = [payload]
+        seen: set[int] = set()
+        while stack:
+            current = stack.pop()
+            if not isinstance(current, Mapping):
+                continue
+            obj_id = id(current)
+            if obj_id in seen:
+                continue
+            seen.add(obj_id)
+            for key in _CADENCE_KEYS:
+                if key not in current:
+                    continue
+                candidate = self._normalise_cadence_value(current.get(key))
+                if candidate is not None:
+                    values.append(candidate)
+            for nested in current.values():
+                if isinstance(nested, Mapping):
+                    stack.append(nested)
+        return values
+
+    def _update_payload_window_from_mapping(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        source: str,
+    ) -> None:
+        """Adjust the payload stale window based on cadence hints."""
+
+        candidates = self._extract_cadence_candidates(payload)
+        if candidates:
+            self._apply_payload_window_hint(source=source, candidates=candidates)
+
+    def _apply_payload_window_hint(
+        self,
+        *,
+        source: str,
+        lease_seconds: Any | None = None,
+        candidates: Iterable[Any] | None = None,
+    ) -> None:
+        """Update the payload window using cadence metadata."""
+
+        values: list[float] = []
+        lease_value = self._normalise_cadence_value(lease_seconds)
+        if lease_value is not None:
+            values.append(lease_value)
+        if candidates is not None:
+            for candidate in candidates:
+                normalised = self._normalise_cadence_value(candidate)
+                if normalised is not None:
+                    values.append(normalised)
+        if not values:
+            return
+
+        hint = max(values)
+        margin = max(
+            hint * _PAYLOAD_WINDOW_MARGIN_RATIO,
+            _PAYLOAD_WINDOW_MARGIN_FLOOR,
+        )
+        window = hint + margin
+        window = max(_PAYLOAD_WINDOW_MIN, min(window, _PAYLOAD_WINDOW_MAX))
+        if math.isclose(self._payload_stale_after, window, rel_tol=1e-3):
+            return
+
+        previous = self._payload_stale_after
+        self._payload_stale_after = window
+        self._payload_window_hint = hint
+        self._payload_window_source = source
+
+        tracker = self._ws_health_tracker()
+        staleness_changed = tracker.set_payload_window(window)
+
+        state = self._ws_state_bucket()
+        state["payload_stale_after"] = tracker.payload_stale_after
+        state["payload_window_hint"] = self._payload_window_hint
+        state["payload_window_source"] = self._payload_window_source
+        state["payload_stale"] = tracker.payload_stale
+
+        _LOGGER.debug(
+            "WS (ducaheat): payload stale window %.1f->%.1f s (hint=%.1f s, source=%s)",
+            previous,
+            window,
+            hint,
+            source,
+        )
+
+        if staleness_changed:
+            self._notify_ws_status(
+                tracker,
+                reason="payload_window_update",
+                payload_changed=True,
+            )
+
+    def _reset_payload_window(self, *, source: str) -> None:
+        """Reset the payload stale window to the default."""
+
+        previous = self._payload_stale_after
+        self._payload_stale_after = self._default_payload_window
+        self._payload_window_hint = None
+        self._payload_window_source = source
+        tracker = self._ws_health_tracker()
+        staleness_changed = tracker.set_payload_window(self._payload_stale_after)
+
+        state = self._ws_state_bucket()
+        state["payload_stale_after"] = tracker.payload_stale_after
+        state["payload_window_hint"] = self._payload_window_hint
+        state["payload_window_source"] = self._payload_window_source
+        state["payload_stale"] = tracker.payload_stale
+
+        if not math.isclose(previous, self._payload_stale_after, rel_tol=1e-3):
+            _LOGGER.debug(
+                "WS (ducaheat): payload stale window reset to %.1f s (source=%s)",
+                self._payload_stale_after,
+                source,
+            )
+
+        if staleness_changed:
+            self._notify_ws_status(
+                tracker,
+                reason="payload_window_reset",
+                payload_changed=True,
+            )
+
     def _dispatch_nodes(self, payload: dict[str, Any]) -> None:
         """Publish node updates with inventory-aware cache refresh."""
 
@@ -1169,6 +1317,12 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         if unknown_types:
             payload_copy["unknown_types"] = sorted(unknown_types)
 
+        if nodes_by_type_payload:
+            self._update_payload_window_from_mapping(
+                nodes_by_type_payload,
+                source="dispatch_nodes",
+            )
+
         self._mark_ws_payload(
             timestamp=time.time(),
             stale_after=self._payload_stale_after,
@@ -1189,8 +1343,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             else:
                 target[key] = deepcopy(value)
 
-    @staticmethod
-    def _collect_sample_updates(nodes: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    def _collect_sample_updates(self, nodes: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
         """Extract heater sample updates from a websocket payload."""
 
         updates: dict[str, dict[str, Any]] = {}
@@ -1206,12 +1359,23 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 if not normalised_addr:
                     continue
                 bucket[normalised_addr] = payload
+            sample_lease = samples.get("lease_seconds") if isinstance(samples, Mapping) else None
+            if sample_lease is not None:
+                self._apply_payload_window_hint(
+                    source="sample_section",
+                    lease_seconds=sample_lease,
+                )
             lease_seconds = type_payload.get("lease_seconds")
             if bucket or lease_seconds is not None:
                 updates[node_type] = {
                     "samples": bucket,
                     "lease_seconds": lease_seconds,
                 }
+            if lease_seconds is not None:
+                self._apply_payload_window_hint(
+                    source="sample_updates",
+                    lease_seconds=lease_seconds,
+                )
         return updates
 
     def _translate_path_update(self, payload: Any) -> dict[str, Any] | None:
@@ -1293,6 +1457,11 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             if node_payload.get("lease_seconds") is not None:
                 has_payload = True
                 break
+        if updates:
+            self._update_payload_window_from_mapping(
+                updates,
+                source="forward_samples",
+            )
         if has_payload:
             self._mark_ws_payload(
                 timestamp=time.time(),
@@ -1444,6 +1613,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._pending_dev_data = False
         self._ping_interval = None
         self._ping_timeout = None
+        self._reset_payload_window(source="disconnect")
         tracker = self._ws_health
         tracker.last_payload_at = None
         tracker.last_heartbeat_at = None

@@ -27,6 +27,7 @@ class StubTracker:
     payload_stale: bool = False
     last_payload_at: float | None = None
     last_heartbeat_at: float | None = None
+    payload_stale_after: float | None = None
     mark_payload_calls: list[dict[str, Any]] = field(default_factory=list)
     mark_heartbeat_calls: list[dict[str, Any]] = field(default_factory=list)
     refresh_calls: list[dict[str, Any]] = field(default_factory=list)
@@ -45,6 +46,8 @@ class StubTracker:
         self.last_payload_at = timestamp
         if timestamp is not None:
             self.last_heartbeat_at = timestamp
+        if stale_after is not None:
+            self.payload_stale_after = stale_after
         self.payload_stale = self.next_payload_stale
         return self.mark_payload_result
 
