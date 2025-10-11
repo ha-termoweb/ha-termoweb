@@ -611,16 +611,6 @@ def test_collect_update_addresses_skips_invalid() -> None:
     assert module.WebSocketClient._collect_update_addresses(nodes) == []
 
 
-def test_merge_nodes_combines_nested_payloads() -> None:
-    """The merge helper should combine nested dictionaries in-place."""
-
-    target = {"htr": {"1": {"temp": 20}, "2": None}}
-    module.WebSocketClient._merge_nodes(
-        target, {"htr": {"1": {"temp": 21}, "3": {"temp": 19}}}
-    )
-    assert target == {"htr": {"1": {"temp": 21}, "2": None, "3": {"temp": 19}}}
-
-
 def test_dispatch_nodes_updates_hass_and_coordinator(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -639,12 +629,15 @@ def test_dispatch_nodes_updates_hass_and_coordinator(
     update_args = client._coordinator.update_nodes.call_args.args  # type: ignore[attr-defined]
     assert update_args[0] is None
     assert isinstance(update_args[1], Inventory)
-    assert update_args[1].payload is payload
+    assert update_args[1].payload is payload["nodes"]
     assert isinstance(addr_map, dict)
     assert addr_map.get("pmo") == ["3"]
     entry_state = client.hass.data[module.DOMAIN]["entry"]
     assert isinstance(entry_state.get("inventory"), Inventory)
     client._dispatcher_mock.assert_called()  # type: ignore[attr-defined]
+    _, _, dispatched_payload = client._dispatcher_mock.call_args[0]  # type: ignore[attr-defined]
+    assert "nodes" not in dispatched_payload
+    assert dispatched_payload["addr_map"].get("pmo") == ["3"]
 
     coordinator_data = getattr(client._coordinator, "data", {})  # type: ignore[attr-defined]
     if isinstance(coordinator_data, dict):
