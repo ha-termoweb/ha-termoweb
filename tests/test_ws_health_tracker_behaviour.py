@@ -69,8 +69,23 @@ def test_ws_health_tracker_rejects_invalid_stale_after() -> None:
     assert tracker.set_payload_window(15.0) is False
     assert tracker.payload_stale_after == 15.0
 
+    # Confirm reapplying the same positive value leaves the tracker unchanged.
+    assert tracker.set_payload_window(15.0) is False
+    assert tracker.payload_stale_after == 15.0
+
     assert tracker.set_payload_window("still-bad") is False
     assert tracker.payload_stale_after == 15.0
 
     assert tracker.mark_payload(timestamp=base + 1.0, stale_after=-3) is False
     assert tracker.payload_stale_after == 15.0
+
+
+def test_ws_health_tracker_future_healthy_since() -> None:
+    """Healthy minutes should not go negative when the transition is in the future."""
+
+    tracker = WsHealthTracker("dev01")
+    base = time.time()
+
+    tracker.update_status("healthy", healthy_since=base + 60.0, timestamp=base)
+
+    assert tracker.healthy_minutes(now=base) == 0
