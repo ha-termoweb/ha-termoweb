@@ -462,6 +462,8 @@ class DucaheatRESTClient(RESTClient):
                     and isinstance(target.get(key), dict)
                 ):
                     _merge(target[key], value)
+                elif isinstance(value, dict):
+                    target[key] = deepcopy(value)
                 else:
                     target[key] = value
 
