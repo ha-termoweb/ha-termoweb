@@ -76,8 +76,8 @@ class MockResponse:
         *,
         headers: dict[str, str] | None = None,
         text_data: str | Callable[[], str] | None = "",
-        text_exc: Exception | None = None,
-        json_exc: Exception | None = None,
+        text_exc: Exception | Callable[[], Exception] | None = None,
+        json_exc: Exception | Callable[[], Exception] | None = None,
     ) -> None:
         self.status = status
         self._json = json_data
@@ -87,6 +87,8 @@ class MockResponse:
         self.headers = headers or {}
         self.request_info = None
         self.history = ()
+        self.text_calls = 0
+        self.json_calls = 0
 
     async def __aenter__(self) -> MockResponse:
         return self
@@ -97,8 +99,10 @@ class MockResponse:
         return None
 
     async def text(self) -> str:
+        self.text_calls += 1
         if self._text_exc is not None:
-            raise self._text_exc
+            exc = self._text_exc() if callable(self._text_exc) else self._text_exc
+            raise exc
         value = self._text() if callable(self._text) else self._text
         if value is None:
             return ""
@@ -107,8 +111,10 @@ class MockResponse:
     async def json(
         self, content_type: str | None = None
     ) -> Any:  # pragma: no cover - simple pass-through
+        self.json_calls += 1
         if self._json_exc is not None:
-            raise self._json_exc
+            exc = self._json_exc() if callable(self._json_exc) else self._json_exc
+            raise exc
         return self._json() if callable(self._json) else self._json
 
 
@@ -118,6 +124,16 @@ class LatchedResponse:
 
     def get(self) -> Any:
         return self._value
+
+
+class _StubRequestInfo:
+    def __init__(self, method: str, url: str) -> None:
+        self.method = method
+        self._url = url
+
+    @property
+    def real_url(self) -> str:
+        return self._url
 
 
 class FakeSession:
@@ -154,6 +170,8 @@ class FakeSession:
         result = self._resolve(self._request_queue, "request")
         if isinstance(result, Exception):
             raise result
+        if hasattr(result, "request_info") and result.request_info is None:
+            result.request_info = _StubRequestInfo(method, url)
         return result
 
     def post(self, url: str, *args: Any, **kwargs: Any) -> Any:
@@ -161,6 +179,8 @@ class FakeSession:
         result = self._resolve(self._post_queue, "post")
         if isinstance(result, Exception):
             raise result
+        if hasattr(result, "request_info") and result.request_info is None:
+            result.request_info = _StubRequestInfo("POST", url)
         return result
 
 
