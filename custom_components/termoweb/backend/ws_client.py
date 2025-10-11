@@ -184,10 +184,18 @@ class WSStats:
 class HandshakeError(RuntimeError):
     """Raised when a websocket handshake fails."""
 
-    def __init__(self, status: int, url: str, detail: str) -> None:
+    def __init__(
+        self,
+        status: int,
+        url: str,
+        detail: str,
+        response_snippet: str | None = None,
+    ) -> None:
         super().__init__(f"handshake failed: status={status}, detail={detail}")
         self.status = status
         self.url = url
+        self.detail = detail
+        self.response_snippet = response_snippet if response_snippet is not None else detail
 
 
 class _WsLeaseMixin:
