@@ -181,7 +181,9 @@ def test_inventory_addresses_by_type_merges_forward_map(
     assert addresses["pmo"] == ["P1"]
 
 
-def test_update_nodes_builds_inventory_from_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_update_nodes_builds_inventory_from_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Ensuring inventory should rebuild containers from cached payload data."""
 
     client = types.SimpleNamespace(get_node_settings=AsyncMock())
@@ -1302,7 +1304,9 @@ def test_async_update_data_uses_cached_samples(monkeypatch: pytest.MonkeyPatch) 
 
         coord.data = {
             "dev": {
-                "nodes_by_type": {"htr": {"addrs": ["A"], "energy": {"A": 1.0}, "power": {}}},
+                "nodes_by_type": {
+                    "htr": {"addrs": ["A"], "energy": {"A": 1.0}, "power": {}}
+                },
                 "htr": {"addrs": ["A"], "energy": {"A": 1.0}, "power": {}},
             }
         }
@@ -1496,6 +1500,7 @@ def test_pmo_samples_scale_and_power() -> None:
 
     assert energy_bucket["M"] == pytest.approx(2.0)
     assert power_bucket["M"] == pytest.approx(1000.0)
+
 
 def test_heater_energy_samples_empty_on_api_error() -> None:
     async def _run() -> None:
@@ -1765,7 +1770,9 @@ def test_energy_state_coordinator_update_addresses_filters_duplicates() -> None:
 
     coord.update_addresses(["A", " ", "B", "A", "B ", ""])
 
-    expected_map, _ = coord_module._normalize_energy_payload(["A", " ", "B", "A", "B ", ""])
+    expected_map, _ = coord_module._normalize_energy_payload(
+        ["A", " ", "B", "A", "B ", ""]
+    )
     expected_map = {key: list(value) for key, value in expected_map.items()}
     assert coord._addresses_by_type == expected_map
     expected_flat = [
@@ -2031,6 +2038,44 @@ def test_ws_driven_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
         await asyncio.sleep(0)
 
         assert coord.data["1"]["htr"]["energy"]["A"] == pytest.approx(0.002)
+
+    asyncio.run(_run())
+
+
+def test_energy_poll_preserves_cached_samples() -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_node_samples = AsyncMock(
+            side_effect=[
+                [{"t": 1_000, "counter": 1_000}],
+                [{"t": 1_600, "counter": 2_000}],
+                [],
+            ]
+        )
+
+        hass = HomeAssistant()
+        coord = EnergyStateCoordinator(
+            hass,
+            client,
+            "dev",
+            ["A"],  # type: ignore[arg-type]
+        )
+
+        await coord.async_refresh()
+        await coord.async_refresh()
+
+        second_poll = coord.data["dev"]["htr"]
+        energy_after_second = second_poll["energy"]["A"]
+        power_after_second = second_poll["power"]["A"]
+
+        assert energy_after_second == pytest.approx(2.0)
+        assert power_after_second == pytest.approx(6_000.0)
+
+        await coord.async_refresh()
+
+        third_poll = coord.data["dev"]["htr"]
+        assert third_poll["energy"]["A"] == pytest.approx(energy_after_second)
+        assert third_poll["power"]["A"] == pytest.approx(power_after_second)
 
     asyncio.run(_run())
 

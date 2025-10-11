@@ -423,7 +423,11 @@ class StateCoordinator(
             node_type: [
                 normalized
                 for addr in addrs
-                if (normalized := normalize_node_addr(addr, use_default_when_falsey=True))
+                if (
+                    normalized := normalize_node_addr(
+                        addr, use_default_when_falsey=True
+                    )
+                )
             ]
             for node_type, addrs in heater_forward.items()
         }
@@ -431,7 +435,11 @@ class StateCoordinator(
             node_type: [
                 normalized
                 for addr in addrs
-                if (normalized := normalize_node_addr(addr, use_default_when_falsey=True))
+                if (
+                    normalized := normalize_node_addr(
+                        addr, use_default_when_falsey=True
+                    )
+                )
             ]
             for node_type, addrs in power_forward.items()
         }
@@ -786,7 +794,8 @@ class StateCoordinator(
             default_order = [
                 addr
                 for addr in (
-                    normalize_node_addr(candidate) for candidate in cache_map.get(node_type, [])
+                    normalize_node_addr(candidate)
+                    for candidate in cache_map.get(node_type, [])
                 )
                 if addr
             ]
@@ -1025,8 +1034,7 @@ class StateCoordinator(
                         bucket.append(normalized)
 
             settings_map = {
-                node_type: dict(bucket)
-                for node_type, bucket in prev_settings.items()
+                node_type: dict(bucket) for node_type, bucket in prev_settings.items()
             }
             settings_bucket = settings_map.setdefault(resolved_type, {})
             settings_bucket[addr] = payload
@@ -1262,6 +1270,55 @@ class EnergyStateCoordinator(
             return True
         return False
 
+    def _seed_cached_energy_and_power(
+        self, dev_id: str
+    ) -> tuple[dict[str, dict[str, float]], dict[str, dict[str, float]]]:
+        """Return energy and power buckets pre-populated from cached data."""
+
+        energy_by_type: dict[str, dict[str, float]] = {
+            node_type: {} for node_type in self._addresses_by_type
+        }
+        power_by_type: dict[str, dict[str, float]] = {
+            node_type: {} for node_type in self._addresses_by_type
+        }
+
+        cached_dev: Mapping[str, Any] | None = None
+        if isinstance(self.data, Mapping):
+            cached = self.data.get(dev_id)
+            if isinstance(cached, Mapping):
+                cached_dev = cached
+
+        if cached_dev:
+            for node_type, addrs_for_type in self._addresses_by_type.items():
+                prev_node = cached_dev.get(node_type)
+                if not isinstance(prev_node, Mapping):
+                    continue
+
+                prev_energy = prev_node.get("energy")
+                if isinstance(prev_energy, Mapping):
+                    energy_bucket = energy_by_type.setdefault(node_type, {})
+                    for addr in addrs_for_type:
+                        cached_energy = float_or_none(prev_energy.get(addr))
+                        if cached_energy is not None:
+                            energy_bucket.setdefault(addr, cached_energy)
+
+                prev_power = prev_node.get("power")
+                if isinstance(prev_power, Mapping):
+                    power_bucket = power_by_type.setdefault(node_type, {})
+                    for addr in addrs_for_type:
+                        cached_power = float_or_none(prev_power.get(addr))
+                        if cached_power is not None:
+                            power_bucket.setdefault(addr, cached_power)
+
+        for (node_type, addr), (_, kwh) in self._last.items():
+            addrs_for_type = self._addresses_by_type.get(node_type)
+            if not addrs_for_type or addr not in addrs_for_type:
+                continue
+            energy_bucket = energy_by_type.setdefault(node_type, {})
+            energy_bucket.setdefault(addr, kwh)
+
+        return energy_by_type, power_by_type
+
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Fetch recent heater energy samples and derive totals and power."""
         if self._should_skip_poll():
@@ -1272,8 +1329,7 @@ class EnergyStateCoordinator(
             return dict(existing)
         dev_id = self._dev_id
         try:
-            energy_by_type: dict[str, dict[str, float]] = {}
-            power_by_type: dict[str, dict[str, float]] = {}
+            energy_by_type, power_by_type = self._seed_cached_energy_and_power(dev_id)
 
             for node_type, addrs_for_type in self._addresses_by_type.items():
                 for addr in addrs_for_type:
