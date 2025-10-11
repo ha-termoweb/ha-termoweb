@@ -42,7 +42,14 @@ async def async_get_config_entry_diagnostics(
         if isinstance(candidate, Mapping):
             record = candidate
 
-    resolution = resolve_record_inventory(record)
+    nodes_payload: Any | None = None
+    if isinstance(record, Mapping):
+        if "nodes" in record:
+            nodes_payload = record.get("nodes")
+        elif "raw_nodes" in record:
+            nodes_payload = record.get("raw_nodes")
+
+    resolution = resolve_record_inventory(record, nodes_payload=nodes_payload)
     inventory_container = resolution.inventory
     inventory_source_label = resolution.source
     if inventory_container is not None:
@@ -108,7 +115,7 @@ async def async_get_config_entry_diagnostics(
         redacted = async_redact_data(diagnostics, SENSITIVE_FIELDS)
         if inspect.isawaitable(redacted):
             redacted = await redacted
-    except Exception:  # pragma: no cover - defensive  # noqa: BLE001
+    except Exception:  # pragma: no cover - defensive
         _LOGGER.exception(
             "Failed to redact diagnostics payload for %s", entry.entry_id
         )

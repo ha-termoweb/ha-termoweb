@@ -133,9 +133,7 @@ def test_diagnostics_uses_raw_nodes_fallback(
     }
 
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {
-        "node_inventory": list(build_node_inventory(raw_nodes)),
-    }
+    hass.data[DOMAIN][entry.entry_id] = {"nodes": raw_nodes}
 
     with caplog.at_level(logging.DEBUG):
         diagnostics = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
@@ -150,7 +148,7 @@ def test_diagnostics_uses_raw_nodes_fallback(
     assert "time_zone" not in diagnostics["home_assistant"]
 
     assert (
-        "Diagnostics inventory source for entry-two: node_inventory (raw=1, filtered=1)"
+        "Diagnostics inventory source for entry-two: raw_nodes (raw=1, filtered=1)"
         in caplog.text
     )
 
