@@ -456,10 +456,17 @@ def test_collect_update_addresses_extracts() -> None:
 def test_handshake_error_exposes_status_and_url() -> None:
     """Ensure ``HandshakeError`` forwards the status and URL details."""
 
-    error = base_ws.HandshakeError(470, "https://example/ws", "nope")
-    assert "handshake failed" in str(error)
+    error = base_ws.HandshakeError(
+        470,
+        "https://example/ws",
+        "nope",
+        response_snippet="snippet",
+    )
+    assert str(error) == "handshake failed: status=470, detail=nope"
     assert error.status == 470
     assert error.url == "https://example/ws"
+    assert error.detail == "nope"
+    assert error.response_snippet == "snippet"
 
 
 def test_dispatch_nodes_without_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -152,11 +152,17 @@ def _make_client(
 def test_handshake_error_exposes_fields() -> None:
     """The TermoWeb handshake error should record status, URL and body."""
 
-    error = module.HandshakeError(503, "https://example/ws", "body")
-    assert str(error) == "handshake failed (status=503)"
+    error = module.HandshakeError(
+        503,
+        "https://example/ws",
+        "body",
+        response_snippet="body",
+    )
+    assert str(error) == "handshake failed: status=503, detail=body"
     assert error.status == 503
     assert error.url == "https://example/ws"
-    assert error.body_snippet == "body"
+    assert error.detail == "body"
+    assert error.response_snippet == "body"
 
 
 def test_init_handles_socketio_http_attribute(monkeypatch: pytest.MonkeyPatch) -> None:

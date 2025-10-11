@@ -56,6 +56,7 @@ from custom_components.termoweb.inventory import (
 )
 
 from .ws_client import (
+    HandshakeError,
     WSStats,
     _prepare_nodes_dispatch,
     _WSStatusMixin,
@@ -70,20 +71,6 @@ _SENSITIVE_PLACEHOLDERS: Mapping[str, tuple[str, Callable[[str | None], str]]] =
     "dev_id": ("{dev_id}", mask_identifier),
     "sid": ("{sid}", mask_identifier),
 }
-
-
-class HandshakeError(RuntimeError):
-    """Capture context for failed websocket handshakes."""
-
-    def __init__(self, status: int, url: str, body_snippet: str) -> None:
-        """Initialise the error with the HTTP response details."""
-
-        super().__init__(f"handshake failed (status={status})")
-        self.status = status
-        self.url = url
-        self.body_snippet = body_snippet
-
-
 class WebSocketClient(_WSStatusMixin):
     """Unified websocket client wrapping ``socketio.AsyncClient``."""
 
@@ -1504,7 +1491,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 _LOGGER.debug(
                     "WS: handshake error url=%s body=%r",
                     self._sanitise_url(err.url),
-                    err.body_snippet,
+                    err.response_snippet,
                 )
             except Exception as err:
                 _LOGGER.info(
@@ -1559,21 +1546,33 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                     if resp.status == 401:
                         _LOGGER.info("WS: handshake 401; refreshing token")
                         await self._force_refresh_token()
-                        raise HandshakeError(resp.status, url, body)
+                        raise HandshakeError(
+                            resp.status,
+                            url,
+                            body,
+                            response_snippet=body,
+                        )
                     if resp.status != 200:
-                        raise HandshakeError(resp.status, url, body)
+                        raise HandshakeError(
+                            resp.status,
+                            url,
+                            body,
+                            response_snippet=body,
+                        )
         except TimeoutError as err:
             raise HandshakeError(599, url, "timeout") from err
         except aiohttp.ClientError as err:
             raise HandshakeError(598, url, str(err)) from err
         parts = body.strip().split(":")
         if len(parts) < 3:
-            raise HandshakeError(590, url, body[:120])
+            snippet = body[:120]
+            raise HandshakeError(590, url, snippet, response_snippet=snippet)
         sid = parts[0]
         try:
             hb_timeout = int(parts[1])
         except ValueError as err:
-            raise HandshakeError(591, url, body[:120]) from err
+            snippet = body[:120]
+            raise HandshakeError(591, url, snippet, response_snippet=snippet) from err
         return sid, hb_timeout
 
     async def _connect_ws(self, sid: str) -> None:
