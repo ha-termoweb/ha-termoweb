@@ -158,10 +158,24 @@ async def _async_register_diagnostics_when_ready(hass: HomeAssistant) -> None:
 
     _LOGGER.debug("Diagnostics registration listener started")
 
+    async def _async_import_diagnostics_module() -> ModuleType:
+        """Import the diagnostics module without blocking the event loop."""
+
+        executor = getattr(hass, "async_add_executor_job", None)
+        if callable(executor):
+            return await executor(
+                import_module, "custom_components.termoweb.diagnostics"
+            )
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, import_module, "custom_components.termoweb.diagnostics"
+        )
+
     async def _attempt_once(attempt: int) -> bool:
         _LOGGER.debug("Diagnostics registration attempt %s starting", attempt)
         try:
-            diagnostics_module = import_module("custom_components.termoweb.diagnostics")
+            diagnostics_module = await _async_import_diagnostics_module()
         except ImportError as err:
             _LOGGER.debug(
                 "Diagnostics module import failed on attempt %s: %s", attempt, err
