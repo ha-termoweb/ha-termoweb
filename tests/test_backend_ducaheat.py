@@ -418,6 +418,37 @@ def test_validate_boost_minutes_and_payload() -> None:
         build_acm_boost_payload(True, 0)
 
 
+def test_ducaheat_log_segmented_post_noop_when_not_debug(
+    ducaheat_rest_client: DucaheatRESTClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    logger_name = "custom_components.termoweb.backend.ducaheat"
+    caplog.set_level(logging.INFO, logger=logger_name)
+    caplog.clear()
+
+    ducaheat_rest_client._log_segmented_post(
+        path="https://example.invalid/path?token=abc",
+        node_type="acm",
+        dev_id="device@example.com",
+        addr="03",
+        payload={"mode": "auto"},
+    )
+
+    assert caplog.records == []
+
+    caplog.set_level(logging.DEBUG, logger=logger_name)
+    caplog.clear()
+
+    ducaheat_rest_client._log_segmented_post(
+        path="https://example.invalid/path?token=abc",
+        node_type="acm",
+        dev_id="device@example.com",
+        addr="03",
+        payload={"mode": "auto"},
+    )
+
+    assert "body_keys=('mode',)" in caplog.text
+
+
 def test_ducaheat_log_segmented_post_handles_non_mapping(
     ducaheat_rest_client: DucaheatRESTClient, caplog: pytest.LogCaptureFixture
 ) -> None:
