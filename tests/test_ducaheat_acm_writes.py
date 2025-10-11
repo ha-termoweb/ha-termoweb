@@ -64,18 +64,6 @@ def test_ducaheat_acm_mode_cancel_when_boost_active(
         assert harness.requests == [
             (
                 "POST",
-                "/api/v2/devs/dev/acm/9/status",
-                {
-                    "headers": {
-                        "Authorization": "Bearer token",
-                        "X-SerialId": "15",
-                        "User-Agent": get_brand_user_agent(BRAND_DUCAHEAT),
-                    },
-                    "json": {"boost": False},
-                },
-            ),
-            (
-                "POST",
                 "/api/v2/devs/dev/acm/9/mode",
                 {
                     "headers": {
@@ -84,6 +72,18 @@ def test_ducaheat_acm_mode_cancel_when_boost_active(
                         "User-Agent": get_brand_user_agent(BRAND_DUCAHEAT),
                     },
                     "json": {"mode": "auto"},
+                },
+            ),
+            (
+                "POST",
+                "/api/v2/devs/dev/acm/9/boost",
+                {
+                    "headers": {
+                        "Authorization": "Bearer token",
+                        "X-SerialId": "15",
+                        "User-Agent": get_brand_user_agent(BRAND_DUCAHEAT),
+                    },
+                    "json": {"boost": False},
                 },
             ),
         ]
@@ -370,15 +370,34 @@ async def test_ducaheat_set_acm_boost_state_non_dict_response(
         return "ok"
 
     rtc_mock = AsyncMock(return_value={"y": 2024, "n": 1, "d": 1, "h": 0, "m": 0, "s": 0})
+    select_mock = AsyncMock(side_effect=[{"select": True}, {"select": False}])
 
     monkeypatch.setattr(client, "_authed_headers", fake_headers)
     monkeypatch.setattr(client, "_post_acm_endpoint", fake_post)
+    monkeypatch.setattr(client, "_select_segmented_node", select_mock)
     monkeypatch.setattr(client, "get_rtc_time", rtc_mock)
 
     result = await client.set_acm_boost_state("dev", "5", boost=False)
     assert result["response"] == "ok"
     assert result["boost_state"]["boost_active"] is False
     rtc_mock.assert_awaited_once_with("dev")
+    assert select_mock.await_count == 2
+    first_call = select_mock.await_args_list[0]
+    assert first_call.kwargs == {
+        "dev_id": "dev",
+        "node_type": "acm",
+        "addr": "5",
+        "headers": {"Authorization": "Bearer"},
+        "select": True,
+    }
+    second_call = select_mock.await_args_list[1]
+    assert second_call.kwargs == {
+        "dev_id": "dev",
+        "node_type": "acm",
+        "addr": "5",
+        "headers": {"Authorization": "Bearer"},
+        "select": False,
+    }
 
 
 @pytest.mark.parametrize(
@@ -407,6 +426,9 @@ async def test_ducaheat_set_acm_boost_state_posts_expected_payload(
     post_mock = AsyncMock(return_value={"ok": True})
     monkeypatch.setattr(client, "_post_acm_endpoint", post_mock)
 
+    select_mock = AsyncMock(side_effect=[{"select": True}, {"select": False}])
+    monkeypatch.setattr(client, "_select_segmented_node", select_mock)
+
     base_rtc = {"y": 2024, "n": 5, "d": 10, "h": 12, "m": 0, "s": 0}
     rtc_mock = AsyncMock(return_value=base_rtc)
     monkeypatch.setattr(client, "get_rtc_time", rtc_mock)
@@ -416,7 +438,7 @@ async def test_ducaheat_set_acm_boost_state_posts_expected_payload(
     )
 
     post_mock.assert_awaited_once_with(
-        "/api/v2/devs/dev/acm/5/status",
+        "/api/v2/devs/dev/acm/5/boost",
         headers,
         expected_payload,
         dev_id="dev",
@@ -424,6 +446,13 @@ async def test_ducaheat_set_acm_boost_state_posts_expected_payload(
     )
     headers_mock.assert_awaited_once()
     rtc_mock.assert_awaited_once_with("dev")
+    assert select_mock.await_count == 2
+    first_call = select_mock.await_args_list[0]
+    assert first_call.kwargs["select"] is True
+    assert first_call.kwargs["headers"] == headers
+    second_call = select_mock.await_args_list[1]
+    assert second_call.kwargs["select"] is False
+    assert second_call.kwargs["headers"] == headers
 
     metadata = result["boost_state"]
     assert metadata["boost_active"] is boost
@@ -617,7 +646,7 @@ async def test_ducaheat_post_acm_endpoint_wraps_client_error(
 
     with pytest.raises(DucaheatRequestError) as ctx:
         await client._post_acm_endpoint(
-            "/api/v2/devs/dev/acm/7/status",
+            "/api/v2/devs/dev/acm/7/boost",
             {"Authorization": "Bearer"},
             {"boost": True},
             dev_id="dev",

@@ -1,6 +1,8 @@
 import asyncio
 import logging
+from collections.abc import Iterable, Mapping
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -264,8 +266,52 @@ async def test_ducaheat_post_acm_endpoint_rethrows_server_error(
 
     with pytest.raises(ClientResponseError):
         await ducaheat_rest_client._post_acm_endpoint(
-            "/api/v2/devs/dev/acm/3/status", {}, {"mode": "boost"}
+            "/api/v2/devs/dev/acm/3/boost", {}, {"mode": "boost"}
         )
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_set_acm_boost_state_claims_select(
+    ducaheat_rest_client: DucaheatRESTClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_post_segmented(
+        self,
+        path: str,
+        *,
+        headers: Mapping[str, str],
+        payload: Mapping[str, Any],
+        dev_id: str,
+        addr: str,
+        node_type: str,
+        ignore_statuses: Iterable[int] | None = None,
+    ) -> dict[str, object]:
+        calls.append((path, dict(payload)))
+        if path.endswith("/boost"):
+            return {"boost": True}
+        return {"select": payload.get("select")}
+
+    monkeypatch.setattr(
+        DucaheatRESTClient, "_post_segmented", fake_post_segmented, raising=False
+    )
+
+    rtc_mock = AsyncMock(
+        return_value={"y": 2024, "n": 1, "d": 1, "h": 0, "m": 0, "s": 0}
+    )
+    monkeypatch.setattr(ducaheat_rest_client, "get_rtc_time", rtc_mock)
+
+    result = await ducaheat_rest_client.set_acm_boost_state(
+        "dev", "3", boost=True, boost_time=15
+    )
+
+    assert result["boost"] is True
+    assert calls == [
+        ("/api/v2/devs/dev/acm/3/select", {"select": True}),
+        ("/api/v2/devs/dev/acm/3/boost", {"boost": True, "boost_time": 15}),
+        ("/api/v2/devs/dev/acm/3/select", {"select": False}),
+    ]
+    rtc_mock.assert_awaited_once_with("dev")
 
 
 @pytest.mark.asyncio
