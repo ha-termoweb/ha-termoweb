@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import math
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import logging
-from typing import Any, Callable, Iterable, Iterator, Mapping
+import math
+from typing import Any, Final
 
 from homeassistant.util import dt as dt_util
 
@@ -17,7 +18,6 @@ from .inventory import (
     normalize_node_addr,
     normalize_node_type,
 )
-
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -294,4 +294,7 @@ def iter_inventory_heater_metadata(
                 node=node,
                 supports_boost=supports_boost(node),
             )
+
+ALLOWED_BOOST_MINUTES: Final[tuple[int, ...]] = tuple(range(60, 601, 60))
+"""Valid boost durations (in minutes) supported by TermoWeb heaters."""
 
