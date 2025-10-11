@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import gzip
-from types import ModuleType, SimpleNamespace
+from types import MappingProxyType, ModuleType, SimpleNamespace
 from typing import Any, Mapping
 from urllib.parse import parse_qsl, urlsplit
 from unittest.mock import AsyncMock, MagicMock
@@ -336,6 +336,42 @@ def test_forward_ws_sample_updates_skips_invalid_sections(
     handler.assert_not_called()
 
 
+def test_forward_ws_sample_updates_skips_non_mapping_samples() -> None:
+    """Sample sections that are not mappings should be skipped."""
+
+    handler = MagicMock()
+    hass = SimpleNamespace(
+        data={
+            base_ws.DOMAIN: {
+                "entry": {
+                    "energy_coordinator": SimpleNamespace(handle_ws_samples=handler),
+                    "inventory": Inventory("dev", {}, []),
+                }
+            }
+        }
+    )
+
+    class WeirdMapping(dict):
+        def get(self, key: Any, default: Any | None = None) -> Any:
+            if key == "samples":
+                return {"7": {"power": 1}}
+            return super().get(key, default)
+
+        def __getitem__(self, key: Any) -> Any:
+            if key == "samples":
+                return ["invalid"]
+            return super().__getitem__(key)
+
+    base_ws.forward_ws_sample_updates(
+        hass,
+        "entry",
+        "dev",
+        {"htr": WeirdMapping({"samples": None, "lease_seconds": 30})},
+    )
+
+    handler.assert_not_called()
+
+
 def test_forward_ws_sample_updates_inventory_validation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -646,6 +682,226 @@ def test_prepare_nodes_dispatch_uses_inventory(monkeypatch: pytest.MonkeyPatch) 
 
     assert context.inventory is inventory
     coordinator.update_nodes.assert_called_once_with(None, inventory)
+
+
+def test_prepare_nodes_dispatch_resolves_record_dev_id_and_coordinator_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Record dev IDs and coordinator inventory should be applied."""
+
+    monkeypatch.setattr(
+        base_ws,
+        "addresses_by_node_type",
+        lambda nodes, **_: ({}, set()),
+    )
+    resolve_calls: list[tuple[Mapping[str, Any] | None, str | None, Any]] = []
+
+    def fake_resolve(
+        record_map: Mapping[str, Any] | None,
+        *,
+        dev_id: str | None = None,
+        nodes_payload: Any | None = None,
+        **_: Any,
+    ) -> Any:
+        resolve_calls.append((record_map, dev_id, nodes_payload))
+        return SimpleNamespace(inventory=None, source="fallback", raw_count=0, filtered_count=0)
+
+    monkeypatch.setattr(base_ws, "resolve_record_inventory", fake_resolve)
+
+    hass_str = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {"dev_id": "raw"}}})
+    coordinator_str = SimpleNamespace(update_nodes=MagicMock())
+    context_str = base_ws._prepare_nodes_dispatch(
+        hass_str,
+        entry_id="entry",
+        coordinator=coordinator_str,
+        raw_nodes={},
+    )
+    assert context_str.inventory.dev_id == "raw"
+
+    inventory = Inventory("dev", {}, [])
+    hass_numeric_record: dict[str, Any] = {"dev_id": 99}
+    hass_numeric = SimpleNamespace(data={base_ws.DOMAIN: {"entry": hass_numeric_record}})
+    coordinator_numeric = SimpleNamespace(update_nodes=MagicMock(), inventory=inventory)
+    context_numeric = base_ws._prepare_nodes_dispatch(
+        hass_numeric,
+        entry_id="entry",
+        coordinator=coordinator_numeric,
+        raw_nodes={"nodes": []},
+    )
+
+    assert context_numeric.inventory is inventory
+    assert hass_numeric_record["inventory"] is inventory
+    update_args = coordinator_numeric.update_nodes.call_args.args
+    assert update_args[0] is None
+    assert update_args[1] is inventory
+    assert resolve_calls[0] == (hass_str.data[base_ws.DOMAIN]["entry"], "raw", {})
+    assert len(resolve_calls) == 1
+
+
+def test_ws_status_tracker_applies_default_cadence_hint() -> None:
+    """Creating a tracker should immediately apply the cadence hint."""
+
+    class Dummy(base_ws._WSStatusMixin):
+        def __init__(self) -> None:
+            self.hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
+            self.entry_id = "entry"
+            self.dev_id = "dev"
+            self._apply_payload_window_hint = MagicMock()
+
+    dummy = Dummy()
+    tracker = dummy._ws_health_tracker()
+
+    assert isinstance(tracker, base_ws.WsHealthTracker)
+    dummy._apply_payload_window_hint.assert_called_once_with(
+        source="cadence",
+        lease_seconds=120,
+        candidates=[30, 75, "90"],
+    )
+
+
+def test_ws_status_tracker_processes_pending_cadence_hint() -> None:
+    """Deferred cadence hints should execute when suppression is active."""
+
+    class Dummy(base_ws._WSStatusMixin):
+        def __init__(self) -> None:
+            self.hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
+            self.entry_id = "entry"
+            self.dev_id = "dev"
+            self._apply_payload_window_hint = MagicMock()
+            self._suppress_default_cadence_hint = True
+            self._pending_default_cadence_hint = True
+
+    dummy = Dummy()
+    dummy._ws_health_tracker()
+
+    dummy._apply_payload_window_hint.assert_called_once()
+    assert dummy._pending_default_cadence_hint is False
+
+
+def test_ws_common_ensure_type_bucket_handles_invalid_inputs() -> None:
+    """Ensure type bucket helper should guard against invalid structures."""
+
+    class Dummy(base_ws._WSCommon):
+        def __init__(self) -> None:
+            self.hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
+            self.entry_id = "entry"
+            self.dev_id = "dev"
+            self._coordinator = SimpleNamespace()
+            base_ws._WSCommon.__init__(self, inventory=None)
+
+    dummy = Dummy()
+    assert dummy._ensure_type_bucket([], "htr") == {}
+    assert dummy._ensure_type_bucket({}, "", dev_map=None) == {}
+
+    bucket = dummy._ensure_type_bucket({}, "htr", dev_map=None)
+    assert bucket["addrs"] == []
+    assert bucket["settings"] == {}
+    assert bucket["samples"] == {}
+    assert bucket["status"] == {}
+    assert bucket["advanced"] == {}
+
+
+def test_ws_common_ensure_type_bucket_populates_dev_map() -> None:
+    """Ensure type bucket helper should normalise buckets and dev maps."""
+
+    class Dummy(base_ws._WSCommon):
+        def __init__(self) -> None:
+            self.hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
+            self.entry_id = "entry"
+            self.dev_id = "dev"
+            self._coordinator = SimpleNamespace()
+            base_ws._WSCommon.__init__(self, inventory=None)
+
+    dummy = Dummy()
+    nodes_by_type = {
+        "htr": MappingProxyType(
+            {
+                "addrs": ("1",),
+                "settings": MappingProxyType({"mode": "auto"}),
+                "samples": {"temp": 20},
+                "status": MappingProxyType({"on": True}),
+            }
+        )
+    }
+    dev_map = {
+        "settings": MappingProxyType({}),
+        "nodes_by_type": MappingProxyType({}),
+    }
+
+    bucket = dummy._ensure_type_bucket(nodes_by_type, "htr", dev_map=dev_map)
+    assert bucket["addrs"] == ["1"]
+    assert bucket["samples"] == {"temp": 20}
+    assert bucket["settings"] == {"mode": "auto"}
+    assert bucket["advanced"] == {}
+    assert dev_map["addresses_by_type"]["htr"] == []
+    assert dev_map["settings"]["htr"] == {}
+    assert dev_map["nodes_by_type"]["htr"] is bucket
+
+    dev_map_second = {
+        "addresses_by_type": MappingProxyType({"htr": ("2",)}),
+        "settings": {"htr": {"existing": 1}},
+        "nodes_by_type": {},
+    }
+    bucket_again = dummy._ensure_type_bucket({"htr": bucket}, "htr", dev_map=dev_map_second)
+    assert bucket_again is bucket
+    assert dev_map_second["addresses_by_type"]["htr"] == ["2"]
+    assert dev_map_second["nodes_by_type"]["htr"] is bucket
+
+    dev_map_third = {
+        "addresses_by_type": {"htr": ["3"]},
+        "settings": {},
+        "nodes_by_type": {},
+    }
+    dummy._ensure_type_bucket({"htr": bucket}, "htr", dev_map=dev_map_third)
+    assert dev_map_third["addresses_by_type"]["htr"] == ["3"]
+
+    dev_map_missing = {
+        "addresses_by_type": {},
+        "settings": MappingProxyType({"htr": MappingProxyType({"mode": "sched"})}),
+    }
+    bucket_missing = dummy._ensure_type_bucket({"htr": bucket}, "htr", dev_map=dev_map_missing)
+    assert bucket_missing is bucket
+    assert dev_map_missing["addresses_by_type"]["htr"] == []
+    assert dev_map_missing["settings"]["htr"] == {"mode": "sched"}
+    assert dev_map_missing["nodes_by_type"]["htr"] is bucket
+
+    dev_map_non_mapping_settings = {
+        "addresses_by_type": {},
+        "settings": None,
+        "nodes_by_type": {},
+    }
+    dummy._ensure_type_bucket({"htr": bucket}, "htr", dev_map=dev_map_non_mapping_settings)
+    assert dev_map_non_mapping_settings["settings"]["htr"] == {}
+
+
+def test_ws_common_apply_heater_addresses_normalizes_inputs() -> None:
+    """Heater address helper should normalise inputs and update energy state."""
+
+    energy_coordinator = SimpleNamespace(update_addresses=MagicMock())
+    hass_record: dict[str, Any] = {"energy_coordinator": energy_coordinator, "inventory": None}
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": hass_record}})
+
+    class Dummy(base_ws._WSCommon):
+        def __init__(self) -> None:
+            self.hass = hass
+            self.entry_id = "entry"
+            self.dev_id = "dev"
+            self._coordinator = SimpleNamespace()
+            base_ws._WSCommon.__init__(self, inventory=None)
+
+    dummy = Dummy()
+    cleaned = dummy._apply_heater_addresses({"htr": "1", "pmo": "7"})
+    assert cleaned["htr"] == ["1"]
+    assert cleaned["pmo"] == ["7"]
+    energy_coordinator.update_addresses.assert_called_with(cleaned)
+
+    energy_coordinator.update_addresses.reset_mock()
+    cleaned_iterable = dummy._apply_heater_addresses(
+        {"htr": ["2", "2", "  "], "pmo": ["", "8", "8"]}
+    )
+    assert cleaned_iterable["htr"] == ["2"]
+    assert cleaned_iterable["pmo"] == ["8"]
+    energy_coordinator.update_addresses.assert_called_with(cleaned_iterable)
 
 
 @pytest.mark.asyncio
