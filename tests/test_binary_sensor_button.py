@@ -497,6 +497,44 @@ def test_accumulator_boost_button_triggers_service() -> None:
     asyncio.run(_run())
 
 
+def test_accumulator_boost_button_ignores_press_without_hass() -> None:
+    async def _run() -> None:
+        class AsyncCallStub:
+            def __init__(self) -> None:
+                self.called = False
+
+            async def __call__(self, *_args, **_kwargs) -> None:
+                self.called = True
+                raise AssertionError("async_call should not be awaited without hass")
+
+        async_call = AsyncCallStub()
+        coordinator = types.SimpleNamespace(
+            hass=types.SimpleNamespace(
+                services=types.SimpleNamespace(async_call=async_call)
+            ),
+            data={},
+        )
+
+        button = AccumulatorBoostButton(
+            coordinator,
+            "entry-guard",
+            "device-guard",
+            "8",
+            "Hallway",
+            "uid-guard",
+            minutes=45,
+            node_type="acm",
+        )
+
+        button.hass = None
+
+        await button.async_press()
+
+        assert async_call.called is False
+
+    asyncio.run(_run())
+
+
 def test_accumulator_boost_cancel_button_triggers_service_without_minutes() -> None:
     async def _run() -> None:
         hass = HomeAssistant()
