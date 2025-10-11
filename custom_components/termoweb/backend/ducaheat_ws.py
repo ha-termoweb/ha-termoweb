@@ -794,6 +794,99 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         snapshot.update(nodes_by_type)
         return snapshot
 
+    def _ensure_type_bucket(
+        self,
+        nodes_by_type: MutableMapping[str, Any],
+        node_type: str,
+        *,
+        dev_map: MutableMapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Return the node bucket for ``node_type`` with default sections."""
+
+        if not isinstance(nodes_by_type, MutableMapping):
+            return {}
+
+        normalized_type = normalize_node_type(node_type)
+        if not normalized_type:
+            return {}
+
+        existing = nodes_by_type.get(normalized_type)
+        if isinstance(existing, MutableMapping):
+            bucket = existing
+        elif isinstance(existing, Mapping):
+            bucket = dict(existing)
+            nodes_by_type[normalized_type] = bucket
+        else:
+            bucket = {}
+            nodes_by_type[normalized_type] = bucket
+
+        addrs = bucket.get("addrs")
+        if isinstance(addrs, Iterable) and not isinstance(addrs, (list, str, bytes)):
+            bucket["addrs"] = list(addrs)
+        elif not isinstance(addrs, list):
+            bucket.setdefault("addrs", [])
+
+        for section in ("settings", "samples", "status", "advanced"):
+            section_payload = bucket.get(section)
+            if isinstance(section_payload, MutableMapping):
+                continue
+            if isinstance(section_payload, Mapping):
+                bucket[section] = dict(section_payload)
+            else:
+                bucket[section] = {}
+
+        if isinstance(dev_map, MutableMapping):
+            addresses_section = dev_map.get("addresses_by_type")
+            if isinstance(addresses_section, MutableMapping):
+                addresses_map = addresses_section
+            elif isinstance(addresses_section, Mapping):
+                addresses_map = dict(addresses_section)
+                dev_map["addresses_by_type"] = addresses_map
+            else:
+                addresses_map = {}
+                dev_map["addresses_by_type"] = addresses_map
+
+            if normalized_type in HEATER_NODE_TYPES:
+                addresses = addresses_map.get(normalized_type)
+                if isinstance(addresses, list):
+                    pass
+                elif isinstance(addresses, Iterable) and not isinstance(
+                    addresses, (str, bytes)
+                ):
+                    addresses_map[normalized_type] = list(addresses)
+                else:
+                    addresses_map[normalized_type] = []
+
+            settings_section = dev_map.get("settings")
+            if isinstance(settings_section, MutableMapping):
+                settings_map = settings_section
+            elif isinstance(settings_section, Mapping):
+                settings_map = dict(settings_section)
+                dev_map["settings"] = settings_map
+            else:
+                settings_map = {}
+                dev_map["settings"] = settings_map
+
+            settings_bucket = settings_map.get(normalized_type)
+            if isinstance(settings_bucket, MutableMapping):
+                pass
+            elif isinstance(settings_bucket, Mapping):
+                settings_map[normalized_type] = dict(settings_bucket)
+            else:
+                settings_map[normalized_type] = {}
+
+            nodes_section = dev_map.get("nodes_by_type")
+            if isinstance(nodes_section, MutableMapping):
+                nodes_section.setdefault(normalized_type, bucket)
+            elif isinstance(nodes_section, Mapping):
+                nodes_map = dict(nodes_section)
+                nodes_map.setdefault(normalized_type, bucket)
+                dev_map["nodes_by_type"] = nodes_map
+            else:
+                dev_map["nodes_by_type"] = {normalized_type: bucket}
+
+        return bucket
+
     def _apply_heater_addresses(
         self,
         normalized_map: Mapping[Any, Iterable[Any]] | None,
