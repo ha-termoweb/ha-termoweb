@@ -193,6 +193,56 @@ async def test_ducaheat_rest_set_node_settings_routes_non_special(
 
 
 
+@pytest.mark.asyncio
+async def test_ducaheat_rest_set_htr_mode_uses_status_segment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure heater mode changes are sent via the /status segment."""
+
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+
+    async def fake_headers() -> dict[str, str]:
+        return {"Authorization": "Bearer token"}
+
+    monkeypatch.setattr(client, "authed_headers", fake_headers)
+
+    calls: list[tuple[str, Mapping[str, Any], str]] = []
+
+    async def fake_post_segmented(
+        path: str,
+        *,
+        headers: Mapping[str, str],
+        payload: Mapping[str, Any],
+        dev_id: str,
+        addr: str,
+        node_type: str,
+        ignore_statuses: Iterable[int] | None = None,
+    ) -> dict[str, Any]:
+        calls.append((path, dict(payload), node_type))
+        return {}
+
+    monkeypatch.setattr(client, "_post_segmented", fake_post_segmented)
+
+    result = await client.set_node_settings("dev", ("htr", "2"), mode="auto")
+
+    assert result == {"status": {}}
+
+    assert calls[0][0].endswith("/select")
+    assert calls[0][1] == {"select": True}
+    assert calls[0][2] == "htr"
+
+    status_calls = [call for call in calls if call[0].endswith("/status")]
+    assert status_calls == [
+        ("/api/v2/devs/dev/htr/2/status", {"mode": "auto"}, "htr")
+    ]
+
+    assert all(not path.endswith("/mode") for path, _, _ in calls)
+
+    assert calls[-1][0].endswith("/select")
+    assert calls[-1][1] == {"select": False}
+    assert calls[-1][2] == "htr"
+
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
