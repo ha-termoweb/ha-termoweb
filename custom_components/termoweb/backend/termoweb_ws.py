@@ -116,19 +116,16 @@ class WebSocketClient(_WSStatusMixin):
 
         is_ducaheat = getattr(api_client, "_is_ducaheat", False)
         brand = BRAND_DUCAHEAT if is_ducaheat else BRAND_TERMOWEB
-        self._user_agent = (
-            getattr(api_client, "user_agent", None)
-            or get_brand_user_agent(brand)
-        )
+        self._user_agent = getattr(
+            api_client, "user_agent", None
+        ) or get_brand_user_agent(brand)
         requested_with = getattr(api_client, "requested_with", None)
         if requested_with is None:
             requested_with = get_brand_requested_with(brand)
         self._requested_with = requested_with
 
         http_session = (
-            self._session
-            if isinstance(self._session, aiohttp.ClientSession)
-            else None
+            self._session if isinstance(self._session, aiohttp.ClientSession) else None
         )
         self._sio = socketio.AsyncClient(
             reconnection=False,
@@ -285,9 +282,14 @@ class WebSocketClient(_WSStatusMixin):
                     segments[-1] = placeholder
                     sanitised_path = "/".join(segments)
         return urlunsplit(
-            (parsed.scheme, parsed.netloc, sanitised_path, sanitised_query, parsed.fragment)
+            (
+                parsed.scheme,
+                parsed.netloc,
+                sanitised_path,
+                sanitised_query,
+                parsed.fragment,
+            )
         )
-
 
     # ------------------------------------------------------------------
     # Public control
@@ -604,7 +606,9 @@ class WebSocketClient(_WSStatusMixin):
             last_event = self._last_event_at or self._stats.last_event_ts
             if not last_event:
                 continue
-            idle_for = time.time() - last_event
+            now = time.time()
+            idle_for = now - last_event
+            self._refresh_ws_payload_state(now=now, reason="idle_monitor")
             if idle_for >= self._payload_idle_window:
                 _LOGGER.info("WS: idle for %.0fs; refreshing websocket lease", idle_for)
                 try:
@@ -647,6 +651,7 @@ class WebSocketClient(_WSStatusMixin):
             await self._subscribe_heater_samples()
             self._subscription_refresh_failed = False
             self._subscription_refresh_last_success = time.time()
+
     # ------------------------------------------------------------------
     # Payload handlers
     # ------------------------------------------------------------------
@@ -767,9 +772,7 @@ class WebSocketClient(_WSStatusMixin):
 
         section = relevant[section_idx] if len(relevant) > section_idx else None
         remainder = (
-            relevant[section_idx + 1 :]
-            if len(relevant) > section_idx + 1
-            else []
+            relevant[section_idx + 1 :] if len(relevant) > section_idx + 1 else []
         )
 
         target_section, nested_key = self._resolve_update_section(section)
@@ -853,6 +856,7 @@ class WebSocketClient(_WSStatusMixin):
             if not added and not node_bucket:
                 translated.pop(node_type, None)
         return translated
+
     @staticmethod
     def _collect_update_addresses(nodes: Mapping[str, Any]) -> list[tuple[str, str]]:
         """Return a sorted list of ``(node_type, addr)`` pairs in ``nodes``."""
@@ -928,6 +932,16 @@ class WebSocketClient(_WSStatusMixin):
             inventory=inventory,
         )
 
+        payload_copy = {
+            "dev_id": self.dev_id,
+            "node_type": None,
+            "nodes": deepcopy(snapshot_payload.get("nodes", raw_nodes_payload)),
+            "nodes_by_type": deepcopy(snapshot_payload.get("nodes_by_type", {})),
+        }
+        payload_copy.setdefault(
+            "addr_map",
+            {node_type: list(addrs) for node_type, addrs in addr_map.items()},
+        )
         if unknown_types:  # pragma: no cover - diagnostic payload
             payload_copy.setdefault("unknown_types", sorted(unknown_types))
 
@@ -1139,7 +1153,9 @@ class WebSocketClient(_WSStatusMixin):
                             updated_map["pmo"] = list(merged_addrs)
                             dev_map["addr_map"] = updated_map
 
-                if (pmo_addresses or "pmo" in nodes_by_type) and "pmo" not in cleaned_map:
+                if (
+                    pmo_addresses or "pmo" in nodes_by_type
+                ) and "pmo" not in cleaned_map:
                     bucket = self._ensure_type_bucket(dev_map, nodes_by_type, "pmo")
                     merged_addrs = _merge_addresses(bucket.get("addrs"), pmo_addresses)
                     bucket["addrs"] = merged_addrs
@@ -1169,7 +1185,11 @@ class WebSocketClient(_WSStatusMixin):
         """Return ordered ``(node_type, addr)`` heater sample subscriptions."""
 
         record_container = self.hass.data.get(DOMAIN, {})
-        record = record_container.get(self.entry_id) if isinstance(record_container, dict) else None
+        record = (
+            record_container.get(self.entry_id)
+            if isinstance(record_container, dict)
+            else None
+        )
         record_mapping: Mapping[str, Any] | None = (
             record if isinstance(record, Mapping) else None
         )
@@ -1193,6 +1213,9 @@ class WebSocketClient(_WSStatusMixin):
             resolution = resolve_record_inventory(
                 record_mapping,
                 dev_id=self.dev_id,
+                nodes_payload=record_mapping.get("nodes")
+                if isinstance(record_mapping, Mapping)
+                else None,
             )
             if resolution.inventory is not None:
                 inventory_container = _bind_inventory(resolution.inventory)
@@ -1236,7 +1259,9 @@ class WebSocketClient(_WSStatusMixin):
             inventory=inventory_container,
         )
 
-        other_types = sorted(node_type for node_type in normalized_map if node_type != "htr")
+        other_types = sorted(
+            node_type for node_type in normalized_map if node_type != "htr"
+        )
         order = ["htr", *other_types]
         return [
             (node_type, addr)
@@ -1267,7 +1292,7 @@ class WebSocketClient(_WSStatusMixin):
         self._cancel_idle_restart()
         self._stats.last_event_ts = now
         self._last_event_at = now
-        self._last_payload_at = now
+        self._mark_ws_payload(timestamp=now, stale_after=self._payload_idle_window)
         if paths:
             self._stats.events_total += 1
             if _LOGGER.isEnabledFor(logging.DEBUG):
@@ -1282,7 +1307,6 @@ class WebSocketClient(_WSStatusMixin):
             self._stats.events_total += 1
         state: dict[str, Any] = self._ws_state_bucket()
         state["last_event_at"] = now
-        state["last_payload_at"] = self._last_payload_at
         state["frames_total"] = self._stats.frames_total
         state["events_total"] = self._stats.events_total
         if self._healthy_since is None:
@@ -1294,6 +1318,7 @@ class WebSocketClient(_WSStatusMixin):
 
         if self._closing or self._idle_restart_pending:
             return
+        self._refresh_ws_payload_state(now=time.time(), reason="idle_restart")
         self._idle_restart_pending = True
         self._ws_state_bucket()["idle_restart_pending"] = True
         _LOGGER.warning(
@@ -1342,6 +1367,7 @@ class WebSocketClient(_WSStatusMixin):
         if isinstance(base, str) and base:
             return base.rstrip("/")
         return API_BASE
+
 
 # ----------------------------------------------------------------------
 # Legacy Socket.IO 0.9 client
@@ -1746,6 +1772,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             await self._send_text(
                 f"5::{self._namespace}:{json.dumps(payload, separators=(',', ':'))}"
             )
+
     async def _heartbeat_loop(self) -> None:
         """Send periodic heartbeat frames to keep the connection alive."""
 
@@ -1964,7 +1991,9 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 nodes_payload,
             )
         for node_type, addr in set(updated_addrs):
-            addr_str = _normalise_addr(addr) or (addr if isinstance(addr, str) else None)
+            addr_str = _normalise_addr(addr) or (
+                addr if isinstance(addr, str) else None
+            )
             addr_map = {node_type: [addr_str] if addr_str is not None else []}
             async_dispatcher_send(
                 self.hass,
@@ -1979,7 +2008,9 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 },
             )
         for node_type, addr in set(sample_addrs):
-            addr_str = _normalise_addr(addr) or (addr if isinstance(addr, str) else None)
+            addr_str = _normalise_addr(addr) or (
+                addr if isinstance(addr, str) else None
+            )
             addr_map = {node_type: [addr_str] if addr_str is not None else []}
             async_dispatcher_send(
                 self.hass,
@@ -2005,9 +2036,8 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         """Record payload batches and update the payload timestamp."""
 
         super()._mark_event(paths=paths, count_event=count_event)
-        self._last_payload_at = self._stats.last_event_ts or self._last_event_at
-        state = self._ws_state_bucket()
-        state["last_payload_at"] = self._last_payload_at
+        tracker = self._ws_health_tracker()
+        self._last_payload_at = tracker.last_payload_at
 
     def _update_legacy_section(
         self,
@@ -2033,7 +2063,9 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             and isinstance(value, MutableMapping)
         ):
             coordinator = getattr(self, "_coordinator", None)
-            apply_helper = getattr(coordinator, "_apply_accumulator_boost_metadata", None)
+            apply_helper = getattr(
+                coordinator, "_apply_accumulator_boost_metadata", None
+            )
             if callable(apply_helper):
                 now = None
                 estimate = getattr(coordinator, "_device_now_estimate", None)
@@ -2050,9 +2082,10 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                         exc_info=err,
                     )
         if section == "settings":
-            canonical_type = normalize_node_type(
-                node_type, use_default_when_falsey=True
-            ) or node_type
+            canonical_type = (
+                normalize_node_type(node_type, use_default_when_falsey=True)
+                or node_type
+            )
             if canonical_type:
                 settings_map: MutableMapping[str, Any] = dev_map.setdefault(
                     "settings", {}
@@ -2073,14 +2106,17 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 if not normalised_addr and isinstance(addr, str):
                     stripped = addr.strip()
                     normalised_addr = stripped or None
-                if not normalised_addr and addr is not None and not isinstance(addr, str):
+                if (
+                    not normalised_addr
+                    and addr is not None
+                    and not isinstance(addr, str)
+                ):
                     candidate = str(addr).strip()
                     normalised_addr = candidate or None
                 if normalised_addr:
                     existing_payload = settings_bucket.get(normalised_addr)
-                    if (
-                        isinstance(existing_payload, MutableMapping)
-                        and isinstance(value, Mapping)
+                    if isinstance(existing_payload, MutableMapping) and isinstance(
+                        value, Mapping
                     ):
                         existing_payload.update(value)
                         section_map[addr] = existing_payload
@@ -2201,6 +2237,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._stats.last_event_ts = now
         self._last_event_at = now
         self._last_heartbeat_at = now
+        self._mark_ws_heartbeat(timestamp=now)
 
     async def _idle_monitor(self) -> None:
         """Monitor payload idleness and restart stale websocket sessions."""
@@ -2217,6 +2254,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             idle_for: float | None = None
             if last_payload:
                 idle_for = now - last_payload
+                self._refresh_ws_payload_state(now=now, reason="idle_monitor")
                 if idle_for >= self._payload_idle_window:
                     _LOGGER.info(
                         "WS: no payloads for %.0f s; scheduling websocket restart",

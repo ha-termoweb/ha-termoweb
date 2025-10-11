@@ -28,6 +28,11 @@ except ImportError:  # pragma: no cover - tests provide minimal loader stub
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client
+
+try:  # pragma: no cover - optional helper on older Home Assistant cores
+    from homeassistant.helpers.event import async_call_later
+except ImportError:  # pragma: no cover - tests provide stubbed helpers
+    async_call_later = None  # type: ignore[assignment]
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 try:  # pragma: no cover - optional helper on older Home Assistant cores
@@ -392,9 +397,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         "config_entry": entry,
         "base_poll_interval": max(base_interval, MIN_POLL_INTERVAL),
         "stretched": False,
+        "poll_suspended": False,
+        "poll_resume_unsub": None,
         "ws_tasks": {},  # dev_id -> asyncio.Task
         "ws_clients": {},  # dev_id -> WS clients
         "ws_state": {},  # dev_id -> status attrs
+        "ws_trackers": {},  # dev_id -> WsHealthTracker
         "version": version,
         "brand": brand,
         "debug": debug_enabled,
@@ -434,79 +442,142 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         _LOGGER.info("WS: started read-only client for %s", dev_id)
 
     def _recalc_poll_interval() -> None:
-        """Stretch polling if all running WS clients report healthy; else restore."""
-        stretched = data["stretched"]
+        """Suspend REST polling when websocket trackers are healthy and fresh."""
+
         tasks: dict[str, asyncio.Task] = data["ws_tasks"]
-        state: dict[str, dict[str, Any]] = data["ws_state"]
+        trackers: dict[str, Any] = data.get("ws_trackers") or {}
+        base_interval = data["base_poll_interval"]
+        suspended = bool(data.get("poll_suspended"))
+
+        def _cancel_timer() -> None:
+            handle = data.get("poll_resume_unsub")
+            if callable(handle):
+                try:
+                    handle()
+                except Exception:  # pragma: no cover - defensive cancellation
+                    _LOGGER.debug(
+                        "WS: failed to cancel poll resume timer", exc_info=True
+                    )
+            data["poll_resume_unsub"] = None
 
         if not tasks:
-            if stretched:
-                coordinator.update_interval = timedelta(
-                    seconds=data["base_poll_interval"]
-                )
+            if suspended:
+                coordinator.update_interval = timedelta(seconds=base_interval)
+                data["poll_suspended"] = False
                 data["stretched"] = False
+                _cancel_timer()
+                _LOGGER.info(
+                    "WS: websocket clients idle; resuming REST polling at %ss",
+                    base_interval,
+                )
             return
 
-        min_healthy_minutes = 5
-        min_healthy_seconds = min_healthy_minutes * 60
+        now = time.time()
+        any_running = False
         all_healthy = True
-        now: float | None = None
+        fresh_payload = True
+        earliest_deadline: float | None = None
+
         for dev_id, task in tasks.items():
             if task.done():
                 all_healthy = False
-                break
-            s = state.get(dev_id) or {}
-            if s.get("status") != "healthy":
+                fresh_payload = False
+                continue
+            any_running = True
+            tracker = trackers.get(dev_id)
+            if tracker is None:
                 all_healthy = False
-                break
-
-            eligible = False
-            minutes_val: float | None
-            try:
-                minutes_raw = s.get("healthy_minutes")
-                minutes_val = float(minutes_raw) if minutes_raw is not None else None
-            except (TypeError, ValueError):
-                minutes_val = None
-
-            if minutes_val is not None:
-                eligible = minutes_val >= min_healthy_minutes
+                fresh_payload = False
+                continue
+            status = getattr(tracker, "status", None)
+            if status != "healthy":
+                all_healthy = False
+            payload_at = getattr(tracker, "last_payload_at", None)
+            if payload_at is None:
+                fresh_payload = False
             else:
+                is_stale = getattr(tracker, "is_payload_stale", None)
                 try:
-                    since_raw = s.get("healthy_since")
-                    since_val = float(since_raw) if since_raw is not None else None
-                except (TypeError, ValueError):
-                    since_val = None
+                    stale = (
+                        bool(is_stale(now=now))
+                        if callable(is_stale)
+                        else bool(getattr(tracker, "payload_stale", False))
+                    )
+                except TypeError:
+                    stale = bool(is_stale()) if callable(is_stale) else False
+                if stale:
+                    fresh_payload = False
+            deadline_func = getattr(tracker, "stale_deadline", None)
+            deadline: float | None = None
+            if callable(deadline_func):
+                try:
+                    deadline = deadline_func()
+                except TypeError:
+                    deadline = None
+            if isinstance(deadline, (int, float)):
+                if earliest_deadline is None or deadline < earliest_deadline:
+                    earliest_deadline = deadline
 
-                if since_val is not None:
-                    if now is None:
-                        now = time.time()
-                    if now >= since_val:
-                        eligible = (now - since_val) >= min_healthy_seconds
+        if not any_running:
+            if suspended:
+                coordinator.update_interval = timedelta(seconds=base_interval)
+                data["poll_suspended"] = False
+                data["stretched"] = False
+                _cancel_timer()
+                _LOGGER.info(
+                    "WS: websocket trackers stopped; resuming REST polling at %ss",
+                    base_interval,
+                )
+            return
 
-            if not eligible:
-                all_healthy = False
-                break
+        if all_healthy and fresh_payload:
+            if not suspended:
+                coordinator.update_interval = None
+                data["poll_suspended"] = True
+                data["stretched"] = True
+                _LOGGER.info(
+                    "WS: trackers healthy with fresh payloads; suspending REST polling",
+                )
+            if earliest_deadline is not None and async_call_later is not None:
+                delay = max(0.0, earliest_deadline - time.time())
+                _cancel_timer()
 
-        if all_healthy and not stretched:
-            coordinator.update_interval = timedelta(seconds=STRETCHED_POLL_INTERVAL)
-            data["stretched"] = True
+                def _resume_callback(_now: Any) -> None:
+                    data["poll_resume_unsub"] = None
+                    _recalc_poll_interval()
+
+                data["poll_resume_unsub"] = async_call_later(
+                    hass, delay, _resume_callback
+                )
+            else:
+                _cancel_timer()
+            return
+
+        if suspended:
+            coordinator.update_interval = timedelta(seconds=base_interval)
             _LOGGER.info(
-                "WS: healthy for ≥5 minutes; stretching REST polling to %ss",
-                STRETCHED_POLL_INTERVAL,
+                "WS: tracker unhealthy or payload stale; resuming REST polling at %ss",
+                base_interval,
             )
-        elif (not all_healthy) and stretched:
-            coordinator.update_interval = timedelta(seconds=data["base_poll_interval"])
-            data["stretched"] = False
-            _LOGGER.info(
-                "WS: no longer healthy; restoring REST polling to %ss",
-                data["base_poll_interval"],
-            )
+        data["poll_suspended"] = False
+        data["stretched"] = False
+        _cancel_timer()
 
     data["recalc_poll"] = _recalc_poll_interval
 
-    def _on_ws_status(_payload: dict) -> None:
-        """Recalculate polling intervals when websocket status changes."""
-        _recalc_poll_interval()
+    def _on_ws_status(payload: dict[str, Any]) -> None:
+        """Recalculate polling intervals when websocket state changes."""
+
+        should_recalc = False
+        if isinstance(payload, Mapping):
+            if payload.get("health_changed") or payload.get("payload_changed"):
+                should_recalc = True
+            elif payload.get("reason") == "status":
+                should_recalc = True
+        else:
+            should_recalc = True
+        if should_recalc:
+            _recalc_poll_interval()
 
     unsub = async_dispatcher_connect(
         hass, signal_ws_status(entry.entry_id), _on_ws_status
@@ -711,6 +782,14 @@ async def _async_shutdown_entry(rec: MutableMapping[str, Any]) -> None:
         except Exception:  # pragma: no cover - defensive logging
             _LOGGER.exception("Failed to unsubscribe websocket status listener")
         rec["unsub_ws_status"] = None
+
+    poll_timer = rec.get("poll_resume_unsub")
+    if callable(poll_timer):
+        try:
+            poll_timer()
+        except Exception:  # pragma: no cover - defensive logging
+            _LOGGER.exception("Failed to cancel suspended poll resume timer")
+    rec["poll_resume_unsub"] = None
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
