@@ -780,12 +780,10 @@ def test_apply_nodes_payload_debug_branches(
     client._collect_update_addresses = MagicMock(
         side_effect=[[("htr", "1")], [], [], []]
     )
-    client._merge_nodes = MagicMock()
     client._client.normalise_ws_nodes = lambda nodes: nodes
 
     client._apply_nodes_payload({}, merge=False, event="dev_data")
 
-    client._nodes_raw = {"htr": {}}
     nodes_payload = {
         "nodes": {
             1: {"samples": {"1": {"power": 5}}},
@@ -900,7 +898,7 @@ def test_apply_nodes_payload_merges_and_dispatches(monkeypatch: pytest.MonkeyPat
 
     snapshot_payload = {"nodes": {"htr": {"settings": {"1": {"temp": 20}}}}}
     client._apply_nodes_payload(snapshot_payload, merge=False, event="dev_data")
-    assert client._nodes["nodes"]["htr"]
+    client._dispatch_nodes.assert_called_with(snapshot_payload["nodes"])
 
     update_payload = {"path": "/api/devs/device/htr/1/samples", "body": {"power": 5}}
     client._apply_nodes_payload(update_payload, merge=True, event="update")
@@ -930,16 +928,6 @@ def test_collect_update_addresses_skips_non_mapping_sections() -> None:
     assert addresses == [("htr", "1")]
 
 
-def test_merge_nodes_handles_scalars() -> None:
-    """_merge_nodes should overwrite non-dict values."""
-
-    target = {"htr": {"settings": {"1": {"temp": 20}}}}
-    module.WebSocketClient._merge_nodes(target, {"htr": {"status": "ok"}})
-    module.WebSocketClient._merge_nodes(target, {"flag": True})
-    assert target["htr"]["status"] == "ok"
-    assert target["flag"] is True
-
-
 def test_dispatch_nodes_with_inventory(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
     """dispatch_nodes should support pre-existing inventory records."""
 
@@ -967,7 +955,13 @@ def test_dispatch_nodes_with_inventory(monkeypatch: pytest.MonkeyPatch, caplog: 
     assert not update_kwargs
     assert update_args[0] is None
     assert isinstance(update_args[1], Inventory)
-    dispatcher.assert_called()
+    dispatcher.assert_called_once()
+    _, _, payload = dispatcher.call_args[0]
+    assert "nodes" not in payload
+    assert payload["addr_map"] == {"htr": ["1"]}
+    nodes_by_type = payload.get("nodes_by_type")
+    assert isinstance(nodes_by_type, Mapping)
+    assert nodes_by_type["htr"]["addrs"] == ["1"]
     dev_map = client._coordinator.data["device"]
     assert dev_map["addresses_by_type"]["htr"] == ["1"]
 
@@ -990,7 +984,11 @@ def test_dispatch_nodes_handles_unknown_types(monkeypatch: pytest.MonkeyPatch) -
     assert not update_kwargs
     assert update_args[0] is None
     assert isinstance(update_args[1], Inventory)
-    dispatcher.assert_called()
+    dispatcher.assert_called_once()
+    _, _, payload = dispatcher.call_args[0]
+    assert "nodes" not in payload
+    assert payload["addr_map"] == {"foo": []}
+    assert payload.get("unknown_types") == ["unknown"]
 
 
 def test_dispatch_nodes_uses_inventory_payload(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1039,7 +1037,6 @@ def test_dispatch_nodes_uses_inventory_payload(monkeypatch: pytest.MonkeyPatch) 
     assert not update_kwargs
     assert update_args == ({"nodes": None}, inventory)
     dispatcher.assert_called_once()
-    assert inventory.payload_calls >= 1
 
 
 def test_handle_event_includes_addr_map(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1194,8 +1191,6 @@ def test_ensure_type_bucket_and_build_snapshot(monkeypatch: pytest.MonkeyPatch) 
     assert "settings" in bucket and dev_map["htr"] is bucket
     bucket_again = client._ensure_type_bucket(dev_map, nodes_by_type, "htr")
     assert bucket_again is bucket
-    snapshot = module.WebSocketClient._build_nodes_snapshot({"htr": {"settings": {"1": {}}}})
-    assert "nodes" in snapshot and "nodes_by_type" in snapshot
 
 
 def test_apply_heater_addresses_updates_coordinator(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1294,10 +1289,10 @@ def test_heater_sample_subscription_targets(monkeypatch: pytest.MonkeyPatch) -> 
 
     client, _sio, _ = _make_client(monkeypatch)
     record = client.hass.data[module.DOMAIN]["entry"]
-    record["nodes"] = {"nodes": [{"type": "htr", "addr": "1"}]}
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
     node_inventory = module.build_node_inventory(raw_nodes)
     inventory = Inventory(client.dev_id, raw_nodes, node_inventory)
+    record["inventory"] = inventory
 
     def fake_resolve(
         record_map: Mapping[str, Any] | None,
@@ -1307,7 +1302,7 @@ def test_heater_sample_subscription_targets(monkeypatch: pytest.MonkeyPatch) -> 
     ) -> Any:
         assert record_map is record
         assert dev_id == client.dev_id
-        assert nodes_payload == record["nodes"]
+        assert nodes_payload is None
         return SimpleNamespace(
             inventory=inventory,
             source="inventory",
@@ -1369,7 +1364,6 @@ def test_heater_sample_subscription_targets_logs_missing_inventory(
     client, _sio, _ = _make_client(monkeypatch)
     record = client.hass.data[module.DOMAIN]["entry"]
     record.pop("inventory", None)
-    record["nodes"] = {"nodes": [{"type": "htr", "addr": "9"}]}
 
     monkeypatch.setattr(
         module,
@@ -1891,14 +1885,13 @@ def test_apply_nodes_payload_translation(monkeypatch: pytest.MonkeyPatch) -> Non
     """Node payload application should merge data and notify listeners."""
 
     client, _sio, dispatcher = _make_client(monkeypatch)
-    client._nodes = {}
-    client._nodes_raw = {}
+    client._dispatch_nodes = MagicMock()
     client._handshake_payload = {"nodes": {}}
     client._handle_handshake({"nodes": {"htr": {"status": {"1": {"temp": 20}}}}})
     client._apply_nodes_payload(
         {"nodes": {"htr": {"status": {"1": {"temp": 25}}}}}, merge=True, event="update"
     )
-    assert client._nodes["htr"]["status"]["1"]["temp"] == 25
+    client._dispatch_nodes.assert_called_with({"htr": {"status": {"1": {"temp": 25}}}})
     dispatcher.assert_called()
 
 
