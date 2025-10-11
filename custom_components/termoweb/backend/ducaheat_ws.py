@@ -740,6 +740,46 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 return snapshot
         return snapshot
 
+    def _update_legacy_section(
+        self,
+        *,
+        node_type: str,
+        addr: str,
+        section: str,
+        body: Any,
+        dev_map: MutableMapping[str, Any],
+    ) -> bool:
+        """Store legacy section updates with defensive type checks."""
+
+        if not isinstance(dev_map, MutableMapping):
+            return False
+
+        if section == "settings":
+            canonical_type = (
+                normalize_node_type(node_type, use_default_when_falsey=True)
+                or node_type
+            )
+            section_root = dev_map.get("settings")
+            if section_root is not None and not isinstance(section_root, MutableMapping):
+                return False
+            if canonical_type and isinstance(section_root, MutableMapping):
+                existing_section = section_root.get(canonical_type)
+                if existing_section is not None and not isinstance(
+                    existing_section, MutableMapping
+                ):
+                    return False
+
+        from .termoweb_ws import TermoWebWSClient
+
+        return TermoWebWSClient._update_legacy_section(
+            self,
+            node_type=node_type,
+            addr=addr,
+            section=section,
+            body=body,
+            dev_map=dev_map,
+        )
+
     @staticmethod
     def _build_nodes_snapshot(nodes: dict[str, Any]) -> dict[str, Any]:
         """Return a snapshot structure with ``nodes`` and ``nodes_by_type`` buckets."""
