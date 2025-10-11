@@ -960,8 +960,7 @@ def test_dispatch_nodes_with_inventory(monkeypatch: pytest.MonkeyPatch, caplog: 
     nodes_by_type = payload.get("nodes_by_type")
     assert isinstance(nodes_by_type, Mapping)
     assert nodes_by_type["htr"]["addrs"] == ["1"]
-    dev_map = client._coordinator.data["device"]
-    assert dev_map["addresses_by_type"]["htr"] == ["1"]
+    assert client._inventory.addresses_by_type["htr"] == ["1"]
 
 
 def test_dispatch_nodes_handles_unknown_types(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1200,8 +1199,10 @@ def test_ensure_type_bucket_and_build_snapshot(monkeypatch: pytest.MonkeyPatch) 
     assert bucket_again is bucket
 
 
-def test_apply_heater_addresses_updates_coordinator(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Applying heater addresses should update the coordinator data map."""
+def test_apply_heater_addresses_normalises_from_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Applying heater addresses should mirror inventory-normalised addresses."""
 
     client, _sio, _ = _make_client(monkeypatch)
     client._coordinator.data = {"device": {"settings": {}}}
@@ -1216,21 +1217,18 @@ def test_apply_heater_addresses_updates_coordinator(monkeypatch: pytest.MonkeyPa
     )
     assert normalized["htr"] == ["1"]
     assert normalized["acm"] == ["2"]
-    assert client._coordinator.data["device"]["nodes_by_type"]
+    assert client._coordinator.data == {"device": {"settings": {}}}
 
 
 def test_apply_heater_addresses_includes_power_monitors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Power monitor addresses should persist in coordinator caches and payloads."""
+    """Power monitor addresses should flow to the energy coordinator."""
 
     client, _sio, _ = _make_client(monkeypatch)
     energy_coordinator = SimpleNamespace(update_addresses=MagicMock())
     record = client.hass.data[module.DOMAIN]["entry"]
     record["energy_coordinator"] = energy_coordinator
-    client._coordinator.data = {
-        "device": {"nodes_by_type": {}, "addresses_by_type": {}, "settings": {}}
-    }
 
     nodes_payload = {
         "nodes": [
@@ -1250,26 +1248,15 @@ def test_apply_heater_addresses_includes_power_monitors(
     energy_coordinator.update_addresses.assert_called_once()
     update_payload = energy_coordinator.update_addresses.call_args[0][0]
     assert update_payload["pmo"] == ["9"]
-
-    dev_map = client._coordinator.data["device"]
-    nodes_by_type = dev_map["nodes_by_type"]
-    assert nodes_by_type["pmo"]["addrs"] == ["9"]
-    addr_map = dev_map.get("addr_map")
-    if isinstance(addr_map, Mapping):
-        assert addr_map["pmo"] == ["9"]
-    addresses_by_type = dev_map["addresses_by_type"]
-    assert addresses_by_type["htr"] == ["1"]
-    assert addresses_by_type["pmo"] == ["9"]
-
+    assert record.get("inventory") is inventory
 
 def test_apply_heater_addresses_skips_empty_non_heater(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Empty address lists for non-heaters should not populate coordinator buckets."""
+    """Empty non-heater lists should still yield a heater placeholder."""
 
     client, _sio, _ = _make_client(monkeypatch)
-    client._coordinator.data = {"device": {"nodes_by_type": {}, "settings": {}}}
     normalized = client._apply_heater_addresses({"acm": []}, inventory=None)
     assert normalized["htr"] == []
-    assert "acm" not in client._coordinator.data["device"]["nodes_by_type"]
+    assert client._coordinator.data == {}
 
 
 def test_apply_heater_addresses_updates_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
