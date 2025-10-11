@@ -44,6 +44,17 @@ def test_staleness_detection_and_refresh() -> None:
     assert tracker.stale_deadline() == pytest.approx(1_070.0)
 
 
+def test_stale_deadline_requires_positive_threshold() -> None:
+    """Stale deadline should be None without a positive payload window."""
+
+    tracker = WsHealthTracker("dev")
+    tracker.mark_payload(timestamp=1_500.0)
+    assert tracker.last_payload_at == 1_500.0
+    # ``payload_stale_after`` is ``None`` until explicitly configured.
+    assert tracker.payload_stale_after is None
+    assert tracker.stale_deadline() is None
+
+
 def test_update_status_resets_health_state() -> None:
     """Test status transitions update healthy timestamps and reset state."""
 
