@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from custom_components.termoweb.backend.ws_client import _WSStatusMixin
+from custom_components.termoweb.const import DOMAIN
 
 
 class DummyHass:
@@ -103,6 +104,43 @@ class TrackingStatusClient(_WSStatusMixin):
         if payload_changed:
             payload["payload_changed"] = True
         self.notifications.append(payload)
+
+
+class LegacyStatusClient(_WSStatusMixin):
+    """Populate legacy websocket fields for tracker bootstrap tests."""
+
+    def __init__(self, hass: DummyHass) -> None:
+        self.hass = hass
+        self.entry_id = "entry"
+        self.dev_id = "device"
+        self._status = "legacy"
+        self._healthy_since = 111.1
+        self._last_payload_at = 222.2
+        self._last_heartbeat_at = 333.3
+
+
+def test_ws_health_tracker_bootstraps_legacy_state() -> None:
+    """Ensure tracker initialization consumes legacy mixin attributes."""
+
+    hass = DummyHass()
+    client = LegacyStatusClient(hass)
+
+    assert hass.data == {}
+
+    tracker = client._ws_health_tracker()
+
+    assert tracker.status == "legacy"
+    assert tracker.healthy_since == 111.1
+    assert tracker.last_payload_at == 222.2
+    assert tracker.last_heartbeat_at == 333.3
+
+    assert DOMAIN in hass.data
+    assert client.entry_id in hass.data[DOMAIN]
+    entry_bucket = hass.data[DOMAIN][client.entry_id]
+    assert "ws_trackers" in entry_bucket
+    assert entry_bucket["ws_trackers"][client.dev_id] is tracker
+
+    assert client._ws_health_tracker() is tracker
 
 
 def test_mark_ws_payload_dispatches_staleness_changes() -> None:
