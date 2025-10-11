@@ -73,6 +73,10 @@ def iter_python_files(root: Path) -> Iterable[Path]:
     for path in sorted(root.rglob("*.py")):
         if any(part == "tests" for part in path.parts):
             continue
+        if any(".git" in part for part in path.parts):
+            continue
+        if any(".venv" in part for part in path.parts):
+            continue
         yield path
 
 
