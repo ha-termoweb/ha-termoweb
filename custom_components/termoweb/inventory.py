@@ -46,7 +46,6 @@ __all__ = [
     "HEATER_NODE_TYPES",
     "NODE_CLASS_BY_TYPE",
     "AccumulatorNode",
-    "HeaterInventoryDetails",
     "HeaterNode",
     "Inventory",
     "InventoryResolution",
@@ -57,7 +56,6 @@ __all__ = [
     "_normalize_node_identifier",
     "addresses_by_node_type",
     "build_heater_address_map",
-    "build_heater_inventory_details",
     "build_node_inventory",
     "heater_platform_details_from_inventory",
     "heater_sample_subscription_targets",
@@ -767,34 +765,6 @@ def build_heater_address_map(
             reverse.setdefault(address, set()).add(node_type)
 
     return by_type, reverse
-
-
-@dataclass(slots=True)
-class HeaterInventoryDetails:
-    """Describe cached metadata derived from heater nodes."""
-
-    nodes_by_type: dict[str, list[Node]]
-    explicit_name_pairs: set[tuple[str, str]]
-    address_map: dict[str, list[str]]
-    reverse_address_map: dict[str, set[str]]
-
-
-def build_heater_inventory_details(
-    nodes: Iterable[Node],
-) -> HeaterInventoryDetails:
-    """Return derived heater metadata for ``nodes``."""
-
-    inventory = Inventory("", {}, nodes)
-    nodes_by_type = inventory.nodes_by_type
-    explicit_names = inventory.explicit_heater_names
-    filtered_forward, filtered_reverse = inventory.heater_address_map
-
-    return HeaterInventoryDetails(
-        nodes_by_type=nodes_by_type,
-        explicit_name_pairs=explicit_names,
-        address_map=filtered_forward,
-        reverse_address_map=filtered_reverse,
-    )
 
 
 def heater_platform_details_from_inventory(
