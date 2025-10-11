@@ -53,7 +53,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
         data,
         default_name_simple=default_name,
     )
-    _, _, resolve_name = heater_details
 
     entities: list[ButtonEntity] = [
         StateRefreshButton(coordinator, entry.entry_id, dev_id)
@@ -62,7 +61,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
     boost_entities: list[ButtonEntity] = []
     for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
         heater_details,
-        resolve_name,
         accumulators_only=True,
     ):
 

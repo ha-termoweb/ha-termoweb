@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 import logging
 import time
 from typing import Any, cast
@@ -36,6 +36,7 @@ from .inventory import (
     Inventory,
     normalize_node_addr,
     normalize_node_type,
+    resolve_record_inventory,
 )
 from .utils import float_or_none
 
@@ -320,7 +321,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 data,
                 map_key="settings",
                 node_types=[self._node_type],
-                inventory_or_details=getattr(self.coordinator, "inventory", None),
+                inventory=getattr(self.coordinator, "inventory", None),
             )
         )
 
@@ -475,96 +476,130 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
     def _payload_mentions_heater(self, payload: Mapping[str, Any]) -> bool:
         """Return True when a websocket payload references this heater."""
 
-        node_type = self._node_type
-        addr = self._addr
-        addr_core = addr.lstrip("0") or addr
-
-        def _matches(candidate: Any) -> bool:
-            normalized = normalize_node_addr(candidate)
-            candidates: list[str] = []
-            if normalized:
-                candidates.append(normalized)
-            if isinstance(candidate, str):
-                stripped = candidate.strip()
-                if stripped:
-                    candidates.append(stripped)
-            else:
-                candidate_str = str(candidate)
-                if candidate_str:
-                    candidates.append(candidate_str)
-            for candidate_str in candidates:
-                if candidate_str == addr or candidate_str.lstrip("0") == addr_core:
-                    return True
-            return False
-
         if not isinstance(payload, Mapping):
             return False
 
-        addr_map = payload.get("addr_map")
-        if isinstance(addr_map, Mapping):
-            addresses = addr_map.get(node_type)
-            if isinstance(addresses, Iterable) and not isinstance(addresses, (str, bytes)):
-                for candidate in addresses:
-                    if _matches(candidate):
-                        return True
-            elif _matches(addresses):
-                return True
+        node_type = self._node_type
+        addr = self._addr
+        addr_core = addr.lstrip("0") or addr
+        normalized_addr = normalize_node_addr(addr, use_default_when_falsey=True)
+        normalized_core = (
+            normalized_addr.lstrip("0") or normalized_addr
+            if normalized_addr
+            else None
+        )
 
-        inventory: Inventory | None = None
+        def _matches(candidate: Any) -> bool:
+            normalized = normalize_node_addr(candidate, use_default_when_falsey=True)
+            if normalized:
+                if normalized_addr and normalized == normalized_addr:
+                    return True
+                if normalized_core and normalized.lstrip("0") == normalized_core:
+                    return True
+                if normalized.lstrip("0") == addr_core:
+                    return True
+
+            if isinstance(candidate, str):
+                stripped = candidate.strip()
+                if not stripped:
+                    return False
+                if stripped == addr:
+                    return True
+                if normalized_addr and stripped == normalized_addr:
+                    return True
+                stripped_core = stripped.lstrip("0")
+                if stripped_core == addr_core:
+                    return True
+                if normalized_core and stripped_core == normalized_core:
+                    return True
+                return False
+
+            if candidate is None:
+                return False
+
+            candidate_str = str(candidate).strip()
+            if not candidate_str:
+                return False
+            if candidate_str == addr:
+                return True
+            if normalized_addr and candidate_str == normalized_addr:
+                return True
+            candidate_core = candidate_str.lstrip("0")
+            if candidate_core == addr_core:
+                return True
+            if normalized_core and candidate_core == normalized_core:
+                return True
+            return False
+
+        direct_addr = payload.get("addr")
+        if _matches(direct_addr):
+            return True
+
+        inventory = self._inventory_for_payload(payload)
+        if inventory is None:
+            return False
+
+        return self._inventory_mentions_addr(
+            inventory,
+            node_type,
+            _matches,
+            normalized_addr,
+        )
+
+    def _inventory_for_payload(
+        self, payload: Mapping[str, Any] | None
+    ) -> Inventory | None:
+        """Return the resolved inventory for ``payload``."""
+
         coordinator = getattr(self, "coordinator", None)
         for attr in ("inventory", "_inventory"):
             candidate = getattr(coordinator, attr, None)
             if isinstance(candidate, Inventory):
-                inventory = candidate
-                break
-        if inventory is None:
-            record = self._device_record()
-            if isinstance(record, Mapping):
-                candidate = record.get("inventory")
-                if isinstance(candidate, Inventory):
-                    inventory = candidate
+                return candidate
 
-        nodes_by_type = payload.get("nodes_by_type")
-        if isinstance(nodes_by_type, Mapping):
-            node_payload = nodes_by_type.get(node_type)
-            if isinstance(node_payload, Mapping):
-                known_addresses: set[str] | None = None
-                known_core: set[str] | None = None
-                if isinstance(inventory, Inventory):
-                    forward_map, _ = inventory.heater_address_map
-                    known_addresses = set(forward_map.get(node_type, ()))
-                    known_core = {
-                        candidate.lstrip("0") or candidate for candidate in known_addresses
-                    }
-                for section in node_payload.values():
-                    if not isinstance(section, Mapping):
-                        continue
-                    for candidate in section.keys():
-                        if known_addresses is not None:
-                            normalized = normalize_node_addr(candidate)
-                            if normalized and normalized in known_addresses:
-                                if _matches(candidate):
-                                    return True
-                                continue
-                            if normalized:
-                                normalized_core = normalized.lstrip("0") or normalized
-                                if known_core and normalized_core in known_core:
-                                    if _matches(candidate):
-                                        return True
-                                    continue
-                            if isinstance(candidate, str):
-                                stripped = candidate.strip()
-                                if stripped:
-                                    if stripped in known_addresses or (
-                                        known_core
-                                        and stripped.lstrip("0") in known_core
-                                    ):
-                                        if _matches(candidate):
-                                            return True
-                                    continue
-                            continue
-                        if _matches(candidate):
-                            return True
+        record = self._device_record()
+        nodes_payload = None
+        if isinstance(payload, Mapping):
+            nodes_payload = payload.get("nodes")
+
+        resolution = resolve_record_inventory(
+            record,
+            dev_id=self._dev_id,
+            nodes_payload=nodes_payload,
+        )
+        return resolution.inventory
+
+    def _inventory_mentions_addr(
+        self,
+        inventory: Inventory,
+        node_type: str,
+        matcher: Callable[[Any], bool],
+        normalized_addr: str | None,
+    ) -> bool:
+        """Return True when ``inventory`` references this heater address."""
+
+        forward_map, reverse_map = inventory.heater_address_map
+        candidates = forward_map.get(node_type, ())
+        if any(matcher(candidate) for candidate in candidates):
+            return True
+
+        if normalized_addr:
+            addr_types = reverse_map.get(normalized_addr)
+            if addr_types and node_type in addr_types:
+                return True
+
+        nodes_by_type = inventory.nodes_by_type
+        for node in nodes_by_type.get(node_type, []):
+            if matcher(getattr(node, "addr", None)):
+                return True
+
+        sample_forward, compat_aliases = inventory.heater_sample_address_map
+        for raw_type, addresses in sample_forward.items():
+            canonical = compat_aliases.get(raw_type, raw_type)
+            if canonical != node_type:
+                continue
+            if any(matcher(candidate) for candidate in addresses):
+                return True
 
         return False
 

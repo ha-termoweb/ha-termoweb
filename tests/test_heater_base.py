@@ -4,8 +4,6 @@ import asyncio
 import logging
 from types import SimpleNamespace
 from typing import Any, Callable
-from unittest.mock import MagicMock
-
 import pytest
 
 from conftest import _install_stubs, make_ws_payload
@@ -13,7 +11,6 @@ from conftest import _install_stubs, make_ws_payload
 _install_stubs()
 
 from custom_components.termoweb import heater as heater_module
-from custom_components.termoweb.heater import _resolve_inventory_metadata
 from custom_components.termoweb import identifiers as identifiers_module
 from custom_components.termoweb.inventory import (
     HeaterNode,
@@ -55,30 +52,6 @@ def test_build_heater_entity_unique_id_normalises_inputs() -> None:
 
 def _make_heater(coordinator: SimpleNamespace) -> HeaterNodeBase:
     return HeaterNodeBase(coordinator, "entry", "dev", "A", "Heater A")
-
-
-def test_resolve_inventory_metadata_requires_resolver_for_inventory() -> None:
-    """Inventory instances must include a resolver."""
-
-    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
-    inventory_nodes = build_node_inventory(raw_nodes)
-    inventory = Inventory("dev", raw_nodes, inventory_nodes)
-
-    with pytest.raises(ValueError):
-        _resolve_inventory_metadata(inventory, None)
-
-
-def test_resolve_inventory_metadata_requires_resolver_for_tuples() -> None:
-    """Inventory tuples must include a resolver."""
-
-    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
-    inventory_nodes = build_node_inventory(raw_nodes)
-    inventory = Inventory("dev", raw_nodes, inventory_nodes)
-    nodes_by_type = inventory.nodes_by_type
-    addrs_by_type, _ = inventory.heater_address_map
-
-    with pytest.raises(ValueError):
-        _resolve_inventory_metadata((nodes_by_type, addrs_by_type, None), None)
 
 
 def test_heater_hass_accessors_fall_back_to_coordinator() -> None:
@@ -296,69 +269,20 @@ def test_heater_platform_details_for_entry_prefers_inventory(
     assert resolve_name("acm", "2") == "Accumulator 2"
 
 
-def test_heater_platform_details_for_entry_uses_prepare_when_missing_inventory(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fallback_nodes = {"acm": [SimpleNamespace(addr="5", type="acm")]}
-    fallback_addrs = {"acm": ["5"]}
-
-    def _resolve(node_type: str, addr: str) -> str:
-        return f"{node_type}-{addr}"
-
-    mock_prepare = MagicMock(
-        return_value=((), fallback_nodes, fallback_addrs, _resolve)
-    )
-
-    monkeypatch.setattr(
-        heater_module,
-        "prepare_heater_platform_data",
-        mock_prepare,
-    )
-
-    nodes_by_type, addrs_by_type, resolve_name = heater_platform_details_for_entry(
-        {"dev_id": "missing"},
-        default_name_simple=lambda addr: f"Heater {addr}",
-    )
-
-    assert nodes_by_type is fallback_nodes
-    assert addrs_by_type is fallback_addrs
-    assert resolve_name is _resolve
-    assert mock_prepare.call_count == 1
-    call_args, call_kwargs = mock_prepare.call_args
-    assert call_args and call_args[0] == {"dev_id": "missing"}
-    assert set(call_kwargs) == {"default_name_simple"}
+def test_heater_platform_details_for_entry_requires_inventory() -> None:
+    with pytest.raises(ValueError):
+        heater_platform_details_for_entry(
+            {"dev_id": "missing"},
+            default_name_simple=lambda addr: f"Heater {addr}",
+        )
 
 
-def test_heater_platform_details_for_entry_handles_non_mapping_entry(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fallback_nodes = {"htr": [SimpleNamespace(addr="1", type="htr")]} 
-    fallback_addrs = {"htr": ["1"]}
-
-    def _resolve(node_type: str, addr: str) -> str:
-        return f"{node_type}:{addr}"
-
-    mock_prepare = MagicMock(
-        return_value=((), fallback_nodes, fallback_addrs, _resolve)
-    )
-
-    monkeypatch.setattr(
-        heater_module,
-        "prepare_heater_platform_data",
-        mock_prepare,
-    )
-
-    nodes_by_type, addrs_by_type, resolve_name = heater_platform_details_for_entry(
-        SimpleNamespace(dev_id="ignored"),
-        default_name_simple=lambda addr: f"Heater {addr}",
-    )
-
-    assert nodes_by_type is fallback_nodes
-    assert addrs_by_type is fallback_addrs
-    assert resolve_name is _resolve
-    call_args, call_kwargs = mock_prepare.call_args
-    assert call_args and call_args[0] == {}
-    assert set(call_kwargs) == {"default_name_simple"}
+def test_heater_platform_details_for_entry_rejects_non_mapping_entry() -> None:
+    with pytest.raises(ValueError):
+        heater_platform_details_for_entry(
+            SimpleNamespace(dev_id="ignored"),
+            default_name_simple=lambda addr: f"Heater {addr}",
+        )
 
 
 def test_prepare_heater_platform_data_uses_coordinator_inventory() -> None:
