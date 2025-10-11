@@ -4,6 +4,53 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+
+def test_ducaheat_rest_normalise_ws_nodes_passthrough_scalars() -> None:
+    """Non-mapping payloads should return the original object unchanged."""
+
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+
+    scalar_payload = "scalar"
+    list_payload = ["entry"]
+
+    scalar_result = client.normalise_ws_nodes(scalar_payload)
+    list_result = client.normalise_ws_nodes(list_payload)
+
+    assert scalar_result is scalar_payload
+    assert list_result is list_payload
+    assert list_payload == ["entry"]
+
+
+def test_ducaheat_rest_normalise_ws_nodes_preserve_non_settings_sections() -> None:
+    """Only the settings section should be normalised within nested payloads."""
+
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+
+    heater_prog = {str(day): [day] * 48 for day in range(7)}
+    payload = {
+        "htr": {
+            "settings": {
+                "01": {"prog": {"prog": heater_prog}, "mode": "auto"},
+            },
+            "status": {"01": {"temp": 21}},
+            "alerts": ["unchanged"],
+        }
+    }
+
+    result = client.normalise_ws_nodes(payload)
+
+    # Settings bucket should be normalised into a flattened schedule.
+    settings = result["htr"]["settings"]["01"]
+    assert isinstance(settings["prog"], list)
+    assert len(settings["prog"]) == 168
+
+    # Non-settings sections should retain their original identities.
+    assert result["htr"]["status"] is payload["htr"]["status"]
+    assert result["htr"]["alerts"] is payload["htr"]["alerts"]
+
+    # Original payload must remain untouched after normalisation.
+    assert len(payload["htr"]["settings"]["01"]["prog"]["prog"]["1"]) == 48
+
 from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
 
 
