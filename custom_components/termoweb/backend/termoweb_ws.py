@@ -59,7 +59,7 @@ from .ws_client import (
     HandshakeError,
     WSStats,
     _prepare_nodes_dispatch,
-    _WSStatusMixin,
+    _WSCommon,
     forward_ws_sample_updates,
     resolve_ws_update_section,
 )
@@ -71,7 +71,7 @@ _SENSITIVE_PLACEHOLDERS: Mapping[str, tuple[str, Callable[[str | None], str]]] =
     "dev_id": ("{dev_id}", mask_identifier),
     "sid": ("{sid}", mask_identifier),
 }
-class WebSocketClient(_WSStatusMixin):
+class WebSocketClient(_WSCommon):
     """Unified websocket client wrapping ``socketio.AsyncClient``."""
 
     def __init__(
@@ -89,6 +89,7 @@ class WebSocketClient(_WSStatusMixin):
         inventory: Inventory | None = None,
     ) -> None:
         """Initialise the websocket client container."""
+        _WSCommon.__init__(self, inventory=inventory)
         self.hass = hass
         self.entry_id = entry_id
         self.dev_id = dev_id
@@ -163,8 +164,6 @@ class WebSocketClient(_WSStatusMixin):
         self._disconnected.set()
         self._backoff_seq = [5, 10, 30, 120, 300]
         self._backoff_idx = 0
-
-        self._inventory: Inventory | None = inventory
 
         self._connected_since: float | None = None
         self._healthy_since: float | None = None
@@ -906,6 +905,8 @@ class WebSocketClient(_WSStatusMixin):
         normalized_map = self._apply_heater_addresses(
             addr_map,
             inventory=inventory,
+            log_prefix="WS",
+            logger=_LOGGER,
         )
 
         addresses_by_type: dict[str, list[str]] = {}
@@ -949,101 +950,6 @@ class WebSocketClient(_WSStatusMixin):
             _send()
 
         return addr_map_payload
-
-    def _apply_heater_addresses(
-        self,
-        normalized_map: Mapping[Any, Iterable[Any]] | None,
-        *,
-        inventory: Inventory | None = None,
-    ) -> dict[str, list[str]]:
-        """Update entry and coordinator state with heater address data."""
-
-        cleaned_map: dict[str, list[str]] = {}
-        if isinstance(normalized_map, Mapping):
-            for raw_type, addrs in normalized_map.items():
-                node_type = normalize_node_type(raw_type)
-                if not node_type:
-                    continue
-                if node_type not in HEATER_NODE_TYPES:
-                    continue
-                if isinstance(addrs, (str, bytes)):
-                    addr_iterable: Iterable[Any] = [addrs]
-                else:
-                    addr_iterable = addrs or []
-                addresses: list[str] = []
-                for candidate in addr_iterable:
-                    addr = normalize_node_addr(candidate)
-                    if not addr or addr in addresses:
-                        continue
-                    addresses.append(addr)
-                if addresses:
-                    cleaned_map[node_type] = addresses
-                else:
-                    cleaned_map.setdefault(node_type, [])
-
-        cleaned_map.setdefault("htr", [])
-
-        record_container = self.hass.data.get(DOMAIN, {})
-        record_raw = (
-            record_container.get(self.entry_id)
-            if isinstance(record_container, dict)
-            else None
-        )
-        record = record_raw if isinstance(record_raw, Mapping) else None
-        record_mutable: MutableMapping[str, Any] | None = (
-            record_raw if isinstance(record_raw, MutableMapping) else None
-        )
-
-        if isinstance(inventory, Inventory):
-            inventory_container = inventory
-        elif inventory is None:
-            inventory_container = (
-                self._inventory if isinstance(self._inventory, Inventory) else None
-            )
-        else:
-            _LOGGER.debug(
-                "WS: ignoring unexpected inventory container (type=%s): %s",
-                type(inventory).__name__,
-                inventory,
-            )
-            inventory_container = None
-
-        if isinstance(inventory_container, Inventory):
-            if isinstance(record_mutable, MutableMapping):
-                record_mutable["inventory"] = inventory_container
-            if not isinstance(self._inventory, Inventory):
-                self._inventory = inventory_container
-
-        pmo_addresses: list[str] = []
-        if isinstance(inventory_container, Inventory):
-            forward_map, _ = inventory_container.power_monitor_address_map
-            pmo_addresses = list(forward_map.get("pmo", []))
-        elif isinstance(normalized_map, Mapping):
-            raw_addrs = normalized_map.get("pmo")
-            if isinstance(raw_addrs, (str, bytes)):
-                candidates: Iterable[Any] = [raw_addrs]
-            elif isinstance(raw_addrs, Iterable):
-                candidates = raw_addrs
-            else:
-                candidates = []
-            seen: set[str] = set()
-            for candidate in candidates:
-                addr = normalize_node_addr(candidate, use_default_when_falsey=True)
-                if not addr or addr in seen:
-                    continue
-                seen.add(addr)
-                pmo_addresses.append(addr)
-
-        energy_coordinator = (
-            record.get("energy_coordinator") if isinstance(record, Mapping) else None
-        )
-        if pmo_addresses:
-            cleaned_map["pmo"] = list(pmo_addresses)
-
-        if hasattr(energy_coordinator, "update_addresses"):
-            energy_coordinator.update_addresses(cleaned_map)
-
-        return cleaned_map
 
     def _heater_sample_subscription_targets(self) -> list[tuple[str, str]]:
         """Return ordered ``(node_type, addr)`` heater sample subscriptions."""
@@ -1121,6 +1027,8 @@ class WebSocketClient(_WSStatusMixin):
         normalized_map = self._apply_heater_addresses(
             normalized_map,
             inventory=inventory_container,
+            log_prefix="WS",
+            logger=_LOGGER,
         )
 
         other_types = sorted(
