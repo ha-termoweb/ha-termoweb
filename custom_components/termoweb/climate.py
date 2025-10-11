@@ -321,7 +321,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 data,
                 map_key="settings",
                 node_types=[self._node_type],
-                inventory_or_details=getattr(self.coordinator, "inventory", None),
+                inventory=getattr(self.coordinator, "inventory", None),
             )
         )
 

@@ -39,12 +39,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
         data,
         default_name_simple=default_name,
     )
-    _, _, resolve_name = heater_details
 
     new_entities: list[AccumulatorBoostDurationSelect] = []
     for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
         heater_details,
-        resolve_name,
         accumulators_only=True,
     ):
         unique_id = build_heater_entity_unique_id(

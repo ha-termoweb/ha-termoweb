@@ -31,6 +31,7 @@ from .const import DOMAIN, signal_ws_data
 from .coordinator import EnergyStateCoordinator
 from .entity import GatewayDispatcherEntity
 from .heater import (
+    HeaterPlatformDetails,
     HeaterNodeBase,
     heater_platform_details_for_entry,
     iter_boostable_heater_nodes,
@@ -132,7 +133,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         data,
         default_name_simple=default_name,
     )
-    _, addrs_by_type, resolve_name = heater_details
+    addrs_by_type = heater_details.addrs_by_type
 
     energy_coordinator: EnergyStateCoordinator | None = data.get(
         "energy_coordinator",
@@ -256,7 +257,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
     new_entities: list[SensorEntity] = []
     for node_type, _node, addr_str, base_name in iter_heater_nodes(
         heater_details,
-        resolve_name,
     ):
         energy_unique_id = build_heater_energy_unique_id(dev_id, node_type, addr_str)
         uid_prefix = energy_unique_id.rsplit(":", 1)[0]
@@ -275,7 +275,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
         )
     for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
         heater_details,
-        resolve_name,
     ):
         energy_unique_id = build_heater_energy_unique_id(dev_id, node_type, addr_str)
         uid_prefix = energy_unique_id.rsplit(":", 1)[0]
@@ -826,7 +825,7 @@ class InstallationTotalEnergySensor(
         dev_id: str,
         name: str,
         unique_id: str,
-        inventory_or_details: Any,
+        details: HeaterPlatformDetails,
     ) -> None:
         """Initialise the installation-wide energy sensor."""
         super().__init__(coordinator)
@@ -834,7 +833,7 @@ class InstallationTotalEnergySensor(
         self._dev_id = dev_id
         self._attr_name = name
         self._attr_unique_id = unique_id
-        self._inventory_or_details = inventory_or_details
+        self._details = details
 
     @property
     def gateway_signal(self) -> str:
@@ -869,7 +868,7 @@ class InstallationTotalEnergySensor(
         for energy_map in iter_heater_maps(
             data,
             map_key="energy",
-            inventory_or_details=self._inventory_or_details,
+            inventory=self._details,
         ):
             for val in energy_map.values():
                 normalised = _normalise_energy_value(self.coordinator, val)
