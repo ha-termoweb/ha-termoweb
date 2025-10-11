@@ -754,29 +754,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         snapshot.update(nodes_by_type)
         return snapshot
 
-    def _ensure_type_bucket(
-        self, dev_map: dict[str, Any], nodes_by_type: dict[str, Any], node_type: str
-    ) -> dict[str, Any]:
-        """Return the node bucket for ``node_type`` with default sections."""
-
-        bucket = nodes_by_type.get(node_type)
-        if bucket is None:
-            bucket = {
-                "addrs": [],
-                "settings": {},
-                "advanced": {},
-                "samples": {},
-            }
-            nodes_by_type[node_type] = bucket
-        else:
-            bucket.setdefault("addrs", [])
-            bucket.setdefault("settings", {})
-            bucket.setdefault("advanced", {})
-            bucket.setdefault("samples", {})
-        if node_type == "htr":
-            dev_map["htr"] = bucket
-        return bucket
-
     def _apply_heater_addresses(
         self,
         normalized_map: Mapping[Any, Iterable[Any]] | None,
@@ -871,97 +848,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             energy_coordinator.update_addresses(cleaned_map)
 
         return cleaned_map
-
-    def _update_legacy_section(
-        self,
-        *,
-        node_type: str,
-        addr: str,
-        section: str,
-        body: Any,
-        dev_map: dict[str, Any],
-        nodes_by_type: dict[str, Any],
-    ) -> bool:
-        """Store legacy section updates and mirror them in raw state."""
-
-        bucket = self._ensure_type_bucket(dev_map, nodes_by_type, node_type)
-        section_map: dict[str, Any] = bucket.setdefault(section, {})
-        if not isinstance(section_map, dict):
-            return False
-        value: Any = dict(body) if isinstance(body, Mapping) else body
-        section_map[addr] = value
-        if (
-            section == "settings"
-            and normalize_node_type(node_type) == "acm"
-            and isinstance(value, MutableMapping)
-        ):
-            coordinator = getattr(self, "_coordinator", None)
-            apply_helper = getattr(
-                coordinator, "_apply_accumulator_boost_metadata", None
-            )
-            if callable(apply_helper):
-                now = None
-                estimate = getattr(coordinator, "_device_now_estimate", None)
-                if callable(estimate):
-                    now = estimate()
-                try:
-                    apply_helper(value, now=now)
-                except Exception as err:  # pragma: no cover - defensive
-                    _LOGGER.debug(
-                        "WS (ducaheat): boost metadata derivation failed for %s/%s: %s",
-                        node_type,
-                        addr,
-                        err,
-                        exc_info=err,
-                    )
-        if section == "settings":
-            canonical_type = (
-                normalize_node_type(node_type, use_default_when_falsey=True)
-                or node_type
-            )
-            if canonical_type:
-                settings_map: MutableMapping[str, Any] = dev_map.setdefault(
-                    "settings", {}
-                )
-                existing_bucket = settings_map.get(canonical_type)
-                if isinstance(existing_bucket, MutableMapping):
-                    settings_bucket = existing_bucket
-                elif isinstance(existing_bucket, Mapping):
-                    settings_bucket = dict(existing_bucket)
-                    settings_map[canonical_type] = settings_bucket
-                else:
-                    settings_bucket = {}
-                    settings_map[canonical_type] = settings_bucket
-                normalised_addr = normalize_node_addr(
-                    addr,
-                    use_default_when_falsey=True,
-                )
-                if not normalised_addr and isinstance(addr, str):
-                    stripped = addr.strip()
-                    normalised_addr = stripped or None
-                if (
-                    not normalised_addr
-                    and addr is not None
-                    and not isinstance(addr, str)
-                ):
-                    candidate = str(addr).strip()
-                    normalised_addr = candidate or None
-                if normalised_addr:
-                    existing_payload = settings_bucket.get(normalised_addr)
-                    if isinstance(existing_payload, MutableMapping) and isinstance(
-                        value, Mapping
-                    ):
-                        existing_payload.update(value)
-                        section_map[addr] = existing_payload
-                    else:
-                        settings_bucket[normalised_addr] = value
-        if not isinstance(self._nodes_raw, dict):
-            self._nodes_raw = {}
-        raw_bucket = self._nodes_raw.setdefault(node_type, {})
-        raw_section = raw_bucket.setdefault(section, {})
-        if isinstance(raw_section, dict):
-            raw_section[addr] = deepcopy(body)
-        return True
 
     def _normalise_cadence_value(self, value: Any) -> float | None:
         """Return a positive cadence hint in seconds."""
@@ -1104,12 +990,13 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             )
 
     def _dispatch_nodes(self, payload: dict[str, Any]) -> None:
-        """Publish node updates with inventory-aware cache refresh."""
+        """Publish inventory-derived node addresses for downstream consumers."""
 
-        if not isinstance(payload, dict):  # pragma: no cover - defensive
+        if not isinstance(payload, Mapping):  # pragma: no cover - defensive
             return
 
-        is_snapshot = isinstance(payload.get("nodes_by_type"), Mapping)
+        nodes_by_type_payload = payload.get("nodes_by_type")
+        is_snapshot = isinstance(nodes_by_type_payload, Mapping)
         raw_nodes: Any = payload.get("nodes") if is_snapshot else payload
 
         context = _prepare_nodes_dispatch(
@@ -1124,97 +1011,35 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         if self._inventory is None and isinstance(inventory, Inventory):
             self._inventory = inventory
 
-        addr_map = context.addr_map
         record = context.record
-        raw_nodes_payload = context.payload
-        if raw_nodes_payload is None:
-            raw_nodes_payload = (
-                inventory.payload if isinstance(inventory, Inventory) else {}
-            )
-
         if isinstance(record, MutableMapping) and isinstance(inventory, Inventory):
             record["inventory"] = inventory
 
-        nodes_by_type_payload: Mapping[str, Any] | None
-        if is_snapshot:
-            nodes_by_type_payload = payload.get("nodes_by_type")
-        else:
-            nodes_by_type_payload = None
-
-        coordinator_data = getattr(self._coordinator, "data", None)
-        dev_map: dict[str, Any] | None = None
-        nodes_by_type_cache: dict[str, Any] | None = None
-        if isinstance(coordinator_data, dict):
-            candidate = coordinator_data.get(self.dev_id)
-            if isinstance(candidate, dict):
-                dev_map = candidate
-                nodes_by_type_cache = dev_map.setdefault("nodes_by_type", {})
-
-        if isinstance(nodes_by_type_payload, Mapping) and dev_map is not None:
-            for raw_type, sections in nodes_by_type_payload.items():
-                node_type = normalize_node_type(raw_type)
-                if not node_type or not isinstance(sections, Mapping):
-                    continue
-                if nodes_by_type_cache is None:
-                    nodes_by_type_cache = dev_map.setdefault("nodes_by_type", {})
-                self._ensure_type_bucket(dev_map, nodes_by_type_cache, node_type)
-                for section, addr_map_payload in sections.items():
-                    mapped_section, nested_key = self._resolve_update_section(section)
-                    target_section = mapped_section or section
-                    if not isinstance(addr_map_payload, Mapping):
-                        continue
-                    if target_section not in {"settings", "advanced", "samples"}:
-                        continue
-                    for addr, body in addr_map_payload.items():
-                        normalised_addr = normalize_node_addr(
-                            addr,
-                            use_default_when_falsey=True,
-                        )
-                        if not normalised_addr:
-                            continue
-                        payload_body: Any
-                        if nested_key and isinstance(body, Mapping):
-                            payload_body = body.get(nested_key)
-                        else:
-                            payload_body = body
-                        if payload_body is None:
-                            continue
-                        self._update_legacy_section(
-                            node_type=node_type,
-                            addr=normalised_addr,
-                            section=target_section,
-                            body=payload_body,
-                            dev_map=dev_map,
-                            nodes_by_type=nodes_by_type_cache,
-                        )
-
+        addr_map = context.addr_map
         normalized_addresses = self._apply_heater_addresses(
             addr_map,
             inventory=inventory,
         )
 
-        nodes_by_type_copy: dict[str, Any]
-        if isinstance(nodes_by_type_payload, Mapping):
-            nodes_by_type_copy = deepcopy(nodes_by_type_payload)
-        else:
-            nodes_by_type_copy = {}
-
-        unknown_types = context.unknown_types
-
-        payload_copy = {
+        payload_copy: dict[str, Any] = {
             "dev_id": self.dev_id,
             "node_type": None,
-            "nodes_by_type": nodes_by_type_copy,
             "addr_map": {
-                node_type: list(addrs)
-                for node_type, addrs in normalized_addresses.items()
+                node_type: list(addrs) for node_type, addrs in addr_map.items()
             },
         }
 
+        if normalized_addresses:
+            payload_copy["addresses_by_type"] = {
+                node_type: list(addrs)
+                for node_type, addrs in normalized_addresses.items()
+            }
+
+        unknown_types = context.unknown_types
         if unknown_types:
             payload_copy["unknown_types"] = sorted(unknown_types)
 
-        if nodes_by_type_payload:
+        if isinstance(nodes_by_type_payload, Mapping):
             self._update_payload_window_from_mapping(
                 nodes_by_type_payload,
                 source="dispatch_nodes",

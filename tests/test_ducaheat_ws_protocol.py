@@ -287,10 +287,10 @@ def _set_inventory(
     return inventory
 
 
-def test_dispatch_nodes_updates_addresses_and_settings(
+def test_dispatch_nodes_publishes_inventory_addresses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Snapshots should update coordinator caches for settings and addresses."""
+    """Snapshots should publish inventory-derived address payloads."""
 
     client = _make_client(monkeypatch)
     hass = client.hass
@@ -313,20 +313,23 @@ def test_dispatch_nodes_updates_addresses_and_settings(
     assert client._dispatcher.call_count == 1
     dispatched = client._dispatcher.call_args[0][2]
     assert "nodes" not in dispatched
-    assert dispatched["nodes_by_type"]["htr"]["settings"]["1"]["target_temp"] == 21
-
-    dev_map = coordinator.data[client.dev_id]
-    assert dev_map["settings"]["htr"]["1"]["target_temp"] == 21
+    assert "nodes_by_type" not in dispatched
+    assert dispatched["addr_map"] == {"htr": ["1"]}
+    assert dispatched["addresses_by_type"]["htr"] == ["1"]
+    coordinator.update_nodes.assert_called_once()
+    update_args = coordinator.update_nodes.call_args[0]
+    assert update_args[0] is None
+    assert update_args[1] is inventory
     assert client._inventory.addresses_by_type["htr"] == ["1"]
 
     record = hass.data[ducaheat_ws.DOMAIN][client.entry_id]
     assert record.get("inventory") is inventory
 
 
-def test_incremental_updates_refresh_cached_settings(
+def test_incremental_updates_preserve_address_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Incremental websocket merges should refresh coordinator settings cache."""
+    """Incremental websocket merges should continue to publish addresses."""
 
     client = _make_client(monkeypatch)
     coordinator = client._coordinator
@@ -339,20 +342,23 @@ def test_incremental_updates_refresh_cached_settings(
     snapshot = client._build_nodes_snapshot(client._nodes_raw)
     client._dispatch_nodes(snapshot)
 
-    initial_settings = coordinator.data[client.dev_id]["settings"]["htr"]["1"]["target_temp"]
-    assert initial_settings == 20
+    first_payload = client._dispatcher.call_args_list[-1][0][2]
+    assert "nodes" not in first_payload
+    assert "nodes_by_type" not in first_payload
+    assert first_payload["addr_map"] == {"htr": ["1"]}
+    assert first_payload["addresses_by_type"]["htr"] == ["1"]
 
     update = {"htr": {"settings": {"1": {"target_temp": 23}}}}
     client._merge_nodes(client._nodes_raw, update)
     updated_snapshot = client._build_nodes_snapshot(client._nodes_raw)
     client._dispatch_nodes(updated_snapshot)
 
-    final_settings = coordinator.data[client.dev_id]["settings"]["htr"]["1"]["target_temp"]
-    assert final_settings == 23
-
     dispatched = client._dispatcher.call_args_list[-1][0][2]
     assert "nodes" not in dispatched
-    assert dispatched["nodes_by_type"]["htr"]["settings"]["1"]["target_temp"] == 23
+    assert "nodes_by_type" not in dispatched
+    assert dispatched["addr_map"] == {"htr": ["1"]}
+    assert dispatched["addresses_by_type"]["htr"] == ["1"]
+    assert coordinator.update_nodes.call_count == 2
 
 
 @pytest.mark.asyncio
