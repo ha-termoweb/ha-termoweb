@@ -18,7 +18,11 @@ from custom_components.termoweb import coordinator as coordinator_module
 from custom_components.termoweb import heater as heater_module
 from custom_components.termoweb import sensor as sensor_module
 from custom_components.termoweb import const as const_module
-from custom_components.termoweb.identifiers import build_heater_energy_unique_id
+from custom_components.termoweb.identifiers import (
+    build_heater_energy_unique_id,
+    build_power_monitor_energy_unique_id,
+    build_power_monitor_power_unique_id,
+)
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
 from custom_components.termoweb.utils import build_gateway_device_info
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
@@ -32,6 +36,8 @@ HeaterTemperatureSensor = sensor_module.HeaterTemperatureSensor
 HeaterEnergyTotalSensor = sensor_module.HeaterEnergyTotalSensor
 HeaterPowerSensor = sensor_module.HeaterPowerSensor
 InstallationTotalEnergySensor = sensor_module.InstallationTotalEnergySensor
+PowerMonitorEnergySensor = sensor_module.PowerMonitorEnergySensor
+PowerMonitorPowerSensor = sensor_module.PowerMonitorPowerSensor
 async_setup_sensor_entry = sensor_module.async_setup_entry
 signal_ws_data = const_module.signal_ws_data
 DOMAIN = const_module.DOMAIN
@@ -253,7 +259,7 @@ def test_sensor_async_setup_entry_defaults_and_skips_invalid(
             },
         )
 
-        energy_coord = types.SimpleNamespace(update_addresses=MagicMock())
+        energy_coord = types.SimpleNamespace(update_addresses=MagicMock(), data={})
 
         hass.data = {
             DOMAIN: {
@@ -274,7 +280,7 @@ def test_sensor_async_setup_entry_defaults_and_skips_invalid(
         def _add_entities(entities: list) -> None:
             added.extend(entities)
 
-        calls: list[tuple[str, dict[str, Any]]] = []
+        calls: list[tuple[str, Any, tuple[str, ...]]] = []
         original_helper = sensor_module.log_skipped_nodes
 
         def _mock_helper(
@@ -284,7 +290,13 @@ def test_sensor_async_setup_entry_defaults_and_skips_invalid(
             logger: logging.Logger | None = None,
             skipped_types: Iterable[str] = ("pmo", "thm"),
         ) -> None:
-            calls.append((platform_name, inventory_or_details))
+            calls.append(
+                (
+                    platform_name,
+                    inventory_or_details,
+                    tuple(skipped_types),
+                )
+            )
             original_helper(
                 platform_name,
                 inventory_or_details,
@@ -299,6 +311,8 @@ def test_sensor_async_setup_entry_defaults_and_skips_invalid(
             await async_setup_sensor_entry(hass, entry, _add_entities)
 
         energy_coord.update_addresses.assert_called_once()
+        update_map = energy_coord.update_addresses.call_args[0][0]
+        assert sorted(update_map.get("pmo", [])) == ["P1"]
 
         names = sorted(
             getattr(ent, "_attr_name", getattr(ent, "name", None)) for ent in added
@@ -312,6 +326,8 @@ def test_sensor_async_setup_entry_defaults_and_skips_invalid(
             "Node 1 Energy",
             "Node 1 Power",
             "Node 1 Temperature",
+            "Power Monitor P1 Energy",
+            "Power Monitor P1 Power",
             "Total Energy",
         ]
 
@@ -320,11 +336,154 @@ def test_sensor_async_setup_entry_defaults_and_skips_invalid(
         assert isinstance(logged_details, tuple)
         logged_nodes = logged_details[0]
         assert "pmo" in logged_nodes
+        assert "pmo" not in calls[0][2]
         messages = [record.getMessage() for record in caplog.records]
-        assert any(
-            "Skipping TermoWeb pmo nodes for sensor platform: P1" in message
-            for message in messages
+        assert not any("Skipping TermoWeb pmo nodes" in message for message in messages)
+
+        pm_energy = next(
+            ent
+            for ent in added
+            if isinstance(ent, PowerMonitorEnergySensor)
+            and ent._attr_unique_id
+            == build_power_monitor_energy_unique_id(dev_id, "P1")
         )
+        pm_power = next(
+            ent
+            for ent in added
+            if isinstance(ent, PowerMonitorPowerSensor)
+            and ent._attr_unique_id
+            == build_power_monitor_power_unique_id(dev_id, "P1")
+        )
+        assert pm_energy.coordinator is energy_coord
+        assert pm_power.coordinator is energy_coord
+
+    asyncio.run(_run())
+
+
+def test_power_monitor_sensors_register_device_info() -> None:
+    async def _run() -> None:
+        hass = HomeAssistant()
+        entry = types.SimpleNamespace(entry_id="entry-pmo")
+        dev_id = "dev-pmo"
+
+        raw_nodes = {
+            "nodes": [
+                {"type": "pmo", "addr": "P1", "name": " Main PMO "},
+                {"type": "pmo", "addr": "P2"},
+            ]
+        }
+        inventory_nodes = build_node_inventory(raw_nodes)
+        inventory = Inventory(dev_id, raw_nodes, inventory_nodes)
+
+        coordinator = types.SimpleNamespace(
+            hass=hass,
+            data={
+                dev_id: {
+                    "nodes": {},
+                    "htr": {"settings": {}, "energy": {}, "power": {}},
+                }
+            },
+        )
+
+        energy_data = {
+            dev_id: {
+                "nodes_by_type": {
+                    "pmo": {
+                        "energy": {"P1": 1.25, "P2": 0.5},
+                        "power": {"P1": 450.0, "P2": 10.0},
+                        "addrs": ["P1", "P2"],
+                    }
+                },
+                "pmo": {
+                    "energy": {"P1": 1.25, "P2": 0.5},
+                    "power": {"P1": 450.0, "P2": 10.0},
+                    "addrs": ["P1", "P2"],
+                },
+            }
+        }
+
+        energy_coord = types.SimpleNamespace(
+            update_addresses=MagicMock(),
+            data=energy_data,
+        )
+
+        hass.data = {
+            DOMAIN: {
+                entry.entry_id: {
+                    "coordinator": coordinator,
+                    "client": types.SimpleNamespace(),
+                    "dev_id": dev_id,
+                    "inventory": inventory,
+                    "node_inventory": inventory_nodes,
+                    "energy_coordinator": energy_coord,
+                }
+            }
+        }
+
+        added: list[Any] = []
+
+        await async_setup_sensor_entry(hass, entry, added.extend)
+
+        energy_coord.update_addresses.assert_called_once()
+        update_map = energy_coord.update_addresses.call_args[0][0]
+        assert sorted(update_map.get("pmo", [])) == ["P1", "P2"]
+
+        energy_entities = {
+            ent._attr_unique_id: ent
+            for ent in added
+            if isinstance(ent, PowerMonitorEnergySensor)
+        }
+        power_entities = {
+            ent._attr_unique_id: ent
+            for ent in added
+            if isinstance(ent, PowerMonitorPowerSensor)
+        }
+
+        key_p1_energy = build_power_monitor_energy_unique_id(dev_id, "P1")
+        key_p2_energy = build_power_monitor_energy_unique_id(dev_id, "P2")
+        key_p1_power = build_power_monitor_power_unique_id(dev_id, "P1")
+        key_p2_power = build_power_monitor_power_unique_id(dev_id, "P2")
+
+        assert {key_p1_energy, key_p2_energy} <= set(energy_entities)
+        assert {key_p1_power, key_p2_power} <= set(power_entities)
+
+        for entity in list(energy_entities.values()) + list(power_entities.values()):
+            entity.hass = hass
+            assert entity.coordinator is energy_coord
+
+        pm1_energy = energy_entities[key_p1_energy]
+        pm2_energy = energy_entities[key_p2_energy]
+        pm1_power = power_entities[key_p1_power]
+        pm2_power = power_entities[key_p2_power]
+
+        assert pm1_energy.device_info["via_device"] == (DOMAIN, dev_id)
+        assert pm2_energy.device_info["via_device"] == (DOMAIN, dev_id)
+        assert pm1_energy.device_info["identifiers"] == {
+            (DOMAIN, dev_id, "pmo", "P1")
+        }
+        assert pm2_energy.device_info["identifiers"] == {
+            (DOMAIN, dev_id, "pmo", "P2")
+        }
+        assert pm1_power.device_info["identifiers"] == {
+            (DOMAIN, dev_id, "pmo", "P1")
+        }
+        assert pm2_power.device_info["identifiers"] == {
+            (DOMAIN, dev_id, "pmo", "P2")
+        }
+
+        assert pm1_energy.native_value == pytest.approx(1.25)
+        assert pm1_power.native_value == pytest.approx(450.0)
+        assert pm2_energy.native_value == pytest.approx(0.5)
+        assert pm2_power.native_value == pytest.approx(10.0)
+
+        assert pm1_energy.device_info["name"] == "Main PMO"
+        assert pm2_energy.device_info["name"] == "Power Monitor P2"
+        assert pm1_power.device_info["name"] == "Main PMO"
+        assert pm2_power.device_info["name"] == "Power Monitor P2"
+        assert pm1_energy.extra_state_attributes == {"dev_id": dev_id, "addr": "P1"}
+        assert pm2_power.extra_state_attributes == {"dev_id": dev_id, "addr": "P2"}
+        assert pm1_energy.available
+        assert pm2_power.available
 
     asyncio.run(_run())
 

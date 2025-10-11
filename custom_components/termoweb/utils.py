@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 
 from .const import DOMAIN
+from .inventory import normalize_node_addr
 
 
 async def async_get_integration(*args, **kwargs):
@@ -87,6 +88,41 @@ def build_gateway_device_info(
                 model = raw.get("model")
                 if model not in (None, ""):
                     info["model"] = str(model)
+
+    return info
+
+
+def build_power_monitor_device_info(
+    hass: HomeAssistant | None,
+    entry_id: str | None,
+    dev_id: str,
+    addr: str,
+    *,
+    name: str | None = None,
+) -> DeviceInfo:
+    """Return canonical ``DeviceInfo`` for a TermoWeb power monitor."""
+
+    normalized_addr = normalize_node_addr(addr, use_default_when_falsey=True) or str(addr)
+    identifier = (DOMAIN, str(dev_id), "pmo", normalized_addr)
+    display_name = (name or "").strip()
+    if not display_name:
+        display_name = f"Power Monitor {normalized_addr}"
+
+    info: DeviceInfo = DeviceInfo(
+        identifiers={identifier},
+        manufacturer="TermoWeb",
+        name=display_name,
+        model="Power Monitor",
+        via_device=(DOMAIN, str(dev_id)),
+    )
+
+    entry_data = _entry_gateway_record(hass, entry_id)
+    if not entry_data:
+        return info
+
+    brand = entry_data.get("brand")
+    if isinstance(brand, str) and brand.strip():
+        info["manufacturer"] = brand.strip()
 
     return info
 

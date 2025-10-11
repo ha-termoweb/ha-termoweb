@@ -189,9 +189,6 @@ class WebSocketClient(_WSStatusMixin):
         self._stats = WSStats()
 
         self._handshake_payload: dict[str, Any] | None = None
-        self._nodes: dict[str, Any] = {}
-        self._nodes_raw: dict[str, Any] = {}
-
         self._payload_idle_window: float = 240.0
         self._idle_restart_task: asyncio.Task | None = None
         self._idle_restart_pending = False
@@ -721,12 +718,7 @@ class WebSocketClient(_WSStatusMixin):
                     "lease_seconds": lease_seconds,
                 }
 
-        if merge and self._nodes_raw:
-            self._merge_nodes(self._nodes_raw, nodes)
-        else:
-            self._nodes_raw = deepcopy(nodes)
-        self._nodes = self._build_nodes_snapshot(self._nodes_raw)
-        self._dispatch_nodes(self._nodes)
+        self._dispatch_nodes(nodes)
         if sample_updates:
             self._forward_sample_updates(sample_updates)
         self._mark_event(paths=None, count_event=True)
@@ -877,17 +869,14 @@ class WebSocketClient(_WSStatusMixin):
                         found.add((node_type, addr))
         return sorted(found)
 
-    def _dispatch_nodes(self, payload: dict[str, Any]) -> dict[str, list[str]]:
+    def _dispatch_nodes(self, payload: Mapping[str, Any]) -> dict[str, list[str]]:
         """Publish node updates and return the address map by node type."""
 
-        if not isinstance(payload, dict):  # pragma: no cover - defensive
-            return {}
-
-        is_snapshot = isinstance(payload.get("nodes_by_type"), dict)
-        raw_nodes: Any = payload.get("nodes") if is_snapshot else payload
-        snapshot_payload: dict[str, Any] = (
-            payload if is_snapshot else {"nodes": None, "nodes_by_type": {}}
-        )
+        raw_nodes: Any
+        if isinstance(payload, Mapping) and "nodes" in payload:
+            raw_nodes = payload.get("nodes")
+        else:
+            raw_nodes = payload
 
         context = _prepare_nodes_dispatch(
             self.hass,
@@ -902,19 +891,26 @@ class WebSocketClient(_WSStatusMixin):
             self._inventory = inventory
         addr_map = context.addr_map
         unknown_types = context.unknown_types
-        record = context.record
-        raw_nodes_payload = context.payload
-        if raw_nodes_payload is None:
-            raw_nodes_payload = (
-                inventory.payload if isinstance(inventory, Inventory) else {}
-            )
+
         if unknown_types:  # pragma: no cover - diagnostic branch
             _LOGGER.debug(
                 "WS: unknown node types in inventory: %s",
                 ", ".join(sorted(unknown_types)),
             )
 
-        if not is_snapshot:  # pragma: no cover - legacy branch
+        self._apply_heater_addresses(addr_map, inventory=inventory)
+
+        addr_map_payload = {
+            node_type: list(addrs) for node_type, addrs in addr_map.items()
+        }
+
+        payload_copy: dict[str, Any] = {
+            "dev_id": self.dev_id,
+            "node_type": None,
+            "addr_map": addr_map_payload,
+        }
+
+        if isinstance(inventory, Inventory):
             nodes_by_type = {
                 node_type: {"addrs": list(addrs)}
                 for node_type, addrs in addr_map.items()
@@ -932,18 +928,6 @@ class WebSocketClient(_WSStatusMixin):
             inventory=inventory,
         )
 
-        payload_copy = {
-            "dev_id": self.dev_id,
-            "node_type": None,
-            "nodes": deepcopy(snapshot_payload.get("nodes", raw_nodes_payload)),
-            "nodes_by_type": deepcopy(
-                snapshot_payload.get("nodes_by_type", {})
-            ),
-        }
-        payload_copy.setdefault(
-            "addr_map",
-            {node_type: list(addrs) for node_type, addrs in addr_map.items()},
-        )
         if unknown_types:  # pragma: no cover - diagnostic payload
             payload_copy.setdefault("unknown_types", sorted(unknown_types))
 
@@ -961,7 +945,7 @@ class WebSocketClient(_WSStatusMixin):
         else:  # pragma: no cover - legacy hass loop stub
             _send()
 
-        return {node_type: list(addrs) for node_type, addrs in addr_map.items()}
+        return addr_map_payload
 
     def _ensure_type_bucket(
         self, dev_map: dict[str, Any], nodes_by_type: dict[str, Any], node_type: str
@@ -1275,37 +1259,6 @@ class WebSocketClient(_WSStatusMixin):
         except Exception:
             _LOGGER.debug("WS: sample subscription setup failed", exc_info=True)
 
-    @staticmethod
-    def _build_nodes_snapshot(nodes: dict[str, Any]) -> dict[str, Any]:
-        """Normalise the nodes payload for consumers."""
-        nodes_copy = deepcopy(nodes)
-        nodes_by_type: dict[str, Any] = {
-            node_type: payload
-            for node_type, payload in nodes_copy.items()
-            if isinstance(payload, dict)
-        }
-        snapshot: dict[str, Any] = {
-            "nodes": nodes_copy,
-            "nodes_by_type": nodes_by_type,
-        }
-        snapshot.update(nodes_by_type)
-        if "htr" in nodes_by_type:
-            snapshot.setdefault("htr", nodes_by_type["htr"])
-        return snapshot
-
-    @staticmethod
-    def _merge_nodes(target: dict[str, Any], source: dict[str, Any]) -> None:
-        """Deep-merge incremental node updates into the stored snapshot."""
-        for key, value in source.items():
-            if isinstance(value, dict):
-                existing = target.get(key)
-                if isinstance(existing, dict):
-                    WebSocketClient._merge_nodes(existing, value)
-                else:
-                    target[key] = deepcopy(value)
-            else:
-                target[key] = value
-
     def _mark_event(
         self, *, paths: list[str] | None, count_event: bool = False
     ) -> None:
@@ -1479,6 +1432,25 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._write_hook_installed = False
         self._write_hook_original: Callable[..., Awaitable[Any]] | None = None
         self._install_write_hook()
+
+    @staticmethod
+    def _build_nodes_snapshot(nodes: dict[str, Any]) -> dict[str, Any]:
+        """Return a snapshot compatible with legacy dispatcher consumers."""
+
+        nodes_copy = deepcopy(nodes)
+        nodes_by_type: dict[str, Any] = {
+            node_type: payload
+            for node_type, payload in nodes_copy.items()
+            if isinstance(payload, dict)
+        }
+        snapshot: dict[str, Any] = {
+            "nodes": nodes_copy,
+            "nodes_by_type": nodes_by_type,
+        }
+        snapshot.update(nodes_by_type)
+        if "htr" in nodes_by_type:
+            snapshot.setdefault("htr", nodes_by_type["htr"])
+        return snapshot
 
     # ------------------------------------------------------------------
     # Public control
@@ -2114,10 +2086,12 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                         section_map[addr] = existing_payload
                     else:
                         settings_bucket[normalised_addr] = value
-        raw_bucket = self._nodes_raw.setdefault(node_type, {})
-        raw_section = raw_bucket.setdefault(section, {})
-        if isinstance(raw_section, dict):
-            raw_section[addr] = deepcopy(body)
+        raw_store = getattr(self, "_nodes_raw", None)
+        if isinstance(raw_store, MutableMapping):
+            raw_bucket = raw_store.setdefault(node_type, {})
+            raw_section = raw_bucket.setdefault(section, {})
+            if isinstance(raw_section, dict):
+                raw_section[addr] = deepcopy(body)
         return True
 
     @staticmethod

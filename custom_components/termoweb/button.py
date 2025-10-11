@@ -25,6 +25,7 @@ from .const import DOMAIN
 from .heater import (
     BoostButtonMetadata,
     HeaterNodeBase,
+    format_boost_duration_label,
     heater_platform_details_for_entry,
     iter_boost_button_metadata,
     iter_boostable_heater_nodes,
@@ -195,7 +196,7 @@ class AccumulatorBoostButton(AccumulatorBoostButtonBase):
     """Button that starts an accumulator boost for a fixed duration."""
 
     _attr_icon = "mdi:timer-play"
-    _attr_translation_key = "accumulator_boost_minutes"
+    _attr_translation_key = "accumulator_boost_hours"
 
     def __init__(
         self,
@@ -214,6 +215,7 @@ class AccumulatorBoostButton(AccumulatorBoostButtonBase):
         """Initialise the boost helper button for a fixed duration."""
 
         self._minutes = minutes
+        label_text = format_boost_duration_label(minutes)
         super().__init__(
             coordinator,
             entry_id,
@@ -221,7 +223,7 @@ class AccumulatorBoostButton(AccumulatorBoostButtonBase):
             addr,
             base_name,
             unique_id,
-            label=label or f"Boost {minutes} minutes",
+            label=label or f"Boost {label_text}",
             node_type=node_type,
         )
         if icon is not None:
@@ -237,7 +239,13 @@ class AccumulatorBoostButton(AccumulatorBoostButtonBase):
     def translation_placeholders(self) -> dict[str, str]:
         """Expose the configured boost duration for translations."""
 
-        return {"minutes": str(self._minutes)}
+        hours_label = format_boost_duration_label(self._minutes)
+        hours = self._minutes // 60
+        return {
+            "hours_label": hours_label,
+            "hours": str(hours),
+            "minutes": str(self._minutes),
+        }
 
 
 class AccumulatorBoostCancelButton(AccumulatorBoostButtonBase):
