@@ -1,4 +1,5 @@
 """Ducaheat backend implementation and HTTP adapter."""
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
@@ -26,6 +27,7 @@ _LOGGER = logging.getLogger(__name__)
 _ORIGINAL_GET_RTC_TIME = RESTClient.get_rtc_time
 
 _DAY_ORDER = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
 
 class DucaheatRequestError(Exception):
     """Raised when the Ducaheat API returns a client error."""
@@ -170,12 +172,7 @@ class DucaheatRESTClient(RESTClient):
                 if mode_value is not None:
                     status_payload["mode"] = mode_value
                     status_includes_mode = True
-            elif (
-                units is not None
-                and mode is None
-                and prog is None
-                and ptemp is None
-            ):
+            elif units is not None and mode is None and prog is None and ptemp is None:
                 status_payload["units"] = self._ensure_units(units)
 
             selection_claimed = False
@@ -256,7 +253,9 @@ class DucaheatRESTClient(RESTClient):
 
         node_type, addr = self._resolve_node_descriptor(node)
         if node_type != "htr":
-            return await super().get_node_samples(dev_id, (node_type, addr), start, stop)
+            return await super().get_node_samples(
+                dev_id, (node_type, addr), start, stop
+            )
 
         headers = await self._authed_headers()
         path = f"/api/v2/devs/{dev_id}/htr/{addr}/samples"
@@ -479,10 +478,7 @@ class DucaheatRESTClient(RESTClient):
         def _merge(target: dict[str, Any], source: dict[str, Any]) -> None:
             """Recursively merge capability dictionaries."""
             for key, value in source.items():
-                if (
-                    isinstance(value, dict)
-                    and isinstance(target.get(key), dict)
-                ):
+                if isinstance(value, dict) and isinstance(target.get(key), dict):
                     _merge(target[key], value)
                 elif isinstance(value, dict):
                     target[key] = deepcopy(value)
@@ -633,12 +629,7 @@ class DucaheatRESTClient(RESTClient):
             if mode_value is not None:
                 status_payload["mode"] = mode_value
                 status_includes_mode = True
-        elif (
-            units is not None
-            and mode is None
-            and prog is None
-            and ptemp is None
-        ):
+        elif units is not None and mode is None and prog is None and ptemp is None:
             status_payload["units"] = self._ensure_units(units)
 
         segment_plan: list[tuple[str, dict[str, Any]]] = []
@@ -695,24 +686,45 @@ class DucaheatRESTClient(RESTClient):
         if ptemp is not None:
             segment_plan.append(("prog_temps", {"ptemp": self._ensure_ptemp(ptemp)}))
 
-        if segment_plan:
-            for name, payload in segment_plan:
-                responses[name] = await self._post_acm_endpoint(
-                    f"{base}/{name}",
+        selection_claimed = False
+        try:
+            if segment_plan or boost_payload is not None:
+                await self._select_segmented_node(
+                    dev_id=dev_id,
+                    node_type="acm",
+                    addr=addr,
+                    headers=headers,
+                    select=True,
+                )
+                selection_claimed = True
+
+            if segment_plan:
+                for name, payload in segment_plan:
+                    responses[name] = await self._post_acm_endpoint(
+                        f"{base}/{name}",
+                        headers,
+                        payload,
+                        dev_id=dev_id,
+                        addr=addr,
+                    )
+
+            if boost_payload is not None:
+                responses["boost"] = await self._post_acm_endpoint(
+                    f"{base}/boost",
                     headers,
-                    payload,
+                    boost_payload,
                     dev_id=dev_id,
                     addr=addr,
                 )
-
-        if boost_payload is not None:
-            responses["boost"] = await self._post_acm_endpoint(
-                f"{base}/boost",
-                headers,
-                boost_payload,
-                dev_id=dev_id,
-                addr=addr,
-            )
+        finally:
+            if selection_claimed:
+                await self._select_segmented_node(
+                    dev_id=dev_id,
+                    node_type="acm",
+                    addr=addr,
+                    headers=headers,
+                    select=False,
+                )
 
         if mode_value is not None or cancel_boost_flag:
             minutes_param: int | None
@@ -756,11 +768,7 @@ class DucaheatRESTClient(RESTClient):
                     boost_state = metadata
             elif metadata:
                 responses["boost_state"] = metadata
-            if (
-                fallback
-                and mode_value != "boost"
-                and "status" not in responses
-            ):
+            if fallback and mode_value != "boost" and "status" not in responses:
                 boost_flag = bool((boost_state or {}).get("boost_active"))
                 responses["status_refresh"] = await self._post_acm_endpoint(
                     f"{base}/boost",
@@ -1052,7 +1060,9 @@ class DucaheatRESTClient(RESTClient):
                         select=False,
                     )
                 except Exception as err:  # noqa: BLE001 - defensive cleanup
-                    message = getattr(err, "body", None) or getattr(err, "message", None)
+                    message = getattr(err, "body", None) or getattr(
+                        err, "message", None
+                    )
                     if not message and err.args:
                         message = err.args[0]
                     _LOGGER.error(
