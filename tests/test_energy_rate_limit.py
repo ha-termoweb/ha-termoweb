@@ -86,3 +86,63 @@ def test_default_samples_rate_limit_state_overrides_time_and_sleep() -> None:
     assert not sleep_calls
 
     reset_samples_rate_limit_state()
+
+
+def test_async_throttle_invokes_on_wait_callback() -> None:
+    """Rate limiter should report the computed delay to on_wait callback."""
+
+    monotonic_values = iter([0.2, 1.2])
+
+    def fake_monotonic() -> float:
+        return next(monotonic_values)
+
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+
+    on_wait_calls: list[float] = []
+
+    def on_wait(delay: float) -> None:
+        on_wait_calls.append(delay)
+
+    limiter = MonotonicRateLimiter(
+        lock=asyncio.Lock(),
+        monotonic=fake_monotonic,
+        sleep=fake_sleep,
+        min_interval=1.0,
+    )
+
+    result = asyncio.run(limiter.async_throttle(on_wait=on_wait))
+
+    assert result == pytest.approx(0.8)
+    assert on_wait_calls == [pytest.approx(0.8)]
+    assert sleep_calls == [pytest.approx(0.8)]
+
+
+def test_set_last_timestamp_short_circuits_future_sleep() -> None:
+    """Future timestamp override should bypass sleeping and update state."""
+
+    def fake_monotonic() -> float:
+        return 15.0
+
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+
+    limiter = MonotonicRateLimiter(
+        lock=asyncio.Lock(),
+        monotonic=fake_monotonic,
+        sleep=fake_sleep,
+        min_interval=1.0,
+    )
+
+    limiter.set_last_timestamp(10.0)
+    assert limiter.last_timestamp() == pytest.approx(10.0)
+
+    result = asyncio.run(limiter.async_throttle())
+
+    assert result == pytest.approx(0.0)
+    assert not sleep_calls
+    assert limiter.last_timestamp() == pytest.approx(15.0)
