@@ -163,15 +163,15 @@ class DucaheatRESTClient(RESTClient):
 
             status_payload: dict[str, Any] = {}
             status_includes_mode = False
+            if mode_value is not None:
+                status_payload["mode"] = mode_value
+                status_includes_mode = True
             if stemp is not None:
                 try:
                     status_payload["stemp"] = self._ensure_temperature(stemp)
                 except ValueError as err:
                     raise ValueError(f"Invalid stemp value: {stemp}") from err
                 status_payload["units"] = self._ensure_units(units)
-                if mode_value is not None:
-                    status_payload["mode"] = mode_value
-                    status_includes_mode = True
             elif units is not None and mode is None and prog is None and ptemp is None:
                 status_payload["units"] = self._ensure_units(units)
 
