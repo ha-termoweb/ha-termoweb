@@ -1620,7 +1620,19 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         targets = self._heater_sample_subscription_targets()
         if not targets:
             return
-        for node_type, addr in targets:
+        for target in targets:
+            if target is None:
+                continue
+            try:
+                node_type, addr = target
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(node_type, str) or not isinstance(addr, str):
+                continue
+            node_type = node_type.strip()
+            addr = addr.strip()
+            if not node_type or not addr:
+                continue
             payload = {
                 "name": "subscribe",
                 "args": [f"/{node_type}/{addr}/samples"],
