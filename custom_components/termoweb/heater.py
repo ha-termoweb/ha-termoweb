@@ -15,6 +15,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from .boost import (
+    ALLOWED_BOOST_MINUTES,
     coerce_boost_bool,
     coerce_boost_minutes,
     coerce_boost_remaining_minutes,
@@ -80,9 +81,9 @@ def _build_boost_button_metadata() -> tuple[BoostButtonMetadata, ...]:
     """Return the configured metadata describing boost helper buttons."""
 
     entries: list[BoostButtonMetadata] = []
-    for hours in range(1, 11):
-        minutes = hours * 60
-        icon_suffix = _BOOST_HOUR_ICON_SUFFIXES.get(hours)
+    for minutes in ALLOWED_BOOST_MINUTES:
+        hours, remainder = divmod(minutes, 60)
+        icon_suffix = _BOOST_HOUR_ICON_SUFFIXES.get(hours) if remainder == 0 else None
         icon = (
             f"mdi:clock-time-{icon_suffix}-outline"
             if icon_suffix is not None
@@ -101,9 +102,7 @@ def _build_boost_button_metadata() -> tuple[BoostButtonMetadata, ...]:
 
 
 BOOST_BUTTON_METADATA: Final[tuple[BoostButtonMetadata, ...]] = _build_boost_button_metadata()
-BOOST_DURATION_OPTIONS: Final[tuple[int, ...]] = tuple(
-    option.minutes for option in BOOST_BUTTON_METADATA if option.minutes is not None
-)
+BOOST_DURATION_OPTIONS: Final[tuple[int, ...]] = ALLOWED_BOOST_MINUTES
 
 
 

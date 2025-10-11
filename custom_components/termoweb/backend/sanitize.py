@@ -4,6 +4,13 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from custom_components.termoweb.boost import ALLOWED_BOOST_MINUTES
+
+_ALLOWED_BOOST_MINUTES_SET = frozenset(ALLOWED_BOOST_MINUTES)
+_ALLOWED_BOOST_MINUTES_MESSAGE = ", ".join(
+    str(option) for option in ALLOWED_BOOST_MINUTES
+)
+
 _BEARER_RE = re.compile(r"Bearer\s+[A-Za-z0-9\-._~+/]+=*", re.IGNORECASE)
 _TOKEN_QUERY_RE = re.compile(r"(?i)(token|refresh_token|access_token)=([^&\s]+)")
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
@@ -64,10 +71,8 @@ def validate_boost_minutes(value: int | None) -> int | None:
         minutes = int(value)
     except (TypeError, ValueError) as err:  # pragma: no cover - defensive
         raise ValueError(f"Invalid boost_time value: {value!r}") from err
-    if minutes < 60 or minutes > 600 or minutes % 60 != 0:
-        raise ValueError(
-            "boost_time must be between 60 and 600 minutes in 60-minute increments"
-        )
+    if minutes not in _ALLOWED_BOOST_MINUTES_SET:
+        raise ValueError(f"boost_time must be one of: {_ALLOWED_BOOST_MINUTES_MESSAGE}")
     return minutes
 
 
