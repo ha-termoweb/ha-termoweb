@@ -682,6 +682,39 @@ def test_request_returns_plain_text() -> None:
     asyncio.run(_run())
 
 
+def test_log_non_htr_payload_truncates_long_preview(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    client = RESTClient(session, "user", "pass")
+
+    class StubLogger:
+        def __init__(self) -> None:
+            self.debug_calls: list[tuple[str, tuple[Any, ...]]] = []
+
+        def debug(self, msg: str, *args: Any) -> None:
+            self.debug_calls.append((msg, args))
+
+    stub_logger = StubLogger()
+    monkeypatch.setattr(api, "_LOGGER", stub_logger)
+
+    payload = {"data": "x" * 600}
+    client._log_non_htr_payload(
+        node_type="acm",
+        dev_id="device-12345",
+        addr="001",
+        stage="update",
+        payload=payload,
+    )
+
+    assert len(stub_logger.debug_calls) == 1
+    _, args = stub_logger.debug_calls[0]
+    snippet = args[-1]
+    assert isinstance(snippet, str)
+    assert snippet.endswith("...")
+    assert len(snippet) <= 500
+
+
 def test_ensure_token_uses_cache_without_http() -> None:
     async def _run() -> None:
         session = FakeSession()
