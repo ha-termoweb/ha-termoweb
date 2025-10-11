@@ -1287,12 +1287,28 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         if validated_minutes is None:
             validated_minutes = self._preferred_boost_minutes()
 
+        settings = self.heater_settings() or {}
+        boost_temp = float_or_none(settings.get("boost_temp"))
+        if boost_temp is None:
+            boost_temp = float_or_none(settings.get("stemp"))
+        if boost_temp is None:
+            _LOGGER.error(
+                "Boost start requires a setpoint for type=%s addr=%s",
+                self._node_type,
+                self._addr,
+            )
+            return
+
+        units = self._units()
+
         async def _call(client: Any) -> None:
             await client.set_acm_boost_state(
                 self._dev_id,
                 self._addr,
                 boost=True,
                 boost_time=validated_minutes,
+                stemp=boost_temp,
+                units=units,
             )
 
         success = await self._async_client_call(

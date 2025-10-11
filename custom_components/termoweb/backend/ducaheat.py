@@ -943,12 +943,30 @@ class DucaheatRESTClient(RESTClient):
         *,
         boost: bool,
         boost_time: int | None = None,
-        ) -> Any:
+        stemp: float | None = None,
+        units: str | None = None,
+    ) -> Any:
         """Toggle an accumulator boost session via segmented endpoints."""
 
         node_type, addr_str = self._resolve_node_descriptor(("acm", addr))
         headers = await self._authed_headers()
-        payload = build_acm_boost_payload(boost, boost_time)
+        formatted_temp: str | None = None
+        if stemp is not None:
+            try:
+                formatted_temp = self._format_temp(stemp)
+            except ValueError as err:
+                raise ValueError(f"Invalid stemp value: {stemp!r}") from err
+
+        unit_value: str | None = None
+        if units is not None:
+            unit_value = self._ensure_units(units)
+
+        payload = build_acm_boost_payload(
+            boost,
+            boost_time,
+            stemp=formatted_temp,
+            units=unit_value,
+        )
         if boost:
             minutes = validate_boost_minutes(boost_time)
             _LOGGER.info(

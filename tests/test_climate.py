@@ -741,7 +741,7 @@ def test_accumulator_async_set_preset_mode_transitions(
         entry_id = "entry-acm-preset"
         dev_id = "dev-acm-preset"
         addr = "11"
-        settings = {"mode": "auto", "units": "C"}
+        settings = {"mode": "auto", "units": "C", "boost_temp": "21.0"}
         record = {
             "nodes": {},
             "nodes_by_type": {"acm": {"settings": {addr: dict(settings)}}},
@@ -798,6 +798,8 @@ def test_accumulator_async_set_preset_mode_transitions(
             addr,
             boost=True,
             boost_time=42,
+            stemp=21.0,
+            units="C",
         )
         assert settings_map["mode"] == "boost"
         assert settings_map["boost_active"] is True
@@ -1107,7 +1109,12 @@ def test_accumulator_service_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
         entry_id = "entry-acm-services"
         dev_id = "dev-acm-services"
         addr = "3"
-        settings = {"mode": "auto", "boost_time": 60, "boost_temp": "20.0"}
+        settings = {
+            "mode": "auto",
+            "boost_time": 60,
+            "boost_temp": "20.0",
+            "units": "C",
+        }
         record = {
             "nodes": {},
             "nodes_by_type": {"acm": {"settings": {addr: dict(settings)}}},
@@ -1176,6 +1183,8 @@ def test_accumulator_service_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
             addr,
             boost=True,
             boost_time=45,
+            stemp=21.2,
+            units="C",
         )
         assert settings_map["mode"] == "boost"
         assert settings_map["boost_active"] is True
@@ -1196,6 +1205,8 @@ def test_accumulator_service_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
             addr,
             boost=True,
             boost_time=75,
+            stemp=21.2,
+            units="C",
         )
         assert settings_map["boost_remaining"] == 75
         assert fallback_calls == 1
@@ -1228,7 +1239,12 @@ def test_accumulator_service_error_paths(monkeypatch: pytest.MonkeyPatch) -> Non
         entry_id = "entry-acm-errors"
         dev_id = "dev-acm-errors"
         addr = "4"
-        settings = {"mode": "auto", "boost_time": 60}
+        settings = {
+            "mode": "auto",
+            "boost_time": 60,
+            "boost_temp": "19.5",
+            "units": "F",
+        }
         record = {
             "nodes": {},
             "nodes_by_type": {"acm": {"settings": {addr: dict(settings)}}},
@@ -1307,6 +1323,8 @@ def test_accumulator_service_error_paths(monkeypatch: pytest.MonkeyPatch) -> Non
             addr,
             boost=True,
             boost_time=20,
+            stemp=19.5,
+            units="F",
         )
         assert fallback_calls == 0
         client.set_acm_boost_state.side_effect = None

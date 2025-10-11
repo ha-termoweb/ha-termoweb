@@ -401,10 +401,16 @@ async def test_ducaheat_set_acm_boost_state_non_dict_response(
 
 
 @pytest.mark.parametrize(
-    ("boost", "boost_time", "expected_payload"),
+    ("boost", "boost_time", "stemp", "units", "expected_payload"),
     [
-        (True, 45, {"boost": True, "boost_time": 45}),
-        (False, None, {"boost": False}),
+        (
+            True,
+            45,
+            21.5,
+            "c",
+            {"boost": True, "boost_time": 45, "stemp": "21.5", "units": "C"},
+        ),
+        (False, None, None, None, {"boost": False}),
     ],
 )
 @pytest.mark.asyncio
@@ -412,6 +418,8 @@ async def test_ducaheat_set_acm_boost_state_posts_expected_payload(
     monkeypatch: pytest.MonkeyPatch,
     boost: bool,
     boost_time: int | None,
+    stemp: float | None,
+    units: str | None,
     expected_payload: dict[str, Any],
 ) -> None:
     client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
@@ -434,7 +442,12 @@ async def test_ducaheat_set_acm_boost_state_posts_expected_payload(
     monkeypatch.setattr(client, "get_rtc_time", rtc_mock)
 
     result = await client.set_acm_boost_state(
-        "dev", 5, boost=boost, boost_time=boost_time
+        "dev",
+        5,
+        boost=boost,
+        boost_time=boost_time,
+        stemp=stemp,
+        units=units,
     )
 
     post_mock.assert_awaited_once_with(
@@ -512,10 +525,12 @@ async def test_ducaheat_set_acm_boost_state_client_error(
     rtc_mock = AsyncMock(return_value={"ignored": True})
     monkeypatch.setattr(client, "get_rtc_time", rtc_mock)
 
+    call_kwargs: dict[str, Any] = {"boost": boost, "boost_time": boost_time}
+    if boost:
+        call_kwargs.update({"stemp": 20.0, "units": "C"})
+
     with pytest.raises(DucaheatRequestError) as exc:
-        await client.set_acm_boost_state(
-            "dev", 7, boost=boost, boost_time=boost_time
-        )
+        await client.set_acm_boost_state("dev", 7, **call_kwargs)
 
     assert exc.value.status == 422
     assert "bad request" in str(exc.value)
