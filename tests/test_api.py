@@ -1624,6 +1624,58 @@ async def test_set_acm_extra_options_forwards_payload(monkeypatch: pytest.Monkey
     assert headers_mock.await_count == 1
 
 
+@pytest.mark.asyncio
+async def test_set_acm_boost_state_formats_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = FakeSession()
+    client = RESTClient(session, "user", "pass")
+
+    request_mock = AsyncMock(return_value={"ok": True})
+    headers_mock = AsyncMock(return_value={"Authorization": "Bearer token"})
+
+    monkeypatch.setattr(client, "_request", request_mock)
+    monkeypatch.setattr(client, "authed_headers", headers_mock)
+    monkeypatch.setattr(client, "_log_non_htr_payload", lambda **_: None)
+
+    response = await client.set_acm_boost_state(
+        "dev123",
+        "7",
+        boost=True,
+        boost_time=120,
+        stemp=22.5,
+        units=" f ",
+    )
+
+    assert response == {"ok": True}
+    assert request_mock.await_count == 1
+    await_call = request_mock.await_args
+    assert await_call.args[0] == "POST"
+    assert await_call.args[1] == "/api/v2/devs/dev123/acm/7/boost"
+    assert await_call.kwargs["json"] == {
+        "boost": True,
+        "boost_time": 120,
+        "stemp": "22.5",
+        "units": "F",
+    }
+    assert await_call.kwargs["headers"] == {"Authorization": "Bearer token"}
+    assert headers_mock.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_set_acm_boost_state_rejects_invalid_units() -> None:
+    client = RESTClient(FakeSession(), "user", "pass")
+
+    with pytest.raises(ValueError, match="Invalid units"):
+        await client.set_acm_boost_state("dev456", "8", boost=True, units="kelvin")
+
+
+@pytest.mark.asyncio
+async def test_set_acm_boost_state_rejects_invalid_stemp() -> None:
+    client = RESTClient(FakeSession(), "user", "pass")
+
+    with pytest.raises(ValueError, match="Invalid stemp value"):
+        await client.set_acm_boost_state("dev789", "9", boost=True, stemp="oops")
+
+
 def test_ducaheat_get_node_settings_normalises_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2309,6 +2361,32 @@ def test_extract_samples_preserves_min_max() -> None:
             "counter_min": "7100000",
             "counter_max": "7300000",
         },
+    ]
+
+
+def test_extract_samples_uses_counter_field_when_value_missing() -> None:
+    client = RESTClient(FakeSession(), "user", "pass", api_base="https://api.fake")
+
+    samples = client._extract_samples(
+        [
+            {
+                "t": 3000,
+                "counter": {
+                    "counter": 12_345,
+                    "min": 12_000,
+                    "max": 13_000,
+                },
+            }
+        ]
+    )
+
+    assert samples == [
+        {
+            "t": 3000,
+            "counter": "12345",
+            "counter_min": "12000",
+            "counter_max": "13000",
+        }
     ]
 
 
