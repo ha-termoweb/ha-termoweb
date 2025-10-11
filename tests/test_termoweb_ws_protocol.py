@@ -686,18 +686,24 @@ def test_translate_path_update_and_resolve(monkeypatch: pytest.MonkeyPatch) -> N
     """Path based updates should map onto node sections."""
 
     client, _sio, _ = _make_client(monkeypatch)
+    translate = lambda payload: ws_client_module.translate_path_update(
+        payload,
+        resolve_section=module.WebSocketClient._resolve_update_section,
+    )
     payload = {
         "path": "/api/devs/device/htr/1/settings/temp",
         "body": {"value": 20},
     }
-    translated = client._translate_path_update(payload)
+    translated = translate(payload)
     assert translated == {"htr": {"settings": {"1": {"temp": {"value": 20}}}}}
+    assert client._translate_path_update(payload) == translated
     setup_payload = {
         "path": "/api/devs/device/htr/1/setup/program",
         "body": {"foo": 1},
     }
-    translated_setup = client._translate_path_update(setup_payload)
+    translated_setup = translate(setup_payload)
     assert translated_setup == {"htr": {"settings": {"1": {"setup": {"program": {"foo": 1}}}}}}
+    assert client._translate_path_update(setup_payload) == translated_setup
     assert module.WebSocketClient._resolve_update_section("advanced_setup") == ("advanced", "advanced_setup")
     assert module.WebSocketClient._resolve_update_section("prog") == ("settings", "prog")
     assert module.WebSocketClient._resolve_update_section(None) == (None, None)
@@ -707,17 +713,26 @@ def test_translate_path_update_invalid_cases(monkeypatch: pytest.MonkeyPatch) ->
     """Invalid payloads should return None from the path translator."""
 
     client, _sio, _ = _make_client(monkeypatch)
-    assert client._translate_path_update("invalid") is None
-    assert client._translate_path_update({"nodes": {}}) is None
-    assert client._translate_path_update({"path": 123, "body": {}}) is None
-    assert client._translate_path_update({"path": "/", "body": {}}) is None
-    assert client._translate_path_update({"path": "/api/devs/device", "body": {}}) is None
-    assert client._translate_path_update({"path": "/api/htr", "body": {}}) is None
-    assert client._translate_path_update({"path": "/htr", "body": {}}) is None
-    assert client._translate_path_update({"path": "/api/devs/device/htr/", "body": {}}) is None
-    assert client._translate_path_update({"path": "/api/devs/device/htr//settings", "body": {}}) is None
-    assert client._translate_path_update({"path": "/api/devs/device/ /settings", "body": {}}) is None
-    assert client._translate_path_update({"path": "/api/devs/device/htr/ /settings", "body": {}}) is None
+    translate = lambda payload: ws_client_module.translate_path_update(
+        payload,
+        resolve_section=module.WebSocketClient._resolve_update_section,
+    )
+    invalid_payloads = [
+        "invalid",
+        {"nodes": {}},
+        {"path": 123, "body": {}},
+        {"path": "/", "body": {}},
+        {"path": "/api/devs/device", "body": {}},
+        {"path": "/api/htr", "body": {}},
+        {"path": "/htr", "body": {}},
+        {"path": "/api/devs/device/htr/", "body": {}},
+        {"path": "/api/devs/device/htr//settings", "body": {}},
+        {"path": "/api/devs/device/ /settings", "body": {}},
+        {"path": "/api/devs/device/htr/ /settings", "body": {}},
+    ]
+    for payload in invalid_payloads:
+        assert translate(payload) is None
+        assert client._translate_path_update(payload) is None
 
 
 def test_translate_path_update_rejects_unknown_nodes(
@@ -726,12 +741,16 @@ def test_translate_path_update_rejects_unknown_nodes(
     """Path translation should ignore unknown node types and addresses."""
 
     client, _sio, _ = _make_client(monkeypatch)
-    assert client._translate_path_update(
-        {"path": "/api/devs/device/ /1/settings", "body": {"v": 1}}
-    ) is None
-    assert client._translate_path_update(
-        {"path": "/api/devs/device/htr/ /settings", "body": {"v": 1}}
-    ) is None
+    translate = lambda payload: ws_client_module.translate_path_update(
+        payload,
+        resolve_section=module.WebSocketClient._resolve_update_section,
+    )
+    for payload in (
+        {"path": "/api/devs/device/ /1/settings", "body": {"v": 1}},
+        {"path": "/api/devs/device/htr/ /settings", "body": {"v": 1}},
+    ):
+        assert translate(payload) is None
+        assert client._translate_path_update(payload) is None
 
 
 def test_handle_handshake_logging(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
