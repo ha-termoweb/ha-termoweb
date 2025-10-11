@@ -18,6 +18,7 @@ from custom_components.termoweb.backend.sanitize import (
     mask_identifier,
     redact_token_fragment,
 )
+from custom_components.termoweb import inventory as inventory_module
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
 from custom_components.termoweb.backend.ws_client import NodeDispatchContext
 from homeassistant.core import HomeAssistant
@@ -1265,7 +1266,7 @@ def test_heater_sample_subscription_targets(monkeypatch: pytest.MonkeyPatch) -> 
     client, _sio, _ = _make_client(monkeypatch)
     record = client.hass.data[module.DOMAIN]["entry"]
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
-    node_inventory = module.build_node_inventory(raw_nodes)
+    node_inventory = build_node_inventory(raw_nodes)
     inventory = Inventory(client.dev_id, raw_nodes, node_inventory)
     record["inventory"] = inventory
 
@@ -1290,7 +1291,7 @@ def test_heater_sample_subscription_targets(monkeypatch: pytest.MonkeyPatch) -> 
     def _unexpected_build(*_: Any, **__: Any) -> Any:
         raise AssertionError("build_node_inventory should not be called")
 
-    monkeypatch.setattr(module, "build_node_inventory", _unexpected_build)
+    monkeypatch.setattr(inventory_module, "build_node_inventory", _unexpected_build)
 
     client._inventory = inventory
 
@@ -1322,7 +1323,7 @@ def test_heater_sample_subscription_targets_uses_coordinator_addrs(
     def _unexpected_build(*_: Any, **__: Any) -> Any:
         raise AssertionError("build_node_inventory should not be called")
 
-    monkeypatch.setattr(module, "build_node_inventory", _unexpected_build)
+    monkeypatch.setattr(inventory_module, "build_node_inventory", _unexpected_build)
 
     targets = client._heater_sample_subscription_targets()
 
@@ -1354,7 +1355,7 @@ def test_heater_sample_subscription_targets_logs_missing_inventory(
     def _unexpected_build(*_: Any, **__: Any) -> Any:
         raise AssertionError("build_node_inventory should not be called")
 
-    monkeypatch.setattr(module, "build_node_inventory", _unexpected_build)
+    monkeypatch.setattr(inventory_module, "build_node_inventory", _unexpected_build)
 
     client._inventory = None
     client._coordinator._addrs = lambda: ["11"]
@@ -1405,7 +1406,7 @@ def test_heater_sample_targets_use_record_inventory(
     def _unexpected_build(*_: Any, **__: Any) -> Any:
         raise AssertionError("build_node_inventory should not be called")
 
-    monkeypatch.setattr(module, "build_node_inventory", _unexpected_build)
+    monkeypatch.setattr(inventory_module, "build_node_inventory", _unexpected_build)
 
     targets = client._heater_sample_subscription_targets()
 

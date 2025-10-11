@@ -49,7 +49,6 @@ from custom_components.termoweb.const import (
 from custom_components.termoweb.inventory import (
     HEATER_NODE_TYPES,
     Inventory,
-    build_node_inventory,
     normalize_node_addr,
     normalize_node_type,
     resolve_record_inventory,
@@ -2018,5 +2017,4 @@ __all__ = [
     "TermoWebWSClient",
     "WSStats",
     "WebSocketClient",
-    "build_node_inventory",
 ]
