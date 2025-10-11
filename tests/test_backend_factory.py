@@ -31,25 +31,31 @@ class DummyHttpClient:
         node_type, addr = node
         return {"dev_id": dev_id, "node_type": node_type, "addr": addr}
 
-    async def set_htr_settings(
+    async def set_node_settings(
         self,
         dev_id: str,
-        addr: str | int,
+        node: tuple[str, str | int],
         *,
         mode: str | None = None,
         stemp: float | None = None,
         prog: list[int] | None = None,
         ptemp: list[float] | None = None,
         units: str = "C",
+        boost_time: int | None = None,
+        cancel_boost: bool = False,
     ) -> dict[str, Any]:
+        node_type, addr = node
         return {
             "dev_id": dev_id,
+            "node_type": node_type,
             "addr": addr,
             "mode": mode,
             "stemp": stemp,
             "prog": prog,
             "ptemp": ptemp,
             "units": units,
+            "boost_time": boost_time,
+            "cancel_boost": cancel_boost,
         }
 
     async def get_node_samples(

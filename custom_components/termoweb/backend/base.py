@@ -44,20 +44,6 @@ class HttpClientProto(Protocol):
     ) -> list[dict[str, str | int]]:
         """Return historical samples for the specified node."""
 
-    async def set_htr_settings(
-        self,
-        dev_id: str,
-        addr: str | int,
-        *,
-        mode: str | None = None,
-        stemp: float | None = None,
-        prog: list[int] | None = None,
-        ptemp: list[float] | None = None,
-        units: str = "C",
-    ) -> Any:
-        """Update heater settings for the specified node."""
-
-
 class WsClientProto(Protocol):
     """Protocol for websocket clients used by the integration."""
 

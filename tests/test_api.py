@@ -1138,7 +1138,7 @@ def test_get_node_samples_logs_for_unknown_type(
     asyncio.run(_run())
 
 
-def test_set_htr_settings_includes_prog_and_ptemp(monkeypatch) -> None:
+def test_set_node_settings_includes_prog_and_ptemp(monkeypatch) -> None:
     async def _run() -> None:
         session = FakeSession()
         client = RESTClient(session, "user", "pw")
@@ -1155,7 +1155,13 @@ def test_set_htr_settings_includes_prog_and_ptemp(monkeypatch) -> None:
 
         prog = [0, 1, 2] * 56
         ptemp = [18.0, 19.0, 20.0]
-        await client.set_htr_settings("dev123", "7", prog=prog, ptemp=ptemp, units="f")
+        await client.set_node_settings(
+            "dev123",
+            ("htr", "7"),
+            prog=prog,
+            ptemp=ptemp,
+            units="f",
+        )
 
         assert received == [
             {
@@ -1250,13 +1256,13 @@ def test_request_final_auth_error_after_retries(monkeypatch) -> None:
     asyncio.run(_run())
 
 
-def test_set_htr_settings_invalid_units() -> None:
+def test_set_node_settings_invalid_units() -> None:
     async def _run() -> None:
         session = FakeSession()
         client = RESTClient(session, "user", "pass")
 
         with pytest.raises(ValueError, match="Invalid units"):
-            await client.set_htr_settings("dev", "1", units="kelvin")
+            await client.set_node_settings("dev", ("htr", "1"), units="kelvin")
 
         assert not session.request_calls
         assert not session.post_calls
@@ -1264,19 +1270,19 @@ def test_set_htr_settings_invalid_units() -> None:
     asyncio.run(_run())
 
 
-def test_set_htr_settings_invalid_program() -> None:
+def test_set_node_settings_invalid_program() -> None:
     async def _run() -> None:
         session = FakeSession()
         client = RESTClient(session, "user", "pass")
 
         with pytest.raises(ValueError, match="prog must be a list of 168"):
-            await client.set_htr_settings("dev", "1", prog=[0, 1, 2])
+            await client.set_node_settings("dev", ("htr", "1"), prog=[0, 1, 2])
 
         with pytest.raises(ValueError, match="prog values must be 0, 1, or 2"):
-            await client.set_htr_settings("dev", "1", prog=[0] * 167 + [5])
+            await client.set_node_settings("dev", ("htr", "1"), prog=[0] * 167 + [5])
 
         with pytest.raises(ValueError, match="prog contains non-integer value"):
-            await client.set_htr_settings("dev", "1", prog=[0] * 167 + ["bad"])
+            await client.set_node_settings("dev", ("htr", "1"), prog=[0] * 167 + ["bad"])
 
         assert not session.request_calls
         assert not session.post_calls
@@ -1284,21 +1290,25 @@ def test_set_htr_settings_invalid_program() -> None:
     asyncio.run(_run())
 
 
-def test_set_htr_settings_invalid_temperatures() -> None:
+def test_set_node_settings_invalid_temperatures() -> None:
     async def _run() -> None:
         session = FakeSession()
         client = RESTClient(session, "user", "pass")
 
         with pytest.raises(ValueError, match="Invalid stemp value"):
-            await client.set_htr_settings("dev", "1", stemp="warm")
+            await client.set_node_settings("dev", ("htr", "1"), stemp="warm")
 
         with pytest.raises(
             ValueError, match="ptemp must be a list of three numeric values"
         ):
-            await client.set_htr_settings("dev", "1", ptemp=[21.0, 19.0])
+            await client.set_node_settings("dev", ("htr", "1"), ptemp=[21.0, 19.0])
 
         with pytest.raises(ValueError, match="ptemp contains non-numeric value"):
-            await client.set_htr_settings("dev", "1", ptemp=[21.0, "bad", 23.0])
+            await client.set_node_settings(
+                "dev",
+                ("htr", "1"),
+                ptemp=[21.0, "bad", 23.0],
+            )
 
         assert not session.request_calls
         assert not session.post_calls
@@ -1513,7 +1523,7 @@ def test_list_devices_unexpected_string_payload(monkeypatch, caplog) -> None:
     assert any("Unexpected /devs shape" in rec.message for rec in caplog.records)
 
 
-def test_set_htr_settings_translates_heat(monkeypatch) -> None:
+def test_set_node_settings_translates_heat(monkeypatch) -> None:
     async def _run() -> None:
         session = FakeSession()
         client = RESTClient(session, "user", "pass")
@@ -1530,7 +1540,7 @@ def test_set_htr_settings_translates_heat(monkeypatch) -> None:
         monkeypatch.setattr(client, "authed_headers", fake_headers)
         monkeypatch.setattr(client, "_request", fake_request)
 
-        await client.set_htr_settings("dev", 1, mode="heat", stemp=21.0)
+        await client.set_node_settings("dev", ("htr", 1), mode="heat", stemp=21.0)
 
         assert captured["json"]["mode"] == "manual"
         assert captured["json"]["stemp"] == "21.0"
@@ -1749,7 +1759,7 @@ def test_ducaheat_get_node_settings_acm_handles_half_hour_prog(
     asyncio.run(_run())
 
 
-def test_ducaheat_set_htr_settings_invalid_stemp(monkeypatch) -> None:
+def test_ducaheat_set_node_settings_invalid_stemp(monkeypatch) -> None:
     async def _run() -> None:
         session = FakeSession()
         client = DucaheatRESTClient(
@@ -1765,14 +1775,14 @@ def test_ducaheat_set_htr_settings_invalid_stemp(monkeypatch) -> None:
         monkeypatch.setattr(client, "authed_headers", fake_headers)
 
         with pytest.raises(ValueError) as exc:
-            await client.set_htr_settings("dev", "A1", stemp="bad")
+            await client.set_node_settings("dev", ("htr", "A1"), stemp="bad")
 
         assert "Invalid stemp value" in str(exc.value)
 
     asyncio.run(_run())
 
 
-def test_ducaheat_set_htr_settings_invalid_units(monkeypatch) -> None:
+def test_ducaheat_set_node_settings_invalid_units(monkeypatch) -> None:
     async def _run() -> None:
         session = FakeSession()
         session.queue_request(
@@ -1792,7 +1802,7 @@ def test_ducaheat_set_htr_settings_invalid_units(monkeypatch) -> None:
         monkeypatch.setattr(client, "authed_headers", fake_headers)
 
         with pytest.raises(ValueError) as exc:
-            await client.set_htr_settings("dev", "A1", stemp=21.0, units="K")
+            await client.set_node_settings("dev", ("htr", "A1"), stemp=21.0, units="K")
 
         assert "Invalid units" in str(exc.value)
 

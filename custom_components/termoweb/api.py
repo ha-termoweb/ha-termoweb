@@ -695,29 +695,6 @@ class RESTClient:
         )
         return self._extract_samples(data)
 
-    async def set_htr_settings(
-        self,
-        dev_id: str,
-        addr: str | int,
-        *,
-        mode: str | None = None,
-        stemp: float | None = None,
-        prog: list[int] | None = None,
-        ptemp: list[float] | None = None,
-        units: str = "C",
-    ) -> Any:
-        """Update heater settings for the specified node."""
-
-        return await self.set_node_settings(
-            dev_id,
-            ("htr", addr),
-            mode=mode,
-            stemp=stemp,
-            prog=prog,
-            ptemp=ptemp,
-            units=units,
-        )
-
     def _resolve_node_descriptor(self, node: NodeDescriptor) -> tuple[str, str]:
         """Return ``(node_type, addr)`` for the provided descriptor."""
 
