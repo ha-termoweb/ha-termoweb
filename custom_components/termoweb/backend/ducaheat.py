@@ -178,25 +178,47 @@ class DucaheatRESTClient(RESTClient):
             ):
                 status_payload["units"] = self._ensure_units(units)
 
-            segment_plan: list[tuple[str, dict[str, Any]]] = []
-            if status_payload:
-                segment_plan.append(("status", status_payload))
-            if mode_value is not None and not status_includes_mode:
-                segment_plan.append(("mode", {"mode": mode_value}))
-            if prog is not None:
-                segment_plan.append(("prog", self._serialise_prog(prog)))
-            if ptemp is not None:
-                segment_plan.append(("prog_temps", self._serialise_prog_temps(ptemp)))
-
-            for name, payload in segment_plan:
-                responses[name] = await self._post_segmented(
-                    f"{base}/{name}",
-                    headers=headers,
-                    payload=payload,
+            selection_claimed = False
+            try:
+                await self._select_segmented_node(
                     dev_id=dev_id,
-                    addr=addr,
                     node_type=node_type,
+                    addr=addr,
+                    headers=headers,
+                    select=True,
                 )
+                selection_claimed = True
+
+                segment_plan: list[tuple[str, dict[str, Any]]] = []
+                if status_payload:
+                    segment_plan.append(("status", status_payload))
+                if mode_value is not None and not status_includes_mode:
+                    segment_plan.append(("mode", {"mode": mode_value}))
+                if prog is not None:
+                    segment_plan.append(("prog", self._serialise_prog(prog)))
+                if ptemp is not None:
+                    segment_plan.append(
+                        ("prog_temps", self._serialise_prog_temps(ptemp))
+                    )
+
+                for name, payload in segment_plan:
+                    responses[name] = await self._post_segmented(
+                        f"{base}/{name}",
+                        headers=headers,
+                        payload=payload,
+                        dev_id=dev_id,
+                        addr=addr,
+                        node_type=node_type,
+                    )
+            finally:
+                if selection_claimed:
+                    await self._select_segmented_node(
+                        dev_id=dev_id,
+                        node_type=node_type,
+                        addr=addr,
+                        headers=headers,
+                        select=False,
+                    )
             return responses
 
         if node_type == "acm":
