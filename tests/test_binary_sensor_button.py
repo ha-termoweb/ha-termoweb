@@ -477,7 +477,11 @@ def test_accumulator_boost_button_triggers_service() -> None:
         )
         button.hass = hass
 
-        assert button.translation_placeholders == {"minutes": "60"}
+        assert button.translation_placeholders == {
+            "hours_label": "1 hour",
+            "hours": "1",
+            "minutes": "60",
+        }
 
         await button.async_press()
 
@@ -584,7 +588,7 @@ def test_accumulator_boost_button_handles_missing_hass() -> None:
             "8",
             "Kitchen",
             "uid-no-hass",
-            minutes=30,
+            minutes=60,
             node_type="acm",
         )
         button.hass = None

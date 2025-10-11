@@ -13,9 +13,10 @@ _install_stubs()
 import custom_components.termoweb.select as select_module
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.heater import (
+    BOOST_DURATION_OPTIONS,
     DEFAULT_BOOST_DURATION,
+    format_boost_duration_label,
     get_boost_runtime_minutes,
-    iter_boost_button_metadata,
     set_boost_runtime_minutes,
 )
 from custom_components.termoweb.identifiers import build_heater_entity_unique_id
@@ -70,7 +71,7 @@ def test_select_setup_and_selection(
             entry.entry_id,
             dev_id,
             coordinator,
-            boost_runtime=boost_runtime_store("acm", node.addr, 30),
+            boost_runtime=boost_runtime_store("acm", node.addr, 60),
         )
 
         def fake_details(entry_data, default_name_simple):
@@ -100,24 +101,23 @@ def test_select_setup_and_selection(
             ":boost_duration",
         )
         expected_options = [
-            str(item.minutes)
-            for item in iter_boost_button_metadata()
-            if item.minutes is not None
+            format_boost_duration_label(minutes)
+            for minutes in BOOST_DURATION_OPTIONS
         ]
         options = getattr(entity, "options", getattr(entity, "_attr_options", []))
         assert options == expected_options
 
         await entity.async_added_to_hass()
         assert entity.async_write_ha_state.called
-        assert entity.current_option == "30"
+        assert entity.current_option == format_boost_duration_label(60)
         assert (
-            get_boost_runtime_minutes(hass, entry.entry_id, "acm", node.addr) == 30
+            get_boost_runtime_minutes(hass, entry.entry_id, "acm", node.addr) == 60
         )
 
         entity.async_write_ha_state.reset_mock()
-        await entity.async_select_option("120")
+        await entity.async_select_option(format_boost_duration_label(120))
         entity.async_write_ha_state.assert_called_once()
-        assert entity.current_option == "120"
+        assert entity.current_option == format_boost_duration_label(120)
         assert (
             get_boost_runtime_minutes(hass, entry.entry_id, "acm", node.addr) == 120
         )
@@ -125,7 +125,7 @@ def test_select_setup_and_selection(
         entity.async_write_ha_state.reset_mock()
         await entity.async_select_option("invalid")
         entity.async_write_ha_state.assert_not_called()
-        assert entity.current_option == "120"
+        assert entity.current_option == format_boost_duration_label(120)
 
     asyncio.run(_run())
 
@@ -133,12 +133,13 @@ def test_select_setup_and_selection(
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
-        ("30", 30),
-        (" 60 ", 60),
+        (format_boost_duration_label(60), 60),
+        (" 2 hours ", 120),
         ("060", 60),
         ("120.0", 120),
         (60, 60),
         (60.0, 60),
+        ("600", 600),
     ],
 )
 def test_option_to_minutes_accepts_valid_values(
@@ -168,9 +169,10 @@ def test_option_to_minutes_accepts_valid_values(
         "",
         "invalid",
         0,
-        -30,
+        -60,
         45,
         "45",
+        "11 hours",
         True,
     ],
 )
@@ -234,7 +236,7 @@ def test_select_restores_last_state(
         entity = added[0]
 
         await entity.async_added_to_hass()
-        assert entity.current_option == "60"
+        assert entity.current_option == format_boost_duration_label(60)
         assert (
             get_boost_runtime_minutes(hass, entry.entry_id, "acm", node.addr) == 60
         )
@@ -260,7 +262,10 @@ def test_select_restores_last_state(
         entity2.async_write_ha_state = MagicMock()
         entity2.async_get_last_state = AsyncMock(return_value=None)
         await entity2.async_added_to_hass()
-        assert entity2.current_option == str(DEFAULT_BOOST_DURATION)
+        assert (
+            entity2.current_option
+            == format_boost_duration_label(DEFAULT_BOOST_DURATION)
+        )
         assert (
             get_boost_runtime_minutes(hass, entry.entry_id, "acm", node.addr)
             == DEFAULT_BOOST_DURATION
@@ -339,7 +344,10 @@ def test_select_filters_nodes_and_handles_fallback(
         # Force fallback branch when option mapping is missing.
         entity._REVERSE_OPTION_MAP = {}
         entity._apply_minutes(75, persist=False)
-        assert entity.current_option == str(DEFAULT_BOOST_DURATION)
+        assert (
+            entity.current_option
+            == format_boost_duration_label(DEFAULT_BOOST_DURATION)
+        )
         del entity._REVERSE_OPTION_MAP
 
         entity.heater_settings = lambda: {"boost_time": "120"}
