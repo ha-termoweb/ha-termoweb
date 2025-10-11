@@ -596,7 +596,7 @@ class DucaheatRESTClient(RESTClient):
         if mode is not None:
             mode_value = str(mode).lower()
 
-        status_payload: dict[str, str] = {}
+        status_payload: dict[str, Any] = {}
         status_includes_mode = False
         cancel_boost_flag = cancel_boost and mode_value != "boost"
         boost_minutes: int | None = None
@@ -618,12 +618,16 @@ class DucaheatRESTClient(RESTClient):
             status_payload["units"] = self._ensure_units(units)
 
         segment_plan: list[tuple[str, dict[str, Any]]] = []
+        boost_payload: dict[str, Any] | None = None
         if status_payload:
             if cancel_boost_flag and "boost" not in status_payload:
                 status_payload["boost"] = False
-            segment_plan.append(("status", status_payload))
+            if "boost" in status_payload:
+                boost_payload = {"boost": status_payload.pop("boost")}
+            if status_payload:
+                segment_plan.append(("status", status_payload))
         elif cancel_boost_flag:
-            segment_plan.append(("status", {"boost": False}))
+            boost_payload = {"boost": False}
 
         if mode_value is not None and not status_includes_mode:
             mode_payload: dict[str, Any] = {"mode": mode_value}
@@ -677,63 +681,72 @@ class DucaheatRESTClient(RESTClient):
                     addr=addr,
                 )
 
-            if mode_value is not None or cancel_boost_flag:
-                minutes_param: int | None
-                if mode_value == "boost":
-                    minutes_param = boost_minutes
-                else:
-                    minutes_param = 0
+        if boost_payload is not None:
+            responses["boost"] = await self._post_acm_endpoint(
+                f"{base}/boost",
+                headers,
+                boost_payload,
+                dev_id=dev_id,
+                addr=addr,
+            )
 
-                should_collect = mode_value == "boost" or cancel_boost_flag
-                if not should_collect:
-                    instance_attrs = getattr(self, "__dict__", None)
-                    bound = getattr(self, "get_rtc_time", None)
-                    skip_instance_patch = False
-                    if isinstance(instance_attrs, dict) and (
-                        "get_rtc_time" in instance_attrs
-                    ):
-                        qualname = getattr(bound, "__qualname__", "")
-                        skip_instance_patch = qualname.endswith("fake_rtc")
-                    if not skip_instance_patch and bound is not None:
-                        bound_func = getattr(bound, "__func__", bound)
-                        original_func = getattr(
-                            _ORIGINAL_GET_RTC_TIME,
-                            "__func__",
-                            _ORIGINAL_GET_RTC_TIME,
-                        )
-                        should_collect = bound_func is not original_func
+        if mode_value is not None or cancel_boost_flag:
+            minutes_param: int | None
+            if mode_value == "boost":
+                minutes_param = boost_minutes
+            else:
+                minutes_param = 0
 
-                metadata: dict[str, Any] | None = None
-                if should_collect:
-                    metadata = await self._collect_boost_metadata(
-                        dev_id,
-                        addr,
-                        boost_active=mode_value == "boost",
-                        minutes=minutes_param,
-                    )
-                fallback = False
-                boost_state: dict[str, Any] | None = None
-                if isinstance(metadata, dict):
-                    fallback = bool(metadata.pop("_fallback", False))
-                    if metadata:
-                        boost_state = metadata
-                elif metadata:
-                    responses["boost_state"] = metadata
-                if (
-                    fallback
-                    and mode_value != "boost"
-                    and "status" not in responses
+            should_collect = mode_value == "boost" or cancel_boost_flag
+            if not should_collect:
+                instance_attrs = getattr(self, "__dict__", None)
+                bound = getattr(self, "get_rtc_time", None)
+                skip_instance_patch = False
+                if isinstance(instance_attrs, dict) and (
+                    "get_rtc_time" in instance_attrs
                 ):
-                    boost_flag = bool((boost_state or {}).get("boost_active"))
-                    responses["status_refresh"] = await self._post_acm_endpoint(
-                        f"{base}/status",
-                        headers,
-                        {"boost": boost_flag},
-                        dev_id=dev_id,
-                        addr=addr,
+                    qualname = getattr(bound, "__qualname__", "")
+                    skip_instance_patch = qualname.endswith("fake_rtc")
+                if not skip_instance_patch and bound is not None:
+                    bound_func = getattr(bound, "__func__", bound)
+                    original_func = getattr(
+                        _ORIGINAL_GET_RTC_TIME,
+                        "__func__",
+                        _ORIGINAL_GET_RTC_TIME,
                     )
-                if boost_state is not None:
-                    responses["boost_state"] = boost_state
+                    should_collect = bound_func is not original_func
+
+            metadata: dict[str, Any] | None = None
+            if should_collect:
+                metadata = await self._collect_boost_metadata(
+                    dev_id,
+                    addr,
+                    boost_active=mode_value == "boost",
+                    minutes=minutes_param,
+                )
+            fallback = False
+            boost_state: dict[str, Any] | None = None
+            if isinstance(metadata, dict):
+                fallback = bool(metadata.pop("_fallback", False))
+                if metadata:
+                    boost_state = metadata
+            elif metadata:
+                responses["boost_state"] = metadata
+            if (
+                fallback
+                and mode_value != "boost"
+                and "status" not in responses
+            ):
+                boost_flag = bool((boost_state or {}).get("boost_active"))
+                responses["status_refresh"] = await self._post_acm_endpoint(
+                    f"{base}/boost",
+                    headers,
+                    {"boost": boost_flag},
+                    dev_id=dev_id,
+                    addr=addr,
+                )
+            if boost_state is not None:
+                responses["boost_state"] = boost_state
 
         return responses
 
@@ -868,6 +881,40 @@ class DucaheatRESTClient(RESTClient):
                 ) from err
             raise
 
+    async def _select_segmented_node(
+        self,
+        *,
+        dev_id: str,
+        node_type: str,
+        addr: str,
+        headers: Mapping[str, str],
+        select: bool,
+    ) -> Any:
+        """Claim or release a segmented node before mutating state."""
+
+        payload = {"select": bool(select)}
+        path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}/select"
+        try:
+            return await self._post_segmented(
+                path,
+                headers=headers,
+                payload=payload,
+                dev_id=dev_id,
+                addr=addr,
+                node_type=node_type,
+            )
+        except ClientResponseError as err:
+            if 400 <= err.status < 500:
+                message = getattr(err, "message", None)
+                if not message and err.args:
+                    message = str(err.args[0])
+                raise DucaheatRequestError(
+                    status=err.status,
+                    path=path,
+                    body=str(message or ""),
+                ) from err
+            raise
+
     async def set_acm_extra_options(
         self,
         dev_id: str,
@@ -896,7 +943,7 @@ class DucaheatRESTClient(RESTClient):
         *,
         boost: bool,
         boost_time: int | None = None,
-    ) -> Any:
+        ) -> Any:
         """Toggle an accumulator boost session via segmented endpoints."""
 
         node_type, addr_str = self._resolve_node_descriptor(("acm", addr))
@@ -918,29 +965,61 @@ class DucaheatRESTClient(RESTClient):
                 mask_identifier(addr_str),
             )
 
-        response = await self._post_acm_endpoint(
-            f"/api/v2/devs/{dev_id}/{node_type}/{addr_str}/status",
-            headers,
-            payload,
-            dev_id=dev_id,
-            addr=addr_str,
-        )
+        claim_acquired = False
+        try:
+            await self._select_segmented_node(
+                dev_id=dev_id,
+                node_type=node_type,
+                addr=addr_str,
+                headers=headers,
+                select=True,
+            )
+            claim_acquired = True
 
-        metadata = await self._collect_boost_metadata(
-            dev_id,
-            addr_str,
-            boost_active=boost,
-            minutes=minutes,
-        )
-        if isinstance(response, dict):
+            response = await self._post_acm_endpoint(
+                f"/api/v2/devs/{dev_id}/{node_type}/{addr_str}/boost",
+                headers,
+                payload,
+                dev_id=dev_id,
+                addr=addr_str,
+            )
+
+            metadata = await self._collect_boost_metadata(
+                dev_id,
+                addr_str,
+                boost_active=boost,
+                minutes=minutes,
+            )
+            if isinstance(response, dict):
+                if metadata:
+                    response.setdefault("boost_state", metadata)
+                return response
+
+            result: dict[str, Any] = {"response": response}
             if metadata:
-                response.setdefault("boost_state", metadata)
-            return response
-
-        result: dict[str, Any] = {"response": response}
-        if metadata:
-            result["boost_state"] = metadata
-        return result
+                result["boost_state"] = metadata
+            return result
+        finally:
+            if claim_acquired:
+                try:
+                    await self._select_segmented_node(
+                        dev_id=dev_id,
+                        node_type=node_type,
+                        addr=addr_str,
+                        headers=headers,
+                        select=False,
+                    )
+                except Exception as err:  # noqa: BLE001 - defensive cleanup
+                    message = getattr(err, "body", None) or getattr(err, "message", None)
+                    if not message and err.args:
+                        message = err.args[0]
+                    _LOGGER.error(
+                        "ACM select release failed dev=%s addr=%s: %s",
+                        mask_identifier(dev_id),
+                        mask_identifier(addr_str),
+                        redact_text(str(message or err)),
+                        exc_info=err,
+                    )
 
     def _format_temp(self, value: float | str) -> str:
         """Format temperatures using one decimal precision."""

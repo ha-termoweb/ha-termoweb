@@ -1878,7 +1878,7 @@ def test_rest_set_acm_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
         )
         assert result == {"ok": True}
         path2, kwargs2 = session.request_calls[1][1:3]
-        assert path2 == "https://api.termoweb.fake/api/v2/devs/dev/acm/4/status"
+        assert path2 == "https://api.termoweb.fake/api/v2/devs/dev/acm/4/boost"
         assert kwargs2["json"] == {"boost": True, "boost_time": 45}
 
         with pytest.raises(ValueError):
@@ -1910,13 +1910,13 @@ def test_ducaheat_set_acm_settings_segmented(monkeypatch) -> None:
                 200, {"ok": True}, headers={"Content-Type": "application/json"}
             ),
             MockResponse(
-                200, {"status": "updated"}, headers={"Content-Type": "application/json"}
-            ),
-            MockResponse(
                 200, {"prog": "saved"}, headers={"Content-Type": "application/json"}
             ),
             MockResponse(
                 200, {"temps": "saved"}, headers={"Content-Type": "application/json"}
+            ),
+            MockResponse(
+                200, {"boost": False}, headers={"Content-Type": "application/json"}
             ),
         )
 
@@ -1955,13 +1955,14 @@ def test_ducaheat_set_acm_settings_segmented(monkeypatch) -> None:
             cancel_boost=True,
         )
 
-        assert set(result) == {"status", "prog", "prog_temps", "boost_state"}
+        assert set(result) == {"status", "prog", "prog_temps", "boost", "boost_state"}
 
         urls = [call[1] for call in session.request_calls]
         assert urls == [
             "https://api.termoweb.fake/api/v2/devs/dev/acm/5/status",
             "https://api.termoweb.fake/api/v2/devs/dev/acm/5/prog",
             "https://api.termoweb.fake/api/v2/devs/dev/acm/5/prog_temps",
+            "https://api.termoweb.fake/api/v2/devs/dev/acm/5/boost",
         ]
 
         status_call = session.request_calls[0]
@@ -1969,12 +1970,14 @@ def test_ducaheat_set_acm_settings_segmented(monkeypatch) -> None:
             "mode": "manual",
             "stemp": "21.2",
             "units": "F",
-            "boost": False,
         }
         prog_call = session.request_calls[1]
         assert prog_call[2]["json"] == {"prog": [0] * 168}
         temps_call = session.request_calls[2]
         assert temps_call[2]["json"] == {"ptemp": ["5.0", "15.0", "21.0"]}
+        boost_call = session.request_calls[3]
+        assert boost_call[2]["json"] == {"boost": False}
+        assert result["boost"] == {"boost": False}
 
         boost_state = result["boost_state"]
         assert boost_state["boost_active"] is False
@@ -1999,10 +2002,22 @@ def test_ducaheat_acm_boost_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
                 200, {"setup": True}, headers={"Content-Type": "application/json"}
             ),
             MockResponse(
-                200, {"boost": True}, headers={"Content-Type": "application/json"}
+                200, {"select": True}, headers={"Content-Type": "application/json"}
             ),
             MockResponse(
                 200, {"boost": True}, headers={"Content-Type": "application/json"}
+            ),
+            MockResponse(
+                200, {"select": False}, headers={"Content-Type": "application/json"}
+            ),
+            MockResponse(
+                200, {"select": True}, headers={"Content-Type": "application/json"}
+            ),
+            MockResponse(
+                200, {"boost": True}, headers={"Content-Type": "application/json"}
+            ),
+            MockResponse(
+                200, {"select": False}, headers={"Content-Type": "application/json"}
             ),
         )
 
@@ -2041,9 +2056,13 @@ def test_ducaheat_acm_boost_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
         assert result["boost_state"]["boost_active"] is False
         assert result["boost_state"]["boost_minutes_delta"] == 0
         rtc_mock.assert_awaited_once_with("dev")
-        path2, kwargs2 = session.request_calls[1][1:3]
-        assert path2 == "https://api.termoweb.fake/api/v2/devs/dev/acm/7/status"
-        assert kwargs2["json"] == {"boost": False}
+        select_call, boost_call, release_call = session.request_calls[1:4]
+        assert select_call[1] == "https://api.termoweb.fake/api/v2/devs/dev/acm/7/select"
+        assert select_call[2]["json"] == {"select": True}
+        assert boost_call[1] == "https://api.termoweb.fake/api/v2/devs/dev/acm/7/boost"
+        assert boost_call[2]["json"] == {"boost": False}
+        assert release_call[1] == "https://api.termoweb.fake/api/v2/devs/dev/acm/7/select"
+        assert release_call[2]["json"] == {"select": False}
 
         rtc_mock.reset_mock()
         result_start = await client.set_acm_boost_state(
@@ -2055,9 +2074,13 @@ def test_ducaheat_acm_boost_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
         assert result_start["boost_state"]["boost_active"] is True
         assert result_start["boost_state"]["boost_minutes_delta"] == 30
         rtc_mock.assert_awaited_once_with("dev")
-        path3, kwargs3 = session.request_calls[2][1:3]
-        assert path3 == "https://api.termoweb.fake/api/v2/devs/dev/acm/7/status"
-        assert kwargs3["json"] == {"boost": True, "boost_time": 30}
+        select_call_2, boost_call_2, release_call_2 = session.request_calls[4:7]
+        assert select_call_2[1] == "https://api.termoweb.fake/api/v2/devs/dev/acm/7/select"
+        assert select_call_2[2]["json"] == {"select": True}
+        assert boost_call_2[1] == "https://api.termoweb.fake/api/v2/devs/dev/acm/7/boost"
+        assert boost_call_2[2]["json"] == {"boost": True, "boost_time": 30}
+        assert release_call_2[1] == "https://api.termoweb.fake/api/v2/devs/dev/acm/7/select"
+        assert release_call_2[2]["json"] == {"select": False}
 
     asyncio.run(_run())
 
@@ -2124,12 +2147,12 @@ def test_ducaheat_set_acm_settings_mode_only(monkeypatch) -> None:
         session.queue_request(
             MockResponse(
                 200,
-                {"ok": True},
+                {"mode": "ok"},
                 headers={"Content-Type": "application/json"},
             ),
             MockResponse(
                 200,
-                {"mode": "ok"},
+                {"boost": False},
                 headers={"Content-Type": "application/json"},
             )
         )
@@ -2153,12 +2176,12 @@ def test_ducaheat_set_acm_settings_mode_only(monkeypatch) -> None:
         result = await client.set_node_settings(
             "dev", ("acm", "3"), mode="auto", cancel_boost=True
         )
-        assert set(result) == {"status", "mode", "boost_state"}
-        status_call, mode_call = session.request_calls
-        assert status_call[1] == "https://api.termoweb.fake/api/v2/devs/dev/acm/3/status"
-        assert status_call[2]["json"] == {"boost": False}
+        assert set(result) == {"mode", "boost", "boost_state"}
+        mode_call, boost_call = session.request_calls
         assert mode_call[1] == "https://api.termoweb.fake/api/v2/devs/dev/acm/3/mode"
         assert mode_call[2]["json"] == {"mode": "auto"}
+        assert boost_call[1] == "https://api.termoweb.fake/api/v2/devs/dev/acm/3/boost"
+        assert boost_call[2]["json"] == {"boost": False}
         rtc_mock.assert_awaited_once_with("dev")
 
     asyncio.run(_run())

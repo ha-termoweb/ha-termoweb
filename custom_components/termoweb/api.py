@@ -637,7 +637,7 @@ class RESTClient:
         payload = build_acm_boost_payload(boost, boost_time)
 
         headers = await self._authed_headers()
-        path = f"/api/v2/devs/{dev_id}/{node_type}/{addr_str}/status"
+        path = f"/api/v2/devs/{dev_id}/{node_type}/{addr_str}/boost"
         self._log_non_htr_payload(
             node_type=node_type,
             dev_id=dev_id,
