@@ -899,57 +899,50 @@ class WebSocketClient(_WSStatusMixin):
         inventory = context.inventory
         if self._inventory is None and isinstance(inventory, Inventory):
             self._inventory = inventory
+
+        record = context.record
+        if isinstance(record, MutableMapping) and isinstance(inventory, Inventory):
+            record["inventory"] = inventory
+
         addr_map = context.addr_map
         unknown_types = context.unknown_types
-
         if unknown_types:  # pragma: no cover - diagnostic branch
             _LOGGER.debug(
                 "WS: unknown node types in inventory: %s",
                 ", ".join(sorted(unknown_types)),
             )
 
-        self._apply_heater_addresses(addr_map, inventory=inventory)
-
         addr_map_payload = {
             node_type: list(addrs) for node_type, addrs in addr_map.items()
         }
 
-        payload_copy: dict[str, Any] = {
-            "dev_id": self.dev_id,
-            "node_type": None,
-            "addr_map": addr_map_payload,
-        }
-
-        if isinstance(inventory, Inventory):
-            nodes_by_type = {
-                node_type: {"addrs": list(addrs)}
-                for node_type, addrs in addr_map.items()
-            }
-            snapshot_payload["nodes_by_type"] = nodes_by_type
-            if "htr" in nodes_by_type:
-                snapshot_payload.setdefault("htr", nodes_by_type["htr"])
-            snapshot_payload["nodes"] = deepcopy(raw_nodes_payload)
-
-        if isinstance(record, MutableMapping) and isinstance(inventory, Inventory):
-            record["inventory"] = inventory
-
-        self._apply_heater_addresses(
+        normalized_map = self._apply_heater_addresses(
             addr_map,
             inventory=inventory,
         )
 
-        payload_copy = {
+        nodes_by_type_payload: Mapping[str, Any] | None = None
+        if isinstance(payload, Mapping):
+            candidate = payload.get("nodes_by_type")
+            if isinstance(candidate, Mapping):
+                nodes_by_type_payload = candidate
+
+        if isinstance(nodes_by_type_payload, Mapping):
+            nodes_by_type_copy = deepcopy(nodes_by_type_payload)
+        else:
+            nodes_by_type_copy = {
+                node_type: {"addrs": list(addrs)}
+                for node_type, addrs in addr_map_payload.items()
+            }
+
+        payload_copy: dict[str, Any] = {
             "dev_id": self.dev_id,
             "node_type": None,
-            "nodes": deepcopy(snapshot_payload.get("nodes", raw_nodes_payload)),
-            "nodes_by_type": deepcopy(snapshot_payload.get("nodes_by_type", {})),
+            "nodes_by_type": nodes_by_type_copy,
+            "addr_map": addr_map_payload,
         }
-        payload_copy.setdefault(
-            "addr_map",
-            {node_type: list(addrs) for node_type, addrs in addr_map.items()},
-        )
         if unknown_types:  # pragma: no cover - diagnostic payload
-            payload_copy.setdefault("unknown_types", sorted(unknown_types))
+            payload_copy["unknown_types"] = sorted(unknown_types)
 
         self._mark_ws_payload(
             timestamp=time.time(),
