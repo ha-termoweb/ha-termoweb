@@ -316,8 +316,8 @@ def test_dispatch_nodes_updates_addresses_and_settings(
     assert dispatched["nodes_by_type"]["htr"]["settings"]["1"]["target_temp"] == 21
 
     dev_map = coordinator.data[client.dev_id]
-    assert dev_map["addresses_by_type"]["htr"] == ["1"]
     assert dev_map["settings"]["htr"]["1"]["target_temp"] == 21
+    assert client._inventory.addresses_by_type["htr"] == ["1"]
 
     record = hass.data[ducaheat_ws.DOMAIN][client.entry_id]
     assert record.get("inventory") is inventory
