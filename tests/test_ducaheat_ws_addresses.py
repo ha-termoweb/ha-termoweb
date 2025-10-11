@@ -53,6 +53,18 @@ def _make_client() -> DucaheatWSClient:
     return client
 
 
+def _build_inventory_payload() -> dict[str, Any]:
+    """Return a representative raw node payload."""
+
+    return {
+        "nodes": [
+            {"type": "htr", "addr": "1"},
+            {"type": "acm", "addr": "02"},
+            {"type": "pmo", "addr": "A1"},
+        ]
+    }
+
+
 def _expected_addresses(values: Iterable[Any]) -> list[str]:
     """Return normalised, deduplicated addresses for ``values``."""
 
@@ -65,25 +77,6 @@ def _expected_addresses(values: Iterable[Any]) -> list[str]:
         seen.add(addr)
         result.append(addr)
     return result
-
-
-def test_ensure_type_bucket_registers_defaults() -> None:
-    """Buckets should expose default sections and update the device map."""
-
-    client = _make_client()
-    nodes_by_type: dict[str, dict[str, Any]] = {}
-    dev_map: dict[str, Any] = {"addresses_by_type": {}, "settings": {}}
-
-    bucket = client._ensure_type_bucket(nodes_by_type, "htr", dev_map=dev_map)
-
-    assert nodes_by_type["htr"] is bucket
-    for section in ("settings", "samples", "status", "advanced"):
-        assert isinstance(bucket[section], dict)
-    assert bucket["addrs"] == []
-
-    assert dev_map["nodes_by_type"]["htr"] is bucket
-    assert dev_map["addresses_by_type"]["htr"] == []
-    assert dev_map["settings"]["htr"] == {}
 
 
 def test_apply_heater_addresses_updates_state() -> None:
@@ -122,4 +115,29 @@ def test_apply_heater_addresses_updates_state() -> None:
     assert hass.data[DOMAIN]["entry"]["inventory"] is inventory
     assert client._inventory is inventory
     energy_coordinator.update_addresses.assert_called_once_with(cleaned)
+
+
+def test_dispatch_nodes_uses_inventory_addresses() -> None:
+    """Inventory address caches should populate dispatch payloads."""
+
+    client = _make_client()
+    client._dispatcher = MagicMock()
+
+    inventory_payload = _build_inventory_payload()
+    inventory = Inventory(
+        "device",
+        inventory_payload,
+        build_node_inventory(inventory_payload),
+    )
+
+    record = client.hass.data[DOMAIN][client.entry_id]
+    record["inventory"] = inventory
+    client._inventory = inventory
+
+    client._dispatch_nodes({"htr": {"settings": {"1": {"target_temp": 21}}}})
+
+    assert client._dispatcher.call_count == 1
+    dispatched = client._dispatcher.call_args[0][2]
+    assert dispatched["addr_map"]["htr"] == ["1"]
+    assert dispatched["addresses_by_type"]["htr"] == ["1"]
 

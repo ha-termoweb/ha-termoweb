@@ -304,11 +304,9 @@ def test_dispatch_nodes_publishes_inventory_addresses(
         }
     }
     client._nodes_raw = copy.deepcopy(payload)
-    snapshot = client._build_nodes_snapshot(client._nodes_raw)
-
     inventory = _set_inventory(client, _build_inventory_payload())
 
-    client._dispatch_nodes(snapshot)
+    client._dispatch_nodes(client._nodes_raw)
 
     assert client._dispatcher.call_count == 1
     dispatched = client._dispatcher.call_args[0][2]
@@ -339,8 +337,7 @@ def test_incremental_updates_preserve_address_payload(
 
     base = {"htr": {"settings": {"1": {"target_temp": 20}}}}
     client._nodes_raw = copy.deepcopy(base)
-    snapshot = client._build_nodes_snapshot(client._nodes_raw)
-    client._dispatch_nodes(snapshot)
+    client._dispatch_nodes(client._nodes_raw)
 
     first_payload = client._dispatcher.call_args_list[-1][0][2]
     assert "nodes" not in first_payload
@@ -350,8 +347,7 @@ def test_incremental_updates_preserve_address_payload(
 
     update = {"htr": {"settings": {"1": {"target_temp": 23}}}}
     client._merge_nodes(client._nodes_raw, update)
-    updated_snapshot = client._build_nodes_snapshot(client._nodes_raw)
-    client._dispatch_nodes(updated_snapshot)
+    client._dispatch_nodes(client._nodes_raw)
 
     dispatched = client._dispatcher.call_args_list[-1][0][2]
     assert "nodes" not in dispatched
@@ -739,9 +735,7 @@ async def test_read_loop_handles_stringified_dev_data(
     client = _make_client(monkeypatch)
     monkeypatch.setattr(client, "_subscribe_feeds", AsyncMock(return_value=1))
     dispatched: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        client, "_dispatch_nodes", lambda payload: dispatched.append(payload)
-    )
+    client._dispatcher = lambda *_args: dispatched.append(_args[2])
 
     nodes = {"htr": {"status": {"1": {"power": 5}}}}
     wrapped = json.dumps({"nodes": nodes}, separators=(",", ":"))
@@ -761,7 +755,9 @@ async def test_read_loop_handles_stringified_dev_data(
     assert isinstance(client._nodes_raw, dict)
     assert client._nodes_raw["htr"]["status"]["1"]["power"] == 5
     assert dispatched
-    assert dispatched[-1]["nodes"]["htr"]["status"]["1"]["power"] == 5
+    payload = dispatched[-1]
+    assert payload["addr_map"]["htr"] == ["1"]
+    assert payload["addresses_by_type"]["htr"] == ["1"]
     client._subscribe_feeds.assert_awaited_once()
     await_args = client._subscribe_feeds.await_args_list
     assert await_args and isinstance(await_args[0].args[0], Mapping)
@@ -931,9 +927,7 @@ async def test_read_loop_processes_update_event(
         client, "_update_status", lambda status: statuses.append(status)
     )
     dispatched: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        client, "_dispatch_nodes", lambda payload: dispatched.append(payload)
-    )
+    client._dispatcher = lambda *_args: dispatched.append(_args[2])
     forwarded: list[Mapping[str, Mapping[str, Any]]] = []
     monkeypatch.setattr(
         client,
@@ -958,9 +952,11 @@ async def test_read_loop_processes_update_event(
 
     assert log_calls and log_calls[0]["body"]["temp"] == 1
     assert statuses and statuses[-1] == "healthy"
+    assert client._nodes_raw["htr"]["status"]["1"]["temp"] == 1
     assert dispatched
     payload = dispatched[-1]
-    assert payload["nodes"]["htr"]["status"]["1"]["temp"] == 1
+    assert payload["addr_map"]["htr"] == ["1"]
+    assert payload["addresses_by_type"]["htr"] == ["1"]
     assert not forwarded
 
 
@@ -1041,9 +1037,7 @@ async def test_read_loop_forwards_sample_updates(
         client, "_update_status", lambda status: statuses.append(status)
     )
     dispatched: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        client, "_dispatch_nodes", lambda payload: dispatched.append(payload)
-    )
+    client._dispatcher = lambda *_args: dispatched.append(_args[2])
 
     class UpdateWS(QueueWebSocket):
         def __init__(self) -> None:
@@ -1061,7 +1055,11 @@ async def test_read_loop_forwards_sample_updates(
     await _run_read_loop(client)
 
     assert statuses and statuses[-1] == "healthy"
-    assert dispatched and dispatched[-1]["nodes"]["htr"]["samples"]["1"]["power"] == 10
+    assert client._nodes_raw["htr"]["samples"]["1"]["power"] == 10
+    assert dispatched
+    payload = dispatched[-1]
+    assert payload["addr_map"]["htr"] == ["1"]
+    assert payload["addresses_by_type"]["htr"] == ["1"]
     assert forwarded and forwarded[-1][0] == "device"
     assert forwarded[-1][2].get("lease_seconds") is None
     assert forwarded[-1][1]["htr"]["1"]["power"] == 10
@@ -1077,9 +1075,7 @@ async def test_read_loop_dev_data_uses_raw_snapshot(
     monkeypatch.setattr(client, "_normalise_nodes_payload", lambda nodes: "bad")
     monkeypatch.setattr(client, "_subscribe_feeds", AsyncMock(return_value=0))
     dispatched: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        client, "_dispatch_nodes", lambda payload: dispatched.append(payload)
-    )
+    client._dispatcher = lambda *_args: dispatched.append(_args[2])
 
     class DevDataWS(QueueWebSocket):
         def __init__(self) -> None:
@@ -1096,7 +1092,9 @@ async def test_read_loop_dev_data_uses_raw_snapshot(
 
     await _run_read_loop(client)
 
-    assert dispatched and dispatched[-1] == {"nodes": {"htr": {"settings": {"1": {}}}}}
+    assert dispatched
+    payload = dispatched[-1]
+    assert payload["addr_map"]["htr"] == ["1"]
     assert client._nodes_raw is None
 
 
@@ -1110,9 +1108,7 @@ async def test_read_loop_merges_updates_into_existing_snapshot(
     client._nodes_raw = {"htr": {"status": {"1": {"temp": 20}}}}
     monkeypatch.setattr(client, "_forward_sample_updates", lambda updates: None)
     dispatched: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        client, "_dispatch_nodes", lambda payload: dispatched.append(payload)
-    )
+    client._dispatcher = lambda *_args: dispatched.append(_args[2])
 
     class MergeWS(QueueWebSocket):
         def __init__(self) -> None:
@@ -1131,7 +1127,10 @@ async def test_read_loop_merges_updates_into_existing_snapshot(
 
     assert client._nodes_raw["htr"]["status"]["1"]["temp"] == 20
     assert client._nodes_raw["htr"]["status"]["1"]["power"] == 5
-    assert dispatched and dispatched[-1]["nodes"]["htr"]["status"]["1"]["power"] == 5
+    assert dispatched
+    payload = dispatched[-1]
+    assert payload["addr_map"]["htr"] == ["1"]
+    assert payload["addresses_by_type"]["htr"] == ["1"]
 
 
 def test_normalise_nodes_payload_handles_mappings(
@@ -1527,7 +1526,6 @@ async def test_namespace_ack_processes_embedded_event(
     monkeypatch.setattr(client, "_replay_subscription_paths", AsyncMock())
     monkeypatch.setattr(client, "_log_nodes_summary", lambda nodes: None)
     monkeypatch.setattr(client, "_normalise_nodes_payload", lambda nodes: nodes)
-    monkeypatch.setattr(client, "_build_nodes_snapshot", lambda nodes: {"nodes": nodes})
     dispatch = MagicMock()
     monkeypatch.setattr(client, "_dispatch_nodes", dispatch)
     subscribe_mock = AsyncMock(return_value=2)
@@ -1576,7 +1574,6 @@ async def test_namespace_ack_skips_unexpected_namespace(
 
     monkeypatch.setattr(client, "_log_nodes_summary", lambda nodes: None)
     monkeypatch.setattr(client, "_normalise_nodes_payload", lambda nodes: nodes)
-    monkeypatch.setattr(client, "_build_nodes_snapshot", lambda nodes: {"nodes": nodes})
     dispatch = MagicMock()
     monkeypatch.setattr(client, "_dispatch_nodes", dispatch)
     subscribe_mock = AsyncMock(return_value=0)

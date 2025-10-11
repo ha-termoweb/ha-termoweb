@@ -549,15 +549,15 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                             if isinstance(nodes, dict):
                                 self._log_nodes_summary(nodes)
                                 normalised = self._normalise_nodes_payload(nodes)
-                                if isinstance(normalised, dict):
+                                dispatch_payload: Mapping[str, Any] | None
+                                if isinstance(normalised, Mapping):
                                     self._nodes_raw = deepcopy(normalised)
-                                    snapshot = self._build_nodes_snapshot(
-                                        self._nodes_raw
-                                    )
+                                    dispatch_payload = self._nodes_raw
                                 else:
                                     self._nodes_raw = None
-                                    snapshot = {"nodes": nodes}
-                                self._dispatch_nodes(snapshot)
+                                    dispatch_payload = nodes
+                                if isinstance(dispatch_payload, Mapping):
+                                    self._dispatch_nodes(dispatch_payload)
                                 subs = await self._subscribe_feeds(nodes)
                                 _LOGGER.info("WS (ducaheat): subscribed %d feeds", subs)
                                 self._update_status("healthy")
@@ -584,10 +584,13 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                         self._merge_nodes(
                                             self._nodes_raw, normalised_update
                                         )
-                                    snapshot = self._build_nodes_snapshot(
-                                        self._nodes_raw
-                                    )
-                                    self._dispatch_nodes(snapshot)
+                                    dispatch_payload: Mapping[str, Any] | None
+                                    if isinstance(self._nodes_raw, Mapping):
+                                        dispatch_payload = self._nodes_raw
+                                    else:
+                                        dispatch_payload = normalised_update
+                                    if isinstance(dispatch_payload, Mapping):
+                                        self._dispatch_nodes(dispatch_payload)
                                     if sample_updates:
                                         self._forward_sample_updates(sample_updates)
                             self._update_status("healthy")
@@ -780,20 +783,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             dev_map=dev_map,
         )
 
-    @staticmethod
-    def _build_nodes_snapshot(nodes: dict[str, Any]) -> dict[str, Any]:
-        """Return a snapshot structure with ``nodes`` and ``nodes_by_type`` buckets."""
-
-        nodes_copy = deepcopy(nodes)
-        nodes_by_type = {
-            node_type: payload
-            for node_type, payload in nodes_copy.items()
-            if isinstance(payload, dict)
-        }
-        snapshot: dict[str, Any] = {"nodes": nodes_copy, "nodes_by_type": nodes_by_type}
-        snapshot.update(nodes_by_type)
-        return snapshot
-
     def _normalise_cadence_value(self, value: Any) -> float | None:
         """Return a positive cadence hint in seconds."""
 
@@ -934,15 +923,21 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 payload_changed=True,
             )
 
-    def _dispatch_nodes(self, payload: dict[str, Any]) -> None:
+    def _dispatch_nodes(self, payload: Mapping[str, Any]) -> None:
         """Publish inventory-derived node addresses for downstream consumers."""
 
         if not isinstance(payload, Mapping):  # pragma: no cover - defensive
             return
 
-        nodes_by_type_payload = payload.get("nodes_by_type")
-        is_snapshot = isinstance(nodes_by_type_payload, Mapping)
-        raw_nodes: Any = payload.get("nodes") if is_snapshot else payload
+        raw_nodes: Mapping[str, Any] | None
+        if "nodes" in payload and isinstance(payload.get("nodes"), Mapping):
+            raw_nodes = payload.get("nodes")  # type: ignore[assignment]
+        else:
+            raw_nodes = payload
+
+        cadence_source: Mapping[str, Any] | None = None
+        if isinstance(raw_nodes, Mapping):
+            cadence_source = raw_nodes
 
         context = _prepare_nodes_dispatch(
             self.hass,
@@ -968,12 +963,28 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             logger=_LOGGER,
         )
 
+        inventory_addresses: dict[str, list[str]] = {}
+        if isinstance(inventory, Inventory):
+            try:
+                inventory_addresses = {
+                    node_type: list(addrs)
+                    for node_type, addrs in inventory.addresses_by_type.items()
+                }
+            except Exception:  # pragma: no cover - defensive cache guard
+                inventory_addresses = {}
+
+        if not inventory_addresses:
+            inventory_addresses = {
+                node_type: list(addrs) for node_type, addrs in addr_map.items()
+            }
+
         payload_copy: dict[str, Any] = {
             "dev_id": self.dev_id,
             "node_type": None,
             "addr_map": {
                 node_type: list(addrs) for node_type, addrs in addr_map.items()
             },
+            "addresses_by_type": inventory_addresses,
         }
 
         if normalized_addresses:
@@ -986,9 +997,10 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         if unknown_types:
             payload_copy["unknown_types"] = sorted(unknown_types)
 
-        if isinstance(nodes_by_type_payload, Mapping):
+        cadence_payload = cadence_source or context.payload
+        if isinstance(cadence_payload, Mapping):
             self._update_payload_window_from_mapping(
-                nodes_by_type_payload,
+                cadence_payload,
                 source="dispatch_nodes",
             )
 
