@@ -507,14 +507,12 @@ def test_iter_boostable_heater_nodes_filters_support_and_types() -> None:
 
 
 def test_iter_heater_maps_deduplicates_sections() -> None:
-    htr_section = {"settings": {"1": {"mode": "auto"}}}
-    acm_section = {"settings": {"2": {"mode": "charge"}}}
+    htr_settings = {"1": {"mode": "auto"}}
+    acm_settings = {"2": {"mode": "charge"}}
     cache = {
-        "nodes_by_type": {
-            "htr": htr_section,
-            "acm": acm_section,
-        },
-        "htr": htr_section,
+        "settings": {"htr": htr_settings, "acm": acm_settings},
+        "htr": {"settings": htr_settings},
+        "acm": {"settings": acm_settings},
     }
 
     results = list(
@@ -526,12 +524,12 @@ def test_iter_heater_maps_deduplicates_sections() -> None:
     )
 
     assert len(results) == 2
-    assert results[0] is htr_section["settings"]
-    assert results[1] is acm_section["settings"]
+    assert results[0] is htr_settings
+    assert results[1] is acm_settings
 
 
 def test_iter_heater_maps_accepts_string_node_type() -> None:
-    cache = {"nodes_by_type": {"htr": {"settings": {"1": {"mode": "auto"}}}}}
+    cache = {"settings": {"htr": {"1": {"mode": "auto"}}}}
 
     results = list(
         heater_module.iter_heater_maps(
@@ -546,7 +544,7 @@ def test_iter_heater_maps_accepts_string_node_type() -> None:
 
 
 def test_iter_heater_maps_requires_truthy_key() -> None:
-    cache = {"nodes_by_type": {"htr": {"settings": {"1": {"mode": "auto"}}}}}
+    cache = {"settings": {"htr": {"1": {"mode": "auto"}}}}
 
     assert list(heater_module.iter_heater_maps(cache, map_key="")) == []
 

@@ -94,6 +94,7 @@ class Inventory:
     _dev_id: str
     _payload: RawNodePayload
     _nodes: tuple[PrebuiltNode, ...]
+    _addresses_by_type_cache: dict[str, tuple[str, ...]] | None
     _nodes_by_type_cache: dict[str, tuple[PrebuiltNode, ...]] | None
     _heater_nodes_cache: tuple[PrebuiltNode, ...] | None
     _explicit_name_pairs_cache: frozenset[tuple[str, str]] | None
@@ -125,6 +126,7 @@ class Inventory:
         object.__setattr__(self, "_dev_id", dev_id)
         object.__setattr__(self, "_payload", payload)
         object.__setattr__(self, "_nodes", tuple(nodes))
+        object.__setattr__(self, "_addresses_by_type_cache", None)
         object.__setattr__(self, "_nodes_by_type_cache", None)
         object.__setattr__(self, "_heater_nodes_cache", None)
         object.__setattr__(self, "_explicit_name_pairs_cache", None)
@@ -154,6 +156,25 @@ class Inventory:
         """Get the immutable tuple of node objects."""
 
         return self._nodes
+
+    def _ensure_addresses_by_type_cache(self) -> dict[str, tuple[str, ...]]:
+        """Return cached node addresses grouped by normalised type."""
+
+        cached = self._addresses_by_type_cache
+        if cached is not None:
+            return cached
+
+        grouped, _ = addresses_by_node_type(self._nodes)
+        normalized = {key: tuple(values) for key, values in grouped.items()}
+        object.__setattr__(self, "_addresses_by_type_cache", normalized)
+        return normalized
+
+    @property
+    def addresses_by_type(self) -> dict[str, list[str]]:
+        """Return mapping of node type to normalised addresses."""
+
+        cached = self._ensure_addresses_by_type_cache()
+        return {key: list(values) for key, values in cached.items()}
 
     def _ensure_nodes_by_type_cache(self) -> dict[str, tuple[PrebuiltNode, ...]]:
         """Return cached node groupings keyed by normalised type."""

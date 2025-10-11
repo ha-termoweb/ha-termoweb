@@ -593,49 +593,56 @@ def iter_heater_maps(
             for candidate in node_iter
         ]
 
-    nodes_by_type_section = cache.get("nodes_by_type")
-    if isinstance(nodes_by_type_section, Mapping):
+    settings_map = cache.get("settings")
+    if isinstance(settings_map, Mapping) and map_key == "settings":
         for desired in desired_types:
             if not desired:
                 continue
-            for node_type, section in nodes_by_type_section.items():
-                canonical = normalize_node_type(
-                    node_type,
-                    use_default_when_falsey=True,
-                )
-                if canonical != desired or not isinstance(section, Mapping):
+            canonical = normalize_node_type(desired, use_default_when_falsey=True)
+            lookup_keys: tuple[str, ...]
+            if canonical and canonical != desired:
+                lookup_keys = (canonical, desired)
+            elif canonical:
+                lookup_keys = (canonical,)
+            else:
+                lookup_keys = (desired,)
+            for key in lookup_keys:
+                section = settings_map.get(key)
+                if not isinstance(section, Mapping):
                     continue
-                for key, candidate in section.items():
-                    if key != map_key or not isinstance(candidate, dict):
-                        continue
-                    ident = id(candidate)
-                    if ident in seen:
-                        continue
-                    seen.add(ident)
-                    yield candidate
+                candidate = section if isinstance(section, dict) else dict(section)
+                ident = id(candidate)
+                if ident in seen:
+                    continue
+                seen.add(ident)
+                yield candidate
                 break
 
-    settings = cache.get("settings")
-    if isinstance(settings, Mapping):
-        for desired in desired_types:
-            if not desired:
+    for desired in desired_types:
+        if not desired:
+            continue
+        canonical = normalize_node_type(desired, use_default_when_falsey=True)
+        lookup_keys: tuple[str, ...]
+        if canonical and canonical != desired:
+            lookup_keys = (canonical, desired)
+        elif canonical:
+            lookup_keys = (canonical,)
+        else:
+            lookup_keys = (desired,)
+        for key in lookup_keys:
+            section = cache.get(key)
+            if not isinstance(section, Mapping):
                 continue
-            for node_type, section in settings.items():
-                canonical = normalize_node_type(
-                    node_type,
-                    use_default_when_falsey=True,
-                )
-                if canonical != desired or not isinstance(section, Mapping):
-                    continue
-                for key, candidate in section.items():
-                    if key != map_key or not isinstance(candidate, dict):
-                        continue
-                    ident = id(candidate)
-                    if ident in seen:
-                        continue
-                    seen.add(ident)
-                    yield candidate
-                break
+            candidate = section.get(map_key)
+            if not isinstance(candidate, Mapping):
+                continue
+            mapping = candidate if isinstance(candidate, dict) else dict(candidate)
+            ident = id(mapping)
+            if ident in seen:
+                continue
+            seen.add(ident)
+            yield mapping
+            break
 
 
 def log_skipped_nodes(

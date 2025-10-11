@@ -203,53 +203,8 @@ class StateCoordinator(
         if inventory is None:
             return {}
 
-        addresses: dict[str, list[str]] = {}
-        seen_by_type: dict[str, set[str]] = {}
-
-        for node in getattr(inventory, "nodes", ()):  # type: ignore[attr-defined]
-            node_type = normalize_node_type(
-                getattr(node, "type", None),
-                use_default_when_falsey=True,
-            )
-            addr = normalize_node_addr(
-                getattr(node, "addr", None),
-                use_default_when_falsey=True,
-            )
-            if not node_type or not addr:
-                continue
-            bucket = addresses.setdefault(node_type, [])
-            seen = seen_by_type.setdefault(node_type, set())
-            if addr not in seen:
-                seen.add(addr)
-                bucket.append(addr)
-
-        forward_map, _ = inventory.heater_address_map
-        for node_type, addrs in forward_map.items():
-            bucket = addresses.setdefault(node_type, [])
-            seen = seen_by_type.setdefault(node_type, set())
-            for addr in addrs:
-                normalized = normalize_node_addr(
-                    addr,
-                    use_default_when_falsey=True,
-                )
-                if normalized and normalized not in seen:
-                    seen.add(normalized)
-                    bucket.append(normalized)
-
-        pmo_forward, _ = inventory.power_monitor_address_map
-        for node_type, addrs in pmo_forward.items():
-            bucket = addresses.setdefault(node_type, [])
-            seen = seen_by_type.setdefault(node_type, set())
-            for addr in addrs:
-                normalized = normalize_node_addr(
-                    addr,
-                    use_default_when_falsey=True,
-                )
-                if normalized and normalized not in seen:
-                    seen.add(normalized)
-                    bucket.append(normalized)
-
-        return {key: list(values) for key, values in addresses.items()}
+        addresses = inventory.addresses_by_type
+        return {node_type: list(addrs) for node_type, addrs in addresses.items()}
 
     @staticmethod
     def _collect_previous_settings(
@@ -286,11 +241,6 @@ class StateCoordinator(
             if not normalised["settings"]:
                 return
             preserved[node_type] = dict(normalised["settings"])
-
-        existing_nodes = prev_dev.get("nodes_by_type")
-        if isinstance(existing_nodes, Mapping):
-            for node_type, section in existing_nodes.items():
-                _ingest_section(node_type, section)
 
         for key, value in prev_dev.items():
             if key in {
@@ -1377,7 +1327,6 @@ class EnergyStateCoordinator(
                     )
 
             dev_data: dict[str, Any] = {"dev_id": dev_id}
-            nodes_by_type: dict[str, dict[str, Any]] = {}
 
             for node_type, addrs_for_type in self._addresses_by_type.items():
                 bucket = {
@@ -1386,33 +1335,26 @@ class EnergyStateCoordinator(
                     "addrs": list(addrs_for_type),
                 }
                 dev_data[node_type] = bucket
-                nodes_by_type[node_type] = bucket
 
-            heater_data = _ensure_heater_section(
-                nodes_by_type,
-                lambda: {
+            heater_data = dev_data.get("htr")
+            if not isinstance(heater_data, dict):
+                heater_data = {
                     "energy": dict(energy_by_type.get("htr", {})),
                     "power": dict(power_by_type.get("htr", {})),
                     "addrs": list(self._addresses_by_type.get("htr", [])),
-                },
-            )
-            dev_data["htr"] = heater_data
+                }
+                dev_data["htr"] = heater_data
 
             for alias, canonical in self._compat_aliases.items():
-                canonical_bucket = nodes_by_type.get(canonical)
-                if canonical_bucket is None:
+                canonical_bucket = dev_data.get(canonical)
+                if not isinstance(canonical_bucket, dict):
                     canonical_bucket = {
                         "energy": {},
                         "power": {},
                         "addrs": list(self._addresses_by_type.get(canonical, [])),
                     }
-                    nodes_by_type[canonical] = canonical_bucket
                     dev_data[canonical] = canonical_bucket
                 dev_data[alias] = canonical_bucket
-                if alias not in nodes_by_type:
-                    nodes_by_type[alias] = canonical_bucket
-
-            dev_data["nodes_by_type"] = nodes_by_type
 
             result: dict[str, dict[str, Any]] = {dev_id: dev_data}
 
@@ -1498,9 +1440,6 @@ class EnergyStateCoordinator(
         dev_data = self.data.get(dev_id)
         if not isinstance(dev_data, dict):
             return
-        nodes_by_type = dev_data.get("nodes_by_type")
-        if not isinstance(nodes_by_type, dict):
-            return
 
         if lease_seconds is not None:
             self._ws_lease = float(lease_seconds) if lease_seconds > 0 else 0.0
@@ -1523,12 +1462,20 @@ class EnergyStateCoordinator(
             node_type = normalize_node_type(raw_type)
             if not node_type:
                 continue
-            tracked_addrs = self._addresses_by_type.get(node_type)
+            canonical_type = self._compat_aliases.get(node_type, node_type)
+            tracked_addrs = self._addresses_by_type.get(canonical_type)
             if not tracked_addrs:
                 continue
-            bucket = nodes_by_type.get(node_type)
+            bucket = dev_data.get(canonical_type)
             if not isinstance(bucket, dict):
-                continue
+                bucket = {
+                    "energy": {},
+                    "power": {},
+                    "addrs": list(tracked_addrs),
+                }
+                dev_data[canonical_type] = bucket
+            if node_type != canonical_type:
+                dev_data[node_type] = bucket
             energy_bucket = bucket.setdefault("energy", {})
             power_bucket = bucket.setdefault("power", {})
             for raw_addr, sample_payload in payload.items():
@@ -1540,7 +1487,7 @@ class EnergyStateCoordinator(
                     continue
                 sample_t, counter = point
                 changed_sample = self._process_energy_sample(
-                    node_type,
+                    canonical_type,
                     addr,
                     sample_t,
                     counter,
@@ -1552,7 +1499,7 @@ class EnergyStateCoordinator(
                     changed = True
 
         if changed:
-            dev_data["nodes_by_type"] = nodes_by_type
+            dev_data.setdefault("dev_id", dev_id)
 
 
 def _wrap_logger(logger: Any) -> Any:

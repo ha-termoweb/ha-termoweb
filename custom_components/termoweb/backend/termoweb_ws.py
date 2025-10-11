@@ -1086,93 +1086,63 @@ class WebSocketClient(_WSStatusMixin):
             if isinstance(dev_map, dict):
                 nodes_by_type: dict[str, Any] = dev_map.setdefault("nodes_by_type", {})
 
-                def _iter_addresses(candidate: Any) -> Iterable[Any]:
-                    """Return iterable form of ``candidate`` for address merging."""
+                if isinstance(inventory_container, Inventory):
+                    address_source: Mapping[str, Iterable[str]] = (
+                        inventory_container.addresses_by_type
+                    )
+                else:
+                    address_source = cleaned_map
 
-                    if isinstance(candidate, (str, bytes)):
-                        return [candidate]
-                    if isinstance(candidate, Iterable):
-                        return candidate
-                    return []
-
-                def _merge_addresses(
-                    existing: Any,
-                    candidates: Iterable[Any],
-                ) -> list[str]:
-                    """Return normalised union of ``existing`` and ``candidates``."""
-
-                    merged: list[str] = []
+                addresses_by_type: dict[str, list[str]] = {}
+                for raw_type, addrs in address_source.items():
+                    node_type = normalize_node_type(
+                        raw_type,
+                        use_default_when_falsey=True,
+                    )
+                    if not node_type:
+                        continue
+                    normalised: list[str] = []
                     seen: set[str] = set()
-                    if isinstance(existing, Iterable) and not isinstance(
-                        existing, (str, bytes)
-                    ):
-                        for candidate in existing:
-                            addr = normalize_node_addr(
-                                candidate,
-                                use_default_when_falsey=True,
-                            )
-                            if not addr or addr in seen:
-                                continue
-                            merged.append(addr)
-                            seen.add(addr)
-                    for candidate in candidates:
+                    for candidate in addrs:
                         addr = normalize_node_addr(
                             candidate,
                             use_default_when_falsey=True,
                         )
                         if not addr or addr in seen:
                             continue
-                        merged.append(addr)
                         seen.add(addr)
-                    return merged
+                        normalised.append(addr)
+                    if normalised or node_type == "htr":
+                        addresses_by_type[node_type] = normalised
 
-                addresses_by_type: dict[str, list[str]] = {}
-                existing_addresses = dev_map.get("addresses_by_type")
-                if isinstance(existing_addresses, Mapping):
-                    for raw_type, raw_addrs in existing_addresses.items():
-                        node_type = normalize_node_type(
-                            raw_type,
+                if pmo_addresses:
+                    payload = addresses_by_type.setdefault("pmo", [])
+                    seen = set(payload)
+                    for candidate in pmo_addresses:
+                        addr = normalize_node_addr(
+                            candidate,
                             use_default_when_falsey=True,
                         )
-                        if not node_type:
+                        if not addr or addr in seen:
                             continue
-                        merged = _merge_addresses(
-                            addresses_by_type.get(node_type),
-                            _iter_addresses(raw_addrs),
-                        )
-                        addresses_by_type[node_type] = merged
-
-                for node_type, addrs in cleaned_map.items():
-                    if not addrs and node_type != "htr":
-                        continue
-                    bucket = self._ensure_type_bucket(dev_map, nodes_by_type, node_type)
-                    merged_addrs = _merge_addresses(bucket.get("addrs"), addrs)
-                    if merged_addrs or node_type == "htr":
-                        bucket["addrs"] = merged_addrs
-                    addresses_by_type[node_type] = merged_addrs
-                    if node_type == "pmo" and merged_addrs:
-                        addr_map = dev_map.get("addr_map")
-                        if isinstance(addr_map, Mapping):
-                            updated_map = dict(addr_map)
-                            updated_map["pmo"] = list(merged_addrs)
-                            dev_map["addr_map"] = updated_map
-
-                if (
-                    pmo_addresses or "pmo" in nodes_by_type
-                ) and "pmo" not in cleaned_map:
-                    bucket = self._ensure_type_bucket(dev_map, nodes_by_type, "pmo")
-                    merged_addrs = _merge_addresses(bucket.get("addrs"), pmo_addresses)
-                    bucket["addrs"] = merged_addrs
-                    addresses_by_type["pmo"] = merged_addrs
-                    if merged_addrs:
-                        addr_map = dev_map.get("addr_map")
-                        if isinstance(addr_map, Mapping):
-                            updated_map = dict(addr_map)
-                            updated_map["pmo"] = list(merged_addrs)
-                            dev_map["addr_map"] = updated_map
+                        seen.add(addr)
+                        payload.append(addr)
 
                 if "htr" not in addresses_by_type:
                     addresses_by_type["htr"] = []
+
+                for node_type, addrs in addresses_by_type.items():
+                    bucket = self._ensure_type_bucket(dev_map, nodes_by_type, node_type)
+                    bucket["addrs"] = list(addrs)
+                    if node_type == "pmo" and addrs:
+                        addr_map = dev_map.get("addr_map")
+                        updated_map: dict[str, Any]
+                        if isinstance(addr_map, Mapping):
+                            updated_map = dict(addr_map)
+                        else:
+                            updated_map = {}
+                        updated_map["pmo"] = list(addrs)
+                        dev_map["addr_map"] = updated_map
 
                 dev_map["addresses_by_type"] = {
                     node_type: list(addrs)
