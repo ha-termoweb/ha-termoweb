@@ -20,21 +20,44 @@ from custom_components.termoweb import (
 from custom_components.termoweb.inventory import AccumulatorNode, HeaterNode
 
 
+class ExplodingStr:
+    """Helper that raises when stringified to test defensive paths."""
+
+    def __str__(self) -> str:
+        raise RuntimeError("boom")
+
+
 def test_coerce_int_variants() -> None:
     """``coerce_int`` should normalise primitives and guard against errors."""
-
-    class BadString:
-        def __str__(self) -> str:
-            raise RuntimeError("boom")
 
     assert boost_module.coerce_int(None) is None
     assert boost_module.coerce_int(True) == 1
     assert boost_module.coerce_int(False) == 0
     assert boost_module.coerce_int(5.7) == 5
     assert boost_module.coerce_int(float("inf")) is None
-    assert boost_module.coerce_int(BadString()) is None
+    assert boost_module.coerce_int(ExplodingStr()) is None
     assert boost_module.coerce_int("   ") is None
     assert boost_module.coerce_int(" 7.2 ") == 7
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    (
+        (True, True),
+        (False, False),
+        (None, None),
+        ("Yes", True),
+        ("off", False),
+        (1, True),
+        (0, False),
+        (2, None),
+        (ExplodingStr(), None),
+    ),
+)
+def test_coerce_boost_bool_variants(value: Any, expected: bool | None) -> None:
+    """``coerce_boost_bool`` should normalise truthy and falsey values."""
+
+    assert boost_module.coerce_boost_bool(value) is expected
 
 
 def test_resolve_boost_end_from_fields_variants(
@@ -210,7 +233,9 @@ def test_apply_accumulator_boost_metadata_updates_payload(
     now = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
     coordinator._apply_accumulator_boost_metadata(payload, now=now)
 
-    assert payload["boost_end_datetime"] == dt.datetime(2024, 1, 1, 1, 30, tzinfo=dt.timezone.utc)
+    assert payload["boost_end_datetime"] == dt.datetime(
+        2024, 1, 1, 1, 30, tzinfo=dt.timezone.utc
+    )
     assert payload["boost_minutes_delta"] == 90
 
     payload.clear()
@@ -366,6 +391,7 @@ async def test_async_update_data_omits_raw_nodes(
     assert "nodes" not in record
     assert record["addresses_by_type"]["htr"] == ["1"]
     assert record["settings"]["htr"]["1"] == {}
+
 
 @pytest.mark.asyncio
 async def test_async_fetch_settings_by_address_pending_and_boost(
@@ -602,12 +628,8 @@ def test_mode_and_pending_key_helpers(
     """Mode normalisation and pending key helpers should validate input."""
 
     assert coord_module.StateCoordinator._normalize_mode_value(None) is None
-    assert (
-        coord_module.StateCoordinator._normalize_mode_value("  Auto ") == "auto"
-    )
-    assert (
-        coord_module.StateCoordinator._normalize_mode_value(123) == "123"
-    )
+    assert coord_module.StateCoordinator._normalize_mode_value("  Auto ") == "auto"
+    assert coord_module.StateCoordinator._normalize_mode_value(123) == "123"
 
     hass = HomeAssistant()
     inventory = inventory_builder("dev", {})
@@ -721,6 +743,7 @@ def test_should_defer_pending_setting_branches(
     )
     payload = {"mode": "manual"}
     assert coordinator._should_defer_pending_setting("htr", "1", payload) is True
+
 
 @pytest.mark.asyncio
 async def test_refresh_skips_pending_settings_merge(
@@ -862,4 +885,3 @@ def test_wrap_logger_proxies_missing_helpers() -> None:
 
     assert proxy.value == "logger"
     assert proxy.isEnabledFor(10) is False
-
