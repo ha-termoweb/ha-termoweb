@@ -1791,7 +1791,7 @@ def test_ducaheat_set_htr_settings_writes_segmented(monkeypatch) -> None:
         assert set(prog_json) == {"prog"}
         assert prog_json["prog"]["1"] == [1] * 48
         ptemp_json = session.request_calls[2][2]["json"]
-        assert ptemp_json == {"antifrost": "5.0", "eco": "15.0", "comfort": "21.0"}
+        assert ptemp_json == {"cold": "5.0", "night": "15.0", "day": "21.0"}
 
     asyncio.run(_run())
 
