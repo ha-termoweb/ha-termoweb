@@ -64,8 +64,10 @@ def validate_boost_minutes(value: int | None) -> int | None:
         minutes = int(value)
     except (TypeError, ValueError) as err:  # pragma: no cover - defensive
         raise ValueError(f"Invalid boost_time value: {value!r}") from err
-    if minutes <= 0:
-        raise ValueError("boost_time must be a positive integer")
+    if minutes < 60 or minutes > 600 or minutes % 60 != 0:
+        raise ValueError(
+            "boost_time must be between 60 and 600 minutes in 60-minute increments"
+        )
     return minutes
 
 
