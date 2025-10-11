@@ -323,6 +323,7 @@ class _WSStatusMixin:
         state["last_payload_at"] = tracker.last_payload_at
         state["last_heartbeat_at"] = tracker.last_heartbeat_at
         state["payload_stale"] = tracker.payload_stale
+        state["payload_stale_after"] = tracker.payload_stale_after
         if changed:
             self._notify_ws_status(
                 tracker,

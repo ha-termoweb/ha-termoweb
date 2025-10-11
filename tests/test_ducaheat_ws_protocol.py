@@ -1203,6 +1203,32 @@ def test_collect_sample_updates_filters_entries(
     assert result == {"htr": {"samples": {"1": {"power": 2}}, "lease_seconds": None}}
 
 
+def test_collect_sample_updates_updates_payload_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cadence hints should tune the websocket payload stale window."""
+
+    client = _make_client(monkeypatch)
+
+    assert client._payload_stale_after == pytest.approx(240.0)
+
+    payload: Mapping[str, Any] = {
+        "htr": {
+            "samples": {"1": {"power": 5}},
+            "lease_seconds": 60,
+        }
+    }
+
+    result = client._collect_sample_updates(payload)
+
+    assert result["htr"]["lease_seconds"] == 60
+    assert client._payload_window_hint == pytest.approx(60.0)
+    assert client._payload_stale_after == pytest.approx(75.0)
+    state = client._ws_state_bucket()
+    assert state["payload_stale_after"] == pytest.approx(75.0)
+    assert state["payload_window_source"] == "sample_updates"
+
+
 def test_forward_sample_updates_handles_guard_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1232,6 +1258,25 @@ def test_forward_sample_updates_handles_exception(
         FailingCoordinator()
     )
     client._forward_sample_updates({"htr": {"samples": {"1": {"power": 1}}}})
+
+
+@pytest.mark.asyncio
+async def test_disconnect_resets_payload_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Disconnecting should restore the default payload window."""
+
+    client = _make_client(monkeypatch)
+    client._apply_payload_window_hint(source="test", lease_seconds=30)
+
+    assert client._payload_stale_after == pytest.approx(45.0)
+
+    await client._disconnect("testing")
+
+    assert client._payload_stale_after == pytest.approx(240.0)
+    state = client._ws_state_bucket()
+    assert state["payload_window_hint"] is None
+    assert state["payload_window_source"] == "disconnect"
 
 
 def test_merge_nodes_overwrites_non_mapping() -> None:
