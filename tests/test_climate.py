@@ -613,7 +613,6 @@ def test_async_setup_entry_creates_accumulator_entity(
 
         client = AsyncMock()
         client.set_node_settings = AsyncMock()
-        client.set_htr_settings = AsyncMock()
 
         hass.data = {
             DOMAIN: {
@@ -674,7 +673,7 @@ def test_async_setup_entry_creates_accumulator_entity(
         call = client.set_node_settings.await_args
         assert call.kwargs["ptemp"] == [18.5, 19.5, 20.5]
         assert call.kwargs["units"] == "C"
-        assert client.set_htr_settings.await_count == 0
+        assert client.set_node_settings.await_count == 1
 
     asyncio.run(_run())
 
@@ -1628,7 +1627,7 @@ def test_heater_additional_cancelled_edges(
             client=AsyncMock(),
         )
         client = AsyncMock()
-        client.set_htr_settings = AsyncMock()
+        client.set_node_settings = AsyncMock()
 
         hass.data = {
             DOMAIN: {
@@ -1686,12 +1685,12 @@ def test_heater_additional_cancelled_edges(
             await heater.async_set_preset_temperatures(ptemp=[18.0, 19.0, 20.0])
         heater.async_write_ha_state = orig_write
 
-        client.set_htr_settings.side_effect = SentinelCancelled()
+        client.set_node_settings.side_effect = SentinelCancelled()
         heater._pending_mode = HVACMode.AUTO
         heater._pending_stemp = 20.5
         with pytest.raises(SentinelCancelled):
             await heater._write_after_debounce()
-        client.set_htr_settings.side_effect = None
+        client.set_node_settings.side_effect = None
 
         class BadFloat:
             def __float__(self) -> float:
@@ -1889,8 +1888,8 @@ def test_heater_write_paths_and_errors(
 
         # -------------------- async_set_schedule (valid) --------------------
         await heater.async_set_schedule(list(base_prog))
-        call = client.set_htr_settings.await_args
-        assert call.args == (dev_id, addr)
+        call = client.set_node_settings.await_args
+        assert call.args == (dev_id, ("htr", addr))
         assert call.kwargs["prog"] == list(base_prog)
         assert call.kwargs["units"] == "C"
 
@@ -1900,46 +1899,46 @@ def test_heater_write_paths_and_errors(
         assert heater._refresh_fallback is not None
         await _complete_fallback_once()
 
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
 
         # -------------------- async_set_schedule (invalid length/value) -----
         caplog.clear()
         await heater.async_set_schedule([0, 1])
-        assert client.set_htr_settings.await_count == 0
+        assert client.set_node_settings.await_count == 0
         assert "Invalid prog length" in caplog.text
         assert not fallback_waiters
 
         caplog.clear()
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
         bad_prog = list(base_prog)
         bad_prog[5] = 7
         await heater.async_set_schedule(bad_prog)
-        assert client.set_htr_settings.await_count == 0
+        assert client.set_node_settings.await_count == 0
         assert "Invalid prog for type" in caplog.text
         assert not fallback_waiters
 
         # -------------------- async_set_schedule (API error) ----------------
         caplog.clear()
-        client.set_htr_settings.reset_mock()
-        client.set_htr_settings.side_effect = RuntimeError("boom schedule")
+        client.set_node_settings.reset_mock()
+        client.set_node_settings.side_effect = RuntimeError("boom schedule")
         prev_prog = list(settings_after["prog"])
         prev_fallback = heater._refresh_fallback
         await heater.async_set_schedule(list(base_prog))
-        assert client.set_htr_settings.await_count == 1
+        assert client.set_node_settings.await_count == 1
         assert settings_after["prog"] == prev_prog
         assert heater._refresh_fallback is prev_fallback
         assert not fallback_waiters
         assert "Schedule write failed" in caplog.text
-        client.set_htr_settings.side_effect = None
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.side_effect = None
+        client.set_node_settings.reset_mock()
 
         # -------------------- async_set_schedule (optimistic failure) -------
         caplog.clear()
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
         old_data = coordinator.data
         coordinator.data = RaisingMapping(old_data)
         await heater.async_set_schedule(list(base_prog))
-        assert client.set_htr_settings.await_count == 1
+        assert client.set_node_settings.await_count == 1
         assert settings_after["prog"] == prev_prog
         assert "Optimistic update failed" in caplog.text
         waiter = await _pop_waiter()
@@ -1951,64 +1950,64 @@ def test_heater_write_paths_and_errors(
         coordinator.async_refresh_heater.assert_awaited_once_with(("htr", addr))
         coordinator.async_refresh_heater.reset_mock()
         assert heater._refresh_fallback is None
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
 
         # -------------------- async_set_preset_temperatures (valid forms) ---
         caplog.clear()
         preset_payload = [18.5, 19.5, 20.5]
         await heater.async_set_preset_temperatures(ptemp=preset_payload)
-        call = client.set_htr_settings.await_args
-        assert call.args == (dev_id, addr)
+        call = client.set_node_settings.await_args
+        assert call.args == (dev_id, ("htr", addr))
         assert call.kwargs["ptemp"] == preset_payload
         assert call.kwargs["units"] == "C"
         assert settings_after["ptemp"] == ["18.5", "19.5", "20.5"]
         await _complete_fallback_once()
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
 
         caplog.clear()
         await heater.async_set_preset_temperatures(cold=16.5, night=17.5, day=18.5)
-        call = client.set_htr_settings.await_args
+        call = client.set_node_settings.await_args
         assert call.kwargs["ptemp"] == [16.5, 17.5, 18.5]
         assert settings_after["ptemp"] == ["16.5", "17.5", "18.5"]
         await _complete_fallback_once()
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
 
         # -------------------- async_set_preset_temperatures (invalid) -------
         caplog.clear()
         await heater.async_set_preset_temperatures(ptemp=[18.0, 19.0])
-        assert client.set_htr_settings.await_count == 0
+        assert client.set_node_settings.await_count == 0
         assert "Invalid ptemp length" in caplog.text
         assert not fallback_waiters
 
         caplog.clear()
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
         await heater.async_set_preset_temperatures(ptemp=["bad", "bad", "bad"])
-        assert client.set_htr_settings.await_count == 0
+        assert client.set_node_settings.await_count == 0
         assert "Invalid ptemp values" in caplog.text
         assert not fallback_waiters
 
         # -------------------- async_set_preset_temperatures (API error) -----
         caplog.clear()
-        client.set_htr_settings.reset_mock()
-        client.set_htr_settings.side_effect = RuntimeError("boom preset")
+        client.set_node_settings.reset_mock()
+        client.set_node_settings.side_effect = RuntimeError("boom preset")
         prev_ptemp = list(settings_after["ptemp"])
         prev_fallback = heater._refresh_fallback
         await heater.async_set_preset_temperatures(ptemp=[19.1, 20.1, 21.1])
-        assert client.set_htr_settings.await_count == 1
+        assert client.set_node_settings.await_count == 1
         assert settings_after["ptemp"] == prev_ptemp
         assert heater._refresh_fallback is prev_fallback
         assert not fallback_waiters
         assert "Preset write failed" in caplog.text
-        client.set_htr_settings.side_effect = None
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.side_effect = None
+        client.set_node_settings.reset_mock()
 
         # -------------------- async_set_preset_temperatures (optimistic failure) -
         caplog.clear()
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
         old_data = coordinator.data
         coordinator.data = RaisingMapping(old_data)
         await heater.async_set_preset_temperatures(ptemp=[19.2, 20.2, 21.2])
-        assert client.set_htr_settings.await_count == 1
+        assert client.set_node_settings.await_count == 1
         assert settings_after["ptemp"] == prev_ptemp
         assert "Optimistic update failed" in caplog.text
         waiter = await _pop_waiter()
@@ -2020,80 +2019,80 @@ def test_heater_write_paths_and_errors(
         coordinator.async_refresh_heater.assert_awaited_once_with(("htr", addr))
         coordinator.async_refresh_heater.reset_mock()
         assert heater._refresh_fallback is None
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
 
         # -------------------- async_set_temperature (valid + clamps) -------
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
         await heater.async_set_temperature(**{ATTR_TEMPERATURE: 35.6})
         assert heater._write_task is not None
         await heater._write_task
-        call = client.set_htr_settings.await_args
-        assert call.args == (dev_id, addr)
+        call = client.set_node_settings.await_args
+        assert call.args == (dev_id, ("htr", addr))
         assert call.kwargs["mode"] == "manual"
         assert call.kwargs["stemp"] == pytest.approx(30.0)
         assert call.kwargs["units"] == "C"
         assert settings_after["stemp"] == "30.0"
         await _complete_fallback_once()
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
 
         await heater.async_set_temperature(**{ATTR_TEMPERATURE: 2.0})
         assert heater._write_task is not None
         await heater._write_task
-        call = client.set_htr_settings.await_args
+        call = client.set_node_settings.await_args
         assert call.kwargs["stemp"] == pytest.approx(5.0)
         assert settings_after["stemp"] == "5.0"
         await _complete_fallback_once()
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
 
         caplog.clear()
         await heater.async_set_temperature(**{ATTR_TEMPERATURE: "bad"})
-        assert client.set_htr_settings.await_count == 0
+        assert client.set_node_settings.await_count == 0
         assert (heater._write_task is None) or heater._write_task.done()
         assert "Invalid temperature payload" in caplog.text
         assert not fallback_waiters
 
         # -------------------- async_set_hvac_mode --------------------------
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
         await heater.async_set_hvac_mode(HVACMode.AUTO)
         assert heater._write_task is not None
         await heater._write_task
-        call = client.set_htr_settings.await_args
+        call = client.set_node_settings.await_args
         assert call.kwargs["mode"] == "auto"
         assert call.kwargs["stemp"] is None
         assert settings_after["mode"] == "auto"
         assert settings_after["stemp"] == "5.0"
         await _complete_fallback_once()
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
 
         await heater.async_set_hvac_mode(HVACMode.OFF)
         assert heater._write_task is not None
         await heater._write_task
-        call = client.set_htr_settings.await_args
+        call = client.set_node_settings.await_args
         assert call.kwargs["mode"] == "off"
         assert settings_after["mode"] == "off"
         assert settings_after["stemp"] == "5.0"
         await _complete_fallback_once()
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
 
         await heater.async_set_hvac_mode(HVACMode.HEAT)
         assert heater._write_task is not None
         await heater._write_task
-        call = client.set_htr_settings.await_args
+        call = client.set_node_settings.await_args
         assert call.kwargs["mode"] == "manual"
         assert call.kwargs["stemp"] == pytest.approx(5.0)
         assert settings_after["mode"] == "manual"
         assert settings_after["stemp"] == "5.0"
         await _complete_fallback_once()
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
 
         caplog.clear()
         await heater.async_set_hvac_mode(cast(HVACMode, "eco"))
-        assert client.set_htr_settings.await_count == 0
+        assert client.set_node_settings.await_count == 0
         assert "Unsupported hvac_mode" in caplog.text
         assert not fallback_waiters
 
         # -------------------- _ensure_write_task and debounce -------------
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
         write_block = True
         pre_fallback = heater._refresh_fallback
         heater._pending_mode = None
@@ -2107,14 +2106,14 @@ def test_heater_write_paths_and_errors(
         write_block = False
         write_waiter.set_result(None)
         await first_task
-        assert client.set_htr_settings.await_count == 0
+        assert client.set_node_settings.await_count == 0
         assert heater._refresh_fallback is pre_fallback
         assert not write_waiters
 
         # -------------------- _write_after_debounce error path -------------
         caplog.clear()
-        client.set_htr_settings.reset_mock()
-        client.set_htr_settings.side_effect = RuntimeError("write boom")
+        client.set_node_settings.reset_mock()
+        client.set_node_settings.side_effect = RuntimeError("write boom")
         heater._pending_mode = HVACMode.AUTO
         heater._pending_stemp = None
         heater._refresh_fallback = None
@@ -2124,8 +2123,8 @@ def test_heater_write_paths_and_errors(
         assert "Mode/setpoint write failed" in caplog.text
         assert heater._refresh_fallback is None
         assert not fallback_waiters
-        client.set_htr_settings.side_effect = None
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.side_effect = None
+        client.set_node_settings.reset_mock()
 
         # -------------------- _schedule_refresh_fallback behaviour --------
         heater._schedule_refresh_fallback()
@@ -2168,14 +2167,14 @@ def test_heater_write_paths_and_errors(
             "last_payload_at": climate_module.time.time(),
             "idle_restart_pending": False,
         }
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
         await heater.async_set_temperature(**{ATTR_TEMPERATURE: 22.5})
         assert heater._write_task is not None
         await heater._write_task
-        assert client.set_htr_settings.await_count == 1
+        assert client.set_node_settings.await_count == 1
         assert heater._refresh_fallback is None
         assert not fallback_waiters
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
 
         # -------------------- WS healthy but stale payload triggers fallback ----
         hass.data[DOMAIN][entry_id]["ws_state"][dev_id] = {
@@ -2187,10 +2186,10 @@ def test_heater_write_paths_and_errors(
         await heater.async_set_temperature(**{ATTR_TEMPERATURE: 21.5})
         assert heater._write_task is not None
         await heater._write_task
-        assert client.set_htr_settings.await_count == 1
+        assert client.set_node_settings.await_count == 1
         assert heater._refresh_fallback is not None
         await _complete_fallback_once()
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
 
         # -------------------- WS status missing triggers fallback ---------
         hass.data[DOMAIN][entry_id]["ws_state"].pop(dev_id, None)
@@ -2199,7 +2198,7 @@ def test_heater_write_paths_and_errors(
         await heater._write_task
         assert heater._refresh_fallback is not None
         await _complete_fallback_once()
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
 
         # -------------------- WS down restores fallback -------------------
         hass.data[DOMAIN][entry_id]["ws_state"][dev_id] = {
@@ -2211,7 +2210,7 @@ def test_heater_write_paths_and_errors(
         await heater._write_task
         assert heater._refresh_fallback is not None
         await _complete_fallback_once()
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
 
         assert created_tasks, "Expected background tasks to be created"
 
@@ -2242,7 +2241,7 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
             client=AsyncMock(),
         )
         client = AsyncMock()
-        client.set_htr_settings = AsyncMock()
+        client.set_node_settings = AsyncMock()
 
         hass.data = {
             DOMAIN: {
@@ -2288,11 +2287,11 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
         with pytest.raises(ValueError):
             await heater.async_set_schedule(prog_cancel)
 
-        client.set_htr_settings.reset_mock()
-        client.set_htr_settings.side_effect = ValueError("api cancel")
+        client.set_node_settings.reset_mock()
+        client.set_node_settings.side_effect = ValueError("api cancel")
         with pytest.raises(ValueError):
             await heater.async_set_schedule(list(base_prog))
-        client.set_htr_settings.side_effect = None
+        client.set_node_settings.side_effect = None
 
         class CancelMapping(dict):
             def __init__(self, real: dict[str, Any]) -> None:
@@ -2322,11 +2321,11 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
                 ptemp=[CancelFloat(), 19.0, 20.0]
             )
 
-        client.set_htr_settings.reset_mock()
-        client.set_htr_settings.side_effect = ValueError("preset cancel")
+        client.set_node_settings.reset_mock()
+        client.set_node_settings.side_effect = ValueError("preset cancel")
         with pytest.raises(ValueError):
             await heater.async_set_preset_temperatures(ptemp=[18.0, 19.0, 20.0])
-        client.set_htr_settings.side_effect = None
+        client.set_node_settings.side_effect = None
 
         coordinator.data = CancelMapping(original_data)
         with pytest.raises(ValueError):
@@ -2340,31 +2339,31 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
 
         monkeypatch.setattr(climate_module.asyncio, "sleep", fast_sleep)
 
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
         heater._pending_mode = None
         heater._pending_stemp = 22.0
         await heater._write_after_debounce()
-        call = client.set_htr_settings.await_args
+        call = client.set_node_settings.await_args
         assert call.kwargs["mode"] == "manual"
         assert call.kwargs["stemp"] == 22.0
 
-        client.set_htr_settings.reset_mock()
+        client.set_node_settings.reset_mock()
         heater._pending_mode = HVACMode.HEAT
         heater._pending_stemp = None
         await heater._write_after_debounce()
-        call = client.set_htr_settings.await_args
+        call = client.set_node_settings.await_args
         assert call.kwargs["mode"] == "manual"
         assert call.kwargs["stemp"] == 22.0
 
-        client.set_htr_settings.reset_mock()
-        client.set_htr_settings.side_effect = ValueError("write cancel")
+        client.set_node_settings.reset_mock()
+        client.set_node_settings.side_effect = ValueError("write cancel")
         heater._pending_mode = HVACMode.AUTO
         heater._pending_stemp = 19.5
         await heater._write_after_debounce()
-        call = client.set_htr_settings.await_args
+        call = client.set_node_settings.await_args
         assert call.kwargs["mode"] == "manual"
         assert call.kwargs["stemp"] == 19.5
-        client.set_htr_settings.side_effect = None
+        client.set_node_settings.side_effect = None
 
         class BadFloat:
             def __float__(self) -> float:
@@ -2425,7 +2424,7 @@ def test_heater_cancelled_paths_propagate(
             client=AsyncMock(),
         )
         client = AsyncMock()
-        client.set_htr_settings = AsyncMock()
+        client.set_node_settings = AsyncMock()
 
         hass.data = {
             DOMAIN: {
@@ -2476,13 +2475,13 @@ def test_heater_cancelled_paths_propagate(
             await heater.async_set_preset_temperatures(ptemp=[18.0, 19.0, 20.0])
         coordinator.data[dev_id]["htr"]["settings"] = original_settings
 
-        client.set_htr_settings.side_effect = asyncio.CancelledError()
+        client.set_node_settings.side_effect = asyncio.CancelledError()
         heater._pending_mode = HVACMode.AUTO
         heater._pending_stemp = 21.0
         with pytest.raises(asyncio.CancelledError):
             await heater._write_after_debounce()
 
-        client.set_htr_settings.side_effect = None
+        client.set_node_settings.side_effect = None
 
         class CancelFloat:
             def __float__(self) -> float:

@@ -440,11 +440,11 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         ptemp: list[float] | None,
         units: str,
     ) -> None:
-        """Send settings via the heater-specific API."""
+        """Send settings for this heater to the backend."""
 
-        await client.set_htr_settings(
+        await client.set_node_settings(
             self._dev_id,
-            self._addr,
+            (self._node_type, self._addr),
             mode=mode,
             stemp=stemp,
             prog=prog,
