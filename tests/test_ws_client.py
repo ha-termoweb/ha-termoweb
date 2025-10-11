@@ -444,7 +444,7 @@ def test_dispatch_nodes_without_snapshot(monkeypatch: pytest.MonkeyPatch) -> Non
     assert seen["nodes_payload"] is payload["nodes"]
     coordinator.update_nodes.assert_called_once()
     update_args = coordinator.update_nodes.call_args.args
-    assert update_args[0] is payload["nodes"]
+    assert update_args[0] is None
     inventory_arg = update_args[1]
     assert isinstance(inventory_arg, Inventory)
     assert inventory_arg.payload is payload["nodes"]
@@ -461,6 +461,7 @@ def test_dispatch_nodes_without_snapshot(monkeypatch: pytest.MonkeyPatch) -> Non
     dispatcher.assert_called_once()
     dispatched_payload = dispatcher.call_args.args[2]
     assert dispatched_payload["addr_map"] == {"htr": ["1"]}
+    assert "nodes" not in dispatched_payload
 
 
 def test_prepare_nodes_dispatch_handles_non_mapping_record(
@@ -636,7 +637,7 @@ def test_dispatch_nodes_updates_hass_and_coordinator(
 
     client._coordinator.update_nodes.assert_called_once()  # type: ignore[attr-defined]
     update_args = client._coordinator.update_nodes.call_args.args  # type: ignore[attr-defined]
-    assert update_args[0] is payload
+    assert update_args[0] is None
     assert isinstance(update_args[1], Inventory)
     assert update_args[1].payload is payload
     assert isinstance(addr_map, dict)
@@ -1292,11 +1293,17 @@ def test_ws_common_dispatch_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
     coordinator.update_nodes.assert_called_once()
     update_args, update_kwargs = coordinator.update_nodes.call_args
     assert not update_kwargs
-    assert update_args[0] == payload["nodes"]
+    assert update_args[0] is None
     assert update_args[1] is inventory_obj
     dispatcher.assert_called_once()
     record = hass.data[base_ws.DOMAIN]["entry"]
     assert record.get("inventory") is inventory_obj
+    dispatched_payload = dispatcher.call_args.args[2]
+    assert dispatched_payload == {
+        "dev_id": "dev",
+        "node_type": None,
+        "addr_map": {"htr": ["1"]},
+    }
 
 
 def test_ws_client_start_selects_delegate(monkeypatch: pytest.MonkeyPatch) -> None:

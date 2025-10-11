@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping, MutableMapping
-from copy import deepcopy
 from dataclasses import dataclass
 import logging
 import time
@@ -368,8 +367,14 @@ def _prepare_nodes_dispatch(
     )
     addr_map = {node_type: list(addrs) for node_type, addrs in addr_map_raw.items()}
 
+    raw_nodes_for_coordinator = raw_nodes
+    raw_nodes_for_context = raw_nodes
+    if isinstance(inventory_container, Inventory):
+        raw_nodes_for_coordinator = None
+        raw_nodes_for_context = None
+
     if hasattr(coordinator, "update_nodes"):
-        coordinator.update_nodes(raw_nodes, inventory_container)
+        coordinator.update_nodes(raw_nodes_for_coordinator, inventory_container)
 
     normalized_unknown: set[str] = {
         node_str
@@ -382,7 +387,7 @@ def _prepare_nodes_dispatch(
     }
 
     return NodeDispatchContext(
-        payload=raw_nodes,
+        payload=raw_nodes_for_context,
         inventory=inventory_container,
         addr_map=addr_map,
         unknown_types=normalized_unknown,
@@ -412,11 +417,9 @@ class _WSCommon(_WSStatusMixin):
             raw_nodes=raw_nodes,
             inventory=self._inventory,
         )
-        nodes_payload = context.payload if context.payload is not None else {}
         payload_copy = {
             "dev_id": self.dev_id,
             "node_type": None,
-            "nodes": deepcopy(nodes_payload),
             "addr_map": {t: list(a) for t, a in context.addr_map.items()},
         }
         async_dispatcher_send(self.hass, signal_ws_data(self.entry_id), payload_copy)
