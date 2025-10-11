@@ -43,7 +43,12 @@ from .identifiers import (
     build_power_monitor_energy_unique_id,
     build_power_monitor_power_unique_id,
 )
-from .inventory import PowerMonitorNode, normalize_node_addr, normalize_node_type
+from .inventory import (
+    Inventory,
+    PowerMonitorNode,
+    normalize_node_addr,
+    normalize_node_type,
+)
 from .utils import (
     build_gateway_device_info,
     build_power_monitor_device_info,
@@ -692,14 +697,6 @@ class PowerMonitorSensorBase(CoordinatorEntity, SensorEntity):
             if isinstance(direct_metric, Mapping):
                 return direct_metric
 
-        nodes_by_type = record.get("nodes_by_type")
-        if isinstance(nodes_by_type, Mapping):
-            pmo_section = nodes_by_type.get("pmo")
-            if isinstance(pmo_section, Mapping):
-                metric = pmo_section.get(self._metric_key)
-                if isinstance(metric, Mapping):
-                    return metric
-
         return {}
 
     def _tracked_addresses(self) -> set[str]:
@@ -716,11 +713,15 @@ class PowerMonitorSensorBase(CoordinatorEntity, SensorEntity):
         if isinstance(direct_bucket, Mapping):
             candidates.append(direct_bucket.get("addrs"))
 
-        nodes_by_type = record.get("nodes_by_type")
-        if isinstance(nodes_by_type, Mapping):
-            pmo_section = nodes_by_type.get("pmo")
-            if isinstance(pmo_section, Mapping):
-                candidates.append(pmo_section.get("addrs"))
+        inventory = record.get("inventory")
+        if isinstance(inventory, Inventory):
+            forward_map, _ = inventory.power_monitor_address_map
+            for values in forward_map.values():
+                candidates.append(values)
+            sample_map = getattr(inventory, "power_monitor_sample_address_map", None)
+            if isinstance(sample_map, tuple) and sample_map:
+                for values in sample_map[0].values():
+                    candidates.append(values)
 
         for raw in candidates:
             if isinstance(raw, (str, bytes)):
