@@ -1201,9 +1201,9 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
                 minutes,
             )
             return None
-        if value > 120:
+        if value < 60 or value > 600 or value % 60 != 0:
             _LOGGER.error(
-                "Boost duration must be between 1 and 120 minutes for type=%s addr=%s: %s",
+                "Boost duration must be between 60 and 600 minutes in 60-minute increments for type=%s addr=%s: %s",
                 self._node_type,
                 self._addr,
                 value,
