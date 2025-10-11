@@ -338,7 +338,7 @@ def _prepare_nodes_dispatch(
         inventory_container = None
 
     if inventory_container is None and hasattr(coordinator, "inventory"):
-        candidate_inventory = getattr(coordinator, "inventory")
+        candidate_inventory = coordinator.inventory
         if isinstance(candidate_inventory, Inventory):
             inventory_container = candidate_inventory
 
@@ -352,11 +352,7 @@ def _prepare_nodes_dispatch(
             inventory_container = resolution.inventory
 
     if inventory_container is None:
-        payload_for_inventory = raw_nodes
-        if payload_for_inventory is None and isinstance(record_mapping, Mapping):
-            payload_for_inventory = record_mapping.get("nodes")
-        if payload_for_inventory is None:
-            payload_for_inventory = {}
+        payload_for_inventory = raw_nodes if raw_nodes is not None else {}
         inventory_container = Inventory(dev_id, payload_for_inventory, [])
 
     if isinstance(record_mutable, MutableMapping):

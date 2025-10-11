@@ -1632,8 +1632,10 @@ async def test_subscribe_feeds_stores_inventory_only(
 
     assert count == 2
     assert {path for _evt, path in emissions} == {"/htr/1/samples", "/htr/1/status"}
-    assert "nodes" not in bucket
-    assert isinstance(bucket.get("inventory"), Inventory)
+    bucket = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
+    inventory = bucket.get("inventory")
+    assert isinstance(inventory, Inventory)
+    assert any(node.addr == "1" for node in getattr(inventory, "nodes", ()))
 
 
 @pytest.mark.asyncio

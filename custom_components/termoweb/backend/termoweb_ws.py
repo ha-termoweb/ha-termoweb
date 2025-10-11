@@ -915,12 +915,18 @@ class WebSocketClient(_WSStatusMixin):
                 node_type: {"addrs": list(addrs)}
                 for node_type, addrs in addr_map.items()
             }
-            if nodes_by_type:
-                payload_copy["nodes_by_type"] = nodes_by_type
-                if "htr" in nodes_by_type:
-                    payload_copy.setdefault("htr", nodes_by_type["htr"])
-                for node_type, bucket in nodes_by_type.items():
-                    payload_copy.setdefault(node_type, bucket)
+            snapshot_payload["nodes_by_type"] = nodes_by_type
+            if "htr" in nodes_by_type:
+                snapshot_payload.setdefault("htr", nodes_by_type["htr"])
+            snapshot_payload["nodes"] = deepcopy(raw_nodes_payload)
+
+        if isinstance(record, MutableMapping) and isinstance(inventory, Inventory):
+            record["inventory"] = inventory
+
+        self._apply_heater_addresses(
+            addr_map,
+            inventory=inventory,
+        )
 
         if unknown_types:  # pragma: no cover - diagnostic payload
             payload_copy.setdefault("unknown_types", sorted(unknown_types))
@@ -1187,7 +1193,6 @@ class WebSocketClient(_WSStatusMixin):
             resolution = resolve_record_inventory(
                 record_mapping,
                 dev_id=self.dev_id,
-                nodes_payload=record_mapping.get("nodes") if isinstance(record_mapping, Mapping) else None,
             )
             if resolution.inventory is not None:
                 inventory_container = _bind_inventory(resolution.inventory)

@@ -20,6 +20,16 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from custom_components.termoweb.api import RESTClient
+from custom_components.termoweb.backend.ws_client import (
+    DUCAHEAT_NAMESPACE,
+    HandshakeError,
+    WSStats,
+    _prepare_nodes_dispatch,
+    _WSCommon,
+    _WsLeaseMixin,
+    forward_ws_sample_updates,
+    resolve_ws_update_section,
+)
 from custom_components.termoweb.const import (
     ACCEPT_LANGUAGE,
     API_BASE,
@@ -37,16 +47,6 @@ from custom_components.termoweb.inventory import (
     normalize_node_addr,
     normalize_node_type,
     resolve_record_inventory,
-)
-from custom_components.termoweb.backend.ws_client import (
-    DUCAHEAT_NAMESPACE,
-    HandshakeError,
-    WSStats,
-    _WSCommon,
-    _WsLeaseMixin,
-    _prepare_nodes_dispatch,
-    forward_ws_sample_updates,
-    resolve_ws_update_section,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -1039,10 +1039,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 inventory.payload if isinstance(inventory, Inventory) else {}
             )
 
-        if isinstance(record, MutableMapping):
-            record["nodes"] = raw_nodes_payload
-            if isinstance(inventory, Inventory):
-                record["inventory"] = inventory
+        if isinstance(record, MutableMapping) and isinstance(inventory, Inventory):
+            record["inventory"] = inventory
 
         nodes_by_type_payload: Mapping[str, Any] | None
         if is_snapshot:
@@ -1266,6 +1264,12 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             coordinator_nodes: Iterable[Any] | None = None
             if isinstance(coordinator_inventory, Inventory):
                 coordinator_nodes = coordinator_inventory.nodes
+
+            nodes_payload: Any | None
+            if isinstance(resolved_nodes, Mapping):
+                nodes_payload = resolved_nodes
+            else:
+                nodes_payload = None
 
             should_resolve = inventory_container is None and (
                 isinstance(nodes, Mapping)

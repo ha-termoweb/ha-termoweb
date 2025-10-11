@@ -419,7 +419,7 @@ def test_resolve_record_inventory_uses_cached_node_list() -> None:
     assert record["inventory"] is resolution.inventory
     assert isinstance(resolution.inventory, Inventory)
     assert resolution.inventory.dev_id == "101"
-    assert record["node_inventory"] is nodes
+    assert "node_inventory" not in record
 
 
 def test_resolve_record_inventory_falls_back_to_snapshot() -> None:
@@ -447,9 +447,12 @@ def test_resolve_record_inventory_builds_from_raw_nodes() -> None:
     """Raw node payloads should be normalised when no cache exists."""
 
     raw_nodes = {"nodes": [{"type": "htr", "addr": "5"}]}
-    record: dict[str, Any] = {"dev_id": "dev-raw", "nodes": raw_nodes}
+    record: dict[str, Any] = {"dev_id": "dev-raw"}
 
-    resolution = inventory_module.resolve_record_inventory(record)
+    resolution = inventory_module.resolve_record_inventory(
+        record,
+        nodes_payload=raw_nodes,
+    )
 
     assert resolution.source == "raw_nodes"
     assert resolution.filtered_count == 1
@@ -495,7 +498,7 @@ def test_resolve_record_inventory_detects_mismatched_inventory() -> None:
     assert resolution.source == "node_inventory"
     assert resolution.filtered_count == 0
     assert record["inventory"] is resolution.inventory
-    assert record["node_inventory"] == [invalid]
+    assert "node_inventory" not in record
 
 
 def test_heater_platform_details_default_name(
