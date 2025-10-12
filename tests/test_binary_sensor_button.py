@@ -19,7 +19,7 @@ import custom_components.termoweb.button as button_module
 import custom_components.termoweb.heater as heater_module
 from custom_components.termoweb import identifiers as identifiers_module
 from custom_components.termoweb.const import DOMAIN, signal_ws_status
-from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.inventory import AccumulatorNode, Inventory
 from custom_components.termoweb.utils import build_gateway_device_info
 
 GatewayOnlineBinarySensor = binary_sensor_module.GatewayOnlineBinarySensor
@@ -28,6 +28,7 @@ StateRefreshButton = button_module.StateRefreshButton
 async_setup_button_entry = button_module.async_setup_entry
 AccumulatorBoostButton = button_module.AccumulatorBoostButton
 AccumulatorBoostCancelButton = button_module.AccumulatorBoostCancelButton
+AccumulatorBoostContext = button_module.AccumulatorBoostContext
 
 
 def test_binary_sensor_setup_and_dispatch(
@@ -233,15 +234,11 @@ def test_accumulator_boost_button_triggers_service() -> None:
         coordinator = types.SimpleNamespace(hass=hass, data={})
         hass.services = types.SimpleNamespace(async_call=AsyncMock())
 
+        context = _make_boost_context(entry_id, dev_id, addr="2", name="Living Room")
         button = AccumulatorBoostButton(
             coordinator,
-            entry_id,
-            dev_id,
-            "2",
-            "Living Room",
-            "uid-boost-60",
-            minutes=60,
-            node_type="acm",
+            context,
+            _metadata_for(60),
         )
         button.hass = hass
 
@@ -287,15 +284,16 @@ def test_accumulator_boost_button_ignores_press_without_hass() -> None:
             data={},
         )
 
-        button = AccumulatorBoostButton(
-            coordinator,
+        context = _make_boost_context(
             "entry-guard",
             "device-guard",
-            "8",
-            "Hallway",
-            "uid-guard",
-            minutes=45,
-            node_type="acm",
+            addr="8",
+            name="Hallway",
+        )
+        button = AccumulatorBoostButton(
+            coordinator,
+            context,
+            _metadata_for(60),
         )
 
         button.hass = None
@@ -315,14 +313,11 @@ def test_accumulator_boost_cancel_button_triggers_service_without_minutes() -> N
         coordinator = types.SimpleNamespace(hass=hass, data={})
         hass.services = types.SimpleNamespace(async_call=AsyncMock())
 
+        context = _make_boost_context(entry_id, dev_id, addr="4", name="Bedroom")
         button = AccumulatorBoostCancelButton(
             coordinator,
-            entry_id,
-            dev_id,
-            "4",
-            "Bedroom",
-            "uid-cancel",
-            node_type="acm",
+            context,
+            _metadata_for(None),
         )
         button.hass = hass
 
@@ -349,15 +344,16 @@ def test_accumulator_boost_button_handles_missing_hass() -> None:
         coordinator = types.SimpleNamespace(hass=hass, data={})
         hass.services = types.SimpleNamespace(async_call=AsyncMock())
 
-        button = AccumulatorBoostButton(
-            coordinator,
+        context = _make_boost_context(
             "entry-no-hass",
             "device-no-hass",
-            "8",
-            "Kitchen",
-            "uid-no-hass",
-            minutes=60,
-            node_type="acm",
+            addr="8",
+            name="Kitchen",
+        )
+        button = AccumulatorBoostButton(
+            coordinator,
+            context,
+            _metadata_for(60),
         )
         button.hass = None
 
@@ -386,15 +382,11 @@ def test_accumulator_boost_button_logs_service_errors(
             raising=False,
         )
 
+        context = _make_boost_context(entry_id, dev_id, addr="10", name="Office")
         button = AccumulatorBoostButton(
             coordinator,
-            entry_id,
-            dev_id,
-            "10",
-            "Office",
-            "uid-errors",
-            minutes=120,
-            node_type="acm",
+            context,
+            _metadata_for(120),
         )
         button.hass = hass
 
@@ -433,3 +425,25 @@ def test_state_refresh_button_direct_press_and_info() -> None:
     asyncio.run(_run())
 
 
+
+
+def _make_boost_context(
+    entry_id: str,
+    dev_id: str,
+    *,
+    addr: str = "2",
+    name: str = "Living Room",
+) -> AccumulatorBoostContext:
+    inventory = Inventory(dev_id, {"nodes": []}, [AccumulatorNode(name=name, addr=addr)])
+    nodes = inventory.nodes_by_type.get("acm", ())
+    assert nodes, "inventory must expose at least one accumulator"
+    node = nodes[0]
+    assert isinstance(node, AccumulatorNode)
+    return AccumulatorBoostContext.from_inventory(entry_id, inventory, node)
+
+
+def _metadata_for(minutes: int | None) -> heater_module.BoostButtonMetadata:
+    for metadata in heater_module.BOOST_BUTTON_METADATA:
+        if metadata.minutes == minutes:
+            return metadata
+    raise AssertionError(f"metadata for minutes={minutes!r} not found")
