@@ -214,25 +214,33 @@ def iter_inventory_heater_metadata(
         )
     )
 
-    lookup: dict[str, dict[str, Node]] = {}
-    for node_type, nodes in nodes_by_type.items():
-        bucket: dict[str, Node] = {}
-        for node in _iter_node_container(nodes):
-            bucket[node.addr] = node
-        if bucket:
-            lookup[node_type] = bucket
-
     for node_type, addresses in addresses_by_type.items():
         if not addresses:
             continue
-        node_bucket = lookup.get(node_type)
-        if not node_bucket:
+
+        candidates = list(_iter_node_container(nodes_by_type.get(node_type, ())))
+        if not candidates:
             continue
-        for addr in addresses:
-            node = node_bucket.get(addr)
-            if node is None:
+
+        for raw_addr in addresses:
+            if not isinstance(raw_addr, str) or not raw_addr:
                 continue
-            yield (node_type, addr, resolve_name(node_type, addr), node)
+
+            matched: Node | None = None
+            for index, node in enumerate(candidates):
+                if node.addr == raw_addr:
+                    matched = node
+                    break
+
+            if matched is None:
+                continue
+
+            yield (
+                node_type,
+                raw_addr,
+                resolve_name(node_type, raw_addr),
+                matched,
+            )
 
 ALLOWED_BOOST_MINUTES: Final[tuple[int, ...]] = tuple(range(60, 601, 60))
 """Valid boost durations (in minutes) supported by TermoWeb heaters."""
