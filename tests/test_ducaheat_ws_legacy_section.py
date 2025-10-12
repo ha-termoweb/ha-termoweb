@@ -51,7 +51,6 @@ def test_update_legacy_section_normalises_accumulator_settings() -> None:
     )
 
     client = _make_client(coordinator)
-    client._nodes_raw = {}
 
     body = {"mode": "auto", "boost": {"remaining": 3600}}
     dev_map: dict[str, Any] = {"settings": {}}
@@ -77,9 +76,7 @@ def test_update_legacy_section_normalises_accumulator_settings() -> None:
     assert stored_payload == {"mode": "auto", "boost": {"remaining": 3600}}
     assert stored_payload is not body
 
-    raw_payload = client._nodes_raw.get("acm", {}).get("settings", {}).get(" 02 ")
-    assert raw_payload == body
-    assert raw_payload is not body
+    assert getattr(client, "_nodes_raw", None) is None
 
 
 def test_update_legacy_section_rejects_non_mapping_section_map() -> None:
@@ -91,9 +88,6 @@ def test_update_legacy_section_rejects_non_mapping_section_map() -> None:
     )
 
     client = _make_client(coordinator)
-    existing_raw = {"acm": {"settings": {" 02 ": {"mode": "manual"}}}}
-    client._nodes_raw = deepcopy(existing_raw)
-
     dev_map: dict[str, Any] = {"settings": {"acm": ["invalid"]}}
     dev_map_snapshot = deepcopy(dev_map)
 
@@ -107,7 +101,7 @@ def test_update_legacy_section_rejects_non_mapping_section_map() -> None:
 
     assert updated is False
     assert dev_map == dev_map_snapshot
-    assert client._nodes_raw == existing_raw
+    assert getattr(client, "_nodes_raw", None) is None
     coordinator._apply_accumulator_boost_metadata.assert_not_called()
     coordinator._device_now_estimate.assert_not_called()
 
