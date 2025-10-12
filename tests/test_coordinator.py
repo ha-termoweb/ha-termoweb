@@ -768,6 +768,10 @@ async def test_refresh_skips_pending_settings_merge(
         nodes=inventory.payload,
         inventory=inventory,
     )
+    addresses = inventory.addresses_by_type
+    heater_forward, heater_reverse = inventory.heater_address_map
+    power_forward, power_reverse = inventory.power_monitor_address_map
+
     initial = {
         "dev": {
             "dev_id": "dev",
@@ -775,14 +779,14 @@ async def test_refresh_skips_pending_settings_merge(
             "raw": {"name": "Device"},
             "connected": True,
             "inventory": inventory,
-            "addresses_by_type": {"htr": ["1"], "acm": [], "pmo": []},
+            "addresses_by_type": addresses,
             "heater_address_map": {
-                "forward": {"htr": ["1"], "acm": []},
-                "reverse": {"1": ["htr"]},
+                "forward": heater_forward,
+                "reverse": heater_reverse,
             },
             "power_monitor_address_map": {
-                "forward": {"pmo": []},
-                "reverse": {},
+                "forward": power_forward,
+                "reverse": power_reverse,
             },
             "settings": {"htr": {"1": {"mode": "manual", "stemp": "21.0"}}},
         }
@@ -831,6 +835,10 @@ async def test_poll_skips_pending_settings_merge(
         nodes=inventory.payload,
         inventory=inventory,
     )
+    addresses = inventory.addresses_by_type
+    heater_forward, heater_reverse = inventory.heater_address_map
+    power_forward, power_reverse = inventory.power_monitor_address_map
+
     initial = {
         "dev": {
             "dev_id": "dev",
@@ -838,14 +846,14 @@ async def test_poll_skips_pending_settings_merge(
             "raw": {"name": "Device"},
             "connected": True,
             "inventory": inventory,
-            "addresses_by_type": {"htr": ["1"], "acm": [], "pmo": []},
+            "addresses_by_type": addresses,
             "heater_address_map": {
-                "forward": {"htr": ["1"], "acm": []},
-                "reverse": {"1": ["htr"]},
+                "forward": heater_forward,
+                "reverse": heater_reverse,
             },
             "power_monitor_address_map": {
-                "forward": {"pmo": []},
-                "reverse": {},
+                "forward": power_forward,
+                "reverse": power_reverse,
             },
             "settings": {"htr": {"1": {"mode": "manual", "stemp": "21.0"}}},
         }
