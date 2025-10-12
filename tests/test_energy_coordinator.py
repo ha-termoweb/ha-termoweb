@@ -22,7 +22,9 @@ from custom_components.termoweb.const import (
 from custom_components.termoweb.inventory import (
     AccumulatorNode,
     HeaterNode,
+    Inventory,
     Node,
+    build_node_inventory,
     normalize_heater_addresses,
     normalize_power_monitor_addresses,
 )
@@ -74,6 +76,34 @@ def _expected_energy_aliases(
     return merged
 
 
+def _inventory_from_nodes(dev_id: str, payload: Mapping[str, Any]) -> Inventory:
+    """Return an Inventory built from ``payload``."""
+
+    return Inventory(dev_id, payload, list(build_node_inventory(payload)))
+
+
+def _state_coordinator_from_nodes(
+    hass: HomeAssistant,
+    client: Any,
+    base_interval: int,
+    dev_id: str,
+    device: Mapping[str, Any],
+    nodes: Mapping[str, Any],
+) -> StateCoordinator:
+    """Build a ``StateCoordinator`` with inventory derived from ``nodes``."""
+
+    inventory = _inventory_from_nodes(dev_id, nodes)
+    return StateCoordinator(
+        hass,
+        client,
+        base_interval,
+        dev_id,
+        device,
+        nodes,
+        inventory=inventory,
+    )
+
+
 @pytest.fixture
 def inventory_from_map(
     inventory_builder: Callable[
@@ -94,7 +124,7 @@ def inventory_from_map(
                 for addr in values:
                     payload_nodes.append({"type": raw_type, "addr": addr})
         payload = {"nodes": payload_nodes}
-        node_list = list(coord_module.build_node_inventory(payload))
+        node_list = list(build_node_inventory(payload))
         return inventory_builder(dev_id, payload, node_list)
 
     return _factory
@@ -125,81 +155,6 @@ def test_ensure_heater_section_helper() -> None:
 
 
 
-def test_update_nodes_builds_inventory_from_payload(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Ensuring inventory should rebuild containers from cached payload data."""
-
-    client = types.SimpleNamespace(get_node_settings=AsyncMock())
-    hass = HomeAssistant()
-    coord = StateCoordinator(
-        hass,
-        client,
-        30,
-        "dev",
-        {"name": "Device"},
-        None,
-    )
-
-    payload = {
-        "nodes": [
-            {"addr": "1", "type": "htr", "name": "Heater"},
-            {"addr": "2", "type": "acm", "name": "Accumulator"},
-        ]
-    }
-    sentinel = [
-        HeaterNode(name="Heater", addr="1"),
-        AccumulatorNode(name="Accumulator", addr="2"),
-    ]
-
-    def _fake_builder(raw: Any) -> list[Node]:
-        assert raw == payload
-        return sentinel
-
-    monkeypatch.setattr(coord_module, "build_node_inventory", _fake_builder)
-
-    coord.update_nodes(payload)
-
-    inventory = coord._ensure_inventory()
-    assert isinstance(inventory, coord_module.Inventory)
-    assert inventory.nodes == tuple(sentinel)
-    assert inventory.payload == payload
-    assert coord._inventory is inventory
-
-
-def test_update_nodes_handles_non_iterable_inventory_hint(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Invalid inventory hints should be ignored until rebuild is requested."""
-
-    client = types.SimpleNamespace(get_node_settings=AsyncMock())
-    hass = HomeAssistant()
-    coord = StateCoordinator(
-        hass,
-        client,
-        30,
-        "dev",
-        {"name": "Device"},
-        None,
-    )
-
-    payload = {"nodes": [{"addr": "5", "type": "htr"}]}
-    sentinel = [HeaterNode(name="Heater", addr="5")]
-
-    def _fake_builder(raw: Any) -> list[Node]:
-        assert raw == payload
-        return sentinel
-
-    monkeypatch.setattr(coord_module, "build_node_inventory", _fake_builder)
-
-    coord.update_nodes(payload, inventory=object())
-
-    inventory = coord._ensure_inventory()
-    assert isinstance(inventory, coord_module.Inventory)
-    assert inventory.nodes == tuple(sentinel)
-    assert coord._inventory is inventory
-
-
 def test_update_nodes_accepts_inventory_container(
     inventory_builder: Callable[
         [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
@@ -227,6 +182,60 @@ def test_update_nodes_accepts_inventory_container(
     assert coord._inventory.payload == payload
 
     coord.update_nodes(None, container)
+    assert coord._inventory is container
+
+
+def test_update_nodes_requires_inventory(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """Coordinator should not rebuild inventory when none is provided."""
+
+    client = types.SimpleNamespace(get_node_settings=AsyncMock())
+    hass = HomeAssistant()
+    payload = {"nodes": [{"addr": "1", "type": "htr"}]}
+    nodes_list = [HeaterNode(name="Heater", addr="1")]
+    container = inventory_builder("dev", payload, nodes_list)
+
+    coord = StateCoordinator(
+        hass,
+        client,
+        30,
+        "dev",
+        {"name": "Device"},
+        container.payload,
+        inventory=container,
+    )
+
+    coord.update_nodes(payload, inventory=None)
+    assert coord._inventory is None
+
+
+def test_update_nodes_ignores_invalid_inventory(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """Passing a non-inventory object should leave the existing cache in place."""
+
+    client = types.SimpleNamespace(get_node_settings=AsyncMock())
+    hass = HomeAssistant()
+    payload = {"nodes": [{"addr": "2", "type": "htr"}]}
+    nodes_list = [HeaterNode(name="Heater", addr="2")]
+    container = inventory_builder("dev", payload, nodes_list)
+
+    coord = StateCoordinator(
+        hass,
+        client,
+        30,
+        "dev",
+        {"name": "Device"},
+        container.payload,
+        inventory=container,
+    )
+
+    coord.update_nodes(payload, inventory=object())
     assert coord._inventory is container
 
 
@@ -280,13 +289,16 @@ def test_coordinator_success_resets_backoff() -> None:
                 {"addr": "B", "type": "acm"},
             ]
         }
+        node_list = list(build_node_inventory(nodes))
+        inventory = Inventory("dev", nodes, node_list)
         coord = StateCoordinator(
             hass,
             client,
             30,
             "dev",
             {"name": "Device"},
-            nodes,  # type: ignore[arg-type]
+            nodes,
+            inventory=inventory,
         )
         coord._backoff = 120
         coord.update_interval = timedelta(seconds=999)
@@ -333,13 +345,15 @@ def test_state_coordinator_round_robin_mixed_types() -> None:
                 {"addr": "B", "type": "acm"},
             ]
         }
+        inventory = _inventory_from_nodes("dev", nodes)
         coord = StateCoordinator(
             hass,
             client,
             30,
             "dev",
             {"name": "Device"},
-            nodes,  # type: ignore[arg-type]
+            nodes,
+            inventory=inventory,
         )
 
         await coord.async_refresh()
@@ -384,13 +398,15 @@ def test_state_coordinator_ignores_non_dict_payloads() -> None:
                 {"addr": "B", "type": "htr"},
             ]
         }
+        inventory = _inventory_from_nodes("dev", nodes)
         coord = StateCoordinator(
             hass,
             client,
             30,
             "dev",
             {"name": "Device"},
-            nodes,  # type: ignore[arg-type]
+            nodes,
+            inventory=inventory,
         )
 
         await coord.async_refresh()
@@ -421,13 +437,15 @@ def test_refresh_heater_skips_invalid_inputs() -> None:
                 {"addr": "B", "type": "acm"},
             ]
         }
+        inventory = _inventory_from_nodes("dev", nodes)
         coord = StateCoordinator(
             hass,
             client,
             30,
             "dev",
             {"name": " Device "},
-            nodes,  # type: ignore[arg-type]
+            nodes,
+            inventory=inventory,
         )
 
         updates: list[dict[str, dict[str, Any]]] = []
@@ -595,13 +613,14 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
                 {"addr": "C", "type": "acm"},
             ]
         }
-        coord = StateCoordinator(
+        inventory = _inventory_from_nodes("dev", nodes)
+        coord = _state_coordinator_from_nodes(
             hass,
             client,
             15,
             "dev",
             {"name": " Device "},
-            nodes,  # type: ignore[arg-type]
+            nodes,
         )
 
         updates: list[dict[str, dict[str, Any]]] = []
@@ -754,13 +773,13 @@ def test_refresh_heater_populates_missing_metadata() -> None:
                 {"addr": "B", "type": "acm"},
             ]
         }
-        coord = StateCoordinator(
+        coord = _state_coordinator_from_nodes(
             hass,
             client,
             45,
             "dev",
             {"name": " Device "},
-            nodes,  # type: ignore[arg-type]
+            nodes,
         )
 
         updates: list[dict[str, dict[str, Any]]] = []
@@ -815,13 +834,13 @@ def test_refresh_heater_handles_errors(caplog: pytest.LogCaptureFixture) -> None
                 {"addr": "B", "type": "acm"},
             ]
         }
-        coord = StateCoordinator(
+        coord = _state_coordinator_from_nodes(
             hass,
             client,
             30,
             "dev",
             {"name": "Device"},
-            nodes,  # type: ignore[arg-type]
+            nodes,
         )
 
         updates: list[dict[str, dict[str, Any]]] = []
@@ -868,16 +887,20 @@ def test_state_coordinator_async_update_data_reuses_previous() -> None:
         client.get_node_settings = AsyncMock(return_value={"mode": "eco"})
 
         hass = HomeAssistant()
+        nodes = {"nodes": [{"type": "acm", "addr": "7"}]}
+        inventory_nodes = list(build_node_inventory(nodes))
+        inventory = Inventory("dev", nodes, inventory_nodes)
         coord = StateCoordinator(
             hass,
             client,
             30,
             "dev",
             {"name": " Device "},
-            {},
+            inventory.payload,
+            inventory=inventory,
         )
 
-        coord.update_nodes({"nodes": [{"type": "acm", "addr": "7"}]})
+        coord.update_nodes(nodes, inventory)
         coord.data = {
             "dev": {
                 "settings": {
@@ -905,16 +928,20 @@ def test_async_refresh_heater_updates_cache() -> None:
         client.get_node_settings = AsyncMock(return_value={"mode": "heat"})
 
         hass = HomeAssistant()
+        nodes = {"nodes": [{"type": "htr", "addr": "A"}]}
+        inventory_nodes = list(build_node_inventory(nodes))
+        inventory = Inventory("dev", nodes, inventory_nodes)
         coord = StateCoordinator(
             hass,
             client,
             30,
             "dev",
             {"name": " Device "},
-            {},
+            inventory.payload,
+            inventory=inventory,
         )
 
-        coord.update_nodes({"nodes": [{"type": "htr", "addr": "A"}]})
+        coord.update_nodes(nodes, inventory)
 
         await coord.async_refresh_heater("A")
 
@@ -932,13 +959,13 @@ def test_async_update_data_skips_non_dict_sections() -> None:
 
         hass = HomeAssistant()
         nodes = {"nodes": [{"addr": "B", "type": "acm"}]}
-        coord = StateCoordinator(
+        coord = _state_coordinator_from_nodes(
             hass,
             client,
             30,
             "dev",
             {"name": "Device"},
-            nodes,  # type: ignore[arg-type]
+            nodes,
         )
 
         coord.data = {
@@ -1254,12 +1281,15 @@ def test_ws_margin_seconds_bounds(
 
 
 
-def test_handle_ws_samples_skips_empty_points() -> None:
+def test_handle_ws_samples_skips_empty_points(
+    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory]
+) -> None:
     """Ensure empty websocket samples do not update coordinator state."""
 
     hass = HomeAssistant()
     client = types.SimpleNamespace()
-    coord = EnergyStateCoordinator(hass, client, "dev", {"htr": ["A"]})
+    inventory = inventory_from_map({"htr": ["A"]})
+    coord = EnergyStateCoordinator(hass, client, "dev", inventory)
     coord.data = {
         "dev": {
             "nodes_by_type": {"htr": {"addrs": ["A"], "energy": {}, "power": {}}},
@@ -1275,12 +1305,15 @@ def test_handle_ws_samples_skips_empty_points() -> None:
     assert coord._last == {}
 
 
-def test_pmo_samples_scale_and_power() -> None:
+def test_pmo_samples_scale_and_power(
+    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory]
+) -> None:
     """Power monitor counters should convert from watt-seconds to kWh."""
 
     hass = HomeAssistant()
     client = types.SimpleNamespace()
-    coord = EnergyStateCoordinator(hass, client, "dev", {"pmo": ["M"]})
+    inventory = inventory_from_map({"pmo": ["M"]})
+    coord = EnergyStateCoordinator(hass, client, "dev", inventory)
     coord.data = {
         "dev": {
             "nodes_by_type": {
@@ -1308,17 +1341,20 @@ def test_pmo_samples_scale_and_power() -> None:
     assert power_bucket["M"] == pytest.approx(1000.0)
 
 
-def test_heater_energy_samples_empty_on_api_error() -> None:
+def test_heater_energy_samples_empty_on_api_error(
+    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory]
+) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
         client.get_node_samples = AsyncMock(side_effect=ClientError("fail"))
 
         hass = HomeAssistant()
+        inventory = inventory_from_map({"htr": ["A"]}, dev_id="1")
         coord = EnergyStateCoordinator(
             hass,
             client,
             "1",
-            ["A"],  # type: ignore[arg-type]
+            inventory,
         )
 
         await coord.async_refresh()
@@ -1332,6 +1368,7 @@ def test_heater_energy_samples_empty_on_api_error() -> None:
 
 def test_heater_energy_client_error_update_failed(
     monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
 ) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
@@ -1340,11 +1377,12 @@ def test_heater_energy_client_error_update_failed(
         )
 
         hass = HomeAssistant()
+        inventory = inventory_from_map({"htr": ["A"]}, dev_id="1")
         coord = EnergyStateCoordinator(
             hass,
             client,
             "1",
-            ["A"],  # type: ignore[arg-type]
+            inventory,
         )
 
         def _raise_client_error(_value: Any) -> float:
@@ -1362,7 +1400,9 @@ def test_heater_energy_client_error_update_failed(
 
 
 
-def test_energy_coordinator_handles_rate_limit_per_node() -> None:
+def test_energy_coordinator_handles_rate_limit_per_node(
+    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory]
+) -> None:
     async def _run() -> None:
         hass = HomeAssistant()
         client = types.SimpleNamespace()
@@ -1376,11 +1416,12 @@ def test_energy_coordinator_handles_rate_limit_per_node() -> None:
 
         client.get_node_samples = AsyncMock(side_effect=_side_effect)
 
+        inventory = inventory_from_map({"htr": ["A"], "acm": ["B"]}, dev_id="dev")
         coord = EnergyStateCoordinator(
             hass,
             client,
             "dev",
-            {"htr": ["A"], "acm": ["B"]},
+            inventory,
         )
 
         await coord.async_refresh()
@@ -1394,45 +1435,6 @@ def test_energy_coordinator_handles_rate_limit_per_node() -> None:
     asyncio.run(_run())
 
 
-
-
-def test_state_coordinator_update_nodes_rebuilds_inventory(
-    monkeypatch: pytest.MonkeyPatch,
-    inventory_builder: Callable[
-        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
-    ],
-) -> None:
-    """Coordinator should rebuild inventory lazily when requested."""
-    hass = HomeAssistant()
-    client = types.SimpleNamespace()
-    nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
-
-    built_nodes = [types.SimpleNamespace(addr="A")]
-    calls: list[dict[str, Any]] = []
-
-    def fake_build(payload: dict[str, Any]) -> list[Any]:
-        calls.append(payload)
-        return built_nodes
-
-    monkeypatch.setattr(coord_module, "build_node_inventory", fake_build)
-
-    inventory = inventory_builder("dev", {})
-    coord = StateCoordinator(
-        hass,
-        client,
-        30,
-        "dev",
-        {"name": "Device"},
-        inventory.payload,
-        inventory=inventory,
-    )
-
-    coord.update_nodes(nodes)
-
-    assert nodes in calls
-    rebuilt = coord._inventory
-    assert isinstance(rebuilt, coord_module.Inventory)
-    assert rebuilt.nodes == tuple(built_nodes)
 
 
 def test_state_coordinator_update_nodes_uses_provided_inventory(
@@ -1465,90 +1467,48 @@ def test_state_coordinator_update_nodes_uses_provided_inventory(
     assert inventory.nodes[0] is provided_nodes[0]
 
 
-def test_energy_state_coordinator_update_addresses_filters_duplicates() -> None:
+def test_energy_state_coordinator_update_addresses_requires_inventory(
+    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory]
+) -> None:
     hass = HomeAssistant()
     client = types.SimpleNamespace()
-    coord = EnergyStateCoordinator(hass, client, "dev", ["orig"])  # type: ignore[arg-type]
+    inventory = inventory_from_map({"htr": ["A"], "acm": ["B"], "pmo": ["M"]})
+    coord = EnergyStateCoordinator(hass, client, "dev", inventory)
 
-    coord.update_addresses(["A", " ", "B", "A", "B ", ""])
-
-    expected_map = _expected_energy_map(["A", " ", "B", "A", "B ", ""])
-    assert coord._addresses_by_type == expected_map
+    assert coord._addresses_by_type == _expected_energy_map(
+        {"htr": ["A"], "acm": ["B"], "pmo": ["M"]}
+    )
     assert coord._compat_aliases == _expected_energy_aliases(
-        ["A", " ", "B", "A", "B ", ""]
-    )
-    expected_flat = [
-        addr
-        for node_type in coord_module.ENERGY_NODE_TYPES
-        for addr in expected_map.get(node_type, [])
-    ]
-    assert coord._addrs() == expected_flat
-
-
-def test_energy_state_coordinator_update_addresses_ignores_invalid_types() -> None:
-    hass = HomeAssistant()
-    client = types.SimpleNamespace()
-    coord = EnergyStateCoordinator(hass, client, "dev", [])  # type: ignore[arg-type]
-
-    coord.update_addresses(
-        {" ": ["skip"], "htr": ["A"], "acm": ["", "B"], "foo": ["X"]}
+        {"htr": ["A"], "acm": ["B"], "pmo": ["M"]}
     )
 
-    expected_map = _expected_energy_map(
-        {" ": ["skip"], "htr": ["A"], "acm": ["", "B"], "foo": ["X"]}
-    )
-    assert coord._addresses_by_type == expected_map
-    assert coord._compat_aliases == _expected_energy_aliases(
-        {" ": ["skip"], "htr": ["A"], "acm": ["", "B"], "foo": ["X"]}
-    )
-    expected_flat = [
-        addr
-        for node_type in coord_module.ENERGY_NODE_TYPES
-        for addr in expected_map.get(node_type, [])
-    ]
-    assert coord._addrs() == expected_flat
-
-
-def test_energy_state_coordinator_update_addresses_accepts_map() -> None:
-    hass = HomeAssistant()
-    client = types.SimpleNamespace()
-    coord = EnergyStateCoordinator(hass, client, "dev", [])  # type: ignore[arg-type]
-
-    coord.update_addresses({"htr": ["A", "A"], "acm": ["B", ""], "foo": ["X"]})
-
-    expected_map = _expected_energy_map(
-        {"htr": ["A", "A"], "acm": ["B", ""], "foo": ["X"]}
-    )
-    assert coord._addresses_by_type == expected_map
-    assert coord._compat_aliases == _expected_energy_aliases(
-        {"htr": ["A", "A"], "acm": ["B", ""], "foo": ["X"]}
-    )
-    expected_flat = [
-        addr
-        for node_type in coord_module.ENERGY_NODE_TYPES
-        for addr in expected_map.get(node_type, [])
-    ]
-    assert coord._addrs() == expected_flat
-
-
-def test_energy_state_coordinator_update_addresses_uses_inventory() -> None:
-    hass = HomeAssistant()
-    client = types.SimpleNamespace()
-
-    coord = EnergyStateCoordinator(hass, client, "dev", None)
-    coord.update_addresses({"htr": ["A"], "acm": ["B"], "pmo": ["M"]})
-
-    assert coord._addresses_by_type == {"htr": ["A"], "acm": ["B"], "pmo": ["M"]}
+    coord.update_addresses(None)
+    assert coord._inventory is None
+    assert coord._addresses_by_type == _expected_energy_map(None)
     assert coord._compat_aliases["htr"] == "htr"
     assert coord._compat_aliases["acm"] == "acm"
     assert coord._compat_aliases["pmo"] == "pmo"
-    assert coord._compat_aliases.get("power_monitor") == "pmo"
-    assert coord._compat_aliases.get("power_monitors") == "pmo"
+
+
+def test_energy_state_coordinator_update_addresses_ignores_non_inventory(
+    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory]
+) -> None:
+    hass = HomeAssistant()
+    client = types.SimpleNamespace()
+    inventory = inventory_from_map({"htr": ["A"]})
+    coord = EnergyStateCoordinator(hass, client, "dev", inventory)
+
+    coord.update_addresses(object())  # type: ignore[arg-type]
+    assert coord._inventory is None
+    assert coord._addresses_by_type == _expected_energy_map(None)
+    assert coord._compat_aliases["htr"] == "htr"
+    assert coord._compat_aliases["acm"] == "acm"
+    assert coord._compat_aliases["pmo"] == "pmo"
 def test_energy_state_coordinator_async_update_adds_legacy_bucket() -> None:
     async def _run() -> None:
         hass = HomeAssistant()
         client = types.SimpleNamespace()
-        coord = EnergyStateCoordinator(hass, client, "dev", [])  # type: ignore[arg-type]
+        coord = EnergyStateCoordinator(hass, client, "dev", None)
 
         result = await coord._async_update_data()
         dev_data = result["dev"]
@@ -1567,13 +1527,13 @@ def test_coordinator_rate_limit_backoff(monkeypatch: pytest.MonkeyPatch) -> None
 
         hass = HomeAssistant()
         nodes = {"nodes": [{"addr": "A", "type": "htr"}, {"addr": "B", "type": "htr"}]}
-        coord = StateCoordinator(
+        coord = _state_coordinator_from_nodes(
             hass,
             client,
             30,
             "1",
             {},
-            nodes,  # type: ignore[arg-type]
+            nodes,
         )
 
         expected_backoffs = [60, 120, 240, 480, 960, 1920, 3600]
@@ -1631,13 +1591,13 @@ def test_coordinator_client_error(monkeypatch: pytest.MonkeyPatch) -> None:
                 {"addr": "B", "type": "acm"},
             ]
         }
-        coord = StateCoordinator(
+        coord = _state_coordinator_from_nodes(
             hass,
             client,
             30,
             "1",
             {},
-            nodes,  # type: ignore[arg-type]
+            nodes,
         )
 
         with pytest.raises(UpdateFailed, match="API error: boom"):
@@ -1668,7 +1628,10 @@ def test_coordinator_client_error(monkeypatch: pytest.MonkeyPatch) -> None:
     asyncio.run(_run())
 
 
-def test_ws_driven_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ws_driven_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
         client.get_node_samples = AsyncMock(
@@ -1676,7 +1639,8 @@ def test_ws_driven_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
         hass = HomeAssistant()
-        coord = EnergyStateCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
+        inventory = inventory_from_map({"htr": ["A"]}, dev_id="1")
+        coord = EnergyStateCoordinator(hass, client, "1", inventory)
 
         await coord.async_refresh()
         assert coord.data["1"]["htr"]["energy"]["A"] == pytest.approx(0.001)
@@ -1703,7 +1667,9 @@ def test_ws_driven_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
     asyncio.run(_run())
 
 
-def test_energy_poll_preserves_cached_samples() -> None:
+def test_energy_poll_preserves_cached_samples(
+    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory]
+) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
         client.get_node_samples = AsyncMock(
@@ -1715,11 +1681,12 @@ def test_energy_poll_preserves_cached_samples() -> None:
         )
 
         hass = HomeAssistant()
+        inventory = inventory_from_map({"htr": ["A"]})
         coord = EnergyStateCoordinator(
             hass,
             client,
             "dev",
-            ["A"],  # type: ignore[arg-type]
+            inventory,
         )
 
         await coord.async_refresh()
@@ -1748,13 +1715,13 @@ def test_coordinator_timeout() -> None:
 
         hass = HomeAssistant()
         nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
-        coord = StateCoordinator(
+        coord = _state_coordinator_from_nodes(
             hass,
             client,
             30,
             "1",
             {},
-            nodes,  # type: ignore[arg-type]
+            nodes,
         )
 
         with pytest.raises(UpdateFailed, match="API timeout"):
@@ -1763,17 +1730,20 @@ def test_coordinator_timeout() -> None:
     asyncio.run(_run())
 
 
-def test_heater_energy_timeout() -> None:
+def test_heater_energy_timeout(
+    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory]
+) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
         client.get_node_samples = AsyncMock(side_effect=asyncio.TimeoutError)
 
         hass = HomeAssistant()
+        inventory = inventory_from_map({"htr": ["A"]}, dev_id="1")
         coord = EnergyStateCoordinator(
             hass,
             client,
             "1",
-            ["A"],  # type: ignore[arg-type]
+            inventory,
         )
 
         with pytest.raises(UpdateFailed, match="API timeout"):

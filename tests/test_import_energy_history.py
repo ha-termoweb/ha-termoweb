@@ -1271,11 +1271,17 @@ def test_energy_polling_matches_import(monkeypatch: pytest.MonkeyPatch) -> None:
             )
         )
 
+        raw_nodes = {"nodes": [{"type": "htr", "addr": "A"}]}
+        inventory = inventory_module.Inventory(
+            "dev",
+            raw_nodes,
+            inventory_module.build_node_inventory(raw_nodes),
+        )
         coordinator = coord_mod.EnergyStateCoordinator(
             hass,
             client,
             "dev",
-            ["A"],
+            inventory,
         )
 
         times = iter([10_000.0, 13_600.0])
@@ -1306,12 +1312,6 @@ def test_energy_polling_matches_import(monkeypatch: pytest.MonkeyPatch) -> None:
             "Heater A",
             "uid",
             "Device A",
-        )
-        raw_nodes = {"nodes": [{"type": "htr", "addr": "A"}]}
-        inventory = inventory_module.Inventory(
-            "dev",
-            raw_nodes,
-            inventory_module.build_node_inventory(raw_nodes),
         )
         details = heater_module.HeaterPlatformDetails(
             inventory,

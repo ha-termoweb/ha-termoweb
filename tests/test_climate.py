@@ -64,8 +64,6 @@ def _make_coordinator(
     *,
     client: Any | None = None,
     inventory: Any | None = None,
-    inventory_payload: Mapping[str, Any] | None = None,
-    inventory_nodes: Iterable[Any] | None = None,
 ) -> FakeCoordinator:
     base_record = dict(record)
 
@@ -152,15 +150,18 @@ def _make_coordinator(
 
     normalised = FakeCoordinator._normalise_device_record(rebuilt_record)
 
+    effective_inventory = inventory
+    if not isinstance(effective_inventory, Inventory) and nodes_payload is not None:
+        node_list = list(build_node_inventory(nodes_payload))
+        effective_inventory = Inventory(dev_id, nodes_payload, node_list)
+
     return FakeCoordinator(
         hass,
         client=client,
         dev_id=dev_id,
         dev=normalised,
         nodes=normalised.get("inventory_payload", {}),
-        inventory=inventory,
-        inventory_payload=inventory_payload,
-        inventory_nodes=inventory_nodes,
+        inventory=effective_inventory,
         data={dev_id: normalised},
     )
 
@@ -1488,13 +1489,13 @@ def test_async_setup_entry_ignores_cached_node_list() -> None:
         dev_id = "dev-list"
         raw_nodes = {"nodes": [{"type": "htr", "addr": "3", "name": "Three"}]}
         node_list = [types.SimpleNamespace(type="htr", addr="3", name="Three")]
+        inventory = Inventory(dev_id, raw_nodes, list(node_list))
 
         coordinator = _make_coordinator(
             hass,
             dev_id,
             {"nodes": {}, "htr": {"settings": {}}},
             client=AsyncMock(),
-            inventory_nodes=node_list,
         )
 
         record: dict[str, Any] = {
