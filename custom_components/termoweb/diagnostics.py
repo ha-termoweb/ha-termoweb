@@ -13,7 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import CONF_BRAND, DEFAULT_BRAND, DOMAIN, get_brand_label
-from .inventory import Node, resolve_record_inventory
+from .inventory import Inventory, Node
 from .utils import async_get_integration_version
 
 _LOGGER = logging.getLogger(__name__)
@@ -42,18 +42,37 @@ async def async_get_config_entry_diagnostics(
         if isinstance(candidate, Mapping):
             record = candidate
 
-    resolution = resolve_record_inventory(record)
-    inventory_container = resolution.inventory
-    inventory_source_label = resolution.source
-    if inventory_container is not None:
-        inventory_source = list(inventory_container.nodes)
+    raw_nodes: list[Any] = []
+    if record is None:
+        _LOGGER.error(
+            "Config entry %s is missing integration data; node inventory unavailable",
+            entry.entry_id,
+        )
     else:
-        inventory_source = []
+        candidate = record.get("inventory")
+        if isinstance(candidate, Inventory):
+            raw_nodes = list(candidate.nodes)
+        else:
+            _LOGGER.error(
+                "Config entry %s does not expose a cached Inventory; node inventory unavailable",
+                entry.entry_id,
+            )
 
-    node_inventory: list[dict[str, Any]] = [
-        node.as_dict() for node in inventory_source if isinstance(node, Node)
+    filtered_nodes: list[Node] = [
+        node for node in raw_nodes if isinstance(node, Node)
     ]
-    node_inventory.sort(key=lambda item: (str(item.get("addr", "")), str(item.get("type", ""))))
+    raw_count = len(raw_nodes)
+    filtered_count = len(filtered_nodes)
+
+    node_inventory = [
+        {
+            "name": node.name,
+            "addr": node.addr,
+            "type": node.type,
+        }
+        for node in filtered_nodes
+    ]
+    node_inventory.sort(key=lambda item: (str(item["addr"]), str(item["type"])))
 
     version = record.get("version") if isinstance(record, Mapping) else None
     if version is None:
@@ -97,11 +116,10 @@ async def async_get_config_entry_diagnostics(
         diagnostics["home_assistant"]["time_zone"] = time_zone_str
 
     _LOGGER.debug(
-        "Diagnostics inventory source for %s: %s (raw=%d, filtered=%d)",
+        "Diagnostics inventory cache for %s: raw=%d, filtered=%d",
         entry.entry_id,
-        inventory_source_label,
-        resolution.raw_count,
-        resolution.filtered_count,
+        raw_count,
+        filtered_count,
     )
 
     try:

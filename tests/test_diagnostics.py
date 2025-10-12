@@ -7,7 +7,7 @@ import logging
 import platform
 import sys
 import types
-from typing import Any
+from typing import Any, Callable
 
 import pytest
 
@@ -39,6 +39,38 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 
+@pytest.fixture
+def diagnostics_record(
+    inventory_builder: Callable[[str, dict[str, Any], list[Any]], Inventory]
+) -> Callable[..., tuple[dict[str, Any], Inventory]]:
+    """Return helper to build diagnostics records with cached inventory."""
+
+    def _factory(
+        nodes: list[dict[str, Any]],
+        *,
+        dev_id: str,
+        version: str | None = None,
+        brand: str | None = None,
+        **extra: Any,
+    ) -> tuple[dict[str, Any], Inventory]:
+        payload = {"nodes": list(nodes)}
+        inventory = inventory_builder(
+            dev_id,
+            payload,
+            build_node_inventory(payload),
+        )
+        record: dict[str, Any] = {"inventory": inventory, "dev_id": dev_id}
+        if version is not None:
+            record["version"] = version
+        if brand is not None:
+            record["brand"] = brand
+        if extra:
+            record.update(extra)
+        return record, inventory
+
+    return _factory
+
+
 def _flatten(data: Any) -> list[str]:
     if isinstance(data, dict):
         keys: list[str] = list(data)
@@ -53,7 +85,10 @@ def _flatten(data: Any) -> list[str]:
     return []
 
 
-def test_diagnostics_with_cached_inventory(caplog: pytest.LogCaptureFixture) -> None:
+def test_diagnostics_with_cached_inventory(
+    caplog: pytest.LogCaptureFixture,
+    diagnostics_record: Callable[..., tuple[dict[str, Any], Inventory]],
+) -> None:
     """Diagnostics return cached inventory and redact sensitive keys."""
 
     hass = HomeAssistant()
@@ -65,26 +100,19 @@ def test_diagnostics_with_cached_inventory(caplog: pytest.LogCaptureFixture) -> 
         data={CONF_BRAND: BRAND_DUCAHEAT},
     )
 
-    raw_nodes = {
-        "nodes": [
+    record, inventory = diagnostics_record(
+        [
             {"name": "Heater One", "addr": "1", "type": "htr"},
             {"name": "Monitor", "addr": "2", "type": "pmo"},
-        ]
-    }
-    inventory = Inventory(
-        "secret-dev",
-        raw_nodes,
-        build_node_inventory(raw_nodes),
+        ],
+        dev_id="secret-dev",
+        version="1.2.3",
+        brand=BRAND_DUCAHEAT,
+        username="user@example.com",
     )
 
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {
-        "version": "1.2.3",
-        "brand": BRAND_DUCAHEAT,
-        "inventory": inventory,
-        "dev_id": "secret-dev",
-        "username": "user@example.com",
-    }
+    hass.data[DOMAIN][entry.entry_id] = record
 
     with caplog.at_level(logging.DEBUG):
         diagnostics = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
@@ -108,13 +136,14 @@ def test_diagnostics_with_cached_inventory(caplog: pytest.LogCaptureFixture) -> 
     assert "username" not in flattened
 
     assert (
-        "Diagnostics inventory source for entry-one: inventory (raw=2, filtered=2)"
-        in caplog.text
+        "Diagnostics inventory cache for entry-one: raw=2, filtered=2" in caplog.text
     )
+    assert not any(record.levelno >= logging.ERROR for record in caplog.records)
 
 
 def test_diagnostics_with_inventory_missing_version(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    caplog: pytest.LogCaptureFixture,
+    diagnostics_record: Callable[..., tuple[dict[str, Any], Inventory]],
 ) -> None:
     """Diagnostics rely on stored inventory and fetch helper version."""
 
@@ -126,20 +155,15 @@ def test_diagnostics_with_inventory_missing_version(
         data={CONF_BRAND: "termoweb"},
     )
 
-    raw_nodes = {
-        "nodes": [
+    record, _ = diagnostics_record(
+        [
             {"name": "Heater Two", "addr": "5", "type": "htr"},
-        ]
-    }
-
-    inventory = Inventory(
-        "dev-two",
-        raw_nodes,
-        build_node_inventory(raw_nodes),
+        ],
+        dev_id="dev-two",
     )
 
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {"inventory": inventory}
+    hass.data[DOMAIN][entry.entry_id] = record
 
     with caplog.at_level(logging.DEBUG):
         diagnostics = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
@@ -154,18 +178,46 @@ def test_diagnostics_with_inventory_missing_version(
     assert "time_zone" not in diagnostics["home_assistant"]
 
     assert (
-        "Diagnostics inventory source for entry-two: inventory (raw=1, filtered=1)"
+        "Diagnostics inventory cache for entry-two: raw=1, filtered=1" in caplog.text
+    )
+    assert not any(record.levelno >= logging.ERROR for record in caplog.records)
+
+
+def test_diagnostics_without_cached_inventory(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Diagnostics log when cached inventory metadata is unavailable."""
+
+    hass = HomeAssistant()
+    entry = ConfigEntry("entry-three", data={})
+
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN][entry.entry_id] = {"version": "9.9.9"}
+
+    with caplog.at_level(logging.DEBUG):
+        diagnostics = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
+
+    assert diagnostics["integration"]["version"] == "9.9.9"
+    assert diagnostics["integration"]["brand"] == "TermoWeb"
+    assert diagnostics["home_assistant"]["version"] == "unknown"
+    assert "time_zone" not in diagnostics["home_assistant"]
+    assert diagnostics["installation"]["node_inventory"] == []
+
+    assert (
+        "Config entry entry-three does not expose a cached Inventory; node inventory unavailable"
+        in caplog.text
+    )
+    assert (
+        "Diagnostics inventory cache for entry-three: raw=0, filtered=0"
         in caplog.text
     )
 
 
-def test_diagnostics_without_record(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Diagnostics handle missing registry records with safe defaults."""
+def test_diagnostics_without_record(caplog: pytest.LogCaptureFixture) -> None:
+    """Diagnostics report missing integration data for unknown entries."""
 
     hass = HomeAssistant()
-    entry = ConfigEntry("entry-three", data={})
+    entry = ConfigEntry("entry-four", data={})
 
     with caplog.at_level(logging.DEBUG):
         diagnostics = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
@@ -173,11 +225,13 @@ def test_diagnostics_without_record(
     assert hass.integration_requests == [DOMAIN]
     assert diagnostics["integration"]["version"] == "test-version"
     assert diagnostics["integration"]["brand"] == "TermoWeb"
-    assert diagnostics["home_assistant"]["version"] == "unknown"
-    assert "time_zone" not in diagnostics["home_assistant"]
     assert diagnostics["installation"]["node_inventory"] == []
 
     assert (
-        "Diagnostics inventory source for entry-three: fallback (raw=0, filtered=0)"
+        "Config entry entry-four is missing integration data; node inventory unavailable"
+        in caplog.text
+    )
+    assert (
+        "Diagnostics inventory cache for entry-four: raw=0, filtered=0"
         in caplog.text
     )
