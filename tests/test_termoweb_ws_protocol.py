@@ -1198,9 +1198,16 @@ def test_apply_heater_addresses_normalises_from_inventory(
     normalized = client._apply_heater_addresses(
         {"htr": ["1"], "acm": ["2"]}, inventory=inventory
     )
-    assert normalized["htr"] == ["1"]
-    assert normalized["acm"] == ["2"]
+    heater_map, heater_aliases = inventory.heater_sample_address_map
+    power_map, power_aliases = inventory.power_monitor_sample_address_map
+    assert normalized["htr"] == heater_map["htr"]
+    assert normalized["acm"] == heater_map["acm"]
     assert client._coordinator.data == {"device": {"settings": {}}}
+    record = client.hass.data[module.DOMAIN]["entry"]
+    assert record.get("sample_aliases") == {
+        **heater_aliases,
+        **power_aliases,
+    }
 
 
 def test_apply_heater_addresses_includes_power_monitors(
@@ -1232,6 +1239,8 @@ def test_apply_heater_addresses_includes_power_monitors(
     update_payload = energy_coordinator.update_addresses.call_args[0][0]
     assert update_payload["pmo"] == ["9"]
     assert record.get("inventory") is inventory
+    sample_aliases = record.get("sample_aliases")
+    assert sample_aliases is not None and sample_aliases.get("pmo") == "pmo"
 
 def test_apply_heater_addresses_skips_empty_non_heater(monkeypatch: pytest.MonkeyPatch) -> None:
     """Empty non-heater lists should still yield a heater placeholder."""

@@ -9,11 +9,7 @@ from unittest.mock import MagicMock
 from homeassistant.core import HomeAssistant
 
 from custom_components.termoweb.backend.ducaheat_ws import DucaheatWSClient, DOMAIN
-from custom_components.termoweb.inventory import (
-    Inventory,
-    build_node_inventory,
-    normalize_node_addr,
-)
+from custom_components.termoweb.inventory import Inventory, build_node_inventory
 
 
 class DummyREST:
@@ -65,20 +61,6 @@ def _build_inventory_payload() -> dict[str, Any]:
     }
 
 
-def _expected_addresses(values: Iterable[Any]) -> list[str]:
-    """Return normalised, deduplicated addresses for ``values``."""
-
-    seen: set[str] = set()
-    result: list[str] = []
-    for candidate in values:
-        addr = normalize_node_addr(candidate)
-        if not addr or addr in seen:
-            continue
-        seen.add(addr)
-        result.append(addr)
-    return result
-
-
 def test_apply_heater_addresses_updates_state() -> None:
     """Heater address normalisation should update entry and coordinator state."""
 
@@ -106,15 +88,24 @@ def test_apply_heater_addresses_updates_state() -> None:
 
     cleaned = client._apply_heater_addresses(normalized_map, inventory=inventory)
 
-    assert cleaned["htr"] == _expected_addresses([" 1 ", "01"])
-    assert normalize_node_addr("003") not in cleaned["htr"]
-    assert cleaned["acm"] == _expected_addresses(["2", "02"])
-    assert cleaned["pmo"] == inventory.power_monitor_address_map[0]["pmo"]
+    heater_map, heater_aliases = inventory.heater_sample_address_map
+    power_map, power_aliases = inventory.power_monitor_sample_address_map
+
+    assert cleaned["htr"] == heater_map["htr"]
+    assert "003" not in cleaned["htr"]
+    assert cleaned["acm"] == heater_map["acm"]
+    assert cleaned["pmo"] == power_map.get("pmo", [])
     assert "thm" not in cleaned
 
     assert hass.data[DOMAIN]["entry"]["inventory"] is inventory
     assert client._inventory is inventory
     energy_coordinator.update_addresses.assert_called_once_with(cleaned)
+
+    sample_aliases = hass.data[DOMAIN]["entry"].get("sample_aliases")
+    assert sample_aliases is not None
+    for alias_map in (heater_aliases, power_aliases):
+        for alias, target in alias_map.items():
+            assert sample_aliases.get(alias) == target
 
 
 def test_dispatch_nodes_uses_inventory_addresses() -> None:
