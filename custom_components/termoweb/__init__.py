@@ -57,6 +57,8 @@ from .coordinator import StateCoordinator
 from .energy import (
     async_import_energy_history as _async_import_energy_history_impl,
     async_register_import_energy_history_service,
+)
+from .throttle import (
     default_samples_rate_limit_state,
     reset_samples_rate_limit_state,
 )
