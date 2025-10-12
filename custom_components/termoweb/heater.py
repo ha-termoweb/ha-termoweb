@@ -1029,9 +1029,6 @@ class HeaterNodeBase(CoordinatorEntity):
             if isinstance(node_settings, Mapping):
                 settings = node_settings
 
-        if not addresses and settings:
-            addresses = [addr for addr in settings if isinstance(addr, str)]
-
         return {"addrs": addresses, "settings": settings}
 
     def heater_settings(self) -> dict[str, Any] | None:

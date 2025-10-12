@@ -151,6 +151,35 @@ def test_heater_handle_ws_event_requires_loop_or_mock() -> None:
     assert called is False
 
 
+def test_heater_section_requires_inventory_for_addresses() -> None:
+    """Heater metadata should not fabricate addresses without inventory."""
+
+    coordinator = SimpleNamespace(
+        data={"dev": {"settings": {"htr": {"1": {"mode": "auto"}}}}}
+    )
+    heater = HeaterNodeBase(coordinator, "entry", "dev", "1", "Heater 1")
+
+    section = heater._heater_section()
+
+    assert section == {"addrs": [], "settings": {"1": {"mode": "auto"}}}
+    assert heater.heater_settings() == {"mode": "auto"}
+    assert heater.available is False
+
+
+def test_heater_platform_details_missing_inventory(caplog: pytest.LogCaptureFixture) -> None:
+    """Inventory resolution should raise when device metadata is absent."""
+
+    caplog.set_level("ERROR")
+
+    with pytest.raises(ValueError):
+        heater_module.heater_platform_details_for_entry(
+            {"dev_id": "dev-1"},
+            default_name_simple=lambda addr: addr,
+        )
+
+    assert "missing inventory" in caplog.text
+
+
 def test_heater_client_handles_missing_hass_data() -> None:
     heater = HeaterNodeBase(SimpleNamespace(hass=None), "entry", "dev", "1", "Heater 1")
 
