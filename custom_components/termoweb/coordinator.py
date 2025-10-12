@@ -956,7 +956,7 @@ class EnergyStateCoordinator(
         hass: HomeAssistant,
         client: RESTClient,
         dev_id: str,
-        addrs: Iterable[str] | Mapping[str, Iterable[str]],
+        addrs: Inventory | Iterable[Any] | Mapping[Any, Iterable[Any]] | None,
     ) -> None:
         """Initialize the heater energy coordinator."""
         super().__init__(
@@ -982,31 +982,65 @@ class EnergyStateCoordinator(
             "acm": 1000.0,
             "pmo": 3_600_000.0,
         }
+        self._inventory: Inventory | None = None
         self.update_addresses(addrs)
 
     def update_addresses(
-        self, addrs: Iterable[str] | Mapping[str, Iterable[str]]
+        self,
+        addrs: Inventory | Iterable[Any] | Mapping[Any, Iterable[Any]] | None,
     ) -> None:
         """Replace the tracked heater addresses with ``addrs``."""
 
-        heater_map, heater_aliases = normalize_heater_addresses(addrs)
-        power_source: Mapping[str, Iterable[str]] | None
-        if isinstance(addrs, Mapping):
-            power_source = addrs
-        else:
-            power_source = None
-        power_map, power_aliases = normalize_power_monitor_addresses(power_source)
+        cleaned_map: dict[str, list[str]]
+        compat_aliases: dict[str, str]
 
-        cleaned_map: dict[str, list[str]] = {
-            "htr": list(heater_map.get("htr", [])),
-            "acm": list(heater_map.get("acm", [])),
-            "pmo": list(power_map.get("pmo", [])),
-        }
+        if isinstance(addrs, Inventory):
+            self._inventory = addrs
+            addresses_by_type = addrs.addresses_by_type
+            cleaned_map = {
+                node_type: list(addresses_by_type.get(node_type, []))
+                for node_type in ENERGY_NODE_TYPES
+            }
+            compat_aliases = {node_type: node_type for node_type in ENERGY_NODE_TYPES}
+        else:
+            self._inventory = None
+            mapping_source: Mapping[Any, Iterable[Any]] | None
+            iterable_source: Iterable[Any] | None
+
+            if isinstance(addrs, tuple) and addrs and isinstance(addrs[0], Mapping):
+                mapping_source = cast(Mapping[Any, Iterable[Any]], addrs[0])
+            elif isinstance(addrs, Mapping):
+                mapping_source = addrs
+            else:
+                mapping_source = None
+
+            if (
+                isinstance(addrs, Iterable)
+                and not isinstance(addrs, (str, bytes))
+                and mapping_source is None
+            ):
+                iterable_source = cast(Iterable[Any], addrs)
+            else:
+                iterable_source = None
+
+            heater_source: Iterable[Any] | Mapping[Any, Iterable[Any]] | None = (
+                mapping_source if mapping_source is not None else iterable_source
+            )
+            power_source: Mapping[Any, Iterable[Any]] | None = mapping_source
+
+            heater_map, heater_aliases = normalize_heater_addresses(heater_source)
+            power_map, power_aliases = normalize_power_monitor_addresses(power_source)
+
+            cleaned_map = {
+                "htr": list(heater_map.get("htr", [])),
+                "acm": list(heater_map.get("acm", [])),
+                "pmo": list(power_map.get("pmo", [])),
+            }
+            compat_aliases = dict(heater_aliases)
+            compat_aliases.update(power_aliases)
+
         for node_type in ENERGY_NODE_TYPES:
             cleaned_map.setdefault(node_type, [])
-
-        compat_aliases: dict[str, str] = dict(heater_aliases)
-        compat_aliases.update(power_aliases)
         for node_type in ENERGY_NODE_TYPES:
             compat_aliases.setdefault(node_type, node_type)
 
@@ -1031,6 +1065,12 @@ class EnergyStateCoordinator(
         self._last = {
             key: value for key, value in self._last.items() if key in valid_keys
         }
+
+    def addresses_for_type(self, node_type: str) -> tuple[str, ...]:
+        """Return tracked addresses for ``node_type``."""
+
+        canonical = self._compat_aliases.get(node_type, node_type)
+        return tuple(self._addresses_by_type.get(canonical, ()))
 
     def _process_energy_sample(
         self,
