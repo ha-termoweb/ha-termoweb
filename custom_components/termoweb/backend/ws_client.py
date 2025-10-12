@@ -601,10 +601,40 @@ def _prepare_nodes_dispatch(
     if isinstance(record_mutable, MutableMapping):
         record_mutable["inventory"] = inventory_container
 
-    addr_map_raw, unknown_types = addresses_by_node_type(
-        inventory_container.nodes, known_types=NODE_CLASS_BY_TYPE
-    )
-    addr_map = {node_type: list(addrs) for node_type, addrs in addr_map_raw.items()}
+    normalized_known_types: set[str] = {
+        normalised
+        for normalised in (
+            normalize_node_type(node_type, use_default_when_falsey=True)
+            for node_type in NODE_CLASS_BY_TYPE
+        )
+        if normalised
+    }
+
+    addr_map: dict[str, list[str]]
+    unknown_types: set[str]
+    if isinstance(inventory_container, Inventory):
+        addr_map = {
+            node_type: list(addresses)
+            for node_type, addresses in inventory_container.addresses_by_type.items()
+        }
+        unknown_types = (
+            {
+                node_type
+                for node_type in addr_map
+                if normalized_known_types and node_type not in normalized_known_types
+            }
+            if normalized_known_types
+            else set()
+        )
+    else:
+        nodes_source = getattr(inventory_container, "nodes", ())
+        addr_map_raw, unknown_types = addresses_by_node_type(
+            nodes_source, known_types=NODE_CLASS_BY_TYPE
+        )
+        addr_map = {
+            node_type: list(addrs)
+            for node_type, addrs in addr_map_raw.items()
+        }
 
     raw_nodes_for_coordinator = raw_nodes
     raw_nodes_for_context = raw_nodes

@@ -537,12 +537,6 @@ def test_dispatch_nodes_without_snapshot(monkeypatch: pytest.MonkeyPatch) -> Non
         )
 
     monkeypatch.setattr(base_ws, "resolve_record_inventory", fake_resolve)
-    monkeypatch.setattr(
-        base_ws,
-        "addresses_by_node_type",
-        lambda nodes, **_: ({"htr": ["1"]}, set()),
-    )
-
     class DummyCommon(base_ws._WSCommon):
         def __init__(self) -> None:
             self.hass = hass
@@ -586,9 +580,6 @@ def test_prepare_nodes_dispatch_handles_non_mapping_record(
 
     hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": []}})
     coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
-    monkeypatch.setattr(
-        base_ws, "addresses_by_node_type", lambda nodes, **_: ({}, set())
-    )
     seen: dict[str, Any] = {}
 
     def fake_resolve(
@@ -628,10 +619,6 @@ def test_prepare_nodes_dispatch_populates_record_inventory(
     hass_record: dict[str, Any] = {"dev_id": "dev"}
     hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": hass_record}})
     coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
-    monkeypatch.setattr(
-        base_ws, "addresses_by_node_type", lambda nodes, **_: ({}, set())
-    )
-
     def fake_resolve(
         record_map: Mapping[str, Any] | None,
         *,
@@ -664,10 +651,6 @@ def test_prepare_nodes_dispatch_uses_inventory(monkeypatch: pytest.MonkeyPatch) 
     coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
     node_inventory = build_node_inventory([{"type": "htr", "addr": "4"}])
     inventory = Inventory("dev", {"nodes": [{"type": "htr", "addr": "4"}]}, node_inventory)
-    monkeypatch.setattr(
-        base_ws, "addresses_by_node_type", lambda nodes, **_: ({"htr": ["4"]}, set())
-    )
-
     def _fail(*_: Any, **__: Any) -> Any:
         raise AssertionError("resolve_record_inventory should not be called")
 
@@ -690,11 +673,6 @@ def test_prepare_nodes_dispatch_resolves_record_dev_id_and_coordinator_inventory
 ) -> None:
     """Record dev IDs and coordinator inventory should be applied."""
 
-    monkeypatch.setattr(
-        base_ws,
-        "addresses_by_node_type",
-        lambda nodes, **_: ({}, set()),
-    )
     resolve_calls: list[tuple[Mapping[str, Any] | None, str | None, Any]] = []
 
     def fake_resolve(
