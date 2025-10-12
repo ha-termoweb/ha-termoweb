@@ -676,8 +676,6 @@ custom_components/termoweb/coordinator.py :: _normalize_energy_payload
     Return canonical energy node address mapping and aliases for ``payload``.
 custom_components/termoweb/coordinator.py :: StateCoordinator.__init__
     Initialize the TermoWeb device coordinator.
-custom_components/termoweb/coordinator.py :: StateCoordinator._inventory_addresses_by_type
-    Return normalized node addresses derived from inventory metadata.
 custom_components/termoweb/coordinator.py :: StateCoordinator._collect_previous_settings
     Return normalised settings carried over from previous poll.
 custom_components/termoweb/coordinator.py :: StateCoordinator._async_fetch_settings_by_address

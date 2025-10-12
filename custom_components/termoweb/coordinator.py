@@ -197,16 +197,6 @@ class StateCoordinator(
         self._rtc_reference_monotonic: float | None = None
         self.update_nodes(nodes, inventory=inventory)
 
-    def _inventory_addresses_by_type(self) -> dict[str, list[str]]:
-        """Return normalized node addresses derived from inventory metadata."""
-
-        inventory = self._ensure_inventory()
-        if inventory is None:
-            return {}
-
-        addresses = inventory.addresses_by_type
-        return {node_type: list(addrs) for node_type, addrs in addresses.items()}
-
     @staticmethod
     def _collect_previous_settings(
         prev_dev: Mapping[str, Any],
@@ -968,7 +958,7 @@ class StateCoordinator(
                 success = True
                 return
 
-            cache_map = self._inventory_addresses_by_type()
+            cache_map = inventory.addresses_by_type
             cache_bucket = cache_map.setdefault(resolved_type, [])
             if addr not in cache_bucket:
                 cache_bucket.append(addr)
@@ -1037,7 +1027,7 @@ class StateCoordinator(
             _LOGGER.debug("Skipping poll because inventory metadata is unavailable")
             return {}
 
-        addr_map = self._inventory_addresses_by_type()
+        addr_map = inventory.addresses_by_type
         _, reverse_map = inventory.heater_address_map
         reverse = {
             normalize_node_addr(address): set(types)
