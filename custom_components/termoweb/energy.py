@@ -21,7 +21,6 @@ from .inventory import (
     normalize_node_addr,
     normalize_node_type,
     parse_heater_energy_unique_id,
-    resolve_record_inventory,
 )
 from .throttle import MonotonicRateLimiter
 
@@ -140,7 +139,9 @@ def _store_statistics(
 ) -> None:
     """Insert statistics using recorder helpers."""
 
-    _import_stats: Callable[[HomeAssistant, Mapping[str, Any], list[dict[str, Any]]], None] | None
+    _import_stats: (
+        Callable[[HomeAssistant, Mapping[str, Any], list[dict[str, Any]]], None] | None
+    )
 
     try:
         from homeassistant.components.recorder.statistics import (
@@ -357,41 +358,31 @@ async def async_import_energy_history(
             "async_import_energy_history nodes must be an Inventory instance"
         )
 
-    inventory_override = nodes
+    inventory: Inventory | None
     selection_spec = selection
 
-    inventory_container: Inventory | None
-    resolution: Any | None = None
-
-    if inventory_override is not None:
-        inventory_container = inventory_override
+    if nodes is not None:
+        inventory = nodes
     elif isinstance(stored_inventory, Inventory):
-        inventory_container = stored_inventory
+        inventory = stored_inventory
     else:
-        resolution = resolve_record_inventory(
-            rec,
-            dev_id=dev_id,
-            node_list=getattr(stored_inventory, "nodes", None),
-        )
-        inventory_container = resolution.inventory if resolution else None
+        inventory = None
 
-    if inventory_container is None:
-        source = getattr(resolution, "source", "unknown")
-        logger.debug(
-            "%s: unable to resolve node inventory (source=%s)",
+    if inventory is None:
+        logger.error(
+            "%s: energy import aborted; inventory missing in integration state",
             dev_id,
-            source,
         )
         return
 
     all_pairs: list[tuple[str, str]] = [
-        (node_type, addr) for node_type, addr in inventory_container.heater_sample_targets
+        (node_type, addr) for node_type, addr in inventory.heater_sample_targets
     ]
     if not all_pairs:
         logger.debug("Energy import: no heater nodes selected for device")
         return
 
-    _, alias_map = inventory_container.heater_sample_address_map
+    _, alias_map = inventory.heater_sample_address_map
     available_types = {node_type for node_type, _ in all_pairs}
     alias_lookup: dict[str, str] = {}
     for raw_type, canonical in alias_map.items():
@@ -415,8 +406,14 @@ async def async_import_energy_history(
         explicit_pairs_input: list[tuple[Any, Any]] | None = None
         default_values: Any | None = None
 
-        if isinstance(selection_spec, tuple) and selection_spec and isinstance(selection_spec[0], Mapping):
-            mapping_sources = cast(Mapping[str, Iterable[Any]], selection_spec[0]).items()
+        if (
+            isinstance(selection_spec, tuple)
+            and selection_spec
+            and isinstance(selection_spec[0], Mapping)
+        ):
+            mapping_sources = cast(
+                Mapping[str, Iterable[Any]], selection_spec[0]
+            ).items()
         elif isinstance(selection_spec, Mapping):
             mapping_sources = selection_spec.items()
         elif isinstance(selection_spec, Iterable) and not isinstance(
@@ -451,8 +448,9 @@ async def async_import_energy_history(
                 if canonical_type == "htr":
                     for actual_type in address_to_types.get(addr, set()):
                         desired_pairs.add((actual_type, addr))
-                elif canonical_type in available_types and canonical_type in address_to_types.get(
-                    addr, set()
+                elif (
+                    canonical_type in available_types
+                    and canonical_type in address_to_types.get(addr, set())
                 ):
                     desired_pairs.add((canonical_type, addr))
         else:
@@ -486,8 +484,9 @@ async def async_import_energy_history(
                     if canonical_type == "htr":
                         for actual_type in address_to_types.get(addr, set()):
                             desired_pairs.add((actual_type, addr))
-                    elif canonical_type in available_types and canonical_type in address_to_types.get(
-                        addr, set()
+                    elif (
+                        canonical_type in available_types
+                        and canonical_type in address_to_types.get(addr, set())
                     ):
                         desired_pairs.add((canonical_type, addr))
 
@@ -562,7 +561,6 @@ async def async_import_energy_history(
     async def _rate_limited_fetch(
         node_type: str, addr: str, start: int, stop: int
     ) -> list[dict[str, Any]]:
-
         def _log_wait(wait: float) -> None:
             logger.debug(
                 "%s:%s/%s: sleeping %.2fs before query",
@@ -899,23 +897,18 @@ async def async_register_import_energy_history_service(
                     continue
                 record = records.get(entry_id)
                 inventory: Inventory | None = None
-                resolution: Any | None = None
                 if isinstance(record, Mapping):
                     stored = record.get("inventory")
                     if isinstance(stored, Inventory):
                         inventory = stored
-                if inventory is None and record is not None:
-                    resolution = resolve_record_inventory(record)
-                    inventory = resolution.inventory
                 if inventory is None:
                     dev = None
                     if isinstance(record, Mapping):
                         dev = record.get("dev_id")
-                    logger.debug(
-                        "%s: skipping energy import for entry %s (source=%s)",
+                    logger.error(
+                        "%s: energy import aborted; inventory missing in integration state (entry=%s)",
                         dev,
                         entry_id,
-                        getattr(resolution, "source", "unknown"),
                     )
                     continue
                 available_targets = inventory.heater_sample_targets
@@ -942,25 +935,19 @@ async def async_register_import_energy_history_service(
                 ent: ConfigEntry | None = rec.get("config_entry")
                 if not ent:
                     continue
-                inventory_container = rec.get("inventory")
-                resolution: Any | None = None
-                if not isinstance(inventory_container, Inventory):
-                    resolution = resolve_record_inventory(rec)
-                    inventory_container = resolution.inventory
-                if inventory_container is None:
+                inventory = rec.get("inventory")
+                if not isinstance(inventory, Inventory):
                     entry_id = getattr(ent, "entry_id", "<unknown>")
-                    logger.debug(
-                        "%s: skipping energy import for entry %s (source=%s)",
+                    logger.error(
+                        "%s: energy import aborted; inventory missing in integration state (entry=%s)",
                         rec.get("dev_id"),
                         entry_id,
-                        getattr(resolution, "source", "unknown"),
                     )
                     continue
                 tasks.append(
                     import_fn(
                         hass,
                         ent,
-                        inventory_container,
                         reset_progress=reset,
                         max_days=max_days,
                     )
