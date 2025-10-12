@@ -852,12 +852,7 @@ class StateCoordinator(
                 )
                 return
 
-            _, reverse_map = inventory.heater_address_map
-            reverse = {
-                normalize_node_addr(address): set(types)
-                for address, types in reverse_map.items()
-                if normalize_node_addr(address)
-            }
+            forward_map, reverse = inventory.heater_address_map
             addr_types = reverse.get(addr)
             resolved_type = node_type or (
                 next(iter(addr_types)) if addr_types else "htr"
@@ -895,17 +890,7 @@ class StateCoordinator(
             current = self.data or {}
             new_data: dict[str, dict[str, Any]] = dict(current)
             prev_dev = dict(new_data.get(dev_id) or {})
-            cache_map = inventory.addresses_by_type
-            prev_settings = self._collect_previous_settings(prev_dev, cache_map)
-
-            for node_type, settings in prev_settings.items():
-                bucket = cache_map.setdefault(node_type, [])
-                for existing_addr in settings:
-                    normalized = normalize_node_addr(
-                        existing_addr, use_default_when_falsey=True
-                    )
-                    if normalized and normalized not in bucket:
-                        bucket.append(normalized)
+            prev_settings = self._collect_previous_settings(prev_dev, forward_map)
 
             settings_map = {
                 node_type: dict(bucket) for node_type, bucket in prev_settings.items()
@@ -956,13 +941,7 @@ class StateCoordinator(
             _LOGGER.debug("Skipping poll because inventory metadata is unavailable")
             return {}
 
-        addr_map = inventory.addresses_by_type
-        _, reverse_map = inventory.heater_address_map
-        reverse = {
-            normalize_node_addr(address): set(types)
-            for address, types in reverse_map.items()
-            if normalize_node_addr(address)
-        }
+        addr_map, reverse = inventory.heater_address_map
         addrs = [addr for addrs in addr_map.values() for addr in addrs]
         rtc_now: datetime | None = None
         try:
