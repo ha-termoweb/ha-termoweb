@@ -746,6 +746,74 @@ def test_async_setup_entry_uses_inventory_node_for_boost_detection(
     asyncio.run(_run())
 
 
+def test_async_setup_entry_prefers_inventory_node_type(
+    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prefer inventory node metadata when classifying heater entities."""
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry_id = "entry-node-type"
+        dev_id = "dev-node-type"
+        nodes = {"nodes": [{"type": "htr", "addr": "2"}]}
+        inventory = climate_inventory(dev_id, nodes)
+
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            {"nodes": nodes, "htr": {"settings": {"2": {}}}},
+            client=AsyncMock(),
+            inventory=inventory,
+        )
+
+        hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "coordinator": coordinator,
+                    "dev_id": dev_id,
+                    "client": AsyncMock(),
+                    "nodes": nodes,
+                    "inventory": inventory,
+                }
+            }
+        }
+
+        node = types.SimpleNamespace(addr="2", type="acm")
+
+        def _iter_metadata(self: climate_module.HeaterPlatformDetails):
+            yield ("htr", node, "2", "Accumulator from Node")
+
+        monkeypatch.setattr(
+            climate_module.HeaterPlatformDetails,
+            "iter_metadata",
+            _iter_metadata,
+        )
+
+        def _supports_boost(_: Any) -> bool:
+            raise AssertionError("supports_boost should not run when node type is acm")
+
+        monkeypatch.setattr(climate_module, "supports_boost", _supports_boost)
+
+        added: list[climate_module.HeaterClimateEntity] = []
+
+        def _async_add_entities(
+            entities: list[climate_module.HeaterClimateEntity],
+        ) -> None:
+            added.extend(entities)
+
+        entry = types.SimpleNamespace(entry_id=entry_id)
+        await async_setup_entry(hass, entry, _async_add_entities)
+
+        assert len(added) == 1
+        entity = added[0]
+        assert isinstance(entity, climate_module.AccumulatorClimateEntity)
+        assert entity._node_type == "acm"
+        assert entity._attr_unique_id.endswith(":acm:2:climate")
+
+    asyncio.run(_run())
+
+
 def test_accumulator_hvac_mode_reporting() -> None:
     """Ensure accumulator HVAC mode normalisation covers all branches."""
 

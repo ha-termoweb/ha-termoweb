@@ -76,12 +76,22 @@ async def async_setup_entry(hass, entry, async_add_entities):
     )
 
     for node_type, node, addr_str, base_name in heater_details.iter_metadata():
-        canonical_type = normalize_node_type(
+        fallback_type = normalize_node_type(
             node_type,
             use_default_when_falsey=True,
         )
-        addr = normalize_node_addr(
+        canonical_type = normalize_node_type(
+            getattr(node, "type", None),
+            default=fallback_type,
+            use_default_when_falsey=True,
+        )
+        fallback_addr = normalize_node_addr(
             addr_str,
+            use_default_when_falsey=True,
+        )
+        addr = normalize_node_addr(
+            getattr(node, "addr", None),
+            default=fallback_addr,
             use_default_when_falsey=True,
         )
         if not canonical_type or not addr:
