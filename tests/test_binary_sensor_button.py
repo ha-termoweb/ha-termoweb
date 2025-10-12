@@ -28,6 +28,7 @@ async_setup_binary_sensor_entry = binary_sensor_module.async_setup_entry
 StateRefreshButton = button_module.StateRefreshButton
 async_setup_button_entry = button_module.async_setup_entry
 AccumulatorBoostButton = button_module.AccumulatorBoostButton
+AccumulatorBoostCancelButton = button_module.AccumulatorBoostCancelButton
 AccumulatorBoostContext = button_module.AccumulatorBoostContext
 
 
@@ -82,9 +83,7 @@ def test_binary_sensor_setup_and_dispatch(
             "guard-device",
         )
         await guard_entity.async_added_to_hass()
-        assert (
-            not guard_entity._gateway_dispatcher.is_connected
-        )  # pylint: disable=protected-access
+        assert not guard_entity._gateway_dispatcher.is_connected  # pylint: disable=protected-access
 
         await async_setup_binary_sensor_entry(hass, entry, _add_entities)
 
@@ -137,9 +136,7 @@ def test_binary_sensor_setup_and_dispatch(
         entity.schedule_update_ha_state.assert_called_once_with()
 
         await entity.async_will_remove_from_hass()
-        assert (
-            not entity._gateway_dispatcher.is_connected
-        )  # pylint: disable=protected-access
+        assert not entity._gateway_dispatcher.is_connected  # pylint: disable=protected-access
 
     asyncio.run(_run())
 
@@ -200,9 +197,7 @@ def test_iter_boostable_inventory_nodes_uses_inventory_helper(
         _fake_iter,
     )
 
-    results = list(
-        binary_sensor_module._iter_boostable_inventory_nodes(inventory)
-    )
+    results = list(binary_sensor_module._iter_boostable_inventory_nodes(inventory))
 
     assert results == [("htr", "2", "Heater 2")]
 
@@ -267,8 +262,6 @@ def test_refresh_button_device_info_and_press(heater_hass_data) -> None:
         coordinator.async_request_refresh.assert_awaited_once()
 
 
-
-
 def test_accumulator_boost_button_triggers_service(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -313,6 +306,50 @@ def test_accumulator_boost_button_triggers_service(
             },
             blocking=True,
         )
+
+    asyncio.run(_run())
+
+
+def test_accumulator_boost_cancel_button_tracks_availability() -> None:
+    async def _run() -> None:
+        hass = HomeAssistant()
+        entry_id = "entry-cancel"
+        dev_id = "device-cancel"
+        addr = "5"
+
+        coordinator = FakeCoordinator(
+            hass,
+            dev_id=dev_id,
+            data={
+                dev_id: {
+                    "settings": {
+                        "acm": {
+                            addr: {"boost_active": True},
+                        }
+                    }
+                }
+            },
+        )
+
+        context = _make_boost_context(entry_id, dev_id, addr=addr, name="Hallway")
+        button = AccumulatorBoostCancelButton(
+            coordinator,
+            context,
+            _metadata_for("cancel"),
+        )
+        button.hass = hass
+        button.async_write_ha_state = MagicMock()
+
+        await button.async_added_to_hass()
+
+        assert button.available is True
+
+        coordinator.data[dev_id]["settings"]["acm"][addr]["boost_active"] = False
+        for listener in list(getattr(coordinator, "listeners", [])):
+            listener()
+
+        assert button.available is False
+        button.async_write_ha_state.assert_called()
 
     asyncio.run(_run())
 
@@ -454,8 +491,6 @@ def test_state_refresh_button_direct_press_and_info() -> None:
     asyncio.run(_run())
 
 
-
-
 def _make_boost_context(
     entry_id: str,
     dev_id: str,
@@ -463,7 +498,9 @@ def _make_boost_context(
     addr: str = "2",
     name: str = "Living Room",
 ) -> AccumulatorBoostContext:
-    inventory = Inventory(dev_id, {"nodes": []}, [AccumulatorNode(name=name, addr=addr)])
+    inventory = Inventory(
+        dev_id, {"nodes": []}, [AccumulatorNode(name=name, addr=addr)]
+    )
     nodes = inventory.nodes_by_type.get("acm", ())
     assert nodes, "inventory must expose at least one accumulator"
     node = nodes[0]
