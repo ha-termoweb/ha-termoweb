@@ -18,8 +18,6 @@ def test_apply_nodes_payload_does_not_cache(monkeypatch: pytest.MonkeyPatch) -> 
     client._dispatch_nodes = MagicMock(return_value={})
     client._forward_sample_updates = MagicMock()
     client._mark_event = MagicMock()
-    client._nodes_raw = {}
-
     payload: dict[str, Any] = {
         "nodes": {
             "htr": {
@@ -32,9 +30,11 @@ def test_apply_nodes_payload_does_not_cache(monkeypatch: pytest.MonkeyPatch) -> 
         }
     }
 
+    assert not hasattr(client, "_nodes_raw")
+
     client._apply_nodes_payload(payload, merge=True, event="update")
 
     client._dispatch_nodes.assert_called_once_with(payload["nodes"])
     client._forward_sample_updates.assert_called_once()
     client._mark_event.assert_called_once()
-    assert client._nodes_raw == {}
+    assert not hasattr(client, "_nodes_raw")
