@@ -285,7 +285,10 @@ async def async_list_devices(client: RESTClient) -> Any:
 async def _async_import_energy_history(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    nodes: Mapping[str, Iterable[str]] | Iterable[str] | None = None,
+    selection: Mapping[str, Iterable[str]]
+    | Iterable[tuple[str, str]]
+    | Iterable[str]
+    | None = None,
     *,
     reset_progress: bool = False,
     max_days: int | None = None,
@@ -296,7 +299,7 @@ async def _async_import_energy_history(
     await _async_import_energy_history_impl(
         hass,
         entry,
-        nodes,
+        selection=selection,
         reset_progress=reset_progress,
         max_days=max_days,
         rate_limit=rate_state,
@@ -396,7 +399,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         base_interval,
         dev_id,
         dev,
-        nodes,
+        None,
         inventory,
     )
 
@@ -449,12 +452,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
                 entry_id=entry.entry_id,
                 dev_id=dev_id,
                 coordinator=coordinator,
-                inventory=data.get("inventory"),
+                inventory=inventory,
             )
             clients[dev_id] = ws_client
         task = ws_client.start()
         tasks[dev_id] = task
         _LOGGER.info("WS: started read-only client for %s", dev_id)
+
+    data["_start_ws"] = _start_ws
 
     def _recalc_poll_interval() -> None:
         """Suspend REST polling when websocket trackers are healthy and fresh."""
@@ -602,18 +607,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     # First refresh (inventory etc.)
     await coordinator.async_config_entry_first_refresh()
 
-    # Always-on push: start for all current devices
-    for dev_id in coordinator.data or {}:
-        hass.async_create_task(_start_ws(dev_id))
-
-    # Start for any devices discovered later
-    def _on_coordinator_updated() -> None:
-        """Start websocket clients for newly discovered devices."""
-        for dev_id in coordinator.data or {}:
-            if dev_id not in data["ws_tasks"]:
-                hass.async_create_task(_start_ws(dev_id))
-
-    coordinator.async_add_listener(_on_coordinator_updated)
+    # Always-on push: start the websocket client for this device
+    hass.async_create_task(_start_ws(dev_id))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -696,16 +691,22 @@ async def async_register_ws_debug_probe_service(hass: HomeAssistant) -> None:
                         dev_id,
                     )
                     continue
+                inventory_obj = rec.get("inventory")
+                if not isinstance(inventory_obj, Inventory):
+                    inventory_obj = None
                 try:
-                    result = probe()
+                    result = probe(inventory_obj)
                 except TypeError as err:
-                    _LOGGER.debug(
-                        "ws_debug_probe: client %s/%s probe invocation failed: %s",
-                        entry_id,
-                        dev_id,
-                        err,
-                    )
-                    continue
+                    try:
+                        result = probe()
+                    except TypeError:
+                        _LOGGER.debug(
+                            "ws_debug_probe: client %s/%s probe invocation failed: %s",
+                            entry_id,
+                            dev_id,
+                            err,
+                        )
+                        continue
                 if asyncio.iscoroutine(result):
                     tasks.append(result)
                 else:

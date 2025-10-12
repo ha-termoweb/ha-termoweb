@@ -1694,19 +1694,10 @@ def test_coordinator_listener_starts_new_ws(
         stub_hass.tasks.clear()
         coordinator.data = dict(coordinator.data)
         coordinator.data["dev-2"] = {"dev_id": "dev-2"}
-        assert coordinator.listeners
-        listener = coordinator.listeners[0]
-
-        listener()
-        assert len(stub_hass.tasks) == 1
-        await _drain_tasks(stub_hass)
-        assert set(record["ws_tasks"]) == {"dev-1", "dev-2"}
-        assert record["ws_tasks"]["dev-1"] is existing_task
-        assert isinstance(record["ws_tasks"]["dev-2"], asyncio.Task)
-        assert not record["ws_tasks"]["dev-2"].done()
-
-        listener()
+        assert not coordinator.listeners
         assert not stub_hass.tasks
+        assert set(record["ws_tasks"]) == {"dev-1"}
+        assert record["ws_tasks"]["dev-1"] is existing_task
 
         for event in start_events:
             event.set()
@@ -1873,20 +1864,9 @@ def test_start_ws_skips_when_task_running(
 
         record = termoweb_init._test_helpers.get_record(stub_hass, entry)
         coordinator: FakeCoordinator = record["coordinator"]
-        assert coordinator.listeners
-        listener = coordinator.listeners[0]
-
-        start_ws = None
-        if listener.__closure__:
-            for cell in listener.__closure__:
-                candidate = cell.cell_contents
-                if (
-                    callable(candidate)
-                    and getattr(candidate, "__name__", "") == "_start_ws"
-                ):
-                    start_ws = candidate
-                    break
-        assert start_ws is not None
+        assert not coordinator.listeners
+        start_ws = record.get("_start_ws")
+        assert callable(start_ws)
 
         existing = record["ws_tasks"].get("dev-1")
         if existing:

@@ -636,14 +636,10 @@ def _prepare_nodes_dispatch(
             for node_type, addrs in addr_map_raw.items()
         }
 
-    raw_nodes_for_coordinator = raw_nodes
-    raw_nodes_for_context = raw_nodes
-    if isinstance(inventory_container, Inventory):
-        raw_nodes_for_coordinator = None
-        raw_nodes_for_context = None
+    raw_nodes_for_context = raw_nodes if not isinstance(inventory_container, Inventory) else None
 
     if hasattr(coordinator, "update_nodes"):
-        coordinator.update_nodes(raw_nodes_for_coordinator, inventory_container)
+        coordinator.update_nodes(None, inventory_container)
 
     normalized_unknown: set[str] = {
         node_str
