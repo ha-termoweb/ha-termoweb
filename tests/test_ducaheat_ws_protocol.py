@@ -308,10 +308,9 @@ def test_dispatch_nodes_publishes_inventory_addresses(
             "samples": {"1": {"power": 1200}},
         }
     }
-    client._nodes_raw = copy.deepcopy(payload)
     inventory = _set_inventory(client, _build_inventory_payload())
 
-    client._dispatch_nodes(client._nodes_raw)
+    client._dispatch_nodes(payload)
 
     assert client._dispatcher.call_count == 1
     dispatched = client._dispatcher.call_args[0][2]
@@ -342,8 +341,7 @@ def test_incremental_updates_preserve_address_payload(
     _set_inventory(client, _build_inventory_payload())
 
     base = {"htr": {"settings": {"1": {"target_temp": 20}}}}
-    client._nodes_raw = copy.deepcopy(base)
-    client._dispatch_nodes(client._nodes_raw)
+    client._dispatch_nodes(base)
 
     first_payload = client._dispatcher.call_args_list[-1][0][2]
     expected_addresses = client._inventory.addresses_by_type
@@ -354,8 +352,7 @@ def test_incremental_updates_preserve_address_payload(
     assert first_payload.get("addr_map", first_addresses) == first_addresses
 
     update = {"htr": {"settings": {"1": {"target_temp": 23}}}}
-    client._merge_nodes(client._nodes_raw, update)
-    client._dispatch_nodes(client._nodes_raw)
+    client._dispatch_nodes(update)
 
     dispatched = client._dispatcher.call_args_list[-1][0][2]
     assert "nodes" not in dispatched
@@ -765,8 +762,7 @@ async def test_read_loop_handles_stringified_dev_data(
 
     await _run_read_loop(client)
 
-    assert isinstance(client._nodes_raw, dict)
-    assert client._nodes_raw["htr"]["status"]["1"]["power"] == 5
+    assert getattr(client, "_nodes_raw", None) is None
     assert dispatched
     payload = dispatched[-1]
     expected_addresses = client._inventory.addresses_by_type
@@ -803,9 +799,7 @@ async def test_read_loop_handles_list_snapshot(
 
     await _run_read_loop(client)
 
-    assert isinstance(client._nodes_raw, dict)
-    assert client._nodes_raw["htr"]["status"]["1"]["power"] == 7
-    assert client._nodes_raw["htr"]["lease_seconds"] == 90
+    assert getattr(client, "_nodes_raw", None) is None
     assert dispatched
     payload = dispatched[-1]
     expected_addresses = client._inventory.addresses_by_type
@@ -1005,7 +999,7 @@ async def test_read_loop_processes_update_event(
 
     assert log_calls and log_calls[0]["body"]["temp"] == 1
     assert statuses and statuses[-1] == "healthy"
-    assert client._nodes_raw["htr"]["status"]["1"]["temp"] == 1
+    assert getattr(client, "_nodes_raw", None) is None
     assert dispatched
     payload = dispatched[-1]
     expected_addresses = client._inventory.addresses_by_type
@@ -1109,7 +1103,7 @@ async def test_read_loop_forwards_sample_updates(
     await _run_read_loop(client)
 
     assert statuses and statuses[-1] == "healthy"
-    assert client._nodes_raw["htr"]["samples"]["1"]["power"] == 10
+    assert getattr(client, "_nodes_raw", None) is None
     assert dispatched
     payload = dispatched[-1]
     expected_addresses = client._inventory.addresses_by_type
@@ -1150,17 +1144,16 @@ async def test_read_loop_dev_data_uses_raw_snapshot(
     assert dispatched
     payload = dispatched[-1]
     assert payload["addr_map"]["htr"] == ["1"]
-    assert client._nodes_raw is None
+    assert getattr(client, "_nodes_raw", None) is None
 
 
 @pytest.mark.asyncio
-async def test_read_loop_merges_updates_into_existing_snapshot(
+async def test_read_loop_does_not_cache_incremental_updates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Subsequent updates should merge into the cached snapshot."""
+    """Incremental updates should not mutate an internal snapshot cache."""
 
     client = _make_client(monkeypatch)
-    client._nodes_raw = {"htr": {"status": {"1": {"temp": 20}}}}
     monkeypatch.setattr(client, "_forward_sample_updates", lambda updates: None)
     dispatched: list[dict[str, Any]] = []
     client._dispatcher = lambda *_args: dispatched.append(_args[2])
@@ -1180,8 +1173,7 @@ async def test_read_loop_merges_updates_into_existing_snapshot(
 
     await _run_read_loop(client)
 
-    assert client._nodes_raw["htr"]["status"]["1"]["temp"] == 20
-    assert client._nodes_raw["htr"]["status"]["1"]["power"] == 5
+    assert getattr(client, "_nodes_raw", None) is None
     assert dispatched
     payload = dispatched[-1]
     expected_addresses = client._inventory.addresses_by_type
@@ -1640,7 +1632,7 @@ async def test_namespace_ack_skips_unexpected_namespace(
 
     dispatch.assert_called_once()
     subscribe_mock.assert_awaited_once()
-    assert client._nodes_raw == {"htr": {"status": {"1": {}}}}
+    assert getattr(client, "_nodes_raw", None) is None
 
 
 @pytest.mark.asyncio

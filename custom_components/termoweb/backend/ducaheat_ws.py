@@ -173,7 +173,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._task: asyncio.Task | None = None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._stats = WSStats()
-        self._nodes_raw: dict[str, Any] | None = None
         self._subscription_paths: set[str] = set()
         self._pending_dev_data = False
         self._keepalive_task: asyncio.Task | None = None
@@ -560,10 +559,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                 normalised = self._normalise_nodes_payload(nodes_map)
                                 dispatch_payload: Mapping[str, Any] | None
                                 if isinstance(normalised, Mapping):
-                                    self._nodes_raw = deepcopy(normalised)
-                                    dispatch_payload = self._nodes_raw
+                                    dispatch_payload = normalised
                                 else:
-                                    self._nodes_raw = None
                                     dispatch_payload = nodes_map
                                 if isinstance(dispatch_payload, Mapping):
                                     self._dispatch_nodes(dispatch_payload)
@@ -587,19 +584,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                     sample_updates = self._collect_sample_updates(
                                         normalised_update
                                     )
-                                    if self._nodes_raw is None:
-                                        self._nodes_raw = deepcopy(normalised_update)
-                                    else:
-                                        self._merge_nodes(
-                                            self._nodes_raw, normalised_update
-                                        )
-                                    dispatch_payload: Mapping[str, Any] | None
-                                    if isinstance(self._nodes_raw, Mapping):
-                                        dispatch_payload = self._nodes_raw
-                                    else:
-                                        dispatch_payload = normalised_update
-                                    if isinstance(dispatch_payload, Mapping):
-                                        self._dispatch_nodes(dispatch_payload)
+                                    if isinstance(normalised_update, Mapping):
+                                        self._dispatch_nodes(normalised_update)
                                     if sample_updates:
                                         self._forward_sample_updates(sample_updates)
                             self._update_status("healthy")
