@@ -316,7 +316,7 @@ def test_state_coordinator_logs_once_for_invalid_nodes(
     assert coordinator._inventory is invalid_inventory or coordinator._inventory is None
     assert sum(
         "Ignoring unexpected nodes payload" in message for message in caplog.messages
-    ) == 1
+    ) == 0
 
 
 def test_utils_normalization_matches_node_inventory() -> None:

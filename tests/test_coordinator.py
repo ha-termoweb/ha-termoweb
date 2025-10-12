@@ -312,8 +312,7 @@ async def test_async_update_data_skips_without_inventory(
         inventory=inventory,
     )
 
-    coord.update_nodes(None)
-
+    coord._inventory = None
     result = await coord._async_update_data()
 
     assert coord._inventory is None
@@ -534,7 +533,7 @@ async def test_async_refresh_heater_errors_without_inventory(
         inventory=inventory,
     )
 
-    coord.update_nodes(None)
+    coord._inventory = None
     assert coord._inventory is None
     client.get_node_settings = AsyncMock()
 

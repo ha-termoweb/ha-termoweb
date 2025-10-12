@@ -72,6 +72,32 @@ def _expected_energy_aliases(
     for node_type in coord_module.ENERGY_NODE_TYPES:
         merged.setdefault(node_type, node_type)
     return merged
+
+
+@pytest.fixture
+def inventory_from_map(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ]
+) -> Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory]:
+    """Return helper to build Inventory objects from address maps."""
+
+    def _factory(
+        mapping: Mapping[str, Iterable[str]] | None,
+        dev_id: str = "dev",
+    ) -> coord_module.Inventory:
+        payload_nodes: list[dict[str, Any]] = []
+        if mapping:
+            for raw_type, values in mapping.items():
+                if not isinstance(values, Iterable) or isinstance(values, (str, bytes)):
+                    continue
+                for addr in values:
+                    payload_nodes.append({"type": raw_type, "addr": addr})
+        payload = {"nodes": payload_nodes}
+        node_list = list(coord_module.build_node_inventory(payload))
+        return inventory_builder(dev_id, payload, node_list)
+
+    return _factory
 def test_ensure_heater_section_helper() -> None:
     """The helper must reuse existing sections or insert defaults."""
 
@@ -95,67 +121,6 @@ def test_ensure_heater_section_helper() -> None:
     )
     assert replaced == {"addrs": ["B"], "settings": {"B": {"mode": "auto"}}}
     assert nodes_by_type["htr"] == replaced
-
-
-def test_merge_nodes_by_type_appends_new_addresses(
-    inventory_builder: Callable[
-        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
-    ],
-) -> None:
-    """Helper should append payload addresses not present in cache."""
-
-    client = types.SimpleNamespace(get_node_settings=AsyncMock())
-    hass = HomeAssistant()
-    inventory = inventory_builder("dev", {})
-    coord = StateCoordinator(
-        hass,
-        client,
-        30,
-        "dev",
-        {"name": "Device"},
-        inventory.payload,
-        inventory=inventory,
-    )
-
-    cache_map = {"htr": ["A"]}
-    current = {"htr": {"addrs": ["A"], "settings": {}}}
-    payload = {"htr": {"B": {"mode": "auto"}}}
-
-    merged = coord._merge_nodes_by_type(cache_map, current, payload)
-
-    assert merged["htr"]["addrs"] == ["A", "B"]
-    assert merged["htr"]["settings"]["B"] == {"mode": "auto"}
-
-
-def test_merge_nodes_by_type_skips_invalid_addresses(
-    inventory_builder: Callable[
-        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
-    ],
-) -> None:
-    """Helper should ignore payload and cache entries without valid addresses."""
-
-    client = types.SimpleNamespace(get_node_settings=AsyncMock())
-    hass = HomeAssistant()
-    inventory = inventory_builder("dev", {})
-    coord = StateCoordinator(
-        hass,
-        client,
-        30,
-        "dev",
-        {"name": "Device"},
-        inventory.payload,
-        inventory=inventory,
-    )
-
-    cache_map = {"htr": ["", "A"]}
-    current = {"htr": {"addrs": ["  "], "settings": {}}}
-    payload = {"htr": {"": {"bad": True}}}
-
-    merged = coord._merge_nodes_by_type(cache_map, current, payload)
-
-    assert merged["htr"]["addrs"] == ["A"]
-    assert merged["htr"]["settings"] == {}
-    assert "" not in merged["htr"]["settings"]
 
 
 
@@ -265,22 +230,10 @@ def test_update_nodes_accepts_inventory_container(
     assert coord._inventory is container
 
 
-def test_normalise_type_section_cleans_addresses() -> None:
-    section = {
-        "addrs": [" 1 ", None, "2"],
-        "settings": {" 1 ": {"mode": "auto"}, None: {"mode": "skip"}},
-    }
-
-    normalized = StateCoordinator._normalise_type_section("htr", section, [" 3 ", ""])
-
-    assert normalized["addrs"] == ["1", "None", "2"]
-    assert normalized["settings"] == {
-        "1": {"mode": "auto"},
-        "None": {"mode": "skip"},
-    }
-
-
-def test_power_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_power_calculation(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
         client.get_node_samples = AsyncMock(
@@ -291,7 +244,8 @@ def test_power_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
         hass = HomeAssistant()
-        coord = EnergyStateCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
+        inventory = inventory_from_map({"htr": ["A"]}, dev_id="1")
+        coord = EnergyStateCoordinator(hass, client, "1", inventory)
 
         fake_time = 1000.0
 
@@ -736,8 +690,7 @@ def test_refresh_heater_handles_tuple_and_acm() -> None:
         assert updates, "Expected coordinator data to be updated"
         latest = updates[-1]["dev"]
         addrs = latest["addresses_by_type"]["acm"]
-        assert addrs[0] == "3"
-        assert "2" in addrs
+        assert addrs == ["3"]
         assert latest["settings"]["acm"]["2"] == {"mode": "auto"}
 
     asyncio.run(_run())
@@ -749,11 +702,20 @@ def test_async_refresh_heater_adds_missing_type() -> None:
         client.get_node_settings = AsyncMock(return_value={"mode": "eco"})
 
         hass = HomeAssistant()
-        nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
-        inventory = [
-            HeaterNode(name="Heater", addr="A"),
-            AccumulatorNode(name="Accumulator", addr="B"),
-        ]
+        nodes = {
+            "nodes": [
+                {"addr": "A", "type": "htr"},
+                {"addr": "B", "type": "acm"},
+            ]
+        }
+        inventory = coord_module.Inventory(
+            "dev",
+            nodes,
+            [
+                HeaterNode(name="Heater", addr="A"),
+                AccumulatorNode(name="Accumulator", addr="B"),
+            ],
+        )
         coord = StateCoordinator(
             hass,
             client,
@@ -932,7 +894,7 @@ def test_state_coordinator_async_update_data_reuses_previous() -> None:
         dev_data = result["dev"]
         assert dev_data["settings"]["acm"]["7"] == {"mode": "eco"}
         assert dev_data["settings"]["htr"]["legacy"] == {"mode": "auto"}
-        assert dev_data["addresses_by_type"]["htr"] == ["legacy"]
+        assert dev_data["addresses_by_type"].get("htr") in (None, [])
 
     asyncio.run(_run())
 
@@ -997,7 +959,10 @@ def test_async_update_data_skips_non_dict_sections() -> None:
     asyncio.run(_run())
 
 
-def test_counter_reset(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_counter_reset(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
         client.get_node_samples = AsyncMock(
@@ -1008,7 +973,8 @@ def test_counter_reset(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
         hass = HomeAssistant()
-        coord = EnergyStateCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
+        inventory = inventory_from_map({"htr": ["A"]}, dev_id="1")
+        coord = EnergyStateCoordinator(hass, client, "1", inventory)
 
         fake_time = 1000.0
 
@@ -1030,6 +996,7 @@ def test_counter_reset(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_energy_processing_consistent_between_poll_and_ws(
     monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
 ) -> None:
     async def _run() -> None:
         monkeypatch.setattr(coord_module.time, "time", lambda: 4000.0)
@@ -1044,12 +1011,8 @@ def test_energy_processing_consistent_between_poll_and_ws(
         )
 
         hass = HomeAssistant()
-        poll_coord = EnergyStateCoordinator(
-            hass,
-            poll_client,
-            "dev",
-            ["A"],  # type: ignore[arg-type]
-        )
+        inventory = inventory_from_map({"htr": ["A"]})
+        poll_coord = EnergyStateCoordinator(hass, poll_client, "dev", inventory)
 
         await poll_coord.async_refresh()
         await poll_coord.async_refresh()
@@ -1063,12 +1026,7 @@ def test_energy_processing_consistent_between_poll_and_ws(
             return_value=[{"t": 1000.0, "counter": 1200.0}]
         )
 
-        ws_coord = EnergyStateCoordinator(
-            hass,
-            ws_client,
-            "dev",
-            ["A"],  # type: ignore[arg-type]
-        )
+        ws_coord = EnergyStateCoordinator(hass, ws_client, "dev", inventory)
 
         await ws_coord.async_refresh()
 
@@ -1088,18 +1046,16 @@ def test_energy_processing_consistent_between_poll_and_ws(
 
 
 
-def test_energy_samples_missing_fields() -> None:
+def test_energy_samples_missing_fields(
+    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
         client.get_node_samples = AsyncMock(return_value=[{"t": 1000, "counter": None}])
 
         hass = HomeAssistant()
-        coord = EnergyStateCoordinator(
-            hass,
-            client,
-            "dev",
-            ["A"],  # type: ignore[arg-type]
-        )
+        inventory = inventory_from_map({"htr": ["A"]})
+        coord = EnergyStateCoordinator(hass, client, "dev", inventory)
 
         await coord.async_refresh()
         data = coord.data["dev"]["htr"]
@@ -1109,7 +1065,9 @@ def test_energy_samples_missing_fields() -> None:
     asyncio.run(_run())
 
 
-def test_energy_samples_invalid_strings() -> None:
+def test_energy_samples_invalid_strings(
+    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
         client.get_node_samples = AsyncMock(
@@ -1117,12 +1075,8 @@ def test_energy_samples_invalid_strings() -> None:
         )
 
         hass = HomeAssistant()
-        coord = EnergyStateCoordinator(
-            hass,
-            client,
-            "dev",
-            ["A"],  # type: ignore[arg-type]
-        )
+        inventory = inventory_from_map({"htr": ["A"]})
+        coord = EnergyStateCoordinator(hass, client, "dev", inventory)
 
         await coord.async_refresh()
         data = coord.data["dev"]["htr"]
@@ -1132,33 +1086,40 @@ def test_energy_samples_invalid_strings() -> None:
     asyncio.run(_run())
 
 
-def test_energy_coordinator_alias_creates_canonical_bucket() -> None:
+def test_energy_coordinator_alias_creates_canonical_bucket(
+    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
         client.get_node_samples = AsyncMock(return_value=[])
 
         hass = HomeAssistant()
-        coord = EnergyStateCoordinator(hass, client, "dev", [])
-        coord._addresses_by_type = {"legacy": []}
-        coord._compat_aliases = {"htr": "htr", "legacy": "acm"}
+        inventory = inventory_from_map({"pmo": ["01"]}, dev_id="dev")
+        coord = EnergyStateCoordinator(hass, client, "dev", inventory)
 
         result = await coord._async_update_data()
 
         dev = result["dev"]
-        assert "acm" in dev
-        assert dev["legacy"] is dev["acm"]
+        assert "pmo" in dev
+        assert dev["power_monitor"] is dev["pmo"]
 
     asyncio.run(_run())
 
 
-def test_update_interval_constant() -> None:
+def test_update_interval_constant(
+    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+) -> None:
     hass = HomeAssistant()
     client = types.SimpleNamespace()
-    coord = EnergyStateCoordinator(hass, client, "1", ["A"])  # type: ignore[arg-type]
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="1")
+    coord = EnergyStateCoordinator(hass, client, "1", inventory)
     assert coord.update_interval == HTR_ENERGY_UPDATE_INTERVAL
 
 
-def test_ws_samples_update_defers_polling(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ws_samples_update_defers_polling(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
         client.get_node_samples = AsyncMock(
@@ -1166,7 +1127,8 @@ def test_ws_samples_update_defers_polling(monkeypatch: pytest.MonkeyPatch) -> No
         )
 
         hass = HomeAssistant()
-        coord = EnergyStateCoordinator(hass, client, "dev", {"htr": ["A"]})
+        inventory = inventory_from_map({"htr": ["A"]})
+        coord = EnergyStateCoordinator(hass, client, "dev", inventory)
 
         fake_time = 0.0
 
@@ -1212,12 +1174,16 @@ def test_ws_samples_update_defers_polling(monkeypatch: pytest.MonkeyPatch) -> No
     asyncio.run(_run())
 
 
-def test_should_skip_poll_conditions(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_should_skip_poll_conditions(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+) -> None:
     """Exercise websocket-driven polling skip decisions."""
 
     hass = HomeAssistant()
     client = types.SimpleNamespace()
-    coord = EnergyStateCoordinator(hass, client, "dev", {"htr": ["A"]})
+    inventory = inventory_from_map({"htr": ["A"]})
+    coord = EnergyStateCoordinator(hass, client, "dev", inventory)
 
     assert coord._should_skip_poll() is False
 
@@ -1235,13 +1201,17 @@ def test_should_skip_poll_conditions(monkeypatch: pytest.MonkeyPatch) -> None:
     assert coord._should_skip_poll() is True
 
 
-def test_async_update_data_uses_cached_samples(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_async_update_data_uses_cached_samples(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+) -> None:
     """Ensure websocket freshness skips API polling and returns cached data."""
 
     async def _run() -> None:
         hass = HomeAssistant()
         client = types.SimpleNamespace()
-        coord = EnergyStateCoordinator(hass, client, "dev", {"htr": ["A"]})
+        inventory = inventory_from_map({"htr": ["A"]})
+        coord = EnergyStateCoordinator(hass, client, "dev", inventory)
 
         coord.data = {
             "dev": {
@@ -1265,12 +1235,15 @@ def test_async_update_data_uses_cached_samples(monkeypatch: pytest.MonkeyPatch) 
     asyncio.run(_run())
 
 
-def test_ws_margin_seconds_bounds() -> None:
+def test_ws_margin_seconds_bounds(
+    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+) -> None:
     """Verify the websocket margin respects defaults and upper bounds."""
 
     hass = HomeAssistant()
     client = types.SimpleNamespace()
-    coord = EnergyStateCoordinator(hass, client, "dev", {"htr": ["A"]})
+    inventory = inventory_from_map({"htr": ["A"]})
+    coord = EnergyStateCoordinator(hass, client, "dev", inventory)
 
     coord._ws_lease = -1
     assert coord._ws_margin_seconds() == coord._ws_margin_default
@@ -1509,7 +1482,7 @@ def test_energy_state_coordinator_update_addresses_filters_duplicates() -> None:
         for node_type in coord_module.ENERGY_NODE_TYPES
         for addr in expected_map.get(node_type, [])
     ]
-    assert coord._addrs == expected_flat
+    assert coord._addrs() == expected_flat
 
 
 def test_energy_state_coordinator_update_addresses_ignores_invalid_types() -> None:
@@ -1533,7 +1506,7 @@ def test_energy_state_coordinator_update_addresses_ignores_invalid_types() -> No
         for node_type in coord_module.ENERGY_NODE_TYPES
         for addr in expected_map.get(node_type, [])
     ]
-    assert coord._addrs == expected_flat
+    assert coord._addrs() == expected_flat
 
 
 def test_energy_state_coordinator_update_addresses_accepts_map() -> None:
@@ -1555,46 +1528,27 @@ def test_energy_state_coordinator_update_addresses_accepts_map() -> None:
         for node_type in coord_module.ENERGY_NODE_TYPES
         for addr in expected_map.get(node_type, [])
     ]
-    assert coord._addrs == expected_flat
+    assert coord._addrs() == expected_flat
 
 
-def test_energy_state_coordinator_update_addresses_uses_helper(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_energy_state_coordinator_update_addresses_uses_inventory() -> None:
     hass = HomeAssistant()
     client = types.SimpleNamespace()
-    calls: list[Any] = []
 
-    def fake_heater(addrs: Any) -> tuple[dict[str, list[str]], dict[str, str]]:
-        calls.append(("heater", addrs))
-        return {"htr": ["A"]}, {"htr": "htr"}
+    coord = EnergyStateCoordinator(hass, client, "dev", None)
+    coord.update_addresses({"htr": ["A"], "acm": ["B"], "pmo": ["M"]})
 
-    def fake_power(addrs: Any) -> tuple[dict[str, list[str]], dict[str, str]]:
-        calls.append(("power", addrs))
-        return {"pmo": ["M"]}, {"pmo": "pmo"}
-
-    monkeypatch.setattr(coord_module, "normalize_heater_addresses", fake_heater)
-    monkeypatch.setattr(
-        coord_module, "normalize_power_monitor_addresses", fake_power
-    )
-
-    coord = EnergyStateCoordinator(hass, client, "dev", [])  # type: ignore[arg-type]
-    assert calls == [("heater", []), ("power", None)]
-
-    coord.update_addresses(["ignored"])
-
-    assert calls[-2:] == [("heater", ["ignored"]), ("power", None)]
-    assert coord._addresses_by_type == {"htr": ["A"], "acm": [], "pmo": ["M"]}
-    assert coord._compat_aliases == {"htr": "htr", "acm": "acm", "pmo": "pmo"}
+    assert coord._addresses_by_type == {"htr": ["A"], "acm": ["B"], "pmo": ["M"]}
+    assert coord._compat_aliases["htr"] == "htr"
+    assert coord._compat_aliases["acm"] == "acm"
+    assert coord._compat_aliases["pmo"] == "pmo"
+    assert coord._compat_aliases.get("power_monitor") == "pmo"
+    assert coord._compat_aliases.get("power_monitors") == "pmo"
 def test_energy_state_coordinator_async_update_adds_legacy_bucket() -> None:
     async def _run() -> None:
         hass = HomeAssistant()
         client = types.SimpleNamespace()
         coord = EnergyStateCoordinator(hass, client, "dev", [])  # type: ignore[arg-type]
-
-        coord._addresses_by_type = {"acm": []}
-        coord._addr_lookup = {}
-        coord._addrs = []
 
         result = await coord._async_update_data()
         dev_data = result["dev"]

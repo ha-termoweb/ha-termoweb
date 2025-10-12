@@ -163,56 +163,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     if energy_coordinator is None:
         energy_coordinator = EnergyStateCoordinator(
-            hass,
-            data["client"],
-            dev_id,
-            inventory,
+            hass, data["client"], dev_id, inventory
         )
         data["energy_coordinator"] = energy_coordinator
         await energy_coordinator.async_config_entry_first_refresh()
     else:
         energy_coordinator.update_addresses(inventory)
-
-    power_monitor_nodes: dict[str, PowerMonitorNode] = {}
-    if isinstance(inventory, Inventory):
-        nodes_by_type = inventory.nodes_by_type
-        power_nodes = nodes_by_type.get("pmo", []) if isinstance(nodes_by_type, Mapping) else []
-        for node in power_nodes or []:
-            if not isinstance(node, PowerMonitorNode):
-                continue
-            addr = normalize_node_addr(
-                getattr(node, "addr", None),
-                use_default_when_falsey=True,
-            )
-            if not addr:
-                continue
-            power_monitor_nodes.setdefault(addr, node)
-
-    power_monitor_addresses: Iterable[str] = ()
-    if isinstance(inventory, Inventory):
-        try:
-            address_map = inventory.power_monitor_address_map
-        except Exception:  # pragma: no cover - defensive cache guard
-            address_map = None
-        if isinstance(address_map, tuple) and address_map:
-            forward_map = address_map[0]
-            if isinstance(forward_map, Mapping):
-                power_monitor_addresses = forward_map.get("pmo", []) or []
-
-    power_monitor_entries: list[tuple[str, str]] = []
-    for addr in power_monitor_addresses:
-        normalized_addr = normalize_node_addr(addr, use_default_when_falsey=True)
-        if not normalized_addr:
-            continue
-        node = power_monitor_nodes.get(normalized_addr)
-        if isinstance(node, PowerMonitorNode):
-            base_name = _power_monitor_display_name(node, normalized_addr)
-        else:
-            base_name = _power_monitor_display_name(
-                PowerMonitorNode(name=None, addr=normalized_addr),
-                normalized_addr,
-            )
-        power_monitor_entries.append((normalized_addr, base_name))
 
     new_entities: list[SensorEntity] = []
     for node_type, _node, addr_str, base_name in iter_heater_nodes(
