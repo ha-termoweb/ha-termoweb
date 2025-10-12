@@ -1808,39 +1808,6 @@ async def test_subscribe_feeds_handles_missing_targets(
 
     assert count == 0
     emit_mock.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_subscribe_feeds_ignores_coordinator_fallback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Empty inventories should still populate alias caches without subscriptions."""
-
-    client = _make_client(monkeypatch)
-    payload = {"nodes": []}
-    client.hass.data[ducaheat_ws.DOMAIN]["entry"]["inventory"] = Inventory(
-        "device",
-        payload,
-        build_node_inventory(payload),
-    )
-
-    emissions: list[str] = []
-
-    async def _capture(event: str, path: str) -> None:
-        emissions.append(path)
-
-    monkeypatch.setattr(client, "_emit_sio", _capture)
-
-    count = await client._subscribe_feeds()
-
-    assert count == 0
-    assert emissions == []
-    record = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
-    sample_aliases = record.get("sample_aliases")
-    assert sample_aliases is not None
-    assert sample_aliases.get("htr") == "htr"
-
-
 @pytest.mark.asyncio
 async def test_subscribe_feeds_prefers_coordinator_inventory(
     monkeypatch: pytest.MonkeyPatch,

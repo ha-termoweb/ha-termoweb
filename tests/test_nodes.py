@@ -294,31 +294,6 @@ def test_build_node_inventory_skips_none_type() -> None:
 
 
 
-
-
-def test_state_coordinator_logs_once_for_invalid_nodes(
-    caplog: pytest.LogCaptureFixture,
-    inventory_builder: Callable[..., inventory_module.Inventory],
-) -> None:
-    hass = HomeAssistant()
-    coordinator = _make_state_coordinator(
-        hass,
-        {},
-        inventory_builder=inventory_builder,
-    )
-
-    caplog.clear()
-    invalid_inventory = inventory_builder("dev", ["bad"], [])
-    with caplog.at_level(logging.DEBUG):
-        coordinator.update_nodes(["bad"], invalid_inventory)
-        coordinator.update_nodes("also bad", invalid_inventory)
-
-    assert coordinator._inventory is invalid_inventory or coordinator._inventory is None
-    assert sum(
-        "Ignoring unexpected nodes payload" in message for message in caplog.messages
-    ) == 1
-
-
 def test_utils_normalization_matches_node_inventory() -> None:
     payload = {"nodes": [{"type": " HTR ", "addr": " 01 "}]}
 

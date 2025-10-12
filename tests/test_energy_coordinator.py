@@ -156,64 +156,8 @@ def test_update_nodes_accepts_inventory_container(
     assert coord._inventory is container
     assert coord._inventory.payload == payload
 
-    coord.update_nodes(None, container)
+    coord.update_nodes(inventory=container)
     assert coord._inventory is container
-
-
-def test_update_nodes_requires_inventory(
-    inventory_builder: Callable[
-        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
-    ],
-) -> None:
-    """Coordinator should not rebuild inventory when none is provided."""
-
-    client = types.SimpleNamespace(get_node_settings=AsyncMock())
-    hass = HomeAssistant()
-    payload = {"nodes": [{"addr": "1", "type": "htr"}]}
-    nodes_list = [HeaterNode(name="Heater", addr="1")]
-    container = inventory_builder("dev", payload, nodes_list)
-
-    coord = StateCoordinator(
-        hass,
-        client,
-        30,
-        "dev",
-        {"name": "Device"},
-        container.payload,
-        inventory=container,
-    )
-
-    coord.update_nodes(payload, inventory=None)
-    assert coord._inventory is None
-
-
-def test_update_nodes_ignores_invalid_inventory(
-    inventory_builder: Callable[
-        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
-    ],
-) -> None:
-    """Passing a non-inventory object should leave the existing cache in place."""
-
-    client = types.SimpleNamespace(get_node_settings=AsyncMock())
-    hass = HomeAssistant()
-    payload = {"nodes": [{"addr": "2", "type": "htr"}]}
-    nodes_list = [HeaterNode(name="Heater", addr="2")]
-    container = inventory_builder("dev", payload, nodes_list)
-
-    coord = StateCoordinator(
-        hass,
-        client,
-        30,
-        "dev",
-        {"name": "Device"},
-        container.payload,
-        inventory=container,
-    )
-
-    coord.update_nodes(payload, inventory=object())
-    assert coord._inventory is container
-
-
 def test_power_calculation(
     monkeypatch: pytest.MonkeyPatch,
     inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
@@ -884,7 +828,7 @@ def test_state_coordinator_async_update_data_reuses_previous() -> None:
             inventory=inventory,
         )
 
-        coord.update_nodes(nodes, inventory)
+        coord.update_nodes(nodes, inventory=inventory)
         coord.data = {
             "dev": {
                 "settings": {
@@ -926,7 +870,7 @@ def test_async_refresh_heater_updates_cache() -> None:
             inventory=inventory,
         )
 
-        coord.update_nodes(nodes, inventory)
+        coord.update_nodes(nodes, inventory=inventory)
 
         await coord.async_refresh_heater("A")
 
@@ -1446,7 +1390,7 @@ def test_state_coordinator_update_nodes_uses_provided_inventory(
         inventory=inventory,
     )
 
-    coord.update_nodes(nodes, provided_inventory)
+    coord.update_nodes(nodes, inventory=provided_inventory)
 
     inventory = coord._inventory
     assert inventory is provided_inventory

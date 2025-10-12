@@ -103,8 +103,6 @@ class StateCoordinator(
         self._device = device or {}
         self._inventory: Inventory | None = None
         self._pending_settings: dict[tuple[str, str], PendingSetting] = {}
-        self._invalid_nodes_logged = False
-        self._invalid_inventory_logged = False
         self._rtc_reference: datetime | None = None
         self._rtc_reference_monotonic: float | None = None
         self.update_nodes(nodes, inventory=inventory)
@@ -477,39 +475,16 @@ class StateCoordinator(
 
     def update_nodes(
         self,
-        nodes: Mapping[str, Any] | None,
+        _nodes: Mapping[str, Any] | None = None,
+        *,
         inventory: Inventory | None = None,
     ) -> None:
-        """Update cached node payload and inventory."""
+        """Update cached inventory metadata."""
 
         if isinstance(inventory, Inventory):
             self._inventory = inventory
-            self._invalid_inventory_logged = False
-            self._invalid_nodes_logged = False
-            return
-
-        if inventory is not None and not self._invalid_inventory_logged:
-            _LOGGER.debug(
-                "Ignoring unexpected inventory container (type=%s): %s",
-                type(inventory).__name__,
-                inventory,
-            )
-            self._invalid_inventory_logged = True
-
-        if nodes is not None and not isinstance(nodes, Mapping):
-            if not self._invalid_nodes_logged:
-                _LOGGER.debug(
-                    "Ignoring unexpected nodes payload (type=%s): %s",
-                    type(nodes).__name__,
-                    nodes,
-                )
-                self._invalid_nodes_logged = True
         else:
-            self._invalid_nodes_logged = False
-
-        if inventory is None:
             self._inventory = None
-            self._invalid_inventory_logged = False
 
     def _ensure_inventory(self) -> Inventory | None:
         """Ensure cached inventory metadata is available."""
