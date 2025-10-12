@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Callable
 
 import pytest
 from unittest.mock import MagicMock
@@ -704,10 +704,10 @@ def test_iter_inventory_heater_metadata_uses_inventory() -> None:
     assert supports == {"1": False, "2": True, "3": True}
 
 
-def test_iter_inventory_heater_metadata_uses_helper(
+def test_iter_inventory_heater_metadata_uses_inventory_method(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Generator should source node data from inventory helper."""
+    """Generator should source node data from inventory iterator."""
 
     inventory = Inventory("dev", {}, [])
     default_factory = lambda addr: f"Heater {addr}"
@@ -718,20 +718,12 @@ def test_iter_inventory_heater_metadata_uses_helper(
         supports_boost=lambda: "true",
     )
 
-    def _fake_helper(inv, *, default_name_simple):
-        assert inv is inventory
+    def _fake_iter(self: Inventory, default_name_simple: Callable[[str], str]):
+        assert self is inventory
         assert default_name_simple is default_factory
-        return (
-            {"acm": [node]},
-            {"acm": [None, "2", ""]},
-            lambda node_type, addr: f"Resolved {node_type} {addr}",
-        )
+        yield ("acm", node, "2", "Resolved acm 2")
 
-    monkeypatch.setattr(
-        boost_module,
-        "heater_platform_details_from_inventory",
-        _fake_helper,
-    )
+    monkeypatch.setattr(Inventory, "iter_heater_platform_metadata", _fake_iter)
 
     results = list(
         boost_module.iter_inventory_heater_metadata(

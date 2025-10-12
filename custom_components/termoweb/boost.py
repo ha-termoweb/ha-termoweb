@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 import logging
 import math
-from typing import Any, Final, cast
+from typing import Any, Final
 
 from homeassistant.util import dt as dt_util
 
-from .inventory import Inventory, Node, heater_platform_details_from_inventory
+from .inventory import Inventory, Node
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -178,24 +178,6 @@ type HeaterInventoryEntry = tuple[str, str, str, Node]
 """Type alias describing ``(node_type, addr, name, node)`` tuples."""
 
 
-def _iter_node_container(nodes: Iterable[Any] | Mapping[Any, Any] | Any) -> Iterator[Node]:
-    """Yield ``Node`` instances from ``nodes`` regardless of container shape."""
-
-    if isinstance(nodes, Mapping):
-        values = nodes.values()
-    elif isinstance(nodes, Iterable) and not isinstance(nodes, (str, bytes)):
-        values = nodes
-    else:
-        values = (nodes,)
-
-    for node in values:
-        if isinstance(node, Node):
-            yield node
-            continue
-        if hasattr(node, "addr") and hasattr(node, "type"):
-            yield cast(Node, node)
-
-
 def iter_inventory_heater_metadata(
     inventory: Inventory | None,
     *,
@@ -207,40 +189,11 @@ def iter_inventory_heater_metadata(
         return
 
     default_factory = default_name_simple or (lambda addr: f"Heater {addr}")
-    nodes_by_type, addresses_by_type, resolve_name = (
-        heater_platform_details_from_inventory(
-            inventory,
-            default_name_simple=default_factory,
-        )
-    )
 
-    for node_type, addresses in addresses_by_type.items():
-        if not addresses:
-            continue
-
-        candidates = list(_iter_node_container(nodes_by_type.get(node_type, ())))
-        if not candidates:
-            continue
-
-        for raw_addr in addresses:
-            if not isinstance(raw_addr, str) or not raw_addr:
-                continue
-
-            matched: Node | None = None
-            for index, node in enumerate(candidates):
-                if node.addr == raw_addr:
-                    matched = node
-                    break
-
-            if matched is None:
-                continue
-
-            yield (
-                node_type,
-                raw_addr,
-                resolve_name(node_type, raw_addr),
-                matched,
-            )
+    for node_type, node, addr, name in inventory.iter_heater_platform_metadata(
+        default_factory
+    ):
+        yield node_type, addr, name, node
 
 ALLOWED_BOOST_MINUTES: Final[tuple[int, ...]] = tuple(range(60, 601, 60))
 """Valid boost durations (in minutes) supported by TermoWeb heaters."""

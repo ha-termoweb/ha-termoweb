@@ -48,50 +48,53 @@ def test_iter_inventory_heater_metadata_covers_branch_variants(
 
     inventory = inventory_builder("dev", {})
 
-    invalid_nodes = (
-        types.SimpleNamespace(type=None, addr="1"),
-        types.SimpleNamespace(type="acm", addr=" "),
-    )
-    object.__setattr__(inventory, "_heater_nodes_cache", tuple(invalid_nodes))
-
     htr_node = types.SimpleNamespace(addr="4", type="htr", supports_boost="no")
     acm_node = types.SimpleNamespace(
         addr="5", type="acm", supports_boost=lambda: "true"
     )
     pmo_node = types.SimpleNamespace(addr="6", type="pmo", supports_boost=None)
 
-    nodes_by_type = {
-        " ": [types.SimpleNamespace(addr="ignored")],
-        "htr": {
-            "bad": types.SimpleNamespace(addr=" ", type="htr"),
-            "good": htr_node,
+    object.__setattr__(
+        inventory,
+        "_nodes_by_type_cache",
+        {
+            " ": (types.SimpleNamespace(addr="ignored"),),
+            "htr": (
+                types.SimpleNamespace(addr=" ", type="htr"),
+                htr_node,
+            ),
+            "acm": (
+                types.SimpleNamespace(addr=None, type="acm"),
+                acm_node,
+            ),
+            "pmo": (pmo_node,),
         },
-        "acm": [acm_node],
-        "pmo": pmo_node,
-    }
+    )
+    object.__setattr__(
+        inventory,
+        "_heater_address_map_cache",
+        (
+            {
+                " ": ("1",),
+                "acm-empty": (),
+                "htr": ("4",),
+                "acm": ("", "5"),
+                "thm": ("7",),
+            },
+            {},
+        ),
+    )
 
-    addresses_by_type = {
-        " ": ["1"],
-        "acm-empty": [],
-        "htr": ["4"],
-        "acm": ["", "5", 6],
-        "thm": ["7"],
-    }
-
-    def _resolve_name(node_type: str, addr: str) -> str:
+    def _fake_resolve(
+        self: Inventory,
+        node_type: str,
+        addr: str,
+        *,
+        default_factory: Any | None = None,
+    ) -> str:
         return f"{node_type}:{addr}"
 
-    def _fake_helper(
-        inventory_value: Inventory, *, default_name_simple: Any
-    ) -> tuple[dict[str, Any], dict[str, Any], Any]:
-        assert inventory_value is inventory
-        return nodes_by_type, addresses_by_type, _resolve_name
-
-    monkeypatch.setattr(
-        boost_module,
-        "heater_platform_details_from_inventory",
-        _fake_helper,
-    )
+    monkeypatch.setattr(Inventory, "resolve_heater_name", _fake_resolve)
 
     results = list(boost_module.iter_inventory_heater_metadata(inventory))
 

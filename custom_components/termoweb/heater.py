@@ -134,11 +134,9 @@ class HeaterPlatformDetails:
     def iter_metadata(self) -> Iterator[tuple[str, Node, str, str]]:
         """Yield heater metadata derived from the inventory."""
 
-        for node_type, addr, name, node in iter_inventory_heater_metadata(
-            self.inventory,
-            default_name_simple=self.default_name_simple,
-        ):
-            yield node_type, node, addr, name
+        yield from self.inventory.iter_heater_platform_metadata(
+            self.default_name_simple,
+        )
 
 
 def _boost_runtime_store(
