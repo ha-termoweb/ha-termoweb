@@ -1018,13 +1018,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         if isinstance(inventory, Inventory):
             self._inventory = inventory
 
-        normalized_map: Mapping[Any, Iterable[Any]] | None = (
-            context.addr_map if isinstance(context.addr_map, Mapping) else None
-        )
-
-        record_bucket = context.record if isinstance(context.record, MutableMapping) else None
-        record_mapping = context.record if isinstance(context.record, Mapping) else None
-
         addresses_by_type: dict[str, list[str]] = {}
         if isinstance(inventory, Inventory):
             try:
@@ -1035,65 +1028,18 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 )
                 addresses_by_type = {}
 
-            alias_map: dict[str, str] = {}
-            try:
-                _, heater_aliases = inventory.heater_sample_address_map
-            except Exception:  # pragma: no cover - defensive cache guard
-                _LOGGER.debug(
-                    "WS (ducaheat): failed to resolve heater aliases", exc_info=True
-                )
-                heater_aliases = {}
-            else:
-                alias_map.update(heater_aliases)
-            try:
-                _, power_aliases = inventory.power_monitor_sample_address_map
-            except Exception:  # pragma: no cover - defensive cache guard
-                _LOGGER.debug(
-                    "WS (ducaheat): failed to resolve power monitor aliases", exc_info=True
-                )
-                power_aliases = {}
-            else:
-                alias_map.update(power_aliases)
-
-            if record_bucket is not None:
-                record_bucket["sample_aliases"] = dict(alias_map)
-
-            energy_coordinator = (
-                record_mapping.get("energy_coordinator")
-                if isinstance(record_mapping, Mapping)
-                else None
-            )
-            if hasattr(energy_coordinator, "update_addresses"):
-                try:
-                    energy_coordinator.update_addresses(inventory)
-                except Exception:  # pragma: no cover - defensive logging
-                    _LOGGER.debug(
-                        "WS (ducaheat): failed to update energy coordinator addresses",
-                        exc_info=True,
-                    )
+        cleaned_map = self._apply_heater_addresses(
+            raw_nodes,
+            inventory=inventory,
+            log_prefix="WS (ducaheat)",
+            logger=_LOGGER,
+        )
 
         if not addresses_by_type:
-            cleaned_map = self._apply_heater_addresses(
-                normalized_map,
-                inventory=None,
-                log_prefix="WS (ducaheat)",
-                logger=_LOGGER,
-            )
-            if isinstance(normalized_map, Mapping):
-                addresses_by_type = {
-                    node_type: [
-                        normalised
-                        for normalised in (
-                            normalize_node_addr(candidate, use_default_when_falsey=True)
-                            for candidate in addrs
-                        )
-                        if normalised
-                    ]
-                    for node_type, addrs in normalized_map.items()
-                }
-                addresses_by_type.update(cleaned_map)
-            else:
-                addresses_by_type = cleaned_map
+            addresses_by_type = {
+                node_type: list(addresses)
+                for node_type, addresses in cleaned_map.items()
+            }
 
         payload_copy: dict[str, Any] = {
             "dev_id": self.dev_id,

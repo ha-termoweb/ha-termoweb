@@ -321,17 +321,12 @@ def test_dispatch_nodes_publishes_inventory_addresses(
     addresses = dispatched["addresses_by_type"]
     assert addresses == expected_addresses
     assert dispatched.get("addr_map", addresses) == addresses
-    coordinator.update_nodes.assert_called_once()
-    update_args = coordinator.update_nodes.call_args[0]
-    assert update_args[0] is None
-    assert update_args[1] is inventory
+    coordinator.update_nodes.assert_not_called()
     assert client._inventory.addresses_by_type["htr"] == ["1"]
 
     record = hass.data[ducaheat_ws.DOMAIN][client.entry_id]
     assert record.get("inventory") is inventory
-    sample_aliases = record.get("sample_aliases")
-    assert sample_aliases is not None
-    assert sample_aliases.get("htr") == "htr"
+    assert "sample_aliases" not in record
     energy_coordinator.update_addresses.assert_called_once_with(inventory)
 
 
@@ -368,7 +363,7 @@ def test_incremental_updates_preserve_address_payload(
     addresses = dispatched["addresses_by_type"]
     assert addresses == expected_addresses
     assert dispatched.get("addr_map", addresses) == addresses
-    assert coordinator.update_nodes.call_count == 2
+    assert coordinator.update_nodes.call_count == 0
 
 
 @pytest.mark.asyncio
@@ -741,11 +736,7 @@ async def test_read_loop_updates_ws_state_on_dev_data(
     assert ws_state["status"] == "healthy"
     assert ws_state["healthy_since"] == base_ts
     assert ws_state["last_event_at"] == base_ts
-    client._coordinator.update_nodes.assert_called_once()
-    update_args, update_kwargs = client._coordinator.update_nodes.call_args
-    assert not update_kwargs
-    assert update_args[0] is None
-    assert isinstance(update_args[1], Inventory)
+    client._coordinator.update_nodes.assert_not_called()
 
 
 @pytest.mark.asyncio
