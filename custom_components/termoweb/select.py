@@ -21,7 +21,7 @@ from .heater import (
     set_boost_runtime_minutes,
 )
 from .identifiers import build_heater_entity_unique_id
-from .inventory import boostable_accumulator_details_for_entry
+from .inventory import Inventory, boostable_accumulator_details_for_entry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
     default_name = lambda addr: f"Heater {addr}"
-    _, accumulator_nodes = boostable_accumulator_details_for_entry(
+    heater_details, accumulator_nodes = boostable_accumulator_details_for_entry(
         data,
         default_name_simple=default_name,
         platform_name="select",
@@ -57,6 +57,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 base_name,
                 unique_id,
                 node_type=node_type,
+                inventory=heater_details.inventory,
             )
         )
 
@@ -89,6 +90,7 @@ class AccumulatorBoostDurationSelect(RestoreEntity, HeaterNodeBase, SelectEntity
         unique_id: str,
         *,
         node_type: str | None = None,
+        inventory: Inventory | None = None,
     ) -> None:
         """Initialise the boost duration selector for an accumulator."""
 
@@ -102,6 +104,7 @@ class AccumulatorBoostDurationSelect(RestoreEntity, HeaterNodeBase, SelectEntity
             unique_id,
             device_name=base_name,
             node_type=node_type,
+            inventory=inventory,
         )
         self._attr_name = "Boost duration"
         self._attr_options = list(self._OPTION_MAP.keys())

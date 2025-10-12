@@ -32,6 +32,7 @@ from homeassistant.helpers import dispatcher as dispatcher_module
 from homeassistant.helpers.dispatcher import dispatcher_send
 
 EnergyStateCoordinator = coordinator_module.EnergyStateCoordinator
+HeaterPlatformDetails = heater_module.HeaterPlatformDetails
 HeaterTemperatureSensor = sensor_module.HeaterTemperatureSensor
 HeaterEnergyTotalSensor = sensor_module.HeaterEnergyTotalSensor
 HeaterPowerSensor = sensor_module.HeaterPowerSensor
@@ -555,6 +556,8 @@ def test_heater_temp_sensor() -> None:
                 "timestamp": 1_700_000_000,
             }
         }
+        raw_nodes = {"nodes": [{"type": "htr", "addr": "A"}]}
+        inventory = Inventory("dev1", raw_nodes, build_node_inventory(raw_nodes))
         coordinator = types.SimpleNamespace(
             hass=hass,
             data={
@@ -569,9 +572,11 @@ def test_heater_temp_sensor() -> None:
                     "htr": {"settings": settings},
                     "settings": {"htr": dict(settings)},
                     "addresses_by_type": {"htr": ["A"]},
+                    "inventory": inventory,
                 }
             },
         )
+        coordinator.inventory = inventory
 
         sensor = HeaterTemperatureSensor(
             coordinator,
@@ -581,6 +586,7 @@ def test_heater_temp_sensor() -> None:
             "Living Room Temperature",
             "temp1",
             "Living Room",
+            inventory=inventory,
         )
 
         original_async_on_remove = sensor.async_on_remove
@@ -627,9 +633,20 @@ def test_heater_temp_sensor() -> None:
 
         original_device = coordinator.data["dev1"]
         coordinator.data["dev1"] = {}
-        assert sensor.available is False
+        assert sensor.available is True
         coordinator.data["dev1"] = original_device
         assert sensor.available is True
+
+        # Removing all inventory references should mark the entity unavailable.
+        sensor._inventory = None
+        coordinator.inventory = None
+        coordinator.data["dev1"]["inventory"] = None
+        coordinator.data["dev1"] = {}
+        assert sensor.available is False
+        coordinator.data["dev1"] = original_device
+        coordinator.data["dev1"]["inventory"] = inventory
+        coordinator.inventory = inventory
+        sensor._inventory = inventory
 
         settings = coordinator.data["dev1"]["htr"]["settings"]["A"]
         settings["mtemp"] = "bad"
@@ -734,13 +751,17 @@ def test_energy_and_power_sensor_properties() -> None:
 
     raw_nodes = {"nodes": [{"type": "htr", "addr": "A"}]}
     inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+    details = HeaterPlatformDetails(
+        inventory,
+        lambda addr: f"Node {addr}",
+    )
     total_sensor = InstallationTotalEnergySensor(
         coordinator,
         "entry",
         "dev",
         "Total",
         "tot",
-        inventory,
+        details,
     )
     total_sensor.hass = hass
     hass.data = {
@@ -797,13 +818,17 @@ def test_energy_sensor_respects_scale_metadata() -> None:
     }
     inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
     coordinator.data.setdefault("dev", {})["inventory"] = inventory
+    details = HeaterPlatformDetails(
+        inventory,
+        lambda addr: f"Node {addr}",
+    )
     total_sensor = InstallationTotalEnergySensor(
         coordinator,
         "entry",
         "dev",
         "Total",
         "tot",
-        inventory,
+        details,
     )
 
     assert energy_sensor.native_value == pytest.approx(1.5)

@@ -13,6 +13,7 @@ _install_stubs()
 from custom_components.termoweb import heater as heater_module
 from custom_components.termoweb import identifiers as identifiers_module
 from custom_components.termoweb.inventory import (
+    AccumulatorNode,
     HeaterNode,
     Inventory,
     build_node_inventory,
@@ -20,10 +21,9 @@ from custom_components.termoweb.inventory import (
 from homeassistant.core import HomeAssistant
 
 HeaterNodeBase = heater_module.HeaterNodeBase
-build_heater_name_map = heater_module.build_heater_name_map
-iter_heater_nodes = heater_module.iter_heater_nodes
 iter_boostable_heater_nodes = heater_module.iter_boostable_heater_nodes
 heater_platform_details_for_entry = heater_module.heater_platform_details_for_entry
+resolve_entry_inventory = heater_module.resolve_entry_inventory
 
 
 def test_build_heater_entity_unique_id_normalises_inputs() -> None:
@@ -174,51 +174,20 @@ def test_heater_platform_details_for_entry_passes_inventory_to_name_map(
     )
 
     assert details.inventory is container
+    assert not calls
+    resolve_name = details.resolve_name
+    assert resolve_name("htr", "9") == "By Type 9"
     assert calls
     recorded_inventory, recorded_factory = calls[0]
     assert recorded_inventory is container
     assert callable(recorded_factory)
     assert recorded_factory("9") == "Heater 9"
 
-    resolve_name = details.resolve_name
-    assert resolve_name("htr", "9") == "By Type 9"
     assert resolve_name("htr", "7") == "Pair 7"
     assert resolve_name("htr", "6") == "Legacy 6"
     assert resolve_name("acm", "5") == "Heater 5"
     assert resolve_name("acm", "8") == "Accumulator 8"
     assert resolve_name("foo", "3") == "Heater 3"
-
-
-def test_build_heater_name_map_handles_invalid_entries() -> None:
-    nodes = {
-        "nodes": [
-            123,
-            {"type": "HTR", "addr": None, "name": "Ignored"},
-            {"type": "foo", "addr": "B", "name": "Skip"},
-            {"type": "htr", "addr": 5, "name": "  "},
-            {"type": "htr", "addr": "6", "name": None},
-            {"type": "htr", "addr": " None ", "name": "Skip None"},
-        ]
-    }
-
-    result = build_heater_name_map(nodes, lambda addr: f"Heater {addr}")
-
-    assert result.get(("htr", "5")) == "Heater 5"
-    assert result.get(("htr", "6")) == "Heater 6"
-    assert result.get("htr") == {"5": "Heater 5", "6": "Heater 6"}
-    assert result.get("by_type", {}).get("htr") == {"5": "Heater 5", "6": "Heater 6"}
-
-
-def test_build_heater_name_map_accepts_iterables_of_dicts() -> None:
-    nodes_iter = (
-        {"type": "htr", "addr": "1"},
-        {"type": "acm", "addr": "2"},
-    )
-
-    result = build_heater_name_map(nodes_iter, lambda addr: f"Heater {addr}")
-
-    assert result.get(("acm", "2")) == "Heater 2"
-    assert result.get("htr", {}).get("1") == "Heater 1"
 
 
 def test_heater_platform_details_for_entry_resolves_normalized_inputs() -> None:
@@ -261,6 +230,48 @@ def test_heater_platform_details_for_entry_prefers_inventory(
     resolve_name = details.resolve_name
     assert resolve_name("htr", "1") == "Lounge"
     assert resolve_name("acm", "2") == "Accumulator 2"
+
+
+def test_heater_platform_details_iter_metadata_exposes_nodes() -> None:
+    raw_nodes = {
+        "nodes": [
+            {"type": "htr", "addr": "1", "name": "Lounge"},
+            {"type": "acm", "addr": "2"},
+        ]
+    }
+    container = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+
+    details = heater_platform_details_for_entry(
+        {"inventory": container},
+        default_name_simple=lambda addr: f"Heater {addr}",
+    )
+
+    metadata = list(details.iter_metadata())
+
+    assert metadata == [
+        ("htr", container.nodes_by_type["htr"][0], "1", "Lounge"),
+        ("acm", container.nodes_by_type["acm"][0], "2", "Accumulator 2"),
+    ]
+
+
+def test_iter_boostable_heater_nodes_yields_accumulators() -> None:
+    raw_nodes = {
+        "nodes": [
+            HeaterNode(name="Heater", addr="1"),
+            AccumulatorNode(name="Storage", addr="2"),
+        ]
+    }
+    container = Inventory("dev", raw_nodes, raw_nodes["nodes"])
+    details = heater_platform_details_for_entry(
+        {"inventory": container},
+        default_name_simple=lambda addr: f"Heater {addr}",
+    )
+
+    results = list(iter_boostable_heater_nodes(details))
+
+    assert results == [
+        ("acm", container.nodes_by_type["acm"][0], "2", "Storage")
+    ]
 
 
 def test_heater_platform_details_for_entry_requires_inventory() -> None:
@@ -308,76 +319,28 @@ def test_heater_platform_details_for_entry_logs_missing_inventory(
     assert any("missing inventory" in message for message in caplog.messages)
 
 
-def test_extract_inventory_accepts_mapping_inventory() -> None:
-    raw_nodes = {"nodes": [{"type": "htr", "addr": "7"}, {"type": "acm", "addr": "8"}]}
-    container = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
-    entry_data = {"inventory": container}
-
-    inventory = heater_module._extract_inventory(entry_data)
-
-    assert inventory is container
-
-
-def test_extract_inventory_handles_non_mapping_input() -> None:
-    assert heater_module._extract_inventory(None) is None
-    assert heater_module._extract_inventory(object()) is None
-
-
-def test_extract_inventory_uses_hass_data() -> None:
+def test_resolve_entry_inventory_prefers_mapping() -> None:
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
     container = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
-    hass = SimpleNamespace(data={heater_module.DOMAIN: {"entry": {"inventory": container}}})
 
-    entry_data = {"hass": hass, "entry_id": "entry"}
+    resolved = resolve_entry_inventory({"inventory": container})
 
-    inventory = heater_module._extract_inventory(entry_data)
-
-    assert inventory is container
+    assert resolved is container
 
 
+def test_resolve_entry_inventory_uses_coordinator() -> None:
+    raw_nodes = {"nodes": [{"type": "acm", "addr": "2"}]}
+    container = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+    coordinator = SimpleNamespace(inventory=container)
+
+    resolved = resolve_entry_inventory({"coordinator": coordinator})
+
+    assert resolved is container
 
 
-def test_iter_heater_maps_deduplicates_sections() -> None:
-    htr_settings = {"1": {"mode": "auto"}}
-    acm_settings = {"2": {"mode": "charge"}}
-    cache = {
-        "settings": {"htr": htr_settings, "acm": acm_settings},
-        "htr": {"settings": htr_settings},
-        "acm": {"settings": acm_settings},
-    }
-
-    results = list(
-        heater_module.iter_heater_maps(
-            cache,
-            map_key="settings",
-            node_types=["", "htr", "acm", "htr"],
-        )
-    )
-
-    assert len(results) == 2
-    assert results[0] is htr_settings
-    assert results[1] is acm_settings
-
-
-def test_iter_heater_maps_accepts_string_node_type() -> None:
-    cache = {"settings": {"htr": {"1": {"mode": "auto"}}}}
-
-    results = list(
-        heater_module.iter_heater_maps(
-            cache,
-            map_key="settings",
-            node_types="htr",
-        )
-    )
-
-    assert len(results) == 1
-    assert results[0] == {"1": {"mode": "auto"}}
-
-
-def test_iter_heater_maps_requires_truthy_key() -> None:
-    cache = {"settings": {"htr": {"1": {"mode": "auto"}}}}
-
-    assert list(heater_module.iter_heater_maps(cache, map_key="")) == []
+def test_resolve_entry_inventory_rejects_invalid_input() -> None:
+    assert resolve_entry_inventory(None) is None
+    assert resolve_entry_inventory(object()) is None
 
 
 @pytest.mark.parametrize(
