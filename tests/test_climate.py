@@ -2100,6 +2100,7 @@ def test_heater_write_paths_and_errors(
         assert (
             "Optimistic update failed" in caplog.text
             or "Failed to resolve device record" in caplog.text
+            or "missing immutable inventory cache" in caplog.text
         )
         waiter = await _pop_waiter()
         task = heater._refresh_fallback
@@ -2172,6 +2173,7 @@ def test_heater_write_paths_and_errors(
         assert (
             "Optimistic update failed" in caplog.text
             or "Failed to resolve device record" in caplog.text
+            or "missing immutable inventory cache" in caplog.text
         )
         waiter = await _pop_waiter()
         task = heater._refresh_fallback
