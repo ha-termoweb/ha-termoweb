@@ -18,7 +18,6 @@ from custom_components.termoweb.backend.sanitize import (
     mask_identifier,
     redact_token_fragment,
 )
-from custom_components.termoweb import inventory as inventory_module
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
 from custom_components.termoweb.backend.ws_client import NodeDispatchContext
 from homeassistant.core import HomeAssistant
@@ -994,10 +993,11 @@ def test_dispatch_nodes_handles_unknown_types(monkeypatch: pytest.MonkeyPatch) -
     record["energy_coordinator"] = SimpleNamespace(update_addresses=MagicMock())
     client._coordinator.update_nodes = MagicMock()
 
-    def fake_addresses(inventory: Any, *, known_types: Any) -> tuple[dict[str, list[str]], set[str]]:
-        return {"foo": []}, {"unknown"}
-
-    monkeypatch.setattr(ws_client_module, "addresses_by_node_type", fake_addresses)
+    client._inventory = Inventory(
+        client.dev_id,
+        {"nodes": [{"type": "foo", "addr": "9"}]},
+        build_node_inventory([{"type": "foo", "addr": "9"}]),
+    )
     client._dispatch_nodes({"nodes": {}})
     client._coordinator.update_nodes.assert_called_once()
     update_args, update_kwargs = client._coordinator.update_nodes.call_args
@@ -1007,9 +1007,9 @@ def test_dispatch_nodes_handles_unknown_types(monkeypatch: pytest.MonkeyPatch) -
     dispatcher.assert_called_once()
     _, _, payload = dispatcher.call_args[0]
     assert "nodes" not in payload
-    assert payload["addresses_by_type"] == {"foo": []}
+    assert payload["addresses_by_type"] == {"foo": ["9"]}
     assert payload.get("addr_map", payload["addresses_by_type"]) == payload["addresses_by_type"]
-    assert payload.get("unknown_types") == ["unknown"]
+    assert payload.get("unknown_types") == ["foo"]
 
 
 def test_dispatch_nodes_uses_inventory_payload(monkeypatch: pytest.MonkeyPatch) -> None:
