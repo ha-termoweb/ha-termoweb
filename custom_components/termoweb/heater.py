@@ -134,22 +134,10 @@ class HeaterPlatformDetails:
     def iter_metadata(self) -> Iterator[tuple[str, Node, str, str]]:
         """Yield heater metadata derived from the inventory."""
 
-        for metadata in iter_inventory_heater_metadata(
+        for node_type, addr, name, node in iter_inventory_heater_metadata(
             self.inventory,
             default_name_simple=self.default_name_simple,
         ):
-            if hasattr(metadata, "node_type"):
-                yield metadata.node_type, metadata.node, metadata.addr, metadata.name
-                continue
-
-            if not isinstance(metadata, tuple) or len(metadata) != 4:
-                _LOGGER.debug(
-                    "Skipping unexpected heater metadata payload: %r",
-                    metadata,
-                )
-                continue
-
-            node_type, addr, name, node = metadata
             yield node_type, node, addr, name
 
 
