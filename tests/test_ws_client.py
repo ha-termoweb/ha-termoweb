@@ -812,40 +812,33 @@ def test_ws_common_ensure_type_bucket_populates_dev_map() -> None:
     assert bucket["samples"] == {"temp": 20}
     assert bucket["settings"] == {"mode": "auto"}
     assert bucket["advanced"] == {}
-    assert dev_map["addresses_by_type"]["htr"] == []
     assert dev_map["settings"]["htr"] == {}
     assert dev_map["nodes_by_type"]["htr"] is bucket
 
     dev_map_second = {
-        "addresses_by_type": MappingProxyType({"htr": ("2",)}),
         "settings": {"htr": {"existing": 1}},
         "nodes_by_type": {},
     }
     bucket_again = dummy._ensure_type_bucket({"htr": bucket}, "htr", dev_map=dev_map_second)
     assert bucket_again is bucket
-    assert dev_map_second["addresses_by_type"]["htr"] == ["2"]
     assert dev_map_second["nodes_by_type"]["htr"] is bucket
 
     dev_map_third = {
-        "addresses_by_type": {"htr": ["3"]},
         "settings": {},
         "nodes_by_type": {},
     }
     dummy._ensure_type_bucket({"htr": bucket}, "htr", dev_map=dev_map_third)
-    assert dev_map_third["addresses_by_type"]["htr"] == ["3"]
+    assert "addresses_by_type" not in dev_map_third
 
     dev_map_missing = {
-        "addresses_by_type": {},
         "settings": MappingProxyType({"htr": MappingProxyType({"mode": "sched"})}),
     }
     bucket_missing = dummy._ensure_type_bucket({"htr": bucket}, "htr", dev_map=dev_map_missing)
     assert bucket_missing is bucket
-    assert dev_map_missing["addresses_by_type"]["htr"] == []
     assert dev_map_missing["settings"]["htr"] == {"mode": "sched"}
     assert dev_map_missing["nodes_by_type"]["htr"] is bucket
 
     dev_map_non_mapping_settings = {
-        "addresses_by_type": {},
         "settings": None,
         "nodes_by_type": {},
     }
