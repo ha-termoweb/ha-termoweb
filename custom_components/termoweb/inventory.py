@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Mapping, MutableMapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from dataclasses import dataclass
 import logging
 from typing import TYPE_CHECKING, Any, cast
@@ -262,9 +262,60 @@ class Inventory:
 
         forward_cache, reverse_cache = cached
         return (
-            {node_type: list(addresses) for node_type, addresses in forward_cache.items()},
-                {addr: set(node_types) for addr, node_types in reverse_cache.items()},
+            {
+                node_type: list(addresses)
+                for node_type, addresses in forward_cache.items()
+            },
+            {addr: set(node_types) for addr, node_types in reverse_cache.items()},
         )
+
+    def iter_heater_platform_metadata(
+        self,
+        default_name_simple: Callable[[str], str],
+    ) -> Iterator[tuple[str, Node, str, str]]:
+        """Yield heater metadata derived from cached inventory details."""
+
+        forward_map, _ = self.heater_address_map
+        if not forward_map:
+            return
+
+        grouped = self._ensure_nodes_by_type_cache()
+
+        for node_type, addresses in forward_map.items():
+            if not addresses:
+                continue
+
+            nodes = grouped.get(node_type, ())
+            if not nodes:
+                continue
+
+            for raw_addr in addresses:
+                if not isinstance(raw_addr, str) or not raw_addr:
+                    continue
+
+                matched: Any | None = None
+                for candidate in nodes:
+                    addr = normalize_node_addr(
+                        getattr(candidate, "addr", None),
+                        use_default_when_falsey=True,
+                    )
+                    if addr == raw_addr:
+                        matched = candidate
+                        break
+
+                if matched is None:
+                    continue
+
+                yield (
+                    node_type,
+                    cast("Node", matched),
+                    raw_addr,
+                    self.resolve_heater_name(
+                        node_type,
+                        raw_addr,
+                        default_factory=default_name_simple,
+                    ),
+                )
 
     @property
     def power_monitor_address_map(
