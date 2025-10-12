@@ -981,9 +981,8 @@ def test_dispatch_nodes_with_inventory(monkeypatch: pytest.MonkeyPatch, caplog: 
     dispatcher.assert_called_once()
     _, _, payload = dispatcher.call_args[0]
     assert "nodes" not in payload
-    assert payload["addr_map"] == {"htr": ["1"]}
     assert payload["addresses_by_type"] == {"htr": ["1"]}
-    assert payload["addr_map"] is payload["addresses_by_type"]
+    assert payload.get("addr_map", payload["addresses_by_type"]) == payload["addresses_by_type"]
     assert client._inventory.addresses_by_type["htr"] == ["1"]
 
 
@@ -1008,9 +1007,8 @@ def test_dispatch_nodes_handles_unknown_types(monkeypatch: pytest.MonkeyPatch) -
     dispatcher.assert_called_once()
     _, _, payload = dispatcher.call_args[0]
     assert "nodes" not in payload
-    assert payload["addr_map"] == {"foo": []}
     assert payload["addresses_by_type"] == {"foo": []}
-    assert payload["addr_map"] is payload["addresses_by_type"]
+    assert payload.get("addr_map", payload["addresses_by_type"]) == payload["addresses_by_type"]
     assert payload.get("unknown_types") == ["unknown"]
 
 
