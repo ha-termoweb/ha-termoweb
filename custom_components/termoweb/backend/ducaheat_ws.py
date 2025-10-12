@@ -1166,29 +1166,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             self._inventory = inventory_container
             record_mapping["inventory"] = inventory_container
 
-            alias_map: dict[str, str] = {}
-            try:
-                _, heater_aliases = inventory_container.heater_sample_address_map
-            except Exception:  # pragma: no cover - defensive cache guard
-                _LOGGER.debug(
-                    "WS (ducaheat): failed to resolve heater aliases during subscribe",
-                    exc_info=True,
-                )
-                heater_aliases = {}
-            else:
-                alias_map.update(heater_aliases)
-            try:
-                _, power_aliases = inventory_container.power_monitor_sample_address_map
-            except Exception:  # pragma: no cover - defensive cache guard
-                _LOGGER.debug(
-                    "WS (ducaheat): failed to resolve power monitor aliases during subscribe",
-                    exc_info=True,
-                )
-                power_aliases = {}
-            else:
-                alias_map.update(power_aliases)
-            record_mapping["sample_aliases"] = dict(alias_map)
-
             energy_coordinator = record_mapping.get("energy_coordinator")
             if hasattr(energy_coordinator, "update_addresses"):
                 try:
