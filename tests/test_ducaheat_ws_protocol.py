@@ -541,6 +541,14 @@ def test_extract_dev_data_payload_variants(monkeypatch: pytest.MonkeyPatch) -> N
     result = client._extract_dev_data_payload([tuple_wrapper])
     assert result is nodes
 
+    list_payload = client._extract_dev_data_payload(
+        [[{"nodes": [{"type": "htr", "addr": "1", "status": {"p": 1}}]}]]
+    )
+    assert isinstance(list_payload, Mapping)
+    nodes_map = list_payload.get("nodes") if isinstance(list_payload, Mapping) else None
+    assert isinstance(nodes_map, Mapping)
+    assert nodes_map["htr"]["status"]["1"]["p"] == 1
+
     assert client._extract_dev_data_payload(["not json"]) is None
 
 
@@ -762,6 +770,44 @@ async def test_read_loop_handles_stringified_dev_data(
     await_args = client._subscribe_feeds.await_args_list
     assert await_args and isinstance(await_args[0].args[0], Mapping)
     assert await_args[0].args[0]["htr"]["status"]["1"]["power"] == 5
+
+
+@pytest.mark.asyncio
+async def test_read_loop_handles_list_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """List-based dev_data snapshots should be coerced into mapping payloads."""
+
+    client = _make_client(monkeypatch)
+    monkeypatch.setattr(client, "_subscribe_feeds", AsyncMock(return_value=2))
+    dispatched: list[dict[str, Any]] = []
+    client._dispatcher = lambda *_args: dispatched.append(_args[2])
+
+    nodes_list = [{"type": "htr", "addr": "1", "status": {"power": 7}, "lease_seconds": 90}]
+    payload = json.dumps(["dev_data", {"nodes": nodes_list}], separators=(",", ":"))
+
+    class DevDataWS(QueueWebSocket):
+        def __init__(self, frame: str) -> None:
+            super().__init__(
+                [SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data=frame)]
+            )
+
+    frame = f"42{client._namespace},{payload}"
+    client._ws = DevDataWS(frame)  # type: ignore[assignment]
+
+    await _run_read_loop(client)
+
+    assert isinstance(client._nodes_raw, dict)
+    assert client._nodes_raw["htr"]["status"]["1"]["power"] == 7
+    assert client._nodes_raw["htr"]["lease_seconds"] == 90
+    assert dispatched
+    payload = dispatched[-1]
+    assert payload["addr_map"]["htr"] == ["1"]
+    assert payload["addresses_by_type"]["htr"] == ["1"]
+    client._subscribe_feeds.assert_awaited_once()
+    await_args = client._subscribe_feeds.await_args_list
+    assert await_args and isinstance(await_args[0].args[0], Mapping)
+    assert await_args[0].args[0]["htr"]["status"]["1"]["power"] == 7
 
 
 @pytest.mark.asyncio

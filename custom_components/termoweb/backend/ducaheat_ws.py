@@ -59,6 +59,8 @@ _PAYLOAD_WINDOW_MAX = 900.0
 _PAYLOAD_WINDOW_MARGIN_RATIO = 0.25
 _PAYLOAD_WINDOW_MARGIN_FLOOR = 15.0
 _CADENCE_KEYS = ("lease_seconds", "cadence_seconds", "poll_seconds")
+_NODE_METADATA_KEYS = {"type", "node_type", "addr", "address", "name", "title", "label"}
+_NODE_TYPE_LEVEL_KEYS = {"lease_seconds", "cadence_seconds", "poll_seconds"}
 
 
 def _rand_t() -> str:
@@ -546,24 +548,26 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
 
                         if evt == "dev_data" and args:
                             payload_map = self._extract_dev_data_payload(args)
-                            nodes = (
-                                payload_map.get("nodes")
-                                if isinstance(payload_map, Mapping)
-                                else None
-                            )
-                            if isinstance(nodes, dict):
-                                self._log_nodes_summary(nodes)
-                                normalised = self._normalise_nodes_payload(nodes)
+                            nodes_map: Mapping[str, Any] | None = None
+                            if isinstance(payload_map, Mapping):
+                                nodes_candidate = payload_map.get("nodes")
+                                if isinstance(nodes_candidate, Mapping):
+                                    nodes_map = nodes_candidate
+                                else:
+                                    nodes_map = self._coerce_dev_data_nodes(nodes_candidate)
+                            if isinstance(nodes_map, Mapping):
+                                self._log_nodes_summary(nodes_map)
+                                normalised = self._normalise_nodes_payload(nodes_map)
                                 dispatch_payload: Mapping[str, Any] | None
                                 if isinstance(normalised, Mapping):
                                     self._nodes_raw = deepcopy(normalised)
                                     dispatch_payload = self._nodes_raw
                                 else:
                                     self._nodes_raw = None
-                                    dispatch_payload = nodes
+                                    dispatch_payload = nodes_map
                                 if isinstance(dispatch_payload, Mapping):
                                     self._dispatch_nodes(dispatch_payload)
-                                subs = await self._subscribe_feeds(nodes)
+                                subs = await self._subscribe_feeds(nodes_map)
                                 _LOGGER.info("WS (ducaheat): subscribed %d feeds", subs)
                                 self._update_status("healthy")
                             break
@@ -668,6 +672,11 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 nodes = item.get("nodes") if "nodes" in item else None
                 if isinstance(nodes, Mapping):
                     return item
+                coerced = self._coerce_dev_data_nodes(nodes)
+                if coerced is not None:
+                    combined = dict(item)
+                    combined["nodes"] = coerced
+                    return combined
                 for key in ("data", "payload", "body"):
                     nested = item.get(key)
                     if nested is not None:
@@ -683,6 +692,47 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             if isinstance(item, (list, tuple)):
                 queue.extend(item)
         return None
+
+    def _coerce_dev_data_nodes(self, nodes: Any) -> dict[str, Any] | None:
+        """Convert list-style websocket snapshots into mapping payloads."""
+
+        if nodes is None or isinstance(nodes, Mapping):
+            return None
+        if isinstance(nodes, (str, bytes, bytearray)):
+            return None
+        if not isinstance(nodes, Iterable):
+            return None
+
+        snapshot: dict[str, Any] = {}
+        for entry in nodes:
+            if not isinstance(entry, Mapping):
+                continue
+            node_type = normalize_node_type(
+                entry.get("type") or entry.get("node_type"),
+                use_default_when_falsey=True,
+            )
+            if not node_type:
+                continue
+            type_bucket = snapshot.setdefault(node_type, {})
+            for key in _NODE_TYPE_LEVEL_KEYS:
+                if key in entry and key not in type_bucket:
+                    type_bucket[key] = entry[key]
+            addr = normalize_node_addr(
+                entry.get("addr") or entry.get("address"),
+                use_default_when_falsey=True,
+            )
+            if not addr:
+                continue
+            for key, value in entry.items():
+                if key in _NODE_METADATA_KEYS or key in _NODE_TYPE_LEVEL_KEYS:
+                    continue
+                existing = type_bucket.get(key)
+                if isinstance(existing, MutableMapping):
+                    existing[addr] = value
+                else:
+                    type_bucket[key] = {addr: value}
+
+        return snapshot or None
 
     def _log_nodes_summary(self, nodes: Mapping[str, Any]) -> None:
         if not _LOGGER.isEnabledFor(logging.INFO):
