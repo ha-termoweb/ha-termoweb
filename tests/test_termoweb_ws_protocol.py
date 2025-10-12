@@ -980,8 +980,8 @@ def test_dispatch_nodes_with_inventory(monkeypatch: pytest.MonkeyPatch, caplog: 
     dispatcher.assert_called_once()
     _, _, payload = dispatcher.call_args[0]
     assert "nodes" not in payload
-    assert payload["addresses_by_type"] == {"htr": ["1"]}
-    assert payload.get("addr_map", payload["addresses_by_type"]) == payload["addresses_by_type"]
+    assert payload["inventory"] is client._inventory
+    assert payload["inventory_addresses"] == {"htr": ["1"]}
     assert client._inventory.addresses_by_type["htr"] == ["1"]
 
 
@@ -1007,8 +1007,7 @@ def test_dispatch_nodes_handles_unknown_types(monkeypatch: pytest.MonkeyPatch) -
     dispatcher.assert_called_once()
     _, _, payload = dispatcher.call_args[0]
     assert "nodes" not in payload
-    assert payload["addresses_by_type"] == {"foo": ["9"]}
-    assert payload.get("addr_map", payload["addresses_by_type"]) == payload["addresses_by_type"]
+    assert payload["inventory_addresses"] == {"foo": ["9"]}
     assert payload.get("unknown_types") == ["foo"]
 
 
@@ -1060,8 +1059,10 @@ def test_dispatch_nodes_uses_inventory_payload(monkeypatch: pytest.MonkeyPatch) 
     dispatcher.assert_called_once()
 
 
-def test_handle_event_includes_addr_map(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Legacy websocket events should include ``addr_map`` in dispatcher payloads."""
+def test_handle_event_includes_inventory_addresses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Legacy websocket events should include inventory metadata in payloads."""
 
     hass = HomeAssistant()
     hass.loop = SimpleNamespace(
@@ -1125,7 +1126,7 @@ def test_handle_event_includes_addr_map(monkeypatch: pytest.MonkeyPatch) -> None
         None,
     )
     assert nodes_payload is not None
-    assert nodes_payload["addr_map"] == {"htr": ["2"]}
+    assert nodes_payload["inventory_addresses"] == {"htr": ["2"]}
 
     settings_payload = next(
         (
@@ -1136,7 +1137,7 @@ def test_handle_event_includes_addr_map(monkeypatch: pytest.MonkeyPatch) -> None
         None,
     )
     assert settings_payload is not None
-    assert settings_payload["addr_map"] == {"htr": ["2"]}
+    assert settings_payload["inventory_addresses"] == {"htr": ["2"]}
 
     dev_state = client._coordinator.data.get("device")
     assert isinstance(dev_state, Mapping)
