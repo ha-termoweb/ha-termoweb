@@ -1,31 +1,52 @@
-"""Tests for ``StateCoordinator._clone_inventory``."""
+"""Tests for coordinator inventory references."""
 
 from __future__ import annotations
+
+from unittest.mock import AsyncMock
+
+from homeassistant.core import HomeAssistant
 
 from custom_components.termoweb.coordinator import StateCoordinator
 from custom_components.termoweb.inventory import Inventory, Node
 
 
-def test_clone_inventory_creates_independent_instance() -> None:
-    """Ensure cloning returns a matching but independent inventory."""
+def test_device_record_reuses_inventory_instance() -> None:
+    """Ensure the coordinator stores the provided inventory without cloning."""
 
-    payload = {"nodes": [{"addr": "1"}, {"addr": "2"}]}
-    nodes = [
-        Node(name="Heater", addr="1", node_type="htr"),
-        Node(name="Thermostat", addr="2", node_type="thm"),
-    ]
-    source = Inventory("dev-123", payload, nodes)
+    payload = {"nodes": [{"addr": "1", "type": "htr"}]}
+    nodes = [Node(name="Heater", addr="1", node_type="htr")]
+    inventory = Inventory("dev-123", payload, nodes)
 
-    clone = StateCoordinator._clone_inventory(source)
+    coordinator = StateCoordinator(
+        HomeAssistant(),
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev-123",
+        device={},
+        nodes=inventory.payload,
+        inventory=inventory,
+    )
 
-    assert clone is not source
-    assert isinstance(clone, Inventory)
-    assert clone.dev_id == source.dev_id
-    assert clone.payload == source.payload
-    assert clone.nodes == source.nodes
+    record = coordinator._assemble_device_record(
+        inventory=inventory,
+        settings_by_type={"htr": {"2": {"mode": "auto"}}},
+        name="Device",
+    )
 
-    clone._heater_name_map_cache[1] = {"sentinel": "clone"}
-    clone._heater_name_map_factories[1] = lambda addr: f"Clone {addr}"
+    assert record["inventory"] is inventory
+    expected_addresses = inventory.addresses_by_type
+    expected_bucket = expected_addresses.setdefault("htr", [])
+    if "2" not in expected_bucket:
+        expected_bucket.append("2")
+    assert record["addresses_by_type"] == expected_addresses
 
-    assert source._heater_name_map_cache == {}
-    assert source._heater_name_map_factories == {}
+    forward, reverse = inventory.heater_address_map
+    assert record["heater_address_map"] == {"forward": forward, "reverse": reverse}
+
+    power_forward, power_reverse = inventory.power_monitor_address_map
+    assert record["power_monitor_address_map"] == {
+        "forward": power_forward,
+        "reverse": power_reverse,
+    }
+
+    assert record["settings"] == {"htr": {"2": {"mode": "auto"}}}

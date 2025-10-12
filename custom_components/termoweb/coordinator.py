@@ -298,12 +298,6 @@ class StateCoordinator(
         return current_rtc
 
     @staticmethod
-    def _clone_inventory(inventory: Inventory) -> Inventory:
-        """Return a fresh ``Inventory`` instance for cached payloads."""
-
-        return Inventory(inventory.dev_id, inventory.payload, inventory.nodes)
-
-    @staticmethod
     def _normalise_settings_map(
         settings_by_type: Mapping[str, Mapping[str, Any]] | None,
     ) -> dict[str, dict[str, Any]]:
@@ -332,100 +326,40 @@ class StateCoordinator(
         self,
         *,
         inventory: Inventory,
-        addresses_by_type: Mapping[str, Iterable[str]],
         settings_by_type: Mapping[str, Mapping[str, Any]],
         name: str,
     ) -> dict[str, Any]:
         """Return a coordinator cache record for ``inventory`` and settings."""
 
-        normalized_addresses: dict[str, list[str]] = {}
-        for node_type, addrs in addresses_by_type.items():
-            bucket: list[str] = []
-            seen: set[str] = set()
-            for candidate in addrs:
-                addr = normalize_node_addr(candidate, use_default_when_falsey=True)
-                if not addr or addr in seen:
-                    continue
-                seen.add(addr)
-                bucket.append(addr)
-            normalized_addresses[node_type] = bucket
-
         normalized_settings = self._normalise_settings_map(settings_by_type)
+
+        addresses_by_type = inventory.addresses_by_type
         for node_type, bucket in normalized_settings.items():
-            dest = normalized_addresses.setdefault(node_type, [])
+            dest = addresses_by_type.setdefault(node_type, [])
             seen = set(dest)
             for addr in bucket:
                 if addr in seen:
                     continue
-                seen.add(addr)
                 dest.append(addr)
+                seen.add(addr)
 
         heater_forward, heater_reverse = inventory.heater_address_map
         power_forward, power_reverse = inventory.power_monitor_address_map
-
-        heater_forward_copy = {
-            node_type: [
-                normalized
-                for addr in addrs
-                if (
-                    normalized := normalize_node_addr(
-                        addr, use_default_when_falsey=True
-                    )
-                )
-            ]
-            for node_type, addrs in heater_forward.items()
-        }
-        power_forward_copy = {
-            node_type: [
-                normalized
-                for addr in addrs
-                if (
-                    normalized := normalize_node_addr(
-                        addr, use_default_when_falsey=True
-                    )
-                )
-            ]
-            for node_type, addrs in power_forward.items()
-        }
-
-        heater_reverse_copy = {
-            normalize_node_addr(addr, use_default_when_falsey=True) or addr: sorted(
-                {
-                    normalize_node_type(node_type, use_default_when_falsey=True)
-                    or node_type
-                    for node_type in node_types
-                }
-            )
-            for addr, node_types in heater_reverse.items()
-        }
-        power_reverse_copy = {
-            normalize_node_addr(addr, use_default_when_falsey=True) or addr: sorted(
-                {
-                    normalize_node_type(node_type, use_default_when_falsey=True)
-                    or node_type
-                    for node_type in node_types
-                }
-            )
-            for addr, node_types in power_reverse.items()
-        }
 
         return {
             "dev_id": self._dev_id,
             "name": name,
             "raw": self._device,
             "connected": True,
-            "inventory": self._clone_inventory(inventory),
-            "addresses_by_type": {
-                node_type: list(addrs)
-                for node_type, addrs in normalized_addresses.items()
-            },
+            "inventory": inventory,
+            "addresses_by_type": addresses_by_type,
             "heater_address_map": {
-                "forward": heater_forward_copy,
-                "reverse": heater_reverse_copy,
+                "forward": heater_forward,
+                "reverse": heater_reverse,
             },
             "power_monitor_address_map": {
-                "forward": power_forward_copy,
-                "reverse": power_reverse_copy,
+                "forward": power_forward,
+                "reverse": power_reverse,
             },
             "settings": normalized_settings,
         }
@@ -958,14 +892,10 @@ class StateCoordinator(
                 success = True
                 return
 
-            cache_map = inventory.addresses_by_type
-            cache_bucket = cache_map.setdefault(resolved_type, [])
-            if addr not in cache_bucket:
-                cache_bucket.append(addr)
-
             current = self.data or {}
             new_data: dict[str, dict[str, Any]] = dict(current)
             prev_dev = dict(new_data.get(dev_id) or {})
+            cache_map = inventory.addresses_by_type
             prev_settings = self._collect_previous_settings(prev_dev, cache_map)
 
             for node_type, settings in prev_settings.items():
@@ -986,7 +916,6 @@ class StateCoordinator(
             dev_name = _device_display_name(self._device, dev_id)
             device_record = self._assemble_device_record(
                 inventory=inventory,
-                addresses_by_type=cache_map,
                 settings_by_type=settings_map,
                 name=dev_name,
             )
@@ -1057,17 +986,6 @@ class StateCoordinator(
 
             dev_name = _device_display_name(self._device, dev_id)
 
-            cache_map = {key: list(values) for key, values in addr_map.items()}
-            for node_type, settings in settings_by_type.items():
-                bucket = cache_map.setdefault(node_type, [])
-                for addr in settings:
-                    normalized = normalize_node_addr(
-                        addr,
-                        use_default_when_falsey=True,
-                    )
-                    if normalized and normalized not in bucket:
-                        bucket.append(normalized)
-
             acm_settings = settings_by_type.get("acm")
             if isinstance(acm_settings, Mapping):
                 now_value = rtc_now or self._device_now_estimate()
@@ -1075,7 +993,6 @@ class StateCoordinator(
 
             device_record = self._assemble_device_record(
                 inventory=inventory,
-                addresses_by_type=cache_map,
                 settings_by_type=settings_by_type,
                 name=dev_name,
             )
