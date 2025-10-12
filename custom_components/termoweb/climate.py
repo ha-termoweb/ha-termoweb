@@ -25,7 +25,6 @@ from .heater import (
     DEFAULT_BOOST_DURATION,
     HeaterNodeBase,
     derive_boost_state,
-    iter_heater_maps,
     log_skipped_nodes,
     resolve_boost_runtime_minutes,
     resolve_entry_inventory,
@@ -84,6 +83,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 resolved_name,
                 unique_id,
                 node_type=node_type,
+                inventory=inventory,
             )
         )
 
@@ -247,6 +247,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         unique_id: str | None = None,
         *,
         node_type: str | None = None,
+        inventory: Inventory | None = None,
     ) -> None:
         """Initialise the climate entity for a TermoWeb heater."""
         HeaterNode.__init__(self, name=name, addr=addr)
@@ -278,6 +279,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             self.name,
             unique_id,
             node_type=resolved_type,
+            inventory=inventory,
         )
 
         self._refresh_fallback: asyncio.Task | None = None
@@ -315,15 +317,35 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
     def _settings_maps(self) -> list[dict[str, Any]]:
         """Return all cached settings maps referencing this node."""
-        data = (self.coordinator.data or {}).get(self._dev_id)
-        return list(
-            iter_heater_maps(
-                data,
-                map_key="settings",
-                node_types=[self._node_type],
-                inventory=getattr(self.coordinator, "inventory", None),
-            )
-        )
+        record = self._device_record()
+        if not isinstance(record, Mapping):
+            return []
+
+        node_type = self._node_type
+        results: list[dict[str, Any]] = []
+        seen: set[int] = set()
+
+        settings_root = record.get("settings")
+        if isinstance(settings_root, Mapping):
+            typed = settings_root.get(node_type)
+            if isinstance(typed, Mapping):
+                mapping = cast(dict[str, Any], typed)
+                ident = id(mapping)
+                if ident not in seen:
+                    seen.add(ident)
+                    results.append(mapping)
+
+        node_section = record.get(node_type)
+        if isinstance(node_section, Mapping):
+            typed = node_section.get("settings")
+            if isinstance(typed, Mapping):
+                mapping = cast(dict[str, Any], typed)
+                ident = id(mapping)
+                if ident not in seen:
+                    seen.add(ident)
+                    results.append(mapping)
+
+        return results
 
     def _optimistic_update(self, mutator: Callable[[dict[str, Any]], None]) -> None:
         """Apply ``mutator`` to cached settings and refresh state if changed."""
@@ -1097,6 +1119,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         unique_id: str | None = None,
         *,
         node_type: str | None = None,
+        inventory: Inventory | None = None,
     ) -> None:
         """Initialise the accumulator climate entity."""
 
@@ -1108,6 +1131,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
             name,
             unique_id,
             node_type=node_type,
+            inventory=inventory,
         )
         self._boost_resume_mode: HVACMode | None = None
 

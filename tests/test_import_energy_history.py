@@ -19,6 +19,7 @@ import pytest
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 
 from custom_components.termoweb import (
+    heater as heater_module,
     identifiers as identifiers_module,
     inventory as inventory_module,
 )
@@ -1312,13 +1313,17 @@ def test_energy_polling_matches_import(monkeypatch: pytest.MonkeyPatch) -> None:
             raw_nodes,
             inventory_module.build_node_inventory(raw_nodes),
         )
+        details = heater_module.HeaterPlatformDetails(
+            inventory,
+            lambda addr: f"Node {addr}",
+        )
         total_entity = sensor_mod.InstallationTotalEnergySensor(
             coordinator,
             "entry",
             "dev",
             "Total",
             "total_uid",
-            inventory,
+            details,
         )
 
         assert energy_entity.native_value == pytest.approx(1.3)

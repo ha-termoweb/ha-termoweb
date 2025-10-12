@@ -35,8 +35,6 @@ from .heater import (
     HeaterNodeBase,
     heater_platform_details_for_entry,
     iter_boostable_heater_nodes,
-    iter_heater_maps,
-    iter_heater_nodes,
     log_skipped_nodes,
 )
 from .identifiers import (
@@ -171,9 +169,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         energy_coordinator.update_addresses(inventory)
 
     new_entities: list[SensorEntity] = []
-    for node_type, _node, addr_str, base_name in iter_heater_nodes(
-        heater_details,
-    ):
+    for node_type, _node, addr_str, base_name in heater_details.iter_metadata():
         energy_unique_id = build_heater_energy_unique_id(dev_id, node_type, addr_str)
         uid_prefix = energy_unique_id.rsplit(":", 1)[0]
         new_entities.extend(
@@ -187,6 +183,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 uid_prefix,
                 energy_unique_id,
                 node_type=node_type,
+                inventory=heater_details.inventory,
             )
         )
     for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
@@ -203,6 +200,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 base_name,
                 uid_prefix,
                 node_type=node_type,
+                inventory=heater_details.inventory,
             )
         )
 
@@ -274,6 +272,7 @@ class HeaterTemperatureSensor(HeaterNodeBase, SensorEntity):
         device_name: str,
         *,
         node_type: str | None = None,
+        inventory: Inventory | None = None,
     ) -> None:
         """Initialise the heater temperature sensor entity."""
         super().__init__(
@@ -285,6 +284,7 @@ class HeaterTemperatureSensor(HeaterNodeBase, SensorEntity):
             unique_id,
             device_name=device_name,
             node_type=node_type,
+            inventory=inventory,
         )
 
     @property
@@ -320,6 +320,7 @@ class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
         device_name: str,
         *,
         node_type: str | None = None,
+        inventory: Inventory | None = None,
     ) -> None:
         """Initialise a heater energy-derived sensor entity."""
         super().__init__(
@@ -331,6 +332,7 @@ class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
             unique_id,
             device_name=device_name,
             node_type=node_type,
+            inventory=inventory,
         )
 
     def _device_available(self, device_entry: dict[str, Any] | None) -> bool:
@@ -478,6 +480,7 @@ def _create_heater_sensors(
     energy_unique_id: str,
     *,
     node_type: str | None = None,
+    inventory: Inventory | None = None,
     temperature_cls: type[HeaterTemperatureSensor] = HeaterTemperatureSensor,
     energy_cls: type[HeaterEnergyTotalSensor] = HeaterEnergyTotalSensor,
     power_cls: type[HeaterPowerSensor] = HeaterPowerSensor,
@@ -497,6 +500,7 @@ def _create_heater_sensors(
         f"{uid_prefix}:temp",
         base_name,
         node_type=node_type,
+        inventory=inventory,
     )
     energy = energy_cls(
         energy_coordinator,
@@ -507,6 +511,7 @@ def _create_heater_sensors(
         energy_unique_id,
         base_name,
         node_type=node_type,
+        inventory=inventory,
     )
     power = power_cls(
         energy_coordinator,
@@ -517,6 +522,7 @@ def _create_heater_sensors(
         f"{uid_prefix}:power",
         base_name,
         node_type=node_type,
+        inventory=inventory,
     )
 
     return (temperature, energy, power)
@@ -531,6 +537,7 @@ def _create_boost_sensors(
     uid_prefix: str,
     *,
     node_type: str | None = None,
+    inventory: Inventory | None = None,
     minutes_cls: type[HeaterBoostMinutesRemainingSensor] = HeaterBoostMinutesRemainingSensor,
     end_cls: type[HeaterBoostEndSensor] = HeaterBoostEndSensor,
 ) -> tuple[
@@ -549,6 +556,7 @@ def _create_boost_sensors(
         f"{boost_prefix}:minutes_remaining",
         device_name=base_name,
         node_type=node_type,
+        inventory=inventory,
     )
     end = end_cls(
         coordinator,
@@ -559,6 +567,7 @@ def _create_boost_sensors(
         f"{boost_prefix}:end",
         device_name=base_name,
         node_type=node_type,
+        inventory=inventory,
     )
 
     return (minutes, end)
@@ -752,13 +761,17 @@ class InstallationTotalEnergySensor(
     def native_value(self) -> float | None:
         """Return the summed energy usage across all heaters."""
         data = (self.coordinator.data or {}).get(self._dev_id)
+        if not isinstance(data, Mapping):
+            return None
         total = 0.0
         found = False
-        for energy_map in iter_heater_maps(
-            data,
-            map_key="energy",
-            inventory=self._details,
-        ):
+        for node_type in self._details.addrs_by_type:
+            section = data.get(node_type)
+            if not isinstance(section, Mapping):
+                continue
+            energy_map = section.get("energy")
+            if not isinstance(energy_map, Mapping):
+                continue
             for val in energy_map.values():
                 normalised = _normalise_energy_value(self.coordinator, val)
                 if normalised is None:

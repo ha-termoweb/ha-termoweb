@@ -22,6 +22,7 @@ from .heater import (
     iter_boostable_heater_nodes,
     log_skipped_nodes,
 )
+from .inventory import Inventory
 from .identifiers import build_heater_entity_unique_id
 from .utils import build_gateway_device_info
 
@@ -60,6 +61,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 unique_id,
                 device_name=base_name,
                 node_type=node_type,
+                inventory=heater_details.inventory,
             )
         )
 
@@ -153,6 +155,7 @@ class HeaterBoostActiveBinarySensor(HeaterNodeBase, BinarySensorEntity):
         *,
         device_name: str | None = None,
         node_type: str | None = None,
+        inventory: Inventory | None = None,
     ) -> None:
         """Initialise the boost activity binary sensor."""
 
@@ -165,6 +168,7 @@ class HeaterBoostActiveBinarySensor(HeaterNodeBase, BinarySensorEntity):
             unique_id,
             device_name=device_name,
             node_type=node_type,
+            inventory=inventory,
         )
 
     @property
