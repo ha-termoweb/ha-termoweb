@@ -48,6 +48,7 @@ from custom_components.termoweb.const import (
 )
 from custom_components.termoweb.inventory import (
     Inventory,
+    heater_sample_subscription_targets,
     normalize_node_addr,
     normalize_node_type,
     resolve_record_inventory,
@@ -978,10 +979,15 @@ class WebSocketClient(_WSCommon):
             self._inventory = container
             return container
 
-        inventory_container: Inventory | None
+        inventory_container: Inventory | None = None
         if isinstance(self._inventory, Inventory):
             inventory_container = _bind_inventory(self._inventory)
-        else:
+        elif isinstance(record_mapping, Mapping):
+            existing_inventory = record_mapping.get("inventory")
+            if isinstance(existing_inventory, Inventory):
+                inventory_container = _bind_inventory(existing_inventory)
+
+        if inventory_container is None:
             resolution = resolve_record_inventory(
                 record_mapping,
                 dev_id=self.dev_id,
@@ -992,7 +998,6 @@ class WebSocketClient(_WSCommon):
             if resolution.inventory is not None:
                 inventory_container = _bind_inventory(resolution.inventory)
             else:
-                inventory_container = None
                 _LOGGER.error(
                     "Unable to resolve shared inventory for entry %s (dev_id=%s, source=%s)",
                     self.entry_id,
@@ -1000,48 +1005,24 @@ class WebSocketClient(_WSCommon):
                     resolution.source,
                 )
 
-        normalized_map: Mapping[Any, Iterable[Any]] | None
-        if isinstance(inventory_container, Inventory):
-            normalized_map, _ = inventory_container.heater_sample_address_map
-        else:
-            normalized_map = {}
-
-        if not normalized_map.get("htr"):
-            fallback: Iterable[Any] | None = None
-            if hasattr(self._coordinator, "_addrs"):
-                try:
-                    fallback = self._coordinator._addrs()  # type: ignore[attr-defined]  # noqa: SLF001
-                except Exception:  # pragma: no cover - defensive
-                    fallback = None
-            if fallback:
-                normalised = list(normalized_map.get("htr", []))
-                seen = set(normalised)
-                for candidate in fallback:
-                    addr = normalize_node_addr(candidate)
-                    if not addr or addr in seen:
-                        continue
-                    seen.add(addr)
-                    normalised.append(addr)
-                if normalised:
-                    normalized_map = dict(normalized_map)
-                    normalized_map["htr"] = normalised
+        fallback_map: Mapping[str, Iterable[Any]] | None = None
+        if hasattr(self._coordinator, "_addrs"):
+            try:
+                fallback_addrs = self._coordinator._addrs()  # type: ignore[attr-defined]  # noqa: SLF001
+            except Exception:  # pragma: no cover - defensive
+                fallback_addrs = None
+            else:
+                if fallback_addrs:
+                    fallback_map = {"htr": fallback_addrs}
 
         normalized_map = self._apply_heater_addresses(
-            normalized_map,
+            fallback_map,
             inventory=inventory_container,
             log_prefix="WS",
             logger=_LOGGER,
         )
 
-        other_types = sorted(
-            node_type for node_type in normalized_map if node_type != "htr"
-        )
-        order = ["htr", *other_types]
-        return [
-            (node_type, addr)
-            for node_type in order
-            for addr in normalized_map.get(node_type, []) or []
-        ]
+        return heater_sample_subscription_targets(normalized_map)
 
     async def _subscribe_heater_samples(self) -> None:
         """Subscribe to heater and accumulator sample updates."""

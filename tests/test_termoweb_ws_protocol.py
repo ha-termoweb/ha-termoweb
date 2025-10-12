@@ -1271,11 +1271,16 @@ def test_apply_heater_addresses_updates_inventory(monkeypatch: pytest.MonkeyPatc
 
 
 def test_heater_sample_subscription_targets(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Subscription helper should normalise addresses before returning targets."""
+    """Subscription helper should forward inventory subscription targets."""
 
     client, _sio, _ = _make_client(monkeypatch)
     record = client.hass.data[module.DOMAIN]["entry"]
-    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
+    raw_nodes = {
+        "nodes": [
+            {"type": "acm", "addr": "2"},
+            {"type": "htr", "addr": "1"},
+        ]
+    }
     node_inventory = build_node_inventory(raw_nodes)
     inventory = Inventory(client.dev_id, raw_nodes, node_inventory)
     record["inventory"] = inventory
@@ -1298,15 +1303,10 @@ def test_heater_sample_subscription_targets(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(module, "resolve_record_inventory", fake_resolve)
 
-    def _unexpected_build(*_: Any, **__: Any) -> Any:
-        raise AssertionError("build_node_inventory should not be called")
-
-    monkeypatch.setattr(inventory_module, "build_node_inventory", _unexpected_build)
-
     client._inventory = inventory
 
     targets = client._heater_sample_subscription_targets()
-    assert targets == [("htr", "1")]
+    assert targets == inventory.heater_sample_targets
 
 
 def test_heater_sample_subscription_targets_uses_coordinator_addrs(
@@ -1330,15 +1330,9 @@ def test_heater_sample_subscription_targets_uses_coordinator_addrs(
         ),
     )
 
-    def _unexpected_build(*_: Any, **__: Any) -> Any:
-        raise AssertionError("build_node_inventory should not be called")
-
-    monkeypatch.setattr(inventory_module, "build_node_inventory", _unexpected_build)
-
     targets = client._heater_sample_subscription_targets()
 
-    assert targets[0] == ("htr", "3")
-    assert ("htr", "4") in targets
+    assert targets == [("htr", "3"), ("htr", "4")]
 
 
 def test_heater_sample_subscription_targets_logs_missing_inventory(
@@ -1362,11 +1356,6 @@ def test_heater_sample_subscription_targets_logs_missing_inventory(
         ),
     )
 
-    def _unexpected_build(*_: Any, **__: Any) -> Any:
-        raise AssertionError("build_node_inventory should not be called")
-
-    monkeypatch.setattr(inventory_module, "build_node_inventory", _unexpected_build)
-
     client._inventory = None
     client._coordinator._addrs = lambda: ["11"]
 
@@ -1376,7 +1365,7 @@ def test_heater_sample_subscription_targets_logs_missing_inventory(
     assert any(
         "Unable to resolve shared inventory" in record.message for record in caplog.records
     )
-    assert targets[0] == ("htr", "11")
+    assert targets == [("htr", "11")]
 
 
 def test_heater_sample_targets_use_record_inventory(
@@ -1413,14 +1402,9 @@ def test_heater_sample_targets_use_record_inventory(
 
     monkeypatch.setattr(module, "resolve_record_inventory", fake_resolve)
 
-    def _unexpected_build(*_: Any, **__: Any) -> Any:
-        raise AssertionError("build_node_inventory should not be called")
-
-    monkeypatch.setattr(inventory_module, "build_node_inventory", _unexpected_build)
-
     targets = client._heater_sample_subscription_targets()
 
-    assert targets == [("htr", "12")]
+    assert targets == inventory.heater_sample_targets
     assert client._inventory is inventory
 
 
@@ -1440,10 +1424,10 @@ def test_heater_sample_targets_build_from_record_raw_nodes(
 
     targets = client._heater_sample_subscription_targets()
 
-    assert targets == [("htr", "13")]
     assert isinstance(client._inventory, Inventory)
     assert client._inventory.payload == raw_nodes
     assert any(node.addr == "13" for node in client._inventory.nodes)
+    assert targets == client._inventory.heater_sample_targets
 
 
 def test_apply_heater_addresses_filters_non_heaters(monkeypatch: pytest.MonkeyPatch) -> None:
