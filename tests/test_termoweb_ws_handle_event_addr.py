@@ -9,6 +9,7 @@ import pytest
 from homeassistant.core import HomeAssistant
 
 from custom_components.termoweb.backend import termoweb_ws as module
+from custom_components.termoweb.inventory import Node
 from tests.test_termoweb_ws_protocol import DummyREST
 
 
@@ -23,10 +24,10 @@ def _make_hass() -> HomeAssistant:
     return hass
 
 
-def test_handle_event_normalises_addr_and_records_raw(
+def test_handle_event_normalises_addr_and_updates_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Events should normalise addresses for dispatch and clone raw payloads."""
+    """Events should normalise addresses for dispatch and cache settings."""
 
     hass = _make_hass()
     hass.data.setdefault(module.DOMAIN, {})["entry"] = {}
@@ -44,6 +45,12 @@ def test_handle_event_normalises_addr_and_records_raw(
         api_client=DummyREST(),
         coordinator=coordinator,
         session=SimpleNamespace(closed=False),
+    )
+
+    client._inventory = module.Inventory(
+        client.dev_id,
+        {"nodes": [{"type": "htr", "addr": "2"}]},
+        (Node(name="Heater", addr="2", node_type="htr"),),
     )
 
     nodes_body: Mapping[str, Any] = {"htr": {"settings": {" 2 ": {"mode": "auto"}}}}
@@ -69,9 +76,9 @@ def test_handle_event_normalises_addr_and_records_raw(
     assert settings_payload is not None
     assert settings_payload["inventory_addresses"] == {"htr": ["2"]}
 
-    raw_store = client._nodes_raw
-    assert raw_store["htr"]["settings"][" 2 "] == {"mode": "manual", "flags": ["eco"]}
-    assert raw_store["htr"]["settings"][" 2 "] is not settings_body
+    dev_record = coordinator.data["device"]
+    cached_settings = dev_record["settings"]["htr"]["2"]
+    assert cached_settings == {"mode": "manual", "flags": ["eco"]}
 
     settings_body["flags"].append("boost")
-    assert raw_store["htr"]["settings"][" 2 "]["flags"] == ["eco"]
+    assert cached_settings["flags"] == ["eco"]

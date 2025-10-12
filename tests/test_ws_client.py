@@ -477,18 +477,6 @@ def test_ws_state_bucket_initialises_missing_data(
     assert module.DOMAIN in client.hass.data
     assert client.hass.data[module.DOMAIN]["entry"]["ws_state"]["device"] is bucket
 
-
-def test_collect_update_addresses_extracts() -> None:
-    """Ensure update address extraction returns sorted node/type pairs."""
-
-    nodes = {
-        "htr": {"settings": {"1": {"temp": 20}, "2": None}},
-        "aux": {"samples": {"3": 10}},
-    }
-    addresses = module.WebSocketClient._collect_update_addresses(nodes)
-    assert addresses == [("aux", "3"), ("htr", "1")]
-
-
 def test_handshake_error_exposes_status_and_url() -> None:
     """Ensure ``HandshakeError`` forwards the status and URL details."""
 
@@ -834,15 +822,6 @@ async def test_websocket_client_reuses_delegate(
 
     client._delegate = None
     assert await client.ws_url() == ""
-
-
-def test_collect_update_addresses_skips_invalid() -> None:
-    """Non-mapping payloads should be ignored when collecting addresses."""
-
-    nodes: Mapping[str, Any] = {"htr": [1, 2], 10: {"settings": {"1": {}}}}
-    assert module.WebSocketClient._collect_update_addresses(nodes) == []
-
-
 
 def test_ducaheat_brand_headers_include_expected_fields() -> None:
     """Verify Ducaheat brand headers contain required keys."""

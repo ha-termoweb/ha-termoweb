@@ -157,7 +157,7 @@ def _make_client(
     hass.loop = hass_loop
     hass.loop_thread_id = threading.get_ident()
     hass.data.setdefault(module.DOMAIN, {})["entry"] = {}
-    coordinator = SimpleNamespace(update_nodes=MagicMock(), data={})
+    coordinator = SimpleNamespace(update_nodes=MagicMock(), data={}, inventory=None)
     client = module.WebSocketClient(
         hass,
         entry_id="entry",
@@ -928,28 +928,6 @@ def test_apply_nodes_payload_merges_and_dispatches(monkeypatch: pytest.MonkeyPat
     client._mark_event.assert_called()
 
 
-def test_collect_update_addresses_handles_invalid_entries() -> None:
-    """collect_update_addresses should filter invalid keys."""
-
-    nodes = {
-        "htr": {"settings": {"1": {}, 2: None}, "samples": {"1": {"power": 10}}, "extra": []},
-        3: {},
-    }
-    addresses = module.WebSocketClient._collect_update_addresses(nodes)
-    assert addresses == [("htr", "1")]
-
-
-def test_collect_update_addresses_skips_non_mapping_sections() -> None:
-    """Non-mapping sections should be ignored when collecting addresses."""
-
-    nodes = {
-        "htr": {"settings": [], "samples": {"1": {"power": 5}}, "advanced": "nope"},
-        "acm": "invalid",
-    }
-    addresses = module.WebSocketClient._collect_update_addresses(nodes)
-    assert addresses == [("htr", "1")]
-
-
 def test_dispatch_nodes_with_inventory(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
     """dispatch_nodes should support pre-existing inventory records."""
 
@@ -1085,6 +1063,13 @@ def test_handle_event_includes_inventory_addresses(
         api_client=DummyREST(),
         coordinator=coordinator,
         session=SimpleNamespace(closed=False),
+    )
+
+    inventory_payload = {"nodes": [{"type": "htr", "addr": "2"}]}
+    client._inventory = Inventory(
+        client.dev_id,
+        inventory_payload,
+        build_node_inventory(inventory_payload),
     )
 
     event_payload = {
@@ -1248,136 +1233,36 @@ def test_apply_heater_addresses_updates_inventory(monkeypatch: pytest.MonkeyPatc
 
 
 def test_heater_sample_subscription_targets(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Subscription helper should forward inventory subscription targets."""
+    """Subscription helper should return inventory-derived targets."""
 
     client, _sio, _ = _make_client(monkeypatch)
-    record = client.hass.data[module.DOMAIN]["entry"]
-    raw_nodes = {
-        "nodes": [
-            {"type": "acm", "addr": "2"},
-            {"type": "htr", "addr": "1"},
-        ]
-    }
-    node_inventory = build_node_inventory(raw_nodes)
-    inventory = Inventory(client.dev_id, raw_nodes, node_inventory)
-    record["inventory"] = inventory
-
-    def fake_resolve(
-        record_map: Mapping[str, Any] | None,
-        *,
-        dev_id: str | None = None,
-        nodes_payload: Any | None = None,
-    ) -> Any:
-        assert record_map is record
-        assert dev_id == client.dev_id
-        assert nodes_payload is None
-        return SimpleNamespace(
-            inventory=inventory,
-            source="inventory",
-            raw_count=len(node_inventory),
-            filtered_count=len(node_inventory),
-        )
-
-    monkeypatch.setattr(module, "resolve_record_inventory", fake_resolve)
-
-    client._inventory = inventory
-
-    targets = client._heater_sample_subscription_targets()
-    assert targets == inventory.heater_sample_targets
-
-
-def test_heater_sample_subscription_targets_ignore_fallback_addrs(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Coordinator-provided addresses are ignored when inventory is empty."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    record = client.hass.data[module.DOMAIN]["entry"]
-    client._coordinator._addrs = lambda: [" 3 ", "3", "4"]
-    inventory = Inventory(client.dev_id, {}, [])
-
-    monkeypatch.setattr(
-        module,
-        "resolve_record_inventory",
-        lambda *_, **__: SimpleNamespace(
-            inventory=inventory,
-            source="inventory",
-            raw_count=0,
-            filtered_count=0,
-        ),
-    )
-
-    targets = client._heater_sample_subscription_targets()
-
-    assert targets == []
-
-
-def test_heater_sample_subscription_targets_logs_missing_inventory(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Missing shared inventory should be logged without rebuilding."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    record = client.hass.data[module.DOMAIN]["entry"]
-    record.pop("inventory", None)
-
-    monkeypatch.setattr(
-        module,
-        "resolve_record_inventory",
-        lambda *_, **__: SimpleNamespace(
-            inventory=None,
-            source="fallback",
-            raw_count=0,
-            filtered_count=0,
-        ),
-    )
-
-    client._inventory = None
-    client._coordinator._addrs = lambda: ["11"]
-
-    with caplog.at_level(logging.ERROR):
-        targets = client._heater_sample_subscription_targets()
-
-    assert any(
-        "Unable to resolve shared inventory" in record.message for record in caplog.records
-    )
-    assert targets == []
-
-
-def test_heater_sample_targets_use_record_inventory(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Record-scoped inventory containers should be reused."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    record = client.hass.data[module.DOMAIN]["entry"]
-    raw_nodes = {"nodes": [{"type": "htr", "addr": "12"}]}
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}, {"type": "acm", "addr": "2"}]}
     inventory = Inventory(
         client.dev_id,
         raw_nodes,
         build_node_inventory(raw_nodes),
     )
-    record["inventory"] = inventory
+    client._inventory = inventory
+
+    targets = client._heater_sample_subscription_targets()
+
+    assert targets == inventory.heater_sample_targets
+
+
+def test_heater_sample_subscription_targets_use_coordinator_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Coordinator-provided inventory should seed subscription targets."""
+
+    client, _sio, _ = _make_client(monkeypatch)
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "3"}]}
+    inventory = Inventory(
+        client.dev_id,
+        raw_nodes,
+        build_node_inventory(raw_nodes),
+    )
     client._inventory = None
-
-    def fake_resolve(
-        record_map: Mapping[str, Any] | None,
-        *,
-        dev_id: str | None = None,
-        nodes_payload: Any | None = None,
-    ) -> Any:
-        assert record_map is record
-        assert dev_id == client.dev_id
-        assert nodes_payload is None
-        return SimpleNamespace(
-            inventory=inventory,
-            source="inventory",
-            raw_count=len(inventory.nodes),
-            filtered_count=len(inventory.nodes),
-        )
-
-    monkeypatch.setattr(module, "resolve_record_inventory", fake_resolve)
+    client._coordinator.inventory = inventory
 
     targets = client._heater_sample_subscription_targets()
 
@@ -1385,26 +1270,40 @@ def test_heater_sample_targets_use_record_inventory(
     assert client._inventory is inventory
 
 
-def test_heater_sample_targets_build_from_record_raw_nodes(
+def test_heater_sample_subscription_targets_logs_missing_inventory(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Raw node payloads should seed inventory rebuilds when cached inventory is missing."""
+    """Missing inventory should be logged when resolving subscription targets."""
+
+    client, _sio, _ = _make_client(monkeypatch)
+    client._inventory = None
+    client._coordinator.inventory = None
+
+    with caplog.at_level(logging.ERROR):
+        targets = client._heater_sample_subscription_targets()
+
+    assert not targets
+    assert any(
+        "missing inventory" in record.message for record in caplog.records
+    )
+
+
+def test_heater_sample_targets_do_not_rebuild_from_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Raw node snapshots should not trigger inventory rebuilds."""
 
     client, _sio, _ = _make_client(monkeypatch)
     record = client.hass.data[module.DOMAIN]["entry"]
-    raw_nodes = {"nodes": [{"type": "htr", "addr": "13"}]}
     record.clear()
-    record["nodes"] = raw_nodes
-    record.pop("inventory", None)
+    record["nodes"] = {"nodes": [{"type": "htr", "addr": "13"}]}
 
     client._inventory = None
+    client._coordinator.inventory = None
 
     targets = client._heater_sample_subscription_targets()
 
-    assert isinstance(client._inventory, Inventory)
-    assert client._inventory.payload == raw_nodes
-    assert any(node.addr == "13" for node in client._inventory.nodes)
-    assert targets == client._inventory.heater_sample_targets
+    assert targets == []
+    assert client._inventory is None
 
 
 def test_apply_heater_addresses_filters_non_heaters(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -50,7 +50,6 @@ from custom_components.termoweb.inventory import (
     Inventory,
     normalize_node_addr,
     normalize_node_type,
-    resolve_record_inventory,
 )
 
 from .ws_client import (
@@ -676,20 +675,10 @@ class WebSocketClient(_WSCommon):
                 nodes = normaliser(nodes)  # type: ignore[arg-type]
             except Exception:  # pragma: no cover - defensive logging only
                 _LOGGER.debug("WS: normalise_ws_nodes failed; using raw payload")
-        if _LOGGER.isEnabledFor(logging.DEBUG):
-            changed = self._collect_update_addresses(nodes)
-            if merge:
-                if changed:
-                    _LOGGER.debug(
-                        "WS: update event for %s",
-                        ", ".join(f"{node_type}/{addr}" for node_type, addr in changed),
-                    )
-                else:
-                    _LOGGER.debug("WS: update event without address changes")
-            else:
-                _LOGGER.debug(
-                    "WS: dev_data snapshot contains %d node groups", len(nodes)
-                )
+        if _LOGGER.isEnabledFor(logging.DEBUG) and not merge:
+            _LOGGER.debug(
+                "WS: dev_data snapshot contains %d node groups", len(nodes)
+            )
         sample_updates: dict[str, dict[str, Any]] = {}
         for node_type, type_payload in nodes.items():
             if not isinstance(node_type, str) or not isinstance(type_payload, Mapping):
@@ -710,7 +699,19 @@ class WebSocketClient(_WSCommon):
                     "lease_seconds": lease_seconds,
                 }
 
-        self._dispatch_nodes(nodes)
+        address_map = self._dispatch_nodes(nodes)
+        if merge and _LOGGER.isEnabledFor(logging.DEBUG):
+            pairs: list[str] = []
+            for node_type, addresses in address_map.items():
+                if not isinstance(node_type, str) or not addresses:
+                    continue
+                for addr in addresses:
+                    if isinstance(addr, str) and addr:
+                        pairs.append(f"{node_type}/{addr}")
+            if pairs:
+                _LOGGER.debug("WS: update event for %s", ", ".join(sorted(pairs)))
+            else:
+                _LOGGER.debug("WS: update event without address changes")
         if sample_updates:
             self._mark_ws_payload(
                 timestamp=time.time(),
@@ -797,22 +798,6 @@ class WebSocketClient(_WSCommon):
                 translated.pop(node_type, None)
         return translated
 
-    @staticmethod
-    def _collect_update_addresses(nodes: Mapping[str, Any]) -> list[tuple[str, str]]:
-        """Return a sorted list of ``(node_type, addr)`` pairs in ``nodes``."""
-
-        found: set[tuple[str, str]] = set()
-        for node_type, payload in nodes.items():
-            if not isinstance(node_type, str) or not isinstance(payload, Mapping):
-                continue
-            for section in payload.values():
-                if not isinstance(section, Mapping):
-                    continue
-                for addr, value in section.items():
-                    if isinstance(addr, str) and value is not None:
-                        found.add((node_type, addr))
-        return sorted(found)
-
     def _dispatch_nodes(self, payload: Mapping[str, Any]) -> dict[str, list[str]]:
         """Publish node updates and return the address map by node type."""
 
@@ -894,60 +879,27 @@ class WebSocketClient(_WSCommon):
     def _heater_sample_subscription_targets(self) -> list[tuple[str, str]]:
         """Return ordered ``(node_type, addr)`` heater sample subscriptions."""
 
-        record_container = self.hass.data.get(DOMAIN, {})
-        record = (
-            record_container.get(self.entry_id)
-            if isinstance(record_container, dict)
-            else None
-        )
-        record_mapping: Mapping[str, Any] | None = (
-            record if isinstance(record, Mapping) else None
-        )
-        record_mutable: MutableMapping[str, Any] | None = (
-            record if isinstance(record, MutableMapping) else None
-        )
+        inventory = self._inventory if isinstance(self._inventory, Inventory) else None
+        if inventory is None:
+            coordinator_inventory = getattr(self._coordinator, "inventory", None)
+            if isinstance(coordinator_inventory, Inventory):
+                inventory = coordinator_inventory
+                self._inventory = coordinator_inventory
 
-        def _bind_inventory(container: Inventory) -> Inventory:
-            """Cache ``container`` across runtime state helpers."""
-
-            if isinstance(record_mutable, MutableMapping):
-                record_mutable["inventory"] = container
-            self._inventory = container
-            return container
-
-        inventory_container: Inventory | None = None
-        if isinstance(self._inventory, Inventory):
-            inventory_container = _bind_inventory(self._inventory)
-        elif isinstance(record_mapping, Mapping):
-            existing_inventory = record_mapping.get("inventory")
-            if isinstance(existing_inventory, Inventory):
-                inventory_container = _bind_inventory(existing_inventory)
-
-        if inventory_container is None:
-            resolution = resolve_record_inventory(
-                record_mapping,
-                dev_id=self.dev_id,
-                nodes_payload=record_mapping.get("nodes")
-                if isinstance(record_mapping, Mapping)
-                else None,
+        if inventory is None:
+            _LOGGER.error(
+                "WS: missing inventory for heater sample subscriptions (entry=%s dev_id=%s)",
+                self.entry_id,
+                self.dev_id,
             )
-            if resolution.inventory is not None:
-                inventory_container = _bind_inventory(resolution.inventory)
-            else:
-                _LOGGER.error(
-                    "Unable to resolve shared inventory for entry %s (dev_id=%s, source=%s)",
-                    self.entry_id,
-                    self.dev_id,
-                    resolution.source,
-                )
+            return []
 
-        if isinstance(inventory_container, Inventory):
-            try:
-                return list(inventory_container.heater_sample_targets)
-            except Exception:  # pragma: no cover - defensive cache guard
-                _LOGGER.debug(
-                    "WS: failed to resolve heater sample targets", exc_info=True
-                )
+        try:
+            return list(inventory.heater_sample_targets)
+        except Exception:  # pragma: no cover - defensive cache guard
+            _LOGGER.debug(
+                "WS: failed to resolve heater sample targets", exc_info=True
+            )
         return []
 
     async def _subscribe_heater_samples(self) -> None:
@@ -1115,7 +1067,6 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self._last_heartbeat_at: float | None = None
 
         self._handshake_payload: dict[str, Any] | None = None
-        self._nodes_raw: dict[str, Any] = {}
 
         self._inventory: Inventory | None = inventory
 
@@ -1532,8 +1483,9 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             return
         paths: list[str] = []
         updated_nodes = False
-        updated_addrs: list[tuple[str, str]] = []
-        sample_addrs: list[tuple[str, str]] = []
+        updated_addrs: set[tuple[str, str]] = set()
+        sample_addrs: set[tuple[str, str]] = set()
+        updated_types: set[str] = set()
 
         def _extract_type_addr(path: str) -> tuple[str | None, str | None]:
             """Extract the node type and address from a websocket path."""
@@ -1549,29 +1501,46 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                     return node_type, addr
             return None, None
 
-        touched_addrs: dict[str, set[str]] = {}
+        def _canonical_type(value: Any) -> str | None:
+            """Return the canonical node type string."""
 
-        def _normalise_addr(value: Any) -> str | None:
-            """Return a normalised representation of a node address."""
-
-            normalized = normalize_node_addr(value)
-            if normalized:
-                return normalized
-            if isinstance(value, str):
-                stripped = value.strip()
-                return stripped or None
-            if value is None:
+            if not isinstance(value, str):
                 return None
-            candidate = str(value)
-            return candidate if candidate else None
+            canonical = normalize_node_type(value, use_default_when_falsey=True)
+            if canonical:
+                return canonical
+            stripped = value.strip()
+            return stripped or None
 
-        def _record_addr(node_type: str, value: Any) -> str | None:
-            """Normalise ``value`` and add it to ``touched_addrs``."""
+        def _canonical_addr(node_type: str, value: Any) -> str | None:
+            """Return the canonical address for ``node_type`` from inventory."""
 
-            normalised = _normalise_addr(value)
-            if normalised:
-                touched_addrs.setdefault(node_type, set()).add(normalised)
-            return normalised
+            candidate = normalize_node_addr(value, use_default_when_falsey=True)
+            if not candidate and isinstance(value, str):
+                stripped = value.strip()
+                candidate = stripped or None
+            if not candidate and value is not None and not isinstance(value, str):
+                candidate = str(value).strip() or None
+
+            inventory = self._inventory if isinstance(self._inventory, Inventory) else None
+            if candidate and inventory is not None:
+                try:
+                    addresses_map = inventory.addresses_by_type
+                except Exception:  # pragma: no cover - defensive cache guard
+                    addresses_map = {}
+                canonical_type = _canonical_type(node_type) or node_type
+                known = addresses_map.get(canonical_type)
+                if isinstance(known, list) and candidate in known:
+                    return candidate
+                try:
+                    _, reverse_map = inventory.heater_address_map
+                except Exception:  # pragma: no cover - defensive cache guard
+                    reverse_map = {}
+                else:
+                    alias_types = reverse_map.get(candidate)
+                    if alias_types and canonical_type in alias_types:
+                        return candidate
+            return candidate
 
         for item in batch:
             if not isinstance(item, Mapping):
@@ -1599,23 +1568,15 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 if isinstance(body, Mapping):
                     type_to_addrs = self._dispatch_nodes(body)
                     if isinstance(type_to_addrs, Mapping):
-                        for node_type, addrs in type_to_addrs.items():
-                            if isinstance(addrs, list):
-                                iterable = addrs
-                            elif isinstance(addrs, Iterable) and not isinstance(
-                                addrs, (str, bytes)
-                            ):
-                                iterable = list(addrs)
-                                if isinstance(type_to_addrs, MutableMapping):
-                                    type_to_addrs[node_type] = iterable
-                            else:
-                                continue
-                            for addr_candidate in iterable:
-                                _record_addr(node_type, addr_candidate)
+                        for node_type in type_to_addrs:
+                            canonical_type = _canonical_type(node_type)
+                            if canonical_type:
+                                updated_types.add(canonical_type)
                     updated_nodes = True
                 continue
             node_type, addr = _extract_type_addr(path)
-            if node_type and addr and node_type != "mgr":
+            canonical_type = _canonical_type(node_type)
+            if canonical_type and addr and canonical_type != "mgr":
                 section = self._legacy_section_for_path(path)
                 if section:
                     if section in {"settings", "advanced"} and not isinstance(
@@ -1629,11 +1590,18 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                         body=body,
                         dev_map=dev_map,
                     ):
-                        recorded_addr = _record_addr(node_type, addr)
-                        if section == "samples":
-                            sample_addrs.append((node_type, recorded_addr or addr))
-                        elif section == "settings":
-                            updated_addrs.append((node_type, recorded_addr or addr))
+                        updated_types.add(canonical_type)
+                        payload_addr = _canonical_addr(canonical_type, addr)
+                        if not payload_addr and isinstance(addr, str):
+                            stripped = addr.strip()
+                            payload_addr = stripped or None
+                        elif not payload_addr and addr is not None:
+                            candidate = str(addr).strip()
+                            payload_addr = candidate or None
+                        if payload_addr and section == "samples":
+                            sample_addrs.add((canonical_type, payload_addr))
+                        elif payload_addr and section == "settings":
+                            updated_addrs.add((canonical_type, payload_addr))
                         updated_nodes = True
                     continue
             raw = dev_map.setdefault("raw", {})
@@ -1646,24 +1614,36 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             timestamp=payload_ts,
             stale_after=self._payload_idle_window,
         )
+        inventory = self._inventory if isinstance(self._inventory, Inventory) else None
+        addresses_by_type: dict[str, list[str]] = {}
+        if inventory is not None:
+            try:
+                addresses_by_type = inventory.addresses_by_type
+            except Exception:  # pragma: no cover - defensive cache guard
+                _LOGGER.debug(
+                    "WS: failed to resolve inventory addresses", exc_info=True
+                )
+                addresses_by_type = {}
+
         payload_base = {
             "dev_id": self.dev_id,
             "ts": self._stats.last_event_ts,
             "node_type": None,
         }
-        addr_map_payload = {
-            node_type: sorted(addresses)
-            for node_type, addresses in touched_addrs.items()
-            if addresses
-        }
+        addr_map_payload: dict[str, list[str]] = {}
+        if updated_types and addresses_by_type:
+            for node_type in sorted(updated_types):
+                addresses = addresses_by_type.get(node_type)
+                if addresses:
+                    addr_map_payload[node_type] = sorted(addresses)
         if updated_nodes:
             nodes_payload: dict[str, Any] = {
                 **payload_base,
                 "addr": None,
                 "kind": "nodes",
             }
-            if isinstance(self._inventory, Inventory):
-                nodes_payload["inventory"] = self._inventory
+            if inventory is not None:
+                nodes_payload["inventory"] = inventory
             if addr_map_payload:
                 nodes_payload["inventory_addresses"] = addr_map_payload
             async_dispatcher_send(
@@ -1671,38 +1651,34 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 signal_ws_data(self.entry_id),
                 nodes_payload,
             )
-        for node_type, addr in set(updated_addrs):
-            addr_str = _normalise_addr(addr) or (
-                addr if isinstance(addr, str) else None
-            )
+        for node_type, addr in sorted(updated_addrs):
+            addr_str = addr if isinstance(addr, str) and addr else None
             settings_payload: dict[str, Any] = {
                 **payload_base,
                 "addr": addr,
                 "kind": f"{node_type}_settings",
                 "node_type": node_type,
             }
-            if isinstance(self._inventory, Inventory):
-                settings_payload["inventory"] = self._inventory
-            if addr_str is not None:
+            if inventory is not None:
+                settings_payload["inventory"] = inventory
+            if addr_str and addresses_by_type.get(node_type):
                 settings_payload["inventory_addresses"] = {node_type: [addr_str]}
             async_dispatcher_send(
                 self.hass,
                 signal_ws_data(self.entry_id),
                 settings_payload,
             )
-        for node_type, addr in set(sample_addrs):
-            addr_str = _normalise_addr(addr) or (
-                addr if isinstance(addr, str) else None
-            )
+        for node_type, addr in sorted(sample_addrs):
+            addr_str = addr if isinstance(addr, str) and addr else None
             samples_payload: dict[str, Any] = {
                 **payload_base,
                 "addr": addr,
                 "kind": f"{node_type}_samples",
                 "node_type": node_type,
             }
-            if isinstance(self._inventory, Inventory):
-                samples_payload["inventory"] = self._inventory
-            if addr_str is not None:
+            if inventory is not None:
+                samples_payload["inventory"] = inventory
+            if addr_str and addresses_by_type.get(node_type):
                 samples_payload["inventory_addresses"] = {node_type: [addr_str]}
             async_dispatcher_send(
                 self.hass,
@@ -1788,15 +1764,9 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                     if isinstance(existing_payload, MutableMapping) and isinstance(
                         value, Mapping
                     ):
-                        existing_payload.update(value)
+                        existing_payload.update(deepcopy(value))
                     else:
-                        settings_bucket[normalised_addr] = value
-        raw_store = getattr(self, "_nodes_raw", None)
-        if isinstance(raw_store, MutableMapping):
-            raw_bucket = raw_store.setdefault(node_type, {})
-            raw_section = raw_bucket.setdefault(section, {})
-            if isinstance(raw_section, dict):
-                raw_section[addr] = deepcopy(body)
+                        settings_bucket[normalised_addr] = deepcopy(value)
         return True
 
     @staticmethod

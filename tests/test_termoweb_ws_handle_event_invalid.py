@@ -25,6 +25,7 @@ def _make_client() -> TermoWebWSClient:
     client._payload_idle_window = 240.0
     client._mark_event = MagicMock(name="_mark_event")
     client._mark_ws_payload = MagicMock(name="_mark_ws_payload")
+    client._inventory = None
     return client
 
 
