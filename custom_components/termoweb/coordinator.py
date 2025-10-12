@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 import logging
 import time
 from time import monotonic as time_mod
-from typing import Any, TypeVar, cast
+from typing import Any, TypeVar
 
 from aiohttp import ClientError
 from homeassistant.core import HomeAssistant
@@ -20,7 +20,6 @@ from .boost import coerce_int, resolve_boost_end_from_fields
 from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
 from .inventory import (
     Inventory,
-    build_node_inventory,
     normalize_node_addr,
     normalize_node_type,
 )
@@ -528,47 +527,19 @@ class StateCoordinator(
     ) -> None:
         """Update cached node payload and inventory."""
 
-        valid_inventory: Inventory | None = None
         if isinstance(inventory, Inventory):
-            valid_inventory = inventory
-        elif (
-            inventory is not None
-            and hasattr(inventory, "payload")
-            and hasattr(inventory, "nodes")
-            and hasattr(inventory, "heater_address_map")
-        ):
-            valid_inventory = cast(Inventory, inventory)
-        elif inventory is not None and not self._invalid_inventory_logged:
+            self._inventory = inventory
+            self._invalid_inventory_logged = False
+            self._invalid_nodes_logged = False
+            return
+
+        if inventory is not None and not self._invalid_inventory_logged:
             _LOGGER.debug(
                 "Ignoring unexpected inventory container (type=%s): %s",
                 type(inventory).__name__,
                 inventory,
             )
             self._invalid_inventory_logged = True
-
-        if valid_inventory is not None:
-            self._inventory = valid_inventory
-            self._invalid_inventory_logged = False
-            self._invalid_nodes_logged = False
-            return
-
-        if isinstance(nodes, Mapping):
-            try:
-                node_list = list(build_node_inventory(nodes))
-            except ValueError as err:  # pragma: no cover - defensive
-                if not self._invalid_nodes_logged:
-                    _LOGGER.debug(
-                        "Failed to rebuild inventory from nodes payload: %s",
-                        err,
-                        exc_info=err,
-                    )
-                    self._invalid_nodes_logged = True
-                return
-
-            self._inventory = Inventory(self._dev_id, nodes, node_list)
-            self._invalid_inventory_logged = False
-            self._invalid_nodes_logged = False
-            return
 
         if nodes is not None and not isinstance(nodes, Mapping):
             if not self._invalid_nodes_logged:
@@ -578,10 +549,11 @@ class StateCoordinator(
                     nodes,
                 )
                 self._invalid_nodes_logged = True
-            return
+        else:
+            self._invalid_nodes_logged = False
 
-        self._invalid_nodes_logged = False
         if inventory is None:
+            self._inventory = None
             self._invalid_inventory_logged = False
 
     def _ensure_inventory(self) -> Inventory | None:
@@ -815,11 +787,11 @@ class EnergyStateCoordinator(
 
     def update_addresses(
         self,
-        inventory: Inventory | Mapping[str, Iterable[str]] | Iterable[str] | None,
+        inventory: Inventory | None,
     ) -> None:
         """Replace the tracked nodes using immutable inventory metadata."""
 
-        self._inventory = self._coerce_inventory(inventory)
+        self._inventory = inventory if isinstance(inventory, Inventory) else None
 
         valid_keys = {pair for pair in self._iter_tracked_pairs()}
         if not valid_keys:
@@ -828,30 +800,6 @@ class EnergyStateCoordinator(
             self._last = {
                 key: value for key, value in self._last.items() if key in valid_keys
             }
-
-    def _coerce_inventory(
-        self,
-        source: Inventory | Mapping[str, Iterable[str]] | Iterable[str] | None,
-    ) -> Inventory | None:
-        """Return an ``Inventory`` built from ``source`` when necessary."""
-
-        if isinstance(source, Inventory):
-            return source
-        if isinstance(source, Mapping):
-            payload_nodes = [
-                {"type": node_type, "addr": addr}
-                for node_type, values in source.items()
-                if isinstance(values, Iterable) and not isinstance(values, (str, bytes))
-                for addr in values
-            ]
-            payload = {"nodes": payload_nodes}
-            node_list = list(build_node_inventory(payload))
-            return Inventory(self._dev_id, payload, node_list)
-        if isinstance(source, Iterable) and not isinstance(source, (str, bytes)):
-            payload = {"nodes": [{"type": "htr", "addr": addr} for addr in source]}
-            node_list = list(build_node_inventory(payload))
-            return Inventory(self._dev_id, payload, node_list)
-        return None
 
     def _iter_tracked_pairs(self) -> set[tuple[str, str]]:
         """Return canonical ``(node_type, addr)`` pairs tracked by the coordinator."""

@@ -25,6 +25,7 @@ from .heater import (
     DEFAULT_BOOST_DURATION,
     HeaterNodeBase,
     clear_climate_entity_id,
+    HeaterPlatformDetails,
     derive_boost_state,
     log_skipped_nodes,
     register_climate_entity_id,
@@ -39,6 +40,7 @@ from .inventory import (
     normalize_node_addr,
     normalize_node_type,
 )
+
 from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
@@ -62,72 +64,53 @@ async def async_setup_entry(hass, entry, async_add_entities):
         )
         return
 
-    default_name_simple = lambda addr: f"Heater {addr}"
+    def default_name_simple(addr: str) -> str:
+        """Return fallback name for heater nodes."""
+
+        return f"Heater {addr}"
     new_entities: list[ClimateEntity] = []
 
-    _, addresses_by_type, resolve_name = (
-        heater_platform_details_from_inventory(
-            inventory,
-            default_name_simple=default_name_simple,
-        )
+    heater_details = HeaterPlatformDetails(
+        inventory=inventory,
+        default_name_simple=default_name_simple,
     )
 
-    node_lookup: dict[tuple[str, str], Any] = {}
-    for node in inventory.heater_nodes:
-        node_type = normalize_node_type(
-            getattr(node, "type", None),
-            use_default_when_falsey=True,
-        )
-        addr = normalize_node_addr(
-            getattr(node, "addr", None),
-            use_default_when_falsey=True,
-        )
-        if not node_type or not addr:
-            continue
-        node_lookup.setdefault((node_type, addr), node)
-
-    for node_type, addresses in addresses_by_type.items():
-        if not addresses:
-            continue
+    for node_type, node, addr_str, base_name in heater_details.iter_metadata():
         canonical_type = normalize_node_type(
             node_type,
             use_default_when_falsey=True,
         )
-        if not canonical_type:
+        addr = normalize_node_addr(
+            addr_str,
+            use_default_when_falsey=True,
+        )
+        if not canonical_type or not addr:
             continue
-        for raw_addr in addresses:
-            addr_str = normalize_node_addr(
-                raw_addr,
-                use_default_when_falsey=True,
-            )
-            if not addr_str:
-                continue
-            resolved_name = resolve_name(canonical_type, addr_str)
-            unique_id = build_heater_entity_unique_id(
+        unique_id = build_heater_entity_unique_id(
+            dev_id,
+            canonical_type,
+            addr,
+            ":climate",
+        )
+        entity_cls: type[HeaterClimateEntity]
+        if canonical_type == "acm" or supports_boost(node):
+            entity_cls = AccumulatorClimateEntity
+        else:
+            entity_cls = HeaterClimateEntity
+        new_entities.append(
+            entity_cls(
+                coordinator,
+                entry.entry_id,
                 dev_id,
-                canonical_type,
-                addr_str,
-                ":climate",
+                addr,
+                base_name,
+                unique_id,
+                node_type=canonical_type,
+                inventory=heater_details.inventory,
             )
-            node = node_lookup.get((canonical_type, addr_str))
-            entity_cls: type[HeaterClimateEntity]
-            if canonical_type == "acm" or supports_boost(node):
-                entity_cls = AccumulatorClimateEntity
-            else:
-                entity_cls = HeaterClimateEntity
-            new_entities.append(
-                entity_cls(
-                    coordinator,
-                    entry.entry_id,
-                    dev_id,
-                    addr_str,
-                    resolved_name,
-                    unique_id,
-                    node_type=canonical_type,
-                )
-            )
+        )
 
-    log_skipped_nodes("climate", inventory, logger=_LOGGER)
+    log_skipped_nodes("climate", heater_details, logger=_LOGGER)
     if new_entities:
         _LOGGER.debug("Adding %d TermoWeb heater entities", len(new_entities))
         async_add_entities(new_entities)

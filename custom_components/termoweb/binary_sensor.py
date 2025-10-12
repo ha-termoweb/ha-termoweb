@@ -14,7 +14,7 @@ from homeassistant.core import callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .boost import supports_boost
+from .boost import iter_inventory_heater_metadata, supports_boost
 from .const import DOMAIN, signal_ws_data, signal_ws_status
 from .coordinator import StateCoordinator
 from .entity import GatewayDispatcherEntity
@@ -299,30 +299,18 @@ def _iter_boostable_inventory_nodes(
 ) -> Iterable[tuple[str, str, str]]:
     """Yield boostable heater metadata from ``inventory``."""
 
-    forward_map, _ = inventory.heater_address_map
-    nodes_by_type = inventory.nodes_by_type
-
-    for node_type, addresses in forward_map.items():
-        canonical_type = normalize_node_type(node_type, use_default_when_falsey=True)
-        if not canonical_type:
+    for node_type, addr, base_name, node in iter_inventory_heater_metadata(inventory):
+        if not supports_boost(node):
             continue
-
-        nodes = {
-            normalize_node_addr(candidate.addr, use_default_when_falsey=True): candidate
-            for candidate in nodes_by_type.get(canonical_type, [])
-        }
-        for addr in addresses:
-            canonical_addr = normalize_node_addr(addr, use_default_when_falsey=True)
-            if not canonical_addr:
-                continue
-            node = nodes.get(canonical_addr)
-            if node is None or not supports_boost(node):
-                continue
-            yield (
-                canonical_type,
-                canonical_addr,
-                inventory.resolve_heater_name(canonical_type, canonical_addr),
-            )
+        canonical_type = normalize_node_type(node_type, use_default_when_falsey=True)
+        canonical_addr = normalize_node_addr(addr, use_default_when_falsey=True)
+        if not canonical_type or not canonical_addr:
+            continue
+        yield (
+            canonical_type,
+            canonical_addr,
+            base_name,
+        )
 
 
 def _build_settings_resolver(

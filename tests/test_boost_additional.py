@@ -74,7 +74,7 @@ def test_iter_inventory_heater_metadata_covers_branch_variants(
         " ": ["1"],
         "acm-empty": [],
         "htr": ["4"],
-        "acm": ["", "5"],
+        "acm": ["", "5", 6],
         "thm": ["7"],
     }
 

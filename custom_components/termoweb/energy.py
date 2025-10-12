@@ -323,7 +323,7 @@ async def _clear_statistics_compat(  # pragma: no cover - compatibility shim
 async def async_import_energy_history(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    nodes: Inventory | Mapping[str, Iterable[str]] | Iterable[str] | None = None,
+    nodes: Inventory | None = None,
     *,
     selection: Mapping[str, Iterable[str]]
     | Iterable[tuple[str, str]]
@@ -352,11 +352,13 @@ async def async_import_energy_history(
     dev_id: str = rec["dev_id"]
     stored_inventory = rec.get("inventory") if isinstance(rec, Mapping) else None
 
-    inventory_override = nodes if isinstance(nodes, Inventory) else None
-    if selection is not None:
-        selection_spec = selection
-    else:
-        selection_spec = None if inventory_override is not None else nodes
+    if nodes is not None and not isinstance(nodes, Inventory):
+        raise TypeError(
+            "async_import_energy_history nodes must be an Inventory instance"
+        )
+
+    inventory_override = nodes
+    selection_spec = selection
 
     inventory_container: Inventory | None
     resolution: Any | None = None

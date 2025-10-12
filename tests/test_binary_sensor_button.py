@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import types
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -161,6 +162,49 @@ def test_binary_sensor_setup_requires_inventory(heater_hass_data) -> None:
             await async_setup_binary_sensor_entry(hass, entry, lambda _: None)
 
     asyncio.run(_run())
+
+
+def test_iter_boostable_inventory_nodes_uses_inventory_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inventory = Inventory("dev", {"nodes": []}, [])
+
+    meta: list[tuple[str, str, str, Any]] = [
+        (
+            "acm",
+            "01",
+            "Accumulator 01",
+            types.SimpleNamespace(supports_boost=lambda: False),
+        ),
+        (
+            "htr",
+            " 2 ",
+            "Heater 2",
+            types.SimpleNamespace(supports_boost=lambda: True),
+        ),
+        (
+            "",
+            "3",
+            "Invalid",
+            types.SimpleNamespace(supports_boost=lambda: True),
+        ),
+    ]
+
+    def _fake_iter(inv: Inventory):
+        assert inv is inventory
+        yield from meta
+
+    monkeypatch.setattr(
+        binary_sensor_module,
+        "iter_inventory_heater_metadata",
+        _fake_iter,
+    )
+
+    results = list(
+        binary_sensor_module._iter_boostable_inventory_nodes(inventory)
+    )
+
+    assert results == [("htr", "2", "Heater 2")]
 
 
 def test_refresh_button_device_info_and_press(heater_hass_data) -> None:

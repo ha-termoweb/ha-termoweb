@@ -64,8 +64,6 @@ def _make_coordinator(
     *,
     client: Any | None = None,
     inventory: Any | None = None,
-    inventory_payload: Mapping[str, Any] | None = None,
-    inventory_nodes: Iterable[Any] | None = None,
 ) -> FakeCoordinator:
     base_record = dict(record)
 
@@ -152,15 +150,18 @@ def _make_coordinator(
 
     normalised = FakeCoordinator._normalise_device_record(rebuilt_record)
 
+    effective_inventory = inventory
+    if not isinstance(effective_inventory, Inventory) and nodes_payload is not None:
+        node_list = list(build_node_inventory(nodes_payload))
+        effective_inventory = Inventory(dev_id, nodes_payload, node_list)
+
     return FakeCoordinator(
         hass,
         client=client,
         dev_id=dev_id,
         dev=normalised,
         nodes=normalised.get("inventory_payload", {}),
-        inventory=inventory,
-        inventory_payload=inventory_payload,
-        inventory_nodes=inventory_nodes,
+        inventory=effective_inventory,
         data={dev_id: normalised},
     )
 
@@ -674,6 +675,73 @@ def test_async_setup_entry_creates_accumulator_entity(
         assert call.kwargs["ptemp"] == [18.5, 19.5, 20.5]
         assert call.kwargs["units"] == "C"
         assert client.set_node_settings.await_count == 1
+
+    asyncio.run(_run())
+
+
+def test_async_setup_entry_uses_inventory_node_for_boost_detection(
+    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry_id = "entry-boost"
+        dev_id = "dev-boost"
+        nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
+        inventory = climate_inventory(dev_id, nodes)
+
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            {"nodes": nodes, "htr": {"settings": {"1": {}}}},
+            client=AsyncMock(),
+            inventory=inventory,
+        )
+
+        record: dict[str, Any] = {
+            "coordinator": coordinator,
+            "dev_id": dev_id,
+            "client": AsyncMock(),
+            "nodes": nodes,
+            "inventory": inventory,
+        }
+        hass.data = {DOMAIN: {entry_id: record}}
+
+        node = types.SimpleNamespace(addr="1", type="htr")
+        iter_calls: list[Any] = []
+
+        def _iter_metadata(self: climate_module.HeaterPlatformDetails):
+            iter_calls.append(node)
+            yield ("htr", node, "1", "Boost Heater")
+
+        boost_calls: list[Any] = []
+
+        def _supports_boost(candidate: Any) -> bool:
+            boost_calls.append(candidate)
+            return True
+
+        monkeypatch.setattr(
+            climate_module.HeaterPlatformDetails,
+            "iter_metadata",
+            _iter_metadata,
+        )
+        monkeypatch.setattr(climate_module, "supports_boost", _supports_boost)
+
+        added: list[climate_module.HeaterClimateEntity] = []
+
+        def _async_add_entities(
+            entities: list[climate_module.HeaterClimateEntity],
+        ) -> None:
+            added.extend(entities)
+
+        entry = types.SimpleNamespace(entry_id=entry_id)
+        await async_setup_entry(hass, entry, _async_add_entities)
+
+        assert iter_calls == [node]
+        assert boost_calls == [node]
+        assert len(added) == 1
+        assert isinstance(added[0], climate_module.AccumulatorClimateEntity)
 
     asyncio.run(_run())
 
@@ -1488,13 +1556,13 @@ def test_async_setup_entry_ignores_cached_node_list() -> None:
         dev_id = "dev-list"
         raw_nodes = {"nodes": [{"type": "htr", "addr": "3", "name": "Three"}]}
         node_list = [types.SimpleNamespace(type="htr", addr="3", name="Three")]
+        inventory = Inventory(dev_id, raw_nodes, list(node_list))
 
         coordinator = _make_coordinator(
             hass,
             dev_id,
             {"nodes": {}, "htr": {"settings": {}}},
             client=AsyncMock(),
-            inventory_nodes=node_list,
         )
 
         record: dict[str, Any] = {

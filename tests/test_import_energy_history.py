@@ -827,6 +827,56 @@ def test_async_import_energy_history_skips_without_inventory(
     assert "dev-missing: unable to resolve node inventory" in caplog.text
 
 
+def test_async_import_energy_history_rejects_non_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        (
+            _mod,
+            energy_mod,
+            const,
+            _import_stats,
+            _update_meta,
+            _last_stats,
+            _get_period,
+            _delete_stats,
+            ConfigEntry,
+            HomeAssistant,
+            _ent_reg,
+        ) = await _load_module(monkeypatch)
+
+        hass = HomeAssistant()
+        hass.config_entries = types.SimpleNamespace(
+            async_update_entry=lambda *_args, **_kwargs: None
+        )
+        entry = ConfigEntry("reject")
+        hass.data = {
+            const.DOMAIN: {
+                entry.entry_id: {
+                    "client": AsyncMock(),
+                    "dev_id": "dev",
+                }
+            }
+        }
+
+        limiter = throttle_module.MonotonicRateLimiter(
+            lock=asyncio.Lock(),
+            monotonic=lambda: 0.0,
+            sleep=lambda _wait: asyncio.sleep(0),
+            min_interval=0.0,
+        )
+
+        with pytest.raises(TypeError, match="Inventory"):
+            await energy_mod.async_import_energy_history(
+                hass,
+                entry,
+                nodes={"htr": ["A"]},  # type: ignore[arg-type]
+                rate_limit=limiter,
+            )
+
+    asyncio.run(_run())
+
+
 def test_async_import_energy_history_uses_inventory_nodes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1162,15 +1212,21 @@ def test_import_energy_history_requested_map_filters(
                 {"type": "pmo", "addr": "ignored"},
             ]
         }
+        snapshot_inventory = inventory_module.Inventory(
+            "dev",
+            raw_nodes,
+            inventory_module.build_node_inventory(raw_nodes),
+        )
         snapshot = types.SimpleNamespace(
             dev_id="dev",
             raw_nodes=raw_nodes,
-            inventory=list(inventory_module.build_node_inventory(raw_nodes)),
+            inventory=snapshot_inventory,
         )
         hass.data[const.DOMAIN][entry.entry_id] = {
             "client": client,
             "dev_id": "dev",
-            "node_inventory": list(snapshot.inventory),
+            "inventory": snapshot_inventory,
+            "node_inventory": list(snapshot.inventory.nodes),
             "config_entry": entry,
             "snapshot": snapshot,
         }
@@ -1271,11 +1327,17 @@ def test_energy_polling_matches_import(monkeypatch: pytest.MonkeyPatch) -> None:
             )
         )
 
+        raw_nodes = {"nodes": [{"type": "htr", "addr": "A"}]}
+        inventory = inventory_module.Inventory(
+            "dev",
+            raw_nodes,
+            inventory_module.build_node_inventory(raw_nodes),
+        )
         coordinator = coord_mod.EnergyStateCoordinator(
             hass,
             client,
             "dev",
-            ["A"],
+            inventory,
         )
 
         times = iter([10_000.0, 13_600.0])
@@ -1306,12 +1368,6 @@ def test_energy_polling_matches_import(monkeypatch: pytest.MonkeyPatch) -> None:
             "Heater A",
             "uid",
             "Device A",
-        )
-        raw_nodes = {"nodes": [{"type": "htr", "addr": "A"}]}
-        inventory = inventory_module.Inventory(
-            "dev",
-            raw_nodes,
-            inventory_module.build_node_inventory(raw_nodes),
         )
         details = heater_module.HeaterPlatformDetails(
             inventory,

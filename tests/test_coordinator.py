@@ -321,7 +321,6 @@ async def test_async_update_data_skips_without_inventory(
 
 @pytest.mark.asyncio
 async def test_async_update_data_requires_inventory(
-    monkeypatch: pytest.MonkeyPatch,
     inventory_builder: Callable[
         [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
     ],
@@ -343,18 +342,10 @@ async def test_async_update_data_requires_inventory(
     )
 
     coord._inventory = None
-    calls: list[Mapping[str, Any] | None] = []
-
-    def _fake_builder(payload: Mapping[str, Any] | None) -> list[Any]:
-        calls.append(payload)
-        return []
-
-    monkeypatch.setattr(coord_module, "build_node_inventory", _fake_builder)
     client.get_node_settings = AsyncMock(return_value={})
 
     result = await coord._async_update_data()
 
-    assert not calls
     assert coord._inventory is None
     assert result == {}
 
@@ -370,7 +361,7 @@ async def test_async_update_data_omits_raw_nodes(
     hass = HomeAssistant()
     client = AsyncMock()
     nodes_payload = {"nodes": [{"addr": "1", "type": "htr"}]}
-    node_list = list(coord_module.build_node_inventory(nodes_payload))
+    node_list = list(inventory_module.build_node_inventory(nodes_payload))
     inventory = inventory_builder("dev", nodes_payload, node_list)
     coord = coord_module.StateCoordinator(
         hass,
@@ -462,53 +453,6 @@ async def test_async_fetch_settings_by_address_pending_and_boost(
     assert settings["acm"]["2"]["mode"] == "auto"
     assert rtc_now == rtc_value
     coord._async_fetch_rtc_datetime.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_async_refresh_heater_rebuilds_inventory(
-    monkeypatch: pytest.MonkeyPatch,
-    inventory_builder: Callable[
-        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
-    ],
-) -> None:
-    """Heater refresh should rebuild inventory when cached data is missing."""
-
-    hass = HomeAssistant()
-    client = AsyncMock()
-    nodes = {"nodes": [{"addr": "1", "type": "acm"}]}
-    inventory = inventory_builder("dev", nodes)
-    coord = coord_module.StateCoordinator(
-        hass,
-        client=client,
-        base_interval=30,
-        dev_id="dev",
-        device={},
-        nodes=inventory.payload,
-        inventory=inventory,
-    )
-
-    coord._inventory = None
-    calls: list[Mapping[str, Any] | None] = []
-
-    sentinel_nodes = list(inventory.nodes)
-
-    def _fake_builder(payload: Mapping[str, Any] | None) -> list[Any]:
-        calls.append(payload)
-        return sentinel_nodes
-
-    monkeypatch.setattr(coord_module, "build_node_inventory", _fake_builder)
-    client.get_node_settings = AsyncMock(return_value={"mode": "auto"})
-
-    coord.update_nodes(nodes)
-
-    assert calls and calls[0] == nodes
-    rebuilt = coord._inventory
-    assert isinstance(rebuilt, coord_module.Inventory)
-    assert rebuilt.payload == nodes
-
-    await coord.async_refresh_heater(("acm", "1"))
-
-    client.get_node_settings.assert_awaited_once_with("dev", ("acm", "1"))
 
 
 @pytest.mark.asyncio
