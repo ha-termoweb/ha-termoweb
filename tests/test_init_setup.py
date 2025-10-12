@@ -300,7 +300,9 @@ async def test_ws_debug_probe_service_skips_when_registered(
     class TrackingServices(_StubServices):
         def __init__(self) -> None:
             super().__init__()
-            self.register_calls: list[tuple[str, str, Callable[[ServiceCall], Any]]] = []
+            self.register_calls: list[
+                tuple[str, str, Callable[[ServiceCall], Any]]
+            ] = []
 
         def async_register(
             self,
@@ -1274,10 +1276,7 @@ def test_import_energy_history_service_invocation(
         args, kwargs = import_mock.await_args
         assert args[0] is stub_hass
         assert args[1] is entry
-        assert getattr(args[2], "heater_sample_targets") == [
-            ("htr", "A"),
-            ("acm", "B"),
-        ]
+        assert len(args) == 2
         assert kwargs == {"reset_progress": False, "max_days": 3}
 
     asyncio.run(_run())
@@ -1339,7 +1338,9 @@ def test_recalc_poll_interval_transitions(
         healthy_event = asyncio.Event()
         healthy_task = asyncio.create_task(healthy_event.wait())
         tracker = WsHealthTracker("dev-healthy")
-        tracker.update_status("healthy", healthy_since=current_time, timestamp=current_time)
+        tracker.update_status(
+            "healthy", healthy_since=current_time, timestamp=current_time
+        )
         tracker.mark_payload(timestamp=current_time, stale_after=300)
         record["ws_tasks"]["dev-healthy"] = healthy_task
         record["ws_trackers"]["dev-healthy"] = tracker
@@ -1363,7 +1364,9 @@ def test_recalc_poll_interval_transitions(
 
         # (d) Fresh payloads restore suspension after a resume
         tracker.mark_payload(timestamp=current_time, stale_after=300)
-        tracker.update_status("healthy", healthy_since=current_time, timestamp=current_time)
+        tracker.update_status(
+            "healthy", healthy_since=current_time, timestamp=current_time
+        )
         current_time = 1_410.0
         record["recalc_poll"]()
         assert record["poll_suspended"] is True

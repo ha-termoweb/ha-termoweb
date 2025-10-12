@@ -48,7 +48,9 @@ def _setup_last_statistics_environment(
     recorder_module = types.ModuleType("homeassistant.components.recorder")
 
     class _RecorderInstance:
-        async def async_add_executor_job(self, func: Any, *args: Any, **kwargs: Any) -> Any:
+        async def async_add_executor_job(
+            self, func: Any, *args: Any, **kwargs: Any
+        ) -> Any:
             return func(*args, **kwargs)
 
     recorder_module.get_instance = (  # type: ignore[attr-defined]
@@ -70,7 +72,9 @@ def _setup_last_statistics_environment(
     )
 
     monkeypatch.setitem(sys.modules, "homeassistant.components", components_module)
-    monkeypatch.setitem(sys.modules, "homeassistant.components.recorder", recorder_module)
+    monkeypatch.setitem(
+        sys.modules, "homeassistant.components.recorder", recorder_module
+    )
     monkeypatch.setitem(
         sys.modules,
         "homeassistant.components.recorder.statistics",
@@ -309,7 +313,9 @@ async def test_get_last_statistics_compat_handles_legacy_signature(
 
 
 @pytest.mark.asyncio
-async def test_get_last_statistics_compat_async_signature(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_get_last_statistics_compat_async_signature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Async helpers should receive keyword-only compatibility arguments."""
 
     async_helper = AsyncMock(return_value={"sensor.async": []})
@@ -487,9 +493,7 @@ async def _load_module(
 
     monkeypatch.setattr(api_module, "RESTClient", _FakeRESTClient)
 
-    ws_module = importlib.import_module(
-        "custom_components.termoweb.backend.ws_client"
-    )
+    ws_module = importlib.import_module("custom_components.termoweb.backend.ws_client")
     termoweb_ws_module = importlib.import_module(
         "custom_components.termoweb.backend.termoweb_ws"
     )
@@ -810,7 +814,9 @@ def test_async_import_energy_history_skips_without_inventory(
 
         hass = HomeAssistant()
         hass.data = {const.DOMAIN: {}}
-        hass.config_entries = types.SimpleNamespace(async_update_entry=lambda *args, **kwargs: None)
+        hass.config_entries = types.SimpleNamespace(
+            async_update_entry=lambda *args, **kwargs: None
+        )
 
         entry = ConfigEntry("entry-missing")
         hass.data[const.DOMAIN][entry.entry_id] = {
@@ -824,7 +830,10 @@ def test_async_import_energy_history_skips_without_inventory(
 
     asyncio.run(_run())
 
-    assert "dev-missing: unable to resolve node inventory" in caplog.text
+    assert (
+        "dev-missing: energy import aborted; inventory missing in integration state"
+        in caplog.text
+    )
 
 
 def test_async_import_energy_history_rejects_non_inventory(
@@ -918,11 +927,6 @@ def test_async_import_energy_history_uses_inventory_nodes(
                 }
             }
         }
-
-        def _unexpected(*_args: Any, **_kwargs: Any) -> None:
-            raise AssertionError("resolve_record_inventory should not be called")
-
-        monkeypatch.setattr(energy_mod, "resolve_record_inventory", _unexpected)
 
         await mod._async_import_energy_history(hass, entry)
 
@@ -1087,7 +1091,9 @@ def test_service_accepts_single_entity_id_string(
 
         gather_calls: list[int] = []
 
-        async def fake_gather(*tasks: Any, return_exceptions: bool = False) -> list[Any]:
+        async def fake_gather(
+            *tasks: Any, return_exceptions: bool = False
+        ) -> list[Any]:
             gather_calls.append(len(tasks))
             results: list[Any] = []
             for task in tasks:
@@ -1131,32 +1137,6 @@ def test_service_accepts_single_entity_id_string(
         assert kwargs == {"reset_progress": False, "max_days": None}
 
     asyncio.run(_run())
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def test_import_energy_history_requested_map_filters(
@@ -1232,7 +1212,9 @@ def test_import_energy_history_requested_map_filters(
         }
 
         uid_a = identifiers_module.build_heater_energy_unique_id("dev", "htr", "A")
-        uid_b_legacy = identifiers_module.build_heater_energy_unique_id("dev", "htr", "B")
+        uid_b_legacy = identifiers_module.build_heater_energy_unique_id(
+            "dev", "htr", "B"
+        )
         ent_reg.add(
             "sensor.dev_A_energy",
             "sensor",
@@ -1292,10 +1274,6 @@ def test_import_energy_history_requested_map_filters(
         assert progress
 
     asyncio.run(_run())
-
-
-
-
 
 
 def test_energy_polling_matches_import(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1390,10 +1368,6 @@ def test_energy_polling_matches_import(monkeypatch: pytest.MonkeyPatch) -> None:
     asyncio.run(_run())
 
 
-
-
-
-
 def test_service_skips_entries_without_inventory(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -1447,7 +1421,10 @@ def test_service_skips_entries_without_inventory(
 
     asyncio.run(_run())
 
-    assert "skipping energy import for entry entry-skip" in caplog.text
+    assert (
+        "energy import aborted; inventory missing in integration state (entry=entry-skip)"
+        in caplog.text
+    )
 
 
 def test_service_filters_invalid_entities(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1689,10 +1666,8 @@ def test_service_uses_snapshot_inventory(monkeypatch: pytest.MonkeyPatch) -> Non
 
         import_mock.assert_awaited_once()
         args, kwargs = import_mock.await_args
-        assert args[0] is hass
-        assert args[1] is entry
-        assert isinstance(args[2], inventory_module.Inventory)
-        assert args[2].heater_sample_targets == [("htr", "A")]
+        assert args == (hass, entry)
+        assert rec["inventory"].heater_sample_targets == [("htr", "A")]
         assert kwargs == {"reset_progress": False, "max_days": 3}
 
         if tasks:
@@ -1769,7 +1744,12 @@ def test_service_uses_cached_inventory_without_snapshot(
 
         rec = hass.data[const.DOMAIN][entry.entry_id]
         rec.pop("snapshot", None)
-        rec["node_inventory"] = _inventory_for(mod, {"htr": ["A"]})
+        raw_nodes = {"nodes": [{"type": "htr", "addr": "A"}]}
+        rec["inventory"] = inventory_module.Inventory(
+            "dev",
+            raw_nodes,
+            inventory_module.build_node_inventory(raw_nodes),
+        )
 
         service = hass.services.get(const.DOMAIN, "import_energy_history")
 
@@ -1777,8 +1757,8 @@ def test_service_uses_cached_inventory_without_snapshot(
 
         import_mock.assert_awaited_once()
         args, kwargs = import_mock.await_args
-        assert isinstance(args[2], inventory_module.Inventory)
-        assert args[2].heater_sample_targets == [("htr", "A")]
+        assert args == (hass, entry)
+        assert rec["inventory"].heater_sample_targets == [("htr", "A")]
         assert kwargs["reset_progress"] is False
         assert kwargs["max_days"] in (None, energy_mod.DEFAULT_MAX_HISTORY_DAYS)
 
