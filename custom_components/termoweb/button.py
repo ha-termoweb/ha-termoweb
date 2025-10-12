@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 import logging
 from typing import Any
 
 from homeassistant.components.button import ButtonEntity
+from homeassistant.core import callback
 
 try:  # pragma: no cover - fallback for stripped Home Assistant stubs in tests
     from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
@@ -28,6 +29,7 @@ from .heater import (
     BOOST_BUTTON_METADATA,
     DEFAULT_BOOST_TEMPERATURE,
     BoostButtonMetadata,
+    derive_boost_state,
     log_skipped_nodes,
     resolve_boost_runtime_minutes,
     resolve_boost_temperature,
@@ -39,6 +41,7 @@ from .utils import build_gateway_device_info
 _LOGGER = logging.getLogger(__name__)
 
 _SERVICE_REQUEST_ACCUMULATOR_BOOST = "request_accumulator_boost"
+_SERVICE_CANCEL_ACCUMULATOR_BOOST = "cancel_accumulator_boost"
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +120,7 @@ def _iter_accumulator_contexts(
         if node is None:
             continue
         yield AccumulatorBoostContext.from_inventory(entry_id, inventory, node)
+
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Expose hub refresh and accumulator boost helper buttons."""
@@ -205,6 +209,70 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
 
         forward_map, _ = self._context.inventory.heater_address_map
         return self._context.addr in forward_map.get(self._context.node_type, ())
+
+    async def async_added_to_hass(self) -> None:
+        """Register coordinator listener hooks once the entity is added."""
+
+        await super().async_added_to_hass()
+        add_listener = getattr(self.coordinator, "async_add_listener", None)
+        if callable(add_listener):
+            remove = add_listener(self._handle_coordinator_update)
+            if callable(remove):
+                self.async_on_remove(remove)
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Refresh entity state when the coordinator updates."""
+
+        self.async_write_ha_state()
+
+    def _coordinator_settings(self) -> Mapping[str, Any] | None:
+        """Return cached coordinator settings for this accumulator."""
+
+        coordinator = getattr(self, "coordinator", None)
+        data = getattr(coordinator, "data", None)
+        if not isinstance(data, Mapping):
+            return None
+
+        record = data.get(self._context.dev_id)
+        if not isinstance(record, Mapping):
+            return None
+
+        settings_by_type = record.get("settings")
+        if isinstance(settings_by_type, Mapping):
+            type_settings = settings_by_type.get(self._context.node_type)
+            if isinstance(type_settings, Mapping):
+                settings = type_settings.get(self._context.addr)
+                if isinstance(settings, Mapping):
+                    return dict(settings)
+
+        nodes_by_type = record.get("nodes_by_type")
+        if isinstance(nodes_by_type, Mapping):
+            node_section = nodes_by_type.get(self._context.node_type)
+            if isinstance(node_section, Mapping):
+                nested_settings = node_section.get("settings")
+                if isinstance(nested_settings, Mapping):
+                    settings = nested_settings.get(self._context.addr)
+                    if isinstance(settings, Mapping):
+                        return dict(settings)
+
+        legacy_section = record.get(self._context.node_type)
+        if isinstance(legacy_section, Mapping):
+            legacy_settings = legacy_section.get("settings")
+            if isinstance(legacy_settings, Mapping):
+                settings = legacy_settings.get(self._context.addr)
+                if isinstance(settings, Mapping):
+                    return dict(settings)
+
+        return None
+
+    def _coordinator_boost_active(self) -> bool:
+        """Return True when coordinator cache reports boost activity."""
+
+        settings = self._coordinator_settings() or {}
+        coordinator = getattr(self, "coordinator", None)
+        state = derive_boost_state(settings, coordinator)
+        return bool(state.active)
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -351,6 +419,75 @@ class AccumulatorBoostButton(AccumulatorBoostButtonBase):
             )
 
 
+class AccumulatorBoostCancelButton(AccumulatorBoostButtonBase):
+    """Button that cancels an active accumulator boost session."""
+
+    _attr_icon = "mdi:flash-off"
+    _attr_translation_key = "accumulator_boost_cancel"
+
+    def __init__(
+        self,
+        coordinator,
+        context: AccumulatorBoostContext,
+        metadata: BoostButtonMetadata,
+    ) -> None:
+        """Initialise the boost cancellation helper button."""
+
+        label = metadata.label or "Cancel boost"
+        icon = metadata.icon or None
+        super().__init__(
+            coordinator,
+            context,
+            label=label,
+            unique_suffix=metadata.unique_suffix,
+            icon=icon,
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return True when an accumulator boost is active."""
+
+        if not super().available:
+            return False
+        return self._coordinator_boost_active()
+
+    async def async_press(self) -> None:
+        """Cancel the active accumulator boost session."""
+
+        hass = self.hass
+        if hass is None:
+            return
+
+        data: dict[str, Any] = {
+            "entry_id": self._context.entry_id,
+            "dev_id": self._context.dev_id,
+            "node_type": self._context.node_type,
+            "addr": self._context.addr,
+        }
+
+        try:
+            await hass.services.async_call(
+                DOMAIN,
+                _SERVICE_CANCEL_ACCUMULATOR_BOOST,
+                data,
+                blocking=True,
+            )
+        except ServiceNotFound as err:
+            _LOGGER.error(
+                "Boost cancel service unavailable for %s (%s): %s",
+                self._context.addr,
+                self._context.node_type,
+                err,
+            )
+        except HomeAssistantError as err:  # pragma: no cover - defensive logging
+            _LOGGER.error(
+                "Boost cancel service failed for %s (%s): %s",
+                self._context.addr,
+                self._context.node_type,
+                err,
+            )
+
+
 def _create_boost_button_entities(
     coordinator,
     context: AccumulatorBoostContext,
@@ -374,11 +511,17 @@ def _build_boost_button(
 ) -> ButtonEntity:
     """Instantiate a boost helper button for ``metadata``."""
 
-    if metadata.action != "start":
-        raise ValueError(f"Unsupported boost button action: {metadata.action}")
+    if metadata.action == "start":
+        return AccumulatorBoostButton(
+            coordinator,
+            context,
+            metadata,
+        )
+    if metadata.action == "cancel":
+        return AccumulatorBoostCancelButton(
+            coordinator,
+            context,
+            metadata,
+        )
 
-    return AccumulatorBoostButton(
-        coordinator,
-        context,
-        metadata,
-    )
+    raise ValueError(f"Unsupported boost button action: {metadata.action}")

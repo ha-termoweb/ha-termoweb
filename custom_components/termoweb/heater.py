@@ -76,6 +76,13 @@ def _build_boost_button_metadata() -> tuple[BoostButtonMetadata, ...]:
             "mdi:flash-outline",
             action="start",
         ),
+        BoostButtonMetadata(
+            None,
+            "cancel",
+            "Cancel boost",
+            "mdi:flash-off",
+            action="cancel",
+        ),
     )
 
 

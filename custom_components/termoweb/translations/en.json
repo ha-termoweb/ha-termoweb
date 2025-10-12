@@ -38,6 +38,9 @@
       },
       "accumulator_boost_start": {
         "name": "Start boost"
+      },
+      "accumulator_boost_cancel": {
+        "name": "Cancel boost"
       }
     },
     "number": {
