@@ -49,7 +49,6 @@ from .const import (
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
     MIN_POLL_INTERVAL,
-    STRETCHED_POLL_INTERVAL,
     get_brand_api_base,
     get_brand_basic_auth,
     signal_ws_status,
