@@ -19,13 +19,59 @@ from custom_components.termoweb.const import (
     HTR_ENERGY_UPDATE_INTERVAL,
     signal_ws_data,
 )
-from custom_components.termoweb.inventory import AccumulatorNode, HeaterNode, Node
+from custom_components.termoweb.inventory import (
+    AccumulatorNode,
+    HeaterNode,
+    Node,
+    normalize_heater_addresses,
+    normalize_power_monitor_addresses,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_connect, dispatcher_send
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 EnergyStateCoordinator = coord_module.EnergyStateCoordinator
 StateCoordinator = coord_module.StateCoordinator
+
+
+def _expected_energy_map(
+    source: Iterable[str] | Mapping[str, Iterable[str]] | None,
+) -> dict[str, list[str]]:
+    """Return the combined heater and power monitor map for ``source``."""
+
+    heater_map, _ = normalize_heater_addresses(source)
+    if isinstance(source, Mapping):
+        power_source: Mapping[str, Iterable[str]] | None = source
+    else:
+        power_source = None
+    power_map, _ = normalize_power_monitor_addresses(power_source)
+
+    combined = {
+        "htr": list(heater_map.get("htr", [])),
+        "acm": list(heater_map.get("acm", [])),
+        "pmo": list(power_map.get("pmo", [])),
+    }
+    for node_type in coord_module.ENERGY_NODE_TYPES:
+        combined.setdefault(node_type, [])
+    return combined
+
+
+def _expected_energy_aliases(
+    source: Iterable[str] | Mapping[str, Iterable[str]] | None,
+) -> dict[str, str]:
+    """Return the merged compatibility aliases for ``source``."""
+
+    heater_aliases = normalize_heater_addresses(source)[1]
+    if isinstance(source, Mapping):
+        power_source: Mapping[str, Iterable[str]] | None = source
+    else:
+        power_source = None
+    power_aliases = normalize_power_monitor_addresses(power_source)[1]
+    merged = dict(heater_aliases)
+    merged.update(power_aliases)
+    for node_type in coord_module.ENERGY_NODE_TYPES:
+        merged.setdefault(node_type, node_type)
+    return merged
 def test_ensure_heater_section_helper() -> None:
     """The helper must reuse existing sections or insert defaults."""
 
@@ -1453,11 +1499,11 @@ def test_energy_state_coordinator_update_addresses_filters_duplicates() -> None:
 
     coord.update_addresses(["A", " ", "B", "A", "B ", ""])
 
-    expected_map, _ = coord_module._normalize_energy_payload(
+    expected_map = _expected_energy_map(["A", " ", "B", "A", "B ", ""])
+    assert coord._addresses_by_type == expected_map
+    assert coord._compat_aliases == _expected_energy_aliases(
         ["A", " ", "B", "A", "B ", ""]
     )
-    expected_map = {key: list(value) for key, value in expected_map.items()}
-    assert coord._addresses_by_type == expected_map
     expected_flat = [
         addr
         for node_type in coord_module.ENERGY_NODE_TYPES
@@ -1475,11 +1521,13 @@ def test_energy_state_coordinator_update_addresses_ignores_invalid_types() -> No
         {" ": ["skip"], "htr": ["A"], "acm": ["", "B"], "foo": ["X"]}
     )
 
-    expected_map, _ = coord_module._normalize_energy_payload(
+    expected_map = _expected_energy_map(
         {" ": ["skip"], "htr": ["A"], "acm": ["", "B"], "foo": ["X"]}
     )
-    expected_map = {key: list(value) for key, value in expected_map.items()}
     assert coord._addresses_by_type == expected_map
+    assert coord._compat_aliases == _expected_energy_aliases(
+        {" ": ["skip"], "htr": ["A"], "acm": ["", "B"], "foo": ["X"]}
+    )
     expected_flat = [
         addr
         for node_type in coord_module.ENERGY_NODE_TYPES
@@ -1495,11 +1543,13 @@ def test_energy_state_coordinator_update_addresses_accepts_map() -> None:
 
     coord.update_addresses({"htr": ["A", "A"], "acm": ["B", ""], "foo": ["X"]})
 
-    expected_map, _ = coord_module._normalize_energy_payload(
+    expected_map = _expected_energy_map(
         {"htr": ["A", "A"], "acm": ["B", ""], "foo": ["X"]}
     )
-    expected_map = {key: list(value) for key, value in expected_map.items()}
     assert coord._addresses_by_type == expected_map
+    assert coord._compat_aliases == _expected_energy_aliases(
+        {"htr": ["A", "A"], "acm": ["B", ""], "foo": ["X"]}
+    )
     expected_flat = [
         addr
         for node_type in coord_module.ENERGY_NODE_TYPES
@@ -1515,53 +1565,27 @@ def test_energy_state_coordinator_update_addresses_uses_helper(
     client = types.SimpleNamespace()
     calls: list[Any] = []
 
-    def fake_normalize(addrs: Any) -> tuple[dict[str, list[str]], dict[str, str]]:
-        calls.append(addrs)
-        return {"htr": ["A"], "acm": [], "pmo": []}, {
-            "htr": "htr",
-            "acm": "acm",
-            "pmo": "pmo",
-        }
+    def fake_heater(addrs: Any) -> tuple[dict[str, list[str]], dict[str, str]]:
+        calls.append(("heater", addrs))
+        return {"htr": ["A"]}, {"htr": "htr"}
 
-    monkeypatch.setattr(coord_module, "_normalize_energy_payload", fake_normalize)
+    def fake_power(addrs: Any) -> tuple[dict[str, list[str]], dict[str, str]]:
+        calls.append(("power", addrs))
+        return {"pmo": ["M"]}, {"pmo": "pmo"}
+
+    monkeypatch.setattr(coord_module, "normalize_heater_addresses", fake_heater)
+    monkeypatch.setattr(
+        coord_module, "normalize_power_monitor_addresses", fake_power
+    )
 
     coord = EnergyStateCoordinator(hass, client, "dev", [])  # type: ignore[arg-type]
-    assert calls == [[]]
+    assert calls == [("heater", []), ("power", None)]
 
     coord.update_addresses(["ignored"])
 
-    assert calls[-1] == ["ignored"]
-    assert coord._addresses_by_type == {"htr": ["A"], "acm": [], "pmo": []}
+    assert calls[-2:] == [("heater", ["ignored"]), ("power", None)]
+    assert coord._addresses_by_type == {"htr": ["A"], "acm": [], "pmo": ["M"]}
     assert coord._compat_aliases == {"htr": "htr", "acm": "acm", "pmo": "pmo"}
-
-
-def test_normalize_energy_payload_handles_none() -> None:
-    mapping, aliases = coord_module._normalize_energy_payload(None)
-
-    assert mapping == {}
-    assert aliases == {"htr": "htr", "acm": "acm", "pmo": "pmo"}
-
-
-def test_normalize_energy_payload_aliases() -> None:
-    mapping, aliases = coord_module._normalize_energy_payload(
-        {"heater": ["1"], "acm": ["2"], "power_monitor": ["P"]}
-    )
-
-    assert mapping == {"htr": ["1"], "acm": ["2"], "pmo": ["P"]}
-    assert aliases["heater"] == "htr"
-    assert aliases["acm"] == "acm"
-    assert aliases.get("power_monitor", aliases.get("pmo")) == "pmo"
-
-
-def test_normalize_energy_payload_accepts_string() -> None:
-    """String payloads should be coerced into heater address lists."""
-
-    mapping, aliases = coord_module._normalize_energy_payload(" 5 ")
-
-    assert mapping == {"htr": ["5"], "acm": [], "pmo": []}
-    assert aliases == {"htr": "htr", "acm": "acm", "pmo": "pmo"}
-
-
 def test_energy_state_coordinator_async_update_adds_legacy_bucket() -> None:
     async def _run() -> None:
         hass = HomeAssistant()
