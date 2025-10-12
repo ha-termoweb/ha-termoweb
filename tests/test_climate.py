@@ -760,27 +760,44 @@ def _make_accumulator_for_validation() -> climate_module.AccumulatorClimateEntit
     return entity
 
 
-    calls: list[Any] = []
-
-    def _fake(value: Any) -> int:
-        calls.append(value)
-        return 45
-
-    monkeypatch.setattr(climate_module, "coerce_boost_minutes", _fake)
-
-    result = entity._validate_boost_minutes(60)
-
-    assert result == 45
-    assert calls == [60]
-
+def _patch_boost_minutes(
+    monkeypatch: pytest.MonkeyPatch, return_value: int | None
+) -> list[Any]:
+    """Patch boost coercion helper and collect input arguments."""
 
     calls: list[Any] = []
 
     def _fake(value: Any) -> int | None:
         calls.append(value)
-        return None
+        return return_value
 
     monkeypatch.setattr(climate_module, "coerce_boost_minutes", _fake)
+    return calls
+
+
+def test_accumulator_validate_boost_minutes_accepts_valid_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Boost validation should return the coerced duration for valid input."""
+
+    _reset_environment()
+    entity = _make_accumulator_for_validation()
+    calls = _patch_boost_minutes(monkeypatch, 60)
+
+    result = entity._validate_boost_minutes(60)
+
+    assert result == 60
+    assert calls == [60]
+
+
+def test_accumulator_validate_boost_minutes_handles_coercion_failure(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Boost validation should log and return None when coercion fails."""
+
+    _reset_environment()
+    entity = _make_accumulator_for_validation()
+    calls = _patch_boost_minutes(monkeypatch, None)
     caplog.set_level(logging.ERROR)
 
     result = entity._validate_boost_minutes("bad")
@@ -790,20 +807,24 @@ def _make_accumulator_for_validation() -> climate_module.AccumulatorClimateEntit
     assert any("Invalid boost minutes" in record.message for record in caplog.records)
 
 
-    calls: list[Any] = []
+def test_accumulator_validate_boost_minutes_rejects_out_of_bounds(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Boost validation should reject durations outside the supported range."""
 
-    def _fake(value: Any) -> int:
-        calls.append(value)
-        return 130
-
-    monkeypatch.setattr(climate_module, "coerce_boost_minutes", _fake)
+    _reset_environment()
+    entity = _make_accumulator_for_validation()
+    calls = _patch_boost_minutes(monkeypatch, 130)
     caplog.set_level(logging.ERROR)
 
     result = entity._validate_boost_minutes(130)
 
     assert result is None
     assert calls == [130]
-    assert any("Boost duration must be between 1 and 120" in record.message for record in caplog.records)
+    assert any(
+        "Boost duration must be between 60 and 600" in record.message
+        for record in caplog.records
+    )
 
 
 def test_accumulator_extra_state_attributes_handles_resolver_fallbacks() -> None:
