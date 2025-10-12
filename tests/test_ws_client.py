@@ -524,7 +524,8 @@ def test_dispatch_nodes_reuses_record_inventory(monkeypatch: pytest.MonkeyPatch)
     coordinator.update_nodes.assert_not_called()
     dispatcher.assert_called_once()
     dispatched_payload = dispatcher.call_args.args[2]
-    assert dispatched_payload["addresses_by_type"] == inventory.addresses_by_type
+    assert dispatched_payload["inventory"] is inventory
+    assert "addresses_by_type" not in dispatched_payload
     assert "nodes" not in dispatched_payload
 
 
@@ -681,8 +682,8 @@ def test_ws_common_ensure_type_bucket_handles_invalid_inputs() -> None:
             base_ws._WSCommon.__init__(self, inventory=None)
 
     dummy = Dummy()
-    assert dummy._ensure_type_bucket([], "htr") == {}
-    assert dummy._ensure_type_bucket({}, "", dev_map=None) == {}
+    assert dummy._ensure_type_bucket([], "htr") is None
+    assert dummy._ensure_type_bucket({}, "", dev_map=None) is None
 
     bucket = dummy._ensure_type_bucket({}, "htr", dev_map=None)
     assert bucket == {}
@@ -770,23 +771,14 @@ def test_ws_common_apply_heater_addresses_uses_inventory() -> None:
             base_ws._WSCommon.__init__(self, inventory=None)
 
     dummy = Dummy()
-    cleaned = dummy._apply_heater_addresses({}, inventory=inventory)
+    dummy._apply_heater_addresses({}, inventory=inventory)
 
-    heater_map, _ = inventory.heater_sample_address_map
-    power_map, _ = inventory.power_monitor_sample_address_map
-
-    assert cleaned["htr"] == list(heater_map.get("htr", ()))
-    assert cleaned["acm"] == list(heater_map.get("acm", ()))
-    assert cleaned["pmo"] == list(power_map.get("pmo", ()))
     assert "sample_aliases" not in hass_record
     energy_coordinator.update_addresses.assert_called_once_with(inventory)
 
     energy_coordinator.update_addresses.reset_mock()
     hass_record.pop("inventory")
-    cleaned_again = dummy._apply_heater_addresses({}, inventory=None)
-    assert cleaned_again["htr"] == list(heater_map.get("htr", ()))
-    assert cleaned_again["acm"] == list(heater_map.get("acm", ()))
-    assert cleaned_again["pmo"] == list(power_map.get("pmo", ()))
+    dummy._apply_heater_addresses({}, inventory=None)
     energy_coordinator.update_addresses.assert_called_once_with(inventory)
 
 
@@ -1403,7 +1395,7 @@ def test_ws_common_dispatch_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
     assert dispatched_payload == {
         "dev_id": "dev",
         "node_type": None,
-        "addresses_by_type": inventory_obj.addresses_by_type,
+        "inventory": inventory_obj,
     }
 
 

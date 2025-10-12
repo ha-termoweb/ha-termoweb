@@ -13,6 +13,8 @@ import pytest
 
 from conftest import FakeCoordinator, _install_stubs, build_coordinator_device_state
 
+from custom_components.termoweb.inventory import Inventory
+
 _install_stubs()
 
 from custom_components.termoweb import climate as climate_module
@@ -113,6 +115,9 @@ def _make_coordinator(
             _merge_settings(str(node_type), bucket if isinstance(bucket, Mapping) else None)
 
     addresses_section = base_record.get("addresses_by_type")
+    inventory_obj = base_record.get("inventory")
+    if isinstance(inventory_obj, Inventory):
+        addresses_section = inventory_obj.addresses_by_type
     if isinstance(addresses_section, Mapping):
         for node_type, addrs in addresses_section.items():
             _merge_addresses(str(node_type), addrs if isinstance(addrs, Iterable) else None)

@@ -236,24 +236,6 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
                 if isinstance(settings, Mapping):
                     return dict(settings)
 
-        nodes_by_type = record.get("nodes_by_type")
-        if isinstance(nodes_by_type, Mapping):
-            node_section = nodes_by_type.get(self._context.node_type)
-            if isinstance(node_section, Mapping):
-                nested_settings = node_section.get("settings")
-                if isinstance(nested_settings, Mapping):
-                    settings = nested_settings.get(self._context.addr)
-                    if isinstance(settings, Mapping):
-                        return dict(settings)
-
-        legacy_section = record.get(self._context.node_type)
-        if isinstance(legacy_section, Mapping):
-            legacy_settings = legacy_section.get("settings")
-            if isinstance(legacy_settings, Mapping):
-                settings = legacy_settings.get(self._context.addr)
-                if isinstance(settings, Mapping):
-                    return dict(settings)
-
         return None
 
     def _coordinator_boost_active(self) -> bool:

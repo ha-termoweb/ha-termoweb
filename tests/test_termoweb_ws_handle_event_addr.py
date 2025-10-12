@@ -74,7 +74,8 @@ def test_handle_event_normalises_addr_and_updates_settings(
         None,
     )
     assert settings_payload is not None
-    assert settings_payload["inventory_addresses"] == {"htr": ["2"]}
+    assert settings_payload["inventory"] is client._inventory
+    assert "inventory_addresses" not in settings_payload
 
     dev_record = coordinator.data["device"]
     cached_settings = dev_record["settings"]["htr"]["2"]

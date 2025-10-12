@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping, MutableMapping
+from collections.abc import Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import logging
@@ -72,37 +72,6 @@ def _device_display_name(device: Mapping[str, Any] | None, dev_id: str) -> str:
             return trimmed
 
     return f"Device {dev_id}"
-
-
-def _ensure_heater_section(
-    nodes_by_type: dict[str, dict[str, Any]],
-    factory: Callable[[], dict[str, Any]],
-) -> dict[str, Any]:
-    """Ensure ``nodes_by_type`` contains an ``htr`` section and return it."""
-
-    existing = nodes_by_type.get("htr")
-    if isinstance(existing, dict):
-        return existing
-    if isinstance(existing, Mapping):
-        section = dict(existing)
-        addrs = section.get("addrs")
-        if isinstance(addrs, Iterable) and not isinstance(addrs, (list, str, bytes)):
-            section["addrs"] = list(addrs)
-        nodes_by_type["htr"] = section
-        return section
-
-    candidate = factory()
-    if isinstance(candidate, dict):
-        heater_section = candidate
-    elif isinstance(candidate, Mapping):
-        heater_section = dict(candidate)
-    else:  # pragma: no cover - defensive conversion
-        heater_section = dict(candidate or {})
-    addrs = heater_section.get("addrs")
-    if isinstance(addrs, Iterable) and not isinstance(addrs, (list, str, bytes)):
-        heater_section["addrs"] = list(addrs)
-    nodes_by_type["htr"] = heater_section
-    return heater_section
 
 
 class StateCoordinator(
@@ -227,26 +196,12 @@ class StateCoordinator(
                 continue
             validated_settings[node_type] = dict(bucket)
 
-        addresses_by_type = inventory.addresses_by_type
-
-        heater_forward, heater_reverse = inventory.heater_address_map
-        power_forward, power_reverse = inventory.power_monitor_address_map
-
         return {
             "dev_id": self._dev_id,
             "name": name,
             "raw": self._device,
             "connected": True,
             "inventory": inventory,
-            "addresses_by_type": addresses_by_type,
-            "heater_address_map": {
-                "forward": heater_forward,
-                "reverse": heater_reverse,
-            },
-            "power_monitor_address_map": {
-                "forward": power_forward,
-                "reverse": power_reverse,
-            },
             "settings": validated_settings,
         }
 

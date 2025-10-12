@@ -379,7 +379,8 @@ async def test_async_update_data_omits_raw_nodes(
 
     record = result["dev"]
     assert "nodes" not in record
-    assert record["addresses_by_type"]["htr"] == ["1"]
+    assert record["inventory"] is inventory
+    assert record["inventory"].addresses_by_type["htr"] == ["1"]
     assert record["settings"]["htr"]["1"] == {}
 
 
@@ -537,32 +538,6 @@ def test_device_display_name_helper() -> None:
     assert coord_module._device_display_name(proxy_device, "dev") == "Proxy"
 
 
-def test_ensure_heater_section_helper() -> None:
-    """The helper must reuse existing sections or insert defaults."""
-
-    nodes_by_type: dict[str, dict[str, Any]] = {
-        "htr": {"addrs": ["1"], "settings": {"1": {}}}
-    }
-    existing = coord_module._ensure_heater_section(nodes_by_type, lambda: {})
-    assert existing is nodes_by_type["htr"]
-
-    proxy_nodes = MappingProxyType({"addrs": ("2",), "settings": {"2": {}}})
-    nodes_by_type = {"htr": proxy_nodes}  # type: ignore[assignment]
-    converted = coord_module._ensure_heater_section(nodes_by_type, lambda: {})
-    assert converted == {"addrs": ["2"], "settings": {"2": {}}}
-    assert nodes_by_type["htr"] == converted
-
-    nodes_by_type = {}
-    created = coord_module._ensure_heater_section(
-        nodes_by_type,
-        lambda: MappingProxyType(
-            {"addrs": ("A",), "settings": {"A": {"mode": "auto"}}}
-        ),
-    )
-    assert created == {"addrs": ["A"], "settings": {"A": {"mode": "auto"}}}
-    assert nodes_by_type["htr"] == created
-
-
 def test_mode_and_pending_key_helpers(
     inventory_builder: Callable[
         [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
@@ -711,10 +686,6 @@ async def test_refresh_skips_pending_settings_merge(
         nodes=inventory.payload,
         inventory=inventory,
     )
-    addresses = inventory.addresses_by_type
-    heater_forward, heater_reverse = inventory.heater_address_map
-    power_forward, power_reverse = inventory.power_monitor_address_map
-
     initial = {
         "dev": {
             "dev_id": "dev",
@@ -722,15 +693,6 @@ async def test_refresh_skips_pending_settings_merge(
             "raw": {"name": "Device"},
             "connected": True,
             "inventory": inventory,
-            "addresses_by_type": addresses,
-            "heater_address_map": {
-                "forward": heater_forward,
-                "reverse": heater_reverse,
-            },
-            "power_monitor_address_map": {
-                "forward": power_forward,
-                "reverse": power_reverse,
-            },
             "settings": {"htr": {"1": {"mode": "manual", "stemp": "21.0"}}},
         }
     }
@@ -778,10 +740,6 @@ async def test_poll_skips_pending_settings_merge(
         nodes=inventory.payload,
         inventory=inventory,
     )
-    addresses = inventory.addresses_by_type
-    heater_forward, heater_reverse = inventory.heater_address_map
-    power_forward, power_reverse = inventory.power_monitor_address_map
-
     initial = {
         "dev": {
             "dev_id": "dev",
@@ -789,15 +747,6 @@ async def test_poll_skips_pending_settings_merge(
             "raw": {"name": "Device"},
             "connected": True,
             "inventory": inventory,
-            "addresses_by_type": addresses,
-            "heater_address_map": {
-                "forward": heater_forward,
-                "reverse": heater_reverse,
-            },
-            "power_monitor_address_map": {
-                "forward": power_forward,
-                "reverse": power_reverse,
-            },
             "settings": {"htr": {"1": {"mode": "manual", "stemp": "21.0"}}},
         }
     }

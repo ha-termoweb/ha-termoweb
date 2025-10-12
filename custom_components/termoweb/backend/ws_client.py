@@ -22,12 +22,7 @@ from ..const import (
     signal_ws_data,
     signal_ws_status,
 )
-from ..inventory import (
-    HEATER_NODE_TYPES,
-    Inventory,
-    normalize_node_addr,
-    normalize_node_type,
-)
+from ..inventory import Inventory, normalize_node_addr, normalize_node_type
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .ducaheat_ws import DucaheatWSClient
@@ -601,11 +596,11 @@ class _WSCommon(_WSStatusMixin):
         """Return the node bucket for ``node_type`` without cloning metadata."""
 
         if not isinstance(nodes_by_type, Mapping):
-            return {}
+            return None
 
         normalized_type = normalize_node_type(node_type)
         if not normalized_type:
-            return {}
+            return None
 
         existing = nodes_by_type.get(normalized_type)
         if isinstance(existing, Mapping):
@@ -657,7 +652,7 @@ class _WSCommon(_WSStatusMixin):
         log_prefix: str = "WS",
         logger: logging.Logger | None = None,
         prefer_inventory: bool = True,
-    ) -> dict[str, list[str]]:
+    ) -> None:
         """Update entry and coordinator state with heater address data."""
         record_container = self.hass.data.get(DOMAIN, {})
         record_raw = (
@@ -698,41 +693,7 @@ class _WSCommon(_WSStatusMixin):
                 log_prefix,
                 self.dev_id,
             )
-            return {}
-
-        try:
-            inventory_heater_map, _ = inventory_container.heater_sample_address_map
-        except Exception:  # pragma: no cover - defensive cache guard
-            active_logger.debug(
-                "%s: failed to resolve heater sample addresses from inventory",
-                log_prefix,
-                exc_info=True,
-            )
-            return {}
-
-        try:
-            inventory_power_map, _ = (
-                inventory_container.power_monitor_sample_address_map
-            )
-        except Exception:  # pragma: no cover - defensive cache guard
-            active_logger.debug(
-                "%s: failed to resolve power monitor sample addresses",
-                log_prefix,
-                exc_info=True,
-            )
-            inventory_power_map = {}
-
-        cleaned_map: dict[str, list[str]] = {
-            node_type: list(addresses)
-            for node_type, addresses in inventory_heater_map.items()
-        }
-
-        for node_type in HEATER_NODE_TYPES:
-            cleaned_map.setdefault(node_type, [])
-
-        pmo_addresses = inventory_power_map.get("pmo", [])
-        if pmo_addresses:
-            cleaned_map["pmo"] = list(pmo_addresses)
+            return None
 
         if isinstance(record_mutable, MutableMapping):
             record_mutable["inventory"] = inventory_container
@@ -746,8 +707,6 @@ class _WSCommon(_WSStatusMixin):
 
         if hasattr(energy_coordinator, "update_addresses"):
             energy_coordinator.update_addresses(inventory_container)
-
-        return cleaned_map
 
     def _dispatch_nodes(self, payload: dict[str, Any]) -> None:
         raw_nodes = payload.get("nodes") if "nodes" in payload else payload
@@ -773,18 +732,10 @@ class _WSCommon(_WSStatusMixin):
             _LOGGER.error("WS: missing inventory for dispatch on device %s", self.dev_id)
             return
 
-        try:
-            addresses_by_type = inventory.addresses_by_type
-        except Exception:  # pragma: no cover - defensive cache guard
-            _LOGGER.debug(
-                "WS: failed to resolve inventory addresses; using empty payload",
-                exc_info=True,
-            )
-            addresses_by_type: dict[str, list[str]] = {}
         payload_copy = {
             "dev_id": self.dev_id,
             "node_type": None,
-            "addresses_by_type": addresses_by_type,
+            "inventory": inventory,
         }
         async_dispatcher_send(self.hass, signal_ws_data(self.entry_id), payload_copy)
 

@@ -196,8 +196,6 @@ def build_coordinator_device_state(
     if nodes_by_type:
         record["nodes_by_type"] = nodes_by_type
         record["settings"] = normalised_settings
-        if normalised_addresses:
-            record["addresses_by_type"] = normalised_addresses
         if "htr" in nodes_by_type:
             record["htr"] = nodes_by_type["htr"]
 
@@ -1722,8 +1720,7 @@ class FakeCoordinator:
             base["nodes_by_type"] = nodes_copy
 
         base["settings"] = normalised_settings
-        if normalised_addresses:
-            base["addresses_by_type"] = normalised_addresses
+        # addresses_by_type is no longer stored in normalized records
 
         legacy = base.get("htr")
         legacy_copy = dict(legacy) if isinstance(legacy, Mapping) else {}
