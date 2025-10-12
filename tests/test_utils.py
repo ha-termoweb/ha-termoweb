@@ -117,6 +117,15 @@ def test_entry_gateway_record_handles_invalid_sources() -> None:
     assert _entry_gateway_record(hass, "entry") is None
 
 
+def test_entry_gateway_record_returns_valid_mapping() -> None:
+    """A well-formed mapping should be returned unchanged."""
+
+    entry_mapping = {"brand": "TermoWeb"}
+    hass = types.SimpleNamespace(data={DOMAIN: {"entry": entry_mapping}})
+
+    assert _entry_gateway_record(hass, "entry") is entry_mapping
+
+
 def test_build_gateway_device_info_defaults_without_entry() -> None:
     hass = types.SimpleNamespace(data={})
 
