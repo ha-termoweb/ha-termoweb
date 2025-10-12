@@ -22,6 +22,7 @@ from custom_components.termoweb import (
     identifiers as identifiers_module,
     inventory as inventory_module,
 )
+from custom_components.termoweb import throttle as throttle_module
 from custom_components.termoweb.energy import _normalize_heater_sources
 from custom_components.termoweb.inventory import HEATER_NODE_TYPES
 
@@ -519,8 +520,7 @@ async def _load_module(
     reset_cache = getattr(energy_module, "_reset_integration_dependencies_cache", None)
     if reset_cache is not None:
         reset_cache()
-    if hasattr(energy_module, "reset_samples_rate_limit_state"):
-        energy_module.reset_samples_rate_limit_state()
+    throttle_module.reset_samples_rate_limit_state()
 
     if load_coordinator:
         importlib.reload(
@@ -1243,7 +1243,7 @@ def test_import_energy_history_requested_map_filters(
         async def _fake_sleep(_delay: float) -> None:
             return None
 
-        energy_mod.reset_samples_rate_limit_state(
+        throttle_module.reset_samples_rate_limit_state(
             time_module=types.SimpleNamespace(
                 monotonic=lambda: next(monotonic_counter),
                 time=lambda: fake_now,
@@ -1264,7 +1264,9 @@ def test_import_energy_history_requested_map_filters(
             },
         )
 
-        energy_mod.reset_samples_rate_limit_state(time_module=time, sleep=asyncio.sleep)
+        throttle_module.reset_samples_rate_limit_state(
+            time_module=time, sleep=asyncio.sleep
+        )
 
         assert client.get_node_samples.await_count >= 2
         progress = entry.options[energy_mod.OPTION_ENERGY_HISTORY_PROGRESS]
