@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Mapping
 import logging
 from typing import Any
 
@@ -13,37 +14,43 @@ from homeassistant.core import callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, signal_ws_status
+from .boost import supports_boost
+from .const import DOMAIN, signal_ws_data, signal_ws_status
 from .coordinator import StateCoordinator
 from .entity import GatewayDispatcherEntity
 from .heater import (
-    HeaterNodeBase,
-    heater_platform_details_for_entry,
-    iter_boostable_heater_nodes,
+    BoostState,
+    DispatcherSubscriptionHelper,
+    derive_boost_state,
     log_skipped_nodes,
+    resolve_entry_inventory,
 )
-from .inventory import Inventory
 from .identifiers import build_heater_entity_unique_id
+from .inventory import Inventory, normalize_node_addr, normalize_node_type
 from .utils import build_gateway_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
+SettingsResolver = Callable[[], Mapping[str, Any] | None]
+
+
 async def async_setup_entry(hass, entry, async_add_entities):
-    """Set up one connectivity binary sensor per TermoWeb hub (dev_id)."""
+    """Set up connectivity and boost binary sensors for a config entry."""
     data = hass.data[DOMAIN][entry.entry_id]
     coord: StateCoordinator = data["coordinator"]
     dev_id = data["dev_id"]
     gateway = GatewayOnlineBinarySensor(coord, entry.entry_id, dev_id)
 
-    default_name = lambda addr: f"Node {addr}"
-    heater_details = heater_platform_details_for_entry(
-        data,
-        default_name_simple=default_name,
-    )
+    inventory = resolve_entry_inventory(data)
+    if inventory is None:
+        _LOGGER.error(
+            "TermoWeb heater setup missing inventory for device %s", dev_id
+        )
+        raise ValueError("TermoWeb inventory unavailable for heater platform")
 
     boost_entities: list[BinarySensorEntity] = []
-    for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
-        heater_details,
+    for node_type, addr_str, base_name in _iter_boostable_inventory_nodes(
+        inventory
     ):
         unique_id = build_heater_entity_unique_id(
             dev_id,
@@ -51,17 +58,24 @@ async def async_setup_entry(hass, entry, async_add_entities):
             addr_str,
             ":boost_active",
         )
+        settings_resolver = _build_settings_resolver(
+            coord,
+            dev_id,
+            node_type,
+            addr_str,
+        )
         boost_entities.append(
             HeaterBoostActiveBinarySensor(
                 coord,
                 entry.entry_id,
                 dev_id,
+                node_type,
                 addr_str,
                 f"{base_name} Boost Active",
                 unique_id,
+                inventory=inventory,
+                settings_resolver=settings_resolver,
                 device_name=base_name,
-                node_type=node_type,
-                inventory=heater_details.inventory,
             )
         )
 
@@ -70,7 +84,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             "Adding %d TermoWeb heater boost binary sensors", len(boost_entities)
         )
 
-    log_skipped_nodes("binary_sensor", heater_details, logger=_LOGGER)
+    log_skipped_nodes("binary_sensor", inventory, logger=_LOGGER)
     async_add_entities([gateway, *boost_entities])
 
 
@@ -139,44 +153,56 @@ class GatewayOnlineBinarySensor(
         self.schedule_update_ha_state()
 
 
-class HeaterBoostActiveBinarySensor(HeaterNodeBase, BinarySensorEntity):
+class HeaterBoostActiveBinarySensor(
+    CoordinatorEntity[StateCoordinator],
+    BinarySensorEntity,
+):
     """Binary sensor indicating whether a heater boost is active."""
 
     _attr_device_class = getattr(BinarySensorDeviceClass, "HEAT", "heat")
+    _attr_should_poll = False
 
     def __init__(
         self,
         coordinator: StateCoordinator,
         entry_id: str,
         dev_id: str,
+        node_type: str,
         addr: str,
         name: str,
         unique_id: str,
         *,
+        inventory: Inventory,
+        settings_resolver: SettingsResolver,
         device_name: str | None = None,
-        node_type: str | None = None,
-        inventory: Inventory | None = None,
     ) -> None:
         """Initialise the boost activity binary sensor."""
 
-        super().__init__(
-            coordinator,
-            entry_id,
-            dev_id,
-            addr,
-            name,
-            unique_id,
-            device_name=device_name,
-            node_type=node_type,
-            inventory=inventory,
+        super().__init__(coordinator)
+        canonical_type = normalize_node_type(
+            node_type, use_default_when_falsey=True
         )
+        canonical_addr = normalize_node_addr(addr, use_default_when_falsey=True)
+        if not canonical_type or not canonical_addr:
+            msg = "node_type and addr must be provided"
+            raise ValueError(msg)
+
+        self._entry_id = entry_id
+        self._dev_id = str(dev_id)
+        self._node_type = canonical_type
+        self._addr = canonical_addr
+        self._attr_name = name
+        self._attr_unique_id = unique_id
+        self._inventory = inventory
+        self._settings_resolver = settings_resolver
+        self._device_name = device_name or name
+        self._ws_subscription = DispatcherSubscriptionHelper(self)
 
     @property
     def is_on(self) -> bool | None:
         """Return True when the heater boost is active."""
 
-        state = self.boost_state()
-        return state.active
+        return self.boost_state().active
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -190,3 +216,135 @@ class HeaterBoostActiveBinarySensor(HeaterNodeBase, BinarySensorEntity):
             "boost_end": state.end_iso,
             "boost_end_label": state.end_label,
         }
+
+    @property
+    def available(self) -> bool:
+        """Return whether the heater node exists in the inventory."""
+
+        forward_map, _ = self._inventory.heater_address_map
+        addresses = forward_map.get(self._node_type, [])
+        return self._addr in addresses
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Expose Home Assistant device metadata for the heater."""
+
+        model = "Accumulator" if self._node_type == "acm" else "Heater"
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._dev_id, self._addr)},
+            name=self._device_name,
+            manufacturer="TermoWeb",
+            model=model,
+            via_device=(DOMAIN, self._dev_id),
+        )
+
+    def boost_state(self) -> BoostState:
+        """Return derived boost metadata for this heater."""
+
+        settings = self._settings_resolver() or {}
+        return derive_boost_state(settings, self.coordinator)
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to websocket updates once the entity is added."""
+
+        await super().async_added_to_hass()
+        if self.hass is None:
+            return
+        signal = signal_ws_data(self._entry_id)
+        if not signal:
+            return
+        self._ws_subscription.subscribe(
+            self.hass,
+            signal,
+            self._handle_ws_message,
+        )
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Detach websocket listeners before removal."""
+
+        self._ws_subscription.unsubscribe()
+        await super().async_will_remove_from_hass()
+
+    def _handle_ws_message(self, payload: Mapping[str, Any]) -> None:
+        """Trigger a refresh when websocket payload targets this entity."""
+
+        if not self._payload_targets_entity(payload):
+            return
+        self.schedule_update_ha_state()
+
+    def _payload_targets_entity(self, payload: Mapping[str, Any]) -> bool:
+        """Return True when ``payload`` references this heater node."""
+
+        if payload.get("dev_id") != self._dev_id:
+            return False
+
+        candidate_type = payload.get("node_type")
+        if candidate_type is not None:
+            canonical = normalize_node_type(candidate_type, use_default_when_falsey=True)
+            if canonical and canonical != self._node_type:
+                return False
+
+        addr = payload.get("addr")
+        if addr is None:
+            return True
+
+        canonical_addr = normalize_node_addr(addr, use_default_when_falsey=True)
+        if not canonical_addr:
+            return False
+        return canonical_addr == self._addr
+
+
+def _iter_boostable_inventory_nodes(
+    inventory: Inventory,
+) -> Iterable[tuple[str, str, str]]:
+    """Yield boostable heater metadata from ``inventory``."""
+
+    forward_map, _ = inventory.heater_address_map
+    nodes_by_type = inventory.nodes_by_type
+
+    for node_type, addresses in forward_map.items():
+        canonical_type = normalize_node_type(node_type, use_default_when_falsey=True)
+        if not canonical_type:
+            continue
+
+        nodes = {
+            normalize_node_addr(candidate.addr, use_default_when_falsey=True): candidate
+            for candidate in nodes_by_type.get(canonical_type, [])
+        }
+        for addr in addresses:
+            canonical_addr = normalize_node_addr(addr, use_default_when_falsey=True)
+            if not canonical_addr:
+                continue
+            node = nodes.get(canonical_addr)
+            if node is None or not supports_boost(node):
+                continue
+            yield (
+                canonical_type,
+                canonical_addr,
+                inventory.resolve_heater_name(canonical_type, canonical_addr),
+            )
+
+
+def _build_settings_resolver(
+    coordinator: StateCoordinator,
+    dev_id: str,
+    node_type: str,
+    addr: str,
+) -> SettingsResolver:
+    """Return callable resolving boost settings for a heater node."""
+
+    def _resolver() -> Mapping[str, Any] | None:
+        data = coordinator.data or {}
+        device = data.get(dev_id)
+        if not isinstance(device, Mapping):
+            return None
+        settings_by_type = device.get("settings")
+        if not isinstance(settings_by_type, Mapping):
+            return None
+        per_type = settings_by_type.get(node_type)
+        if not isinstance(per_type, Mapping):
+            return None
+        settings = per_type.get(addr)
+        return settings if isinstance(settings, Mapping) else None
+
+    return _resolver
