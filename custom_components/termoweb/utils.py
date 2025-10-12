@@ -44,6 +44,38 @@ def _entry_gateway_record(
     return entry_data
 
 
+def apply_entry_device_overrides(
+    info: DeviceInfo,
+    entry_data: Mapping[str, Any] | None,
+    *,
+    include_version: bool = False,
+) -> DeviceInfo:
+    """Return device info with brand and version overrides."""
+
+    if not isinstance(entry_data, Mapping):
+        return info
+
+    manufacturer: str | None = None
+
+    brand = entry_data.get("brand")
+    if isinstance(brand, str) and brand.strip():
+        manufacturer = brand.strip()
+    else:
+        override = entry_data.get("manufacturer")
+        if isinstance(override, str) and override.strip():
+            manufacturer = override.strip()
+
+    if manufacturer:
+        info["manufacturer"] = manufacturer
+
+    if include_version:
+        version = entry_data.get("version")
+        if version is not None:
+            info["sw_version"] = str(version)
+
+    return info
+
+
 def build_gateway_device_info(
     hass: HomeAssistant | None,
     entry_id: str | None,
@@ -63,16 +95,12 @@ def build_gateway_device_info(
     )
 
     entry_data = _entry_gateway_record(hass, entry_id)
+    info = apply_entry_device_overrides(
+        info, entry_data, include_version=include_version
+    )
+
     if not entry_data:
         return info
-
-    brand = entry_data.get("brand")
-    if isinstance(brand, str) and brand.strip():
-        info["manufacturer"] = brand.strip()
-
-    version = entry_data.get("version")
-    if include_version and version is not None:
-        info["sw_version"] = str(version)
 
     coordinator = entry_data.get("coordinator")
     data: Mapping[str, Any] | None = None
@@ -117,14 +145,7 @@ def build_power_monitor_device_info(
     )
 
     entry_data = _entry_gateway_record(hass, entry_id)
-    if not entry_data:
-        return info
-
-    brand = entry_data.get("brand")
-    if isinstance(brand, str) and brand.strip():
-        info["manufacturer"] = brand.strip()
-
-    return info
+    return apply_entry_device_overrides(info, entry_data)
 
 
 def float_or_none(value: Any) -> float | None:
