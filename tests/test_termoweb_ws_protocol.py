@@ -937,9 +937,7 @@ def test_dispatch_nodes_with_inventory(monkeypatch: pytest.MonkeyPatch, caplog: 
     energy = SimpleNamespace(update_addresses=MagicMock(), handle_ws_samples=MagicMock())
     record["energy_coordinator"] = energy
     client._coordinator.update_nodes = MagicMock()
-    client._coordinator.data = {
-        "device": {"addresses_by_type": {}, "settings": {}}
-    }
+    client._coordinator.data = {"device": {"inventory": record["inventory"], "settings": {}}}
     nodes_payload = {"nodes": [{"type": "htr", "addr": "1"}]}
     client._inventory = Inventory(
         client.dev_id,
@@ -949,13 +947,13 @@ def test_dispatch_nodes_with_inventory(monkeypatch: pytest.MonkeyPatch, caplog: 
     caplog.set_level(logging.DEBUG)
 
     result = client._dispatch_nodes({"nodes": {"htr": {"settings": {"1": {}}}}})
-    assert isinstance(result, dict)
+    assert result is None
     client._coordinator.update_nodes.assert_not_called()
     dispatcher.assert_called_once()
     _, _, payload = dispatcher.call_args[0]
     assert "nodes" not in payload
     assert payload["inventory"] is client._inventory
-    assert payload["inventory_addresses"] == {"htr": ["1"]}
+    assert "inventory_addresses" not in payload
     assert client._inventory.addresses_by_type["htr"] == ["1"]
 
 
@@ -977,7 +975,7 @@ def test_dispatch_nodes_handles_unknown_types(monkeypatch: pytest.MonkeyPatch) -
     dispatcher.assert_called_once()
     _, _, payload = dispatcher.call_args[0]
     assert "nodes" not in payload
-    assert payload["inventory_addresses"] == {"foo": ["9"]}
+    assert "inventory_addresses" not in payload
     assert "unknown_types" not in payload
 
 
@@ -1023,7 +1021,7 @@ def test_dispatch_nodes_uses_inventory_payload(monkeypatch: pytest.MonkeyPatch) 
     dispatcher.assert_called_once()
 
 
-def test_handle_event_includes_inventory_addresses(
+def test_handle_event_includes_inventory_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Legacy websocket events should include inventory metadata in payloads."""
@@ -1097,7 +1095,8 @@ def test_handle_event_includes_inventory_addresses(
         None,
     )
     assert nodes_payload is not None
-    assert nodes_payload["inventory_addresses"] == {"htr": ["2"]}
+    assert nodes_payload["inventory"] is client._inventory
+    assert "inventory_addresses" not in nodes_payload
 
     settings_payload = next(
         (
@@ -1108,7 +1107,8 @@ def test_handle_event_includes_inventory_addresses(
         None,
     )
     assert settings_payload is not None
-    assert settings_payload["inventory_addresses"] == {"htr": ["2"]}
+    assert settings_payload["inventory"] is client._inventory
+    assert "inventory_addresses" not in settings_payload
 
     dev_state = client._coordinator.data.get("device")
     assert isinstance(dev_state, Mapping)
@@ -1163,13 +1163,7 @@ def test_apply_heater_addresses_normalises_from_inventory(
         raw_nodes,
         build_node_inventory(raw_nodes),
     )
-    normalized = client._apply_heater_addresses(
-        {"htr": ["1"], "acm": ["2"]}, inventory=inventory
-    )
-    heater_map, heater_aliases = inventory.heater_sample_address_map
-    power_map, power_aliases = inventory.power_monitor_sample_address_map
-    assert normalized["htr"] == heater_map["htr"]
-    assert normalized["acm"] == heater_map["acm"]
+    client._apply_heater_addresses({"htr": ["1"], "acm": ["2"]}, inventory=inventory)
     assert client._coordinator.data == {"device": {"settings": {}}}
     record = client.hass.data[module.DOMAIN]["entry"]
     assert "sample_aliases" not in record
@@ -1197,9 +1191,7 @@ def test_apply_heater_addresses_includes_power_monitors(
         build_node_inventory(nodes_payload),
     )
 
-    normalized = client._apply_heater_addresses({"htr": ["1"]}, inventory=inventory)
-
-    assert normalized["pmo"] == ["9"]
+    client._apply_heater_addresses({"htr": ["1"]}, inventory=inventory)
     energy_coordinator.update_addresses.assert_called_once_with(inventory)
     assert record.get("inventory") is inventory
     assert "sample_aliases" not in record
@@ -1209,7 +1201,7 @@ def test_apply_heater_addresses_requires_inventory(monkeypatch: pytest.MonkeyPat
 
     client, _sio, _ = _make_client(monkeypatch)
     normalized = client._apply_heater_addresses({"acm": []}, inventory=None)
-    assert normalized == {}
+    assert normalized is None
     assert client._coordinator.data == {}
 
 
@@ -1319,13 +1311,12 @@ def test_apply_heater_addresses_filters_non_heaters(monkeypatch: pytest.MonkeyPa
         build_node_inventory(nodes_payload),
     )
 
-    normalized = client._apply_heater_addresses(
+    client._apply_heater_addresses(
         {"foo": ["5"], "htr": ["6"]},
         inventory=inventory_container,
     )
 
-    assert "foo" not in normalized
-    assert normalized["htr"] == ["6"]
+    assert record["inventory"] is inventory_container
 
 
 def test_apply_heater_addresses_logs_invalid_inventory(
@@ -1346,12 +1337,10 @@ def test_apply_heater_addresses_logs_invalid_inventory(
     client._inventory = inventory
 
     with caplog.at_level("DEBUG"):
-        normalized = client._apply_heater_addresses(
+        client._apply_heater_addresses(
             {"htr": ["4"]},
             inventory=[SimpleNamespace(type="htr", addr="4")],
         )
-
-    assert normalized["htr"] == ["4"]
     assert "ignoring unexpected inventory container" in caplog.text
 
 
@@ -1675,6 +1664,12 @@ def test_apply_nodes_payload_translation(monkeypatch: pytest.MonkeyPatch) -> Non
     """Node payload application should merge data and notify listeners."""
 
     client, _sio, dispatcher = _make_client(monkeypatch)
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
+    client._inventory = Inventory(
+        client.dev_id,
+        raw_nodes,
+        build_node_inventory(raw_nodes),
+    )
     original_dispatch = client._dispatch_nodes
     client._dispatch_nodes = MagicMock(side_effect=original_dispatch)
     client._handshake_payload = {"nodes": {}}

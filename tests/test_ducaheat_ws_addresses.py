@@ -86,16 +86,7 @@ def test_apply_heater_addresses_updates_state() -> None:
         "thm": ["9"],
     }
 
-    cleaned = client._apply_heater_addresses(normalized_map, inventory=inventory)
-
-    heater_map, heater_aliases = inventory.heater_sample_address_map
-    power_map, power_aliases = inventory.power_monitor_sample_address_map
-
-    assert cleaned["htr"] == heater_map["htr"]
-    assert "003" not in cleaned["htr"]
-    assert cleaned["acm"] == heater_map["acm"]
-    assert cleaned["pmo"] == power_map.get("pmo", [])
-    assert "thm" not in cleaned
+    client._apply_heater_addresses(normalized_map, inventory=inventory)
 
     assert hass.data[DOMAIN]["entry"]["inventory"] is inventory
     assert client._inventory is inventory
@@ -104,8 +95,8 @@ def test_apply_heater_addresses_updates_state() -> None:
     assert "sample_aliases" not in hass.data[DOMAIN]["entry"]
 
 
-def test_dispatch_nodes_uses_inventory_addresses() -> None:
-    """Inventory address caches should populate dispatch payloads."""
+def test_dispatch_nodes_includes_inventory_metadata() -> None:
+    """Inventory metadata should populate dispatch payloads."""
 
     client = _make_client()
     client._dispatcher = MagicMock()
@@ -125,8 +116,7 @@ def test_dispatch_nodes_uses_inventory_addresses() -> None:
 
     assert client._dispatcher.call_count == 1
     dispatched = client._dispatcher.call_args[0][2]
-    assert dispatched["addr_map"]["htr"] == ["1"]
-    assert dispatched["addresses_by_type"]["htr"] == ["1"]
+    assert dispatched["inventory"] is inventory
     assert (
         "sample_aliases" not in client.hass.data[DOMAIN][client.entry_id]
     )

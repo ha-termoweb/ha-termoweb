@@ -34,15 +34,8 @@ def test_device_record_reuses_inventory_instance() -> None:
     )
 
     assert record["inventory"] is inventory
-    assert record["addresses_by_type"] == inventory.addresses_by_type
-
-    forward, reverse = inventory.heater_address_map
-    assert record["heater_address_map"] == {"forward": forward, "reverse": reverse}
-
-    power_forward, power_reverse = inventory.power_monitor_address_map
-    assert record["power_monitor_address_map"] == {
-        "forward": power_forward,
-        "reverse": power_reverse,
-    }
+    assert "addresses_by_type" not in record
+    assert "heater_address_map" not in record
+    assert "power_monitor_address_map" not in record
 
     assert record["settings"] == {"htr": {"2": {"mode": "auto"}}}

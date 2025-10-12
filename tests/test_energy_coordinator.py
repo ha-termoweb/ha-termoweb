@@ -128,31 +128,6 @@ def inventory_from_map(
         return inventory_builder(dev_id, payload, node_list)
 
     return _factory
-def test_ensure_heater_section_helper() -> None:
-    """The helper must reuse existing sections or insert defaults."""
-
-    nodes_by_type: dict[str, dict[str, Any]] = {
-        "htr": {"addrs": ["1"], "settings": {"1": {}}}
-    }
-    existing = coord_module._ensure_heater_section(nodes_by_type, lambda: {})
-    assert existing is nodes_by_type["htr"]
-
-    nodes_by_type = {}
-    created = coord_module._ensure_heater_section(
-        nodes_by_type, lambda: {"addrs": ["A"], "settings": {}}
-    )
-    assert created == {"addrs": ["A"], "settings": {}}
-    assert nodes_by_type["htr"] == {"addrs": ["A"], "settings": {}}
-
-    nodes_by_type = {"htr": []}  # type: ignore[assignment]
-    replaced = coord_module._ensure_heater_section(
-        nodes_by_type,
-        lambda: {"addrs": ["B"], "settings": {"B": {"mode": "auto"}}},
-    )
-    assert replaced == {"addrs": ["B"], "settings": {"B": {"mode": "auto"}}}
-    assert nodes_by_type["htr"] == replaced
-
-
 
 
 def test_update_nodes_accepts_inventory_container(
@@ -316,8 +291,9 @@ def test_coordinator_success_resets_backoff() -> None:
         )
         assert dev["settings"]["htr"]["A"] == {"mode": "auto"}
         assert dev["settings"]["acm"]["B"] == {"mode": "auto"}
-        assert dev["addresses_by_type"]["htr"] == ["A"]
-        assert dev["addresses_by_type"]["acm"] == ["B"]
+        assert dev["inventory"] is inventory
+        assert dev["inventory"].addresses_by_type["htr"] == ["A"]
+        assert dev["inventory"].addresses_by_type["acm"] == ["B"]
         assert "nodes" not in dev
         assert "nodes_by_type" not in dev
         assert coord._backoff == 0
@@ -374,8 +350,9 @@ def test_state_coordinator_round_robin_mixed_types() -> None:
         assert dev["settings"]["htr"]["A"] == {"mode": "auto"}
         assert dev["settings"]["htr"]["C"] == {"mode": "eco"}
         assert dev["settings"]["acm"]["B"] == {"mode": "charge"}
-        assert dev["addresses_by_type"]["htr"] == ["A", "C"]
-        assert dev["addresses_by_type"]["acm"] == ["B"]
+        assert dev["inventory"] is inventory
+        assert dev["inventory"].addresses_by_type["htr"] == ["A", "C"]
+        assert dev["inventory"].addresses_by_type["acm"] == ["B"]
         assert "nodes" not in dev
 
     asyncio.run(_run())
@@ -462,7 +439,7 @@ def test_refresh_heater_skips_invalid_inputs() -> None:
         coord.data = {
             "dev": {
                 "settings": {"htr": {"A": {"mode": "manual"}}},
-                "addresses_by_type": {"htr": ["A"]},
+                "inventory": inventory,
             }
         }
         await coord.async_refresh_heater("")
@@ -472,7 +449,7 @@ def test_refresh_heater_skips_invalid_inputs() -> None:
         coord.data = {
             "dev": {
                 "settings": {"htr": {}},
-                "addresses_by_type": {"htr": ["A"]},
+                "inventory": inventory,
             }
         }
         await coord.async_refresh_heater("A")
@@ -646,7 +623,8 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
         assert "nodes" not in dev
         assert dev["connected"] is True
         assert dev["settings"]["htr"]["A"] == {"mode": "auto"}
-        assert dev["addresses_by_type"]["htr"] == ["A", "B"]
+        assert isinstance(dev.get("inventory"), coord_module.Inventory)
+        assert dev["inventory"].addresses_by_type["htr"] == ["A", "B"]
 
         await coord.async_refresh_heater("B")
         assert client.get_node_settings.await_args_list[-1].args == (
@@ -657,8 +635,9 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
         second = updates[-1]
         assert second["dev"]["settings"]["htr"]["A"] == {"mode": "auto"}
         assert second["dev"]["settings"]["htr"]["B"] == {"mode": "eco"}
-        assert second["dev"]["addresses_by_type"]["htr"] == ["A", "B"]
-        assert second["dev"]["addresses_by_type"]["acm"] == ["C"]
+        assert isinstance(second["dev"].get("inventory"), coord_module.Inventory)
+        assert second["dev"]["inventory"].addresses_by_type["htr"] == ["A", "B"]
+        assert second["dev"]["inventory"].addresses_by_type["acm"] == ["C"]
         assert second["dev"]["settings"].get("acm", {}) == {}
 
     asyncio.run(_run())
@@ -687,7 +666,7 @@ def test_refresh_heater_handles_tuple_and_acm() -> None:
         )
         coord.data = {
             "dev": {
-                "addresses_by_type": {"acm": ["3"], "htr": []},
+                "inventory": inventory_container,
                 "settings": {"acm": {"1": {"prev": True}}},
             }
         }
@@ -708,7 +687,8 @@ def test_refresh_heater_handles_tuple_and_acm() -> None:
         client.get_node_settings.assert_awaited_once()
         assert updates, "Expected coordinator data to be updated"
         latest = updates[-1]["dev"]
-        addrs = latest["addresses_by_type"]["acm"]
+        assert latest["inventory"] is inventory_container
+        addrs = latest["inventory"].addresses_by_type["acm"]
         assert addrs == ["3"]
         assert latest["settings"]["acm"]["2"] == {"mode": "auto"}
 
@@ -748,14 +728,15 @@ def test_async_refresh_heater_adds_missing_type() -> None:
         coord.data = {
             "dev": {
                 "settings": {"htr": {"A": {"mode": "manual"}}},
-                "addresses_by_type": {"htr": ["A"], "acm": []},
+                "inventory": inventory,
             }
         }
 
         await coord.async_refresh_heater(("acm", "B"))
 
         dev_data = coord.data["dev"]
-        assert "B" in dev_data["addresses_by_type"]["acm"]
+        assert dev_data["inventory"] is inventory
+        assert "B" in dev_data["inventory"].addresses_by_type["acm"]
         assert dev_data["settings"]["acm"]["B"] == {"mode": "eco"}
 
     asyncio.run(_run())
@@ -781,6 +762,7 @@ def test_refresh_heater_populates_missing_metadata() -> None:
             {"name": " Device "},
             nodes,
         )
+        inventory = coord._ensure_inventory()
 
         updates: list[dict[str, dict[str, Any]]] = []
 
@@ -796,7 +778,7 @@ def test_refresh_heater_populates_missing_metadata() -> None:
         coord.data = {
             "dev": {
                 "settings": {"htr": {}},
-                "addresses_by_type": {"htr": [], "acm": ["B"]},
+                "inventory": inventory,
                 "connected": False,
             }
         }
@@ -811,7 +793,8 @@ def test_refresh_heater_populates_missing_metadata() -> None:
         assert "nodes" not in result
         assert result["connected"] is True
         assert result["settings"]["htr"]["A"] == {"mode": "heat"}
-        assert result["addresses_by_type"]["acm"] == ["B"]
+        assert result["inventory"] is inventory
+        assert result["inventory"].addresses_by_type["acm"] == ["B"]
 
     asyncio.run(_run())
 
@@ -842,6 +825,7 @@ def test_refresh_heater_handles_errors(caplog: pytest.LogCaptureFixture) -> None
             {"name": "Device"},
             nodes,
         )
+        inventory = coord._ensure_inventory()
 
         updates: list[dict[str, dict[str, Any]]] = []
 
@@ -857,7 +841,7 @@ def test_refresh_heater_handles_errors(caplog: pytest.LogCaptureFixture) -> None
         coord.data = {
             "dev": {
                 "settings": {"htr": {}},
-                "addresses_by_type": {"htr": []},
+                "inventory": inventory,
             }
         }
         await coord.async_refresh_heater("A")
@@ -907,7 +891,7 @@ def test_state_coordinator_async_update_data_reuses_previous() -> None:
                     "acm": {"7": {"prev": True}},
                     "htr": {"legacy": {"mode": "auto"}},
                 },
-                "addresses_by_type": {"acm": ["7"], "htr": ["legacy"]},
+                "inventory": inventory,
             }
         }
 
@@ -917,7 +901,8 @@ def test_state_coordinator_async_update_data_reuses_previous() -> None:
         dev_data = result["dev"]
         assert dev_data["settings"]["acm"]["7"] == {"mode": "eco"}
         assert dev_data["settings"]["htr"]["legacy"] == {"mode": "auto"}
-        assert dev_data["addresses_by_type"].get("htr") in (None, [])
+        assert dev_data["inventory"] is inventory
+        assert dev_data["inventory"].addresses_by_type.get("htr") in (None, [])
 
     asyncio.run(_run())
 
@@ -947,7 +932,8 @@ def test_async_refresh_heater_updates_cache() -> None:
 
         dev_data = coord.data["dev"]
         assert dev_data["settings"]["htr"]["A"] == {"mode": "heat"}
-        assert dev_data["addresses_by_type"]["htr"] == ["A"]
+        assert dev_data["inventory"] is inventory
+        assert dev_data["inventory"].addresses_by_type["htr"] == ["A"]
 
     asyncio.run(_run())
 
@@ -971,7 +957,7 @@ def test_async_update_data_skips_non_dict_sections() -> None:
         coord.data = {
             "dev": {
                 "settings": {"acm": {"B": {"mode": "auto"}}},
-                "addresses_by_type": {"acm": ["B"]},
+                "inventory": coord._ensure_inventory(),
                 "misc": "invalid",
             }
         }
@@ -980,7 +966,8 @@ def test_async_update_data_skips_non_dict_sections() -> None:
 
         dev_data = result["dev"]
         assert dev_data["settings"]["acm"]["B"] == {"mode": "heat"}
-        assert dev_data["addresses_by_type"]["acm"] == ["B"]
+        assert isinstance(dev_data.get("inventory"), coord_module.Inventory)
+        assert dev_data["inventory"].addresses_by_type["acm"] == ["B"]
         assert client.get_node_settings.await_count == 1
 
     asyncio.run(_run())

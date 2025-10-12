@@ -48,9 +48,8 @@ def test_assemble_device_record_uses_inventory_maps(
         name="Device dev",
     )
 
-    assert record["addresses_by_type"] == inventory.addresses_by_type
-    assert record["heater_address_map"]["forward"] == inventory.heater_address_map[0]
-    assert record["power_monitor_address_map"]["forward"] == (
-        inventory.power_monitor_address_map[0]
-    )
+    assert record["inventory"] is inventory
+    assert "addresses_by_type" not in record
+    assert "heater_address_map" not in record
+    assert "power_monitor_address_map" not in record
     assert record["settings"] == settings

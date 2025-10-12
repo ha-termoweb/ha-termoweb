@@ -161,9 +161,7 @@ class DummyCoordinator:
         self.data: dict[str, Any] = {
             "device": {
                 "nodes_by_type": {},
-                "addr_map": {},
                 "settings": {},
-                "addresses_by_type": {},
             }
         }
 
@@ -286,10 +284,10 @@ def _set_inventory(
     return inventory
 
 
-def test_dispatch_nodes_publishes_inventory_addresses(
+def test_dispatch_nodes_includes_inventory_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Snapshots should publish inventory-derived address payloads."""
+    """Snapshots should publish inventory metadata payloads."""
 
     client = _make_client(monkeypatch)
     hass = client.hass
@@ -313,12 +311,11 @@ def test_dispatch_nodes_publishes_inventory_addresses(
 
     assert client._dispatcher.call_count == 1
     dispatched = client._dispatcher.call_args[0][2]
-    expected_addresses = inventory.addresses_by_type
     assert "nodes" not in dispatched
     assert "nodes_by_type" not in dispatched
-    addresses = dispatched["addresses_by_type"]
-    assert addresses == expected_addresses
-    assert dispatched.get("addr_map", addresses) == addresses
+    assert "addresses_by_type" not in dispatched
+    assert "addr_map" not in dispatched
+    assert dispatched["inventory"] is inventory
     coordinator.update_nodes.assert_not_called()
     assert client._inventory.addresses_by_type["htr"] == ["1"]
 
@@ -343,12 +340,11 @@ def test_incremental_updates_preserve_address_payload(
     client._dispatch_nodes(base)
 
     first_payload = client._dispatcher.call_args_list[-1][0][2]
-    expected_addresses = client._inventory.addresses_by_type
     assert "nodes" not in first_payload
     assert "nodes_by_type" not in first_payload
-    first_addresses = first_payload["addresses_by_type"]
-    assert first_addresses == expected_addresses
-    assert first_payload.get("addr_map", first_addresses) == first_addresses
+    assert "addresses_by_type" not in first_payload
+    assert "addr_map" not in first_payload
+    assert first_payload["inventory"] is client._inventory
 
     update = {"htr": {"settings": {"1": {"target_temp": 23}}}}
     client._dispatch_nodes(update)
@@ -356,9 +352,9 @@ def test_incremental_updates_preserve_address_payload(
     dispatched = client._dispatcher.call_args_list[-1][0][2]
     assert "nodes" not in dispatched
     assert "nodes_by_type" not in dispatched
-    addresses = dispatched["addresses_by_type"]
-    assert addresses == expected_addresses
-    assert dispatched.get("addr_map", addresses) == addresses
+    assert "addresses_by_type" not in dispatched
+    assert "addr_map" not in dispatched
+    assert dispatched["inventory"] is client._inventory
     assert coordinator.update_nodes.call_count == 0
 
 
@@ -764,9 +760,9 @@ async def test_read_loop_handles_stringified_dev_data(
     assert getattr(client, "_nodes_raw", None) is None
     assert dispatched
     payload = dispatched[-1]
-    expected_addresses = client._inventory.addresses_by_type
-    assert payload["addr_map"]["htr"] == ["1"]
-    assert payload["addresses_by_type"] == expected_addresses
+    assert payload["inventory"] is client._inventory
+    assert "addresses_by_type" not in payload
+    assert "addr_map" not in payload
     client._subscribe_feeds.assert_awaited_once_with()
 
 
@@ -798,9 +794,9 @@ async def test_read_loop_handles_list_snapshot(
     assert getattr(client, "_nodes_raw", None) is None
     assert dispatched
     payload = dispatched[-1]
-    expected_addresses = client._inventory.addresses_by_type
-    assert payload["addr_map"]["htr"] == ["1"]
-    assert payload["addresses_by_type"] == expected_addresses
+    assert payload["inventory"] is client._inventory
+    assert "addresses_by_type" not in payload
+    assert "addr_map" not in payload
     client._subscribe_feeds.assert_awaited_once_with()
 
 
@@ -995,9 +991,9 @@ async def test_read_loop_processes_update_event(
     assert getattr(client, "_nodes_raw", None) is None
     assert dispatched
     payload = dispatched[-1]
-    expected_addresses = client._inventory.addresses_by_type
-    assert payload["addr_map"]["htr"] == ["1"]
-    assert payload["addresses_by_type"] == expected_addresses
+    assert payload["inventory"] is client._inventory
+    assert "addresses_by_type" not in payload
+    assert "addr_map" not in payload
     assert not forwarded
 
 
@@ -1099,9 +1095,9 @@ async def test_read_loop_forwards_sample_updates(
     assert getattr(client, "_nodes_raw", None) is None
     assert dispatched
     payload = dispatched[-1]
-    expected_addresses = client._inventory.addresses_by_type
-    assert payload["addr_map"]["htr"] == ["1"]
-    assert payload["addresses_by_type"] == expected_addresses
+    assert payload["inventory"] is client._inventory
+    assert "addresses_by_type" not in payload
+    assert "addr_map" not in payload
     assert forwarded and forwarded[-1][0] == "device"
     assert forwarded[-1][2].get("lease_seconds") is None
     assert forwarded[-1][1]["htr"]["1"]["power"] == 10
@@ -1136,7 +1132,9 @@ async def test_read_loop_dev_data_uses_raw_snapshot(
 
     assert dispatched
     payload = dispatched[-1]
-    assert payload["addr_map"]["htr"] == ["1"]
+    assert payload["inventory"] is client._inventory
+    assert "addresses_by_type" not in payload
+    assert "addr_map" not in payload
     assert getattr(client, "_nodes_raw", None) is None
 
 
@@ -1169,9 +1167,9 @@ async def test_read_loop_does_not_cache_incremental_updates(
     assert getattr(client, "_nodes_raw", None) is None
     assert dispatched
     payload = dispatched[-1]
-    expected_addresses = client._inventory.addresses_by_type
-    assert payload["addr_map"]["htr"] == ["1"]
-    assert payload["addresses_by_type"] == expected_addresses
+    assert payload["inventory"] is client._inventory
+    assert "addresses_by_type" not in payload
+    assert "addr_map" not in payload
 
 
 def test_normalise_nodes_payload_handles_mappings(

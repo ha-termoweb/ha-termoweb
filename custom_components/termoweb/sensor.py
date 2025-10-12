@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from datetime import datetime
 import logging
 import math
@@ -211,6 +211,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 f"{base_name} Energy",
                 energy_unique_id,
                 base_name,
+                inventory=heater_details.inventory,
             )
         )
         new_entities.append(
@@ -222,6 +223,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 f"{base_name} Power",
                 power_unique_id,
                 base_name,
+                inventory=heater_details.inventory,
             )
         )
 
@@ -582,6 +584,8 @@ class PowerMonitorSensorBase(CoordinatorEntity, SensorEntity):
         name: str,
         unique_id: str,
         device_name: str,
+        *,
+        inventory: Inventory,
     ) -> None:
         """Initialise the power monitor sensor base entity."""
 
@@ -593,6 +597,19 @@ class PowerMonitorSensorBase(CoordinatorEntity, SensorEntity):
         self._attr_name = name
         self._attr_unique_id = unique_id
         self._device_name = device_name
+        self._inventory: Inventory | None = inventory
+
+    def _resolve_inventory(self) -> Inventory | None:
+        """Return the immutable inventory backing this sensor."""
+
+        inventory = getattr(self, "_inventory", None)
+        if isinstance(inventory, Inventory):
+            return inventory
+        coordinator_inventory = getattr(self.coordinator, "inventory", None)
+        if isinstance(coordinator_inventory, Inventory):
+            self._inventory = coordinator_inventory
+            return coordinator_inventory
+        return None
 
     def _device_record(self) -> Mapping[str, Any] | None:
         """Return the cached coordinator data for this device."""
@@ -639,18 +656,11 @@ class PowerMonitorSensorBase(CoordinatorEntity, SensorEntity):
         bucket = self._metric_bucket()
         if self._addr in bucket:
             return True
-        addresses: Iterable[str] = ()
-        accessor = getattr(self.coordinator, "addresses_for_type", None)
-        if callable(accessor):
-            try:
-                addresses = accessor("pmo")
-            except Exception:  # pragma: no cover - defensive safeguard
-                addresses = ()
-        if not addresses:
-            address_map = getattr(self.coordinator, "_addresses_by_type", None)
-            if isinstance(address_map, Mapping):
-                addresses = address_map.get("pmo", ())
-        return self._addr in set(addresses)
+        inventory = self._resolve_inventory()
+        if not isinstance(inventory, Inventory):
+            return False
+        addresses = inventory.addresses_by_type.get("pmo", [])
+        return self._addr in addresses
 
     @property
     def native_value(self) -> float | None:

@@ -27,10 +27,7 @@ def _make_client() -> ducaheat_ws.DucaheatWSClient:
         update_nodes=MagicMock(),
         data={
             "device": {
-                "nodes_by_type": {},
-                "addr_map": {},
                 "settings": {},
-                "addresses_by_type": {},
             }
         },
     )

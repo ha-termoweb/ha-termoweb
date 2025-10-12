@@ -45,7 +45,9 @@ async def test_dev_data_snapshot_does_not_populate_cache(
     assert getattr(client, "_nodes_raw", None) is None
     assert dispatched
     payload = dispatched[-1]
-    assert payload["addr_map"]["htr"] == ["1"]
+    assert payload["inventory"] is client._inventory
+    assert "addr_map" not in payload
+    assert "addresses_by_type" not in payload
 
 
 @pytest.mark.asyncio
@@ -76,4 +78,6 @@ async def test_update_events_do_not_cache_nodes(
     assert getattr(client, "_nodes_raw", None) is None
     assert dispatched
     payload = dispatched[-1]
-    assert payload["addr_map"]["htr"] == ["1"]
+    assert payload["inventory"] is client._inventory
+    assert "addr_map" not in payload
+    assert "addresses_by_type" not in payload

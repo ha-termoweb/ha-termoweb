@@ -1003,34 +1003,21 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         if isinstance(inventory, Inventory):
             self._inventory = inventory
 
-        addresses_by_type: dict[str, list[str]] = {}
-        if isinstance(inventory, Inventory):
-            try:
-                addresses_by_type = inventory.addresses_by_type
-            except Exception:  # pragma: no cover - defensive cache guard
-                _LOGGER.debug(
-                    "WS (ducaheat): failed to extract inventory address map", exc_info=True
-                )
-                addresses_by_type = {}
+        if not isinstance(inventory, Inventory):
+            _LOGGER.error("WS (ducaheat): missing inventory for node dispatch on %s", self.dev_id)
+            return
 
-        cleaned_map = self._apply_heater_addresses(
+        self._apply_heater_addresses(
             raw_nodes,
             inventory=inventory,
             log_prefix="WS (ducaheat)",
             logger=_LOGGER,
         )
 
-        if not addresses_by_type:
-            addresses_by_type = {
-                node_type: list(addresses)
-                for node_type, addresses in cleaned_map.items()
-            }
-
         payload_copy: dict[str, Any] = {
             "dev_id": self.dev_id,
             "node_type": None,
-            "addr_map": addresses_by_type,
-            "addresses_by_type": addresses_by_type,
+            "inventory": inventory,
         }
 
         cadence_payload = cadence_source or context.payload
