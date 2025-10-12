@@ -22,8 +22,10 @@ from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
 from .inventory import (
     Inventory,
     build_node_inventory,
+    normalize_heater_addresses,
     normalize_node_addr,
     normalize_node_type,
+    normalize_power_monitor_addresses,
 )
 from .utils import float_or_none
 
@@ -105,61 +107,6 @@ def _ensure_heater_section(
         heater_section["addrs"] = list(addrs)
     nodes_by_type["htr"] = heater_section
     return heater_section
-
-
-def _normalize_energy_payload(
-    payload: Mapping[str, Iterable[Any]] | Iterable[Any] | None,
-) -> tuple[dict[str, list[str]], dict[str, str]]:
-    """Return canonical energy node address mapping and aliases for ``payload``."""
-
-    if payload is None:
-        return {}, {node_type: node_type for node_type in ENERGY_NODE_TYPES}
-
-    cleaned_map: dict[str, list[str]] = {}
-    compat_aliases: dict[str, str] = {
-        node_type: node_type for node_type in ENERGY_NODE_TYPES
-    }
-    if isinstance(payload, Mapping):
-        sources: Iterable[tuple[Any, Iterable[Any] | Any]] = payload.items()
-    else:
-        sources = [("htr", payload)]
-
-    for raw_type, values in sources:
-        node_type = normalize_node_type(raw_type, use_default_when_falsey=True)
-        if not node_type:
-            continue
-        alias_target = node_type
-        if node_type in {"heater", "heaters", "htr"}:
-            alias_target = "htr"
-        elif node_type in {"accumulator", "accumulators", "acm"}:
-            alias_target = "acm"
-        elif node_type in {"power_monitor", "power_monitors", "pmo"}:
-            alias_target = "pmo"
-        if alias_target not in ENERGY_NODE_TYPES:
-            continue
-
-        compat_aliases.setdefault(alias_target, alias_target)
-        if node_type != alias_target:
-            compat_aliases[node_type] = alias_target
-
-        if isinstance(values, (str, bytes)) or not isinstance(values, Iterable):
-            candidates = [values]
-        else:
-            candidates = list(values)
-
-        bucket = cleaned_map.setdefault(alias_target, [])
-        seen = set(bucket)
-        for candidate in candidates:
-            addr = normalize_node_addr(candidate, use_default_when_falsey=True)
-            if not addr or addr in seen:
-                continue
-            seen.add(addr)
-            bucket.append(addr)
-
-    for node_type in ENERGY_NODE_TYPES:
-        cleaned_map.setdefault(node_type, [])
-        compat_aliases.setdefault(node_type, node_type)
-    return cleaned_map, compat_aliases
 
 
 class StateCoordinator(
@@ -1042,7 +989,27 @@ class EnergyStateCoordinator(
     ) -> None:
         """Replace the tracked heater addresses with ``addrs``."""
 
-        cleaned_map, compat_aliases = _normalize_energy_payload(addrs)
+        heater_map, heater_aliases = normalize_heater_addresses(addrs)
+        power_source: Mapping[str, Iterable[str]] | None
+        if isinstance(addrs, Mapping):
+            power_source = addrs
+        else:
+            power_source = None
+        power_map, power_aliases = normalize_power_monitor_addresses(power_source)
+
+        cleaned_map: dict[str, list[str]] = {
+            "htr": list(heater_map.get("htr", [])),
+            "acm": list(heater_map.get("acm", [])),
+            "pmo": list(power_map.get("pmo", [])),
+        }
+        for node_type in ENERGY_NODE_TYPES:
+            cleaned_map.setdefault(node_type, [])
+
+        compat_aliases: dict[str, str] = dict(heater_aliases)
+        compat_aliases.update(power_aliases)
+        for node_type in ENERGY_NODE_TYPES:
+            compat_aliases.setdefault(node_type, node_type)
+
         self._addresses_by_type = cleaned_map
         self._compat_aliases = compat_aliases
         self._addr_lookup = {
