@@ -593,14 +593,14 @@ class _WSCommon(_WSStatusMixin):
 
     def _ensure_type_bucket(
         self,
-        nodes_by_type: MutableMapping[str, Any],
+        nodes_by_type: Mapping[str, Any] | MutableMapping[str, Any],
         node_type: str,
         *,
         dev_map: MutableMapping[str, Any] | None = None,
-    ) -> MutableMapping[str, Any]:
-        """Return the existing node bucket for ``node_type``."""
+    ) -> Mapping[str, Any]:
+        """Return the node bucket for ``node_type`` without cloning metadata."""
 
-        if not isinstance(nodes_by_type, MutableMapping):
+        if not isinstance(nodes_by_type, Mapping):
             return {}
 
         normalized_type = normalize_node_type(node_type)
@@ -608,41 +608,16 @@ class _WSCommon(_WSStatusMixin):
             return {}
 
         existing = nodes_by_type.get(normalized_type)
-        if isinstance(existing, MutableMapping):
-            bucket: MutableMapping[str, Any] = existing
-        elif isinstance(existing, Mapping):
-            bucket = dict(existing)
-            nodes_by_type[normalized_type] = bucket
+        if isinstance(existing, Mapping):
+            bucket: Mapping[str, Any] = existing
         else:
-            bucket = {}
-
-        for section in ("settings", "samples", "status", "advanced"):
-            section_payload = bucket.get(section)
-            if isinstance(section_payload, MutableMapping):
-                continue
-            if isinstance(section_payload, Mapping):
-                bucket[section] = dict(section_payload)
+            mutable: dict[str, Any] = {}
+            bucket = mutable
+            if isinstance(nodes_by_type, MutableMapping):
+                nodes_by_type[normalized_type] = mutable
 
         if not isinstance(dev_map, MutableMapping):
             return bucket
-
-        settings_section = dev_map.get("settings")
-        if isinstance(settings_section, MutableMapping):
-            settings_map: MutableMapping[str, Any] = settings_section
-        elif isinstance(settings_section, Mapping):
-            settings_map = dict(settings_section)
-            dev_map["settings"] = settings_map
-        else:
-            settings_map = {}
-            dev_map["settings"] = settings_map
-
-        existing_settings = settings_map.get(normalized_type)
-        if isinstance(existing_settings, MutableMapping):
-            pass
-        elif isinstance(existing_settings, Mapping):
-            settings_map[normalized_type] = dict(existing_settings)
-        else:
-            settings_map.setdefault(normalized_type, {})
 
         inventory: Inventory | None = None
         if isinstance(self._inventory, Inventory):
@@ -658,25 +633,19 @@ class _WSCommon(_WSStatusMixin):
             if isinstance(candidate, Inventory):
                 inventory = candidate
 
-        if inventory is None and isinstance(dev_map.get("inventory"), Inventory):
-            inventory = dev_map["inventory"]
+        if inventory is None:
+            candidate = dev_map.get("inventory") if isinstance(dev_map, Mapping) else None
+            if isinstance(candidate, Inventory):
+                inventory = candidate
 
         if isinstance(inventory, Inventory):
             dev_map["inventory"] = inventory
-            try:
-                addresses_by_type = inventory.addresses_by_type
-            except Exception:  # pragma: no cover - defensive cache guard
-                addresses_by_type = {}
-            existing_addresses = dev_map.get("addresses_by_type")
-            if isinstance(existing_addresses, MutableMapping):
-                for key, values in addresses_by_type.items():
-                    existing_addresses.setdefault(key, list(values))
-            else:
-                dev_map["addresses_by_type"] = {
-                    key: list(values) for key, values in addresses_by_type.items()
-                }
 
-        dev_map.pop("nodes_by_type", None)
+        settings_section = dev_map.get("settings")
+        if isinstance(settings_section, MutableMapping):
+            settings_section.setdefault(normalized_type, {})
+        elif settings_section is None or "settings" not in dev_map:
+            dev_map["settings"] = {normalized_type: {}}
 
         return bucket
 
