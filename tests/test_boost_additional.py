@@ -95,11 +95,13 @@ def test_iter_inventory_heater_metadata_covers_branch_variants(
 
     results = list(boost_module.iter_inventory_heater_metadata(inventory))
 
-    assert [(item.node_type, item.addr) for item in results] == [
+    assert [
+        (node_type, addr) for node_type, addr, _, _ in results
+    ] == [
         ("htr", "4"),
         ("acm", "5"),
     ]
-    assert results[0].name == "htr:4"
-    assert results[0].supports_boost is False
-    assert results[1].name == "acm:5"
-    assert results[1].supports_boost is True
+    assert results[0][2] == "htr:4"
+    assert boost_module.supports_boost(results[0][3]) is False
+    assert results[1][2] == "acm:5"
+    assert boost_module.supports_boost(results[1][3]) is True

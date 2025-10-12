@@ -652,17 +652,20 @@ def test_iter_inventory_heater_metadata_uses_inventory() -> None:
         )
     )
 
-    pairs = sorted((item.node_type, item.addr) for item in results)
+    pairs = sorted((node_type, addr) for node_type, addr, _, _ in results)
     assert pairs == sorted([
         ("htr", "1"),
         ("acm", "2"),
         ("acm", "3"),
     ])
-    names = {item.addr: item.name for item in results}
+    names = {addr: name for _, addr, name, _ in results}
     assert names["1"] == "Living"
     assert names["2"] == "Accumulator 2"
     assert names["3"] == "Storage"
-    supports = {item.addr: item.supports_boost for item in results}
+    supports = {
+        addr: boost_module.supports_boost(node)
+        for _, addr, _, node in results
+    }
     assert supports == {"1": False, "2": True, "3": True}
 
 
@@ -703,12 +706,12 @@ def test_iter_inventory_heater_metadata_uses_helper(
     )
 
     assert len(results) == 1
-    metadata = results[0]
-    assert metadata.node is node
-    assert metadata.node_type == "acm"
-    assert metadata.addr == "2"
-    assert metadata.name == "Resolved acm 2"
-    assert metadata.supports_boost is True
+    node_type, addr, name, resolved_node = results[0]
+    assert resolved_node is node
+    assert node_type == "acm"
+    assert addr == "2"
+    assert name == "Resolved acm 2"
+    assert boost_module.supports_boost(resolved_node) is True
 
 
 def test_iter_inventory_heater_metadata_handles_missing() -> None:

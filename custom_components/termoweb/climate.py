@@ -56,21 +56,29 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     default_name_simple = lambda addr: f"Heater {addr}"
     new_entities: list[ClimateEntity] = []
-    for metadata in iter_inventory_heater_metadata(
+    for node_type, addr_str, resolved_name, node in iter_inventory_heater_metadata(
         inventory,
         default_name_simple=default_name_simple,
     ):
-        node_type = metadata.node_type
-        addr_str = metadata.addr
-        resolved_name = metadata.name
         unique_id = build_heater_entity_unique_id(
             dev_id,
             node_type,
             addr_str,
             ":climate",
         )
+        supports = False
+        candidate = getattr(node, "supports_boost", None)
+        if isinstance(candidate, bool):
+            supports = candidate
+        elif callable(candidate):
+            try:
+                supports = bool(candidate())
+            except Exception:  # noqa: BLE001 - defensive
+                _LOGGER.debug(
+                    "Ignoring boost support probe failure for node %s", addr_str, exc_info=True
+                )
         entity_cls: type[HeaterClimateEntity]
-        if node_type == "acm" or metadata.supports_boost:
+        if node_type == "acm" or supports:
             entity_cls = AccumulatorClimateEntity
         else:
             entity_cls = HeaterClimateEntity
