@@ -26,6 +26,7 @@ from homeassistant.helpers import entity_registry as entity_registry_mod
 from custom_components.termoweb.backend.ws_health import WsHealthTracker
 from custom_components.termoweb.identifiers import build_heater_energy_unique_id
 from custom_components.termoweb.inventory import build_heater_address_map
+import custom_components.termoweb.inventory as inventory_module
 
 
 class FakeWSClient:
@@ -1263,7 +1264,7 @@ def test_import_energy_history_service_invocation(
         args, kwargs = import_mock.await_args
         assert args[0] is stub_hass
         assert args[1] is entry
-        assert args[2] == {"htr": ["A"], "acm": ["B"]}
+        assert args[2] == [("htr", "A"), ("acm", "B")]
         assert kwargs == {"reset_progress": True, "max_days": 10}
 
         import_mock.reset_mock()
@@ -1273,7 +1274,10 @@ def test_import_energy_history_service_invocation(
         args, kwargs = import_mock.await_args
         assert args[0] is stub_hass
         assert args[1] is entry
-        assert args[2] == {"htr": ["A"], "acm": ["B"]}
+        assert getattr(args[2], "heater_sample_targets") == [
+            ("htr", "A"),
+            ("acm", "B"),
+        ]
         assert kwargs == {"reset_progress": False, "max_days": 3}
 
     asyncio.run(_run())
