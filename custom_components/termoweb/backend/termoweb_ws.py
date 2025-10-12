@@ -48,7 +48,6 @@ from custom_components.termoweb.const import (
 )
 from custom_components.termoweb.inventory import (
     Inventory,
-    heater_sample_subscription_targets,
     normalize_node_addr,
     normalize_node_type,
     resolve_record_inventory,
@@ -904,7 +903,7 @@ class WebSocketClient(_WSCommon):
                 inventory_addresses = {}
 
         cleaned_map = self._apply_heater_addresses(
-            inventory_addresses,
+            raw_nodes,
             inventory=inventory,
             log_prefix="WS",
             logger=_LOGGER,
@@ -924,14 +923,6 @@ class WebSocketClient(_WSCommon):
         }
         if inventory_addresses:
             payload_copy["inventory_addresses"] = inventory_addresses
-
-        unknown_types = context.unknown_types
-        if unknown_types:  # pragma: no cover - diagnostic branch
-            _LOGGER.debug(
-                "WS: unknown node types in inventory: %s",
-                ", ".join(sorted(unknown_types)),
-            )
-            payload_copy["unknown_types"] = sorted(unknown_types)
 
         self._mark_ws_payload(
             timestamp=time.time(),
@@ -1006,33 +997,12 @@ class WebSocketClient(_WSCommon):
 
         if isinstance(inventory_container, Inventory):
             try:
-                targets = list(inventory_container.heater_sample_targets)
+                return list(inventory_container.heater_sample_targets)
             except Exception:  # pragma: no cover - defensive cache guard
                 _LOGGER.debug(
                     "WS: failed to resolve heater sample targets", exc_info=True
                 )
-            else:
-                if targets:
-                    return targets
-
-        fallback_map: Mapping[str, Iterable[Any]] | None = None
-        if hasattr(self._coordinator, "_addrs"):
-            try:
-                fallback_addrs = self._coordinator._addrs()  # type: ignore[attr-defined]  # noqa: SLF001
-            except Exception:  # pragma: no cover - defensive
-                fallback_addrs = None
-            else:
-                if fallback_addrs:
-                    fallback_map = {"htr": fallback_addrs}
-
-        normalized_map = self._apply_heater_addresses(
-            fallback_map,
-            inventory=inventory_container,
-            log_prefix="WS",
-            logger=_LOGGER,
-        )
-
-        return heater_sample_subscription_targets(normalized_map)
+        return []
 
     async def _subscribe_heater_samples(self) -> None:
         """Subscribe to heater and accumulator sample updates."""

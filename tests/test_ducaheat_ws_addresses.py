@@ -101,11 +101,7 @@ def test_apply_heater_addresses_updates_state() -> None:
     assert client._inventory is inventory
     energy_coordinator.update_addresses.assert_called_once_with(inventory)
 
-    sample_aliases = hass.data[DOMAIN]["entry"].get("sample_aliases")
-    assert sample_aliases is not None
-    for alias_map in (heater_aliases, power_aliases):
-        for alias, target in alias_map.items():
-            assert sample_aliases.get(alias) == target
+    assert "sample_aliases" not in hass.data[DOMAIN]["entry"]
 
 
 def test_dispatch_nodes_uses_inventory_addresses() -> None:
@@ -131,7 +127,7 @@ def test_dispatch_nodes_uses_inventory_addresses() -> None:
     dispatched = client._dispatcher.call_args[0][2]
     assert dispatched["addr_map"]["htr"] == ["1"]
     assert dispatched["addresses_by_type"]["htr"] == ["1"]
-    sample_aliases = client.hass.data[DOMAIN][client.entry_id].get("sample_aliases")
-    assert sample_aliases is not None
-    assert sample_aliases.get("htr") == "htr"
+    assert (
+        "sample_aliases" not in client.hass.data[DOMAIN][client.entry_id]
+    )
 
