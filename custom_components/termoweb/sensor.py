@@ -31,8 +31,8 @@ from .const import DOMAIN, signal_ws_data
 from .coordinator import EnergyStateCoordinator
 from .entity import GatewayDispatcherEntity
 from .heater import (
-    HeaterPlatformDetails,
     HeaterNodeBase,
+    HeaterPlatformDetails,
     heater_platform_details_for_entry,
     iter_boostable_heater_nodes,
     log_skipped_nodes,
@@ -42,12 +42,7 @@ from .identifiers import (
     build_power_monitor_energy_unique_id,
     build_power_monitor_power_unique_id,
 )
-from .inventory import (
-    Inventory,
-    PowerMonitorNode,
-    normalize_node_addr,
-    normalize_node_type,
-)
+from .inventory import Inventory, PowerMonitorNode, normalize_node_addr
 from .utils import (
     build_gateway_device_info,
     build_power_monitor_device_info,

@@ -36,16 +36,16 @@
       "force_refresh": {
         "name": "Force refresh"
       },
-      "accumulator_boost_hours": {
-        "name": "Boost {hours_label}"
-      },
-      "accumulator_boost_cancel": {
-        "name": "Cancel boost"
+      "accumulator_boost_start": {
+        "name": "Start boost"
       }
     },
-    "select": {
+    "number": {
       "accumulator_boost_duration": {
         "name": "Boost duration"
+      },
+      "accumulator_boost_temperature": {
+        "name": "Boost temperature"
       }
     }
   },

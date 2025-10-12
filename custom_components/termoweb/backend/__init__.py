@@ -10,8 +10,8 @@ __all__ = [
     "Backend",
     "DucaheatBackend",
     "DucaheatRESTClient",
-    "TermoWebBackend",
     "HttpClientProto",
+    "TermoWebBackend",
     "WsClientProto",
     "create_backend",
 ]

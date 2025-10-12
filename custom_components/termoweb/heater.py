@@ -15,7 +15,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from .boost import (
-    ALLOWED_BOOST_MINUTES,
     coerce_boost_bool,
     coerce_boost_minutes,
     coerce_boost_remaining_minutes,
@@ -24,20 +23,22 @@ from .boost import (
 )
 from .const import DOMAIN, signal_ws_data
 from .inventory import (
-    HEATER_NODE_TYPES,
     Inventory,
     Node,
-    heater_platform_details_from_inventory,
     normalize_node_addr,
     normalize_node_type,
     resolve_record_inventory,
 )
+from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 
 
 _BOOST_RUNTIME_KEY: Final = "boost_runtime"
+_BOOST_TEMPERATURE_KEY: Final = "boost_temperature"
+_CLIMATE_ENTITY_KEY: Final = "climate_entities"
 DEFAULT_BOOST_DURATION: Final = 60
+DEFAULT_BOOST_TEMPERATURE: Final = 20.0
 _HASS_UNSET: Final[HomeAssistant | None] = cast(HomeAssistant | None, object())
 
 
@@ -49,20 +50,7 @@ class BoostButtonMetadata:
     unique_suffix: str
     label: str
     icon: str
-
-
-_BOOST_HOUR_ICON_SUFFIXES: Final[dict[int, str]] = {
-    1: "one",
-    2: "two",
-    3: "three",
-    4: "four",
-    5: "five",
-    6: "six",
-    7: "seven",
-    8: "eight",
-    9: "nine",
-    10: "ten",
-}
+    action: str = "start"
 
 
 def format_boost_duration_label(minutes: int) -> str:
@@ -80,29 +68,18 @@ def format_boost_duration_label(minutes: int) -> str:
 def _build_boost_button_metadata() -> tuple[BoostButtonMetadata, ...]:
     """Return the configured metadata describing boost helper buttons."""
 
-    entries: list[BoostButtonMetadata] = []
-    for minutes in ALLOWED_BOOST_MINUTES:
-        hours, remainder = divmod(minutes, 60)
-        icon_suffix = _BOOST_HOUR_ICON_SUFFIXES.get(hours) if remainder == 0 else None
-        icon = (
-            f"mdi:clock-time-{icon_suffix}-outline"
-            if icon_suffix is not None
-            else "mdi:clock-outline"
-        )
-        entries.append(
-            BoostButtonMetadata(
-                minutes,
-                str(minutes),
-                f"Boost {format_boost_duration_label(minutes)}",
-                icon,
-            )
-        )
-    entries.append(BoostButtonMetadata(None, "cancel", "Cancel boost", "mdi:timer-off"))
-    return tuple(entries)
+    return (
+        BoostButtonMetadata(
+            None,
+            "start",
+            "Start boost",
+            "mdi:flash-outline",
+            action="start",
+        ),
+    )
 
 
 BOOST_BUTTON_METADATA: Final[tuple[BoostButtonMetadata, ...]] = _build_boost_button_metadata()
-BOOST_DURATION_OPTIONS: Final[tuple[int, ...]] = ALLOWED_BOOST_MINUTES
 
 
 
@@ -150,11 +127,11 @@ class HeaterPlatformDetails:
     def iter_metadata(self) -> Iterator[tuple[str, Node, str, str]]:
         """Yield heater metadata derived from the inventory."""
 
-        for metadata in iter_inventory_heater_metadata(
+        for node_type, addr, name, node in iter_inventory_heater_metadata(
             self.inventory,
             default_name_simple=self.default_name_simple,
         ):
-            yield metadata.node_type, metadata.node, metadata.addr, metadata.name
+            yield node_type, node, addr, name
 
 
 def _boost_runtime_store(
@@ -176,6 +153,28 @@ def _boost_runtime_store(
 
     new_store: dict[str, dict[str, int]] = {}
     entry_data[_BOOST_RUNTIME_KEY] = new_store
+    return new_store
+
+
+def _boost_temperature_store(
+    entry_data: MutableMapping[str, Any] | None,
+    *,
+    create: bool,
+) -> dict[str, dict[str, float]]:
+    """Return the mutable boost temperature store for ``entry_data``."""
+
+    if not isinstance(entry_data, MutableMapping):
+        return {}
+
+    store = entry_data.get(_BOOST_TEMPERATURE_KEY)
+    if isinstance(store, dict):
+        return store
+
+    if not create:
+        return {}
+
+    new_store: dict[str, dict[str, float]] = {}
+    entry_data[_BOOST_TEMPERATURE_KEY] = new_store
     return new_store
 
 
@@ -217,6 +216,41 @@ def get_boost_runtime_minutes(
         return None
 
     return minutes
+
+
+def get_boost_temperature(
+    hass: HomeAssistant,
+    entry_id: str,
+    node_type: str,
+    addr: str,
+) -> float | None:
+    """Return the stored boost temperature for the specified node."""
+
+    domain_data = hass.data.get(DOMAIN)
+    if not isinstance(domain_data, MutableMapping):
+        return None
+
+    entry_data = domain_data.get(entry_id)
+    if not isinstance(entry_data, MutableMapping):
+        return None
+
+    node_type_norm = normalize_node_type(
+        node_type,
+        use_default_when_falsey=True,
+    )
+    addr_norm = normalize_node_addr(
+        addr,
+        use_default_when_falsey=True,
+    )
+    if not node_type_norm or not addr_norm:
+        return None
+
+    store = _boost_temperature_store(entry_data, create=False)
+    bucket = store.get(node_type_norm)
+    if not isinstance(bucket, MutableMapping):
+        return None
+
+    return float_or_none(bucket.get(addr_norm))
 
 
 def set_boost_runtime_minutes(
@@ -265,6 +299,43 @@ def set_boost_runtime_minutes(
     bucket[addr_norm] = validated
 
 
+def set_boost_temperature(
+    hass: HomeAssistant,
+    entry_id: str,
+    node_type: str,
+    addr: str,
+    temperature: float,
+) -> None:
+    """Persist ``temperature`` as the preferred boost setpoint."""
+
+    domain_data = hass.data.get(DOMAIN)
+    if not isinstance(domain_data, MutableMapping):
+        return
+
+    entry_data = domain_data.get(entry_id)
+    if not isinstance(entry_data, MutableMapping):
+        return
+
+    node_type_norm = normalize_node_type(
+        node_type,
+        use_default_when_falsey=True,
+    )
+    addr_norm = normalize_node_addr(
+        addr,
+        use_default_when_falsey=True,
+    )
+    if not node_type_norm or not addr_norm:
+        return
+
+    store = _boost_temperature_store(entry_data, create=True)
+    bucket = store.setdefault(node_type_norm, {})
+    if not isinstance(bucket, MutableMapping):
+        bucket = {}
+        store[node_type_norm] = bucket
+
+    bucket[addr_norm] = float(temperature)
+
+
 def resolve_boost_runtime_minutes(
     hass: HomeAssistant,
     entry_id: str,
@@ -279,6 +350,155 @@ def resolve_boost_runtime_minutes(
     if stored is not None:
         return stored
     return default
+
+
+def resolve_boost_temperature(
+    hass: HomeAssistant,
+    entry_id: str,
+    node_type: str,
+    addr: str,
+    *,
+    default: float | None = None,
+) -> float | None:
+    """Return the preferred boost temperature for ``node`` or ``default``."""
+
+    stored = get_boost_temperature(hass, entry_id, node_type, addr)
+    if stored is not None:
+        return stored
+    return default
+
+
+def _climate_entity_store(
+    entry_data: MutableMapping[str, Any] | None,
+    *,
+    create: bool,
+) -> dict[str, dict[str, str]]:
+    """Return the mutable climate entity ID store for ``entry_data``."""
+
+    if not isinstance(entry_data, MutableMapping):
+        return {}
+
+    store = entry_data.get(_CLIMATE_ENTITY_KEY)
+    if isinstance(store, dict):
+        return store
+
+    if not create:
+        return {}
+
+    new_store: dict[str, dict[str, str]] = {}
+    entry_data[_CLIMATE_ENTITY_KEY] = new_store
+    return new_store
+
+
+def register_climate_entity_id(
+    hass: HomeAssistant,
+    entry_id: str,
+    node_type: str,
+    addr: str,
+    entity_id: str | None,
+) -> None:
+    """Record the climate entity ID for ``(entry_id, node_type, addr)``."""
+
+    if not entity_id:
+        return
+
+    domain_data = hass.data.get(DOMAIN)
+    if not isinstance(domain_data, MutableMapping):
+        return
+
+    entry_data = domain_data.get(entry_id)
+    if not isinstance(entry_data, MutableMapping):
+        return
+
+    node_type_norm = normalize_node_type(
+        node_type,
+        use_default_when_falsey=True,
+    )
+    addr_norm = normalize_node_addr(
+        addr,
+        use_default_when_falsey=True,
+    )
+    if not node_type_norm or not addr_norm:
+        return
+
+    store = _climate_entity_store(entry_data, create=True)
+    bucket = store.setdefault(node_type_norm, {})
+    if not isinstance(bucket, MutableMapping):
+        bucket = {}
+        store[node_type_norm] = bucket
+
+    bucket[addr_norm] = str(entity_id)
+
+
+def clear_climate_entity_id(
+    hass: HomeAssistant,
+    entry_id: str,
+    node_type: str,
+    addr: str,
+) -> None:
+    """Remove the recorded climate entity ID for ``(entry_id, node_type, addr)``."""
+
+    domain_data = hass.data.get(DOMAIN)
+    if not isinstance(domain_data, MutableMapping):
+        return
+
+    entry_data = domain_data.get(entry_id)
+    if not isinstance(entry_data, MutableMapping):
+        return
+
+    node_type_norm = normalize_node_type(
+        node_type,
+        use_default_when_falsey=True,
+    )
+    addr_norm = normalize_node_addr(
+        addr,
+        use_default_when_falsey=True,
+    )
+    if not node_type_norm or not addr_norm:
+        return
+
+    store = _climate_entity_store(entry_data, create=False)
+    bucket = store.get(node_type_norm)
+    if not isinstance(bucket, MutableMapping):
+        return
+
+    bucket.pop(addr_norm, None)
+
+
+def resolve_climate_entity_id(
+    hass: HomeAssistant,
+    entry_id: str,
+    node_type: str,
+    addr: str,
+) -> str | None:
+    """Return the recorded climate entity ID for ``(entry_id, node_type, addr)``."""
+
+    domain_data = hass.data.get(DOMAIN)
+    if not isinstance(domain_data, MutableMapping):
+        return None
+
+    entry_data = domain_data.get(entry_id)
+    if not isinstance(entry_data, MutableMapping):
+        return None
+
+    node_type_norm = normalize_node_type(
+        node_type,
+        use_default_when_falsey=True,
+    )
+    addr_norm = normalize_node_addr(
+        addr,
+        use_default_when_falsey=True,
+    )
+    if not node_type_norm or not addr_norm:
+        return None
+
+    store = _climate_entity_store(entry_data, create=False)
+    bucket = store.get(node_type_norm)
+    if not isinstance(bucket, MutableMapping):
+        return None
+
+    entity_id = bucket.get(addr_norm)
+    return str(entity_id) if isinstance(entity_id, str) else None
 
 
 def iter_boost_button_metadata() -> Iterator[BoostButtonMetadata]:

@@ -770,6 +770,9 @@ def _install_stubs() -> None:
     select_mod = sys.modules.get("homeassistant.components.select") or types.ModuleType(
         "homeassistant.components.select"
     )
+    number_mod = sys.modules.get("homeassistant.components.number") or types.ModuleType(
+        "homeassistant.components.number"
+    )
     climate_mod = sys.modules.get(
         "homeassistant.components.climate"
     ) or types.ModuleType("homeassistant.components.climate")
@@ -800,6 +803,7 @@ def _install_stubs() -> None:
     sys.modules["homeassistant.components.button"] = button_mod
     sys.modules["homeassistant.components.sensor"] = sensor_mod
     sys.modules["homeassistant.components.select"] = select_mod
+    sys.modules["homeassistant.components.number"] = number_mod
     sys.modules["homeassistant.components.climate"] = climate_mod
 
     homeassistant_pkg.config_entries = config_entries_mod
@@ -833,6 +837,7 @@ def _install_stubs() -> None:
     components_mod.button = button_mod
     components_mod.sensor = sensor_mod
     components_mod.select = select_mod
+    components_mod.number = number_mod
 
     const_mod.EVENT_HOMEASSISTANT_STARTED = "homeassistant_started"
     const_mod.STATE_UNKNOWN = "unknown"
@@ -1545,6 +1550,28 @@ def _install_stubs() -> None:
             return getattr(self, "_attr_current_option", None)
 
     select_mod.SelectEntity = SelectEntity
+
+    class NumberMode:
+        SLIDER = "slider"
+
+    class NumberEntity:
+        def __init__(self) -> None:
+            self.hass: Any | None = None
+
+        async def async_added_to_hass(self) -> None:
+            return None
+
+        async def async_will_remove_from_hass(self) -> None:
+            return None
+
+        def schedule_update_ha_state(self) -> None:
+            return None
+
+        def async_write_ha_state(self) -> None:
+            return None
+
+    number_mod.NumberEntity = NumberEntity
+    number_mod.NumberMode = NumberMode
 
     class RestoreEntity:
         async def async_added_to_hass(self) -> None:

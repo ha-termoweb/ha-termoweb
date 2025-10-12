@@ -888,10 +888,10 @@ __all__ = [
     "HandshakeError",
     "WSStats",
     "WebSocketClient",
-    "forward_ws_sample_updates",
-    "translate_path_update",
-    "resolve_ws_update_section",
     "WsHealthTracker",
+    "forward_ws_sample_updates",
+    "resolve_ws_update_section",
+    "translate_path_update",
 ]
 
 time_mod = time.monotonic

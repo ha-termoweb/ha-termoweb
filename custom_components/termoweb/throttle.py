@@ -1,12 +1,14 @@
 """Shared throttling helpers for the TermoWeb integration."""
 
 from __future__ import annotations
+
 """Shared throttling helpers for the TermoWeb integration."""
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 import time
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 SleepCallable = Callable[[float], Awaitable[Any]]
 MonotonicCallable = Callable[[], float]
