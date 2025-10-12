@@ -313,8 +313,9 @@ def test_dispatch_nodes_publishes_inventory_addresses(
     expected_addresses = inventory.addresses_by_type
     assert "nodes" not in dispatched
     assert "nodes_by_type" not in dispatched
-    assert dispatched["addr_map"] == {"htr": ["1"]}
-    assert dispatched["addresses_by_type"] == expected_addresses
+    addresses = dispatched["addresses_by_type"]
+    assert addresses == expected_addresses
+    assert dispatched.get("addr_map", addresses) == addresses
     coordinator.update_nodes.assert_called_once()
     update_args = coordinator.update_nodes.call_args[0]
     assert update_args[0] is None
@@ -344,8 +345,9 @@ def test_incremental_updates_preserve_address_payload(
     expected_addresses = client._inventory.addresses_by_type
     assert "nodes" not in first_payload
     assert "nodes_by_type" not in first_payload
-    assert first_payload["addr_map"] == {"htr": ["1"]}
-    assert first_payload["addresses_by_type"] == expected_addresses
+    first_addresses = first_payload["addresses_by_type"]
+    assert first_addresses == expected_addresses
+    assert first_payload.get("addr_map", first_addresses) == first_addresses
 
     update = {"htr": {"settings": {"1": {"target_temp": 23}}}}
     client._merge_nodes(client._nodes_raw, update)
@@ -354,8 +356,9 @@ def test_incremental_updates_preserve_address_payload(
     dispatched = client._dispatcher.call_args_list[-1][0][2]
     assert "nodes" not in dispatched
     assert "nodes_by_type" not in dispatched
-    assert dispatched["addr_map"] == {"htr": ["1"]}
-    assert dispatched["addresses_by_type"] == expected_addresses
+    addresses = dispatched["addresses_by_type"]
+    assert addresses == expected_addresses
+    assert dispatched.get("addr_map", addresses) == addresses
     assert coordinator.update_nodes.call_count == 2
 
 

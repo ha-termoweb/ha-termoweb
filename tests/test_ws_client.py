@@ -574,7 +574,8 @@ def test_dispatch_nodes_without_snapshot(monkeypatch: pytest.MonkeyPatch) -> Non
     assert [_extract_addr(node) for node in inventory_arg.nodes] == ["1"]
     dispatcher.assert_called_once()
     dispatched_payload = dispatcher.call_args.args[2]
-    assert dispatched_payload["addr_map"] == {"htr": ["1"]}
+    assert dispatched_payload["addresses_by_type"] == {"htr": ["1"]}
+    assert dispatched_payload.get("addr_map") is None
     assert "nodes" not in dispatched_payload
 
 
@@ -1550,7 +1551,7 @@ def test_ws_common_dispatch_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
     assert dispatched_payload == {
         "dev_id": "dev",
         "node_type": None,
-        "addr_map": {"htr": ["1"]},
+        "addresses_by_type": {"htr": ["1"]},
     }
 
 

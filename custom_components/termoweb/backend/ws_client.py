@@ -873,10 +873,26 @@ class _WSCommon(_WSStatusMixin):
             raw_nodes=raw_nodes,
             inventory=self._inventory,
         )
+        inventory = context.inventory if isinstance(context.inventory, Inventory) else None
+        addresses_by_type: dict[str, list[str]] = {}
+        if inventory is not None:
+            try:
+                addresses_by_type = inventory.addresses_by_type
+            except Exception:  # pragma: no cover - defensive cache guard
+                _LOGGER.debug(
+                    "WS: failed to resolve inventory addresses; falling back to addr_map",
+                    exc_info=True,
+                )
+                addresses_by_type = {}
+        if not addresses_by_type:
+            addresses_by_type = {
+                node_type: list(addresses)
+                for node_type, addresses in context.addr_map.items()
+            }
         payload_copy = {
             "dev_id": self.dev_id,
             "node_type": None,
-            "addr_map": {t: list(a) for t, a in context.addr_map.items()},
+            "addresses_by_type": addresses_by_type,
         }
         async_dispatcher_send(self.hass, signal_ws_data(self.entry_id), payload_copy)
 
