@@ -48,7 +48,6 @@ from custom_components.termoweb.inventory import (
     Inventory,
     normalize_node_addr,
     normalize_node_type,
-    resolve_record_inventory,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -564,7 +563,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                     dispatch_payload = nodes_map
                                 if isinstance(dispatch_payload, Mapping):
                                     self._dispatch_nodes(dispatch_payload)
-                                subs = await self._subscribe_feeds(nodes_map)
+                                subs = await self._subscribe_feeds()
                                 _LOGGER.info("WS (ducaheat): subscribed %d feeds", subs)
                                 self._update_status("healthy")
                             break
@@ -1143,7 +1142,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             log_prefix="WS (ducaheat)",
         )
 
-    async def _subscribe_feeds(self, nodes: Mapping[str, Any] | None) -> int:
+    async def _subscribe_feeds(self) -> int:
         """Subscribe to heater status and sample feeds."""
 
         try:
@@ -1159,42 +1158,16 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     record_mapping.update(existing_record)
                 domain_bucket[self.entry_id] = record_mapping
 
-            inventory_container: Inventory | None = (
-                self._inventory if isinstance(self._inventory, Inventory) else None
-            )
-            if inventory_container is None:
-                cached_inventory = record_mapping.get("inventory")
-                if isinstance(cached_inventory, Inventory):
-                    inventory_container = cached_inventory
-
-            coordinator_inventory: Inventory | None = None
-            for attr in ("_inventory", "inventory"):
-                candidate = getattr(self._coordinator, attr, None)
-                if isinstance(candidate, Inventory):
-                    coordinator_inventory = candidate
-                    break
-
-            coordinator_nodes: Iterable[Any] | None = None
-            if isinstance(coordinator_inventory, Inventory):
-                coordinator_nodes = coordinator_inventory.nodes
-
-            should_resolve = inventory_container is None and (
-                isinstance(nodes, Mapping) or not isinstance(coordinator_inventory, Inventory)
-            )
-            if should_resolve:
-                resolution = resolve_record_inventory(
-                    record_mapping,
-                    dev_id=self.dev_id,
-                    nodes_payload=nodes if isinstance(nodes, Mapping) else None,
-                    node_list=coordinator_nodes,
-                )
-                if isinstance(resolution.inventory, Inventory):
-                    inventory_container = resolution.inventory
-
-            if inventory_container is None and isinstance(
-                coordinator_inventory, Inventory
+            inventory_container: Inventory | None = None
+            for candidate in (
+                self._inventory,
+                record_mapping.get("inventory"),
+                getattr(self._coordinator, "_inventory", None),
+                getattr(self._coordinator, "inventory", None),
             ):
-                inventory_container = coordinator_inventory
+                if isinstance(candidate, Inventory):
+                    inventory_container = candidate
+                    break
 
             if not isinstance(inventory_container, Inventory):
                 _LOGGER.error(
