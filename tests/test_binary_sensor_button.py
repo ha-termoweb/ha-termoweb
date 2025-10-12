@@ -20,7 +20,7 @@ import custom_components.termoweb.button as button_module
 import custom_components.termoweb.heater as heater_module
 from custom_components.termoweb import identifiers as identifiers_module
 from custom_components.termoweb.const import DOMAIN, signal_ws_status
-from custom_components.termoweb.inventory import AccumulatorNode, Inventory
+from custom_components.termoweb.inventory import AccumulatorNode, HeaterNode, Inventory
 from custom_components.termoweb.utils import build_gateway_device_info
 
 GatewayOnlineBinarySensor = binary_sensor_module.GatewayOnlineBinarySensor
@@ -489,6 +489,41 @@ def test_state_refresh_button_direct_press_and_info() -> None:
         coordinator.async_request_refresh.assert_awaited_once()
 
     asyncio.run(_run())
+
+
+def test_iter_accumulator_contexts_uses_inventory_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry_id = "entry-meta"
+    dev_id = "device-meta"
+    canonical = AccumulatorNode(name="Accumulator A", addr="1")
+    inventory = Inventory(dev_id, {"nodes": []}, [canonical, HeaterNode(name="Heater", addr="2")])
+
+    metadata = [
+        ("acm", "1", "Accumulator A", canonical),
+        ("acm", "3", "Accumulator B", types.SimpleNamespace(addr="3", type="acm")),
+        ("htr", "2", "Heater", HeaterNode(name="Heater", addr="2")),
+    ]
+
+    def _fake_iter(inv: Inventory, **_kwargs):
+        assert inv is inventory
+        yield from metadata
+
+    monkeypatch.setattr(
+        button_module,
+        "iter_inventory_heater_metadata",
+        _fake_iter,
+    )
+
+    contexts = list(
+        button_module._iter_accumulator_contexts(entry_id, inventory)
+    )
+
+    assert len(contexts) == 1
+    context = contexts[0]
+    assert context.entry_id == entry_id
+    assert context.inventory is inventory
+    assert context.node is canonical
 
 
 def _make_boost_context(

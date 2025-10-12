@@ -24,6 +24,7 @@ except ImportError:  # pragma: no cover - executed in unit test stubs
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .boost import iter_inventory_heater_metadata
 from .const import DOMAIN
 from .heater import (
     BOOST_BUTTON_METADATA,
@@ -105,19 +106,8 @@ def _iter_accumulator_contexts(
     if not isinstance(inventory, Inventory):
         return
 
-    forward_map, _ = inventory.heater_address_map
-    addresses = forward_map.get("acm", ())
-    if not addresses:
-        return
-
-    node_lookup: dict[str, AccumulatorNode] = {}
-    for node in inventory.nodes_by_type.get("acm", ()):
-        if isinstance(node, AccumulatorNode):
-            node_lookup[node.addr] = node
-
-    for addr in addresses:
-        node = node_lookup.get(addr)
-        if node is None:
+    for node_type, _addr, _name, node in iter_inventory_heater_metadata(inventory):
+        if node_type != "acm" or not isinstance(node, AccumulatorNode):
             continue
         yield AccumulatorBoostContext.from_inventory(entry_id, inventory, node)
 
