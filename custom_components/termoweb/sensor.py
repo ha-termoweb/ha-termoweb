@@ -247,12 +247,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     if energy_coordinator is None:
         energy_coordinator = EnergyStateCoordinator(
-            hass, data["client"], dev_id, energy_nodes_map
+            hass, data["client"], dev_id, inventory
         )
         data["energy_coordinator"] = energy_coordinator
         await energy_coordinator.async_config_entry_first_refresh()
     else:
-        energy_coordinator.update_addresses(energy_nodes_map)
+        energy_coordinator.update_addresses(inventory)
 
     new_entities: list[SensorEntity] = []
     for node_type, _node, addr_str, base_name in iter_heater_nodes(

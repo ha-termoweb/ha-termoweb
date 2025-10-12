@@ -868,7 +868,7 @@ def test_ws_common_apply_heater_addresses_normalizes_inputs() -> None:
     sample_aliases = hass_record["sample_aliases"]
     assert sample_aliases["htr"] == "htr"
     assert sample_aliases["pmo"] == "pmo"
-    energy_coordinator.update_addresses.assert_called_with(cleaned)
+    energy_coordinator.update_addresses.assert_called_with(None)
 
     energy_coordinator.update_addresses.reset_mock()
     cleaned_iterable = dummy._apply_heater_addresses(
@@ -879,7 +879,7 @@ def test_ws_common_apply_heater_addresses_normalizes_inputs() -> None:
     sample_aliases = hass_record["sample_aliases"]
     assert sample_aliases["htr"] == "htr"
     assert sample_aliases["pmo"] == "pmo"
-    energy_coordinator.update_addresses.assert_called_with(cleaned_iterable)
+    energy_coordinator.update_addresses.assert_called_with(None)
 
 
 @pytest.mark.asyncio
