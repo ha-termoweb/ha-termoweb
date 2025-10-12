@@ -105,3 +105,55 @@ def test_iter_inventory_heater_metadata_covers_branch_variants(
     assert boost_module.supports_boost(results[0][3]) is False
     assert results[1][2] == "acm:5"
     assert boost_module.supports_boost(results[1][3]) is True
+
+
+def test_iter_inventory_boostable_metadata_filters_invalid_nodes(
+    monkeypatch: pytest.MonkeyPatch, inventory_builder
+) -> None:
+    """Boostable metadata iterator should filter unsupported nodes."""
+
+    inventory = inventory_builder("dev", {})
+
+    boostable = types.SimpleNamespace(
+        addr=" 1 ",
+        type="HTR",
+        supports_boost=lambda: True,
+    )
+    skipped = types.SimpleNamespace(
+        addr="2",
+        type="htr",
+        supports_boost=lambda: False,
+    )
+    invalid = types.SimpleNamespace(
+        addr="",
+        type="acm",
+        supports_boost=lambda: True,
+    )
+
+    nodes_by_type = {
+        "HTR": [boostable, skipped],
+        "acm": [invalid],
+    }
+    addresses_by_type = {
+        "HTR": [" 1 ", "2"],
+        "acm": [""],
+    }
+
+    def _resolve_name(node_type: str, addr: str) -> str:
+        return f"{node_type}:{addr}"
+
+    def _fake_helper(
+        inventory_value: Inventory, *, default_name_simple: Any
+    ) -> tuple[dict[str, Any], dict[str, Any], Any]:
+        assert inventory_value is inventory
+        return nodes_by_type, addresses_by_type, _resolve_name
+
+    monkeypatch.setattr(
+        boost_module,
+        "heater_platform_details_from_inventory",
+        _fake_helper,
+    )
+
+    results = list(boost_module.iter_inventory_boostable_metadata(inventory))
+
+    assert results == [("htr", "1", "HTR: 1 ")]

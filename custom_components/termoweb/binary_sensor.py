@@ -14,7 +14,7 @@ from homeassistant.core import callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .boost import iter_inventory_heater_metadata, supports_boost
+from .boost import iter_inventory_boostable_metadata
 from .const import DOMAIN, signal_ws_data, signal_ws_status
 from .coordinator import StateCoordinator
 from .entity import GatewayDispatcherEntity
@@ -299,18 +299,7 @@ def _iter_boostable_inventory_nodes(
 ) -> Iterable[tuple[str, str, str]]:
     """Yield boostable heater metadata from ``inventory``."""
 
-    for node_type, addr, base_name, node in iter_inventory_heater_metadata(inventory):
-        if not supports_boost(node):
-            continue
-        canonical_type = normalize_node_type(node_type, use_default_when_falsey=True)
-        canonical_addr = normalize_node_addr(addr, use_default_when_falsey=True)
-        if not canonical_type or not canonical_addr:
-            continue
-        yield (
-            canonical_type,
-            canonical_addr,
-            base_name,
-        )
+    yield from iter_inventory_boostable_metadata(inventory)
 
 
 def _build_settings_resolver(

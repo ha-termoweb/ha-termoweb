@@ -10,7 +10,13 @@ from typing import Any, Final, cast
 
 from homeassistant.util import dt as dt_util
 
-from .inventory import Inventory, Node, heater_platform_details_from_inventory
+from .inventory import (
+    Inventory,
+    Node,
+    heater_platform_details_from_inventory,
+    normalize_node_addr,
+    normalize_node_type,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -176,6 +182,27 @@ def resolve_boost_end_from_fields(
 
 type HeaterInventoryEntry = tuple[str, str, str, Node]
 """Type alias describing ``(node_type, addr, name, node)`` tuples."""
+
+
+def iter_inventory_boostable_metadata(
+    inventory: Inventory | None,
+) -> Iterator[tuple[str, str, str]]:
+    """Yield canonical boostable heater metadata from ``inventory``."""
+
+    for node_type, addr, base_name, node in iter_inventory_heater_metadata(inventory):
+        if not supports_boost(node):
+            continue
+        canonical_type = normalize_node_type(
+            node_type,
+            use_default_when_falsey=True,
+        )
+        canonical_addr = normalize_node_addr(
+            addr,
+            use_default_when_falsey=True,
+        )
+        if not canonical_type or not canonical_addr:
+            continue
+        yield canonical_type, canonical_addr, base_name
 
 
 def _iter_node_container(nodes: Iterable[Any] | Mapping[Any, Any] | Any) -> Iterator[Node]:

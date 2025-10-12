@@ -166,24 +166,11 @@ def test_iter_boostable_inventory_nodes_uses_inventory_helper(
 ) -> None:
     inventory = Inventory("dev", {"nodes": []}, [])
 
-    meta: list[tuple[str, str, str, Any]] = [
-        (
-            "acm",
-            "01",
-            "Accumulator 01",
-            types.SimpleNamespace(supports_boost=lambda: False),
-        ),
+    meta: list[tuple[str, str, str]] = [
         (
             "htr",
-            " 2 ",
+            "2",
             "Heater 2",
-            types.SimpleNamespace(supports_boost=lambda: True),
-        ),
-        (
-            "",
-            "3",
-            "Invalid",
-            types.SimpleNamespace(supports_boost=lambda: True),
         ),
     ]
 
@@ -193,7 +180,7 @@ def test_iter_boostable_inventory_nodes_uses_inventory_helper(
 
     monkeypatch.setattr(
         binary_sensor_module,
-        "iter_inventory_heater_metadata",
+        "iter_inventory_boostable_metadata",
         _fake_iter,
     )
 
