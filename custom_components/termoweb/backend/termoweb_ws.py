@@ -47,7 +47,6 @@ from custom_components.termoweb.const import (
     signal_ws_data,
 )
 from custom_components.termoweb.inventory import (
-    HEATER_NODE_TYPES,
     Inventory,
     normalize_node_addr,
     normalize_node_type,
@@ -905,7 +904,7 @@ class WebSocketClient(_WSCommon):
             node_type: list(addrs) for node_type, addrs in addr_map.items()
         }
 
-        normalized_map = self._apply_heater_addresses(
+        self._apply_heater_addresses(
             addr_map,
             inventory=inventory,
             log_prefix="WS",
@@ -973,7 +972,6 @@ class WebSocketClient(_WSCommon):
         def _bind_inventory(container: Inventory) -> Inventory:
             """Cache ``container`` across runtime state helpers."""
 
-            payload = getattr(container, "payload", None)
             if isinstance(record_mutable, MutableMapping):
                 record_mutable["inventory"] = container
             self._inventory = container
