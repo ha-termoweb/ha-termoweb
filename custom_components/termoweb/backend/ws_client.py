@@ -27,8 +27,10 @@ from ..inventory import (
     NODE_CLASS_BY_TYPE,
     Inventory,
     addresses_by_node_type,
+    normalize_heater_addresses,
     normalize_node_addr,
     normalize_node_type,
+    normalize_power_monitor_addresses,
     resolve_record_inventory,
 )
 
@@ -748,29 +750,6 @@ class _WSCommon(_WSStatusMixin):
     ) -> dict[str, list[str]]:
         """Update entry and coordinator state with heater address data."""
 
-        cleaned_map: dict[str, list[str]] = {}
-        if isinstance(normalized_map, Mapping):
-            for raw_type, addrs in normalized_map.items():
-                node_type = normalize_node_type(raw_type)
-                if not node_type or node_type not in HEATER_NODE_TYPES:
-                    continue
-                if isinstance(addrs, (str, bytes)):
-                    addr_iterable: Iterable[Any] = [addrs]
-                else:
-                    addr_iterable = addrs or []
-                addresses: list[str] = []
-                for candidate in addr_iterable:
-                    addr = normalize_node_addr(candidate)
-                    if not addr or addr in addresses:
-                        continue
-                    addresses.append(addr)
-                if addresses:
-                    cleaned_map[node_type] = addresses
-                else:
-                    cleaned_map.setdefault(node_type, [])
-
-        cleaned_map.setdefault("htr", [])
-
         record_container = self.hass.data.get(DOMAIN, {})
         record_raw = (
             record_container.get(self.entry_id)
@@ -798,37 +777,87 @@ class _WSCommon(_WSStatusMixin):
             )
             inventory_container = None
 
+        active_logger = logger or _LOGGER
+
+        fallback_heater_map, fallback_heater_aliases = normalize_heater_addresses(
+            normalized_map
+        )
+        fallback_power_map, fallback_power_aliases = normalize_power_monitor_addresses(
+            normalized_map
+        )
+
+        if isinstance(inventory_container, Inventory):
+            try:
+                inventory_heater_map, heater_aliases = (
+                    inventory_container.heater_sample_address_map
+                )
+            except Exception:  # pragma: no cover - defensive cache guard
+                active_logger.debug(
+                    "%s: failed to resolve heater sample addresses from inventory",
+                    log_prefix,
+                    exc_info=True,
+                )
+                inventory_heater_map = {}
+                heater_aliases = {}
+            try:
+                inventory_power_map, power_aliases = (
+                    inventory_container.power_monitor_sample_address_map
+                )
+            except Exception:  # pragma: no cover - defensive cache guard
+                active_logger.debug(
+                    "%s: failed to resolve power monitor sample addresses",
+                    log_prefix,
+                    exc_info=True,
+                )
+                inventory_power_map = {}
+                power_aliases = {}
+
+            heater_map: dict[str, list[str]] = dict(inventory_heater_map)
+            power_map: dict[str, list[str]] = dict(inventory_power_map)
+
+            for node_type, addresses in fallback_heater_map.items():
+                if node_type not in heater_map or not heater_map.get(node_type):
+                    if addresses:
+                        heater_map[node_type] = addresses
+
+            if fallback_power_map.get("pmo") and not power_map.get("pmo"):
+                power_map["pmo"] = fallback_power_map["pmo"]
+        else:
+            heater_map = fallback_heater_map
+            heater_aliases = fallback_heater_aliases
+            power_map = fallback_power_map
+            power_aliases = fallback_power_aliases
+
+        cleaned_map: dict[str, list[str]] = {
+            node_type: addresses
+            for node_type, addresses in heater_map.items()
+            if node_type in HEATER_NODE_TYPES
+        }
+        if "htr" not in cleaned_map:
+            cleaned_map["htr"] = heater_map.get("htr", [])
+
+        pmo_addresses = power_map.get("pmo", [])
+        if pmo_addresses:
+            cleaned_map["pmo"] = pmo_addresses
+
         if isinstance(inventory_container, Inventory):
             if isinstance(record_mutable, MutableMapping):
                 record_mutable["inventory"] = inventory_container
             if not isinstance(self._inventory, Inventory):
                 self._inventory = inventory_container
 
-        pmo_addresses: list[str] = []
-        if isinstance(inventory_container, Inventory):
-            forward_map, _ = inventory_container.power_monitor_address_map
-            pmo_addresses = list(forward_map.get("pmo", []))
-        elif isinstance(normalized_map, Mapping):
-            raw_addrs = normalized_map.get("pmo")
-            if isinstance(raw_addrs, (str, bytes)):
-                candidates: Iterable[Any] = [raw_addrs]
-            elif isinstance(raw_addrs, Iterable):
-                candidates = raw_addrs
-            else:
-                candidates = []
-            seen: set[str] = set()
-            for candidate in candidates:
-                addr = normalize_node_addr(candidate, use_default_when_falsey=True)
-                if not addr or addr in seen:
-                    continue
-                seen.add(addr)
-                pmo_addresses.append(addr)
+        sample_aliases = dict(heater_aliases)
+        sample_aliases.update(power_aliases)
+        for alias, target in fallback_heater_aliases.items():
+            sample_aliases.setdefault(alias, target)
+        for alias, target in fallback_power_aliases.items():
+            sample_aliases.setdefault(alias, target)
+        if isinstance(record_mutable, MutableMapping):
+            record_mutable["sample_aliases"] = sample_aliases
 
         energy_coordinator = (
             record.get("energy_coordinator") if isinstance(record, Mapping) else None
         )
-        if pmo_addresses:
-            cleaned_map["pmo"] = list(pmo_addresses)
 
         if hasattr(energy_coordinator, "update_addresses"):
             energy_coordinator.update_addresses(cleaned_map)

@@ -893,6 +893,9 @@ def test_ws_common_apply_heater_addresses_normalizes_inputs() -> None:
     cleaned = dummy._apply_heater_addresses({"htr": "1", "pmo": "7"})
     assert cleaned["htr"] == ["1"]
     assert cleaned["pmo"] == ["7"]
+    sample_aliases = hass_record["sample_aliases"]
+    assert sample_aliases["htr"] == "htr"
+    assert sample_aliases["pmo"] == "pmo"
     energy_coordinator.update_addresses.assert_called_with(cleaned)
 
     energy_coordinator.update_addresses.reset_mock()
@@ -901,6 +904,9 @@ def test_ws_common_apply_heater_addresses_normalizes_inputs() -> None:
     )
     assert cleaned_iterable["htr"] == ["2"]
     assert cleaned_iterable["pmo"] == ["8"]
+    sample_aliases = hass_record["sample_aliases"]
+    assert sample_aliases["htr"] == "htr"
+    assert sample_aliases["pmo"] == "pmo"
     energy_coordinator.update_addresses.assert_called_with(cleaned_iterable)
 
 
