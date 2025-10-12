@@ -73,17 +73,12 @@ def coerce_boost_minutes(value: Any) -> int | None:
 
     if value is None or isinstance(value, bool):
         return None
-    try:
-        if isinstance(value, (int, float)):
-            minutes = int(value)
-        else:
-            text = str(value).strip()
-            if not text:
-                return None
-            minutes = int(float(text))
-    except (TypeError, ValueError):  # pragma: no cover - defensive
+
+    minutes = coerce_int(value)
+    if minutes is None or minutes <= 0:
         return None
-    return minutes if minutes > 0 else None
+
+    return minutes
 
 
 def coerce_boost_remaining_minutes(value: Any) -> int | None:
@@ -92,18 +87,7 @@ def coerce_boost_remaining_minutes(value: Any) -> int | None:
     if value is None or isinstance(value, bool):
         return None
 
-    candidate: int | None
-    try:
-        if isinstance(value, (int, float)):
-            candidate = int(value)
-        else:
-            text = str(value).strip()
-            if not text:
-                return None
-            candidate = int(float(text))
-    except (TypeError, ValueError):  # pragma: no cover - defensive
-        return None
-
+    candidate = coerce_int(value)
     if candidate is None or candidate <= 0:
         return None
 
