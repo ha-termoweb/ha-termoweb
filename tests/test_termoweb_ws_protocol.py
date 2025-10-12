@@ -1009,7 +1009,6 @@ def test_dispatch_nodes_handles_unknown_types(monkeypatch: pytest.MonkeyPatch) -
     assert "nodes" not in payload
     assert payload["addresses_by_type"] == {"foo": ["9"]}
     assert payload.get("addr_map", payload["addresses_by_type"]) == payload["addresses_by_type"]
-    assert payload.get("unknown_types") == ["foo"]
 
 
 def test_dispatch_nodes_uses_inventory_payload(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1044,8 +1043,6 @@ def test_dispatch_nodes_uses_inventory_payload(monkeypatch: pytest.MonkeyPatch) 
         return NodeDispatchContext(
             payload=None,
             inventory=inventory,
-            addr_map={"htr": ["2"]},
-            unknown_types=set(),
             record=record,
         )
 
@@ -1305,15 +1302,22 @@ def test_heater_sample_subscription_targets(monkeypatch: pytest.MonkeyPatch) -> 
     assert targets == inventory.heater_sample_targets
 
 
-def test_heater_sample_subscription_targets_uses_coordinator_addrs(
+def test_heater_sample_subscription_targets_prefers_inventory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Coordinator fallback addresses should be merged into subscription list."""
+    """Inventory-derived targets should take priority over coordinator fallbacks."""
 
     client, _sio, _ = _make_client(monkeypatch)
     record = client.hass.data[module.DOMAIN]["entry"]
     client._coordinator._addrs = lambda: [" 3 ", "3", "4"]
-    inventory = Inventory(client.dev_id, {}, [])
+    node_inventory = build_node_inventory(
+        [{"type": "htr", "addr": "1"}, {"type": "acm", "addr": "2"}]
+    )
+    inventory = Inventory(
+        client.dev_id,
+        {"nodes": [{"type": "htr", "addr": "1"}, {"type": "acm", "addr": "2"}]},
+        node_inventory,
+    )
 
     monkeypatch.setattr(
         module,
@@ -1328,7 +1332,7 @@ def test_heater_sample_subscription_targets_uses_coordinator_addrs(
 
     targets = client._heater_sample_subscription_targets()
 
-    assert targets == [("htr", "3"), ("htr", "4")]
+    assert targets == inventory.heater_sample_targets
 
 
 def test_heater_sample_subscription_targets_logs_missing_inventory(

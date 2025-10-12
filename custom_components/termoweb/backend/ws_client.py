@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable, Mapping, MutableMapping, Callable
+from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
 import logging
 import time
@@ -24,14 +24,11 @@ from ..const import (
 )
 from ..inventory import (
     HEATER_NODE_TYPES,
-    NODE_CLASS_BY_TYPE,
     Inventory,
-    addresses_by_node_type,
     normalize_heater_addresses,
     normalize_node_addr,
     normalize_node_type,
     normalize_power_monitor_addresses,
-    resolve_record_inventory,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -535,9 +532,7 @@ class NodeDispatchContext:
     """Container for shared node dispatch metadata."""
 
     payload: Any
-    inventory: Inventory
-    addr_map: dict[str, list[str]]
-    unknown_types: set[str]
+    inventory: Inventory | None
     record: MutableMapping[str, Any] | None
 
 
@@ -560,16 +555,6 @@ def _prepare_nodes_dispatch(
         record_raw if isinstance(record_raw, MutableMapping) else None
     )
 
-    dev_id = str(getattr(coordinator, "_dev_id", "") or "")
-    if not dev_id:
-        dev_id = str(getattr(coordinator, "dev_id", "") or "")
-    if not dev_id and isinstance(record_mapping, Mapping):
-        candidate = record_mapping.get("dev_id")
-        if isinstance(candidate, str):
-            dev_id = candidate
-        elif candidate not in (None, ""):
-            dev_id = str(candidate)
-
     inventory_container: Inventory | None = None
     if isinstance(inventory, Inventory):
         inventory_container = inventory
@@ -577,89 +562,24 @@ def _prepare_nodes_dispatch(
         candidate_inventory = record_mapping.get("inventory")
         if isinstance(candidate_inventory, Inventory):
             inventory_container = candidate_inventory
-    else:
-        inventory_container = None
 
     if inventory_container is None and hasattr(coordinator, "inventory"):
-        candidate_inventory = coordinator.inventory
+        candidate_inventory = getattr(coordinator, "inventory", None)
         if isinstance(candidate_inventory, Inventory):
             inventory_container = candidate_inventory
 
-    if inventory_container is None:
-        resolution = resolve_record_inventory(
-            record_mapping,
-            dev_id=dev_id or None,
-            nodes_payload=raw_nodes,
-        )
-        if resolution.inventory is not None:
-            inventory_container = resolution.inventory
+    raw_nodes_for_coordinator = raw_nodes if inventory_container is None else None
 
-    if inventory_container is None:
-        payload_for_inventory = raw_nodes if raw_nodes is not None else {}
-        inventory_container = Inventory(dev_id, payload_for_inventory, [])
+    update_nodes = getattr(coordinator, "update_nodes", None)
+    if callable(update_nodes):
+        update_nodes(raw_nodes_for_coordinator, inventory_container)
 
-    if isinstance(record_mutable, MutableMapping):
+    if inventory_container is not None and isinstance(record_mutable, MutableMapping):
         record_mutable["inventory"] = inventory_container
 
-    normalized_known_types: set[str] = {
-        normalised
-        for normalised in (
-            normalize_node_type(node_type, use_default_when_falsey=True)
-            for node_type in NODE_CLASS_BY_TYPE
-        )
-        if normalised
-    }
-
-    addr_map: dict[str, list[str]]
-    unknown_types: set[str]
-    if isinstance(inventory_container, Inventory):
-        addr_map = {
-            node_type: list(addresses)
-            for node_type, addresses in inventory_container.addresses_by_type.items()
-        }
-        unknown_types = (
-            {
-                node_type
-                for node_type in addr_map
-                if normalized_known_types and node_type not in normalized_known_types
-            }
-            if normalized_known_types
-            else set()
-        )
-    else:
-        nodes_source = getattr(inventory_container, "nodes", ())
-        addr_map_raw, unknown_types = addresses_by_node_type(
-            nodes_source, known_types=NODE_CLASS_BY_TYPE
-        )
-        addr_map = {
-            node_type: list(addrs)
-            for node_type, addrs in addr_map_raw.items()
-        }
-
-    raw_nodes_for_coordinator = raw_nodes
-    raw_nodes_for_context = raw_nodes
-    if isinstance(inventory_container, Inventory):
-        raw_nodes_for_coordinator = None
-        raw_nodes_for_context = None
-
-    if hasattr(coordinator, "update_nodes"):
-        coordinator.update_nodes(raw_nodes_for_coordinator, inventory_container)
-
-    normalized_unknown: set[str] = {
-        node_str
-        for node_str in (
-            str(node_type).strip()
-            for node_type in unknown_types
-            if node_type is not None
-        )
-        if node_str
-    }
-
     return NodeDispatchContext(
-        payload=raw_nodes_for_context,
+        payload=raw_nodes_for_coordinator,
         inventory=inventory_container,
-        addr_map=addr_map,
-        unknown_types=normalized_unknown,
         record=record_mutable,
     )
 
@@ -790,16 +710,14 @@ class _WSCommon(_WSStatusMixin):
 
         active_logger = logger or _LOGGER
 
-        fallback_heater_map, fallback_heater_aliases = normalize_heater_addresses(
-            normalized_map
-        )
-        fallback_power_map, fallback_power_aliases = normalize_power_monitor_addresses(
-            normalized_map
-        )
+        heater_map: dict[str, list[str]]
+        heater_aliases: dict[str, str]
+        power_map: dict[str, list[str]]
+        power_aliases: dict[str, str]
 
         if isinstance(inventory_container, Inventory):
             try:
-                inventory_heater_map, heater_aliases = (
+                heater_map, heater_aliases = (
                     inventory_container.heater_sample_address_map
                 )
             except Exception:  # pragma: no cover - defensive cache guard
@@ -808,10 +726,10 @@ class _WSCommon(_WSStatusMixin):
                     log_prefix,
                     exc_info=True,
                 )
-                inventory_heater_map = {}
+                heater_map = {}
                 heater_aliases = {}
             try:
-                inventory_power_map, power_aliases = (
+                power_map, power_aliases = (
                     inventory_container.power_monitor_sample_address_map
                 )
             except Exception:  # pragma: no cover - defensive cache guard
@@ -820,36 +738,23 @@ class _WSCommon(_WSStatusMixin):
                     log_prefix,
                     exc_info=True,
                 )
-                inventory_power_map = {}
+                power_map = {}
                 power_aliases = {}
-
-            heater_map: dict[str, list[str]] = dict(inventory_heater_map)
-            power_map: dict[str, list[str]] = dict(inventory_power_map)
-
-            for node_type, addresses in fallback_heater_map.items():
-                if node_type not in heater_map or not heater_map.get(node_type):
-                    if addresses:
-                        heater_map[node_type] = addresses
-
-            if fallback_power_map.get("pmo") and not power_map.get("pmo"):
-                power_map["pmo"] = fallback_power_map["pmo"]
         else:
-            heater_map = fallback_heater_map
-            heater_aliases = fallback_heater_aliases
-            power_map = fallback_power_map
-            power_aliases = fallback_power_aliases
+            heater_map, heater_aliases = normalize_heater_addresses(normalized_map)
+            power_map, power_aliases = normalize_power_monitor_addresses(normalized_map)
 
         cleaned_map: dict[str, list[str]] = {
-            node_type: addresses
+            node_type: list(addresses)
             for node_type, addresses in heater_map.items()
             if node_type in HEATER_NODE_TYPES
         }
         if "htr" not in cleaned_map:
-            cleaned_map["htr"] = heater_map.get("htr", [])
+            cleaned_map.setdefault("htr", list(heater_map.get("htr", [])))
 
         pmo_addresses = power_map.get("pmo", [])
         if pmo_addresses:
-            cleaned_map["pmo"] = pmo_addresses
+            cleaned_map["pmo"] = list(pmo_addresses)
 
         if isinstance(inventory_container, Inventory):
             if isinstance(record_mutable, MutableMapping):
@@ -857,12 +762,9 @@ class _WSCommon(_WSStatusMixin):
             if not isinstance(self._inventory, Inventory):
                 self._inventory = inventory_container
 
-        sample_aliases = dict(heater_aliases)
+        sample_aliases: dict[str, str] = {}
+        sample_aliases.update(heater_aliases)
         sample_aliases.update(power_aliases)
-        for alias, target in fallback_heater_aliases.items():
-            sample_aliases.setdefault(alias, target)
-        for alias, target in fallback_power_aliases.items():
-            sample_aliases.setdefault(alias, target)
         if isinstance(record_mutable, MutableMapping):
             record_mutable["sample_aliases"] = sample_aliases
 
@@ -885,44 +787,43 @@ class _WSCommon(_WSStatusMixin):
             inventory=self._inventory,
         )
         inventory = context.inventory if isinstance(context.inventory, Inventory) else None
-        normalized_map: Mapping[Any, Iterable[Any]] | None = (
-            context.addr_map if isinstance(context.addr_map, Mapping) else None
-        )
+        fallback_map: Mapping[Any, Iterable[Any]] | None = None
+        if not isinstance(inventory, Inventory) and isinstance(raw_nodes, Mapping):
+            extracted: dict[str, list[str]] = {}
+            for node_type, section in raw_nodes.items():
+                if not isinstance(node_type, str) or not isinstance(section, Mapping):
+                    continue
+                addresses: set[str] = set()
+                for sub_section in section.values():
+                    if not isinstance(sub_section, Mapping):
+                        continue
+                    for raw_addr in sub_section:
+                        addr = normalize_node_addr(
+                            raw_addr, use_default_when_falsey=True
+                        )
+                        if addr:
+                            addresses.add(addr)
+                if addresses:
+                    extracted[node_type] = sorted(addresses)
+            fallback_map = extracted
+
         self._apply_heater_addresses(
-            normalized_map,
+            fallback_map,
             inventory=inventory,
             log_prefix="WS",
             logger=_LOGGER,
         )
 
         addresses_by_type: dict[str, list[str]] = {}
-        if inventory is not None:
+        if isinstance(inventory, Inventory):
             try:
-                inventory_map = inventory.addresses_by_type
+                addresses_by_type = inventory.addresses_by_type
             except Exception:  # pragma: no cover - defensive cache guard
                 _LOGGER.debug(
-                    "WS: failed to resolve inventory addresses; falling back to addr_map",
-                    exc_info=True,
+                    "WS: failed to resolve inventory addresses", exc_info=True
                 )
-                inventory_map = None
-            else:
-                inventory_map = (
-                    dict(inventory_map) if isinstance(inventory_map, Mapping) else None
-                )
-            if isinstance(inventory_map, Mapping):
-                extracted: dict[str, list[str]] = {}
-                for node_type, addresses in inventory_map.items():
-                    if isinstance(addresses, Iterable) and not isinstance(
-                        addresses, (str, bytes)
-                    ):
-                        extracted[node_type] = list(addresses)
-                        continue
-                    normalised = normalize_node_addr(
-                        addresses, use_default_when_falsey=True
-                    )
-                    extracted[node_type] = [normalised] if normalised else []
-                addresses_by_type = extracted
-        if not addresses_by_type and isinstance(normalized_map, Mapping):
+                addresses_by_type = {}
+        elif isinstance(fallback_map, Mapping):
             addresses_by_type = {
                 node_type: [
                     addr
@@ -932,7 +833,7 @@ class _WSCommon(_WSStatusMixin):
                     )
                     if addr
                 ]
-                for node_type, addresses in normalized_map.items()
+                for node_type, addresses in fallback_map.items()
             }
         payload_copy = {
             "dev_id": self.dev_id,
@@ -1025,10 +926,10 @@ __all__ = [
     "HandshakeError",
     "WSStats",
     "WebSocketClient",
-    "forward_ws_sample_updates",
-    "translate_path_update",
-    "resolve_ws_update_section",
     "WsHealthTracker",
+    "forward_ws_sample_updates",
+    "resolve_ws_update_section",
+    "translate_path_update",
 ]
 
 time_mod = time.monotonic

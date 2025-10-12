@@ -505,38 +505,18 @@ def test_handshake_error_exposes_status_and_url() -> None:
     assert error.response_snippet == "snippet"
 
 
-def test_dispatch_nodes_without_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Resolve inventory records when no snapshot exists."""
-
-    hass_record: dict[str, Any] = {"dev_id": "device"}
-    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": hass_record}})
-    coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
-    dispatcher = MagicMock()
-    monkeypatch.setattr(base_ws, "async_dispatcher_send", dispatcher)
-    seen: dict[str, Any] = {}
+def test_dispatch_nodes_uses_record_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
+    """dispatch_nodes should prefer the shared inventory reference."""
 
     payload = {"nodes": [{"addr": "1", "type": "htr"}]}
     node_inventory = build_node_inventory(payload["nodes"])
     inventory = Inventory("device", payload["nodes"], node_inventory)
+    hass_record: dict[str, Any] = {"dev_id": "device", "inventory": inventory}
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": hass_record}})
+    coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
+    dispatcher = MagicMock()
+    monkeypatch.setattr(base_ws, "async_dispatcher_send", dispatcher)
 
-    def fake_resolve(
-        record_map: Mapping[str, Any] | None,
-        *,
-        dev_id: str | None = None,
-        nodes_payload: Any | None = None,
-        **_: Any,
-    ) -> Any:
-        seen["record"] = record_map
-        seen["dev_id"] = dev_id
-        seen["nodes_payload"] = nodes_payload
-        return SimpleNamespace(
-            inventory=inventory,
-            source="test",
-            raw_count=len(node_inventory),
-            filtered_count=len(node_inventory),
-        )
-
-    monkeypatch.setattr(base_ws, "resolve_record_inventory", fake_resolve)
     class DummyCommon(base_ws._WSCommon):
         def __init__(self) -> None:
             self.hass = hass
@@ -547,25 +527,7 @@ def test_dispatch_nodes_without_snapshot(monkeypatch: pytest.MonkeyPatch) -> Non
 
     DummyCommon()._dispatch_nodes(payload)
 
-    assert seen["record"] is hass_record
-    assert seen["dev_id"] == "dev"
-    assert seen["nodes_payload"] is payload["nodes"]
-    coordinator.update_nodes.assert_called_once()
-    update_args = coordinator.update_nodes.call_args.args
-    assert update_args[0] is None
-    inventory_arg = update_args[1]
-    assert isinstance(inventory_arg, Inventory)
-    assert inventory_arg.payload is payload["nodes"]
-
-    def _extract_addr(node: Any) -> str:
-        addr_attr = getattr(node, "addr", None)
-        if addr_attr is not None:
-            return addr_attr
-        if isinstance(node, Mapping):
-            return str(node.get("addr", ""))
-        return str(node)
-
-    assert [_extract_addr(node) for node in inventory_arg.nodes] == ["1"]
+    coordinator.update_nodes.assert_called_once_with(None, inventory)
     dispatcher.assert_called_once()
     dispatched_payload = dispatcher.call_args.args[2]
     assert dispatched_payload["addresses_by_type"] == {"htr": ["1"]}
@@ -573,88 +535,51 @@ def test_dispatch_nodes_without_snapshot(monkeypatch: pytest.MonkeyPatch) -> Non
     assert "nodes" not in dispatched_payload
 
 
-def test_prepare_nodes_dispatch_handles_non_mapping_record(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_prepare_nodes_dispatch_handles_non_mapping_record() -> None:
     """Node dispatch helper should tolerate non-mapping hass records."""
 
     hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": []}})
     coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
-    seen: dict[str, Any] = {}
-
-    def fake_resolve(
-        record_map: Mapping[str, Any] | None,
-        *,
-        dev_id: str | None = None,
-        nodes_payload: Any | None = None,
-        **_: Any,
-    ) -> Any:
-        seen["record"] = record_map
-        seen["dev_id"] = dev_id
-        seen["nodes_payload"] = nodes_payload
-        return SimpleNamespace(inventory=None, source="fallback", raw_count=0, filtered_count=0)
-
-    monkeypatch.setattr(base_ws, "resolve_record_inventory", fake_resolve)
 
     context = base_ws._prepare_nodes_dispatch(
         hass,
         entry_id="entry",
         coordinator=coordinator,
-        raw_nodes={},
+        raw_nodes={"nodes": {}},
     )
 
-    assert seen["record"] is None
-    assert seen["dev_id"] == "dev"
-    assert seen["nodes_payload"] == {}
+    coordinator.update_nodes.assert_called_once_with({"nodes": {}}, None)
     assert context.record is None
-    assert isinstance(context.inventory, Inventory)
-    assert context.inventory.nodes == ()
+    assert context.inventory is None
 
 
-def test_prepare_nodes_dispatch_populates_record_inventory(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Fallback inventory creation should store the container on the record."""
+def test_prepare_nodes_dispatch_reuses_record_inventory() -> None:
+    """Existing inventory entries on the record should be reused."""
 
-    hass_record: dict[str, Any] = {"dev_id": "dev"}
+    inventory = Inventory("dev", {}, [])
+    hass_record: dict[str, Any] = {"dev_id": "dev", "inventory": inventory}
     hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": hass_record}})
     coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
-    def fake_resolve(
-        record_map: Mapping[str, Any] | None,
-        *,
-        dev_id: str | None = None,
-        nodes_payload: Any | None = None,
-        **_: Any,
-    ) -> Any:
-        assert record_map is hass_record
-        assert dev_id == "dev"
-        assert nodes_payload == {}
-        return SimpleNamespace(inventory=None, source="fallback", raw_count=0, filtered_count=0)
-
-    monkeypatch.setattr(base_ws, "resolve_record_inventory", fake_resolve)
 
     context = base_ws._prepare_nodes_dispatch(
         hass,
         entry_id="entry",
         coordinator=coordinator,
-        raw_nodes={},
+        raw_nodes=None,
     )
 
-    assert isinstance(hass_record.get("inventory"), Inventory)
-    assert context.inventory is hass_record["inventory"]
+    coordinator.update_nodes.assert_called_once_with(None, inventory)
+    assert context.inventory is inventory
+    assert hass_record["inventory"] is inventory
 
 
-def test_prepare_nodes_dispatch_uses_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_prepare_nodes_dispatch_uses_inventory() -> None:
     """Existing inventory objects should be reused by the dispatch helper."""
 
     hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
     coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
     node_inventory = build_node_inventory([{"type": "htr", "addr": "4"}])
     inventory = Inventory("dev", {"nodes": [{"type": "htr", "addr": "4"}]}, node_inventory)
-    def _fail(*_: Any, **__: Any) -> Any:
-        raise AssertionError("resolve_record_inventory should not be called")
-
-    monkeypatch.setattr(base_ws, "resolve_record_inventory", _fail)
 
     context = base_ws._prepare_nodes_dispatch(
         hass,
@@ -668,53 +593,24 @@ def test_prepare_nodes_dispatch_uses_inventory(monkeypatch: pytest.MonkeyPatch) 
     coordinator.update_nodes.assert_called_once_with(None, inventory)
 
 
-def test_prepare_nodes_dispatch_resolves_record_dev_id_and_coordinator_inventory(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Record dev IDs and coordinator inventory should be applied."""
-
-    resolve_calls: list[tuple[Mapping[str, Any] | None, str | None, Any]] = []
-
-    def fake_resolve(
-        record_map: Mapping[str, Any] | None,
-        *,
-        dev_id: str | None = None,
-        nodes_payload: Any | None = None,
-        **_: Any,
-    ) -> Any:
-        resolve_calls.append((record_map, dev_id, nodes_payload))
-        return SimpleNamespace(inventory=None, source="fallback", raw_count=0, filtered_count=0)
-
-    monkeypatch.setattr(base_ws, "resolve_record_inventory", fake_resolve)
-
-    hass_str = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {"dev_id": "raw"}}})
-    coordinator_str = SimpleNamespace(update_nodes=MagicMock())
-    context_str = base_ws._prepare_nodes_dispatch(
-        hass_str,
-        entry_id="entry",
-        coordinator=coordinator_str,
-        raw_nodes={},
-    )
-    assert context_str.inventory.dev_id == "raw"
+def test_prepare_nodes_dispatch_prefers_coordinator_inventory() -> None:
+    """Coordinator inventories should be forwarded to downstream consumers."""
 
     inventory = Inventory("dev", {}, [])
-    hass_numeric_record: dict[str, Any] = {"dev_id": 99}
-    hass_numeric = SimpleNamespace(data={base_ws.DOMAIN: {"entry": hass_numeric_record}})
-    coordinator_numeric = SimpleNamespace(update_nodes=MagicMock(), inventory=inventory)
-    context_numeric = base_ws._prepare_nodes_dispatch(
-        hass_numeric,
+    hass_record: dict[str, Any] = {"dev_id": 99}
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": hass_record}})
+    coordinator = SimpleNamespace(update_nodes=MagicMock(), inventory=inventory)
+
+    context = base_ws._prepare_nodes_dispatch(
+        hass,
         entry_id="entry",
-        coordinator=coordinator_numeric,
+        coordinator=coordinator,
         raw_nodes={"nodes": []},
     )
 
-    assert context_numeric.inventory is inventory
-    assert hass_numeric_record["inventory"] is inventory
-    update_args = coordinator_numeric.update_nodes.call_args.args
-    assert update_args[0] is None
-    assert update_args[1] is inventory
-    assert resolve_calls[0] == (hass_str.data[base_ws.DOMAIN]["entry"], "raw", {})
-    assert len(resolve_calls) == 1
+    coordinator.update_nodes.assert_called_once_with(None, inventory)
+    assert context.inventory is inventory
+    assert hass_record["inventory"] is inventory
 
 
 def test_ws_status_tracker_applies_default_cadence_hint() -> None:
@@ -1471,32 +1367,13 @@ def test_ws_common_update_status_dispatches(monkeypatch: pytest.MonkeyPatch) -> 
 def test_ws_common_dispatch_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
     """WS common dispatch should update coordinator and emit dispatcher events."""
 
-    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
+    inventory_nodes = build_node_inventory([{ "type": "htr", "addr": "1" }])
+    inventory_obj = Inventory("dev", {"nodes": [{"type": "htr", "addr": "1"}]}, inventory_nodes)
+    hass_record: dict[str, Any] = {"inventory": inventory_obj}
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": hass_record}})
     coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
     dispatcher = MagicMock()
     monkeypatch.setattr(base_ws, "async_dispatcher_send", dispatcher)
-
-    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
-    inventory_nodes = build_node_inventory(raw_nodes)
-    inventory_obj = Inventory("dev", raw_nodes, inventory_nodes)
-
-    def fake_resolve(
-        record: Mapping[str, Any] | None,
-        *,
-        dev_id: str | None = None,
-        nodes_payload: Any | None = None,
-        **_: Any,
-    ) -> Any:
-        assert dev_id == "dev"
-        assert nodes_payload == raw_nodes
-        return SimpleNamespace(inventory=inventory_obj, source="test", raw_count=1, filtered_count=1)
-
-    monkeypatch.setattr(base_ws, "resolve_record_inventory", fake_resolve)
-    monkeypatch.setattr(
-        base_ws,
-        "addresses_by_node_type",
-        lambda inventory, known_types=None: ({"htr": ["1"]}, {}),
-    )
 
     class Dummy(base_ws._WSCommon):
         def __init__(self) -> None:
@@ -1504,10 +1381,10 @@ def test_ws_common_dispatch_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
             self.entry_id = "entry"
             self.dev_id = "dev"
             self._coordinator = coordinator
-            self._inventory = None
+            self._inventory = inventory_obj
 
     dummy = Dummy()
-    payload = {"nodes": raw_nodes}
+    payload = {"nodes": {"htr": {"samples": {"1": {"power": 5}}}}}
     dummy._dispatch_nodes(payload)
 
     coordinator.update_nodes.assert_called_once()

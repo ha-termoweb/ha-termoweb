@@ -893,16 +893,28 @@ class WebSocketClient(_WSCommon):
         if isinstance(record, MutableMapping) and isinstance(inventory, Inventory):
             record["inventory"] = inventory
 
-        addr_map = context.addr_map if isinstance(context.addr_map, dict) else {}
-        unknown_types = context.unknown_types
-        if unknown_types:  # pragma: no cover - diagnostic branch
-            _LOGGER.debug(
-                "WS: unknown node types in inventory: %s",
-                ", ".join(sorted(unknown_types)),
-            )
+        fallback_map: Mapping[Any, Iterable[Any]] | None = None
+        if not isinstance(inventory, Inventory) and isinstance(raw_nodes, Mapping):
+            extracted: dict[str, list[str]] = {}
+            for node_type, section in raw_nodes.items():
+                if not isinstance(node_type, str) or not isinstance(section, Mapping):
+                    continue
+                addresses: set[str] = set()
+                for sub_section in section.values():
+                    if not isinstance(sub_section, Mapping):
+                        continue
+                    for raw_addr in sub_section:
+                        addr = normalize_node_addr(
+                            raw_addr, use_default_when_falsey=True
+                        )
+                        if addr:
+                            addresses.add(addr)
+                if addresses:
+                    extracted[node_type] = sorted(addresses)
+            fallback_map = extracted
 
         cleaned_map = self._apply_heater_addresses(
-            addr_map,
+            fallback_map,
             inventory=inventory,
             log_prefix="WS",
             logger=_LOGGER,
@@ -911,57 +923,21 @@ class WebSocketClient(_WSCommon):
         addresses_by_type: dict[str, list[str]] = {}
         if isinstance(inventory, Inventory):
             try:
-                inventory_map = inventory.addresses_by_type
+                addresses_by_type = inventory.addresses_by_type
             except Exception:  # pragma: no cover - defensive cache guard
-                inventory_map = None
-            else:
-                inventory_map = (
-                    dict(inventory_map) if isinstance(inventory_map, Mapping) else None
-                )
-            if isinstance(inventory_map, Mapping):
-                addresses_by_type = {
-                    node_type: list(addresses)
-                    if isinstance(addresses, Iterable)
-                    and not isinstance(addresses, (str, bytes))
-                    else [
-                        normalised
-                        for normalised in (
-                            normalize_node_addr(
-                                addresses, use_default_when_falsey=True
-                            ),
-                        )
-                        if normalised
-                    ]
-                    for node_type, addresses in inventory_map.items()
-                }
-
-        if not addresses_by_type and isinstance(addr_map, Mapping):
+                addresses_by_type = {}
+        elif isinstance(fallback_map, Mapping):
             addresses_by_type = {
                 node_type: [
-                    normalised
-                    for normalised in (
+                    addr
+                    for addr in (
                         normalize_node_addr(candidate, use_default_when_falsey=True)
-                        for candidate in addrs
+                        for candidate in addresses
                     )
-                    if normalised
+                    if addr
                 ]
-                for node_type, addrs in addr_map.items()
+                for node_type, addresses in fallback_map.items()
             }
-        elif isinstance(addr_map, Mapping):
-            for node_type, addrs in addr_map.items():
-                addresses_by_type.setdefault(
-                    node_type,
-                    [
-                        normalised
-                        for normalised in (
-                            normalize_node_addr(
-                                candidate, use_default_when_falsey=True
-                            )
-                            for candidate in addrs
-                        )
-                        if normalised
-                    ],
-                )
 
         payload_copy: dict[str, Any] = {
             "dev_id": self.dev_id,
@@ -969,8 +945,6 @@ class WebSocketClient(_WSCommon):
             "addr_map": addresses_by_type,
             "addresses_by_type": addresses_by_type,
         }
-        if unknown_types:  # pragma: no cover - diagnostic payload
-            payload_copy["unknown_types"] = sorted(unknown_types)
 
         self._mark_ws_payload(
             timestamp=time.time(),

@@ -1022,12 +1022,28 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         if isinstance(record, MutableMapping) and inventory is not None:
             record["inventory"] = inventory
 
-        normalized_map: Mapping[Any, Iterable[Any]] | None = (
-            context.addr_map if isinstance(context.addr_map, Mapping) else None
-        )
+        fallback_map: Mapping[Any, Iterable[Any]] | None = None
+        if inventory is None and isinstance(raw_nodes, Mapping):
+            extracted: dict[str, list[str]] = {}
+            for node_type, section in raw_nodes.items():
+                if not isinstance(node_type, str) or not isinstance(section, Mapping):
+                    continue
+                addresses: set[str] = set()
+                for sub_section in section.values():
+                    if not isinstance(sub_section, Mapping):
+                        continue
+                    for raw_addr in sub_section:
+                        addr = normalize_node_addr(
+                            raw_addr, use_default_when_falsey=True
+                        )
+                        if addr:
+                            addresses.add(addr)
+                if addresses:
+                    extracted[node_type] = sorted(addresses)
+            fallback_map = extracted
 
         cleaned_map = self._apply_heater_addresses(
-            normalized_map,
+            fallback_map,
             inventory=inventory,
             log_prefix="WS (ducaheat)",
             logger=_LOGGER,
@@ -1060,34 +1076,18 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     for node_type, addresses in inventory_map.items()
                 }
 
-        if not addresses_by_type and isinstance(normalized_map, Mapping):
+        if not addresses_by_type and isinstance(fallback_map, Mapping):
             addresses_by_type = {
                 node_type: [
-                    normalised
-                    for normalised in (
+                    addr
+                    for addr in (
                         normalize_node_addr(candidate, use_default_when_falsey=True)
                         for candidate in addrs
                     )
-                    if normalised
+                    if addr
                 ]
-                for node_type, addrs in normalized_map.items()
+                for node_type, addrs in fallback_map.items()
             }
-        else:
-            if isinstance(normalized_map, Mapping):
-                for node_type, addrs in normalized_map.items():
-                    addresses_by_type.setdefault(
-                        node_type,
-                        [
-                            normalised
-                            for normalised in (
-                                normalize_node_addr(
-                                    candidate, use_default_when_falsey=True
-                                )
-                                for candidate in addrs
-                            )
-                            if normalised
-                        ],
-                    )
 
         payload_copy: dict[str, Any] = {
             "dev_id": self.dev_id,
@@ -1095,10 +1095,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             "addr_map": addresses_by_type or cleaned_map,
             "addresses_by_type": addresses_by_type or cleaned_map,
         }
-
-        unknown_types = context.unknown_types
-        if unknown_types:
-            payload_copy["unknown_types"] = sorted(unknown_types)
 
         cadence_payload = cadence_source or context.payload
         if isinstance(cadence_payload, Mapping):
