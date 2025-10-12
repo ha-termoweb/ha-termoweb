@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Iterable, Mapping, MutableMapping
+from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import dataclass
 import logging
 import time
@@ -598,7 +598,7 @@ class _WSCommon(_WSStatusMixin):
         *,
         dev_map: MutableMapping[str, Any] | None = None,
     ) -> MutableMapping[str, Any]:
-        """Return the node bucket for ``node_type`` with default sections."""
+        """Return the existing node bucket for ``node_type``."""
 
         if not isinstance(nodes_by_type, MutableMapping):
             return {}
@@ -615,13 +615,6 @@ class _WSCommon(_WSStatusMixin):
             nodes_by_type[normalized_type] = bucket
         else:
             bucket = {}
-            nodes_by_type[normalized_type] = bucket
-
-        addrs = bucket.get("addrs")
-        if isinstance(addrs, Iterable) and not isinstance(addrs, (list, str, bytes)):
-            bucket["addrs"] = list(addrs)
-        elif not isinstance(addrs, list):
-            bucket.setdefault("addrs", [])
 
         for section in ("settings", "samples", "status", "advanced"):
             section_payload = bucket.get(section)
@@ -629,8 +622,6 @@ class _WSCommon(_WSStatusMixin):
                 continue
             if isinstance(section_payload, Mapping):
                 bucket[section] = dict(section_payload)
-            else:
-                bucket[section] = {}
 
         if not isinstance(dev_map, MutableMapping):
             return bucket
@@ -651,17 +642,41 @@ class _WSCommon(_WSStatusMixin):
         elif isinstance(existing_settings, Mapping):
             settings_map[normalized_type] = dict(existing_settings)
         else:
-            settings_map[normalized_type] = {}
+            settings_map.setdefault(normalized_type, {})
 
-        nodes_section = dev_map.get("nodes_by_type")
-        if isinstance(nodes_section, MutableMapping):
-            nodes_section.setdefault(normalized_type, bucket)
-        elif isinstance(nodes_section, Mapping):
-            nodes_map = dict(nodes_section)
-            nodes_map.setdefault(normalized_type, bucket)
-            dev_map["nodes_by_type"] = nodes_map
+        inventory: Inventory | None = None
+        if isinstance(self._inventory, Inventory):
+            inventory = self._inventory
         else:
-            dev_map["nodes_by_type"] = {normalized_type: bucket}
+            record_container = self.hass.data.get(DOMAIN, {})
+            record = (
+                record_container.get(self.entry_id)
+                if isinstance(record_container, Mapping)
+                else None
+            )
+            candidate = record.get("inventory") if isinstance(record, Mapping) else None
+            if isinstance(candidate, Inventory):
+                inventory = candidate
+
+        if inventory is None and isinstance(dev_map.get("inventory"), Inventory):
+            inventory = dev_map["inventory"]
+
+        if isinstance(inventory, Inventory):
+            dev_map["inventory"] = inventory
+            try:
+                addresses_by_type = inventory.addresses_by_type
+            except Exception:  # pragma: no cover - defensive cache guard
+                addresses_by_type = {}
+            existing_addresses = dev_map.get("addresses_by_type")
+            if isinstance(existing_addresses, MutableMapping):
+                for key, values in addresses_by_type.items():
+                    existing_addresses.setdefault(key, list(values))
+            else:
+                dev_map["addresses_by_type"] = {
+                    key: list(values) for key, values in addresses_by_type.items()
+                }
+
+        dev_map.pop("nodes_by_type", None)
 
         return bucket
 
