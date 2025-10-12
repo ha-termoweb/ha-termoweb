@@ -1141,9 +1141,7 @@ def test_handle_event_includes_addr_map(monkeypatch: pytest.MonkeyPatch) -> None
     dev_state = client._coordinator.data.get("device")
     assert isinstance(dev_state, Mapping)
     assert "nodes" not in dev_state
-    addresses_by_type = dev_state.get("addresses_by_type")
-    assert isinstance(addresses_by_type, Mapping)
-    assert addresses_by_type.get("htr") == ["2"]
+    assert "addresses_by_type" not in dev_state
 
 
 def test_update_legacy_settings_updates_settings_map(monkeypatch: pytest.MonkeyPatch) -> None:

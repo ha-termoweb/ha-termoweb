@@ -1022,33 +1022,78 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         if isinstance(record, MutableMapping) and inventory is not None:
             record["inventory"] = inventory
 
-        if inventory is not None:
-            try:
-                addresses_by_type = inventory.addresses_by_type
-            except Exception:  # pragma: no cover - defensive cache guard
-                addresses_by_type = {}
-        else:
-            addresses_by_type = {}
+        normalized_map: Mapping[Any, Iterable[Any]] | None = (
+            context.addr_map if isinstance(context.addr_map, Mapping) else None
+        )
 
-        if not addresses_by_type:
-            addresses_by_type = {
-                node_type: list(addrs) for node_type, addrs in context.addr_map.items()
-            }
-
-        self._apply_heater_addresses(
-            addresses_by_type,
+        cleaned_map = self._apply_heater_addresses(
+            normalized_map,
             inventory=inventory,
             log_prefix="WS (ducaheat)",
             logger=_LOGGER,
         )
 
+        addresses_by_type: dict[str, list[str]] = {}
+        if inventory is not None:
+            try:
+                inventory_map = inventory.addresses_by_type
+            except Exception:  # pragma: no cover - defensive cache guard
+                inventory_map = None
+            else:
+                inventory_map = (
+                    dict(inventory_map) if isinstance(inventory_map, Mapping) else None
+                )
+            if isinstance(inventory_map, Mapping):
+                addresses_by_type = {
+                    node_type: list(addresses)
+                    if isinstance(addresses, Iterable)
+                    and not isinstance(addresses, (str, bytes))
+                    else [
+                        normalised
+                        for normalised in (
+                            normalize_node_addr(
+                                addresses, use_default_when_falsey=True
+                            ),
+                        )
+                        if normalised
+                    ]
+                    for node_type, addresses in inventory_map.items()
+                }
+
+        if not addresses_by_type and isinstance(normalized_map, Mapping):
+            addresses_by_type = {
+                node_type: [
+                    normalised
+                    for normalised in (
+                        normalize_node_addr(candidate, use_default_when_falsey=True)
+                        for candidate in addrs
+                    )
+                    if normalised
+                ]
+                for node_type, addrs in normalized_map.items()
+            }
+        else:
+            if isinstance(normalized_map, Mapping):
+                for node_type, addrs in normalized_map.items():
+                    addresses_by_type.setdefault(
+                        node_type,
+                        [
+                            normalised
+                            for normalised in (
+                                normalize_node_addr(
+                                    candidate, use_default_when_falsey=True
+                                )
+                                for candidate in addrs
+                            )
+                            if normalised
+                        ],
+                    )
+
         payload_copy: dict[str, Any] = {
             "dev_id": self.dev_id,
             "node_type": None,
-            "addr_map": {
-                node_type: list(addrs) for node_type, addrs in context.addr_map.items()
-            },
-            "addresses_by_type": addresses_by_type,
+            "addr_map": addresses_by_type or cleaned_map,
+            "addresses_by_type": addresses_by_type or cleaned_map,
         }
 
         unknown_types = context.unknown_types

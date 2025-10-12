@@ -721,25 +721,6 @@ class _WSCommon(_WSStatusMixin):
         if not isinstance(dev_map, MutableMapping):
             return bucket
 
-        addresses_section = dev_map.get("addresses_by_type")
-        if isinstance(addresses_section, MutableMapping):
-            addresses_map: MutableMapping[str, Any] = addresses_section
-        elif isinstance(addresses_section, Mapping):
-            addresses_map = dict(addresses_section)
-            dev_map["addresses_by_type"] = addresses_map
-        else:
-            addresses_map = {}
-            dev_map["addresses_by_type"] = addresses_map
-
-        if normalized_type in HEATER_NODE_TYPES:
-            addresses = addresses_map.get(normalized_type)
-            if isinstance(addresses, list):
-                pass
-            elif isinstance(addresses, Iterable) and not isinstance(addresses, (str, bytes)):
-                addresses_map[normalized_type] = list(addresses)
-            else:
-                addresses_map[normalized_type] = []
-
         settings_section = dev_map.get("settings")
         if isinstance(settings_section, MutableMapping):
             settings_map: MutableMapping[str, Any] = settings_section
@@ -904,20 +885,54 @@ class _WSCommon(_WSStatusMixin):
             inventory=self._inventory,
         )
         inventory = context.inventory if isinstance(context.inventory, Inventory) else None
+        normalized_map: Mapping[Any, Iterable[Any]] | None = (
+            context.addr_map if isinstance(context.addr_map, Mapping) else None
+        )
+        self._apply_heater_addresses(
+            normalized_map,
+            inventory=inventory,
+            log_prefix="WS",
+            logger=_LOGGER,
+        )
+
         addresses_by_type: dict[str, list[str]] = {}
         if inventory is not None:
             try:
-                addresses_by_type = inventory.addresses_by_type
+                inventory_map = inventory.addresses_by_type
             except Exception:  # pragma: no cover - defensive cache guard
                 _LOGGER.debug(
                     "WS: failed to resolve inventory addresses; falling back to addr_map",
                     exc_info=True,
                 )
-                addresses_by_type = {}
-        if not addresses_by_type:
+                inventory_map = None
+            else:
+                inventory_map = (
+                    dict(inventory_map) if isinstance(inventory_map, Mapping) else None
+                )
+            if isinstance(inventory_map, Mapping):
+                extracted: dict[str, list[str]] = {}
+                for node_type, addresses in inventory_map.items():
+                    if isinstance(addresses, Iterable) and not isinstance(
+                        addresses, (str, bytes)
+                    ):
+                        extracted[node_type] = list(addresses)
+                        continue
+                    normalised = normalize_node_addr(
+                        addresses, use_default_when_falsey=True
+                    )
+                    extracted[node_type] = [normalised] if normalised else []
+                addresses_by_type = extracted
+        if not addresses_by_type and isinstance(normalized_map, Mapping):
             addresses_by_type = {
-                node_type: list(addresses)
-                for node_type, addresses in context.addr_map.items()
+                node_type: [
+                    addr
+                    for addr in (
+                        normalize_node_addr(candidate, use_default_when_falsey=True)
+                        for candidate in addresses
+                    )
+                    if addr
+                ]
+                for node_type, addresses in normalized_map.items()
             }
         payload_copy = {
             "dev_id": self.dev_id,
