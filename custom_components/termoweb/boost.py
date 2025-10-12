@@ -3,21 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import logging
 import math
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from homeassistant.util import dt as dt_util
 
-from .inventory import (
-    Inventory,
-    Node,
-    heater_platform_details_from_inventory,
-    normalize_node_addr,
-    normalize_node_type,
-)
+from .inventory import Inventory, Node, heater_platform_details_from_inventory
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -181,23 +174,34 @@ def resolve_boost_end_from_fields(
     return selected, minutes_remaining
 
 
-@dataclass(frozen=True, slots=True)
-class InventoryHeaterMetadata:
-    """Metadata describing a heater node sourced from an inventory."""
+type HeaterInventoryEntry = tuple[str, str, str, Node]
+"""Type alias describing ``(node_type, addr, name, node)`` tuples."""
 
-    node_type: str
-    addr: str
-    name: str
-    node: Node
-    supports_boost: bool
+
+def _iter_node_container(nodes: Iterable[Any] | Mapping[Any, Any] | Any) -> Iterator[Node]:
+    """Yield ``Node`` instances from ``nodes`` regardless of container shape."""
+
+    if isinstance(nodes, Mapping):
+        values = nodes.values()
+    elif isinstance(nodes, Iterable) and not isinstance(nodes, (str, bytes)):
+        values = nodes
+    else:
+        values = (nodes,)
+
+    for node in values:
+        if isinstance(node, Node):
+            yield node
+            continue
+        if hasattr(node, "addr") and hasattr(node, "type"):
+            yield cast(Node, node)
 
 
 def iter_inventory_heater_metadata(
     inventory: Inventory | None,
     *,
     default_name_simple: Callable[[str], str] | None = None,
-) -> Iterator[InventoryHeaterMetadata]:
-    """Yield metadata for heater nodes described by ``inventory``."""
+) -> Iterator[HeaterInventoryEntry]:
+    """Yield ``(node_type, addr, name, node)`` tuples for heater nodes."""
 
     if not isinstance(inventory, Inventory):
         return
@@ -210,74 +214,25 @@ def iter_inventory_heater_metadata(
         )
     )
 
-    heater_nodes = getattr(inventory, "heater_nodes", ())
-    node_lookup: dict[tuple[str, str], Node] = {}
-    for node in heater_nodes:
-        node_type = normalize_node_type(
-            getattr(node, "type", None),
-            use_default_when_falsey=True,
-        )
-        addr = normalize_node_addr(
-            getattr(node, "addr", None),
-            use_default_when_falsey=True,
-        )
-        if not node_type or not addr:
+    lookup: dict[str, dict[str, Node]] = {}
+    for node_type, nodes in nodes_by_type.items():
+        bucket: dict[str, Node] = {}
+        for node in _iter_node_container(nodes):
+            bucket[node.addr] = node
+        if bucket:
+            lookup[node_type] = bucket
+
+    for node_type, addresses in addresses_by_type.items():
+        if not addresses:
             continue
-        key = (node_type, addr)
-        if key not in node_lookup:
-            node_lookup[key] = node
-
-    if not node_lookup:
-        for node_type_raw, nodes in nodes_by_type.items():
-            node_type = normalize_node_type(
-                node_type_raw,
-                use_default_when_falsey=True,
-            )
-            if not node_type:
-                continue
-            candidates: Iterable[Any]
-            if isinstance(nodes, Mapping):
-                candidates = nodes.values()
-            elif isinstance(nodes, Iterable) and not isinstance(nodes, (str, bytes)):
-                candidates = nodes
-            else:
-                candidates = (nodes,)
-            for node in candidates:
-                addr = normalize_node_addr(
-                    getattr(node, "addr", None),
-                    use_default_when_falsey=True,
-                )
-                if not addr:
-                    continue
-                key = (node_type, addr)
-                node_lookup.setdefault(key, node)
-
-    for node_type_raw, addresses in addresses_by_type.items():
-        node_type = normalize_node_type(
-            node_type_raw,
-            use_default_when_falsey=True,
-        )
-        if not node_type or not addresses:
+        node_bucket = lookup.get(node_type)
+        if not node_bucket:
             continue
-
-        for addr_raw in addresses:
-            addr = normalize_node_addr(
-                addr_raw,
-                use_default_when_falsey=True,
-            )
-            if not addr:
-                continue
-            node = node_lookup.get((node_type, addr))
+        for addr in addresses:
+            node = node_bucket.get(addr)
             if node is None:
                 continue
-            name = resolve_name(node_type, addr)
-            yield InventoryHeaterMetadata(
-                node_type=node_type,
-                addr=addr,
-                name=name,
-                node=node,
-                supports_boost=supports_boost(node),
-            )
+            yield (node_type, addr, resolve_name(node_type, addr), node)
 
 ALLOWED_BOOST_MINUTES: Final[tuple[int, ...]] = tuple(range(60, 601, 60))
 """Valid boost durations (in minutes) supported by TermoWeb heaters."""
