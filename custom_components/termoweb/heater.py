@@ -154,7 +154,19 @@ class HeaterPlatformDetails:
             self.inventory,
             default_name_simple=self.default_name_simple,
         ):
-            yield metadata.node_type, metadata.node, metadata.addr, metadata.name
+            node_type = getattr(metadata, "node_type", None)
+            node = getattr(metadata, "node", None)
+            addr = getattr(metadata, "addr", None)
+            name = getattr(metadata, "name", None)
+
+            if node_type and node and addr and name:
+                yield node_type, node, addr, name
+                continue
+
+            if isinstance(metadata, tuple) and len(metadata) >= 4:
+                tuple_type, tuple_addr, tuple_name, tuple_node = metadata[:4]
+                yield tuple_type, tuple_node, tuple_addr, tuple_name
+                continue
 
 
 def _boost_runtime_store(
