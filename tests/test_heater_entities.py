@@ -395,25 +395,29 @@ def test_boost_entities_expose_state(monkeypatch: pytest.MonkeyPatch) -> None:
     def _resolver(day: int, minute: int, *, now=None) -> tuple[datetime, int]:
         raise AssertionError("resolver should not be used when derived metadata present")
 
+    raw_nodes = [{"type": "acm", "addr": "1", "name": "Accumulator"}]
+    inventory = Inventory("dev", {"nodes": raw_nodes}, build_node_inventory(raw_nodes))
+    settings_map = {"acm": {"1": settings}}
+
     coordinator = SimpleNamespace(
-        data={
-            "dev": {
-                "settings": {"acm": {"1": settings}},
-                "addresses_by_type": {"acm": ["1"]},
-            }
-        },
+        data={"dev": {"settings": settings_map}},
         resolve_boost_end=_resolver,
     )
+
+    def _settings_resolver() -> dict[str, Any] | None:
+        return settings_map["acm"].get("1")
 
     boost_binary = HeaterBoostActiveBinarySensor(
         coordinator,
         "entry",
         "dev",
+        "acm",
         "1",
         "Accumulator Boost Active",
         f"{DOMAIN}:dev:acm:1:boost_active",
+        inventory=inventory,
+        settings_resolver=_settings_resolver,
         device_name="Accumulator",
-        node_type="acm",
     )
     minutes_sensor = HeaterBoostMinutesRemainingSensor(
         coordinator,
@@ -455,24 +459,26 @@ def test_boost_entities_expose_state(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_boost_entities_handle_missing_data() -> None:
     """Boost entities should gracefully handle missing settings."""
 
-    coordinator = SimpleNamespace(
-        data={
-            "dev": {
-                "settings": {"acm": {"1": {}}},
-                "addresses_by_type": {"acm": ["1"]},
-            }
-        }
-    )
+    raw_nodes = [{"type": "acm", "addr": "1", "name": "Accumulator"}]
+    inventory = Inventory("dev", {"nodes": raw_nodes}, build_node_inventory(raw_nodes))
+    settings_map = {"acm": {"1": {}}}
+
+    coordinator = SimpleNamespace(data={"dev": {"settings": settings_map}})
+
+    def _settings_resolver() -> dict[str, Any] | None:
+        return settings_map["acm"].get("1")
 
     boost_binary = HeaterBoostActiveBinarySensor(
         coordinator,
         "entry",
         "dev",
+        "acm",
         "1",
         "Accumulator Boost Active",
         f"{DOMAIN}:dev:acm:1:boost_active",
+        inventory=inventory,
+        settings_resolver=_settings_resolver,
         device_name="Accumulator",
-        node_type="acm",
     )
     minutes_sensor = HeaterBoostMinutesRemainingSensor(
         coordinator,
