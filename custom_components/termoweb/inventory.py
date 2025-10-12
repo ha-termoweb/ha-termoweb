@@ -866,7 +866,6 @@ def boostable_accumulator_details_for_entry(
     """Return boostable accumulator metadata for a config entry."""
 
     from .heater import (
-        HeaterPlatformDetails,
         heater_platform_details_for_entry,
         iter_boostable_heater_nodes,
         log_skipped_nodes,
