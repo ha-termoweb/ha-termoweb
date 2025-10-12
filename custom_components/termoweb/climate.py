@@ -19,7 +19,7 @@ from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
 from .backend.ducaheat import DucaheatRESTClient
-from .boost import coerce_boost_minutes, iter_inventory_heater_metadata
+from .boost import coerce_boost_minutes, supports_boost
 from .const import BRAND_DUCAHEAT, DOMAIN
 from .heater import (
     DEFAULT_BOOST_DURATION,
@@ -35,7 +35,7 @@ from .inventory import (
     Inventory,
     normalize_node_addr,
     normalize_node_type,
-    resolve_record_inventory,
+    heater_platform_details_from_inventory,
 )
 from .utils import float_or_none
 
@@ -54,46 +54,76 @@ async def async_setup_entry(hass, entry, async_add_entities):
     inventory = resolve_entry_inventory(data)
 
 
+    if not isinstance(inventory, Inventory):
+        _LOGGER.error(
+            "TermoWeb climate setup missing inventory for device %s", dev_id
+        )
+        return
+
     default_name_simple = lambda addr: f"Heater {addr}"
     new_entities: list[ClimateEntity] = []
-    for node_type, addr_str, resolved_name, node in iter_inventory_heater_metadata(
-        inventory,
-        default_name_simple=default_name_simple,
-    ):
-        unique_id = build_heater_entity_unique_id(
-            dev_id,
+
+    _, addresses_by_type, resolve_name = (
+        heater_platform_details_from_inventory(
+            inventory,
+            default_name_simple=default_name_simple,
+        )
+    )
+
+    node_lookup: dict[tuple[str, str], Any] = {}
+    for node in inventory.heater_nodes:
+        node_type = normalize_node_type(
+            getattr(node, "type", None),
+            use_default_when_falsey=True,
+        )
+        addr = normalize_node_addr(
+            getattr(node, "addr", None),
+            use_default_when_falsey=True,
+        )
+        if not node_type or not addr:
+            continue
+        node_lookup.setdefault((node_type, addr), node)
+
+    for node_type, addresses in addresses_by_type.items():
+        if not addresses:
+            continue
+        canonical_type = normalize_node_type(
             node_type,
-            addr_str,
-            ":climate",
+            use_default_when_falsey=True,
         )
-        supports = False
-        candidate = getattr(node, "supports_boost", None)
-        if isinstance(candidate, bool):
-            supports = candidate
-        elif callable(candidate):
-            try:
-                supports = bool(candidate())
-            except Exception:  # noqa: BLE001 - defensive
-                _LOGGER.debug(
-                    "Ignoring boost support probe failure for node %s", addr_str, exc_info=True
-                )
-        entity_cls: type[HeaterClimateEntity]
-        if node_type == "acm" or supports:
-            entity_cls = AccumulatorClimateEntity
-        else:
-            entity_cls = HeaterClimateEntity
-        new_entities.append(
-            entity_cls(
-                coordinator,
-                entry.entry_id,
-                dev_id,
-                addr_str,
-                resolved_name,
-                unique_id,
-                node_type=node_type,
-                inventory=inventory,
+        if not canonical_type:
+            continue
+        for raw_addr in addresses:
+            addr_str = normalize_node_addr(
+                raw_addr,
+                use_default_when_falsey=True,
             )
-        )
+            if not addr_str:
+                continue
+            resolved_name = resolve_name(canonical_type, addr_str)
+            unique_id = build_heater_entity_unique_id(
+                dev_id,
+                canonical_type,
+                addr_str,
+                ":climate",
+            )
+            node = node_lookup.get((canonical_type, addr_str))
+            entity_cls: type[HeaterClimateEntity]
+            if canonical_type == "acm" or supports_boost(node):
+                entity_cls = AccumulatorClimateEntity
+            else:
+                entity_cls = HeaterClimateEntity
+            new_entities.append(
+                entity_cls(
+                    coordinator,
+                    entry.entry_id,
+                    dev_id,
+                    addr_str,
+                    resolved_name,
+                    unique_id,
+                    node_type=canonical_type,
+                )
+            )
 
     log_skipped_nodes("climate", inventory, logger=_LOGGER)
     if new_entities:
@@ -325,35 +355,73 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
     def _settings_maps(self) -> list[dict[str, Any]]:
         """Return all cached settings maps referencing this node."""
-        record = self._device_record()
-        if not isinstance(record, Mapping):
+        data = (self.coordinator.data or {}).get(self._dev_id)
+        if not isinstance(data, Mapping):
             return []
 
-        node_type = self._node_type
-        results: list[dict[str, Any]] = []
+        inventory = self._shared_inventory()
+        addr = self._addr
+        candidate_types: list[str]
+        if inventory is None or not addr:
+            candidate_types = [self._node_type]
+        else:
+            _, reverse_map = inventory.heater_address_map
+            addr_types = reverse_map.get(addr)
+            candidate_types = []
+            if addr_types:
+                for value in addr_types:
+                    canonical = normalize_node_type(
+                        value,
+                        use_default_when_falsey=True,
+                    )
+                    if canonical and canonical not in candidate_types:
+                        candidate_types.append(canonical)
+            if self._node_type not in candidate_types:
+                candidate_types.insert(0, self._node_type)
+
         seen: set[int] = set()
+        results: list[dict[str, Any]] = []
 
-        settings_root = record.get("settings")
-        if isinstance(settings_root, Mapping):
-            typed = settings_root.get(node_type)
-            if isinstance(typed, Mapping):
-                mapping = cast(dict[str, Any], typed)
+        settings_section = data.get("settings")
+        if isinstance(settings_section, Mapping):
+            for node_type in candidate_types:
+                bucket = settings_section.get(node_type)
+                if not isinstance(bucket, Mapping):
+                    continue
+                mapping = bucket if isinstance(bucket, dict) else dict(bucket)
                 ident = id(mapping)
-                if ident not in seen:
-                    seen.add(ident)
-                    results.append(mapping)
+                if ident in seen:
+                    continue
+                seen.add(ident)
+                results.append(mapping)
 
-        node_section = record.get(node_type)
-        if isinstance(node_section, Mapping):
-            typed = node_section.get("settings")
-            if isinstance(typed, Mapping):
-                mapping = cast(dict[str, Any], typed)
-                ident = id(mapping)
-                if ident not in seen:
-                    seen.add(ident)
-                    results.append(mapping)
+        for node_type in candidate_types:
+            section = data.get(node_type)
+            if not isinstance(section, Mapping):
+                continue
+            bucket = section.get("settings")
+            if not isinstance(bucket, Mapping):
+                continue
+            mapping = bucket if isinstance(bucket, dict) else dict(bucket)
+            ident = id(mapping)
+            if ident in seen:
+                continue
+            seen.add(ident)
+            results.append(mapping)
 
         return results
+
+    def _shared_inventory(self) -> Inventory | None:
+        """Return the shared immutable inventory for this coordinator."""
+
+        coordinator = getattr(self, "coordinator", None)
+        if coordinator is None:
+            return None
+        for attr in ("inventory", "_inventory"):
+            candidate = getattr(coordinator, attr, None)
+            if isinstance(candidate, Inventory):
+                return candidate
+        return None
 
     def _optimistic_update(self, mutator: Callable[[dict[str, Any]], None]) -> None:
         """Apply ``mutator`` to cached settings and refresh state if changed."""
@@ -510,125 +578,37 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             return False
 
         node_type = self._node_type
-        addr = self._addr
-        addr_core = addr.lstrip("0") or addr
-        normalized_addr = normalize_node_addr(addr, use_default_when_falsey=True)
-        normalized_core = (
-            normalized_addr.lstrip("0") or normalized_addr
-            if normalized_addr
-            else None
+        normalized_addr = normalize_node_addr(
+            self._addr,
+            use_default_when_falsey=True,
         )
-
-        def _matches(candidate: Any) -> bool:
-            normalized = normalize_node_addr(candidate, use_default_when_falsey=True)
-            if normalized:
-                if normalized_addr and normalized == normalized_addr:
-                    return True
-                if normalized_core and normalized.lstrip("0") == normalized_core:
-                    return True
-                if normalized.lstrip("0") == addr_core:
-                    return True
-
-            if isinstance(candidate, str):
-                stripped = candidate.strip()
-                if not stripped:
-                    return False
-                if stripped == addr:
-                    return True
-                if normalized_addr and stripped == normalized_addr:
-                    return True
-                stripped_core = stripped.lstrip("0")
-                if stripped_core == addr_core:
-                    return True
-                if normalized_core and stripped_core == normalized_core:
-                    return True
-                return False
-
-            if candidate is None:
-                return False
-
-            candidate_str = str(candidate).strip()
-            if not candidate_str:
-                return False
-            if candidate_str == addr:
-                return True
-            if normalized_addr and candidate_str == normalized_addr:
-                return True
-            candidate_core = candidate_str.lstrip("0")
-            if candidate_core == addr_core:
-                return True
-            if normalized_core and candidate_core == normalized_core:
-                return True
+        if not normalized_addr:
             return False
 
-        direct_addr = payload.get("addr")
-        if _matches(direct_addr):
+        direct_addr = normalize_node_addr(
+            payload.get("addr"),
+            use_default_when_falsey=True,
+        )
+        if direct_addr and direct_addr == normalized_addr:
             return True
 
-        inventory = self._inventory_for_payload(payload)
+        inventory = self._shared_inventory()
         if inventory is None:
             return False
 
-        return self._inventory_mentions_addr(
-            inventory,
-            node_type,
-            _matches,
-            normalized_addr,
-        )
-
-    def _inventory_for_payload(
-        self, payload: Mapping[str, Any] | None
-    ) -> Inventory | None:
-        """Return the resolved inventory for ``payload``."""
-
-        coordinator = getattr(self, "coordinator", None)
-        for attr in ("inventory", "_inventory"):
-            candidate = getattr(coordinator, attr, None)
-            if isinstance(candidate, Inventory):
-                return candidate
-
-        record = self._device_record()
-        nodes_payload = None
-        if isinstance(payload, Mapping):
-            nodes_payload = payload.get("nodes")
-
-        resolution = resolve_record_inventory(
-            record,
-            dev_id=self._dev_id,
-            nodes_payload=nodes_payload,
-        )
-        return resolution.inventory
-
-    def _inventory_mentions_addr(
-        self,
-        inventory: Inventory,
-        node_type: str,
-        matcher: Callable[[Any], bool],
-        normalized_addr: str | None,
-    ) -> bool:
-        """Return True when ``inventory`` references this heater address."""
-
-        forward_map, reverse_map = inventory.heater_address_map
-        candidates = forward_map.get(node_type, ())
-        if any(matcher(candidate) for candidate in candidates):
+        _, reverse_map = inventory.heater_address_map
+        addr_types = reverse_map.get(normalized_addr)
+        if addr_types and node_type in addr_types:
             return True
 
-        if normalized_addr:
-            addr_types = reverse_map.get(normalized_addr)
-            if addr_types and node_type in addr_types:
-                return True
-
-        nodes_by_type = inventory.nodes_by_type
-        for node in nodes_by_type.get(node_type, []):
-            if matcher(getattr(node, "addr", None)):
-                return True
-
-        sample_forward, compat_aliases = inventory.heater_sample_address_map
-        for raw_type, addresses in sample_forward.items():
-            canonical = compat_aliases.get(raw_type, raw_type)
-            if canonical != node_type:
+        for sample_type, sample_addr in inventory.heater_sample_targets:
+            canonical_type = normalize_node_type(
+                sample_type,
+                use_default_when_falsey=True,
+            )
+            if canonical_type != node_type:
                 continue
-            if any(matcher(candidate) for candidate in addresses):
+            if normalize_node_addr(sample_addr, use_default_when_falsey=True) == normalized_addr:
                 return True
 
         return False
