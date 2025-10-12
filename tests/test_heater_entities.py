@@ -694,7 +694,7 @@ def test_iter_inventory_heater_metadata_uses_helper(
         assert default_name_simple is default_factory
         return (
             {"acm": [node]},
-            {"acm": ["2"]},
+            {"acm": [None, "2", ""]},
             lambda node_type, addr: f"Resolved {node_type} {addr}",
         )
 
