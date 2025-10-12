@@ -67,3 +67,40 @@ def test_build_power_monitor_device_info_trimmed_name_with_brand_override() -> N
 
     assert info["name"] == "Kitchen Meter"
     assert info["manufacturer"] == "Tevolve"
+
+
+def test_build_power_monitor_device_info_uses_manufacturer_override() -> None:
+    """Fallback manufacturer override should apply when brand is missing."""
+
+    entry_id = "entry-id"
+    hass = types.SimpleNamespace(
+        data={DOMAIN: {entry_id: {"manufacturer": "  Custom Co  "}}},
+    )
+
+    info = build_power_monitor_device_info(
+        hass,
+        entry_id,
+        "gateway-77",
+        "03",
+    )
+
+    assert info["manufacturer"] == "Custom Co"
+    assert info["name"] == "Power Monitor 03"
+    assert info["identifiers"] == {(DOMAIN, "gateway-77", "pmo", "03")}
+
+
+def test_build_power_monitor_device_info_sets_via_device_reference() -> None:
+    """The via-device reference should point back to the owning gateway."""
+
+    hass = types.SimpleNamespace(data={})
+
+    info = build_power_monitor_device_info(
+        hass,
+        "entry-id",
+        "gateway-23",
+        "P4",
+        name="Storage Monitor",
+    )
+
+    assert info["via_device"] == (DOMAIN, "gateway-23")
+    assert info["name"] == "Storage Monitor"
