@@ -30,11 +30,7 @@ def test_collect_previous_settings_normalises_and_ingests_sections() -> None:
         "inventory": {"ignored": True},
         "nodes": {},
     }
-    addr_map = {
-        "htr": ["01", "02", "03"],
-        "status": ["05"],
-        "prog": ["06"],
-    }
+    addr_map = {"htr": ["01", "02"], "acm": []}
 
     result = StateCoordinator._collect_previous_settings(prev_dev, addr_map)
 
