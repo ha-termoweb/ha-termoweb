@@ -892,7 +892,7 @@ class WebSocketClient(_WSCommon):
         if isinstance(record, MutableMapping) and isinstance(inventory, Inventory):
             record["inventory"] = inventory
 
-        addr_map = context.addr_map
+        addr_map = context.addr_map if isinstance(context.addr_map, dict) else {}
         unknown_types = context.unknown_types
         if unknown_types:  # pragma: no cover - diagnostic branch
             _LOGGER.debug(
@@ -900,34 +900,35 @@ class WebSocketClient(_WSCommon):
                 ", ".join(sorted(unknown_types)),
             )
 
-        addr_map_payload = {
-            node_type: list(addrs) for node_type, addrs in addr_map.items()
-        }
+        canonical_map: dict[str, list[str]] | None = None
+        if isinstance(inventory, Inventory):
+            try:
+                candidate_map = inventory.addresses_by_type
+            except Exception:  # pragma: no cover - defensive cache guard
+                candidate_map = None
+            else:
+                candidate_map = candidate_map if isinstance(candidate_map, dict) else None
+            if candidate_map is not None:
+                canonical_map = candidate_map
+
+        if canonical_map is None:
+            canonical_map = addr_map
+        elif canonical_map is not addr_map and isinstance(addr_map, Mapping):
+            for node_type, addrs in addr_map.items():
+                canonical_map.setdefault(node_type, addrs)
 
         self._apply_heater_addresses(
-            addr_map,
+            canonical_map,
             inventory=inventory,
             log_prefix="WS",
             logger=_LOGGER,
         )
 
-        addresses_by_type: dict[str, list[str]] = {}
-        if isinstance(inventory, Inventory):
-            try:
-                addresses_by_type = {
-                    node_type: list(addrs)
-                    for node_type, addrs in inventory.addresses_by_type.items()
-                }
-            except Exception:  # pragma: no cover - defensive cache guard
-                addresses_by_type = dict(addr_map_payload)
-        if not addresses_by_type:
-            addresses_by_type = dict(addr_map_payload)
-
         payload_copy: dict[str, Any] = {
             "dev_id": self.dev_id,
             "node_type": None,
-            "addr_map": addr_map_payload,
-            "addresses_by_type": addresses_by_type,
+            "addr_map": canonical_map,
+            "addresses_by_type": canonical_map,
         }
         if unknown_types:  # pragma: no cover - diagnostic payload
             payload_copy["unknown_types"] = sorted(unknown_types)
@@ -951,7 +952,7 @@ class WebSocketClient(_WSCommon):
         else:  # pragma: no cover - legacy hass loop stub
             _send()
 
-        return addr_map_payload
+        return canonical_map
 
     def _heater_sample_subscription_targets(self) -> list[tuple[str, str]]:
         """Return ordered ``(node_type, addr)`` heater sample subscriptions."""
@@ -1692,16 +1693,20 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 if isinstance(body, Mapping):
                     type_to_addrs = self._dispatch_nodes(body)
                     if isinstance(type_to_addrs, Mapping):
-                        dev_map["addresses_by_type"] = {
-                            node_type: list(addrs)
-                            for node_type, addrs in type_to_addrs.items()
-                        }
+                        dev_map["addresses_by_type"] = type_to_addrs
                         for node_type, addrs in type_to_addrs.items():
-                            if isinstance(addrs, Iterable) and not isinstance(
+                            if isinstance(addrs, list):
+                                iterable = addrs
+                            elif isinstance(addrs, Iterable) and not isinstance(
                                 addrs, (str, bytes)
                             ):
-                                for addr_candidate in addrs:
-                                    _record_addr(node_type, addr_candidate)
+                                iterable = list(addrs)
+                                if isinstance(type_to_addrs, MutableMapping):
+                                    type_to_addrs[node_type] = iterable
+                            else:
+                                continue
+                            for addr_candidate in iterable:
+                                _record_addr(node_type, addr_candidate)
                     updated_nodes = True
                 continue
             node_type, addr = _extract_type_addr(path)
