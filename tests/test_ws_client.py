@@ -700,8 +700,8 @@ def test_ws_common_ensure_type_bucket_handles_invalid_inputs() -> None:
     assert bucket == {}
 
 
-def test_ws_common_ensure_type_bucket_populates_dev_map() -> None:
-    """Ensure type bucket helper should normalise buckets and dev maps."""
+def test_ws_common_ensure_type_bucket_uses_inventory_without_clones() -> None:
+    """Ensure type bucket helper reuses immutable metadata containers."""
 
     class Dummy(base_ws._WSCommon):
         def __init__(self) -> None:
@@ -731,33 +731,28 @@ def test_ws_common_ensure_type_bucket_populates_dev_map() -> None:
             }
         )
     }
-    dev_map = {
-        "settings": MappingProxyType({}),
-        "addresses_by_type": MappingProxyType({}),
-    }
+    dev_map = {"settings": MappingProxyType({})}
+    original_settings = dev_map["settings"]
 
     bucket = dummy._ensure_type_bucket(nodes_by_type, "htr", dev_map=dev_map)
     assert "addrs" not in bucket
-    assert bucket["settings"] == {"1": {"mode": "auto"}}
-    assert bucket["samples"] == {"1": {"temp": 20}}
-    assert bucket["status"] == {"1": {"on": True}}
-    assert "advanced" not in bucket
-    assert dev_map["settings"]["htr"] == {}
+    assert bucket is nodes_by_type["htr"]
+    assert bucket["settings"]["1"]["mode"] == "auto"
+    assert bucket["samples"]["1"]["temp"] == 20
+    assert bucket["status"]["1"]["on"] is True
+    assert dev_map["settings"] is original_settings
     assert dev_map["inventory"] is inventory
-    assert dev_map.get("nodes_by_type") is None
-    assert dev_map["addresses_by_type"]["htr"] == inventory.addresses_by_type["htr"]
+    assert "addresses_by_type" not in dev_map
 
-    dev_map_second = {"settings": {"htr": {"existing": 1}}, "addresses_by_type": {}}
-    dev_map_second["inventory"] = inventory
+    dev_map_second = {"settings": {"htr": {"existing": 1}}, "inventory": inventory}
     bucket_again = dummy._ensure_type_bucket({"htr": bucket}, "htr", dev_map=dev_map_second)
     assert bucket_again is bucket
     assert dev_map_second["settings"]["htr"] == {"existing": 1}
-    assert dev_map_second["addresses_by_type"]["htr"] == inventory.addresses_by_type["htr"]
 
-    dev_map_non_mapping_settings = {"settings": None, "addresses_by_type": {}, "inventory": inventory}
+    dev_map_non_mapping_settings = {"settings": None, "inventory": inventory}
     dummy._ensure_type_bucket({"htr": bucket}, "htr", dev_map=dev_map_non_mapping_settings)
     assert dev_map_non_mapping_settings["settings"]["htr"] == {}
-    assert dev_map_non_mapping_settings["addresses_by_type"]["htr"] == inventory.addresses_by_type["htr"]
+    assert "addresses_by_type" not in dev_map_non_mapping_settings
 
 
 def test_ws_common_apply_heater_addresses_uses_inventory() -> None:
