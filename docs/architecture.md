@@ -67,7 +67,7 @@ coordinators already consume.【F:custom_components/termoweb/inventory.py†L181
   `HeaterClimateEntity` exposes `preset_modes` with a synthetic `boost` entry,
   `BoostDurationSelect` lets users configure the preferred runtime, helper
   buttons trigger or cancel a boost using canned durations, and binary/sensor
-  entities reflect the active state and expected end time.【F:custom_components/termoweb/climate.py†L982-L1269】【F:custom_components/termoweb/select.py†L29-L219】【F:custom_components/termoweb/button.py†L39-L296】【F:custom_components/termoweb/binary_sensor.py†L42-L99】【F:custom_components/termoweb/sensor.py†L146-L461】
+  entities reflect the active state and expected end time.【F:custom_components/termoweb/climate.py†L982-L1269】【F:custom_components/termoweb/number.py†L1-L226】【F:custom_components/termoweb/button.py†L39-L296】【F:custom_components/termoweb/binary_sensor.py†L42-L99】【F:custom_components/termoweb/sensor.py†L146-L461】
 - **Websocket layer** – `WebSocketClient` negotiates the correct Socket.IO or
   Engine.IO handshake, keeps per-device health metrics, updates coordinator
   caches, and broadcasts dispatcher signals. `DucaheatWSClient` layers brand-
@@ -154,7 +154,7 @@ Power monitor energy counters flow exclusively through REST reads and `/pmo/{add
 - **REST client** — issues mandatory `select` claims and the subsequent `/boost` writes for accumulator nodes.
 - **WebSocket client** — subscribes to `/api/v2/socket_io` and relays `update` + `dev_data` events to the coordinator.
 - **Coordinator** — serialises selection, orchestrates retries, and merges WebSocket deltas into Home Assistant state.
-- **UI layer** — renders Boost duration controls (1–10 hours) and a setpoint input that enforces one-decimal strings.
+- **UI layer** — exposes slider controls for the boost duration (1–10 hours) and setpoint (5–30 °C) so presets stay in sync with Home Assistant.
 
 ### HTTP data contracts
 
@@ -180,7 +180,8 @@ Representative payload emitted after a successful write:
 
 ### HA entity mapping
 
-- **Controls:** Boost duration selector constrained to **1–10 hours (60–600 minutes)** plus a setpoint field that accepts strings matching `^[0-9]+\.[0-9]$`.
+- **Controls:** Boost duration and setpoint sliders constrained to **1–10 hours (60–600 minutes)** and **5–30 °C** respectively.
+- **Helpers:** Single **Start boost** button pulls the stored duration and temperature presets before invoking the boost service, with a companion **Cancel boost** action.
 - **Attributes:** expose `boost`, `boost_end_day`, `boost_end_min`, `stemp`, and `units` so dashboards mirror cloud state.
 - **Defaults:** cache `/setup` values (`extra_options.boost_time`, `boost_temp`) to pre-populate selectors without toggling Boost directly.
 

@@ -58,11 +58,8 @@ from .energy import (
     async_import_energy_history as _async_import_energy_history_impl,
     async_register_import_energy_history_service,
 )
-from .throttle import (
-    default_samples_rate_limit_state,
-    reset_samples_rate_limit_state,
-)
 from .inventory import Inventory, build_node_inventory
+from .throttle import default_samples_rate_limit_state, reset_samples_rate_limit_state
 from .utils import async_get_integration_version as _async_get_integration_version
 
 try:  # pragma: no cover - fallback for test stubs
@@ -72,7 +69,7 @@ except ImportError:  # pragma: no cover - tests provide minimal constants
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["button", "binary_sensor", "climate", "select", "sensor"]
+PLATFORMS = ["button", "binary_sensor", "climate", "number", "sensor"]
 
 DIAGNOSTICS_RETRY_DELAY = 0.5
 
@@ -590,9 +587,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
 
         should_recalc = False
         if isinstance(payload, Mapping):
-            if payload.get("health_changed") or payload.get("payload_changed"):
-                should_recalc = True
-            elif payload.get("reason") == "status":
+            if payload.get("health_changed") or payload.get("payload_changed") or payload.get("reason") == "status":
                 should_recalc = True
         else:
             should_recalc = True

@@ -24,8 +24,10 @@ from .const import BRAND_DUCAHEAT, DOMAIN
 from .heater import (
     DEFAULT_BOOST_DURATION,
     HeaterNodeBase,
+    clear_climate_entity_id,
     derive_boost_state,
     log_skipped_nodes,
+    register_climate_entity_id,
     resolve_boost_runtime_minutes,
     resolve_entry_inventory,
 )
@@ -33,9 +35,9 @@ from .identifiers import build_heater_entity_unique_id
 from .inventory import (
     HeaterNode,
     Inventory,
+    heater_platform_details_from_inventory,
     normalize_node_addr,
     normalize_node_type,
-    heater_platform_details_from_inventory,
 )
 from .utils import float_or_none
 
@@ -327,11 +329,33 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         self._pending_stemp: float | None = None
         self._write_task: asyncio.Task | None = None
 
+    async def async_added_to_hass(self) -> None:
+        """Register the entity ID for cross-platform helpers."""
+
+        await super().async_added_to_hass()
+        hass = self.hass
+        if hass is not None:
+            register_climate_entity_id(
+                hass,
+                self._entry_id,
+                self._node_type,
+                self._addr,
+                getattr(self, "entity_id", None),
+            )
+
     async def async_will_remove_from_hass(self) -> None:
         """Clean up pending tasks when the entity is removed."""
         if self._refresh_fallback:
             self._refresh_fallback.cancel()
             self._refresh_fallback = None
+        hass = self.hass
+        if hass is not None:
+            clear_climate_entity_id(
+                hass,
+                self._entry_id,
+                self._node_type,
+                self._addr,
+            )
         await super().async_will_remove_from_hass()
 
     @staticmethod

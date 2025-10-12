@@ -417,19 +417,18 @@ async def async_import_energy_history(
             mapping_sources = cast(Mapping[str, Iterable[Any]], selection_spec[0]).items()
         elif isinstance(selection_spec, Mapping):
             mapping_sources = selection_spec.items()
-        else:
-            if isinstance(selection_spec, Iterable) and not isinstance(
-                selection_spec, (str, bytes)
+        elif isinstance(selection_spec, Iterable) and not isinstance(
+            selection_spec, (str, bytes)
+        ):
+            candidate_list = list(selection_spec)
+            if candidate_list and all(
+                isinstance(item, tuple) and len(item) == 2 for item in candidate_list
             ):
-                candidate_list = list(selection_spec)
-                if candidate_list and all(
-                    isinstance(item, tuple) and len(item) == 2 for item in candidate_list
-                ):
-                    explicit_pairs_input = candidate_list
-                else:
-                    default_values = candidate_list
+                explicit_pairs_input = candidate_list
             else:
-                default_values = selection_spec
+                default_values = candidate_list
+        else:
+            default_values = selection_spec
 
         if explicit_pairs_input is not None:
             for raw_type, raw_addr in explicit_pairs_input:
