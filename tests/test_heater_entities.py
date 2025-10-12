@@ -166,6 +166,20 @@ def test_heater_section_requires_inventory_for_addresses() -> None:
     assert heater.available is False
 
 
+def test_heater_resolve_inventory_logs_missing(caplog: pytest.LogCaptureFixture) -> None:
+    """Inventory resolution should raise when the immutable cache is missing."""
+
+    caplog.set_level("ERROR")
+
+    coordinator = SimpleNamespace(data={"dev": {}}, inventory=None)
+    heater = HeaterNodeBase(coordinator, "entry", "dev", "1", "Heater 1")
+
+    with pytest.raises(ValueError):
+        heater._resolve_inventory()
+
+    assert "missing immutable inventory cache" in caplog.text
+
+
 def test_heater_platform_details_missing_inventory(caplog: pytest.LogCaptureFixture) -> None:
     """Inventory resolution should raise when device metadata is absent."""
 
@@ -457,6 +471,7 @@ def test_boost_entities_expose_state(monkeypatch: pytest.MonkeyPatch) -> None:
         f"{DOMAIN}:dev:acm:1:boost:minutes_remaining",
         device_name="Accumulator",
         node_type="acm",
+        inventory=inventory,
     )
     end_sensor = HeaterBoostEndSensor(
         coordinator,
@@ -467,6 +482,7 @@ def test_boost_entities_expose_state(monkeypatch: pytest.MonkeyPatch) -> None:
         f"{DOMAIN}:dev:acm:1:boost:end",
         device_name="Accumulator",
         node_type="acm",
+        inventory=inventory,
     )
 
     assert boost_binary.is_on is True
@@ -518,6 +534,7 @@ def test_boost_entities_handle_missing_data() -> None:
         f"{DOMAIN}:dev:acm:1:boost:minutes_remaining",
         device_name="Accumulator",
         node_type="acm",
+        inventory=inventory,
     )
     end_sensor = HeaterBoostEndSensor(
         coordinator,
@@ -528,6 +545,7 @@ def test_boost_entities_handle_missing_data() -> None:
         f"{DOMAIN}:dev:acm:1:boost:end",
         device_name="Accumulator",
         node_type="acm",
+        inventory=inventory,
     )
 
     assert boost_binary.is_on is False
@@ -547,10 +565,12 @@ def test_boost_end_sensor_returns_base_state_when_available() -> None:
         data={
             "dev": {
                 "settings": {"acm": {"1": {}}},
-                "addresses_by_type": {"acm": ["1"]},
             }
         }
     )
+
+    payload: dict[str, Any] = {"nodes": []}
+    inventory = Inventory("dev", payload, build_node_inventory(payload))
 
     sensor = HeaterBoostEndSensor(
         coordinator,
@@ -560,6 +580,7 @@ def test_boost_end_sensor_returns_base_state_when_available() -> None:
         "Accumulator Boost End",
         f"{DOMAIN}:dev:acm:1:boost:end",
         node_type="acm",
+        inventory=inventory,
     )
 
     sensor.boost_state = MagicMock(  # type: ignore[assignment]
@@ -581,10 +602,12 @@ def test_boost_end_sensor_handles_isoformat_error() -> None:
         data={
             "dev": {
                 "settings": {"acm": {"1": {}}},
-                "addresses_by_type": {"acm": ["1"]},
             }
         }
     )
+
+    payload: dict[str, Any] = {"nodes": []}
+    inventory = Inventory("dev", payload, build_node_inventory(payload))
 
     sensor = HeaterBoostEndSensor(
         coordinator,
@@ -594,6 +617,7 @@ def test_boost_end_sensor_handles_isoformat_error() -> None:
         "Accumulator Boost End",
         f"{DOMAIN}:dev:acm:1:boost:end",
         node_type="acm",
+        inventory=inventory,
     )
 
     def _raise() -> None:

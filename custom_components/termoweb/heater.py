@@ -27,7 +27,6 @@ from .inventory import (
     Node,
     normalize_node_addr,
     normalize_node_type,
-    resolve_record_inventory,
 )
 from .utils import float_or_none
 
@@ -956,8 +955,9 @@ class HeaterNodeBase(CoordinatorEntity):
     def _device_available(self, device_entry: dict[str, Any] | None) -> bool:
         """Return True when ``device_entry`` provides heater metadata for this node."""
 
-        inventory = self._resolve_inventory()
-        if not isinstance(inventory, Inventory):
+        try:
+            inventory = self._resolve_inventory()
+        except ValueError:
             return False
 
         node_type = getattr(self, "_node_type", "htr")
@@ -984,7 +984,7 @@ class HeaterNodeBase(CoordinatorEntity):
 
         return record if isinstance(record, dict) else None
 
-    def _resolve_inventory(self) -> Inventory | None:
+    def _resolve_inventory(self) -> Inventory:
         """Return the cached inventory for this entity, if available."""
 
         inventory = getattr(self, "_inventory", None)
@@ -996,15 +996,11 @@ class HeaterNodeBase(CoordinatorEntity):
             self._inventory = coordinator_inventory
             return coordinator_inventory
 
-        record = self._device_record()
-        if isinstance(record, Mapping):
-            resolution = resolve_record_inventory(record)
-            candidate = resolution.inventory if resolution is not None else None
-            if isinstance(candidate, Inventory):
-                self._inventory = candidate
-                return candidate
-
-        return None
+        unique_id = getattr(self, "_attr_unique_id", None) or self._dev_id
+        _LOGGER.error(
+            "TermoWeb heater %s missing immutable inventory cache", unique_id
+        )
+        raise ValueError("TermoWeb heater inventory unavailable")
 
     def _heater_section(self) -> dict[str, Any]:
         """Return the heater-specific metadata cached for this entity."""
@@ -1015,7 +1011,11 @@ class HeaterNodeBase(CoordinatorEntity):
 
         node_type = getattr(self, "_node_type", "htr")
         addresses: list[str] = []
-        inventory = self._resolve_inventory()
+        try:
+            inventory = self._resolve_inventory()
+        except ValueError:
+            inventory = None
+
         if isinstance(inventory, Inventory):
             forward_map, _ = inventory.heater_address_map
             addresses = list(forward_map.get(node_type, []))
