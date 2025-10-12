@@ -120,9 +120,7 @@ def test_power_monitor_sensors_register_device_info() -> None:
 
         await async_setup_sensor_entry(hass, entry, added.extend)
 
-        energy_coord.update_addresses.assert_called_once()
-        update_map = energy_coord.update_addresses.call_args[0][0]
-        assert sorted(update_map.get("pmo", [])) == ["P1", "P2"]
+        energy_coord.update_addresses.assert_called_once_with(inventory)
 
         energy_entities = {
             ent._attr_unique_id: ent

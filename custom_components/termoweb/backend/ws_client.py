@@ -871,7 +871,10 @@ class _WSCommon(_WSStatusMixin):
         )
 
         if hasattr(energy_coordinator, "update_addresses"):
-            energy_coordinator.update_addresses(cleaned_map)
+            if isinstance(inventory_container, Inventory):
+                energy_coordinator.update_addresses(inventory_container)
+            else:
+                energy_coordinator.update_addresses(cleaned_map)
 
         return cleaned_map
 

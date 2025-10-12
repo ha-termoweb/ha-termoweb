@@ -99,7 +99,7 @@ def test_apply_heater_addresses_updates_state() -> None:
 
     assert hass.data[DOMAIN]["entry"]["inventory"] is inventory
     assert client._inventory is inventory
-    energy_coordinator.update_addresses.assert_called_once_with(cleaned)
+    energy_coordinator.update_addresses.assert_called_once_with(inventory)
 
     sample_aliases = hass.data[DOMAIN]["entry"].get("sample_aliases")
     assert sample_aliases is not None

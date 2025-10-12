@@ -1231,9 +1231,7 @@ def test_apply_heater_addresses_includes_power_monitors(
     normalized = client._apply_heater_addresses({"htr": ["1"]}, inventory=inventory)
 
     assert normalized["pmo"] == ["9"]
-    energy_coordinator.update_addresses.assert_called_once()
-    update_payload = energy_coordinator.update_addresses.call_args[0][0]
-    assert update_payload["pmo"] == ["9"]
+    energy_coordinator.update_addresses.assert_called_once_with(inventory)
     assert record.get("inventory") is inventory
     sample_aliases = record.get("sample_aliases")
     assert sample_aliases is not None and sample_aliases.get("pmo") == "pmo"
