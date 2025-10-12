@@ -513,13 +513,9 @@ custom_components/termoweb/button.py :: AccumulatorBoostButtonBase._service_minu
 custom_components/termoweb/button.py :: AccumulatorBoostButtonBase.async_press
     Invoke the helper service to update the accumulator boost state.
 custom_components/termoweb/button.py :: AccumulatorBoostButton.__init__
-    Initialise the boost helper button for a fixed duration.
-custom_components/termoweb/button.py :: AccumulatorBoostButton._service_minutes
-    Return the hard-coded boost duration for the button.
-custom_components/termoweb/button.py :: AccumulatorBoostButton.translation_placeholders
-    Expose the configured boost duration for translations.
-custom_components/termoweb/button.py :: AccumulatorBoostCancelButton.__init__
-    Initialise the helper button that cancels an active boost.
+    Initialise the boost helper button that uses stored presets.
+custom_components/termoweb/button.py :: AccumulatorBoostButton.async_press
+    Trigger a boost using the persisted duration and temperature.
 custom_components/termoweb/button.py :: _create_boost_button_entities
     Return boost helper buttons described by shared metadata.
 custom_components/termoweb/button.py :: _build_boost_button
@@ -1004,26 +1000,38 @@ custom_components/termoweb/inventory.py :: _normalise_with_fallback
     Return the first non-empty normalised value from ``candidates``.
 custom_components/termoweb/inventory.py :: build_node_inventory
     Return a list of :class:`Node` instances for the provided payload.
-custom_components/termoweb/select.py :: async_setup_entry
-    Set up boost duration selectors for accumulator nodes.
-custom_components/termoweb/select.py :: AccumulatorBoostDurationSelect.__init__
-    Initialise the boost duration selector for an accumulator.
-custom_components/termoweb/select.py :: AccumulatorBoostDurationSelect.async_added_to_hass
+custom_components/termoweb/number.py :: async_setup_entry
+    Set up boost configuration number entities for accumulator nodes.
+custom_components/termoweb/number.py :: AccumulatorBoostDurationNumber.__init__
+    Initialise the boost duration slider for an accumulator.
+custom_components/termoweb/number.py :: AccumulatorBoostDurationNumber.async_added_to_hass
     Restore the preferred duration once the entity is added.
-custom_components/termoweb/select.py :: AccumulatorBoostDurationSelect.async_select_option
-    Handle a new boost duration selection from the user.
-custom_components/termoweb/select.py :: AccumulatorBoostDurationSelect.extra_state_attributes
+custom_components/termoweb/number.py :: AccumulatorBoostDurationNumber.async_set_native_value
+    Handle slider updates from the user interface.
+custom_components/termoweb/number.py :: AccumulatorBoostDurationNumber.extra_state_attributes
     Expose the preferred minutes as an attribute.
-custom_components/termoweb/select.py :: AccumulatorBoostDurationSelect._apply_minutes
-    Update the active option and persist when requested.
-custom_components/termoweb/select.py :: AccumulatorBoostDurationSelect._initial_minutes_from_settings
+custom_components/termoweb/number.py :: AccumulatorBoostDurationNumber._initial_minutes_from_settings
     Return the bootstrap value sourced from cached settings.
-custom_components/termoweb/select.py :: AccumulatorBoostDurationSelect._option_to_minutes
-    Translate ``value`` into a supported minute option.
-custom_components/termoweb/select.py :: AccumulatorBoostDurationSelect._validate_minutes
+custom_components/termoweb/number.py :: AccumulatorBoostDurationNumber._apply_minutes
+    Update the cached minutes and persist when requested.
+custom_components/termoweb/number.py :: AccumulatorBoostDurationNumber._validate_minutes
     Return a supported minute value, falling back to the default.
-custom_components/termoweb/select.py :: AccumulatorBoostDurationSelect._current_minutes
-    Return the currently selected duration as minutes.
+custom_components/termoweb/number.py :: AccumulatorBoostDurationNumber._hours_to_minutes
+    Translate a slider value in hours into whole minutes.
+custom_components/termoweb/number.py :: AccumulatorBoostTemperatureNumber.__init__
+    Initialise the boost temperature slider for an accumulator.
+custom_components/termoweb/number.py :: AccumulatorBoostTemperatureNumber.async_added_to_hass
+    Restore the preferred temperature once the entity is added.
+custom_components/termoweb/number.py :: AccumulatorBoostTemperatureNumber.async_set_native_value
+    Handle slider updates that adjust the boost temperature.
+custom_components/termoweb/number.py :: AccumulatorBoostTemperatureNumber.extra_state_attributes
+    Expose the preferred temperature as an attribute.
+custom_components/termoweb/number.py :: AccumulatorBoostTemperatureNumber._initial_temperature_from_settings
+    Return the bootstrap value sourced from cached settings.
+custom_components/termoweb/number.py :: AccumulatorBoostTemperatureNumber._apply_temperature
+    Update the cached temperature and persist when requested.
+custom_components/termoweb/number.py :: AccumulatorBoostTemperatureNumber._validate_temperature
+    Return a valid boost temperature within supported limits.
 custom_components/termoweb/sensor.py :: _looks_like_integer_string
     Return True if the string looks like an integer number.
 custom_components/termoweb/sensor.py :: _normalise_energy_value

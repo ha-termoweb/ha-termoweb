@@ -28,7 +28,6 @@ async_setup_binary_sensor_entry = binary_sensor_module.async_setup_entry
 StateRefreshButton = button_module.StateRefreshButton
 async_setup_button_entry = button_module.async_setup_entry
 AccumulatorBoostButton = button_module.AccumulatorBoostButton
-AccumulatorBoostCancelButton = button_module.AccumulatorBoostCancelButton
 AccumulatorBoostContext = button_module.AccumulatorBoostContext
 
 
@@ -270,7 +269,9 @@ def test_refresh_button_device_info_and_press(heater_hass_data) -> None:
 
 
 
-def test_accumulator_boost_button_triggers_service() -> None:
+def test_accumulator_boost_button_triggers_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     async def _run() -> None:
         hass = HomeAssistant()
         entry_id = "entry-trigger"
@@ -278,19 +279,24 @@ def test_accumulator_boost_button_triggers_service() -> None:
         coordinator = types.SimpleNamespace(hass=hass, data={})
         hass.services = types.SimpleNamespace(async_call=AsyncMock())
 
+        monkeypatch.setattr(
+            button_module,
+            "resolve_boost_runtime_minutes",
+            lambda *_: 180,
+        )
+        monkeypatch.setattr(
+            button_module,
+            "resolve_boost_temperature",
+            lambda *_args, **_kwargs: 22.5,
+        )
+
         context = _make_boost_context(entry_id, dev_id, addr="2", name="Living Room")
         button = AccumulatorBoostButton(
             coordinator,
             context,
-            _metadata_for(60),
+            _metadata_for("start"),
         )
         button.hass = hass
-
-        assert button.translation_placeholders == {
-            "hours_label": "1 hour",
-            "hours": "1",
-            "minutes": "60",
-        }
 
         await button.async_press()
 
@@ -302,7 +308,8 @@ def test_accumulator_boost_button_triggers_service() -> None:
                 "dev_id": dev_id,
                 "node_type": "acm",
                 "addr": "2",
-                "minutes": 60,
+                "minutes": 180,
+                "temperature": 22.5,
             },
             blocking=True,
         )
@@ -337,7 +344,7 @@ def test_accumulator_boost_button_ignores_press_without_hass() -> None:
         button = AccumulatorBoostButton(
             coordinator,
             context,
-            _metadata_for(60),
+            _metadata_for("start"),
         )
 
         button.hass = None
@@ -345,39 +352,6 @@ def test_accumulator_boost_button_ignores_press_without_hass() -> None:
         await button.async_press()
 
         assert async_call.called is False
-
-    asyncio.run(_run())
-
-
-def test_accumulator_boost_cancel_button_triggers_service_without_minutes() -> None:
-    async def _run() -> None:
-        hass = HomeAssistant()
-        entry_id = "entry-cancel"
-        dev_id = "device-cancel"
-        coordinator = types.SimpleNamespace(hass=hass, data={})
-        hass.services = types.SimpleNamespace(async_call=AsyncMock())
-
-        context = _make_boost_context(entry_id, dev_id, addr="4", name="Bedroom")
-        button = AccumulatorBoostCancelButton(
-            coordinator,
-            context,
-            _metadata_for(None),
-        )
-        button.hass = hass
-
-        await button.async_press()
-
-        hass.services.async_call.assert_awaited_once_with(
-            DOMAIN,
-            button_module._SERVICE_REQUEST_ACCUMULATOR_BOOST,
-            {
-                "entry_id": entry_id,
-                "dev_id": dev_id,
-                "node_type": "acm",
-                "addr": "4",
-            },
-            blocking=True,
-        )
 
     asyncio.run(_run())
 
@@ -397,7 +371,7 @@ def test_accumulator_boost_button_handles_missing_hass() -> None:
         button = AccumulatorBoostButton(
             coordinator,
             context,
-            _metadata_for(60),
+            _metadata_for("start"),
         )
         button.hass = None
 
@@ -426,11 +400,22 @@ def test_accumulator_boost_button_logs_service_errors(
             raising=False,
         )
 
+        monkeypatch.setattr(
+            button_module,
+            "resolve_boost_runtime_minutes",
+            lambda *_: 120,
+        )
+        monkeypatch.setattr(
+            button_module,
+            "resolve_boost_temperature",
+            lambda *_args, **_kwargs: 25.0,
+        )
+
         context = _make_boost_context(entry_id, dev_id, addr="10", name="Office")
         button = AccumulatorBoostButton(
             coordinator,
             context,
-            _metadata_for(120),
+            _metadata_for("start"),
         )
         button.hass = hass
 
@@ -486,8 +471,8 @@ def _make_boost_context(
     return AccumulatorBoostContext.from_inventory(entry_id, inventory, node)
 
 
-def _metadata_for(minutes: int | None) -> heater_module.BoostButtonMetadata:
+def _metadata_for(action: str) -> heater_module.BoostButtonMetadata:
     for metadata in heater_module.BOOST_BUTTON_METADATA:
-        if metadata.minutes == minutes:
+        if metadata.action == action:
             return metadata
-    raise AssertionError(f"metadata for minutes={minutes!r} not found")
+    raise AssertionError(f"metadata for action={action!r} not found")

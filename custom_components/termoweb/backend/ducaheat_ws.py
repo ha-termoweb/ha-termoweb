@@ -444,7 +444,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                         msg = await ws.receive()
                     else:
                         msg = await asyncio.wait_for(ws.receive(), timeout=timeout)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     now = time.time()
                     self._refresh_ws_payload_state(now=now, reason="payload_timeout")
                     tracker = self._ws_health

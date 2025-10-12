@@ -26,9 +26,11 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN
 from .heater import (
     BOOST_BUTTON_METADATA,
+    DEFAULT_BOOST_TEMPERATURE,
     BoostButtonMetadata,
-    format_boost_duration_label,
     log_skipped_nodes,
+    resolve_boost_runtime_minutes,
+    resolve_boost_temperature,
 )
 from .identifiers import build_heater_entity_unique_id
 from .inventory import AccumulatorNode, Inventory
@@ -257,10 +259,10 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
 
 
 class AccumulatorBoostButton(AccumulatorBoostButtonBase):
-    """Button that starts an accumulator boost for a fixed duration."""
+    """Button that starts an accumulator boost using persisted presets."""
 
-    _attr_icon = "mdi:timer-play"
-    _attr_translation_key = "accumulator_boost_hours"
+    _attr_icon = "mdi:flash-outline"
+    _attr_translation_key = "accumulator_boost_start"
 
     def __init__(
         self,
@@ -268,13 +270,10 @@ class AccumulatorBoostButton(AccumulatorBoostButtonBase):
         context: AccumulatorBoostContext,
         metadata: BoostButtonMetadata,
     ) -> None:
-        """Initialise the boost helper button for a fixed duration."""
-
-        if metadata.minutes is None:
-            raise ValueError("Boost button metadata must define minutes")
+        """Initialise the boost helper button that uses stored presets."""
 
         self._metadata = metadata
-        label = metadata.label or f"Boost {format_boost_duration_label(metadata.minutes)}"
+        label = metadata.label or "Start boost"
         icon = metadata.icon or None
         super().__init__(
             coordinator,
@@ -284,49 +283,72 @@ class AccumulatorBoostButton(AccumulatorBoostButtonBase):
             icon=icon,
         )
 
-    @property
-    def _service_minutes(self) -> int | None:
-        """Return the hard-coded boost duration for the button."""
+    async def async_press(self) -> None:
+        """Trigger a boost using the persisted duration and temperature."""
 
-        return self._metadata.minutes
+        hass = self.hass
+        if hass is None:
+            return
 
-    @property
-    def translation_placeholders(self) -> dict[str, str]:
-        """Expose the configured boost duration for translations."""
+        minutes = resolve_boost_runtime_minutes(
+            hass,
+            self._context.entry_id,
+            self._context.node_type,
+            self._context.addr,
+        )
+        if minutes is None or minutes <= 0:
+            _LOGGER.error(
+                "Boost start requires a stored duration for %s (%s)",
+                self._context.addr,
+                self._context.node_type,
+            )
+            return
 
-        minutes = self._metadata.minutes
-        hours_label = format_boost_duration_label(minutes)
-        hours = minutes // 60
-        return {
-            "hours_label": hours_label,
-            "hours": str(hours),
-            "minutes": str(minutes),
+        temperature = resolve_boost_temperature(
+            hass,
+            self._context.entry_id,
+            self._context.node_type,
+            self._context.addr,
+            default=DEFAULT_BOOST_TEMPERATURE,
+        )
+        if temperature is None:
+            _LOGGER.error(
+                "Boost start requires a stored temperature for %s (%s)",
+                self._context.addr,
+                self._context.node_type,
+            )
+            return
+
+        data: dict[str, Any] = {
+            "entry_id": self._context.entry_id,
+            "dev_id": self._context.dev_id,
+            "node_type": self._context.node_type,
+            "addr": self._context.addr,
+            "minutes": minutes,
+            "temperature": round(float(temperature), 1),
         }
 
-
-class AccumulatorBoostCancelButton(AccumulatorBoostButtonBase):
-    """Button that stops the active accumulator boost session."""
-
-    _attr_icon = "mdi:timer-off"
-    _attr_translation_key = "accumulator_boost_cancel"
-
-    def __init__(
-        self,
-        coordinator,
-        context: AccumulatorBoostContext,
-        metadata: BoostButtonMetadata,
-    ) -> None:
-        """Initialise the helper button that cancels an active boost."""
-
-        label = metadata.label or "Cancel boost"
-        icon = metadata.icon or None
-        super().__init__(
-            coordinator,
-            context,
-            label=label,
-            unique_suffix=metadata.unique_suffix,
-            icon=icon,
-        )
+        try:
+            await hass.services.async_call(
+                DOMAIN,
+                _SERVICE_REQUEST_ACCUMULATOR_BOOST,
+                data,
+                blocking=True,
+            )
+        except ServiceNotFound as err:
+            _LOGGER.error(
+                "Boost helper service unavailable for %s (%s): %s",
+                self._context.addr,
+                self._context.node_type,
+                err,
+            )
+        except HomeAssistantError as err:  # pragma: no cover - defensive logging
+            _LOGGER.error(
+                "Boost helper service failed for %s (%s): %s",
+                self._context.addr,
+                self._context.node_type,
+                err,
+            )
 
 
 def _create_boost_button_entities(
@@ -352,12 +374,8 @@ def _build_boost_button(
 ) -> ButtonEntity:
     """Instantiate a boost helper button for ``metadata``."""
 
-    if metadata.minutes is None:
-        return AccumulatorBoostCancelButton(
-            coordinator,
-            context,
-            metadata,
-        )
+    if metadata.action != "start":
+        raise ValueError(f"Unsupported boost button action: {metadata.action}")
 
     return AccumulatorBoostButton(
         coordinator,
