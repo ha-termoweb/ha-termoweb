@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from dataclasses import dataclass
 import logging
 from typing import Any
 
@@ -23,18 +25,96 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .heater import (
+    BOOST_BUTTON_METADATA,
     BoostButtonMetadata,
-    HeaterNodeBase,
     format_boost_duration_label,
-    iter_boost_button_metadata,
+    log_skipped_nodes,
 )
 from .identifiers import build_heater_entity_unique_id
-from .inventory import Inventory, boostable_accumulator_details_for_entry
+from .inventory import AccumulatorNode, Inventory
 from .utils import build_gateway_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
 _SERVICE_REQUEST_ACCUMULATOR_BOOST = "request_accumulator_boost"
+
+
+@dataclass(frozen=True, slots=True)
+class AccumulatorBoostContext:
+    """Inventory-backed context describing an accumulator boost target."""
+
+    entry_id: str
+    inventory: Inventory
+    node: AccumulatorNode
+    base_name: str
+    unique_prefix: str
+
+    @classmethod
+    def from_inventory(
+        cls,
+        entry_id: str,
+        inventory: Inventory,
+        node: AccumulatorNode,
+    ) -> AccumulatorBoostContext:
+        """Build context for ``node`` using the shared inventory."""
+
+        base_name = inventory.resolve_heater_name(node.type, node.addr)
+        unique_prefix = build_heater_entity_unique_id(
+            inventory.dev_id,
+            node.type,
+            node.addr,
+            ":boost",
+        )
+        return cls(entry_id, inventory, node, base_name, unique_prefix)
+
+    @property
+    def dev_id(self) -> str:
+        """Return the gateway identifier for the accumulator node."""
+
+        return self.inventory.dev_id
+
+    @property
+    def node_type(self) -> str:
+        """Return the canonical node type for the accumulator node."""
+
+        return self.node.type
+
+    @property
+    def addr(self) -> str:
+        """Return the canonical address for the accumulator node."""
+
+        return self.node.addr
+
+    def unique_id(self, suffix: str) -> str:
+        """Return the unique ID for a boost helper with ``suffix``."""
+
+        return f"{self.unique_prefix}_{suffix}"
+
+
+def _iter_accumulator_contexts(
+    entry_id: str,
+    inventory: Inventory | None,
+) -> Iterator[AccumulatorBoostContext]:
+    """Yield boost contexts for accumulator nodes in ``inventory``."""
+
+    if not isinstance(inventory, Inventory):
+        return
+
+    forward_map, _ = inventory.heater_address_map
+    addresses = forward_map.get("acm", ())
+    if not addresses:
+        return
+
+    node_lookup: dict[str, AccumulatorNode] = {}
+    for node in inventory.nodes_by_type.get("acm", ()):
+        if isinstance(node, AccumulatorNode):
+            node_lookup[node.addr] = node
+
+    for addr in addresses:
+        node = node_lookup.get(addr)
+        if node is None:
+            continue
+        yield AccumulatorBoostContext.from_inventory(entry_id, inventory, node)
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Expose hub refresh and accumulator boost helper buttons."""
@@ -42,36 +122,16 @@ async def async_setup_entry(hass, entry, async_add_entities):
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
-
-    def default_name(addr: str) -> str:
-        """Return a placeholder name for heater nodes."""
-
-        return f"Heater {addr}"
     entities: list[ButtonEntity] = [
         StateRefreshButton(coordinator, entry.entry_id, dev_id)
     ]
 
-    heater_details, accumulator_nodes = boostable_accumulator_details_for_entry(
-        data,
-        default_name_simple=default_name,
-        platform_name="button",
-        logger=_LOGGER,
-    )
+    inventory = data.get("inventory")
+    log_skipped_nodes("button", inventory, logger=_LOGGER)
 
     boost_entities: list[ButtonEntity] = []
-    for node_type, addr_str, base_name in accumulator_nodes:
-
-        boost_entities.extend(
-            _create_boost_button_entities(
-                coordinator,
-                entry.entry_id,
-                dev_id,
-                addr_str,
-                base_name,
-                node_type,
-                inventory=heater_details.inventory,
-            )
-        )
+    for context in _iter_accumulator_contexts(entry.entry_id, inventory):
+        boost_entities.extend(_create_boost_button_entities(coordinator, context))
 
     if boost_entities:
         entities.extend(boost_entities)
@@ -107,7 +167,7 @@ class StateRefreshButton(CoordinatorEntity, ButtonEntity):
         await self.coordinator.async_request_refresh()
 
 
-class AccumulatorBoostButtonBase(HeaterNodeBase, ButtonEntity):
+class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
     """Base entity for TermoWeb accumulator boost helper buttons."""
 
     _attr_entity_category = EntityCategory.CONFIG
@@ -116,38 +176,45 @@ class AccumulatorBoostButtonBase(HeaterNodeBase, ButtonEntity):
     def __init__(
         self,
         coordinator,
-        entry_id: str,
-        dev_id: str,
-        addr: str,
-        base_name: str,
-        unique_id: str,
+        context: AccumulatorBoostContext,
         *,
         label: str,
-        node_type: str | None = None,
-        inventory: Inventory | None = None,
+        unique_suffix: str,
+        icon: str | None = None,
     ) -> None:
         """Initialise an accumulator boost helper button."""
 
-        HeaterNodeBase.__init__(
-            self,
-            coordinator,
-            entry_id,
-            dev_id,
-            addr,
-            f"{base_name} {label}",
-            unique_id,
-            device_name=base_name,
-            node_type=node_type,
-            inventory=inventory,
-        )
-        self._label = label
+        super().__init__(coordinator)
+        self._context = context
         self._attr_name = label
+        self._attr_unique_id = context.unique_id(unique_suffix)
+        if icon is not None:
+            self._attr_icon = icon
 
     @property
     def _service_minutes(self) -> int | None:
         """Return the minutes payload passed to the helper service."""
 
         return None
+
+    @property
+    def available(self) -> bool:
+        """Return True when the inventory exposes this accumulator."""
+
+        forward_map, _ = self._context.inventory.heater_address_map
+        return self._context.addr in forward_map.get(self._context.node_type, ())
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return Home Assistant device metadata for the accumulator."""
+
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._context.dev_id, self._context.addr)},
+            name=self._context.base_name,
+            manufacturer="TermoWeb",
+            model="Accumulator",
+            via_device=(DOMAIN, self._context.dev_id),
+        )
 
     async def async_press(self) -> None:
         """Invoke the helper service to update the accumulator boost state."""
@@ -157,10 +224,10 @@ class AccumulatorBoostButtonBase(HeaterNodeBase, ButtonEntity):
             return
 
         data: dict[str, Any] = {
-            "entry_id": self._entry_id,
-            "dev_id": self._dev_id,
-            "node_type": self._node_type,
-            "addr": self._addr,
+            "entry_id": self._context.entry_id,
+            "dev_id": self._context.dev_id,
+            "node_type": self._context.node_type,
+            "addr": self._context.addr,
         }
         minutes = self._service_minutes
         if minutes is not None:
@@ -176,15 +243,15 @@ class AccumulatorBoostButtonBase(HeaterNodeBase, ButtonEntity):
         except ServiceNotFound as err:
             _LOGGER.error(
                 "Boost helper service unavailable for %s (%s): %s",
-                self._addr,
-                self._node_type,
+                self._context.addr,
+                self._context.node_type,
                 err,
             )
         except HomeAssistantError as err:  # pragma: no cover - defensive logging
             _LOGGER.error(
                 "Boost helper service failed for %s (%s): %s",
-                self._addr,
-                self._node_type,
+                self._context.addr,
+                self._context.node_type,
                 err,
             )
 
@@ -198,52 +265,42 @@ class AccumulatorBoostButton(AccumulatorBoostButtonBase):
     def __init__(
         self,
         coordinator,
-        entry_id: str,
-        dev_id: str,
-        addr: str,
-        base_name: str,
-        unique_id: str,
-        *,
-        minutes: int,
-        node_type: str | None = None,
-        label: str | None = None,
-        icon: str | None = None,
-        inventory: Inventory | None = None,
+        context: AccumulatorBoostContext,
+        metadata: BoostButtonMetadata,
     ) -> None:
         """Initialise the boost helper button for a fixed duration."""
 
-        self._minutes = minutes
-        label_text = format_boost_duration_label(minutes)
+        if metadata.minutes is None:
+            raise ValueError("Boost button metadata must define minutes")
+
+        self._metadata = metadata
+        label = metadata.label or f"Boost {format_boost_duration_label(metadata.minutes)}"
+        icon = metadata.icon or None
         super().__init__(
             coordinator,
-            entry_id,
-            dev_id,
-            addr,
-            base_name,
-            unique_id,
-            label=label or f"Boost {label_text}",
-            node_type=node_type,
-            inventory=inventory,
+            context,
+            label=label,
+            unique_suffix=metadata.unique_suffix,
+            icon=icon,
         )
-        if icon is not None:
-            self._attr_icon = icon
 
     @property
     def _service_minutes(self) -> int | None:
         """Return the hard-coded boost duration for the button."""
 
-        return self._minutes
+        return self._metadata.minutes
 
     @property
     def translation_placeholders(self) -> dict[str, str]:
         """Expose the configured boost duration for translations."""
 
-        hours_label = format_boost_duration_label(self._minutes)
-        hours = self._minutes // 60
+        minutes = self._metadata.minutes
+        hours_label = format_boost_duration_label(minutes)
+        hours = minutes // 60
         return {
             "hours_label": hours_label,
             "hours": str(hours),
-            "minutes": str(self._minutes),
+            "minutes": str(minutes),
         }
 
 
@@ -256,107 +313,54 @@ class AccumulatorBoostCancelButton(AccumulatorBoostButtonBase):
     def __init__(
         self,
         coordinator,
-        entry_id: str,
-        dev_id: str,
-        addr: str,
-        base_name: str,
-        unique_id: str,
-        *,
-        node_type: str | None = None,
-        label: str | None = None,
-        icon: str | None = None,
-        inventory: Inventory | None = None,
+        context: AccumulatorBoostContext,
+        metadata: BoostButtonMetadata,
     ) -> None:
         """Initialise the helper button that cancels an active boost."""
 
+        label = metadata.label or "Cancel boost"
+        icon = metadata.icon or None
         super().__init__(
             coordinator,
-            entry_id,
-            dev_id,
-            addr,
-            base_name,
-            unique_id,
-            label=label or "Cancel boost",
-            node_type=node_type,
-            inventory=inventory,
+            context,
+            label=label,
+            unique_suffix=metadata.unique_suffix,
+            icon=icon,
         )
-        if icon is not None:
-            self._attr_icon = icon
 
 
 def _create_boost_button_entities(
     coordinator,
-    entry_id: str,
-    dev_id: str,
-    addr: str,
-    base_name: str,
-    node_type: str,
-    *,
-    inventory: Inventory | None = None,
+    context: AccumulatorBoostContext,
 ) -> list[ButtonEntity]:
     """Return boost helper buttons described by shared metadata."""
 
-    unique_prefix = build_heater_entity_unique_id(
-        dev_id,
-        node_type,
-        addr,
-        ":boost",
-    )
     return [
         _build_boost_button(
             metadata,
             coordinator,
-            entry_id,
-            dev_id,
-            addr,
-            base_name,
-            node_type,
-            unique_prefix,
-            inventory=inventory,
+            context,
         )
-        for metadata in iter_boost_button_metadata()
+        for metadata in BOOST_BUTTON_METADATA
     ]
 
 
 def _build_boost_button(
     metadata: BoostButtonMetadata,
     coordinator,
-    entry_id: str,
-    dev_id: str,
-    addr: str,
-    base_name: str,
-    node_type: str,
-    unique_prefix: str,
-    *,
-    inventory: Inventory | None = None,
+    context: AccumulatorBoostContext,
 ) -> ButtonEntity:
     """Instantiate a boost helper button for ``metadata``."""
 
-    unique_id = f"{unique_prefix}_{metadata.unique_suffix}"
     if metadata.minutes is None:
         return AccumulatorBoostCancelButton(
             coordinator,
-            entry_id,
-            dev_id,
-            addr,
-            base_name,
-            unique_id,
-            node_type=node_type,
-            label=metadata.label,
-            icon=metadata.icon,
-            inventory=inventory,
+            context,
+            metadata,
         )
 
     return AccumulatorBoostButton(
         coordinator,
-        entry_id,
-        dev_id,
-        addr,
-        base_name,
-        unique_id,
-        minutes=metadata.minutes,
-        node_type=node_type,
-        label=metadata.label,
-        icon=metadata.icon,
-        inventory=inventory,
+        context,
+        metadata,
     )
