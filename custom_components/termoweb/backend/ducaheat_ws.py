@@ -1014,51 +1014,42 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             inventory=self._inventory,
         )
 
-        inventory = context.inventory
-        if self._inventory is None and isinstance(inventory, Inventory):
+        inventory = context.inventory if isinstance(context.inventory, Inventory) else None
+        if self._inventory is None and inventory is not None:
             self._inventory = inventory
 
         record = context.record
-        if isinstance(record, MutableMapping) and isinstance(inventory, Inventory):
+        if isinstance(record, MutableMapping) and inventory is not None:
             record["inventory"] = inventory
 
-        addr_map = context.addr_map
-        normalized_addresses = self._apply_heater_addresses(
-            addr_map,
+        if inventory is not None:
+            try:
+                addresses_by_type = inventory.addresses_by_type
+            except Exception:  # pragma: no cover - defensive cache guard
+                addresses_by_type = {}
+        else:
+            addresses_by_type = {}
+
+        if not addresses_by_type:
+            addresses_by_type = {
+                node_type: list(addrs) for node_type, addrs in context.addr_map.items()
+            }
+
+        self._apply_heater_addresses(
+            addresses_by_type,
             inventory=inventory,
             log_prefix="WS (ducaheat)",
             logger=_LOGGER,
         )
 
-        inventory_addresses: dict[str, list[str]] = {}
-        if isinstance(inventory, Inventory):
-            try:
-                inventory_addresses = {
-                    node_type: list(addrs)
-                    for node_type, addrs in inventory.addresses_by_type.items()
-                }
-            except Exception:  # pragma: no cover - defensive cache guard
-                inventory_addresses = {}
-
-        if not inventory_addresses:
-            inventory_addresses = {
-                node_type: list(addrs) for node_type, addrs in addr_map.items()
-            }
-
         payload_copy: dict[str, Any] = {
             "dev_id": self.dev_id,
             "node_type": None,
             "addr_map": {
-                node_type: list(addrs) for node_type, addrs in addr_map.items()
+                node_type: list(addrs) for node_type, addrs in context.addr_map.items()
             },
-            "addresses_by_type": inventory_addresses,
+            "addresses_by_type": addresses_by_type,
         }
-
-        if normalized_addresses:
-            payload_copy["addresses_by_type"] = {
-                node_type: list(addrs)
-                for node_type, addrs in normalized_addresses.items()
-            }
 
         unknown_types = context.unknown_types
         if unknown_types:
