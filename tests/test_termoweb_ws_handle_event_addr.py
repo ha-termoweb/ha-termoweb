@@ -67,7 +67,7 @@ def test_handle_event_normalises_addr_and_records_raw(
         None,
     )
     assert settings_payload is not None
-    assert settings_payload["addr_map"] == {"htr": ["2"]}
+    assert settings_payload["inventory_addresses"] == {"htr": ["2"]}
 
     raw_store = client._nodes_raw
     assert raw_store["htr"]["settings"][" 2 "] == {"mode": "manual", "flags": ["eco"]}

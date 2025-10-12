@@ -29,7 +29,7 @@ from .heater import (
     iter_boost_button_metadata,
 )
 from .identifiers import build_heater_entity_unique_id
-from .inventory import boostable_accumulator_details_for_entry
+from .inventory import Inventory, boostable_accumulator_details_for_entry
 from .utils import build_gateway_device_info
 
 _LOGGER = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         StateRefreshButton(coordinator, entry.entry_id, dev_id)
     ]
 
-    _, accumulator_nodes = boostable_accumulator_details_for_entry(
+    heater_details, accumulator_nodes = boostable_accumulator_details_for_entry(
         data,
         default_name_simple=default_name,
         platform_name="button",
@@ -69,6 +69,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 addr_str,
                 base_name,
                 node_type,
+                inventory=heater_details.inventory,
             )
         )
 
@@ -123,6 +124,7 @@ class AccumulatorBoostButtonBase(HeaterNodeBase, ButtonEntity):
         *,
         label: str,
         node_type: str | None = None,
+        inventory: Inventory | None = None,
     ) -> None:
         """Initialise an accumulator boost helper button."""
 
@@ -136,6 +138,7 @@ class AccumulatorBoostButtonBase(HeaterNodeBase, ButtonEntity):
             unique_id,
             device_name=base_name,
             node_type=node_type,
+            inventory=inventory,
         )
         self._label = label
         self._attr_name = label
@@ -205,6 +208,7 @@ class AccumulatorBoostButton(AccumulatorBoostButtonBase):
         node_type: str | None = None,
         label: str | None = None,
         icon: str | None = None,
+        inventory: Inventory | None = None,
     ) -> None:
         """Initialise the boost helper button for a fixed duration."""
 
@@ -219,6 +223,7 @@ class AccumulatorBoostButton(AccumulatorBoostButtonBase):
             unique_id,
             label=label or f"Boost {label_text}",
             node_type=node_type,
+            inventory=inventory,
         )
         if icon is not None:
             self._attr_icon = icon
@@ -260,6 +265,7 @@ class AccumulatorBoostCancelButton(AccumulatorBoostButtonBase):
         node_type: str | None = None,
         label: str | None = None,
         icon: str | None = None,
+        inventory: Inventory | None = None,
     ) -> None:
         """Initialise the helper button that cancels an active boost."""
 
@@ -272,6 +278,7 @@ class AccumulatorBoostCancelButton(AccumulatorBoostButtonBase):
             unique_id,
             label=label or "Cancel boost",
             node_type=node_type,
+            inventory=inventory,
         )
         if icon is not None:
             self._attr_icon = icon
@@ -284,6 +291,8 @@ def _create_boost_button_entities(
     addr: str,
     base_name: str,
     node_type: str,
+    *,
+    inventory: Inventory | None = None,
 ) -> list[ButtonEntity]:
     """Return boost helper buttons described by shared metadata."""
 
@@ -303,6 +312,7 @@ def _create_boost_button_entities(
             base_name,
             node_type,
             unique_prefix,
+            inventory=inventory,
         )
         for metadata in iter_boost_button_metadata()
     ]
@@ -317,6 +327,8 @@ def _build_boost_button(
     base_name: str,
     node_type: str,
     unique_prefix: str,
+    *,
+    inventory: Inventory | None = None,
 ) -> ButtonEntity:
     """Instantiate a boost helper button for ``metadata``."""
 
@@ -332,6 +344,7 @@ def _build_boost_button(
             node_type=node_type,
             label=metadata.label,
             icon=metadata.icon,
+            inventory=inventory,
         )
 
     return AccumulatorBoostButton(
@@ -345,4 +358,5 @@ def _build_boost_button(
         node_type=node_type,
         label=metadata.label,
         icon=metadata.icon,
+        inventory=inventory,
     )

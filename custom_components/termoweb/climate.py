@@ -285,6 +285,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         unique_id: str | None = None,
         *,
         node_type: str | None = None,
+        inventory: Inventory | None = None,
     ) -> None:
         """Initialise the climate entity for a TermoWeb heater."""
         HeaterNode.__init__(self, name=name, addr=addr)
@@ -316,6 +317,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             self.name,
             unique_id,
             node_type=resolved_type,
+            inventory=inventory,
         )
 
         self._refresh_fallback: asyncio.Task | None = None
@@ -1105,6 +1107,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         unique_id: str | None = None,
         *,
         node_type: str | None = None,
+        inventory: Inventory | None = None,
     ) -> None:
         """Initialise the accumulator climate entity."""
 
@@ -1116,6 +1119,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
             name,
             unique_id,
             node_type=node_type,
+            inventory=inventory,
         )
         self._boost_resume_mode: HVACMode | None = None
 

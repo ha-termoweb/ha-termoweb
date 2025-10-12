@@ -34,11 +34,7 @@ def test_device_record_reuses_inventory_instance() -> None:
     )
 
     assert record["inventory"] is inventory
-    expected_addresses = inventory.addresses_by_type
-    expected_bucket = expected_addresses.setdefault("htr", [])
-    if "2" not in expected_bucket:
-        expected_bucket.append("2")
-    assert record["addresses_by_type"] == expected_addresses
+    assert record["addresses_by_type"] == inventory.addresses_by_type
 
     forward, reverse = inventory.heater_address_map
     assert record["heater_address_map"] == {"forward": forward, "reverse": reverse}

@@ -11,7 +11,7 @@ import logging
 import sys
 import time
 import types
-from typing import Any, Iterable, Mapping
+from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -19,11 +19,11 @@ import pytest
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 
 from custom_components.termoweb import (
+    heater as heater_module,
     identifiers as identifiers_module,
     inventory as inventory_module,
 )
 from custom_components.termoweb import throttle as throttle_module
-from custom_components.termoweb.energy import _normalize_heater_sources
 from custom_components.termoweb.inventory import HEATER_NODE_TYPES
 
 from conftest import _install_stubs
@@ -700,54 +700,6 @@ def test_store_statistics_prefers_internal_import(
     asyncio.run(_run())
 
 
-def test_normalize_heater_sources_handles_none() -> None:
-    """Normalising with no addresses should return an empty heater list."""
-
-    mapping = _normalize_heater_sources(None)
-
-    assert mapping == {"htr": []}
-
-
-def test_normalize_heater_sources_deduplicates_entries() -> None:
-    """Normalization should coerce types, deduplicate and trim addresses."""
-
-    mapping = _normalize_heater_sources(
-        {"heater": [" 1 ", "", None], "acm": " 2 ", "invalid": ["3"]}
-    )
-
-    assert mapping == {"htr": ["1"], "acm": ["2"]}
-
-
-def test_normalize_heater_sources_uses_inventory(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Wrapper should delegate to inventory normalization helpers."""
-
-    sample = {"heater": ["1"]}
-
-    expected_map = {"htr": ["1"]}
-    expected_aliases = {"heater": "htr"}
-
-    calls: list[Mapping[Any, Iterable[Any]] | Iterable[Any] | None] = []
-
-    def _fake_normalize(
-        addrs: Mapping[Any, Iterable[Any]] | Iterable[Any] | None,
-    ) -> tuple[dict[str, list[str]], dict[str, str]]:
-        calls.append(addrs)
-        assert addrs is sample
-        return expected_map, expected_aliases
-
-    monkeypatch.setattr(
-        "custom_components.termoweb.energy.normalize_heater_addresses",
-        _fake_normalize,
-    )
-
-    mapping = _normalize_heater_sources(sample)
-
-    assert mapping is expected_map
-    assert calls == [sample]
-
-
 def test_store_statistics_external_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         (
@@ -917,29 +869,12 @@ def test_async_import_energy_history_uses_inventory_nodes(
             }
         }
 
-        captured: dict[str, Any] = {}
-        real_resolve = energy_mod.resolve_record_inventory
+        def _unexpected(*_args: Any, **_kwargs: Any) -> None:
+            raise AssertionError("resolve_record_inventory should not be called")
 
-        def _capture(
-            record: Mapping[str, Any] | None,
-            *,
-            dev_id: str | None = None,
-            node_list=None,
-            **kwargs: Any,
-        ):
-            captured["node_list"] = node_list
-            return real_resolve(
-                record,
-                dev_id=dev_id,
-                node_list=node_list,
-                **kwargs,
-            )
-
-        monkeypatch.setattr(energy_mod, "resolve_record_inventory", _capture)
+        monkeypatch.setattr(energy_mod, "resolve_record_inventory", _unexpected)
 
         await mod._async_import_energy_history(hass, entry)
-
-        assert captured["node_list"] == stored_inventory.nodes
 
     asyncio.run(_run())
 
@@ -988,6 +923,19 @@ def test_register_import_service_uses_module_asyncio(
 
         entry = ConfigEntry("cache-test", options={})
         entries[entry.entry_id] = entry
+
+        raw_nodes = {"nodes": [{"type": "htr", "addr": "A"}]}
+        inventory = inventory_module.Inventory(
+            "dev",
+            raw_nodes,
+            inventory_module.build_node_inventory(raw_nodes),
+        )
+        hass.data[const.DOMAIN][entry.entry_id] = {
+            "inventory": inventory,
+            "config_entry": entry,
+            "client": AsyncMock(),
+            "dev_id": "dev",
+        }
 
         uid = identifiers_module.build_heater_energy_unique_id("dev", "htr", "A")
         ent_reg.add(
@@ -1063,6 +1011,20 @@ def test_service_accepts_single_entity_id_string(
         entry = ConfigEntry("cache-test", options={})
         entries[entry.entry_id] = entry
 
+        raw_nodes = {"nodes": [{"type": "htr", "addr": "A"}]}
+        inventory = inventory_module.Inventory(
+            "dev",
+            raw_nodes,
+            inventory_module.build_node_inventory(raw_nodes),
+        )
+        hass.data = {const.DOMAIN: {}}
+        hass.data[const.DOMAIN][entry.entry_id] = {
+            "inventory": inventory,
+            "config_entry": entry,
+            "client": AsyncMock(),
+            "dev_id": "dev",
+        }
+
         uid = identifiers_module.build_heater_energy_unique_id("dev", "htr", "A")
         ent_reg.add(
             "sensor.dev_A_energy",
@@ -1115,7 +1077,7 @@ def test_service_accepts_single_entity_id_string(
         import_mock.assert_awaited_once()
         args, kwargs = import_mock.await_args
         assert args[:2] == (hass, entry)
-        assert args[2] == {"htr": ["A"]}
+        assert args[2] == [("htr", "A")]
         assert kwargs == {"reset_progress": False, "max_days": None}
 
     asyncio.run(_run())
@@ -1351,13 +1313,17 @@ def test_energy_polling_matches_import(monkeypatch: pytest.MonkeyPatch) -> None:
             raw_nodes,
             inventory_module.build_node_inventory(raw_nodes),
         )
+        details = heater_module.HeaterPlatformDetails(
+            inventory,
+            lambda addr: f"Node {addr}",
+        )
         total_entity = sensor_mod.InstallationTotalEnergySensor(
             coordinator,
             "entry",
             "dev",
             "Total",
             "total_uid",
-            inventory,
+            details,
         )
 
         assert energy_entity.native_value == pytest.approx(1.3)
@@ -1669,7 +1635,8 @@ def test_service_uses_snapshot_inventory(monkeypatch: pytest.MonkeyPatch) -> Non
         args, kwargs = import_mock.await_args
         assert args[0] is hass
         assert args[1] is entry
-        assert args[2] == {"htr": ["A"]}
+        assert isinstance(args[2], inventory_module.Inventory)
+        assert args[2].heater_sample_targets == [("htr", "A")]
         assert kwargs == {"reset_progress": False, "max_days": 3}
 
         if tasks:
@@ -1754,7 +1721,8 @@ def test_service_uses_cached_inventory_without_snapshot(
 
         import_mock.assert_awaited_once()
         args, kwargs = import_mock.await_args
-        assert args[2] == {"htr": ["A"]}
+        assert isinstance(args[2], inventory_module.Inventory)
+        assert args[2].heater_sample_targets == [("htr", "A")]
         assert kwargs["reset_progress"] is False
         assert kwargs["max_days"] in (None, energy_mod.DEFAULT_MAX_HISTORY_DAYS)
 

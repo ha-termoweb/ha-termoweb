@@ -17,7 +17,9 @@ from .api import RESTClient
 from .const import DOMAIN
 from .identifiers import build_heater_energy_unique_id
 from .inventory import (
-    normalize_heater_addresses,
+    Inventory,
+    normalize_node_addr,
+    normalize_node_type,
     parse_heater_energy_unique_id,
     resolve_record_inventory,
 )
@@ -125,15 +127,6 @@ def _resolve_statistics_helpers(
         sync=sync_helper,
         async_fn=async_helper,
     )
-
-
-def _normalize_heater_sources(
-    addrs: Mapping[Any, Iterable[Any]] | Iterable[Any] | None,
-) -> dict[str, list[str]]:
-    """Return canonical heater node address map for ``addrs``."""
-
-    normalized_map, _aliases = normalize_heater_addresses(addrs)
-    return normalized_map
 
 
 def _iso_date(ts: int) -> str:
@@ -330,7 +323,7 @@ async def _clear_statistics_compat(  # pragma: no cover - compatibility shim
 async def async_import_energy_history(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    nodes: Mapping[str, Iterable[str]] | Iterable[str] | None = None,
+    nodes: Inventory | Mapping[str, Iterable[str]] | Iterable[str] | None = None,
     *,
     reset_progress: bool = False,
     max_days: int | None = None,
@@ -354,64 +347,147 @@ async def async_import_energy_history(
     client: RESTClient = rec["client"]
     dev_id: str = rec["dev_id"]
     stored_inventory = rec.get("inventory") if isinstance(rec, Mapping) else None
-    node_list = getattr(stored_inventory, "nodes", None)
 
-    resolution = resolve_record_inventory(
-        rec,
-        dev_id=dev_id,
-        node_list=node_list,
-    )
-    inventory_container = resolution.inventory
+    inventory_override = nodes if isinstance(nodes, Inventory) else None
+    selection_spec = None if inventory_override is not None else nodes
+
+    inventory_container: Inventory | None
+    resolution: Any | None = None
+
+    if inventory_override is not None:
+        inventory_container = inventory_override
+    elif isinstance(stored_inventory, Inventory):
+        inventory_container = stored_inventory
+    else:
+        resolution = resolve_record_inventory(
+            rec,
+            dev_id=dev_id,
+            node_list=getattr(stored_inventory, "nodes", None),
+        )
+        inventory_container = resolution.inventory if resolution else None
+
     if inventory_container is None:
+        source = getattr(resolution, "source", "unknown")
         logger.debug(
             "%s: unable to resolve node inventory (source=%s)",
             dev_id,
-            resolution.source,
+            source,
         )
         return
 
-    by_type, reverse_lookup = inventory_container.heater_address_map
-
-    requested_map: dict[str, list[str]] | None
-    if nodes is None:
-        requested_map = None
-    else:
-        normalized_map = _normalize_heater_sources(nodes)
-        requested_map = {k: list(v) for k, v in normalized_map.items() if v}
-
-    selected_map: dict[str, list[str]] = {}
-    if requested_map:
-        available_sets: dict[str, set[str]] = {
-            node_type: set(addrs) for node_type, addrs in by_type.items()
-        }
-        for req_type, addr_list in requested_map.items():
-            if not addr_list:  # pragma: no cover - defensive guard
-                continue
-            if req_type == "htr":
-                for addr in addr_list:
-                    for actual_type in reverse_lookup.get(addr, set()):
-                        selected_map.setdefault(actual_type, []).append(addr)
-            else:
-                available = available_sets.get(req_type)
-                if not available:
-                    continue
-                filtered = [addr for addr in addr_list if addr in available]
-                if filtered:
-                    selected_map.setdefault(req_type, []).extend(filtered)
-
-    if not selected_map:
-        selected_map = {node_type: list(addrs) for node_type, addrs in by_type.items()}
-
-    if selected_map:
-        deduped_map = _normalize_heater_sources(selected_map)
-        selected_map = {k: list(v) for k, v in deduped_map.items() if v}
-
     all_pairs: list[tuple[str, str]] = [
-        (node_type, addr) for node_type, addrs in by_type.items() for addr in addrs
+        (node_type, addr) for node_type, addr in inventory_container.heater_sample_targets
     ]
-    target_pairs: list[tuple[str, str]] = [
-        (node_type, addr) for node_type, addrs in selected_map.items() for addr in addrs
-    ]
+    if not all_pairs:
+        logger.debug("Energy import: no heater nodes selected for device")
+        return
+
+    _, alias_map = inventory_container.heater_sample_address_map
+    available_types = {node_type for node_type, _ in all_pairs}
+    alias_lookup: dict[str, str] = {}
+    for raw_type, canonical in alias_map.items():
+        normalized_key = normalize_node_type(raw_type, use_default_when_falsey=True)
+        if normalized_key:
+            alias_lookup[normalized_key] = canonical
+    for node_type in available_types:
+        alias_lookup.setdefault(node_type, node_type)
+
+    address_to_types: dict[str, set[str]] = {}
+    for node_type, addr in all_pairs:
+        address_to_types.setdefault(addr, set()).add(node_type)
+
+    requested_pairs: set[tuple[str, str]] = set()
+    desired_pairs: set[tuple[str, str]] = set()
+
+    if selection_spec is None:
+        target_pairs = list(all_pairs)
+    else:
+        mapping_sources: Iterable[tuple[Any, Any]] | None = None
+        explicit_pairs_input: list[tuple[Any, Any]] | None = None
+        default_values: Any | None = None
+
+        if isinstance(selection_spec, tuple) and selection_spec and isinstance(selection_spec[0], Mapping):
+            mapping_sources = cast(Mapping[str, Iterable[Any]], selection_spec[0]).items()
+        elif isinstance(selection_spec, Mapping):
+            mapping_sources = selection_spec.items()
+        else:
+            if isinstance(selection_spec, Iterable) and not isinstance(
+                selection_spec, (str, bytes)
+            ):
+                candidate_list = list(selection_spec)
+                if candidate_list and all(
+                    isinstance(item, tuple) and len(item) == 2 for item in candidate_list
+                ):
+                    explicit_pairs_input = candidate_list
+                else:
+                    default_values = candidate_list
+            else:
+                default_values = selection_spec
+
+        if explicit_pairs_input is not None:
+            for raw_type, raw_addr in explicit_pairs_input:
+                normalized_key = normalize_node_type(
+                    raw_type,
+                    use_default_when_falsey=True,
+                )
+                canonical_type = alias_lookup.get(normalized_key)
+                if not canonical_type:
+                    continue
+                addr = normalize_node_addr(
+                    raw_addr,
+                    use_default_when_falsey=True,
+                )
+                if not addr:
+                    continue
+                requested_pairs.add((canonical_type, addr))
+                if canonical_type == "htr":
+                    for actual_type in address_to_types.get(addr, set()):
+                        desired_pairs.add((actual_type, addr))
+                elif canonical_type in available_types and canonical_type in address_to_types.get(
+                    addr, set()
+                ):
+                    desired_pairs.add((canonical_type, addr))
+        else:
+            if mapping_sources is None:
+                if default_values is None:
+                    mapping_sources = []
+                else:
+                    mapping_sources = [("htr", default_values)]
+            for raw_type, values in mapping_sources:
+                normalized_key = normalize_node_type(
+                    raw_type,
+                    use_default_when_falsey=True,
+                )
+                canonical_type = alias_lookup.get(normalized_key)
+                if not canonical_type:
+                    continue
+                if isinstance(values, str) or isinstance(values, bytes):
+                    candidates = [values]
+                elif isinstance(values, Iterable):
+                    candidates = list(values)
+                else:
+                    candidates = [values]
+                for candidate in candidates:
+                    addr = normalize_node_addr(
+                        candidate,
+                        use_default_when_falsey=True,
+                    )
+                    if not addr:
+                        continue
+                    requested_pairs.add((canonical_type, addr))
+                    if canonical_type == "htr":
+                        for actual_type in address_to_types.get(addr, set()):
+                            desired_pairs.add((actual_type, addr))
+                    elif canonical_type in available_types and canonical_type in address_to_types.get(
+                        addr, set()
+                    ):
+                        desired_pairs.add((canonical_type, addr))
+
+        target_pairs = [pair for pair in all_pairs if pair in desired_pairs]
+
+    if not target_pairs:
+        logger.debug("Energy import: no heater nodes selected for device")
+        return
 
     day = 24 * 3600
     now_dt = datetime_mod.now(UTC)
@@ -452,7 +528,7 @@ async def async_import_energy_history(
         hass.config_entries.async_update_entry(entry, options=options)
 
     if reset_progress:
-        if nodes is None:
+        if selection_spec is None:
             progress.clear()
         else:
             cleared_any = False
@@ -460,11 +536,10 @@ async def async_import_energy_history(
                 progress.pop(f"{node_type}:{addr}", None)
                 progress.pop(addr, None)
                 cleared_any = True
-            if not cleared_any and requested_map:
-                for req_type, addr_list in requested_map.items():
-                    for addr in addr_list:
-                        progress.pop(f"{req_type}:{addr}", None)
-                        progress.pop(addr, None)
+            if not cleared_any:
+                for req_type, addr in requested_pairs:
+                    progress.pop(f"{req_type}:{addr}", None)
+                    progress.pop(addr, None)
         _write_progress_options(progress, imported=False)
     elif entry.options.get(OPTION_ENERGY_HISTORY_IMPORTED):
         logger.debug("%s: energy history already imported", entry.entry_id)
@@ -781,11 +856,14 @@ async def async_register_import_energy_history_service(
         max_days = call.data.get("max_history_retrieval")
         ent_ids = call.data.get("entity_id")
         tasks = []
+        records = hass.data.get(DOMAIN, {})
+        if not isinstance(records, Mapping):
+            records = {}
         if ent_ids:
             ent_reg = registry_mod.async_get(hass)
             if isinstance(ent_ids, str):
                 ent_ids = [ent_ids]
-            entry_map: dict[str, dict[str, set[str]]] = {}
+            entry_pairs: dict[str, set[tuple[str, str]]] = {}
 
             def _parse_energy_unique_id(unique_id: str) -> tuple[str, str] | None:
                 parsed = parse_heater_energy_unique_id(unique_id)
@@ -805,54 +883,76 @@ async def async_register_import_energy_history_service(
                 entry_id = er_ent.config_entry_id
                 if not entry_id:
                     continue
-                entry_map.setdefault(entry_id, {}).setdefault(node_type, set()).add(
-                    addr
-                )
+                entry_pairs.setdefault(entry_id, set()).add((node_type, addr))
 
-            for entry_id, addr_map in entry_map.items():
+            for entry_id, target_set in entry_pairs.items():
                 ent = hass.config_entries.async_get_entry(entry_id)
                 if not ent:
                     continue
-                normalized = {
-                    node_type: sorted(addrs)
-                    for node_type, addrs in addr_map.items()
-                    if addrs
-                }
-                if not normalized:  # pragma: no cover - defensive guard
+                record = records.get(entry_id)
+                inventory: Inventory | None = None
+                resolution: Any | None = None
+                if isinstance(record, Mapping):
+                    stored = record.get("inventory")
+                    if isinstance(stored, Inventory):
+                        inventory = stored
+                if inventory is None and record is not None:
+                    resolution = resolve_record_inventory(record)
+                    inventory = resolution.inventory
+                if inventory is None:
+                    dev = None
+                    if isinstance(record, Mapping):
+                        dev = record.get("dev_id")
+                    logger.debug(
+                        "%s: skipping energy import for entry %s (source=%s)",
+                        dev,
+                        entry_id,
+                        getattr(resolution, "source", "unknown"),
+                    )
+                    continue
+                available_targets = inventory.heater_sample_targets
+                if not available_targets:
+                    continue
+                filtered_targets = [
+                    pair for pair in available_targets if pair in target_set
+                ]
+                if not filtered_targets:
                     continue
                 tasks.append(
                     import_fn(
                         hass,
                         ent,
-                        normalized,
+                        filtered_targets,
                         reset_progress=reset,
                         max_days=max_days,
                     )
                 )
         else:
-            for rec in hass.data.get(DOMAIN, {}).values():
+            for entry_id, rec in records.items():
                 if not isinstance(rec, Mapping):
                     continue
                 ent: ConfigEntry | None = rec.get("config_entry")
                 if not ent:
                     continue
-                resolution = resolve_record_inventory(rec)
-                inventory_container = resolution.inventory
+                inventory_container = rec.get("inventory")
+                resolution: Any | None = None
+                if not isinstance(inventory_container, Inventory):
+                    resolution = resolve_record_inventory(rec)
+                    inventory_container = resolution.inventory
                 if inventory_container is None:
                     entry_id = getattr(ent, "entry_id", "<unknown>")
                     logger.debug(
                         "%s: skipping energy import for entry %s (source=%s)",
                         rec.get("dev_id"),
                         entry_id,
-                        resolution.source,
+                        getattr(resolution, "source", "unknown"),
                     )
                     continue
-                by_type, _ = inventory_container.heater_address_map
                 tasks.append(
                     import_fn(
                         hass,
                         ent,
-                        by_type,
+                        inventory_container,
                         reset_progress=reset,
                         max_days=max_days,
                     )

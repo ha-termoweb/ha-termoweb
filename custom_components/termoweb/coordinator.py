@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, MutableMapping
-from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import logging
@@ -22,10 +21,8 @@ from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
 from .inventory import (
     Inventory,
     build_node_inventory,
-    normalize_heater_addresses,
     normalize_node_addr,
     normalize_node_type,
-    normalize_power_monitor_addresses,
 )
 from .utils import float_or_none
 
@@ -147,9 +144,9 @@ class StateCoordinator(
     @staticmethod
     def _collect_previous_settings(
         prev_dev: Mapping[str, Any],
-        addr_map: Mapping[str, Iterable[str]],
+        inventory: Inventory | None,
     ) -> dict[str, dict[str, Any]]:
-        """Return normalised settings carried over from previous poll."""
+        """Return cached settings carried over from previous poll."""
 
         preserved: dict[str, dict[str, Any]] = {}
 
@@ -158,46 +155,18 @@ class StateCoordinator(
             for node_type, bucket in existing_settings.items():
                 if not isinstance(bucket, Mapping):
                     continue
-                dest: dict[str, Any] = preserved.setdefault(node_type, {})
-                for raw_addr, payload in bucket.items():
-                    addr = normalize_node_addr(
-                        raw_addr,
-                        use_default_when_falsey=True,
-                    )
-                    if not addr:
-                        continue
-                    dest[addr] = payload
+                preserved[node_type] = {
+                    addr: payload
+                    for addr, payload in bucket.items()
+                    if isinstance(addr, str) and addr
+                }
 
-        def _ingest_section(node_type: str, section: Any) -> None:
-            if node_type in preserved:
-                return
-            normalised = StateCoordinator._normalise_type_section(
-                node_type,
-                section,
-                addr_map.get(node_type, []),
-            )
-            if not normalised["settings"]:
-                return
-            preserved[node_type] = dict(normalised["settings"])
+        if not isinstance(inventory, Inventory):
+            return preserved
 
-        for key, value in prev_dev.items():
-            if key in {
-                "dev_id",
-                "name",
-                "raw",
-                "connected",
-                "nodes",
-                "nodes_by_type",
-                "settings",
-                "addresses_by_type",
-                "heater_address_map",
-                "power_monitor_address_map",
-                "inventory",
-            }:
-                continue
-            if not isinstance(value, Mapping):
-                continue
-            _ingest_section(key, value)
+        forward_map, _ = inventory.heater_address_map
+        for node_type in forward_map:
+            preserved.setdefault(node_type, {})
 
         return preserved
 
@@ -244,31 +213,6 @@ class StateCoordinator(
                 bucket[addr] = payload
         return current_rtc
 
-    @staticmethod
-    def _normalise_settings_map(
-        settings_by_type: Mapping[str, Mapping[str, Any]] | None,
-    ) -> dict[str, dict[str, Any]]:
-        """Return a copy of ``settings_by_type`` keyed by normalised addresses."""
-
-        if not isinstance(settings_by_type, Mapping):
-            return {}
-
-        normalised: dict[str, dict[str, Any]] = {}
-        for node_type, bucket in settings_by_type.items():
-            normalized_type = normalize_node_type(
-                node_type, use_default_when_falsey=True
-            )
-            if not normalized_type or not isinstance(bucket, Mapping):
-                continue
-            dest: dict[str, Any] = {}
-            for raw_addr, payload in bucket.items():
-                addr = normalize_node_addr(raw_addr, use_default_when_falsey=True)
-                if not addr:
-                    continue
-                dest[addr] = deepcopy(payload)
-            normalised[normalized_type] = dest
-        return normalised
-
     def _assemble_device_record(
         self,
         *,
@@ -278,17 +222,13 @@ class StateCoordinator(
     ) -> dict[str, Any]:
         """Return a coordinator cache record for ``inventory`` and settings."""
 
-        normalized_settings = self._normalise_settings_map(settings_by_type)
+        validated_settings: dict[str, dict[str, Any]] = {}
+        for node_type, bucket in settings_by_type.items():
+            if not isinstance(bucket, Mapping):
+                continue
+            validated_settings[node_type] = dict(bucket)
 
         addresses_by_type = inventory.addresses_by_type
-        for node_type, bucket in normalized_settings.items():
-            dest = addresses_by_type.setdefault(node_type, [])
-            seen = set(dest)
-            for addr in bucket:
-                if addr in seen:
-                    continue
-                dest.append(addr)
-                seen.add(addr)
 
         heater_forward, heater_reverse = inventory.heater_address_map
         power_forward, power_reverse = inventory.power_monitor_address_map
@@ -308,7 +248,7 @@ class StateCoordinator(
                 "forward": power_forward,
                 "reverse": power_reverse,
             },
-            "settings": normalized_settings,
+            "settings": validated_settings,
         }
 
     @staticmethod
@@ -581,103 +521,6 @@ class StateCoordinator(
         )
         return True
 
-    def _merge_nodes_by_type(
-        self,
-        cache_map: Mapping[str, Iterable[str]],
-        current_sections: Mapping[str, Any] | None,
-        new_payload: Mapping[str, Mapping[str, Any]] | None,
-    ) -> dict[str, dict[str, Any]]:
-        """Merge cached addresses, existing sections and payload settings."""
-
-        sections: dict[str, Any] = {}
-        if isinstance(current_sections, Mapping):
-            sections = dict(current_sections)
-
-        payload_map: dict[str, Mapping[str, Any]] = {}
-        if isinstance(new_payload, Mapping):
-            payload_map = dict(new_payload)
-
-        merged_types = set(cache_map) | set(sections) | set(payload_map)
-        nodes_by_type: dict[str, dict[str, Any]] = {}
-
-        for node_type in merged_types:
-            default_addrs = cache_map.get(node_type, [])
-            section = sections.get(node_type)
-            normalized = self._normalise_type_section(node_type, section, default_addrs)
-
-            payload_settings = payload_map.get(node_type)
-            if isinstance(payload_settings, Mapping):
-                settings_bucket = normalized.setdefault("settings", {})
-                for raw_addr, data in payload_settings.items():
-                    addr = normalize_node_addr(raw_addr)
-                    if not addr:
-                        continue
-                    settings_bucket[addr] = data
-                    if addr not in normalized["addrs"]:
-                        normalized["addrs"].append(addr)
-
-            default_order = [
-                addr
-                for addr in (
-                    normalize_node_addr(candidate)
-                    for candidate in cache_map.get(node_type, [])
-                )
-                if addr
-            ]
-            extras = [addr for addr in normalized["addrs"] if addr not in default_order]
-            normalized["addrs"] = default_order + extras
-
-            nodes_by_type[node_type] = normalized
-
-        return nodes_by_type
-
-    @staticmethod
-    def _normalise_type_section(
-        node_type: str,
-        section: Any,
-        default_addrs: Iterable[str] | None = None,
-    ) -> dict[str, Any]:
-        """Return a standard mapping for a node type section."""
-
-        addrs: list[str] = []
-        if default_addrs is not None:
-            addrs = [
-                addr
-                for addr in (
-                    normalize_node_addr(candidate) for candidate in default_addrs
-                )
-                if addr
-            ]
-
-        settings: dict[str, Any] = {}
-
-        if isinstance(section, dict):
-            raw_addrs = section.get("addrs")
-            if isinstance(raw_addrs, Iterable) and not isinstance(
-                raw_addrs, (str, bytes)
-            ):
-                addrs = [
-                    addr
-                    for addr in (
-                        normalize_node_addr(candidate) for candidate in raw_addrs
-                    )
-                    if addr
-                ]
-            raw_settings = section.get("settings")
-            if isinstance(raw_settings, dict):
-                settings = {
-                    normalized: data
-                    for addr, data in raw_settings.items()
-                    if (normalized := normalize_node_addr(addr))
-                }
-
-        # Ensure addrs contains any addresses present in settings
-        for addr in settings:
-            if addr not in addrs:
-                addrs.append(addr)
-
-        return {"addrs": addrs, "settings": settings}
-
     def update_nodes(
         self,
         nodes: Mapping[str, Any] | None,
@@ -685,7 +528,7 @@ class StateCoordinator(
     ) -> None:
         """Update cached node payload and inventory."""
 
-        valid_inventory: Inventory | None
+        valid_inventory: Inventory | None = None
         if isinstance(inventory, Inventory):
             valid_inventory = inventory
         elif (
@@ -695,25 +538,21 @@ class StateCoordinator(
             and hasattr(inventory, "heater_address_map")
         ):
             valid_inventory = cast(Inventory, inventory)
-        elif inventory is None:
-            valid_inventory = None
-        else:
-            if not self._invalid_inventory_logged:
-                _LOGGER.debug(
-                    "Ignoring unexpected inventory container (type=%s): %s",
-                    type(inventory).__name__,
-                    inventory,
-                )
-                self._invalid_inventory_logged = True
-            valid_inventory = None
+        elif inventory is not None and not self._invalid_inventory_logged:
+            _LOGGER.debug(
+                "Ignoring unexpected inventory container (type=%s): %s",
+                type(inventory).__name__,
+                inventory,
+            )
+            self._invalid_inventory_logged = True
+
+        if valid_inventory is not None:
+            self._inventory = valid_inventory
+            self._invalid_inventory_logged = False
+            self._invalid_nodes_logged = False
+            return
 
         if isinstance(nodes, Mapping):
-            if valid_inventory is not None:
-                self._inventory = valid_inventory
-                self._invalid_inventory_logged = False
-                self._invalid_nodes_logged = False
-                return
-
             try:
                 node_list = list(build_node_inventory(nodes))
             except ValueError as err:  # pragma: no cover - defensive
@@ -724,11 +563,11 @@ class StateCoordinator(
                         exc_info=err,
                     )
                     self._invalid_nodes_logged = True
-                self._inventory = None
-            else:
-                self._inventory = Inventory(self._dev_id, nodes, node_list)
-                self._invalid_inventory_logged = False
-                self._invalid_nodes_logged = False
+                return
+
+            self._inventory = Inventory(self._dev_id, nodes, node_list)
+            self._invalid_inventory_logged = False
+            self._invalid_nodes_logged = False
             return
 
         if nodes is not None and not isinstance(nodes, Mapping):
@@ -739,18 +578,11 @@ class StateCoordinator(
                     nodes,
                 )
                 self._invalid_nodes_logged = True
-        else:
-            self._invalid_nodes_logged = False
-
-        if valid_inventory is not None:
-            self._inventory = valid_inventory
-            self._invalid_inventory_logged = False
             return
 
+        self._invalid_nodes_logged = False
         if inventory is None:
             self._invalid_inventory_logged = False
-
-        self._inventory = None
 
     def _ensure_inventory(self) -> Inventory | None:
         """Ensure cached inventory metadata is available."""
@@ -837,7 +669,7 @@ class StateCoordinator(
             current = self.data or {}
             new_data: dict[str, dict[str, Any]] = dict(current)
             prev_dev = dict(new_data.get(dev_id) or {})
-            prev_settings = self._collect_previous_settings(prev_dev, forward_map)
+            prev_settings = self._collect_previous_settings(prev_dev, inventory)
 
             settings_map = {
                 node_type: dict(bucket) for node_type, bucket in prev_settings.items()
@@ -894,7 +726,7 @@ class StateCoordinator(
         try:
             self._prune_pending_settings()
             prev_dev = (self.data or {}).get(dev_id, {})
-            prev_by_type = self._collect_previous_settings(prev_dev, addr_map)
+            prev_by_type = self._collect_previous_settings(prev_dev, inventory)
             all_types = set(addr_map) | set(prev_by_type)
             settings_by_type: dict[str, dict[str, Any]] = {
                 node_type: dict(prev_by_type.get(node_type, {}))
@@ -956,7 +788,7 @@ class EnergyStateCoordinator(
         hass: HomeAssistant,
         client: RESTClient,
         dev_id: str,
-        addrs: Iterable[str] | Mapping[str, Iterable[str]],
+        inventory: Inventory | None,
     ) -> None:
         """Initialize the heater energy coordinator."""
         super().__init__(
@@ -967,10 +799,7 @@ class EnergyStateCoordinator(
         )
         self.client = client
         self._dev_id = dev_id
-        self._addresses_by_type: dict[str, list[str]] = {}
-        self._addr_lookup: dict[str, str] = {}
-        self._addrs: list[str] = []
-        self._compat_aliases: dict[str, str] = {}
+        self._inventory: Inventory | None = None
         self._last: dict[tuple[str, str], tuple[float, float]] = {}
         self._base_interval = HTR_ENERGY_UPDATE_INTERVAL
         self._base_interval_seconds = HTR_ENERGY_UPDATE_INTERVAL.total_seconds()
@@ -982,55 +811,111 @@ class EnergyStateCoordinator(
             "acm": 1000.0,
             "pmo": 3_600_000.0,
         }
-        self.update_addresses(addrs)
+        self.update_addresses(inventory)
 
     def update_addresses(
-        self, addrs: Iterable[str] | Mapping[str, Iterable[str]]
+        self,
+        inventory: Inventory | Mapping[str, Iterable[str]] | Iterable[str] | None,
     ) -> None:
-        """Replace the tracked heater addresses with ``addrs``."""
+        """Replace the tracked nodes using immutable inventory metadata."""
 
-        heater_map, heater_aliases = normalize_heater_addresses(addrs)
-        power_source: Mapping[str, Iterable[str]] | None
-        if isinstance(addrs, Mapping):
-            power_source = addrs
+        self._inventory = self._coerce_inventory(inventory)
+
+        valid_keys = {pair for pair in self._iter_tracked_pairs()}
+        if not valid_keys:
+            self._last = {}
         else:
-            power_source = None
-        power_map, power_aliases = normalize_power_monitor_addresses(power_source)
+            self._last = {
+                key: value for key, value in self._last.items() if key in valid_keys
+            }
 
-        cleaned_map: dict[str, list[str]] = {
-            "htr": list(heater_map.get("htr", [])),
-            "acm": list(heater_map.get("acm", [])),
-            "pmo": list(power_map.get("pmo", [])),
-        }
+    def _coerce_inventory(
+        self,
+        source: Inventory | Mapping[str, Iterable[str]] | Iterable[str] | None,
+    ) -> Inventory | None:
+        """Return an ``Inventory`` built from ``source`` when necessary."""
+
+        if isinstance(source, Inventory):
+            return source
+        if isinstance(source, Mapping):
+            payload_nodes = [
+                {"type": node_type, "addr": addr}
+                for node_type, values in source.items()
+                if isinstance(values, Iterable) and not isinstance(values, (str, bytes))
+                for addr in values
+            ]
+            payload = {"nodes": payload_nodes}
+            node_list = list(build_node_inventory(payload))
+            return Inventory(self._dev_id, payload, node_list)
+        if isinstance(source, Iterable) and not isinstance(source, (str, bytes)):
+            payload = {"nodes": [{"type": "htr", "addr": addr} for addr in source]}
+            node_list = list(build_node_inventory(payload))
+            return Inventory(self._dev_id, payload, node_list)
+        return None
+
+    def _iter_tracked_pairs(self) -> set[tuple[str, str]]:
+        """Return canonical ``(node_type, addr)`` pairs tracked by the coordinator."""
+
+        addresses_by_type = self._addresses_by_type
+        pairs: set[tuple[str, str]] = set()
         for node_type in ENERGY_NODE_TYPES:
-            cleaned_map.setdefault(node_type, [])
+            for addr in addresses_by_type.get(node_type, []):
+                pairs.add((node_type, addr))
+        return pairs
 
-        compat_aliases: dict[str, str] = dict(heater_aliases)
-        compat_aliases.update(power_aliases)
+    @property
+    def _addresses_by_type(self) -> dict[str, list[str]]:
+        """Return the immutable inventory addresses grouped by type."""
+
+        inventory = self._inventory
+        if not isinstance(inventory, Inventory):
+            return {node_type: [] for node_type in ENERGY_NODE_TYPES}
+
+        heater_map, _ = inventory.heater_sample_address_map
+        power_map, _ = inventory.power_monitor_sample_address_map
+
+        addresses: dict[str, list[str]] = {}
         for node_type in ENERGY_NODE_TYPES:
-            compat_aliases.setdefault(node_type, node_type)
+            if node_type == "pmo":
+                addresses[node_type] = list(power_map.get("pmo", []))
+            else:
+                addresses[node_type] = list(heater_map.get(node_type, []))
+        return addresses
 
-        self._addresses_by_type = cleaned_map
-        self._compat_aliases = compat_aliases
-        self._addr_lookup = {
-            addr: node_type
-            for node_type, addrs_for_type in cleaned_map.items()
-            for addr in addrs_for_type
-        }
-        self._addrs = [
+    @property
+    def _compat_aliases(self) -> dict[str, str]:
+        """Return the compatibility aliases exposed by the inventory."""
+
+        inventory = self._inventory
+        if not isinstance(inventory, Inventory):
+            return {node_type: node_type for node_type in ENERGY_NODE_TYPES}
+
+        _, heater_aliases = inventory.heater_sample_address_map
+        power_map, power_aliases = inventory.power_monitor_sample_address_map
+
+        alias_map: dict[str, str] = dict(heater_aliases)
+        alias_map.update(power_aliases)
+        for node_type in ENERGY_NODE_TYPES:
+            alias_map.setdefault(node_type, node_type)
+
+        # Ensure pmo aliases exist even when the inventory lacks power monitors.
+        if "pmo" not in alias_map:
+            alias_map["pmo"] = "pmo"
+        if power_map.get("pmo"):
+            alias_map.setdefault("power_monitor", "pmo")
+            alias_map.setdefault("power_monitors", "pmo")
+
+        return alias_map
+
+    def _addrs(self) -> list[str]:
+        """Return a flattened list of tracked addresses for websocket fallbacks."""
+
+        addresses_by_type = self._addresses_by_type
+        return [
             addr
             for node_type in ENERGY_NODE_TYPES
-            for addr in cleaned_map.get(node_type, [])
+            for addr in addresses_by_type.get(node_type, [])
         ]
-
-        valid_keys = {
-            (node_type, addr)
-            for node_type, addrs_for_type in cleaned_map.items()
-            for addr in addrs_for_type
-        }
-        self._last = {
-            key: value for key, value in self._last.items() if key in valid_keys
-        }
 
     def _process_energy_sample(
         self,
@@ -1082,11 +967,13 @@ class EnergyStateCoordinator(
     ) -> tuple[dict[str, dict[str, float]], dict[str, dict[str, float]]]:
         """Return energy and power buckets pre-populated from cached data."""
 
+        addresses_by_type = self._addresses_by_type
+
         energy_by_type: dict[str, dict[str, float]] = {
-            node_type: {} for node_type in self._addresses_by_type
+            node_type: {} for node_type in addresses_by_type
         }
         power_by_type: dict[str, dict[str, float]] = {
-            node_type: {} for node_type in self._addresses_by_type
+            node_type: {} for node_type in addresses_by_type
         }
 
         cached_dev: Mapping[str, Any] | None = None
@@ -1096,7 +983,7 @@ class EnergyStateCoordinator(
                 cached_dev = cached
 
         if cached_dev:
-            for node_type, addrs_for_type in self._addresses_by_type.items():
+            for node_type, addrs_for_type in addresses_by_type.items():
                 prev_node = cached_dev.get(node_type)
                 if not isinstance(prev_node, Mapping):
                     continue
@@ -1118,7 +1005,7 @@ class EnergyStateCoordinator(
                             power_bucket.setdefault(addr, cached_power)
 
         for (node_type, addr), (_, kwh) in self._last.items():
-            addrs_for_type = self._addresses_by_type.get(node_type)
+            addrs_for_type = addresses_by_type.get(node_type)
             if not addrs_for_type or addr not in addrs_for_type:
                 continue
             energy_bucket = energy_by_type.setdefault(node_type, {})
@@ -1138,7 +1025,8 @@ class EnergyStateCoordinator(
         try:
             energy_by_type, power_by_type = self._seed_cached_energy_and_power(dev_id)
 
-            for node_type, addrs_for_type in self._addresses_by_type.items():
+            addresses_by_type = self._addresses_by_type
+            for node_type, addrs_for_type in addresses_by_type.items():
                 for addr in addrs_for_type:
                     now = time.time()
                     start = now - 3600  # fetch recent samples
@@ -1198,17 +1086,18 @@ class EnergyStateCoordinator(
                 heater_data = {
                     "energy": dict(energy_by_type.get("htr", {})),
                     "power": dict(power_by_type.get("htr", {})),
-                    "addrs": list(self._addresses_by_type.get("htr", [])),
+                    "addrs": list(addresses_by_type.get("htr", [])),
                 }
                 dev_data["htr"] = heater_data
 
-            for alias, canonical in self._compat_aliases.items():
+            alias_map = self._compat_aliases
+            for alias, canonical in alias_map.items():
                 canonical_bucket = dev_data.get(canonical)
                 if not isinstance(canonical_bucket, dict):
                     canonical_bucket = {
                         "energy": {},
                         "power": {},
-                        "addrs": list(self._addresses_by_type.get(canonical, [])),
+                        "addrs": list(addresses_by_type.get(canonical, [])),
                     }
                     dev_data[canonical] = canonical_bucket
                 dev_data[alias] = canonical_bucket
@@ -1315,12 +1204,15 @@ class EnergyStateCoordinator(
 
         changed = False
 
+        addresses_by_type = self._addresses_by_type
+        alias_map = self._compat_aliases
+
         for raw_type, payload in updates.items():
             node_type = normalize_node_type(raw_type)
             if not node_type:
                 continue
-            canonical_type = self._compat_aliases.get(node_type, node_type)
-            tracked_addrs = self._addresses_by_type.get(canonical_type)
+            canonical_type = alias_map.get(node_type, node_type)
+            tracked_addrs = addresses_by_type.get(canonical_type)
             if not tracked_addrs:
                 continue
             bucket = dev_data.get(canonical_type)

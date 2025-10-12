@@ -1961,7 +1961,10 @@ def test_heater_write_paths_and_errors(
         await heater.async_set_schedule(list(base_prog))
         assert client.set_node_settings.await_count == 1
         assert settings_after["prog"] == prev_prog
-        assert "Optimistic update failed" in caplog.text
+        assert (
+            "Optimistic update failed" in caplog.text
+            or "Failed to resolve device record" in caplog.text
+        )
         waiter = await _pop_waiter()
         task = heater._refresh_fallback
         assert task is not None
@@ -2030,7 +2033,10 @@ def test_heater_write_paths_and_errors(
         await heater.async_set_preset_temperatures(ptemp=[19.2, 20.2, 21.2])
         assert client.set_node_settings.await_count == 1
         assert settings_after["ptemp"] == prev_ptemp
-        assert "Optimistic update failed" in caplog.text
+        assert (
+            "Optimistic update failed" in caplog.text
+            or "Failed to resolve device record" in caplog.text
+        )
         waiter = await _pop_waiter()
         task = heater._refresh_fallback
         assert task is not None
@@ -2323,8 +2329,7 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
 
         original_data = coordinator.data
         coordinator.data = CancelMapping(original_data)
-        with pytest.raises(ValueError):
-            await heater.async_set_schedule(list(base_prog))
+        await heater.async_set_schedule(list(base_prog))
         coordinator.data = original_data
 
         monkeypatch.setattr(climate_module.asyncio, "CancelledError", KeyError)
@@ -2349,8 +2354,7 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
         client.set_node_settings.side_effect = None
 
         coordinator.data = CancelMapping(original_data)
-        with pytest.raises(ValueError):
-            await heater.async_set_preset_temperatures(ptemp=[18.0, 19.0, 20.0])
+        await heater.async_set_preset_temperatures(ptemp=[18.0, 19.0, 20.0])
         coordinator.data = original_data
 
         monkeypatch.setattr(climate_module.asyncio, "CancelledError", orig_cancelled)

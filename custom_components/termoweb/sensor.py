@@ -35,8 +35,6 @@ from .heater import (
     HeaterNodeBase,
     heater_platform_details_for_entry,
     iter_boostable_heater_nodes,
-    iter_heater_maps,
-    iter_heater_nodes,
     log_skipped_nodes,
 )
 from .identifiers import (
@@ -118,12 +116,33 @@ def _normalise_energy_value(coordinator: Any, raw: Any) -> float | None:
     return numeric * scale
 
 
+def _power_monitor_display_name(node: PowerMonitorNode, addr: str) -> str:
+    """Return the display name for a power monitor address."""
+
+    raw_name = getattr(node, "name", None)
+    trimmed = raw_name.strip() if isinstance(raw_name, str) else None
+    if trimmed:
+        return trimmed
+
+    default_factory = getattr(node, "default_name", None)
+    if callable(default_factory):
+        try:
+            fallback = default_factory()
+        except Exception:  # pragma: no cover - defensive fallback
+            fallback = None
+        if isinstance(fallback, str):
+            fallback_trimmed = fallback.strip()
+            if fallback_trimmed:
+                return fallback_trimmed
+
+    return f"Power Monitor {addr}"
+
+
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up sensors for each heater node."""
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
-    inventory = data.get("inventory")
 
     def default_name(addr: str) -> str:
         """Return a placeholder name for heater nodes."""
@@ -133,131 +152,24 @@ async def async_setup_entry(hass, entry, async_add_entities):
         data,
         default_name_simple=default_name,
     )
+    inventory = heater_details.inventory
     addrs_by_type = heater_details.addrs_by_type
 
     energy_coordinator: EnergyStateCoordinator | None = data.get(
         "energy_coordinator",
     )
 
-    def _merge_energy_addresses(source: Mapping[str, Iterable[str]] | None) -> None:
-        if not isinstance(source, Mapping):
-            return
-        for raw_type, values in source.items():
-            canonical_type = normalize_node_type(
-                raw_type,
-                use_default_when_falsey=True,
-            ) or str(raw_type)
-            if isinstance(values, (str, bytes)) or not isinstance(values, Iterable):
-                candidates = [values]
-            else:
-                candidates = list(values)
-            bucket = energy_nodes_map.setdefault(canonical_type, [])
-            seen = set(bucket)
-            for candidate in candidates:
-                addr = normalize_node_addr(candidate, use_default_when_falsey=True)
-                if not addr or addr in seen:
-                    continue
-                seen.add(addr)
-                bucket.append(addr)
-
-    energy_nodes_map: dict[str, list[str]] = {
-        node_type: list(addresses)
-        for node_type, addresses in addrs_by_type.items()
-    }
-    energy_nodes_map.setdefault("htr", list(addrs_by_type.get("htr", [])))
-    energy_nodes_map.setdefault("acm", list(addrs_by_type.get("acm", [])))
-    energy_nodes_map.setdefault("pmo", [])
-
-    power_monitor_names: dict[str, str] = {}
-
-    def _fallback_power_monitor_name(addr: str) -> str:
-        """Return a default label for a power monitor address."""
-
-        try:
-            fallback_node = PowerMonitorNode(name=None, addr=addr)
-            candidate = fallback_node.default_name()
-        except Exception:  # pragma: no cover - defensive fallback
-            candidate = None
-        if isinstance(candidate, str):
-            trimmed = candidate.strip()
-            if trimmed:
-                return trimmed
-        return f"Power Monitor {addr}"
-
-    def _register_power_monitor_node(node: Any) -> None:
-        """Add a named power monitor derived from ``node``."""
-
-        addr = normalize_node_addr(getattr(node, "addr", None), use_default_when_falsey=True)
-        if not addr:
-            return
-        raw_name = getattr(node, "name", None)
-        trimmed = raw_name.strip() if isinstance(raw_name, str) else None
-        if trimmed:
-            power_monitor_names[addr] = trimmed
-            return
-        default_name = None
-        default_factory = getattr(node, "default_name", None)
-        if callable(default_factory):
-            try:
-                default_name = default_factory()
-            except Exception:  # pragma: no cover - defensive fallback
-                default_name = None
-        if isinstance(default_name, str):
-            default_trimmed = default_name.strip()
-            if default_trimmed:
-                power_monitor_names.setdefault(addr, default_trimmed)
-                return
-        power_monitor_names.setdefault(addr, _fallback_power_monitor_name(addr))
-
-    def _integrate_power_monitor_addresses(
-        source: Mapping[str, Iterable[str]] | None,
-    ) -> None:
-        """Merge addresses from ``source`` into the energy map and names."""
-
-        if not isinstance(source, Mapping):
-            return
-        _merge_energy_addresses(source)
-        for values in source.values():
-            if isinstance(values, (str, bytes)) or not isinstance(values, Iterable):
-                candidates = [values]
-            else:
-                candidates = list(values)
-            for candidate in candidates:
-                addr = normalize_node_addr(candidate, use_default_when_falsey=True)
-                if not addr:
-                    continue
-                power_monitor_names.setdefault(addr, _fallback_power_monitor_name(addr))
-
-    if inventory is not None:
-        nodes_by_type_map = getattr(inventory, "nodes_by_type", None)
-        if isinstance(nodes_by_type_map, Mapping):
-            for candidate in nodes_by_type_map.get("pmo", []) or []:
-                _register_power_monitor_node(candidate)
-
-        address_map = getattr(inventory, "power_monitor_address_map", None)
-        if isinstance(address_map, tuple) and address_map:
-            _integrate_power_monitor_addresses(address_map[0])
-
-    sample_map = getattr(inventory, "power_monitor_sample_address_map", None)
-    if isinstance(sample_map, tuple) and sample_map:
-        _integrate_power_monitor_addresses(sample_map[0])
-
-    if power_monitor_names:
-        _merge_energy_addresses({"pmo": list(power_monitor_names)})
-
     if energy_coordinator is None:
         energy_coordinator = EnergyStateCoordinator(
-            hass, data["client"], dev_id, energy_nodes_map
+            hass, data["client"], dev_id, inventory
         )
         data["energy_coordinator"] = energy_coordinator
         await energy_coordinator.async_config_entry_first_refresh()
     else:
-        energy_coordinator.update_addresses(energy_nodes_map)
+        energy_coordinator.update_addresses(inventory)
 
     new_entities: list[SensorEntity] = []
-    for node_type, _node, addr_str, base_name in iter_heater_nodes(
-        heater_details,
-    ):
+    for node_type, _node, addr_str, base_name in heater_details.iter_metadata():
         energy_unique_id = build_heater_energy_unique_id(dev_id, node_type, addr_str)
         uid_prefix = energy_unique_id.rsplit(":", 1)[0]
         new_entities.extend(
@@ -271,6 +183,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 uid_prefix,
                 energy_unique_id,
                 node_type=node_type,
+                inventory=heater_details.inventory,
             )
         )
     for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
@@ -287,10 +200,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 base_name,
                 uid_prefix,
                 node_type=node_type,
+                inventory=heater_details.inventory,
             )
         )
 
-    for addr_str, base_name in sorted(power_monitor_names.items()):
+    for addr_str, base_name in sorted(power_monitor_entries):
         energy_unique_id = build_power_monitor_energy_unique_id(dev_id, addr_str)
         power_unique_id = build_power_monitor_power_unique_id(dev_id, addr_str)
         new_entities.append(
@@ -358,6 +272,7 @@ class HeaterTemperatureSensor(HeaterNodeBase, SensorEntity):
         device_name: str,
         *,
         node_type: str | None = None,
+        inventory: Inventory | None = None,
     ) -> None:
         """Initialise the heater temperature sensor entity."""
         super().__init__(
@@ -369,6 +284,7 @@ class HeaterTemperatureSensor(HeaterNodeBase, SensorEntity):
             unique_id,
             device_name=device_name,
             node_type=node_type,
+            inventory=inventory,
         )
 
     @property
@@ -404,6 +320,7 @@ class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
         device_name: str,
         *,
         node_type: str | None = None,
+        inventory: Inventory | None = None,
     ) -> None:
         """Initialise a heater energy-derived sensor entity."""
         super().__init__(
@@ -415,6 +332,7 @@ class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
             unique_id,
             device_name=device_name,
             node_type=node_type,
+            inventory=inventory,
         )
 
     def _device_available(self, device_entry: dict[str, Any] | None) -> bool:
@@ -562,6 +480,7 @@ def _create_heater_sensors(
     energy_unique_id: str,
     *,
     node_type: str | None = None,
+    inventory: Inventory | None = None,
     temperature_cls: type[HeaterTemperatureSensor] = HeaterTemperatureSensor,
     energy_cls: type[HeaterEnergyTotalSensor] = HeaterEnergyTotalSensor,
     power_cls: type[HeaterPowerSensor] = HeaterPowerSensor,
@@ -581,6 +500,7 @@ def _create_heater_sensors(
         f"{uid_prefix}:temp",
         base_name,
         node_type=node_type,
+        inventory=inventory,
     )
     energy = energy_cls(
         energy_coordinator,
@@ -591,6 +511,7 @@ def _create_heater_sensors(
         energy_unique_id,
         base_name,
         node_type=node_type,
+        inventory=inventory,
     )
     power = power_cls(
         energy_coordinator,
@@ -601,6 +522,7 @@ def _create_heater_sensors(
         f"{uid_prefix}:power",
         base_name,
         node_type=node_type,
+        inventory=inventory,
     )
 
     return (temperature, energy, power)
@@ -615,6 +537,7 @@ def _create_boost_sensors(
     uid_prefix: str,
     *,
     node_type: str | None = None,
+    inventory: Inventory | None = None,
     minutes_cls: type[HeaterBoostMinutesRemainingSensor] = HeaterBoostMinutesRemainingSensor,
     end_cls: type[HeaterBoostEndSensor] = HeaterBoostEndSensor,
 ) -> tuple[
@@ -633,6 +556,7 @@ def _create_boost_sensors(
         f"{boost_prefix}:minutes_remaining",
         device_name=base_name,
         node_type=node_type,
+        inventory=inventory,
     )
     end = end_cls(
         coordinator,
@@ -643,6 +567,7 @@ def _create_boost_sensors(
         f"{boost_prefix}:end",
         device_name=base_name,
         node_type=node_type,
+        inventory=inventory,
     )
 
     return (minutes, end)
@@ -698,44 +623,6 @@ class PowerMonitorSensorBase(CoordinatorEntity, SensorEntity):
 
         return {}
 
-    def _tracked_addresses(self) -> set[str]:
-        """Return addresses tracked for this power monitor."""
-
-        record = self._device_record()
-        if not isinstance(record, Mapping):
-            return set()
-
-        addresses: set[str] = set()
-        candidates = []
-
-        direct_bucket = record.get("pmo")
-        if isinstance(direct_bucket, Mapping):
-            candidates.append(direct_bucket.get("addrs"))
-
-        inventory = record.get("inventory")
-        if isinstance(inventory, Inventory):
-            forward_map, _ = inventory.power_monitor_address_map
-            for values in forward_map.values():
-                candidates.append(values)
-            sample_map = getattr(inventory, "power_monitor_sample_address_map", None)
-            if isinstance(sample_map, tuple) and sample_map:
-                for values in sample_map[0].values():
-                    candidates.append(values)
-
-        for raw in candidates:
-            if isinstance(raw, (str, bytes)):
-                raw_iterable: Iterable[Any] = [raw]
-            elif isinstance(raw, Iterable):
-                raw_iterable = raw
-            else:
-                continue
-            for item in raw_iterable:
-                addr = normalize_node_addr(item, use_default_when_falsey=True)
-                if addr:
-                    addresses.add(addr)
-
-        return addresses
-
     def _coerce_native_value(self, raw: Any) -> float | None:
         """Convert a metric payload value to ``float`` if possible."""
 
@@ -757,7 +644,18 @@ class PowerMonitorSensorBase(CoordinatorEntity, SensorEntity):
         bucket = self._metric_bucket()
         if self._addr in bucket:
             return True
-        return self._addr in self._tracked_addresses()
+        addresses: Iterable[str] = ()
+        accessor = getattr(self.coordinator, "addresses_for_type", None)
+        if callable(accessor):
+            try:
+                addresses = accessor("pmo")
+            except Exception:  # pragma: no cover - defensive safeguard
+                addresses = ()
+        if not addresses:
+            address_map = getattr(self.coordinator, "_addresses_by_type", None)
+            if isinstance(address_map, Mapping):
+                addresses = address_map.get("pmo", ())
+        return self._addr in set(addresses)
 
     @property
     def native_value(self) -> float | None:
@@ -863,13 +761,17 @@ class InstallationTotalEnergySensor(
     def native_value(self) -> float | None:
         """Return the summed energy usage across all heaters."""
         data = (self.coordinator.data or {}).get(self._dev_id)
+        if not isinstance(data, Mapping):
+            return None
         total = 0.0
         found = False
-        for energy_map in iter_heater_maps(
-            data,
-            map_key="energy",
-            inventory=self._details,
-        ):
+        for node_type in self._details.addrs_by_type:
+            section = data.get(node_type)
+            if not isinstance(section, Mapping):
+                continue
+            energy_map = section.get("energy")
+            if not isinstance(energy_map, Mapping):
+                continue
             for val in energy_map.values():
                 normalised = _normalise_energy_value(self.coordinator, val)
                 if normalised is None:

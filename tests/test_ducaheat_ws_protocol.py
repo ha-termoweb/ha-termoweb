@@ -297,6 +297,11 @@ def test_dispatch_nodes_publishes_inventory_addresses(
     coordinator = client._coordinator
     client._dispatcher = MagicMock()
 
+    energy_coordinator = SimpleNamespace(update_addresses=MagicMock())
+    hass.data[ducaheat_ws.DOMAIN][client.entry_id]["energy_coordinator"] = (
+        energy_coordinator
+    )
+
     payload = {
         "htr": {
             "settings": {"1": {"target_temp": 21}},
@@ -324,6 +329,10 @@ def test_dispatch_nodes_publishes_inventory_addresses(
 
     record = hass.data[ducaheat_ws.DOMAIN][client.entry_id]
     assert record.get("inventory") is inventory
+    sample_aliases = record.get("sample_aliases")
+    assert sample_aliases is not None
+    assert sample_aliases.get("htr") == "htr"
+    energy_coordinator.update_addresses.assert_called_once_with(inventory)
 
 
 def test_incremental_updates_preserve_address_payload(
@@ -1827,10 +1836,10 @@ async def test_subscribe_feeds_handles_missing_targets(
 
 
 @pytest.mark.asyncio
-async def test_subscribe_feeds_uses_coordinator_fallback(
+async def test_subscribe_feeds_ignores_coordinator_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Fallback coordinator addresses should be subscribed when snapshot empty."""
+    """Coordinator fallback addresses should be ignored when inventory is empty."""
 
     client = _make_client(monkeypatch)
     payload = {"nodes": []}
@@ -1850,8 +1859,12 @@ async def test_subscribe_feeds_uses_coordinator_fallback(
 
     count = await client._subscribe_feeds(None)
 
-    assert count == 2
-    assert set(emissions) == {"/htr/5/samples", "/htr/5/status"}
+    assert count == 0
+    assert emissions == []
+    record = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
+    sample_aliases = record.get("sample_aliases")
+    assert sample_aliases is not None
+    assert sample_aliases.get("htr") == "htr"
 
 
 @pytest.mark.asyncio
