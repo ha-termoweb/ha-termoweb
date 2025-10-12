@@ -341,7 +341,7 @@ class WebSocketClient(_WSCommon):
         url, _ = await self._build_engineio_target()
         return url
 
-    async def debug_probe(self) -> None:
+    async def debug_probe(self, inventory: Inventory | None = None) -> None:
         """Emit a dev_data probe for debugging purposes."""
 
         if not _LOGGER.isEnabledFor(logging.DEBUG):

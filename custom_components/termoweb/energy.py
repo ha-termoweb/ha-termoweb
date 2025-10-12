@@ -325,6 +325,10 @@ async def async_import_energy_history(
     entry: ConfigEntry,
     nodes: Inventory | Mapping[str, Iterable[str]] | Iterable[str] | None = None,
     *,
+    selection: Mapping[str, Iterable[str]]
+    | Iterable[tuple[str, str]]
+    | Iterable[str]
+    | None = None,
     reset_progress: bool = False,
     max_days: int | None = None,
     rate_limit: MonotonicRateLimiter,
@@ -349,7 +353,10 @@ async def async_import_energy_history(
     stored_inventory = rec.get("inventory") if isinstance(rec, Mapping) else None
 
     inventory_override = nodes if isinstance(nodes, Inventory) else None
-    selection_spec = None if inventory_override is not None else nodes
+    if selection is not None:
+        selection_spec = selection
+    else:
+        selection_spec = None if inventory_override is not None else nodes
 
     inventory_container: Inventory | None
     resolution: Any | None = None

@@ -355,7 +355,10 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
     def _settings_maps(self) -> list[dict[str, Any]]:
         """Return all cached settings maps referencing this node."""
-        data = (self.coordinator.data or {}).get(self._dev_id)
+        try:
+            data = (self.coordinator.data or {}).get(self._dev_id)
+        except Exception:
+            return []
         if not isinstance(data, Mapping):
             return []
 

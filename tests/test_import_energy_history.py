@@ -1217,7 +1217,7 @@ def test_import_energy_history_requested_map_filters(
         await mod._async_import_energy_history(
             hass,
             entry,
-            {
+            selection={
                 "htr": ["A", "B", "B"],
                 "acm": "B",
                 "": ["ignored"],
