@@ -337,7 +337,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 headers={**headers, "Content-Type": "text/plain;charset=UTF-8"},
                 data=payload,
             ) as resp:
-                drain = await resp.read()
+                await resp.read()
                 #                _LOGGER.debug(
                 #                    "WS (ducaheat): POST 40/ns -> status=%s len=%s",
                 #                    resp.status,
@@ -1151,12 +1151,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             coordinator_nodes: Iterable[Any] | None = None
             if isinstance(coordinator_inventory, Inventory):
                 coordinator_nodes = coordinator_inventory.nodes
-
-            nodes_payload: Any | None
-            if isinstance(resolved_nodes, Mapping):
-                nodes_payload = resolved_nodes
-            else:
-                nodes_payload = None
 
             should_resolve = inventory_container is None and (
                 isinstance(nodes, Mapping)
