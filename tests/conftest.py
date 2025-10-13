@@ -45,7 +45,9 @@ _frame_module: Any | None = None
 
 
 @pytest.fixture
-def inventory_builder() -> Callable[[str, Mapping[str, Any] | None, Iterable[Any] | None], "Inventory"]:
+def inventory_builder() -> Callable[
+    [str, Mapping[str, Any] | None, Iterable[Any] | None], "Inventory"
+]:
     """Return helper to construct Inventory containers for tests."""
 
     from custom_components.termoweb.inventory import Inventory
@@ -127,7 +129,9 @@ def build_coordinator_device_state(
                 continue
             bucket = normalised_settings.setdefault(node_type, {})
             for addr, data in raw_bucket.items():
-                normalised_addr = normalize_node_addr(addr, use_default_when_falsey=True)
+                normalised_addr = normalize_node_addr(
+                    addr, use_default_when_falsey=True
+                )
                 if not normalised_addr:
                     continue
                 if isinstance(data, dict):
@@ -146,7 +150,9 @@ def build_coordinator_device_state(
             if not node_type:
                 continue
             bucket = normalised_addresses.setdefault(node_type, [])
-            if isinstance(raw_addrs, Iterable) and not isinstance(raw_addrs, (str, bytes)):
+            if isinstance(raw_addrs, Iterable) and not isinstance(
+                raw_addrs, (str, bytes)
+            ):
                 seen: set[str] = set(bucket)
                 for candidate in raw_addrs:
                     normalised_addr = normalize_node_addr(
@@ -166,9 +172,7 @@ def build_coordinator_device_state(
             normalised_sections[node_type] = dict(raw_section)
 
     type_keys = (
-        set(normalised_settings)
-        | set(normalised_addresses)
-        | set(normalised_sections)
+        set(normalised_settings) | set(normalised_addresses) | set(normalised_sections)
     )
     nodes_by_type: dict[str, dict[str, Any]] = {}
 
@@ -676,6 +680,29 @@ def _install_stubs() -> None:
     helpers_mod = sys.modules.get("homeassistant.helpers") or types.ModuleType(
         "homeassistant.helpers"
     )
+    service_mod = sys.modules.get("homeassistant.helpers.service") or types.ModuleType(
+        "homeassistant.helpers.service"
+    )
+
+    class _ReferencedEntities:
+        def __init__(
+            self,
+            referenced_entity_ids: Iterable[str] | None = None,
+            indirectly_referenced_entity_ids: Iterable[str] | None = None,
+        ) -> None:
+            self.referenced_entity_ids = list(referenced_entity_ids or [])
+            self.indirectly_referenced_entity_ids = list(
+                indirectly_referenced_entity_ids or []
+            )
+
+    if not hasattr(service_mod, "async_extract_referenced_entity_ids"):
+        service_mod.async_extract_referenced_entity_ids = AsyncMock(
+            return_value=_ReferencedEntities()
+        )
+    if not hasattr(service_mod, "ReferencedEntities"):
+        service_mod.ReferencedEntities = _ReferencedEntities  # type: ignore[attr-defined]
+
+    helpers_mod.service = service_mod
     try:
         from homeassistant.helpers import frame as frame_mod  # type: ignore[import-not-found]
     except Exception:  # pragma: no cover - fallback when HA not installed
@@ -755,6 +782,7 @@ def _install_stubs() -> None:
     sys.modules["homeassistant.data_entry_flow"] = data_entry_flow_mod
     sys.modules["homeassistant.helpers.entity"] = entity_mod
     sys.modules["homeassistant.helpers.entity_registry"] = entity_registry_mod
+    sys.modules["homeassistant.helpers.service"] = service_mod
     sys.modules["homeassistant.helpers.dispatcher"] = dispatcher_mod
     sys.modules["homeassistant.helpers.translation"] = translation_mod
     sys.modules["homeassistant.helpers.update_coordinator"] = update_coordinator_mod
@@ -1708,7 +1736,9 @@ class FakeCoordinator:
                 if isinstance(bucket, Mapping):
                     normalised_settings[node_type] = dict(bucket)
 
-        addresses_source = base.get("addresses_by_type") if isinstance(record, Mapping) else None
+        addresses_source = (
+            base.get("addresses_by_type") if isinstance(record, Mapping) else None
+        )
         normalised_addresses: dict[str, list[str]] = {}
         if isinstance(addresses_source, Mapping):
             for node_type, addrs in addresses_source.items():
@@ -1787,8 +1817,7 @@ class FakeCoordinator:
         self.update_interval = dt.timedelta(seconds=base_interval or 0)
         if data is not None:
             self.data = {
-                key: self._normalise_device_record(value)
-                for key, value in data.items()
+                key: self._normalise_device_record(value) for key, value in data.items()
             }
         elif dev_id:
             self.data = {dev_id: self.dev}

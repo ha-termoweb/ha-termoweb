@@ -11,7 +11,7 @@ from typing import Any, cast
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import entity_registry as er, service
 
 from .api import RESTClient
 from .const import DOMAIN
@@ -851,15 +851,23 @@ async def async_register_import_energy_history_service(
         logger.debug("service import_energy_history called")
         reset = bool(call.data.get("reset_progress", False))
         max_days = call.data.get("max_history_retrieval")
-        ent_ids = call.data.get("entity_id")
+
+        ent_ids: set[str] = set()
+        extracted = await service.async_extract_referenced_entity_ids(hass, call)
+        ent_ids.update(extracted.referenced_entity_ids)
+        ent_ids.update(extracted.indirectly_referenced_entity_ids)
+
+        raw_entity_ids = call.data.get("entity_id")
+        if isinstance(raw_entity_ids, str):
+            ent_ids.add(raw_entity_ids)
+        elif isinstance(raw_entity_ids, Iterable):
+            ent_ids.update(eid for eid in raw_entity_ids if isinstance(eid, str))
         tasks = []
         records = hass.data.get(DOMAIN, {})
         if not isinstance(records, Mapping):
             records = {}
         if ent_ids:
             ent_reg = registry_mod.async_get(hass)
-            if isinstance(ent_ids, str):
-                ent_ids = [ent_ids]
             entry_pairs: dict[str, set[tuple[str, str]]] = {}
 
             def _parse_energy_unique_id(unique_id: str) -> tuple[str, str] | None:

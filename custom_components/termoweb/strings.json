@@ -88,7 +88,7 @@
     },
     "import_energy_history": {
       "name": "Import energy history",
-      "description": "Import historical hourly energy counters for TermoWeb heaters up to one year ago into Home Assistant statistics.",
+      "description": "Import historical hourly energy counters for TermoWeb heaters up to one year ago into Home Assistant statistics. Target entities, devices, or areas to limit the import, or omit the target to refresh every TermoWeb config entry.",
       "fields": {
         "reset_progress": {
           "name": "Reset progress",
