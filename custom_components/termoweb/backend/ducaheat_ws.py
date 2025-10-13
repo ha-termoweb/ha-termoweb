@@ -1139,18 +1139,15 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     record_mapping.update(existing_record)
                 domain_bucket[self.entry_id] = record_mapping
 
-            inventory_container: Inventory | None = None
-            for candidate in (
-                self._inventory,
-                record_mapping.get("inventory"),
-                getattr(self._coordinator, "_inventory", None),
-                getattr(self._coordinator, "inventory", None),
-            ):
-                if isinstance(candidate, Inventory):
-                    inventory_container = candidate
-                    break
-
-            if not isinstance(inventory_container, Inventory):
+            try:
+                inventory_container = Inventory.require_from_context(
+                    inventory=self._inventory,
+                    container=record_mapping,
+                    hass=self.hass,
+                    entry_id=self.entry_id,
+                    coordinator=self._coordinator,
+                )
+            except LookupError:
                 _LOGGER.error(
                     "WS (ducaheat): missing inventory for device %s; skipping heater subscriptions",
                     self.dev_id,
@@ -1158,7 +1155,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 return 0
 
             self._inventory = inventory_container
-            record_mapping["inventory"] = inventory_container
 
             energy_coordinator = record_mapping.get("energy_coordinator")
             if hasattr(energy_coordinator, "update_addresses"):

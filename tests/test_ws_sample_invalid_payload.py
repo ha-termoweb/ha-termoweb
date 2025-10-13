@@ -7,6 +7,7 @@ from typing import Any
 
 from custom_components.termoweb.backend.ws_client import forward_ws_sample_updates
 from custom_components.termoweb.const import DOMAIN
+from custom_components.termoweb.inventory import Inventory, build_node_inventory
 
 
 class EnergyCoordinatorStub:
@@ -34,7 +35,20 @@ def test_forward_ws_sample_updates_ignores_non_mapping_sections() -> None:
 
     entry_id = "entry"
     coordinator = EnergyCoordinatorStub()
-    hass = SimpleNamespace(data={DOMAIN: {entry_id: {"energy_coordinator": coordinator}}})
+    hass = SimpleNamespace(
+        data={
+            DOMAIN: {
+                entry_id: {
+                    "energy_coordinator": coordinator,
+                    "inventory": Inventory(
+                        "dev",
+                        {"nodes": [{"type": "htr", "addr": "1"}]},
+                        build_node_inventory({"nodes": [{"type": "htr", "addr": "1"}]}),
+                    ),
+                }
+            }
+        }
+    )
 
     forward_ws_sample_updates(
         hass,

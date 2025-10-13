@@ -30,7 +30,6 @@ from .heater import (
     log_skipped_nodes,
     register_climate_entity_id,
     resolve_boost_runtime_minutes,
-    resolve_entry_inventory,
 )
 from .identifiers import build_heater_entity_unique_id
 from .inventory import (
@@ -55,14 +54,13 @@ async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
 
-    inventory = resolve_entry_inventory(data)
-
-
-    if not isinstance(inventory, Inventory):
+    try:
+        inventory = Inventory.require_from_context(container=data)
+    except LookupError as err:
         _LOGGER.error(
             "TermoWeb climate setup missing inventory for device %s", dev_id
         )
-        return
+        raise ValueError("TermoWeb inventory unavailable for climate platform") from err
 
     def default_name_simple(addr: str) -> str:
         """Return fallback name for heater nodes."""

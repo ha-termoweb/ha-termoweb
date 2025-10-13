@@ -23,7 +23,6 @@ from .heater import (
     DispatcherSubscriptionHelper,
     derive_boost_state,
     log_skipped_nodes,
-    resolve_entry_inventory,
 )
 from .identifiers import build_heater_entity_unique_id
 from .inventory import Inventory, normalize_node_addr, normalize_node_type
@@ -41,12 +40,13 @@ async def async_setup_entry(hass, entry, async_add_entities):
     dev_id = data["dev_id"]
     gateway = GatewayOnlineBinarySensor(coord, entry.entry_id, dev_id)
 
-    inventory = resolve_entry_inventory(data)
-    if inventory is None:
+    try:
+        inventory = Inventory.require_from_context(container=data)
+    except LookupError as err:
         _LOGGER.error(
             "TermoWeb heater setup missing inventory for device %s", dev_id
         )
-        raise ValueError("TermoWeb inventory unavailable for heater platform")
+        raise ValueError("TermoWeb inventory unavailable for heater platform") from err
 
     boost_entities: list[BinarySensorEntity] = []
     for node_type, addr_str, base_name in _iter_boostable_inventory_nodes(

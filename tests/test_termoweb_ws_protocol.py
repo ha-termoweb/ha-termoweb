@@ -156,7 +156,16 @@ def _make_client(
     hass = HomeAssistant()
     hass.loop = hass_loop
     hass.loop_thread_id = threading.get_ident()
-    hass.data.setdefault(module.DOMAIN, {})["entry"] = {}
+    inventory_payload = {"nodes": [{"type": "htr", "addr": "1"}]}
+    default_inventory = Inventory(
+        "device",
+        inventory_payload,
+        build_node_inventory(inventory_payload),
+    )
+    hass.data.setdefault(module.DOMAIN, {})["entry"] = {
+        "dev_id": "device",
+        "inventory": default_inventory,
+    }
     coordinator = SimpleNamespace(update_nodes=MagicMock(), data={}, inventory=None)
     client = module.WebSocketClient(
         hass,
@@ -1279,12 +1288,14 @@ def test_apply_heater_addresses_logs_invalid_inventory(
     )
     client._inventory = inventory
 
-    with caplog.at_level("DEBUG"):
+    with caplog.at_level("ERROR"):
         client._apply_heater_addresses(
             {"htr": ["4"]},
             inventory=[SimpleNamespace(type="htr", addr="4")],
         )
-    assert "ignoring unexpected inventory container" in caplog.text
+
+    assert client._inventory is inventory
+    assert "missing inventory" not in caplog.text
 
 
 

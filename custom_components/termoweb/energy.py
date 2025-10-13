@@ -351,7 +351,6 @@ async def async_import_energy_history(
         return
     client: RESTClient = rec["client"]
     dev_id: str = rec["dev_id"]
-    stored_inventory = rec.get("inventory") if isinstance(rec, Mapping) else None
 
     if nodes is not None and not isinstance(nodes, Inventory):
         raise TypeError(
@@ -361,14 +360,13 @@ async def async_import_energy_history(
     inventory: Inventory | None
     selection_spec = selection
 
-    if nodes is not None:
-        inventory = nodes
-    elif isinstance(stored_inventory, Inventory):
-        inventory = stored_inventory
-    else:
-        inventory = None
-
-    if inventory is None:
+    container = rec if isinstance(rec, Mapping) else None
+    try:
+        inventory = Inventory.require_from_context(
+            inventory=nodes,
+            container=container,
+        )
+    except LookupError:
         logger.error(
             "%s: energy import aborted; inventory missing in integration state",
             dev_id,
@@ -889,15 +887,11 @@ async def async_register_import_energy_history_service(
                 if not ent:
                     continue
                 record = records.get(entry_id)
-                inventory: Inventory | None = None
-                if isinstance(record, Mapping):
-                    stored = record.get("inventory")
-                    if isinstance(stored, Inventory):
-                        inventory = stored
-                if inventory is None:
-                    dev = None
-                    if isinstance(record, Mapping):
-                        dev = record.get("dev_id")
+                container = record if isinstance(record, Mapping) else None
+                try:
+                    inventory = Inventory.require_from_context(container=container)
+                except LookupError:
+                    dev = record.get("dev_id") if isinstance(record, Mapping) else None
                     logger.error(
                         "%s: energy import aborted; inventory missing in integration state (entry=%s)",
                         dev,
@@ -928,8 +922,9 @@ async def async_register_import_energy_history_service(
                 ent: ConfigEntry | None = rec.get("config_entry")
                 if not ent:
                     continue
-                inventory = rec.get("inventory")
-                if not isinstance(inventory, Inventory):
+                try:
+                    inventory = Inventory.require_from_context(container=rec)
+                except LookupError:
                     entry_id = getattr(ent, "entry_id", "<unknown>")
                     logger.error(
                         "%s: energy import aborted; inventory missing in integration state (entry=%s)",
