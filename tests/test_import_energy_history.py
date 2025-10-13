@@ -282,6 +282,45 @@ async def test_get_last_statistics_compat_uses_modern_signature(
 
 
 @pytest.mark.asyncio
+async def test_get_last_statistics_compat_handles_convert_units_requirement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sync helpers that require convert_units should retain keyword safety."""
+
+    calls: dict[str, Any] = {}
+
+    def _convert_helper(
+        hass_obj: Any,
+        number_of_stats: int,
+        statistic_id: str,
+        convert_units: bool,
+        types: set[str],
+    ) -> dict[str, list[Any]]:
+        calls["args"] = (
+            hass_obj,
+            number_of_stats,
+            statistic_id,
+            convert_units,
+            types,
+        )
+        return {statistic_id: []}
+
+    energy_module, hass, _ = _setup_last_statistics_environment(
+        monkeypatch, sync_helper=_convert_helper
+    )
+
+    result = await energy_module._get_last_statistics_compat(
+        hass,
+        4,
+        "sensor.convert",
+        types={"sum"},
+    )
+
+    assert result == {"sensor.convert": []}
+    assert calls["args"] == (hass, 4, "sensor.convert", True, {"sum"})
+
+
+@pytest.mark.asyncio
 async def test_get_last_statistics_compat_handles_legacy_signature(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
