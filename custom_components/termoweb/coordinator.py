@@ -781,13 +781,10 @@ class EnergyStateCoordinator(
         """Return the compatibility aliases exposed by the inventory."""
 
         inventory = self._resolve_inventory()
-        _, heater_aliases = inventory.heater_sample_address_map
-        _, power_aliases = inventory.power_monitor_sample_address_map
-
-        alias_map: dict[str, str] = {**heater_aliases, **power_aliases}
-        for node_type in ENERGY_NODE_TYPES:
-            alias_map.setdefault(node_type, node_type)
-        return alias_map
+        return inventory.sample_alias_map(
+            include_types=ENERGY_NODE_TYPES,
+            restrict_to=ENERGY_NODE_TYPES,
+        )
 
     def update_addresses(
         self,
