@@ -18,11 +18,11 @@ from .boost import (
     coerce_boost_bool,
     coerce_boost_minutes,
     coerce_boost_remaining_minutes,
-    iter_inventory_heater_metadata,
     supports_boost,
 )
 from .const import DOMAIN, signal_ws_data
 from .inventory import (
+    HEATER_NODE_TYPES,
     Inventory,
     Node,
     normalize_node_addr,
@@ -85,8 +85,9 @@ def _build_boost_button_metadata() -> tuple[BoostButtonMetadata, ...]:
     )
 
 
-BOOST_BUTTON_METADATA: Final[tuple[BoostButtonMetadata, ...]] = _build_boost_button_metadata()
-
+BOOST_BUTTON_METADATA: Final[tuple[BoostButtonMetadata, ...]] = (
+    _build_boost_button_metadata()
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -524,7 +525,10 @@ def iter_boostable_heater_nodes(
     elif isinstance(details, Inventory):  # pragma: no cover - compatibility shim
         metadata_iter = (
             (meta.node_type, meta.node, meta.addr, meta.name)
-            for meta in iter_inventory_heater_metadata(details)
+            for meta in details.iter_nodes_metadata(
+                node_types=HEATER_NODE_TYPES,
+                default_name_simple=lambda addr: f"Heater {addr}",
+            )
         )
     else:
         return
@@ -664,7 +668,9 @@ def derive_boost_state(
 
     placeholder_iso = boost_end_iso.strip() if isinstance(boost_end_iso, str) else None
     placeholder_detected = False
-    if (boost_end_dt is not None and boost_end_dt.year <= 1971) or (placeholder_iso and placeholder_iso.startswith("1970-")):
+    if (boost_end_dt is not None and boost_end_dt.year <= 1971) or (
+        placeholder_iso and placeholder_iso.startswith("1970-")
+    ):
         placeholder_detected = True
 
     if placeholder_detected:
@@ -785,6 +791,7 @@ def log_skipped_nodes(
             addrs or "<no-addr>",
         )
 
+
 def heater_platform_details_for_entry(
     entry_data: Mapping[str, Any] | None,
     *,
@@ -800,7 +807,9 @@ def heater_platform_details_for_entry(
             dev_id = entry_data.get("dev_id")  # type: ignore[assignment]
         _LOGGER.error(
             "TermoWeb heater setup missing inventory for device %s",
-            (dev_id or "<unknown>") if isinstance(dev_id, str) and dev_id else "<unknown>",
+            (dev_id or "<unknown>")
+            if isinstance(dev_id, str) and dev_id
+            else "<unknown>",
         )
         raise ValueError("TermoWeb inventory unavailable for heater platform") from err
 
@@ -977,9 +986,7 @@ class HeaterNodeBase(CoordinatorEntity):
             return coordinator_inventory
 
         unique_id = getattr(self, "_attr_unique_id", None) or self._dev_id
-        _LOGGER.error(
-            "TermoWeb heater %s missing immutable inventory cache", unique_id
-        )
+        _LOGGER.error("TermoWeb heater %s missing immutable inventory cache", unique_id)
         raise ValueError("TermoWeb heater inventory unavailable")
 
     def _heater_section(self) -> dict[str, Any]:

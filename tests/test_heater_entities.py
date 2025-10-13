@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from typing import Any, Callable
+from typing import Any, Callable, Iterable, Iterator
 
 import pytest
 from unittest.mock import MagicMock
@@ -13,7 +13,11 @@ from conftest import _install_stubs, make_ws_payload
 _install_stubs()
 
 from custom_components.termoweb import boost as boost_module, heater as heater_module
-from custom_components.termoweb.inventory import Inventory, build_node_inventory
+from custom_components.termoweb.inventory import (
+    Inventory,
+    InventoryNodeMetadata,
+    build_node_inventory,
+)
 from custom_components.termoweb.const import DOMAIN, signal_ws_data
 from custom_components.termoweb.binary_sensor import HeaterBoostActiveBinarySensor
 from custom_components.termoweb.sensor import (
@@ -166,7 +170,9 @@ def test_heater_section_requires_inventory_for_addresses() -> None:
     assert heater.available is False
 
 
-def test_heater_resolve_inventory_logs_missing(caplog: pytest.LogCaptureFixture) -> None:
+def test_heater_resolve_inventory_logs_missing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Inventory resolution should raise when the immutable cache is missing."""
 
     caplog.set_level("ERROR")
@@ -180,7 +186,9 @@ def test_heater_resolve_inventory_logs_missing(caplog: pytest.LogCaptureFixture)
     assert "missing immutable inventory cache" in caplog.text
 
 
-def test_heater_platform_details_missing_inventory(caplog: pytest.LogCaptureFixture) -> None:
+def test_heater_platform_details_missing_inventory(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Inventory resolution should raise when device metadata is absent."""
 
     caplog.set_level("ERROR")
@@ -359,7 +367,9 @@ def test_derive_boost_state_parses_string_end(monkeypatch: pytest.MonkeyPatch) -
     assert state.end_label is None
 
 
-def test_derive_boost_state_handles_now_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_derive_boost_state_handles_now_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Ensure boost end derivation tolerates errors from ``dt_util.now``."""
 
     def _raise_now() -> datetime:
@@ -399,7 +409,9 @@ def test_derive_boost_state_normalises_epoch_placeholder(
     assert state.end_label == "Never"
 
 
-def test_derive_boost_state_uses_parse_datetime(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_derive_boost_state_uses_parse_datetime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Verify ``dt_util.parse_datetime`` is leveraged when available."""
 
     iso_value = "2024-01-02T03:04:05+00:00"
@@ -436,7 +448,9 @@ def test_boost_entities_expose_state(monkeypatch: pytest.MonkeyPatch) -> None:
     }
 
     def _resolver(day: int, minute: int, *, now=None) -> tuple[datetime, int]:
-        raise AssertionError("resolver should not be used when derived metadata present")
+        raise AssertionError(
+            "resolver should not be used when derived metadata present"
+        )
 
     raw_nodes = [{"type": "acm", "addr": "1", "name": "Accumulator"}]
     inventory = Inventory("dev", {"nodes": raw_nodes}, build_node_inventory(raw_nodes))
@@ -691,7 +705,7 @@ def test_boost_runtime_store_handles_non_mapping() -> None:
     assert entry_data[heater_module._BOOST_RUNTIME_KEY] is created
 
 
-def test_iter_inventory_heater_metadata_uses_inventory() -> None:
+def test_iter_nodes_metadata_uses_inventory() -> None:
     """Inventory helper should yield metadata with resolved names."""
 
     raw_nodes = {
@@ -705,30 +719,29 @@ def test_iter_inventory_heater_metadata_uses_inventory() -> None:
     inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
 
     results = list(
-        boost_module.iter_inventory_heater_metadata(
-            inventory,
+        inventory.iter_nodes_metadata(
+            node_types=("htr", "acm"),
             default_name_simple=lambda addr: f"Heater {addr}",
         )
     )
 
-    pairs = sorted((node_type, addr) for node_type, addr, _, _ in results)
-    assert pairs == sorted([
-        ("htr", "1"),
-        ("acm", "2"),
-        ("acm", "3"),
-    ])
-    names = {addr: name for _, addr, name, _ in results}
+    pairs = sorted((meta.node_type, meta.addr) for meta in results)
+    assert pairs == sorted(
+        [
+            ("htr", "1"),
+            ("acm", "2"),
+            ("acm", "3"),
+        ]
+    )
+    names = {meta.addr: meta.name for meta in results}
     assert names["1"] == "Living"
     assert names["2"] == "Accumulator 2"
     assert names["3"] == "Storage"
-    supports = {
-        addr: boost_module.supports_boost(node)
-        for _, addr, _, node in results
-    }
+    supports = {meta.addr: boost_module.supports_boost(meta.node) for meta in results}
     assert supports == {"1": False, "2": True, "3": True}
 
 
-def test_iter_inventory_heater_metadata_uses_inventory_method(
+def test_iter_nodes_metadata_uses_inventory_method(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Generator should source node data from inventory iterator."""
@@ -736,39 +749,35 @@ def test_iter_inventory_heater_metadata_uses_inventory_method(
     inventory = Inventory("dev", {}, [])
     default_factory = lambda addr: f"Heater {addr}"
 
-    node = SimpleNamespace(
+    metadata = InventoryNodeMetadata(
+        node_type="acm",
+        node=SimpleNamespace(addr="2", type="acm", supports_boost=lambda: "true"),
         addr="2",
-        type="acm",
-        supports_boost=lambda: "true",
+        name="Resolved acm 2",
     )
 
-    def _fake_iter(self: Inventory, default_name_simple: Callable[[str], str]):
+    def _fake_iter(
+        self: Inventory,
+        *,
+        node_types: Iterable[str] | None = None,
+        default_name_simple: Callable[[str], str] | None = None,
+    ) -> Iterator[InventoryNodeMetadata]:
         assert self is inventory
+        assert node_types == ("htr", "acm") or set(node_types or []) == {"htr", "acm"}
         assert default_name_simple is default_factory
-        yield ("acm", node, "2", "Resolved acm 2")
+        yield metadata
 
-    monkeypatch.setattr(Inventory, "iter_heater_platform_metadata", _fake_iter)
+    monkeypatch.setattr(Inventory, "iter_nodes_metadata", _fake_iter)
 
     results = list(
-        boost_module.iter_inventory_heater_metadata(
-            inventory,
+        inventory.iter_nodes_metadata(
+            node_types=("htr", "acm"),
             default_name_simple=default_factory,
         )
     )
 
-    assert len(results) == 1
-    node_type, addr, name, resolved_node = results[0]
-    assert resolved_node is node
-    assert node_type == "acm"
-    assert addr == "2"
-    assert name == "Resolved acm 2"
-    assert boost_module.supports_boost(resolved_node) is True
-
-
-def test_iter_inventory_heater_metadata_handles_missing() -> None:
-    """Generator should gracefully handle missing inventory."""
-
-    assert list(boost_module.iter_inventory_heater_metadata(None)) == []
+    assert results == [metadata]
+    assert boost_module.supports_boost(results[0].node) is True
 
 
 def test_boost_runtime_helpers_guard_invalid_structures() -> None:

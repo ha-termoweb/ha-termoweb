@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 import logging
 import math
 from typing import Any, Final
 
 from homeassistant.util import dt as dt_util
-
-from .inventory import Inventory, Node
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -174,27 +171,5 @@ def resolve_boost_end_from_fields(
     return selected, minutes_remaining
 
 
-type HeaterInventoryEntry = tuple[str, str, str, Node]
-"""Type alias describing ``(node_type, addr, name, node)`` tuples."""
-
-
-def iter_inventory_heater_metadata(
-    inventory: Inventory | None,
-    *,
-    default_name_simple: Callable[[str], str] | None = None,
-) -> Iterator[HeaterInventoryEntry]:
-    """Yield ``(node_type, addr, name, node)`` tuples for heater nodes."""
-
-    if not isinstance(inventory, Inventory):
-        return
-
-    default_factory = default_name_simple or (lambda addr: f"Heater {addr}")
-
-    for node_type, node, addr, name in inventory.iter_heater_platform_metadata(
-        default_factory
-    ):
-        yield node_type, addr, name, node
-
 ALLOWED_BOOST_MINUTES: Final[tuple[int, ...]] = tuple(range(60, 601, 60))
 """Valid boost durations (in minutes) supported by TermoWeb heaters."""
-

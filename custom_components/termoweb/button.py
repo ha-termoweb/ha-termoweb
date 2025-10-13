@@ -24,7 +24,6 @@ except ImportError:  # pragma: no cover - executed in unit test stubs
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .boost import iter_inventory_heater_metadata
 from .const import DOMAIN
 from .heater import (
     BOOST_BUTTON_METADATA,
@@ -99,15 +98,13 @@ class AccumulatorBoostContext:
 
 def _iter_accumulator_contexts(
     entry_id: str,
-    inventory: Inventory | None,
+    inventory: Inventory,
 ) -> Iterator[AccumulatorBoostContext]:
     """Yield boost contexts for accumulator nodes in ``inventory``."""
 
-    if not isinstance(inventory, Inventory):
-        return
-
-    for node_type, _addr, _name, node in iter_inventory_heater_metadata(inventory):
-        if node_type != "acm" or not isinstance(node, AccumulatorNode):
+    for metadata in inventory.iter_nodes_metadata(node_types=("acm",)):
+        node = metadata.node
+        if not isinstance(node, AccumulatorNode):
             continue
         yield AccumulatorBoostContext.from_inventory(entry_id, inventory, node)
 
@@ -125,9 +122,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     try:
         inventory = Inventory.require_from_context(container=data)
     except LookupError as err:
-        _LOGGER.error(
-            "TermoWeb button setup missing inventory for device %s", dev_id
-        )
+        _LOGGER.error("TermoWeb button setup missing inventory for device %s", dev_id)
         raise ValueError("TermoWeb inventory unavailable for button platform") from err
 
     log_skipped_nodes("button", inventory, logger=_LOGGER)

@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import types
-from typing import Any
+from typing import Any, Callable, Iterable, Iterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -20,7 +20,12 @@ import custom_components.termoweb.button as button_module
 import custom_components.termoweb.heater as heater_module
 from custom_components.termoweb import identifiers as identifiers_module
 from custom_components.termoweb.const import DOMAIN, signal_ws_status
-from custom_components.termoweb.inventory import AccumulatorNode, HeaterNode, Inventory
+from custom_components.termoweb.inventory import (
+    AccumulatorNode,
+    HeaterNode,
+    Inventory,
+    InventoryNodeMetadata,
+)
 from custom_components.termoweb.utils import build_gateway_device_info
 
 GatewayOnlineBinarySensor = binary_sensor_module.GatewayOnlineBinarySensor
@@ -166,36 +171,37 @@ def test_iter_boostable_inventory_nodes_uses_inventory_helper(
 ) -> None:
     inventory = Inventory("dev", {"nodes": []}, [])
 
-    meta: list[tuple[str, str, str, Any]] = [
-        (
-            "acm",
-            "01",
-            "Accumulator 01",
-            types.SimpleNamespace(supports_boost=lambda: False),
+    metadata = [
+        InventoryNodeMetadata(
+            node_type="acm",
+            addr="01",
+            name="Accumulator 01",
+            node=types.SimpleNamespace(supports_boost=lambda: False),
         ),
-        (
-            "htr",
-            " 2 ",
-            "Heater 2",
-            types.SimpleNamespace(supports_boost=lambda: True),
+        InventoryNodeMetadata(
+            node_type="htr",
+            addr=" 2 ",
+            name="Heater 2",
+            node=types.SimpleNamespace(supports_boost=lambda: True),
         ),
-        (
-            "",
-            "3",
-            "Invalid",
-            types.SimpleNamespace(supports_boost=lambda: True),
+        InventoryNodeMetadata(
+            node_type="",
+            addr="3",
+            name="Invalid",
+            node=types.SimpleNamespace(supports_boost=lambda: True),
         ),
     ]
 
-    def _fake_iter(inv: Inventory):
-        assert inv is inventory
-        yield from meta
+    def _fake_iter(
+        self: Inventory,
+        *,
+        node_types: Iterable[str] | None = None,
+        default_name_simple: Callable[[str], str] | None = None,
+    ) -> Iterator[InventoryNodeMetadata]:
+        assert self is inventory
+        yield from metadata
 
-    monkeypatch.setattr(
-        binary_sensor_module,
-        "iter_inventory_heater_metadata",
-        _fake_iter,
-    )
+    monkeypatch.setattr(Inventory, "iter_nodes_metadata", _fake_iter)
 
     results = list(binary_sensor_module._iter_boostable_inventory_nodes(inventory))
 
@@ -497,27 +503,43 @@ def test_iter_accumulator_contexts_uses_inventory_metadata(
     entry_id = "entry-meta"
     dev_id = "device-meta"
     canonical = AccumulatorNode(name="Accumulator A", addr="1")
-    inventory = Inventory(dev_id, {"nodes": []}, [canonical, HeaterNode(name="Heater", addr="2")])
+    inventory = Inventory(
+        dev_id, {"nodes": []}, [canonical, HeaterNode(name="Heater", addr="2")]
+    )
 
     metadata = [
-        ("acm", "1", "Accumulator A", canonical),
-        ("acm", "3", "Accumulator B", types.SimpleNamespace(addr="3", type="acm")),
-        ("htr", "2", "Heater", HeaterNode(name="Heater", addr="2")),
+        InventoryNodeMetadata(
+            node_type="acm",
+            addr="1",
+            name="Accumulator A",
+            node=canonical,
+        ),
+        InventoryNodeMetadata(
+            node_type="acm",
+            addr="3",
+            name="Accumulator B",
+            node=types.SimpleNamespace(addr="3", type="acm"),
+        ),
+        InventoryNodeMetadata(
+            node_type="htr",
+            addr="2",
+            name="Heater",
+            node=HeaterNode(name="Heater", addr="2"),
+        ),
     ]
 
-    def _fake_iter(inv: Inventory, **_kwargs):
-        assert inv is inventory
+    def _fake_iter(
+        self: Inventory,
+        *,
+        node_types: Iterable[str] | None = None,
+        default_name_simple: Callable[[str], str] | None = None,
+    ) -> Iterator[InventoryNodeMetadata]:
+        assert self is inventory
         yield from metadata
 
-    monkeypatch.setattr(
-        button_module,
-        "iter_inventory_heater_metadata",
-        _fake_iter,
-    )
+    monkeypatch.setattr(Inventory, "iter_nodes_metadata", _fake_iter)
 
-    contexts = list(
-        button_module._iter_accumulator_contexts(entry_id, inventory)
-    )
+    contexts = list(button_module._iter_accumulator_contexts(entry_id, inventory))
 
     assert len(contexts) == 1
     context = contexts[0]

@@ -19,7 +19,9 @@ def test_supports_boost_accepts_boolean_attribute() -> None:
     assert boost_module.supports_boost(node) is True
 
 
-def test_supports_boost_handles_callable_failure(caplog: pytest.LogCaptureFixture) -> None:
+def test_supports_boost_handles_callable_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Callable ``supports_boost`` errors should be logged and return ``False``."""
 
     class FailingNode:
@@ -41,7 +43,7 @@ def test_supports_boost_defaults_to_false_for_unknown_value() -> None:
     assert boost_module.supports_boost(node) is False
 
 
-def test_iter_inventory_heater_metadata_covers_branch_variants(
+def test_iter_nodes_metadata_covers_branch_variants(
     monkeypatch: pytest.MonkeyPatch, inventory_builder
 ) -> None:
     """Inventory metadata iterator should cope with mixed node structures."""
@@ -96,15 +98,18 @@ def test_iter_inventory_heater_metadata_covers_branch_variants(
 
     monkeypatch.setattr(Inventory, "resolve_heater_name", _fake_resolve)
 
-    results = list(boost_module.iter_inventory_heater_metadata(inventory))
+    results = list(
+        inventory.iter_nodes_metadata(
+            node_types=("htr", "acm"),
+            default_name_simple=lambda addr: f"Heater {addr}",
+        )
+    )
 
-    assert [
-        (node_type, addr) for node_type, addr, _, _ in results
-    ] == [
+    assert [(meta.node_type, meta.addr) for meta in results] == [
         ("htr", "4"),
         ("acm", "5"),
     ]
-    assert results[0][2] == "htr:4"
-    assert boost_module.supports_boost(results[0][3]) is False
-    assert results[1][2] == "acm:5"
-    assert boost_module.supports_boost(results[1][3]) is True
+    assert results[0].name == "htr:4"
+    assert boost_module.supports_boost(results[0].node) is False
+    assert results[1].name == "acm:5"
+    assert boost_module.supports_boost(results[1].node) is True

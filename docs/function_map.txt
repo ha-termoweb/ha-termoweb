@@ -494,8 +494,6 @@ custom_components/termoweb/boost.py :: supports_boost
     Return ``True`` when ``node`` exposes boost controls.
 custom_components/termoweb/boost.py :: resolve_boost_end_from_fields
     Translate boost end ``day``/``minute`` fields into a timestamp.
-custom_components/termoweb/boost.py :: iter_inventory_heater_metadata
-    Yield metadata for heater nodes described by ``inventory``.
 custom_components/termoweb/button.py :: async_setup_entry
     Expose hub refresh and accumulator boost helper buttons.
 custom_components/termoweb/button.py :: async_setup_entry.default_name
@@ -992,6 +990,8 @@ custom_components/termoweb/inventory.py :: _collect_snapshot_addresses
     Return mapping of addresses to candidate payloads from ``section``.
 custom_components/termoweb/inventory.py :: _extract_snapshot_name
     Return best candidate name extracted from ``payloads``.
+custom_components/termoweb/inventory.py :: Inventory.iter_nodes_metadata
+    Yield canonical node metadata for the requested types.
 custom_components/termoweb/inventory.py :: _iter_node_payload
     Yield node dictionaries from a payload returned by the API.
 custom_components/termoweb/inventory.py :: _resolve_node_class
