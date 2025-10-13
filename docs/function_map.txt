@@ -768,8 +768,6 @@ custom_components/termoweb/energy.py :: _resolve_recorder_imports
     Return cached recorder helper imports.
 custom_components/termoweb/energy.py :: _resolve_statistics_helpers
     Return the recorder statistics helpers for compatibility shims.
-custom_components/termoweb/energy.py :: _async_extract_selected_entities
-    Resolve referenced entities using available Home Assistant helpers.
 custom_components/termoweb/energy.py :: _normalize_heater_sources
     Return canonical heater node address map for ``addrs``.
 custom_components/termoweb/energy.py :: _iso_date

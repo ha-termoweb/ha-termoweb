@@ -1259,7 +1259,6 @@ def test_import_energy_history_service_invocation(
 
         call = SimpleNamespace(
             data={
-                "entity_id": ["sensor.dev_a_energy", "sensor.dev_b_energy"],
                 "reset_progress": True,
                 "max_history_retrieval": 10,
             }
@@ -1267,9 +1266,7 @@ def test_import_energy_history_service_invocation(
         await service(call)
         assert import_mock.await_count == 1
         args, kwargs = import_mock.await_args
-        assert args[0] is stub_hass
-        assert args[1] is entry
-        assert args[2] == [("htr", "A"), ("acm", "B")]
+        assert args == (stub_hass, entry)
         assert kwargs == {"reset_progress": True, "max_days": 10}
 
         import_mock.reset_mock()
@@ -1277,9 +1274,7 @@ def test_import_energy_history_service_invocation(
         await service(call_all)
         assert import_mock.await_count == 1
         args, kwargs = import_mock.await_args
-        assert args[0] is stub_hass
-        assert args[1] is entry
-        assert len(args) == 2
+        assert args == (stub_hass, entry)
         assert kwargs == {"reset_progress": False, "max_days": 3}
 
     asyncio.run(_run())
@@ -1774,9 +1769,7 @@ def test_import_energy_history_service_error_logging(
             config_entry_id=entry2.entry_id,
         )
 
-        call = SimpleNamespace(
-            data={"entity_id": ["sensor.svc1_energy", "sensor.svc2_energy"]}
-        )
+        call = SimpleNamespace(data={})
         await service(call)
         assert len(log_calls) == 2
 
@@ -1938,12 +1931,13 @@ def test_import_energy_history_service_handles_string_ids_and_cancelled(
         )
 
         with pytest.raises(asyncio.CancelledError):
-            await service(SimpleNamespace(data={"entity_id": "sensor.valid"}))
+            await service(SimpleNamespace(data={}))
         assert cancel_import.await_count == 1
         cancel_import.reset_mock()
 
-        await service(SimpleNamespace(data={"entity_id": ["sensor.invalid"]}))
-        assert cancel_import.await_count == 0
+        with pytest.raises(asyncio.CancelledError):
+            await service(SimpleNamespace(data={}))
+        assert cancel_import.await_count == 1
 
     asyncio.run(_run())
 

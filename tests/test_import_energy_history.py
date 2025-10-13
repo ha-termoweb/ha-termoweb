@@ -1026,12 +1026,13 @@ def test_register_import_service_uses_module_asyncio(
         service = hass.services.get(const.DOMAIN, "import_energy_history")
         assert callable(service)
 
-        await service(
-            types.SimpleNamespace(data={"entity_id": ["sensor.dev_A_energy"]})
-        )
+        await service(types.SimpleNamespace(data={}))
 
         assert gather_calls == [1]
         import_mock.assert_awaited_once()
+        args, kwargs = import_mock.await_args
+        assert args == (hass, entry)
+        assert kwargs == {"reset_progress": False, "max_days": None}
 
     asyncio.run(_run())
 
@@ -1132,16 +1133,13 @@ def test_service_accepts_single_entity_id_string(
         assert gather_calls == [1]
         import_mock.assert_awaited_once()
         args, kwargs = import_mock.await_args
-        assert args[:2] == (hass, entry)
-        assert args[2] == [("htr", "A")]
+        assert args == (hass, entry)
         assert kwargs == {"reset_progress": False, "max_days": None}
 
     asyncio.run(_run())
 
 
-def test_service_resolves_targets_from_helper(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_service_runs_for_each_entry(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         (
             mod,
@@ -1154,10 +1152,11 @@ def test_service_resolves_targets_from_helper(
             _delete_stats,
             ConfigEntry,
             HomeAssistant,
-            ent_reg,
+            _ent_reg,
         ) = await _load_module(monkeypatch)
 
         hass = HomeAssistant()
+        hass.data = {const.DOMAIN: {}}
 
         entries: dict[str, ConfigEntry] = {}
         hass.config_entries = types.SimpleNamespace(
@@ -1165,49 +1164,35 @@ def test_service_resolves_targets_from_helper(
             async_get_entry=lambda entry_id: entries.get(entry_id),
         )
 
-        entry = ConfigEntry("cache-helper", options={})
-        entries[entry.entry_id] = entry
-
         raw_nodes = {"nodes": [{"type": "htr", "addr": "A"}]}
-        inventory = inventory_module.Inventory(
-            "dev",
+        inventory_a = inventory_module.Inventory(
+            "dev-a",
             raw_nodes,
             inventory_module.build_node_inventory(raw_nodes),
         )
-        hass.data = {const.DOMAIN: {}}
-        hass.data[const.DOMAIN][entry.entry_id] = {
-            "inventory": inventory,
-            "config_entry": entry,
-            "client": AsyncMock(),
-            "dev_id": "dev",
-        }
-
-        uid = identifiers_module.build_heater_energy_unique_id("dev", "htr", "A")
-        ent_reg.add(
-            "sensor.dev_A_energy",
-            "sensor",
-            const.DOMAIN,
-            uid,
-            "A energy",
-            config_entry_id=entry.entry_id,
+        inventory_b = inventory_module.Inventory(
+            "dev-b",
+            raw_nodes,
+            inventory_module.build_node_inventory(raw_nodes),
         )
 
-        gather_calls: list[int] = []
+        entry_a = ConfigEntry("cache-a", options={})
+        entry_b = ConfigEntry("cache-b", options={})
+        entries[entry_a.entry_id] = entry_a
+        entries[entry_b.entry_id] = entry_b
 
-        async def fake_gather(
-            *tasks: Any, return_exceptions: bool = False
-        ) -> list[Any]:
-            gather_calls.append(len(tasks))
-            results: list[Any] = []
-            for task in tasks:
-                try:
-                    results.append(await task)
-                except Exception as err:  # pragma: no cover - defensive
-                    if return_exceptions:
-                        results.append(err)
-                    else:
-                        raise
-            return results
+        hass.data[const.DOMAIN][entry_a.entry_id] = {
+            "inventory": inventory_a,
+            "config_entry": entry_a,
+            "client": AsyncMock(),
+            "dev_id": "dev-a",
+        }
+        hass.data[const.DOMAIN][entry_b.entry_id] = {
+            "inventory": inventory_b,
+            "config_entry": entry_b,
+            "client": AsyncMock(),
+            "dev_id": "dev-b",
+        }
 
         class Services:
             def __init__(self) -> None:
@@ -1224,17 +1209,18 @@ def test_service_resolves_targets_from_helper(
 
         hass.services = Services()
 
-        monkeypatch.setattr(energy_mod.asyncio, "gather", fake_gather)
+        gather_calls: list[int] = []
 
-        helper_result = energy_mod.service.ReferencedEntities(
-            ["sensor.dev_A_energy"],
-            [],
-        )
-        monkeypatch.setattr(
-            energy_mod.service,
-            "async_extract_referenced_entity_ids",
-            AsyncMock(return_value=helper_result),
-        )
+        async def fake_gather(
+            *tasks: Any, return_exceptions: bool = False
+        ) -> list[Any]:
+            gather_calls.append(len(tasks))
+            results: list[Any] = []
+            for task in tasks:
+                results.append(await task)
+            return results
+
+        monkeypatch.setattr(energy_mod.asyncio, "gather", fake_gather)
 
         import_mock = AsyncMock()
         await energy_mod.async_register_import_energy_history_service(hass, import_mock)
@@ -1242,12 +1228,12 @@ def test_service_resolves_targets_from_helper(
         service = hass.services.get(const.DOMAIN, "import_energy_history")
         await service(types.SimpleNamespace(data={}))
 
-        assert gather_calls == [1]
-        import_mock.assert_awaited_once()
-        args, kwargs = import_mock.await_args
-        assert args[:2] == (hass, entry)
-        assert args[2] == [("htr", "A")]
-        assert kwargs == {"reset_progress": False, "max_days": None}
+        assert gather_calls == [2]
+        assert import_mock.await_count == 2
+        awaited_entries = {call.args for call in import_mock.await_args_list}
+        assert awaited_entries == {(hass, entry_a), (hass, entry_b)}
+        for call in import_mock.await_args_list:
+            assert call.kwargs == {"reset_progress": False, "max_days": None}
 
     asyncio.run(_run())
 
@@ -1295,6 +1281,10 @@ def test_import_energy_history_requested_map_filters(
                     {"t": 86_400, "counter": 3_000},
                     {"t": 92_400, "counter": 5_000},
                 ],
+                [
+                    {"t": 86_400, "counter": 7_000},
+                    {"t": 92_400, "counter": 9_000},
+                ],
             ]
         )
 
@@ -1302,7 +1292,7 @@ def test_import_energy_history_requested_map_filters(
             "nodes": [
                 {"type": "htr", "addr": "A"},
                 {"type": "acm", "addr": "B"},
-                {"type": "pmo", "addr": "ignored"},
+                {"type": "pmo", "addr": "C"},
             ]
         }
         snapshot_inventory = inventory_module.Inventory(
@@ -1344,6 +1334,15 @@ def test_import_energy_history_requested_map_filters(
             "B energy",
             config_entry_id=entry.entry_id,
         )
+        uid_p = identifiers_module.build_heater_energy_unique_id("dev", "pmo", "C")
+        ent_reg.add(
+            "sensor.dev_C_energy",
+            "sensor",
+            const.DOMAIN,
+            uid_p,
+            "C energy",
+            config_entry_id=entry.entry_id,
+        )
 
         monotonic_counter = itertools.count(start=0.0, step=1.0)
         fake_now = 3 * 86_400
@@ -1368,22 +1367,15 @@ def test_import_energy_history_requested_map_filters(
         await mod._async_import_energy_history(
             hass,
             entry,
-            selection={
-                "htr": ["A", "B", "B"],
-                "acm": "B",
-                "": ["ignored"],
-                "thm": ["Z"],
-                "pmo": [],
-            },
         )
 
         throttle_module.reset_samples_rate_limit_state(
             time_module=time, sleep=asyncio.sleep
         )
 
-        assert client.get_node_samples.await_count >= 2
+        assert client.get_node_samples.await_count >= 3
         progress = entry.options[energy_mod.OPTION_ENERGY_HISTORY_PROGRESS]
-        assert set(progress) >= {"htr:A", "acm:B"}
+        assert set(progress) >= {"htr:A", "acm:B", "pmo:C"}
         assert progress
 
     asyncio.run(_run())
@@ -1678,7 +1670,10 @@ def test_service_filters_invalid_entities(monkeypatch: pytest.MonkeyPatch) -> No
 
         await service(call)
 
-        import_mock.assert_not_called()
+        import_mock.assert_awaited_once()
+        args, kwargs = import_mock.await_args
+        assert args == (hass, entry)
+        assert kwargs == {"reset_progress": False, "max_days": None}
 
         import_mock.reset_mock()
 
@@ -1689,8 +1684,7 @@ def test_service_filters_invalid_entities(monkeypatch: pytest.MonkeyPatch) -> No
 
         import_mock.assert_awaited_once()
         args, kwargs = import_mock.await_args
-        assert args[0] is hass
-        assert args[1] is entry
+        assert args == (hass, entry)
 
         if tasks:
             await asyncio.gather(*tasks)
