@@ -969,7 +969,10 @@ def test_async_setup_entry_auth_error(
     stub_hass.config_entries.add(entry)
 
     async def _run() -> None:
-        await termoweb_init.async_setup_entry(stub_hass, entry)
+        try:
+            await termoweb_init.async_setup_entry(stub_hass, entry)
+        finally:
+            await _drain_tasks(stub_hass)
 
     with pytest.raises(ConfigEntryAuthFailed):
         asyncio.run(_run())
