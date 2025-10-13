@@ -105,7 +105,8 @@ def test_hourly_poller_on_time_threadsafe(inventory_from_map) -> None:
         created_tasks.append(task)
         return task
 
-    hass.async_create_task = MagicMock(side_effect=_make_task)
+    hass.loop.create_task = MagicMock(side_effect=_make_task)
+    hass.async_create_task = MagicMock(side_effect=AssertionError())
 
     inventory = inventory_from_map({"htr": ["A"]})
     backend = AsyncMock()
@@ -115,13 +116,13 @@ def test_hourly_poller_on_time_threadsafe(inventory_from_map) -> None:
     poller._on_time(None)
 
     hass.loop.call_soon_threadsafe.assert_called_once()
-    hass.async_create_task.assert_not_called()
+    hass.loop.create_task.assert_not_called()
     callback = captured["callback"]
     args = captured["args"]
 
     callback(*args)
 
-    hass.async_create_task.assert_called_once()
+    hass.loop.create_task.assert_called_once()
     fake_task = created_tasks[0]
     assert poller._active_task is fake_task
 

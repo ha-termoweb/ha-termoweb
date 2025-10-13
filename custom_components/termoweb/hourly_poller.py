@@ -108,13 +108,21 @@ class HourlySamplesPoller:
 
         reference = dt_util.as_local(now) if now is not None else dt_util.now()
 
+        loop = self._hass.loop
+
         def _schedule() -> None:
             if self._active_task is not None and not self._active_task.done():
                 _LOGGER.debug(
                     "Hourly poller: skipping trigger while previous run is active"
                 )
                 return
-            task = self._hass.async_create_task(self._run_for_previous_hour(reference))
+            try:
+                task = loop.create_task(self._run_for_previous_hour(reference))
+            except RuntimeError:
+                _LOGGER.exception(
+                    "Hourly poller: failed to schedule run for %s", reference
+                )
+                return
             self._active_task = task
 
             def _finalise(finished: asyncio.Task[None]) -> None:
@@ -130,7 +138,7 @@ class HourlySamplesPoller:
 
             task.add_done_callback(_finalise)
 
-        self._hass.loop.call_soon_threadsafe(_schedule)
+        loop.call_soon_threadsafe(_schedule)
 
     def _enumerate_nodes(self, inventory: Inventory) -> list[tuple[str, str]]:
         """Return canonical ``(node_type, addr)`` pairs for ``inventory``."""
