@@ -18,10 +18,13 @@ from homeassistant.const import STATE_UNKNOWN, UnitOfTemperature
 try:  # pragma: no cover - fallback for older Home Assistant stubs
     from homeassistant.const import UnitOfTime
 except ImportError:  # pragma: no cover - fallback for older Home Assistant stubs
+
     class UnitOfTime:  # type: ignore[override]
         """Fallback UnitOfTime namespace with minute granularity."""
 
         MINUTES = "min"
+
+
 from homeassistant.core import callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.typing import StateType
@@ -123,7 +126,7 @@ def _power_monitor_display_name(node: PowerMonitorNode, addr: str) -> str:
     if callable(default_factory):
         try:
             fallback = default_factory()
-        except Exception:  # pragma: no cover - defensive fallback
+        except Exception:  # pragma: no cover - defensive fallback  # noqa: BLE001
             fallback = None
         if isinstance(fallback, str):
             fallback_trimmed = fallback.strip()
@@ -143,12 +146,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
         """Return a placeholder name for heater nodes."""
 
         return f"Node {addr}"
+
     heater_details = heater_platform_details_for_entry(
         data,
         default_name_simple=default_name,
     )
     inventory = heater_details.inventory
-    addrs_by_type = heater_details.addrs_by_type
 
     energy_coordinator: EnergyStateCoordinator | None = data.get(
         "energy_coordinator",
@@ -162,6 +165,58 @@ async def async_setup_entry(hass, entry, async_add_entities):
         await energy_coordinator.async_config_entry_first_refresh()
     else:
         energy_coordinator.update_addresses(inventory)
+
+    power_monitor_entries: list[tuple[str, str]] = []
+    candidate_power_monitors = inventory.nodes_by_type.get("pmo", [])
+    if not isinstance(candidate_power_monitors, list):
+        if isinstance(candidate_power_monitors, tuple):
+            candidate_power_monitors = list(candidate_power_monitors)
+        else:
+            candidate_power_monitors = []
+
+    for node in candidate_power_monitors:
+        if not isinstance(node, PowerMonitorNode):
+            continue
+        addr_norm = normalize_node_addr(node.addr, use_default_when_falsey=True)
+        if not addr_norm:
+            continue
+        display_name = _power_monitor_display_name(node, addr_norm)
+        power_monitor_entries.append((addr_norm, display_name))
+
+    power_monitor_entities: list[SensorEntity] = []
+    if not power_monitor_entries:
+        _LOGGER.debug(
+            "No TermoWeb power monitors discovered for %s; skipping power sensors",
+            dev_id,
+        )
+    else:
+        for addr_str, base_name in sorted(power_monitor_entries):
+            energy_unique_id = build_power_monitor_energy_unique_id(dev_id, addr_str)
+            power_unique_id = build_power_monitor_power_unique_id(dev_id, addr_str)
+            power_monitor_entities.append(
+                PowerMonitorEnergySensor(
+                    energy_coordinator,
+                    entry.entry_id,
+                    dev_id,
+                    addr_str,
+                    f"{base_name} Energy",
+                    energy_unique_id,
+                    base_name,
+                    inventory=heater_details.inventory,
+                )
+            )
+            power_monitor_entities.append(
+                PowerMonitorPowerSensor(
+                    energy_coordinator,
+                    entry.entry_id,
+                    dev_id,
+                    addr_str,
+                    f"{base_name} Power",
+                    power_unique_id,
+                    base_name,
+                    inventory=heater_details.inventory,
+                )
+            )
 
     new_entities: list[SensorEntity] = []
     for node_type, _node, addr_str, base_name in heater_details.iter_metadata():
@@ -199,33 +254,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             )
         )
 
-    for addr_str, base_name in sorted(power_monitor_entries):
-        energy_unique_id = build_power_monitor_energy_unique_id(dev_id, addr_str)
-        power_unique_id = build_power_monitor_power_unique_id(dev_id, addr_str)
-        new_entities.append(
-            PowerMonitorEnergySensor(
-                energy_coordinator,
-                entry.entry_id,
-                dev_id,
-                addr_str,
-                f"{base_name} Energy",
-                energy_unique_id,
-                base_name,
-                inventory=heater_details.inventory,
-            )
-        )
-        new_entities.append(
-            PowerMonitorPowerSensor(
-                energy_coordinator,
-                entry.entry_id,
-                dev_id,
-                addr_str,
-                f"{base_name} Power",
-                power_unique_id,
-                base_name,
-                inventory=heater_details.inventory,
-            )
-        )
+    new_entities.extend(power_monitor_entities)
 
     log_skipped_nodes(
         "sensor",
@@ -535,7 +564,9 @@ def _create_boost_sensors(
     *,
     node_type: str | None = None,
     inventory: Inventory | None = None,
-    minutes_cls: type[HeaterBoostMinutesRemainingSensor] = HeaterBoostMinutesRemainingSensor,
+    minutes_cls: type[
+        HeaterBoostMinutesRemainingSensor
+    ] = HeaterBoostMinutesRemainingSensor,
     end_cls: type[HeaterBoostEndSensor] = HeaterBoostEndSensor,
 ) -> tuple[
     HeaterBoostMinutesRemainingSensor,
@@ -712,6 +743,8 @@ class PowerMonitorPowerSensor(PowerMonitorSensorBase):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "W"
     _metric_key = "power"
+
+
 class InstallationTotalEnergySensor(
     GatewayDispatcherEntity, CoordinatorEntity, SensorEntity
 ):
