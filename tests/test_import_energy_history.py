@@ -1139,6 +1139,119 @@ def test_service_accepts_single_entity_id_string(
     asyncio.run(_run())
 
 
+def test_service_resolves_targets_from_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _run() -> None:
+        (
+            mod,
+            energy_mod,
+            const,
+            _import_stats,
+            _update_meta,
+            _last_stats,
+            _get_period,
+            _delete_stats,
+            ConfigEntry,
+            HomeAssistant,
+            ent_reg,
+        ) = await _load_module(monkeypatch)
+
+        hass = HomeAssistant()
+
+        entries: dict[str, ConfigEntry] = {}
+        hass.config_entries = types.SimpleNamespace(
+            async_update_entry=lambda entry, *, options: entry.options.update(options),
+            async_get_entry=lambda entry_id: entries.get(entry_id),
+        )
+
+        entry = ConfigEntry("cache-helper", options={})
+        entries[entry.entry_id] = entry
+
+        raw_nodes = {"nodes": [{"type": "htr", "addr": "A"}]}
+        inventory = inventory_module.Inventory(
+            "dev",
+            raw_nodes,
+            inventory_module.build_node_inventory(raw_nodes),
+        )
+        hass.data = {const.DOMAIN: {}}
+        hass.data[const.DOMAIN][entry.entry_id] = {
+            "inventory": inventory,
+            "config_entry": entry,
+            "client": AsyncMock(),
+            "dev_id": "dev",
+        }
+
+        uid = identifiers_module.build_heater_energy_unique_id("dev", "htr", "A")
+        ent_reg.add(
+            "sensor.dev_A_energy",
+            "sensor",
+            const.DOMAIN,
+            uid,
+            "A energy",
+            config_entry_id=entry.entry_id,
+        )
+
+        gather_calls: list[int] = []
+
+        async def fake_gather(
+            *tasks: Any, return_exceptions: bool = False
+        ) -> list[Any]:
+            gather_calls.append(len(tasks))
+            results: list[Any] = []
+            for task in tasks:
+                try:
+                    results.append(await task)
+                except Exception as err:  # pragma: no cover - defensive
+                    if return_exceptions:
+                        results.append(err)
+                    else:
+                        raise
+            return results
+
+        class Services:
+            def __init__(self) -> None:
+                self._svcs: dict[str, dict[str, object]] = {}
+
+            def has_service(self, domain: str, service: str) -> bool:
+                return service in self._svcs.get(domain, {})
+
+            def async_register(self, domain: str, service: str, func: object) -> None:
+                self._svcs.setdefault(domain, {})[service] = func
+
+            def get(self, domain: str, service: str) -> object:
+                return self._svcs[domain][service]
+
+        hass.services = Services()
+
+        monkeypatch.setattr(energy_mod.asyncio, "gather", fake_gather)
+
+        helper_result = energy_mod.service.ReferencedEntities(
+            ["sensor.dev_A_energy"],
+            [],
+        )
+        monkeypatch.setattr(
+            energy_mod.service,
+            "async_extract_referenced_entity_ids",
+            AsyncMock(return_value=helper_result),
+        )
+
+        import_mock = AsyncMock()
+        await energy_mod.async_register_import_energy_history_service(hass, import_mock)
+
+        service = hass.services.get(const.DOMAIN, "import_energy_history")
+        await service(types.SimpleNamespace(data={}))
+
+        assert gather_calls == [1]
+        import_mock.assert_awaited_once()
+        args, kwargs = import_mock.await_args
+        assert args[:2] == (hass, entry)
+        assert args[2] == [("htr", "A")]
+        assert kwargs == {"reset_progress": False, "max_days": None}
+
+    asyncio.run(_run())
+
+
 def test_import_energy_history_requested_map_filters(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
