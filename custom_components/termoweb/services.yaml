@@ -110,10 +110,17 @@ import_energy_history:
   description: >-
     Import historical hourly energy counters for TermoWeb heaters up to one
     year ago into Home Assistant statistics.
-  target:
-    entity:
-      integration: termoweb
   fields:
+    entity_id:
+      name: Energy sensors
+      description: >-
+        Restrict the import to the selected TermoWeb energy sensors. Leave
+        empty to refresh every configured heater.
+      selector:
+        entity:
+          integration: termoweb
+          domain: sensor
+          multiple: true
     reset_progress:
       name: Reset progress
       description: >-

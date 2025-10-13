@@ -119,7 +119,7 @@ See instructions in custom_components/termoweb/assets, to install the card and c
 - Live energy samples now arrive via the websocket connection, with the hourly
   REST poll remaining as a fallback if the push feed is unavailable.
 - Use the `termoweb.import_energy_history` service (Developer Tools → Services) to backfill past consumption after installing the integration.
-- Target specific heaters by setting `target.entity_id`, `target.device_id`, or `target.area_id` (or the matching keys under `data:`); omit the target to refresh every TermoWeb config entry.
+- Select specific energy sensors (or provide their `entity_id` values) to limit the import, or leave the picker empty to refresh every TermoWeb config entry.
 - No extra configuration is required beyond selecting the sensors in the Energy Dashboard.
 
 ---
