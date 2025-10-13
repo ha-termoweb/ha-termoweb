@@ -163,6 +163,24 @@ def _make_ducaheat_client(
     return client
 
 
+def _ensure_inventory_record(
+    hass: Any,
+    entry_id: str,
+    *,
+    dev_id: str = "dev",
+    inventory: Inventory | None = None,
+) -> Inventory:
+    """Populate ``hass`` domain data with a default inventory if needed."""
+
+    if not isinstance(inventory, Inventory):
+        payload = {"nodes": [{"type": "htr", "addr": "1"}]}
+        inventory = Inventory(dev_id, payload, build_node_inventory(payload))
+    hass.data.setdefault(base_ws.DOMAIN, {}).setdefault(entry_id, {})
+    hass.data[base_ws.DOMAIN][entry_id].setdefault("inventory", inventory)
+    hass.data[base_ws.DOMAIN][entry_id].setdefault("dev_id", dev_id)
+    return inventory
+
+
 def test_forward_ws_sample_updates_guards_and_invalid_lease() -> None:
     """Guard clauses and invalid lease values should be handled safely."""
 
@@ -177,6 +195,7 @@ def test_forward_ws_sample_updates_guards_and_invalid_lease() -> None:
     hass.data[base_ws.DOMAIN]["entry"] = {
         "energy_coordinator": SimpleNamespace(),
     }
+    _ensure_inventory_record(hass, "entry", dev_id="dev")
     base_ws.forward_ws_sample_updates(
         hass,
         "entry",
@@ -383,12 +402,12 @@ def test_forward_ws_sample_updates_inventory_validation(
     monkeypatch.setattr(
         Inventory,
         "heater_sample_address_map",
-        property(lambda self: ({"htr": ["1"]}, ["bad"])),
+        property(lambda self: ({"htr": ["1"]}, {"bad": "htr"})),
     )
     monkeypatch.setattr(
         Inventory,
         "power_monitor_sample_address_map",
-        property(lambda self: ({"pmo": ["3"]}, ["invalid"])),
+        property(lambda self: ({"pmo": ["3"]}, {"invalid": "pmo"})),
     )
 
     handler = MagicMock()
@@ -529,48 +548,6 @@ def test_dispatch_nodes_reuses_record_inventory(monkeypatch: pytest.MonkeyPatch)
     assert "nodes" not in dispatched_payload
 
 
-def test_prepare_nodes_dispatch_handles_non_mapping_record(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Node dispatch helper should tolerate non-mapping hass records."""
-
-    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": []}})
-    coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
-    monkeypatch.setattr(base_ws, "resolve_record_inventory", lambda *_, **__: None, raising=False)
-
-    context = base_ws._prepare_nodes_dispatch(
-        hass,
-        entry_id="entry",
-        coordinator=coordinator,
-        raw_nodes={},
-    )
-
-    assert context.record is None
-    assert context.inventory is None
-
-
-def test_prepare_nodes_dispatch_leaves_record_unchanged(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Records without inventories should remain untouched."""
-
-    hass_record: dict[str, Any] = {"dev_id": "dev"}
-    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": hass_record}})
-    coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
-
-    monkeypatch.setattr(base_ws, "resolve_record_inventory", lambda *_, **__: None, raising=False)
-
-    context = base_ws._prepare_nodes_dispatch(
-        hass,
-        entry_id="entry",
-        coordinator=coordinator,
-        raw_nodes={},
-    )
-
-    assert "inventory" not in hass_record
-    assert context.inventory is None
-
-
 def test_prepare_nodes_dispatch_uses_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
     """Existing inventory objects should be reused by the dispatch helper."""
 
@@ -587,6 +564,7 @@ def test_prepare_nodes_dispatch_uses_inventory(monkeypatch: pytest.MonkeyPatch) 
     )
 
     assert context.inventory is inventory
+    assert hass.data[base_ws.DOMAIN]["entry"]["inventory"] is inventory
     coordinator.update_nodes.assert_not_called()
 
 

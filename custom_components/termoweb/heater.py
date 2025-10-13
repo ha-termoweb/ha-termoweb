@@ -785,27 +785,6 @@ def log_skipped_nodes(
             addrs or "<no-addr>",
         )
 
-
-def resolve_entry_inventory(
-    entry_data: Mapping[str, Any] | None,
-) -> Inventory | None:
-    """Return the shared inventory stored alongside a config entry."""
-
-    if not isinstance(entry_data, Mapping):
-        return None
-
-    candidate = entry_data.get("inventory")
-    if isinstance(candidate, Inventory):
-        return candidate
-
-    coordinator = entry_data.get("coordinator")
-    candidate = getattr(coordinator, "inventory", None)
-    if isinstance(candidate, Inventory):
-        return candidate
-
-    return None
-
-
 def heater_platform_details_for_entry(
     entry_data: Mapping[str, Any] | None,
     *,
@@ -813,8 +792,9 @@ def heater_platform_details_for_entry(
 ) -> HeaterPlatformDetails:
     """Return heater platform metadata derived from ``entry_data``."""
 
-    inventory = resolve_entry_inventory(entry_data)
-    if inventory is None:
+    try:
+        inventory = Inventory.require_from_context(container=entry_data)
+    except LookupError as err:
         dev_id: str | None = None
         if isinstance(entry_data, Mapping):
             dev_id = entry_data.get("dev_id")  # type: ignore[assignment]
@@ -822,7 +802,7 @@ def heater_platform_details_for_entry(
             "TermoWeb heater setup missing inventory for device %s",
             (dev_id or "<unknown>") if isinstance(dev_id, str) and dev_id else "<unknown>",
         )
-        raise ValueError("TermoWeb inventory unavailable for heater platform")
+        raise ValueError("TermoWeb inventory unavailable for heater platform") from err
 
     return HeaterPlatformDetails(
         inventory=inventory,

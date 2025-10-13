@@ -69,9 +69,11 @@ def forward_ws_sample_updates(
         return
 
     try:
-        inventory = Inventory.require_from_record(
-            record,
-            context=f"{log_prefix} sample forwarding entry={entry_id}",
+        inventory = Inventory.require_from_context(
+            container=record,
+            hass=hass,
+            entry_id=entry_id,
+            coordinator=record.get("coordinator"),
         )
     except LookupError as err:
         active_logger = logger or _LOGGER
@@ -532,23 +534,19 @@ def _prepare_nodes_dispatch(
         record_raw if isinstance(record_raw, MutableMapping) else None
     )
 
-    inventory_container: Inventory | None = None
-    if isinstance(inventory, Inventory):
-        inventory_container = inventory
-    elif isinstance(record_mapping, Mapping):
-        candidate_inventory = record_mapping.get("inventory")
-        if isinstance(candidate_inventory, Inventory):
-            inventory_container = candidate_inventory
+    container: Mapping[str, Any] | MutableMapping[str, Any] | None
+    if isinstance(record_mutable, MutableMapping):
+        container = record_mutable
+    else:
+        container = record_mapping
 
-    if inventory_container is None and hasattr(coordinator, "inventory"):
-        candidate_inventory = getattr(coordinator, "inventory", None)
-        if isinstance(candidate_inventory, Inventory):
-            inventory_container = candidate_inventory
-
-    if isinstance(record_mutable, MutableMapping) and isinstance(
-        inventory_container, Inventory
-    ):
-        record_mutable["inventory"] = inventory_container
+    inventory_container = Inventory.require_from_context(
+        inventory=inventory,
+        container=container,
+        hass=hass,
+        entry_id=entry_id,
+        coordinator=coordinator,
+    )
 
     return NodeDispatchContext(
         payload=raw_nodes,
@@ -598,27 +596,18 @@ class _WSCommon(_WSStatusMixin):
         if not isinstance(dev_map, MutableMapping):
             return bucket
 
-        inventory: Inventory | None = None
-        if isinstance(self._inventory, Inventory):
-            inventory = self._inventory
-        else:
-            record_container = self.hass.data.get(DOMAIN, {})
-            record = (
-                record_container.get(self.entry_id)
-                if isinstance(record_container, Mapping)
-                else None
+        try:
+            inventory_container = Inventory.require_from_context(
+                inventory=self._inventory,
+                container=dev_map,
+                hass=self.hass,
+                entry_id=self.entry_id,
+                coordinator=self._coordinator,
             )
-            candidate = record.get("inventory") if isinstance(record, Mapping) else None
-            if isinstance(candidate, Inventory):
-                inventory = candidate
-
-        if inventory is None:
-            candidate = dev_map.get("inventory") if isinstance(dev_map, Mapping) else None
-            if isinstance(candidate, Inventory):
-                inventory = candidate
-
-        if isinstance(inventory, Inventory):
-            dev_map["inventory"] = inventory
+        except LookupError:
+            inventory_container = None
+        else:
+            dev_map["inventory"] = inventory_container
 
         settings_section = dev_map.get("settings")
         if isinstance(settings_section, MutableMapping):
@@ -635,7 +624,6 @@ class _WSCommon(_WSStatusMixin):
         inventory: Inventory | None = None,
         log_prefix: str = "WS",
         logger: logging.Logger | None = None,
-        prefer_inventory: bool = True,
     ) -> None:
         """Update entry and coordinator state with heater address data."""
         record_container = self.hass.data.get(DOMAIN, {})
@@ -652,35 +640,35 @@ class _WSCommon(_WSStatusMixin):
 
         active_logger = logger or _LOGGER
 
-        inventory_container: Inventory | None = None
-        if isinstance(inventory, Inventory):
-            inventory_container = inventory
+        container: Mapping[str, Any] | MutableMapping[str, Any] | None
+        if isinstance(record_mutable, MutableMapping):
+            container = record_mutable
         else:
-            if inventory is not None:
-                active_logger.debug(
-                    "%s: ignoring unexpected inventory container (type=%s): %s",
-                    log_prefix,
-                    type(inventory).__name__,
-                    inventory,
-                )
-            if prefer_inventory:
-                if isinstance(self._inventory, Inventory):
-                    inventory_container = self._inventory
-                elif isinstance(record_mapping, Mapping):
-                    candidate_inventory = record_mapping.get("inventory")
-                    if isinstance(candidate_inventory, Inventory):
-                        inventory_container = candidate_inventory
+            container = record_mapping
 
-        if not isinstance(inventory_container, Inventory):
+        resolved_inventory = inventory
+        if not isinstance(resolved_inventory, Inventory) and isinstance(
+            self._inventory, Inventory
+        ):
+            resolved_inventory = self._inventory
+
+        try:
+            inventory_container = Inventory.require_from_context(
+                inventory=resolved_inventory,
+                container=container,
+                hass=self.hass,
+                entry_id=self.entry_id,
+                coordinator=self._coordinator,
+            )
+        except LookupError:
             active_logger.error(
                 "%s: missing inventory for heater address update on %s",
                 log_prefix,
                 self.dev_id,
             )
-            return None
+            raise
 
         if isinstance(record_mutable, MutableMapping):
-            record_mutable["inventory"] = inventory_container
             record_mutable.pop("sample_aliases", None)
         if not isinstance(self._inventory, Inventory):
             self._inventory = inventory_container

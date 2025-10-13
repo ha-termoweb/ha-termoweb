@@ -122,7 +122,14 @@ async def async_setup_entry(hass, entry, async_add_entities):
         StateRefreshButton(coordinator, entry.entry_id, dev_id)
     ]
 
-    inventory = data.get("inventory")
+    try:
+        inventory = Inventory.require_from_context(container=data)
+    except LookupError as err:
+        _LOGGER.error(
+            "TermoWeb button setup missing inventory for device %s", dev_id
+        )
+        raise ValueError("TermoWeb inventory unavailable for button platform") from err
+
     log_skipped_nodes("button", inventory, logger=_LOGGER)
 
     boost_entities: list[ButtonEntity] = []

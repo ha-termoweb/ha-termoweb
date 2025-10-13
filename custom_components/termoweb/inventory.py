@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from dataclasses import dataclass
 import logging
 from typing import TYPE_CHECKING, Any, cast
@@ -743,6 +743,62 @@ class Inventory:
         self._heater_name_map_cache[key] = mapping
         self._heater_name_map_factories[key] = factory
         return mapping
+
+    @staticmethod
+    def require_from_context(
+        *,
+        inventory: "Inventory" | None = None,
+        container: Mapping[str, Any] | MutableMapping[str, Any] | None = None,
+        hass: Any | None = None,
+        entry_id: str | None = None,
+        coordinator: Any | None = None,
+        store: bool = True,
+    ) -> "Inventory":
+        """Return the shared inventory associated with a Home Assistant entry."""
+
+        resolved: Inventory | None = None
+        mutable_targets: list[MutableMapping[str, Any]] = []
+
+        if isinstance(inventory, Inventory):
+            resolved = inventory
+
+        if container is not None:
+            if isinstance(container, MutableMapping):
+                mutable_targets.append(container)
+            if resolved is None and isinstance(container, Mapping):
+                candidate = container.get("inventory")
+                if isinstance(candidate, Inventory):
+                    resolved = candidate
+
+        record_candidate: Mapping[str, Any] | None = None
+        if hass is not None and entry_id:
+            hass_data = getattr(hass, "data", None)
+            if isinstance(hass_data, Mapping):
+                domain_bucket = hass_data.get(DOMAIN)
+                if isinstance(domain_bucket, Mapping):
+                    record_candidate = domain_bucket.get(entry_id)
+                    if isinstance(record_candidate, MutableMapping):
+                        mutable_targets.append(record_candidate)
+                    if resolved is None and isinstance(record_candidate, Mapping):
+                        candidate = record_candidate.get("inventory")
+                        if isinstance(candidate, Inventory):
+                            resolved = candidate
+
+        if resolved is None and coordinator is not None:
+            for attr in ("inventory", "_inventory"):
+                candidate = getattr(coordinator, attr, None)
+                if isinstance(candidate, Inventory):
+                    resolved = candidate
+                    break
+
+        if resolved is None:
+            raise LookupError("TermoWeb inventory is unavailable")
+
+        if store:
+            for target in mutable_targets:
+                target["inventory"] = resolved
+
+        return resolved
 
     @staticmethod
     def require_from_record(

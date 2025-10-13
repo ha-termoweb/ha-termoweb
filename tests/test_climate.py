@@ -13,6 +13,7 @@ import pytest
 
 from conftest import FakeCoordinator, _install_stubs, build_coordinator_device_state
 
+import custom_components.termoweb.inventory as inventory_module
 from custom_components.termoweb.inventory import Inventory
 
 _install_stubs()
@@ -295,16 +296,16 @@ def test_async_setup_entry_creates_entities(
         entry = types.SimpleNamespace(entry_id=entry_id)
         calls: list[Mapping[str, Any] | None] = []
 
-        original_resolver = climate_module.resolve_entry_inventory
+        original_resolver = Inventory.require_from_context
 
-        def _record_inventory(entry_data: Mapping[str, Any] | None) -> Inventory | None:
-            calls.append(entry_data)
-            return original_resolver(entry_data)
+        def _record_inventory(*args: Any, **kwargs: Any) -> Inventory:
+            calls.append(kwargs.get("container"))
+            return original_resolver(*args, **kwargs)
 
         monkeypatch.setattr(
-            climate_module,
-            "resolve_entry_inventory",
-            _record_inventory,
+            inventory_module.Inventory,
+            "require_from_context",
+            staticmethod(_record_inventory),
         )
         await async_setup_entry(hass, entry, _async_add_entities)
 
@@ -1548,16 +1549,18 @@ def test_async_setup_entry_without_inventory_skips_entities(
 
         calls: list[Mapping[str, Any] | None] = []
 
-        def _missing_inventory(entry_data: Mapping[str, Any] | None) -> Inventory | None:
-            calls.append(entry_data)
-            return None
+        def _missing_inventory(*args: Any, **kwargs: Any) -> Inventory:
+            calls.append(kwargs.get("container"))
+            raise LookupError("missing inventory")
 
         monkeypatch.setattr(
-            climate_module,
-            "resolve_entry_inventory",
-            _missing_inventory,
+            inventory_module.Inventory,
+            "require_from_context",
+            staticmethod(_missing_inventory),
         )
-        await async_setup_entry(hass, entry, _async_add_entities)
+
+        with pytest.raises(ValueError):
+            await async_setup_entry(hass, entry, _async_add_entities)
 
         assert added == []
         record_after = hass.data[DOMAIN][entry.entry_id]
@@ -1593,6 +1596,7 @@ def test_async_setup_entry_reuses_coordinator_inventory(
             "dev_id": dev_id,
             "client": AsyncMock(),
             "nodes": raw_nodes,
+            "inventory": inventory,
         }
         hass.data = {DOMAIN: {entry.entry_id: record}}
 
@@ -1603,96 +1607,22 @@ def test_async_setup_entry_reuses_coordinator_inventory(
 
         calls: list[Mapping[str, Any] | None] = []
 
-        def _reuse_inventory(entry_data: Mapping[str, Any] | None) -> Inventory | None:
-            calls.append(entry_data)
-            return inventory
+        original_resolver = Inventory.require_from_context
+
+        def _reuse_inventory(*args: Any, **kwargs: Any) -> Inventory:
+            calls.append(kwargs.get("container"))
+            return original_resolver(*args, **kwargs)
 
         monkeypatch.setattr(
-            climate_module,
-            "resolve_entry_inventory",
-            _reuse_inventory,
+            inventory_module.Inventory,
+            "require_from_context",
+            staticmethod(_reuse_inventory),
         )
         await async_setup_entry(hass, entry, _async_add_entities)
 
         assert len(added) == 1
-        assert "inventory" not in hass.data[DOMAIN][entry.entry_id]
+        assert hass.data[DOMAIN][entry.entry_id]["inventory"] is inventory
         assert calls and calls[0] is record
-
-    asyncio.run(_run())
-
-
-def test_async_setup_entry_ignores_cached_node_list() -> None:
-    async def _run() -> None:
-        _reset_environment()
-        hass = HomeAssistant()
-        entry = types.SimpleNamespace(entry_id="entry-list")
-        dev_id = "dev-list"
-        raw_nodes = {"nodes": [{"type": "htr", "addr": "3", "name": "Three"}]}
-        node_list = [types.SimpleNamespace(type="htr", addr="3", name="Three")]
-        inventory = Inventory(dev_id, raw_nodes, list(node_list))
-
-        coordinator = _make_coordinator(
-            hass,
-            dev_id,
-            {"nodes": {}, "htr": {"settings": {}}},
-            client=AsyncMock(),
-        )
-
-        record: dict[str, Any] = {
-            "coordinator": coordinator,
-            "dev_id": dev_id,
-            "client": AsyncMock(),
-            "node_inventory": list(node_list),
-        }
-        hass.data = {DOMAIN: {entry.entry_id: record}}
-
-        added: list[HeaterClimateEntity] = []
-
-        def _async_add_entities(entities: list[HeaterClimateEntity]) -> None:
-            added.extend(entities)
-
-        await async_setup_entry(hass, entry, _async_add_entities)
-
-        assert not added
-        assert "node_inventory" in hass.data[DOMAIN][entry.entry_id]
-
-    asyncio.run(_run())
-
-
-def test_async_setup_entry_does_not_build_inventory_on_error() -> None:
-    async def _run() -> None:
-        _reset_environment()
-        hass = HomeAssistant()
-        entry = types.SimpleNamespace(entry_id="entry-error")
-        dev_id = "dev-error"
-        raw_nodes = {"nodes": [{"type": "htr", "addr": "9"}]}
-
-        coordinator = _make_coordinator(
-            hass,
-            dev_id,
-            {"nodes": raw_nodes, "htr": {"settings": {"9": {}}}},
-            client=AsyncMock(),
-        )
-
-        record: dict[str, Any] = {
-            "coordinator": coordinator,
-            "dev_id": dev_id,
-            "client": AsyncMock(),
-            "nodes": raw_nodes,
-        }
-        hass.data = {DOMAIN: {entry.entry_id: record}}
-
-        added: list[HeaterClimateEntity] = []
-
-        def _async_add_entities(entities: list[HeaterClimateEntity]) -> None:
-            added.extend(entities)
-
-        await async_setup_entry(hass, entry, _async_add_entities)
-
-        assert added == []
-        record_after = hass.data[DOMAIN][entry.entry_id]
-        assert "inventory" not in record_after
-        assert "node_inventory" not in record_after
 
     asyncio.run(_run())
 
