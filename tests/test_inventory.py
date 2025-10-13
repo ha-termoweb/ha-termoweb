@@ -378,126 +378,17 @@ def test_resolve_record_inventory_prefers_existing_container() -> None:
     assert resolution.raw_count == 1
 
 
-def test_resolve_record_inventory_uses_explicit_node_list() -> None:
-    """Explicit node lists should be normalised when provided."""
+def test_resolve_record_inventory_missing_inventory_logs_error(caplog: pytest.LogCaptureFixture) -> None:
+    """Missing inventory should return a descriptive resolution."""
 
-    nodes = [
-        Node(name="Heater", addr="1", node_type="htr"),
-        SimpleNamespace(type="htr", addr="", name="ignored"),
-        SimpleNamespace(as_dict=lambda: {}, type=" ", addr=""),
-    ]
-    record: dict[str, Any] = {
-        "dev_id": 101,
-        "nodes": {"nodes": []},
-    }
-
-    resolution = inventory_module.resolve_record_inventory(record, node_list=nodes)
-
-    assert resolution.source == "node_list"
-    assert resolution.filtered_count == 1
-    assert record["inventory"] is resolution.inventory
-    assert isinstance(resolution.inventory, Inventory)
-    assert resolution.inventory.dev_id == "101"
-
-
-def test_resolve_record_inventory_ignores_record_node_inventory() -> None:
-    """Record-provided node caches should no longer influence resolution."""
-
-    nodes = [
-        Node(name="Heater", addr="1", node_type="htr"),
-        SimpleNamespace(type="htr", addr="", name="ignored"),
-    ]
-    record: dict[str, Any] = {
-        "dev_id": "device",
-        "node_inventory": nodes,
-    }
+    record: dict[str, Any] = {"dev_id": "device"}
 
     resolution = inventory_module.resolve_record_inventory(record)
 
     assert resolution.inventory is None
-    assert resolution.source == "fallback"
-    assert record["node_inventory"] is nodes
-
-
-def test_resolve_record_inventory_falls_back_to_snapshot() -> None:
-    """Snapshots should be converted into inventory containers when needed."""
-
-    raw_nodes = {"nodes": [{"type": "htr", "addr": "2"}]}
-    snapshot_nodes = inventory_module.build_node_inventory(raw_nodes)
-    snapshot = SimpleNamespace(
-        dev_id="snapshot-dev",
-        raw_nodes=raw_nodes,
-        inventory=list(snapshot_nodes),
-    )
-    record: dict[str, Any] = {"snapshot": snapshot}
-
-    resolution = inventory_module.resolve_record_inventory(record)
-
-    assert resolution.source == "snapshot"
-    assert resolution.filtered_count == 1
-    assert record["inventory"] is resolution.inventory
-    assert resolution.inventory.dev_id == "snapshot-dev"
-
-
-def test_resolve_record_inventory_builds_from_raw_nodes() -> None:
-    """Raw node payloads should be normalised when no cache exists."""
-
-    raw_nodes = {"nodes": [{"type": "htr", "addr": "5"}]}
-    record: dict[str, Any] = {"dev_id": "dev-raw"}
-
-    resolution = inventory_module.resolve_record_inventory(
-        record,
-        nodes_payload=raw_nodes,
-    )
-
-    assert resolution.source == "raw_nodes"
-    assert resolution.filtered_count == 1
-    assert record["inventory"] is resolution.inventory
-    assert resolution.inventory.heater_address_map[0] == {"htr": ["5"]}
-
-
-def test_resolve_record_inventory_handles_missing_data() -> None:
-    """Resolution should return a fallback result when metadata is absent."""
-
-    resolution = inventory_module.resolve_record_inventory(None)
-
-    assert resolution.inventory is None
-    assert resolution.source == "fallback"
+    assert resolution.source == "missing"
     assert resolution.filtered_count == 0
-
-
-def test_resolve_record_inventory_handles_null_nodes() -> None:
-    """Records with null node payloads should fall back gracefully."""
-
-    record = {"dev_id": "dev-null", "nodes": None}
-
-    resolution = inventory_module.resolve_record_inventory(record)
-
-    assert resolution.inventory is None
-    assert resolution.source == "fallback"
-    assert resolution.filtered_count == 0
-
-
-def test_resolve_record_inventory_detects_mismatched_inventory() -> None:
-    """Cached inventory should be rebuilt when cached entries are invalid."""
-
-    invalid = SimpleNamespace(as_dict=lambda: {}, type=" ", addr="")
-    cached = Inventory("dev", {}, [invalid])
-    override_nodes = [
-        Node(name="Heater", addr="1", node_type="htr"),
-        invalid,
-    ]
-    record: dict[str, Any] = {"inventory": cached}
-
-    resolution = inventory_module.resolve_record_inventory(
-        record,
-        node_list=override_nodes,
-    )
-
-    assert resolution.source == "node_list"
-    assert resolution.filtered_count == 1
-    assert record["inventory"] is resolution.inventory
-    assert resolution.inventory is not cached
+    assert "device" in caplog.text
 
 
 def test_heater_platform_details_default_name(

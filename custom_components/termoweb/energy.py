@@ -382,8 +382,9 @@ async def async_import_energy_history(
         logger.debug("Energy import: no heater nodes selected for device")
         return
 
+    forward_map, reverse_map = inventory.heater_address_map
     _, alias_map = inventory.heater_sample_address_map
-    available_types = {node_type for node_type, _ in all_pairs}
+    available_types = set(forward_map)
     alias_lookup: dict[str, str] = {}
     for raw_type, canonical in alias_map.items():
         normalized_key = normalize_node_type(raw_type, use_default_when_falsey=True)
@@ -391,10 +392,6 @@ async def async_import_energy_history(
             alias_lookup[normalized_key] = canonical
     for node_type in available_types:
         alias_lookup.setdefault(node_type, node_type)
-
-    address_to_types: dict[str, set[str]] = {}
-    for node_type, addr in all_pairs:
-        address_to_types.setdefault(addr, set()).add(node_type)
 
     requested_pairs: set[tuple[str, str]] = set()
     desired_pairs: set[tuple[str, str]] = set()
@@ -446,11 +443,11 @@ async def async_import_energy_history(
                     continue
                 requested_pairs.add((canonical_type, addr))
                 if canonical_type == "htr":
-                    for actual_type in address_to_types.get(addr, set()):
+                    for actual_type in reverse_map.get(addr, set()):
                         desired_pairs.add((actual_type, addr))
                 elif (
                     canonical_type in available_types
-                    and canonical_type in address_to_types.get(addr, set())
+                    and canonical_type in reverse_map.get(addr, set())
                 ):
                     desired_pairs.add((canonical_type, addr))
         else:
@@ -467,7 +464,7 @@ async def async_import_energy_history(
                 canonical_type = alias_lookup.get(normalized_key)
                 if not canonical_type:
                     continue
-                if isinstance(values, str) or isinstance(values, bytes):
+                if isinstance(values, (str, bytes)):
                     candidates = [values]
                 elif isinstance(values, Iterable):
                     candidates = list(values)
@@ -482,11 +479,11 @@ async def async_import_energy_history(
                         continue
                     requested_pairs.add((canonical_type, addr))
                     if canonical_type == "htr":
-                        for actual_type in address_to_types.get(addr, set()):
+                        for actual_type in reverse_map.get(addr, set()):
                             desired_pairs.add((actual_type, addr))
                     elif (
                         canonical_type in available_types
-                        and canonical_type in address_to_types.get(addr, set())
+                        and canonical_type in reverse_map.get(addr, set())
                     ):
                         desired_pairs.add((canonical_type, addr))
 

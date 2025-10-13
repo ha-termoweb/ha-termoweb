@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 import logging
 from typing import TYPE_CHECKING, Any, cast
@@ -652,28 +652,6 @@ class Inventory:
         return mapping
 
 
-def _normalize_node_iterable(
-    nodes: Iterable[Any] | None,
-) -> tuple[tuple[Node, ...], int] | None:
-    """Return filtered node tuples and raw length for ``nodes``."""
-
-    if nodes is None:
-        return None
-
-    raw_list = list(nodes)
-    filtered: list[Node] = []
-    for node in raw_list:
-        if not hasattr(node, "as_dict"):
-            continue
-        node_type = normalize_node_type(getattr(node, "type", ""))
-        addr = normalize_node_addr(getattr(node, "addr", ""))
-        if not node_type or not addr:
-            continue
-        filtered.append(cast(Node, node))
-
-    return (tuple(filtered), len(raw_list))
-
-
 def resolve_record_inventory(
     record: Mapping[str, Any] | None,
     *,
@@ -684,125 +662,17 @@ def resolve_record_inventory(
     """Return the ``Inventory`` for ``record`` and describe its origin."""
 
     mapping: Mapping[str, Any] | None = record if isinstance(record, Mapping) else None
-    mutable: MutableMapping[str, Any] | None
-    if isinstance(record, MutableMapping):
-        mutable = record
-    else:
-        mutable = None
 
-    resolved_dev_id = str(dev_id or "")
+    if mapping is None:
+        return InventoryResolution(None, "missing", 0, 0)
 
-    if mapping is not None:
-        record_dev = mapping.get("dev_id")
-        if not resolved_dev_id:
-            if isinstance(record_dev, str) and record_dev.strip():
-                resolved_dev_id = record_dev.strip()
-            elif record_dev not in (None, ""):
-                resolved_dev_id = str(record_dev)
-
-    payload_candidate = nodes_payload
-
-    nodes_candidate: Iterable[Any] | None = node_list
-
-    def _node_pairs(items: Iterable[Any]) -> set[tuple[str, str]]:
-        pairs: set[tuple[str, str]] = set()
-        for node in items:
-            node_type = normalize_node_type(getattr(node, "type", ""))
-            addr = normalize_node_addr(getattr(node, "addr", ""))
-            if not node_type or not addr:
-                continue
-            pairs.add((node_type, addr))
-        return pairs
-
-    node_info = _normalize_node_iterable(nodes_candidate)
-
-    candidate = mapping.get("inventory") if mapping is not None else None
+    candidate = mapping.get("inventory")
     if isinstance(candidate, Inventory):
-        if node_info is None:
-            node_count = len(candidate.nodes)
-            return InventoryResolution(candidate, "inventory", node_count, node_count)
-        nodes_tuple, _ = node_info
-        candidate_pairs = _node_pairs(candidate.nodes)
-        override_pairs = _node_pairs(nodes_tuple)
-        if candidate_pairs == override_pairs and len(candidate.nodes) == len(nodes_tuple):
-            node_count = len(candidate.nodes)
-            return InventoryResolution(candidate, "inventory", node_count, node_count)
+        node_count = len(candidate.nodes)
+        return InventoryResolution(candidate, "inventory", node_count, node_count)
 
-    def _finalize(
-        nodes_tuple: tuple[Node, ...],
-        *,
-        source: str,
-        raw_count: int,
-        payload: Any | None,
-        override_dev_id: str | None = None,
-    ) -> InventoryResolution | None:
-        nonlocal resolved_dev_id
-
-        effective_dev_id = override_dev_id or resolved_dev_id
-        effective_dev_id = str(effective_dev_id or "")
-        payload_obj = payload if payload is not None else {}
-
-        try:
-            container = Inventory(effective_dev_id, payload_obj, nodes_tuple)
-        except Exception:  # pragma: no cover - defensive  # noqa: BLE001
-            _LOGGER.debug("Failed to construct inventory from %s data", source, exc_info=True)
-            return None
-
-        if mutable is not None:
-            mutable["inventory"] = container
-
-        resolved_dev_id = container.dev_id
-        return InventoryResolution(container, source, raw_count, len(container.nodes))
-
-    if node_info is not None:
-        nodes_tuple, raw_count = node_info
-        result = _finalize(
-            nodes_tuple,
-            source="node_list",
-            raw_count=raw_count,
-            payload=payload_candidate,
-        )
-        if result is not None:
-            return result
-
-    snapshot = mapping.get("snapshot") if mapping is not None else None
-    if snapshot is not None:
-        snapshot_nodes = getattr(snapshot, "inventory", None)
-        node_info = _normalize_node_iterable(snapshot_nodes)
-        if node_info is not None:
-            nodes_tuple, raw_count = node_info
-            snapshot_payload = payload_candidate
-            if snapshot_payload is None:
-                snapshot_payload = getattr(snapshot, "raw_nodes", None)
-            snapshot_dev_id = getattr(snapshot, "dev_id", None)
-            result = _finalize(
-                nodes_tuple,
-                source="snapshot",
-                raw_count=raw_count,
-                payload=snapshot_payload,
-                override_dev_id=str(snapshot_dev_id) if snapshot_dev_id is not None else None,
-            )
-            if result is not None:
-                return result
-
-    payload_for_build = payload_candidate
-
-    if payload_for_build is not None:
-        try:
-            built_nodes = build_node_inventory(payload_for_build)
-        except Exception:  # pragma: no cover - defensive  # noqa: BLE001
-            _LOGGER.debug("Failed to normalise raw nodes for inventory", exc_info=True)
-        else:
-            result = _finalize(
-                tuple(built_nodes),
-                source="raw_nodes",
-                raw_count=len(built_nodes),
-                payload=payload_for_build,
-            )
-            if result is not None:
-                return result
-
-    return InventoryResolution(None, "fallback", 0, 0)
+    _LOGGER.error("Inventory metadata missing for record %s", mapping.get("dev_id"))
+    return InventoryResolution(None, "missing", 0, 0)
 
 
 def _normalize_node_identifier(
