@@ -8,6 +8,7 @@ This repository provides a Home Assistant integration for the TermoWeb cloud pla
 * **Device:** A single gateway (identified by a hexadecimal `dev_id`) that bridges a user's site to the TermoWeb backend.
 * **Node:** An endpoint attached to the gateway. Supported types include heaters (`htr`), accumulators (`acm`), power monitors (`pmo`), and thermostats (`thm`). Each node exposes an integer `addr` and a `type` code.
 * **Physical deployment assumptions:** Gateways and their nodes are fixed hardware that gets installed during construction. Treat this inventory as immutable for the lifetime of the integration: runtime code should not anticipate gateways or nodes being added, removed, or rebranded. Only the initial setup needs to interrogate the backend for device metadata. If hardware is physically replaced, the user can reload the integration to refresh the details.
+* The Inventory of nodes, node types, node addresses and dev_id of the gateway are instantiated ONCE at startup and are IMMUTABLE and ALWAYS available. Use Inventory and methods to find that information, do not make additional lists or caches of nodes.
 
 ## Documentation Map
 * `termoweb_openapi.yaml`, `termoweb_api.md` — REST and WebSocket reference for the TermoWeb backend.
