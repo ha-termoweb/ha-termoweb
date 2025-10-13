@@ -283,10 +283,6 @@ async def async_list_devices(client: RESTClient) -> Any:
 async def _async_import_energy_history(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    selection: Mapping[str, Iterable[str]]
-    | Iterable[tuple[str, str]]
-    | Iterable[str]
-    | None = None,
     *,
     reset_progress: bool = False,
     max_days: int | None = None,
@@ -297,7 +293,6 @@ async def _async_import_energy_history(
     await _async_import_energy_history_impl(
         hass,
         entry,
-        selection=selection,
         reset_progress=reset_progress,
         max_days=max_days,
         rate_limit=rate_state,

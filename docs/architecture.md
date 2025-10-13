@@ -74,9 +74,9 @@ coordinators already consume.【F:custom_components/termoweb/inventory.py†L181
   caches, and broadcasts dispatcher signals. `DucaheatWSClient` layers brand-
   specific logging atop the shared implementation.【F:custom_components/termoweb/backend/ws_client.py†L40-L193】【F:custom_components/termoweb/backend/ducaheat_ws.py†L188-L386】
 - **Energy services** – the energy helper enforces a shared rate limiter for
-  historical sample queries, performs targeted imports based on entity
-  selection, and registers the `import_energy_history` service only once per
-  Home Assistant instance.【F:custom_components/termoweb/energy.py†L150-L177】【F:custom_components/termoweb/energy.py†L421-L512】【F:custom_components/termoweb/energy.py†L841-L919】
+  historical sample queries, iterates the immutable inventory to import every
+  node's history, and registers the `import_energy_history` service only once
+  per Home Assistant instance.【F:custom_components/termoweb/energy.py†L150-L177】【F:custom_components/termoweb/energy.py†L344-L523】【F:custom_components/termoweb/energy.py†L720-L774】
 
 - **Power monitor coverage** – `pmo` nodes are discovered from `dev_data`, expose read payloads via `/pmo/{addr}`
   and energy counters via `/pmo/{addr}/samples`. No WebSocket `status` deltas are observed, so consumers must poll REST or fetch

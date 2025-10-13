@@ -7,39 +7,16 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import logging
-from typing import Any, TYPE_CHECKING, cast
+from typing import Any, cast
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.helpers import entity_registry as er, service
-
-try:  # pragma: no cover - compatibility shim
-    from homeassistant.helpers import target as target_helpers
-except ImportError:  # pragma: no cover - compatibility shim
-    target_helpers = None
-
-if TYPE_CHECKING:  # pragma: no cover - typing only
-    try:
-        from homeassistant.helpers.target import SelectedEntities as TargetSelectedEntities
-    except ImportError:  # pragma: no cover - typing only
-        TargetSelectedEntities = Any  # type: ignore[assignment]
-    try:
-        from homeassistant.helpers.service import SelectedEntities as ServiceSelectedEntities
-    except ImportError:  # pragma: no cover - typing only
-        ServiceSelectedEntities = Any  # type: ignore[assignment]
-    SelectedEntitiesType = TargetSelectedEntities | ServiceSelectedEntities
-else:  # pragma: no cover - runtime fallback
-    SelectedEntitiesType = Any
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
 from .api import RESTClient
 from .const import DOMAIN
 from .identifiers import build_heater_energy_unique_id
-from .inventory import (
-    Inventory,
-    normalize_node_addr,
-    normalize_node_type,
-    parse_heater_energy_unique_id,
-)
+from .inventory import Inventory
 from .throttle import MonotonicRateLimiter
 
 _LOGGER = logging.getLogger(__name__)
@@ -144,16 +121,6 @@ def _resolve_statistics_helpers(
         sync=sync_helper,
         async_fn=async_helper,
     )
-
-
-async def _async_extract_selected_entities(
-    hass: HomeAssistant, call: ServiceCall
-) -> SelectedEntitiesType:
-    """Resolve referenced entities using available Home Assistant helpers."""
-
-    if target_helpers is not None:
-        return target_helpers.async_extract_referenced_entity_ids(hass, call)
-    return await service.async_extract_referenced_entity_ids(hass, call)
 
 
 def _iso_date(ts: int) -> str:
@@ -354,10 +321,6 @@ async def async_import_energy_history(
     entry: ConfigEntry,
     nodes: Inventory | None = None,
     *,
-    selection: Mapping[str, Iterable[str]]
-    | Iterable[tuple[str, str]]
-    | Iterable[str]
-    | None = None,
     reset_progress: bool = False,
     max_days: int | None = None,
     rate_limit: MonotonicRateLimiter,
@@ -386,8 +349,6 @@ async def async_import_energy_history(
         )
 
     inventory: Inventory | None
-    selection_spec = selection
-
     container = rec if isinstance(rec, Mapping) else None
     try:
         inventory = Inventory.require_from_context(
@@ -401,118 +362,36 @@ async def async_import_energy_history(
         )
         return
 
-    all_pairs: list[tuple[str, str]] = [
-        (node_type, addr) for node_type, addr in inventory.heater_sample_targets
-    ]
-    if not all_pairs:
-        logger.debug("Energy import: no heater nodes selected for device")
-        return
+    all_pairs: list[tuple[str, str]] = []
+    seen_pairs: set[tuple[str, str]] = set()
 
-    forward_map, reverse_map = inventory.heater_address_map
-    available_types = set(forward_map)
-    alias_lookup = inventory.sample_alias_map(
-        include_types=available_types,
-        restrict_to=available_types,
+    def _extend_targets(pairs: Iterable[tuple[str, str]]) -> None:
+        for node_type, addr in pairs:
+            normalized_type = node_type.strip() if isinstance(node_type, str) else ""
+            normalized_addr = addr.strip() if isinstance(addr, str) else ""
+            if not normalized_type or not normalized_addr:
+                continue
+            pair = (normalized_type, normalized_addr)
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            all_pairs.append(pair)
+
+    _extend_targets(inventory.heater_sample_targets)
+    _extend_targets(inventory.power_monitor_sample_targets)
+    _extend_targets(
+        (metadata.node_type, metadata.addr)
+        for metadata in inventory.iter_nodes_metadata()
     )
 
-    requested_pairs: set[tuple[str, str]] = set()
-    desired_pairs: set[tuple[str, str]] = set()
+    if not all_pairs:
+        logger.debug("Energy import: no nodes available for device")
+        return
 
-    if selection_spec is None:
-        target_pairs = list(all_pairs)
-    else:
-        mapping_sources: Iterable[tuple[Any, Any]] | None = None
-        explicit_pairs_input: list[tuple[Any, Any]] | None = None
-        default_values: Any | None = None
-
-        if (
-            isinstance(selection_spec, tuple)
-            and selection_spec
-            and isinstance(selection_spec[0], Mapping)
-        ):
-            mapping_sources = cast(
-                Mapping[str, Iterable[Any]], selection_spec[0]
-            ).items()
-        elif isinstance(selection_spec, Mapping):
-            mapping_sources = selection_spec.items()
-        elif isinstance(selection_spec, Iterable) and not isinstance(
-            selection_spec, (str, bytes)
-        ):
-            candidate_list = list(selection_spec)
-            if candidate_list and all(
-                isinstance(item, tuple) and len(item) == 2 for item in candidate_list
-            ):
-                explicit_pairs_input = candidate_list
-            else:
-                default_values = candidate_list
-        else:
-            default_values = selection_spec
-
-        if explicit_pairs_input is not None:
-            for raw_type, raw_addr in explicit_pairs_input:
-                normalized_key = normalize_node_type(
-                    raw_type,
-                    use_default_when_falsey=True,
-                )
-                canonical_type = alias_lookup.get(normalized_key)
-                if not canonical_type:
-                    continue
-                addr = normalize_node_addr(
-                    raw_addr,
-                    use_default_when_falsey=True,
-                )
-                if not addr:
-                    continue
-                requested_pairs.add((canonical_type, addr))
-                if canonical_type == "htr":
-                    for actual_type in reverse_map.get(addr, set()):
-                        desired_pairs.add((actual_type, addr))
-                elif (
-                    canonical_type in available_types
-                    and canonical_type in reverse_map.get(addr, set())
-                ):
-                    desired_pairs.add((canonical_type, addr))
-        else:
-            if mapping_sources is None:
-                if default_values is None:
-                    mapping_sources = []
-                else:
-                    mapping_sources = [("htr", default_values)]
-            for raw_type, values in mapping_sources:
-                normalized_key = normalize_node_type(
-                    raw_type,
-                    use_default_when_falsey=True,
-                )
-                canonical_type = alias_lookup.get(normalized_key)
-                if not canonical_type:
-                    continue
-                if isinstance(values, (str, bytes)):
-                    candidates = [values]
-                elif isinstance(values, Iterable):
-                    candidates = list(values)
-                else:
-                    candidates = [values]
-                for candidate in candidates:
-                    addr = normalize_node_addr(
-                        candidate,
-                        use_default_when_falsey=True,
-                    )
-                    if not addr:
-                        continue
-                    requested_pairs.add((canonical_type, addr))
-                    if canonical_type == "htr":
-                        for actual_type in reverse_map.get(addr, set()):
-                            desired_pairs.add((actual_type, addr))
-                    elif (
-                        canonical_type in available_types
-                        and canonical_type in reverse_map.get(addr, set())
-                    ):
-                        desired_pairs.add((canonical_type, addr))
-
-        target_pairs = [pair for pair in all_pairs if pair in desired_pairs]
+    target_pairs = list(all_pairs)
 
     if not target_pairs:
-        logger.debug("Energy import: no heater nodes selected for device")
+        logger.debug("Energy import: no nodes available for device")
         return
 
     day = 24 * 3600
@@ -554,18 +433,7 @@ async def async_import_energy_history(
         hass.config_entries.async_update_entry(entry, options=options)
 
     if reset_progress:
-        if selection_spec is None:
-            progress.clear()
-        else:
-            cleared_any = False
-            for node_type, addr in target_pairs:
-                progress.pop(f"{node_type}:{addr}", None)
-                progress.pop(addr, None)
-                cleared_any = True
-            if not cleared_any:
-                for req_type, addr in requested_pairs:
-                    progress.pop(f"{req_type}:{addr}", None)
-                    progress.pop(addr, None)
+        progress.clear()
         _write_progress_options(progress, imported=False)
     elif entry.options.get(OPTION_ENERGY_HISTORY_IMPORTED):
         logger.debug("%s: energy history already imported", entry.entry_id)
@@ -609,7 +477,7 @@ async def async_import_energy_history(
     for node_type, addr in target_pairs:
         logger.debug(
             "Energy import: importing history for %s %s",
-            node_type or "htr",
+            node_type,
             addr,
         )
         all_samples: list[dict[str, Any]] = []
@@ -871,8 +739,6 @@ async def async_register_import_energy_history_service(
 
     logger = _LOGGER
     async_mod = asyncio
-    registry_mod = er
-
     async def _service_import_energy_history(call) -> None:
         """Handle the import_energy_history service call."""
 
@@ -880,102 +746,34 @@ async def async_register_import_energy_history_service(
         reset = bool(call.data.get("reset_progress", False))
         max_days = call.data.get("max_history_retrieval")
 
-        ent_ids: set[str] = set()
-        extracted = await _async_extract_selected_entities(hass, call)
-        ent_ids.update(extracted.referenced_entity_ids)
-        ent_ids.update(extracted.indirectly_referenced_entity_ids)
-
-        raw_entity_ids = call.data.get("entity_id")
-        if isinstance(raw_entity_ids, str):
-            ent_ids.add(raw_entity_ids)
-        elif isinstance(raw_entity_ids, Iterable):
-            ent_ids.update(eid for eid in raw_entity_ids if isinstance(eid, str))
         tasks = []
         records = hass.data.get(DOMAIN, {})
         if not isinstance(records, Mapping):
             records = {}
-        if ent_ids:
-            ent_reg = registry_mod.async_get(hass)
-            entry_pairs: dict[str, set[tuple[str, str]]] = {}
-
-            def _parse_energy_unique_id(unique_id: str) -> tuple[str, str] | None:
-                parsed = parse_heater_energy_unique_id(unique_id)
-                if not parsed:
-                    return None
-                _dev_id, node_type, addr = parsed
-                return node_type, addr
-
-            for eid in ent_ids:
-                er_ent = ent_reg.async_get(eid)
-                if not er_ent or er_ent.platform != DOMAIN:
-                    continue
-                parsed = _parse_energy_unique_id(er_ent.unique_id or "")
-                if not parsed:
-                    continue
-                node_type, addr = parsed
-                entry_id = er_ent.config_entry_id
-                if not entry_id:
-                    continue
-                entry_pairs.setdefault(entry_id, set()).add((node_type, addr))
-
-            for entry_id, target_set in entry_pairs.items():
-                ent = hass.config_entries.async_get_entry(entry_id)
-                if not ent:
-                    continue
-                record = records.get(entry_id)
-                container = record if isinstance(record, Mapping) else None
-                try:
-                    inventory = Inventory.require_from_context(container=container)
-                except LookupError:
-                    dev = record.get("dev_id") if isinstance(record, Mapping) else None
-                    logger.error(
-                        "%s: energy import aborted; inventory missing in integration state (entry=%s)",
-                        dev,
-                        entry_id,
-                    )
-                    continue
-                available_targets = inventory.heater_sample_targets
-                if not available_targets:
-                    continue
-                filtered_targets = [
-                    pair for pair in available_targets if pair in target_set
-                ]
-                if not filtered_targets:
-                    continue
-                tasks.append(
-                    import_fn(
-                        hass,
-                        ent,
-                        filtered_targets,
-                        reset_progress=reset,
-                        max_days=max_days,
-                    )
+        for entry_id, rec in records.items():
+            if not isinstance(rec, Mapping):
+                continue
+            ent: ConfigEntry | None = rec.get("config_entry")
+            if not ent:
+                continue
+            try:
+                Inventory.require_from_context(container=rec)
+            except LookupError:
+                entry_entry_id = getattr(ent, "entry_id", "<unknown>")
+                logger.error(
+                    "%s: energy import aborted; inventory missing in integration state (entry=%s)",
+                    rec.get("dev_id"),
+                    entry_entry_id,
                 )
-        else:
-            for entry_id, rec in records.items():
-                if not isinstance(rec, Mapping):
-                    continue
-                ent: ConfigEntry | None = rec.get("config_entry")
-                if not ent:
-                    continue
-                try:
-                    inventory = Inventory.require_from_context(container=rec)
-                except LookupError:
-                    entry_id = getattr(ent, "entry_id", "<unknown>")
-                    logger.error(
-                        "%s: energy import aborted; inventory missing in integration state (entry=%s)",
-                        rec.get("dev_id"),
-                        entry_id,
-                    )
-                    continue
-                tasks.append(
-                    import_fn(
-                        hass,
-                        ent,
-                        reset_progress=reset,
-                        max_days=max_days,
-                    )
+                continue
+            tasks.append(
+                import_fn(
+                    hass,
+                    ent,
+                    reset_progress=reset,
+                    max_days=max_days,
                 )
+            )
         if tasks:
             logger.debug("import_energy_history: awaiting %d tasks", len(tasks))
             results = await async_mod.gather(*tasks, return_exceptions=True)
