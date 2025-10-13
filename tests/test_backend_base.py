@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
+from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -69,6 +70,17 @@ class ExampleBackend(Backend):
             }
         )
         return DummyWsClient(hass, entry_id=entry_id, dev_id=dev_id)
+
+    async def fetch_hourly_samples(
+        self,
+        dev_id: str,
+        nodes: Any,
+        start_local: datetime,
+        end_local: datetime,
+    ) -> dict[tuple[str, str], list[dict[str, Any]]]:
+        """Return an empty sample mapping for the dummy backend."""
+
+        return {}
 
 
 @pytest.mark.asyncio

@@ -53,11 +53,12 @@ from .const import (
     get_brand_basic_auth,
     signal_ws_status,
 )
-from .coordinator import StateCoordinator
+from .coordinator import EnergyStateCoordinator, StateCoordinator
 from .energy import (
     async_import_energy_history as _async_import_energy_history_impl,
     async_register_import_energy_history_service,
 )
+from .hourly_poller import HourlySamplesPoller
 from .inventory import Inventory, build_node_inventory
 from .throttle import default_samples_rate_limit_state, reset_samples_rate_limit_state
 from .utils import async_get_integration_version as _async_get_integration_version
@@ -400,6 +401,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         inventory,
     )
 
+    energy_coordinator = EnergyStateCoordinator(hass, client, dev_id, inventory)
+    await energy_coordinator.async_config_entry_first_refresh()
+
+    poller = HourlySamplesPoller(hass, energy_coordinator, backend, inventory)
+    await poller.async_setup()
+
     debug_enabled = bool(entry.options.get("debug", entry.data.get("debug", False)))
 
     hass.data.setdefault(DOMAIN, {})
@@ -407,8 +414,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         "backend": backend,
         "client": backend.client,
         "coordinator": coordinator,
+        "energy_coordinator": energy_coordinator,
         "dev_id": dev_id,
         "inventory": inventory,
+        "hourly_poller": poller,
         "config_entry": entry,
         "base_poll_interval": max(base_interval, MIN_POLL_INTERVAL),
         "stretched": False,
@@ -471,7 +480,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
             if callable(handle):
                 try:
                     handle()
-                except Exception:  # pragma: no cover - defensive cancellation
+                except Exception:  # noqa: BLE001 - defensive cancellation
                     _LOGGER.debug(
                         "WS: failed to cancel poll resume timer", exc_info=True
                     )
@@ -756,6 +765,13 @@ async def _async_shutdown_entry(rec: MutableMapping[str, Any]) -> None:
         except Exception:  # pragma: no cover - defensive logging
             _LOGGER.exception("Diagnostics listener task raised during shutdown")
         rec["diagnostics_task"] = None
+
+    poller = rec.get("hourly_poller")
+    if hasattr(poller, "async_shutdown"):
+        try:
+            await poller.async_shutdown()
+        except Exception:  # pragma: no cover - defensive shutdown logging
+            _LOGGER.exception("Failed to stop hourly samples poller")
 
     ws_tasks = rec.get("ws_tasks")
     if isinstance(ws_tasks, Mapping):

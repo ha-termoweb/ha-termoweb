@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 import types
 from typing import Any, Callable, Iterable, Mapping
 from unittest.mock import AsyncMock
@@ -60,32 +60,6 @@ def _state_coordinator_from_nodes(
         nodes,
         inventory=inventory,
     )
-
-
-@pytest.fixture
-def inventory_from_map(
-    inventory_builder: Callable[
-        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
-    ]
-) -> Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory]:
-    """Return helper to build Inventory objects from address maps."""
-
-    def _factory(
-        mapping: Mapping[str, Iterable[str]] | None,
-        dev_id: str = "dev",
-    ) -> coord_module.Inventory:
-        payload_nodes: list[dict[str, Any]] = []
-        if mapping:
-            for raw_type, values in mapping.items():
-                if not isinstance(values, Iterable) or isinstance(values, (str, bytes)):
-                    continue
-                for addr in values:
-                    payload_nodes.append({"type": raw_type, "addr": addr})
-        payload = {"nodes": payload_nodes}
-        node_list = list(build_node_inventory(payload))
-        return inventory_builder(dev_id, payload, node_list)
-
-    return _factory
 
 
 def test_update_nodes_accepts_inventory_container(
@@ -961,6 +935,45 @@ def test_energy_processing_consistent_between_poll_and_ws(
         assert ws_bucket["energy"]["A"] == pytest.approx(poll_energy)
         assert ws_bucket["power"]["A"] == pytest.approx(poll_power)
         assert ws_coord._last[("htr", "A")] == poll_coord._last[("htr", "A")]
+
+    asyncio.run(_run())
+
+
+def test_merge_samples_for_window_updates_energy(
+    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+) -> None:
+    """Normalised hourly samples should merge into coordinator caches."""
+
+    async def _run() -> None:
+        hass = HomeAssistant()
+        client = types.SimpleNamespace()
+        client.get_node_samples = AsyncMock(return_value=[])
+        inventory = inventory_from_map({"htr": ["A"], "pmo": ["M"]})
+        coord = EnergyStateCoordinator(hass, client, "dev", inventory)
+        await coord.async_refresh()
+
+        start = datetime(2023, 3, 27, 7, 0, tzinfo=UTC)
+        await coord.merge_samples_for_window(
+            "dev",
+            {
+                ("htr", "A"): [
+                    {"ts": start, "energy_wh": 1_200.0},
+                    {"ts": start + timedelta(hours=1), "energy_wh": 2_400.0},
+                ],
+                ("pmo", "M"): [
+                    {"ts": start + timedelta(minutes=30), "energy_wh": 500.0},
+                ],
+            },
+        )
+
+        dev_data = coord.data["dev"]
+        assert dev_data["htr"]["energy"]["A"] == pytest.approx(2.4)
+        assert dev_data["htr"]["power"]["A"] == pytest.approx(1_200.0)
+        assert dev_data["pmo"]["energy"]["M"] == pytest.approx(0.5)
+        assert dev_data["power_monitor"] is dev_data["pmo"]
+        last_point = coord._last[("htr", "A")]
+        assert last_point[0] == pytest.approx((start + timedelta(hours=1)).timestamp())
+        assert last_point[1] == pytest.approx(2.4)
 
     asyncio.run(_run())
 
