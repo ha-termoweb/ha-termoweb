@@ -1066,12 +1066,8 @@ custom_components/termoweb/sensor.py :: async_setup_entry
     Set up sensors for each heater node.
 custom_components/termoweb/sensor.py :: async_setup_entry.default_name
     Return a placeholder name for heater nodes.
-custom_components/termoweb/sensor.py :: async_setup_entry._fallback_power_monitor_name
-    Return a default label for a power monitor address.
-custom_components/termoweb/sensor.py :: async_setup_entry._register_power_monitor_node
-    Add a named power monitor derived from ``node``.
-custom_components/termoweb/sensor.py :: async_setup_entry._integrate_power_monitor_addresses
-    Merge addresses from ``source`` into the energy map and names.
+custom_components/termoweb/sensor.py :: _power_monitor_display_name
+    Return the display name for a power monitor address.
 custom_components/termoweb/sensor.py :: HeaterTemperatureSensor.__init__
     Initialise the heater temperature sensor entity.
 custom_components/termoweb/sensor.py :: HeaterTemperatureSensor.native_value
