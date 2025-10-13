@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from itertools import chain
 import logging
 import time
 from time import monotonic as time_mod
@@ -18,11 +19,7 @@ from homeassistant.util import dt as dt_util
 from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .boost import coerce_int, resolve_boost_end_from_fields
 from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
-from .inventory import (
-    Inventory,
-    normalize_node_addr,
-    normalize_node_type,
-)
+from .inventory import Inventory, normalize_node_addr, normalize_node_type
 from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
@@ -101,6 +98,10 @@ class StateCoordinator(
         self._backoff = 0  # seconds
         self._dev_id = dev_id
         self._device = device or {}
+        if not isinstance(inventory, Inventory):
+            msg = "EnergyStateCoordinator requires an Inventory instance"
+            raise TypeError(msg)
+
         self._inventory: Inventory | None = None
         self._pending_settings: dict[tuple[str, str], PendingSetting] = {}
         self._rtc_reference: datetime | None = None
@@ -715,85 +716,92 @@ class EnergyStateCoordinator(
         }
         self.update_addresses(inventory)
 
+    def _resolve_inventory(self, candidate: Inventory | None = None) -> Inventory:
+        """Return the active inventory, preferring ``candidate`` when provided."""
+
+        if candidate is not None and not isinstance(candidate, Inventory):
+            msg = "Energy inventory is unavailable"
+            raise TypeError(msg)
+
+        inventory = candidate if isinstance(candidate, Inventory) else self._inventory
+        if not isinstance(inventory, Inventory):
+            msg = "Energy inventory is unavailable"
+            raise TypeError(msg)
+        return inventory
+
+    def _tracked_address_map(
+        self, inventory: Inventory | None = None
+    ) -> dict[str, tuple[str, ...]]:
+        """Return canonical address tuples grouped by node type."""
+
+        resolved = self._resolve_inventory(inventory)
+        buckets: dict[str, list[str]] = {
+            node_type: [] for node_type in ENERGY_NODE_TYPES
+        }
+
+        def _record(node_type: str, addr: str) -> None:
+            bucket = buckets.setdefault(node_type, [])
+            if addr not in bucket:
+                bucket.append(addr)
+
+        for node_type, addr in chain(
+            resolved.heater_sample_targets, resolved.power_monitor_sample_targets
+        ):
+            normalized_type = normalize_node_type(
+                node_type,
+                use_default_when_falsey=True,
+            )
+            normalized_addr = normalize_node_addr(
+                addr,
+                use_default_when_falsey=True,
+            )
+            if not normalized_type or normalized_type not in ENERGY_NODE_TYPES:
+                continue
+            if not normalized_addr:
+                continue
+            _record(normalized_type, normalized_addr)
+
+        return {
+            node_type: tuple(addresses) for node_type, addresses in buckets.items()
+        }
+
+    def _tracked_address_pairs(
+        self, inventory: Inventory | None = None
+    ) -> set[tuple[str, str]]:
+        """Return the tracked ``(node_type, addr)`` pairs for ``inventory``."""
+
+        address_map = self._tracked_address_map(inventory)
+        return {
+            (node_type, addr)
+            for node_type, addrs in address_map.items()
+            for addr in addrs
+        }
+
+    def _alias_map(self) -> dict[str, str]:
+        """Return the compatibility aliases exposed by the inventory."""
+
+        inventory = self._resolve_inventory()
+        _, heater_aliases = inventory.heater_sample_address_map
+        _, power_aliases = inventory.power_monitor_sample_address_map
+
+        alias_map: dict[str, str] = {**heater_aliases, **power_aliases}
+        for node_type in ENERGY_NODE_TYPES:
+            alias_map.setdefault(node_type, node_type)
+        return alias_map
+
     def update_addresses(
         self,
         inventory: Inventory | None,
     ) -> None:
         """Replace the tracked nodes using immutable inventory metadata."""
 
-        self._inventory = inventory if isinstance(inventory, Inventory) else None
-
-        valid_keys = {pair for pair in self._iter_tracked_pairs()}
-        if not valid_keys:
-            self._last = {}
-        else:
-            self._last = {
-                key: value for key, value in self._last.items() if key in valid_keys
-            }
-
-    def _iter_tracked_pairs(self) -> set[tuple[str, str]]:
-        """Return canonical ``(node_type, addr)`` pairs tracked by the coordinator."""
-
-        addresses_by_type = self._addresses_by_type
-        pairs: set[tuple[str, str]] = set()
-        for node_type in ENERGY_NODE_TYPES:
-            for addr in addresses_by_type.get(node_type, []):
-                pairs.add((node_type, addr))
-        return pairs
-
-    @property
-    def _addresses_by_type(self) -> dict[str, list[str]]:
-        """Return the immutable inventory addresses grouped by type."""
-
-        inventory = self._inventory
         if not isinstance(inventory, Inventory):
-            return {node_type: [] for node_type in ENERGY_NODE_TYPES}
+            msg = "Energy inventory is unavailable"
+            raise TypeError(msg)
 
-        heater_map, _ = inventory.heater_sample_address_map
-        power_map, _ = inventory.power_monitor_sample_address_map
-
-        addresses: dict[str, list[str]] = {}
-        for node_type in ENERGY_NODE_TYPES:
-            if node_type == "pmo":
-                addresses[node_type] = list(power_map.get("pmo", []))
-            else:
-                addresses[node_type] = list(heater_map.get(node_type, []))
-        return addresses
-
-    @property
-    def _compat_aliases(self) -> dict[str, str]:
-        """Return the compatibility aliases exposed by the inventory."""
-
-        inventory = self._inventory
-        if not isinstance(inventory, Inventory):
-            return {node_type: node_type for node_type in ENERGY_NODE_TYPES}
-
-        _, heater_aliases = inventory.heater_sample_address_map
-        power_map, power_aliases = inventory.power_monitor_sample_address_map
-
-        alias_map: dict[str, str] = dict(heater_aliases)
-        alias_map.update(power_aliases)
-        for node_type in ENERGY_NODE_TYPES:
-            alias_map.setdefault(node_type, node_type)
-
-        # Ensure pmo aliases exist even when the inventory lacks power monitors.
-        if "pmo" not in alias_map:
-            alias_map["pmo"] = "pmo"
-        if power_map.get("pmo"):
-            alias_map.setdefault("power_monitor", "pmo")
-            alias_map.setdefault("power_monitors", "pmo")
-
-        return alias_map
-
-    def _addrs(self) -> list[str]:
-        """Return a flattened list of tracked addresses for websocket fallbacks."""
-
-        addresses_by_type = self._addresses_by_type
-        return [
-            addr
-            for node_type in ENERGY_NODE_TYPES
-            for addr in addresses_by_type.get(node_type, [])
-        ]
+        valid_keys = self._tracked_address_pairs(inventory)
+        self._inventory = inventory
+        self._last = {key: value for key, value in self._last.items() if key in valid_keys}
 
     def _process_energy_sample(
         self,
@@ -845,7 +853,7 @@ class EnergyStateCoordinator(
     ) -> tuple[dict[str, dict[str, float]], dict[str, dict[str, float]]]:
         """Return energy and power buckets pre-populated from cached data."""
 
-        addresses_by_type = self._addresses_by_type
+        addresses_by_type = self._tracked_address_map()
 
         energy_by_type: dict[str, dict[str, float]] = {
             node_type: {} for node_type in addresses_by_type
@@ -903,7 +911,7 @@ class EnergyStateCoordinator(
         try:
             energy_by_type, power_by_type = self._seed_cached_energy_and_power(dev_id)
 
-            addresses_by_type = self._addresses_by_type
+            addresses_by_type = self._tracked_address_map()
             for node_type, addrs_for_type in addresses_by_type.items():
                 for addr in addrs_for_type:
                     now = time.time()
@@ -951,7 +959,7 @@ class EnergyStateCoordinator(
 
             dev_data: dict[str, Any] = {"dev_id": dev_id}
 
-            for node_type, addrs_for_type in self._addresses_by_type.items():
+            for node_type, addrs_for_type in self._tracked_address_map().items():
                 bucket = {
                     "energy": dict(energy_by_type.get(node_type, {})),
                     "power": dict(power_by_type.get(node_type, {})),
@@ -964,18 +972,18 @@ class EnergyStateCoordinator(
                 heater_data = {
                     "energy": dict(energy_by_type.get("htr", {})),
                     "power": dict(power_by_type.get("htr", {})),
-                    "addrs": list(addresses_by_type.get("htr", [])),
+                    "addrs": list(addresses_by_type.get("htr", ())),
                 }
                 dev_data["htr"] = heater_data
 
-            alias_map = self._compat_aliases
+            alias_map = self._alias_map()
             for alias, canonical in alias_map.items():
                 canonical_bucket = dev_data.get(canonical)
                 if not isinstance(canonical_bucket, dict):
                     canonical_bucket = {
                         "energy": {},
                         "power": {},
-                        "addrs": list(addresses_by_type.get(canonical, [])),
+                        "addrs": list(addresses_by_type.get(canonical, ())),
                     }
                     dev_data[canonical] = canonical_bucket
                 dev_data[alias] = canonical_bucket
@@ -1082,8 +1090,8 @@ class EnergyStateCoordinator(
 
         changed = False
 
-        addresses_by_type = self._addresses_by_type
-        alias_map = self._compat_aliases
+        addresses_by_type = self._tracked_address_map()
+        alias_map = self._alias_map()
 
         for raw_type, payload in updates.items():
             node_type = normalize_node_type(raw_type)

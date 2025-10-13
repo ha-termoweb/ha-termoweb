@@ -34,48 +34,6 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 
 EnergyStateCoordinator = coord_module.EnergyStateCoordinator
 StateCoordinator = coord_module.StateCoordinator
-
-
-def _expected_energy_map(
-    source: Iterable[str] | Mapping[str, Iterable[str]] | None,
-) -> dict[str, list[str]]:
-    """Return the combined heater and power monitor map for ``source``."""
-
-    heater_map, _ = normalize_heater_addresses(source)
-    if isinstance(source, Mapping):
-        power_source: Mapping[str, Iterable[str]] | None = source
-    else:
-        power_source = None
-    power_map, _ = normalize_power_monitor_addresses(power_source)
-
-    combined = {
-        "htr": list(heater_map.get("htr", [])),
-        "acm": list(heater_map.get("acm", [])),
-        "pmo": list(power_map.get("pmo", [])),
-    }
-    for node_type in coord_module.ENERGY_NODE_TYPES:
-        combined.setdefault(node_type, [])
-    return combined
-
-
-def _expected_energy_aliases(
-    source: Iterable[str] | Mapping[str, Iterable[str]] | None,
-) -> dict[str, str]:
-    """Return the merged compatibility aliases for ``source``."""
-
-    heater_aliases = normalize_heater_addresses(source)[1]
-    if isinstance(source, Mapping):
-        power_source: Mapping[str, Iterable[str]] | None = source
-    else:
-        power_source = None
-    power_aliases = normalize_power_monitor_addresses(power_source)[1]
-    merged = dict(heater_aliases)
-    merged.update(power_aliases)
-    for node_type in coord_module.ENERGY_NODE_TYPES:
-        merged.setdefault(node_type, node_type)
-    return merged
-
-
 def _inventory_from_nodes(dev_id: str, payload: Mapping[str, Any]) -> Inventory:
     """Return an Inventory built from ``payload``."""
 
@@ -408,13 +366,14 @@ def test_register_pending_setting_normalizes_values(
 ) -> None:
     client = types.SimpleNamespace(get_node_settings=AsyncMock())
     hass = HomeAssistant()
-    coord = StateCoordinator(
+    nodes = {"nodes": [{"addr": "1", "type": "htr"}]}
+    coord = _state_coordinator_from_nodes(
         hass,
         client,
         30,
         "dev",
         {"name": "Device"},
-        {},
+        nodes,
     )
 
     monkeypatch.setattr(coord_module, "time_mod", lambda: 100.0)
@@ -434,13 +393,14 @@ def test_should_defer_pending_setting_handles_expiry(
 ) -> None:
     client = types.SimpleNamespace(get_node_settings=AsyncMock())
     hass = HomeAssistant()
-    coord = StateCoordinator(
+    nodes = {"nodes": [{"addr": "1", "type": "htr"}]}
+    coord = _state_coordinator_from_nodes(
         hass,
         client,
         30,
         "dev",
         {"name": "Device"},
-        {},
+        nodes,
     )
 
     monkeypatch.setattr(coord_module, "time_mod", lambda: 10.0)
@@ -456,13 +416,14 @@ def test_should_defer_pending_setting_defers_missing_payload(
 ) -> None:
     client = types.SimpleNamespace(get_node_settings=AsyncMock())
     hass = HomeAssistant()
-    coord = StateCoordinator(
+    nodes = {"nodes": [{"addr": "2", "type": "acm"}]}
+    coord = _state_coordinator_from_nodes(
         hass,
         client,
         30,
         "dev",
         {"name": "Device"},
-        {},
+        nodes,
     )
 
     monkeypatch.setattr(coord_module, "time_mod", lambda: 50.0)
@@ -478,13 +439,14 @@ def test_should_defer_pending_setting_satisfied_payload(
 ) -> None:
     client = types.SimpleNamespace(get_node_settings=AsyncMock())
     hass = HomeAssistant()
-    coord = StateCoordinator(
+    nodes = {"nodes": [{"addr": "3", "type": "htr"}]}
+    coord = _state_coordinator_from_nodes(
         hass,
         client,
         30,
         "dev",
         {"name": "Device"},
-        {},
+        nodes,
     )
 
     monkeypatch.setattr(coord_module, "time_mod", lambda: 75.0)
@@ -501,13 +463,14 @@ def test_should_defer_pending_setting_mismatch_defers(
 ) -> None:
     client = types.SimpleNamespace(get_node_settings=AsyncMock())
     hass = HomeAssistant()
-    coord = StateCoordinator(
+    nodes = {"nodes": [{"addr": "4", "type": "htr"}]}
+    coord = _state_coordinator_from_nodes(
         hass,
         client,
         30,
         "dev",
         {"name": "Device"},
-        {},
+        nodes,
     )
 
     monkeypatch.setattr(coord_module, "time_mod", lambda: 200.0)
@@ -1398,7 +1361,7 @@ def test_state_coordinator_update_nodes_uses_provided_inventory(
     assert inventory.nodes[0] is provided_nodes[0]
 
 
-def test_energy_state_coordinator_update_addresses_requires_inventory(
+def test_energy_state_coordinator_requires_inventory(
     inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory]
 ) -> None:
     hass = HomeAssistant()
@@ -1406,46 +1369,32 @@ def test_energy_state_coordinator_update_addresses_requires_inventory(
     inventory = inventory_from_map({"htr": ["A"], "acm": ["B"], "pmo": ["M"]})
     coord = EnergyStateCoordinator(hass, client, "dev", inventory)
 
-    assert coord._addresses_by_type == _expected_energy_map(
-        {"htr": ["A"], "acm": ["B"], "pmo": ["M"]}
-    )
-    assert coord._compat_aliases == _expected_energy_aliases(
-        {"htr": ["A"], "acm": ["B"], "pmo": ["M"]}
-    )
+    assert coord._tracked_address_map() == {
+        "htr": ("A",),
+        "acm": ("B",),
+        "pmo": ("M",),
+    }
+    assert coord._alias_map() == {
+        "htr": "htr",
+        "acm": "acm",
+        "pmo": "pmo",
+        "power_monitor": "pmo",
+        "power_monitors": "pmo",
+    }
 
-    coord.update_addresses(None)
-    assert coord._inventory is None
-    assert coord._addresses_by_type == _expected_energy_map(None)
-    assert coord._compat_aliases["htr"] == "htr"
-    assert coord._compat_aliases["acm"] == "acm"
-    assert coord._compat_aliases["pmo"] == "pmo"
+    with pytest.raises(TypeError):
+        coord.update_addresses(None)
+
+    with pytest.raises(TypeError):
+        coord.update_addresses(object())  # type: ignore[arg-type]
 
 
-def test_energy_state_coordinator_update_addresses_ignores_non_inventory(
-    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory]
-) -> None:
+def test_energy_state_coordinator_rejects_missing_inventory() -> None:
     hass = HomeAssistant()
     client = types.SimpleNamespace()
-    inventory = inventory_from_map({"htr": ["A"]})
-    coord = EnergyStateCoordinator(hass, client, "dev", inventory)
 
-    coord.update_addresses(object())  # type: ignore[arg-type]
-    assert coord._inventory is None
-    assert coord._addresses_by_type == _expected_energy_map(None)
-    assert coord._compat_aliases["htr"] == "htr"
-    assert coord._compat_aliases["acm"] == "acm"
-    assert coord._compat_aliases["pmo"] == "pmo"
-def test_energy_state_coordinator_async_update_adds_legacy_bucket() -> None:
-    async def _run() -> None:
-        hass = HomeAssistant()
-        client = types.SimpleNamespace()
-        coord = EnergyStateCoordinator(hass, client, "dev", None)
-
-        result = await coord._async_update_data()
-        dev_data = result["dev"]
-        assert dev_data["htr"] == {"energy": {}, "power": {}, "addrs": []}
-
-    asyncio.run(_run())
+    with pytest.raises(TypeError):
+        EnergyStateCoordinator(hass, client, "dev", None)  # type: ignore[arg-type]
 
 
 def test_coordinator_rate_limit_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
