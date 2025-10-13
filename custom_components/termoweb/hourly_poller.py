@@ -1,4 +1,5 @@
 """Hourly REST poller for historical samples across all backends."""
+
 from __future__ import annotations
 
 import asyncio
@@ -68,7 +69,9 @@ class HourlySamplesPoller:
 
         helper = async_track_time_change
         if helper is None:
-            _LOGGER.debug("Hourly poller: time-change helper unavailable; scheduling skipped")
+            _LOGGER.debug(
+                "Hourly poller: time-change helper unavailable; scheduling skipped"
+            )
         elif self._remove_listener is None:
             self._remove_listener = helper(
                 self._hass,
@@ -88,7 +91,9 @@ class HourlySamplesPoller:
             try:
                 self._remove_listener()
             except Exception:  # noqa: BLE001 - defensive logging only
-                _LOGGER.debug("Hourly poller: failed to remove time listener", exc_info=True)
+                _LOGGER.debug(
+                    "Hourly poller: failed to remove time listener", exc_info=True
+                )
             self._remove_listener = None
 
         task = self._active_task
@@ -99,27 +104,33 @@ class HourlySamplesPoller:
                 await task
 
     def _on_time(self, now: datetime | None) -> None:
-        """Callback invoked by Home Assistant's time tracker."""
+        """Callback invoked by Home Assistant's time tracker in a thread-safe way."""
 
         reference = dt_util.as_local(now) if now is not None else dt_util.now()
-        if self._active_task is not None and not self._active_task.done():
-            _LOGGER.debug("Hourly poller: skipping trigger while previous run is active")
-            return
-        task = self._hass.async_create_task(self._run_for_previous_hour(reference))
-        self._active_task = task
 
-        def _finalise(finished: asyncio.Task[None]) -> None:
-            self._active_task = None
-            if finished.cancelled():
-                _LOGGER.debug("Hourly poller task cancelled")
-                return
-            exception = finished.exception()
-            if exception is not None:
-                _LOGGER.exception(
-                    "Hourly poller run raised an exception", exc_info=exception
+        def _schedule() -> None:
+            if self._active_task is not None and not self._active_task.done():
+                _LOGGER.debug(
+                    "Hourly poller: skipping trigger while previous run is active"
                 )
+                return
+            task = self._hass.async_create_task(self._run_for_previous_hour(reference))
+            self._active_task = task
 
-        task.add_done_callback(_finalise)
+            def _finalise(finished: asyncio.Task[None]) -> None:
+                self._active_task = None
+                if finished.cancelled():
+                    _LOGGER.debug("Hourly poller task cancelled")
+                    return
+                exception = finished.exception()
+                if exception is not None:
+                    _LOGGER.exception(
+                        "Hourly poller run raised an exception", exc_info=exception
+                    )
+
+            task.add_done_callback(_finalise)
+
+        self._hass.loop.call_soon_threadsafe(_schedule)
 
     def _enumerate_nodes(self, inventory: Inventory) -> list[tuple[str, str]]:
         """Return canonical ``(node_type, addr)`` pairs for ``inventory``."""
@@ -237,7 +248,8 @@ class HourlySamplesPoller:
 
         if not result:
             _LOGGER.debug(
-                "Hourly poller: backend returned no data for %s", mask_identifier(dev_id)
+                "Hourly poller: backend returned no data for %s",
+                mask_identifier(dev_id),
             )
             return
 
@@ -255,7 +267,8 @@ class HourlySamplesPoller:
             raise
         except Exception:  # pragma: no cover - defensive logging
             _LOGGER.exception(
-                "Hourly poller: coordinator merge failed for %s", mask_identifier(dev_id)
+                "Hourly poller: coordinator merge failed for %s",
+                mask_identifier(dev_id),
             )
 
 
