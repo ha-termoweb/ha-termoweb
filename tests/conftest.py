@@ -68,6 +68,34 @@ def inventory_builder() -> Callable[[str, Mapping[str, Any] | None, Iterable[Any
     return _factory
 
 
+@pytest.fixture
+def inventory_from_map(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], "Inventory"
+    ],
+) -> Callable[[Mapping[str, Iterable[str]] | None, str], "Inventory"]:
+    """Return helper to build Inventory objects from address maps."""
+
+    from custom_components.termoweb.inventory import build_node_inventory
+
+    def _factory(
+        mapping: Mapping[str, Iterable[str]] | None,
+        dev_id: str = "dev",
+    ) -> "Inventory":
+        payload_nodes: list[dict[str, Any]] = []
+        if mapping:
+            for raw_type, values in mapping.items():
+                if not isinstance(values, Iterable) or isinstance(values, (str, bytes)):
+                    continue
+                for addr in values:
+                    payload_nodes.append({"type": raw_type, "addr": addr})
+        payload = {"nodes": payload_nodes}
+        node_list = list(build_node_inventory(payload))
+        return inventory_builder(dev_id, payload, node_list)
+
+    return _factory
+
+
 def build_coordinator_device_state(
     *,
     nodes: Mapping[str, Any] | None = None,

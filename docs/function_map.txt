@@ -108,6 +108,12 @@ custom_components/termoweb/backend/base.py :: Backend.client
     Return the HTTP client associated with this backend.
 custom_components/termoweb/backend/base.py :: Backend.create_ws_client
     Create a websocket client for the given device.
+custom_components/termoweb/backend/base.py :: Backend.fetch_hourly_samples
+    Return normalised hourly samples grouped by node descriptor.
+custom_components/termoweb/backend/base.py :: normalise_sample_records
+    Return sorted sample dictionaries containing ``ts`` and ``energy_wh``.
+custom_components/termoweb/backend/base.py :: fetch_normalised_hourly_samples
+    Return per-node normalised samples for ``nodes`` between ``start`` and ``end``.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRequestError.__init__
     Initialise error metadata for logging and diagnostics.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._post_segmented
@@ -118,6 +124,8 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.get_node_se
     Fetch and normalise node settings for the Ducaheat API.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.set_node_settings
     Write heater settings using the segmented endpoints.
+custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend.fetch_hourly_samples
+    Return hourly samples for ``nodes`` using the segmented API.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.get_node_samples
     Return samples converting epoch seconds to milliseconds for the API.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.normalise_ws_nodes
@@ -240,6 +248,8 @@ custom_components/termoweb/backend/termoweb.py :: TermoWebBackend._resolve_ws_cl
     Return the websocket client class compatible with this backend.
 custom_components/termoweb/backend/termoweb.py :: TermoWebBackend.create_ws_client
     Instantiate the unified websocket client for TermoWeb.
+custom_components/termoweb/backend/termoweb.py :: TermoWebBackend.fetch_hourly_samples
+    Return hourly samples for ``nodes`` using the REST API.
 custom_components/termoweb/backend/termoweb_ws.py :: HandshakeError.__init__
     Initialise the error with the HTTP response details.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient.__init__
@@ -734,6 +744,22 @@ custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._extract_sam
     Extract ``(timestamp, counter)`` from websocket sample payloads.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.handle_ws_samples
     Update cached heater metrics from websocket ``samples`` payloads.
+custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.merge_samples_for_window
+    Merge normalised hourly samples into the cached energy state.
+custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller.__init__
+    Initialise the poller with Home Assistant context and dependencies.
+custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller.async_setup
+    Register the HH:05 local trigger and perform optional catch-up.
+custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller.async_shutdown
+    Cancel scheduled triggers and pending polling tasks.
+custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller._on_time
+    Callback invoked by Home Assistant's time tracker.
+custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller._enumerate_nodes
+    Return canonical ``(node_type, addr)`` pairs for ``inventory``.
+custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller._run_for_previous_hour
+    Fetch and merge samples for the hour preceding ``now_local``.
+custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller._poll_device
+    Fetch samples for ``dev_id`` and merge them into the coordinator.
 custom_components/termoweb/coordinator.py :: _wrap_logger
     Return a logger proxy that exposes ``isEnabledFor`` when missing.
 custom_components/termoweb/diagnostics.py :: async_get_config_entry_diagnostics

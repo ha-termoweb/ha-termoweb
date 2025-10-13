@@ -10,17 +10,21 @@ from typing import Any
 
 from aiohttp import ClientResponseError
 
-from ..api import RESTClient
-from ..const import BRAND_DUCAHEAT, WS_NAMESPACE
-from ..inventory import Inventory, NodeDescriptor
-from .base import Backend, WsClientProto
-from .ducaheat_ws import DucaheatWSClient
-from .sanitize import (
+from custom_components.termoweb.api import RESTClient
+from custom_components.termoweb.backend.base import (
+    Backend,
+    WsClientProto,
+    fetch_normalised_hourly_samples,
+)
+from custom_components.termoweb.backend.ducaheat_ws import DucaheatWSClient
+from custom_components.termoweb.backend.sanitize import (
     build_acm_boost_payload,
     mask_identifier,
     redact_text,
     validate_boost_minutes,
 )
+from custom_components.termoweb.const import BRAND_DUCAHEAT, WS_NAMESPACE
+from custom_components.termoweb.inventory import Inventory, NodeDescriptor
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1150,6 +1154,25 @@ class DucaheatBackend(Backend):
             coordinator=coordinator,
             namespace=WS_NAMESPACE,
             inventory=inventory,
+        )
+
+    async def fetch_hourly_samples(
+        self,
+        dev_id: str,
+        nodes: Iterable[tuple[str, str]],
+        start_local: datetime,
+        end_local: datetime,
+    ) -> dict[tuple[str, str], list[dict[str, Any]]]:
+        """Return hourly samples for ``nodes`` using the segmented API."""
+
+        return await fetch_normalised_hourly_samples(
+            client=self.client,
+            dev_id=dev_id,
+            nodes=nodes,
+            start_local=start_local,
+            end_local=end_local,
+            logger=_LOGGER,
+            log_prefix="ducaheat",
         )
 
 

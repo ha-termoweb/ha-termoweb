@@ -17,6 +17,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .api import BackendAuthError, BackendRateLimitError, RESTClient
+from .backend.sanitize import mask_identifier
 from .boost import coerce_int, resolve_boost_end_from_fields
 from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
 from .inventory import Inventory, normalize_node_addr, normalize_node_type
@@ -1132,6 +1133,126 @@ class EnergyStateCoordinator(
 
         if changed:
             dev_data.setdefault("dev_id", dev_id)
+
+    async def merge_samples_for_window(
+        self,
+        dev_id: str,
+        samples: Mapping[tuple[str, str], Iterable[Mapping[str, Any]]],
+    ) -> None:
+        """Merge normalised hourly samples into the cached energy state."""
+
+        if dev_id != self._dev_id or not isinstance(samples, Mapping):
+            return
+
+        data = self.data
+        if not isinstance(data, dict):
+            return
+
+        dev_data = data.get(dev_id)
+        if not isinstance(dev_data, dict):
+            dev_data = {"dev_id": dev_id}
+            data[dev_id] = dev_data
+
+        addresses_by_type = self._tracked_address_map()
+        alias_map = self._alias_map()
+        merge_counts: dict[tuple[str, str], int] = {}
+
+        for descriptor, records in samples.items():
+            if not isinstance(descriptor, tuple) or len(descriptor) != 2:
+                continue
+
+            raw_type, raw_addr = descriptor
+            node_type = normalize_node_type(
+                raw_type,
+                use_default_when_falsey=True,
+            )
+            addr = normalize_node_addr(
+                raw_addr,
+                use_default_when_falsey=True,
+            )
+            if not node_type or not addr:
+                continue
+
+            canonical_type = alias_map.get(node_type, node_type)
+            tracked_addrs = addresses_by_type.get(canonical_type)
+            if not tracked_addrs or addr not in tracked_addrs:
+                continue
+
+            bucket = dev_data.get(canonical_type)
+            if not isinstance(bucket, dict):
+                bucket = {
+                    "energy": {},
+                    "power": {},
+                    "addrs": list(tracked_addrs),
+                }
+                dev_data[canonical_type] = bucket
+            else:
+                bucket.setdefault("energy", {})
+                bucket.setdefault("power", {})
+                bucket.setdefault("addrs", list(tracked_addrs))
+
+            energy_bucket = bucket["energy"]
+            power_bucket = bucket["power"]
+            scale = float(self._counter_scales.get(canonical_type, 1000.0) or 1000.0)
+            factor = scale / 1000.0 if scale else 1.0
+
+            prepared: list[tuple[float, float]] = []
+            for record in records:
+                if not isinstance(record, Mapping):
+                    continue
+                ts_value = record.get("ts")
+                if isinstance(ts_value, datetime):
+                    when = dt_util.as_utc(ts_value).timestamp()
+                else:
+                    when = float_or_none(record.get("timestamp"))
+                    if when is None:
+                        continue
+                energy_wh = float_or_none(record.get("energy_wh"))
+                if energy_wh is None:
+                    continue
+                prepared.append((when, energy_wh * factor))
+
+            if not prepared:
+                continue
+
+            prepared.sort(key=lambda item: item[0])
+            merge_counts[(canonical_type, addr)] = len(prepared)
+
+            for when, counter in prepared:
+                self._process_energy_sample(
+                    canonical_type,
+                    addr,
+                    when,
+                    counter,
+                    energy_bucket,
+                    power_bucket,
+                    prune_power=True,
+                )
+
+        for canonical_type, addrs in addresses_by_type.items():
+            bucket = dev_data.get(canonical_type)
+            if isinstance(bucket, dict):
+                bucket.setdefault("addrs", list(addrs))
+
+        for alias, canonical in alias_map.items():
+            if alias == canonical:
+                continue
+            canonical_bucket = dev_data.get(canonical)
+            if canonical_bucket is not None:
+                dev_data[alias] = canonical_bucket
+
+        dev_data.setdefault("dev_id", dev_id)
+
+        if merge_counts:
+            summary = ", ".join(
+                f"{node_type}:{addr}={count}"
+                for (node_type, addr), count in sorted(merge_counts.items())
+            )
+            _LOGGER.debug(
+                "Hourly samples merge complete for %s: %s",
+                mask_identifier(dev_id),
+                summary,
+            )
 
 
 def _wrap_logger(logger: Any) -> Any:

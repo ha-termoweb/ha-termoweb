@@ -1,11 +1,20 @@
 """TermoWeb backend implementation."""
 from __future__ import annotations
 
+from collections.abc import Iterable
+from datetime import datetime
+import logging
 from typing import Any, cast
 
-from ..inventory import Inventory
-from .base import Backend, WsClientProto
-from .ws_client import WebSocketClient
+from custom_components.termoweb.backend.base import (
+    Backend,
+    WsClientProto,
+    fetch_normalised_hourly_samples,
+)
+from custom_components.termoweb.backend.ws_client import WebSocketClient
+from custom_components.termoweb.inventory import Inventory
+
+_LOGGER = logging.getLogger(__name__)
 
 try:  # pragma: no cover - exercised via backend tests
     from custom_components.termoweb.backend.termoweb_ws import (
@@ -51,4 +60,23 @@ class TermoWebBackend(Backend):
         return ws_cls(
             hass,
             **kwargs,
+        )
+
+    async def fetch_hourly_samples(
+        self,
+        dev_id: str,
+        nodes: Iterable[tuple[str, str]],
+        start_local: datetime,
+        end_local: datetime,
+    ) -> dict[tuple[str, str], list[dict[str, Any]]]:
+        """Return hourly samples for ``nodes`` using the REST API."""
+
+        return await fetch_normalised_hourly_samples(
+            client=self.client,
+            dev_id=dev_id,
+            nodes=nodes,
+            start_local=start_local,
+            end_local=end_local,
+            logger=_LOGGER,
+            log_prefix="termoweb",  # identifies the backend in shared logs
         )
