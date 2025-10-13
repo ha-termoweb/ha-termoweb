@@ -6,6 +6,8 @@ import asyncio
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import partial
+import inspect
 import logging
 from typing import Any, cast
 
@@ -237,29 +239,103 @@ async def _get_last_statistics_compat(  # pragma: no cover - compatibility shim
         "async_get_last_statistics",
     )
 
-    if (
-        helpers.sync
-        and helpers.executor
-        and helpers.sync_target is not None
-        and start_time is None
-    ):
-        try:
-            return await helpers.executor(
-                helpers.sync,
-                helpers.sync_target,
-                number_of_stats,
-                statistic_id,
-                types,
-                None,
-            )
-        except TypeError:
-            return await helpers.executor(
-                helpers.sync,
-                helpers.sync_target,
-                number_of_stats,
-                statistic_id,
-                types,
-            )
+    if helpers.sync and helpers.executor and helpers.sync_target is not None:
+        signature = inspect.signature(helpers.sync)
+        params = list(signature.parameters.values())
+        call_args: list[Any] = [
+            helpers.sync_target,
+            number_of_stats,
+            statistic_id,
+        ]
+        call_kwargs: dict[str, Any] = {}
+        can_call_sync = True
+
+        for param in params[len(call_args) :]:
+            if param.kind in (
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            ):
+                continue
+
+            if param.name == "convert_units":
+                value: Any = True
+            elif param.name == "types":
+                value = types
+            elif param.name == "start_time":
+                if start_time is None and param.default is inspect.Signature.empty:
+                    value = None
+                elif start_time is not None:
+                    value = start_time
+                else:
+                    continue
+            else:
+                if param.default is inspect.Signature.empty:
+                    can_call_sync = False
+                    break
+                continue
+
+            if param.kind in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            ):
+                call_args.append(value)
+            else:
+                call_kwargs[param.name] = value
+
+        if can_call_sync:
+            sync_call = partial(helpers.sync, *call_args, **call_kwargs)
+            try:
+                return await helpers.executor(sync_call)
+            except TypeError as err:
+                message = str(err)
+                if not any(
+                    phrase in message
+                    for phrase in (
+                        "unexpected keyword argument",
+                        "required positional argument",
+                        "positional arguments but",
+                    )
+                ):
+                    raise
+
+                fallback_calls = [
+                    partial(
+                        helpers.sync,
+                        helpers.sync_target,
+                        number_of_stats,
+                        statistic_id,
+                        types=types,
+                    ),
+                    partial(
+                        helpers.sync,
+                        helpers.sync_target,
+                        number_of_stats,
+                        statistic_id,
+                        convert_units=True,
+                        types=types,
+                    ),
+                    partial(
+                        helpers.sync,
+                        helpers.sync_target,
+                        number_of_stats,
+                        statistic_id,
+                        types,
+                        None,
+                    ),
+                    partial(
+                        helpers.sync,
+                        helpers.sync_target,
+                        number_of_stats,
+                        statistic_id,
+                        types,
+                    ),
+                ]
+
+                for call in fallback_calls:
+                    try:
+                        return await helpers.executor(call)
+                    except TypeError:
+                        continue
 
     if helpers.async_fn is None:
         return None
