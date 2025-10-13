@@ -97,6 +97,10 @@ def test_hourly_poller_on_time_threadsafe(inventory_from_map) -> None:
         def trigger(self) -> None:
             for callback in list(self._callbacks):
                 callback(self)
+            try:
+                self.coro.close()
+            except Exception:  # pragma: no cover - defensive cleanup
+                pass
 
     created_tasks: list[FakeTask] = []
 
