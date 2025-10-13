@@ -13,7 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import CONF_BRAND, DEFAULT_BRAND, DOMAIN, get_brand_label
-from .inventory import Inventory, Node
+from .inventory import Inventory
 from .utils import async_get_integration_version
 
 _LOGGER = logging.getLogger(__name__)
@@ -46,21 +46,17 @@ async def async_get_config_entry_diagnostics(
         record,
         context=f"diagnostics for config entry {entry.entry_id}",
     )
-    raw_nodes = list(inventory.nodes)
-
-    filtered_nodes: list[Node] = [
-        node for node in raw_nodes if isinstance(node, Node)
-    ]
-    raw_count = len(raw_nodes)
-    filtered_count = len(filtered_nodes)
+    raw_count = len(inventory.nodes)
+    metadata = list(inventory.iter_nodes_metadata())
+    filtered_count = len(metadata)
 
     node_inventory = [
         {
-            "name": node.name,
-            "addr": node.addr,
-            "type": node.type,
+            "name": meta.name,
+            "addr": meta.addr,
+            "type": meta.node_type,
         }
-        for node in filtered_nodes
+        for meta in metadata
     ]
     node_inventory.sort(key=lambda item: (str(item["addr"]), str(item["type"])))
 
@@ -119,8 +115,6 @@ async def async_get_config_entry_diagnostics(
         if inspect.isawaitable(redacted):
             redacted = await redacted
     except Exception:  # pragma: no cover - defensive
-        _LOGGER.exception(
-            "Failed to redact diagnostics payload for %s", entry.entry_id
-        )
+        _LOGGER.exception("Failed to redact diagnostics payload for %s", entry.entry_id)
         raise
     return redacted

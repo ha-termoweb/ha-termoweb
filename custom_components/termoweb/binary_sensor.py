@@ -14,7 +14,7 @@ from homeassistant.core import callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .boost import iter_inventory_heater_metadata, supports_boost
+from .boost import supports_boost
 from .const import DOMAIN, signal_ws_data, signal_ws_status
 from .coordinator import StateCoordinator
 from .entity import GatewayDispatcherEntity
@@ -25,7 +25,12 @@ from .heater import (
     log_skipped_nodes,
 )
 from .identifiers import build_heater_entity_unique_id
-from .inventory import Inventory, normalize_node_addr, normalize_node_type
+from .inventory import (
+    HEATER_NODE_TYPES,
+    Inventory,
+    normalize_node_addr,
+    normalize_node_type,
+)
 from .utils import build_gateway_device_info
 
 _LOGGER = logging.getLogger(__name__)
@@ -43,15 +48,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
     try:
         inventory = Inventory.require_from_context(container=data)
     except LookupError as err:
-        _LOGGER.error(
-            "TermoWeb heater setup missing inventory for device %s", dev_id
-        )
+        _LOGGER.error("TermoWeb heater setup missing inventory for device %s", dev_id)
         raise ValueError("TermoWeb inventory unavailable for heater platform") from err
 
     boost_entities: list[BinarySensorEntity] = []
-    for node_type, addr_str, base_name in _iter_boostable_inventory_nodes(
-        inventory
-    ):
+    for node_type, addr_str, base_name in _iter_boostable_inventory_nodes(inventory):
         unique_id = build_heater_entity_unique_id(
             dev_id,
             node_type,
@@ -179,9 +180,7 @@ class HeaterBoostActiveBinarySensor(
         """Initialise the boost activity binary sensor."""
 
         super().__init__(coordinator)
-        canonical_type = normalize_node_type(
-            node_type, use_default_when_falsey=True
-        )
+        canonical_type = normalize_node_type(node_type, use_default_when_falsey=True)
         canonical_addr = normalize_node_addr(addr, use_default_when_falsey=True)
         if not canonical_type or not canonical_addr:
             msg = "node_type and addr must be provided"
@@ -280,7 +279,9 @@ class HeaterBoostActiveBinarySensor(
 
         candidate_type = payload.get("node_type")
         if candidate_type is not None:
-            canonical = normalize_node_type(candidate_type, use_default_when_falsey=True)
+            canonical = normalize_node_type(
+                candidate_type, use_default_when_falsey=True
+            )
             if canonical and canonical != self._node_type:
                 return False
 
@@ -299,18 +300,20 @@ def _iter_boostable_inventory_nodes(
 ) -> Iterable[tuple[str, str, str]]:
     """Yield boostable heater metadata from ``inventory``."""
 
-    for node_type, addr, base_name, node in iter_inventory_heater_metadata(inventory):
-        if not supports_boost(node):
+    for metadata in inventory.iter_nodes_metadata(node_types=HEATER_NODE_TYPES):
+        if not supports_boost(metadata.node):
             continue
-        canonical_type = normalize_node_type(node_type, use_default_when_falsey=True)
-        canonical_addr = normalize_node_addr(addr, use_default_when_falsey=True)
+        canonical_type = normalize_node_type(
+            metadata.node_type,
+            use_default_when_falsey=True,
+        )
+        canonical_addr = normalize_node_addr(
+            metadata.addr,
+            use_default_when_falsey=True,
+        )
         if not canonical_type or not canonical_addr:
             continue
-        yield (
-            canonical_type,
-            canonical_addr,
-            base_name,
-        )
+        yield (canonical_type, canonical_addr, metadata.name)
 
 
 def _build_settings_resolver(

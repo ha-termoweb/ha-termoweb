@@ -48,6 +48,7 @@ __all__ = [
     "AccumulatorNode",
     "HeaterNode",
     "Inventory",
+    "InventoryNodeMetadata",
     "InventoryResolution",
     "Node",
     "NodeDescriptor",
@@ -88,6 +89,16 @@ class InventoryResolution:
     source: str
     raw_count: int
     filtered_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class InventoryNodeMetadata:
+    """Describe a node and its resolved display metadata."""
+
+    node_type: str
+    node: Node
+    addr: str
+    name: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -320,46 +331,66 @@ class Inventory:
     ) -> Iterator[tuple[str, Node, str, str]]:
         """Yield heater metadata derived from cached inventory details."""
 
-        forward_map, _ = self.heater_address_map
-        if not forward_map:
-            return
+        for metadata in self.iter_nodes_metadata(
+            node_types=HEATER_NODE_TYPES,
+            default_name_simple=default_name_simple,
+        ):
+            yield metadata.node_type, metadata.node, metadata.addr, metadata.name
+
+    def iter_nodes_metadata(
+        self,
+        *,
+        node_types: Iterable[str] | None = None,
+        default_name_simple: Callable[[str], str] | None = None,
+    ) -> Iterator[InventoryNodeMetadata]:
+        """Yield canonical node metadata for ``node_types``."""
+
+        factory = default_name_simple or _default_heater_name
+
+        if node_types is None:
+            allowed_types: set[str] | None = None
+        else:
+            allowed_types = {
+                normalize_node_type(candidate, use_default_when_falsey=True)
+                for candidate in node_types
+            }
+            allowed_types.discard("")
+            if not allowed_types:
+                return
 
         grouped = self._ensure_nodes_by_type_cache()
 
-        for node_type, addresses in forward_map.items():
-            if not addresses:
+        for node_type, nodes in grouped.items():
+            if allowed_types is not None and node_type not in allowed_types:
                 continue
 
-            nodes = grouped.get(node_type, ())
-            if not nodes:
-                continue
-
-            for raw_addr in addresses:
-                if not isinstance(raw_addr, str) or not raw_addr:
+            for candidate in nodes:
+                addr = normalize_node_addr(
+                    getattr(candidate, "addr", None),
+                    use_default_when_falsey=True,
+                )
+                if not addr:
                     continue
 
-                matched: Any | None = None
-                for candidate in nodes:
-                    addr = normalize_node_addr(
-                        getattr(candidate, "addr", None),
-                        use_default_when_falsey=True,
-                    )
-                    if addr == raw_addr:
-                        matched = candidate
-                        break
-
-                if matched is None:
-                    continue
-
-                yield (
-                    node_type,
-                    cast("Node", matched),
-                    raw_addr,
-                    self.resolve_heater_name(
+                if node_type in HEATER_NODE_TYPES:
+                    name = self.resolve_heater_name(
                         node_type,
-                        raw_addr,
-                        default_factory=default_name_simple,
-                    ),
+                        addr,
+                        default_factory=factory,
+                    )
+                else:
+                    raw_name = getattr(candidate, "name", None)
+                    if isinstance(raw_name, str):
+                        stripped = raw_name.strip()
+                        name = stripped or f"{node_type.upper()} {addr}"
+                    else:
+                        name = f"{node_type.upper()} {addr}"
+
+                yield InventoryNodeMetadata(
+                    node_type=node_type,
+                    node=cast("Node", candidate),
+                    addr=addr,
+                    name=name,
                 )
 
     @property
@@ -386,13 +417,19 @@ class Inventory:
             filtered_forward.setdefault("pmo", ())
             cached = (
                 filtered_forward,
-                {addr: frozenset(node_types) for addr, node_types in reverse_map.items()},
+                {
+                    addr: frozenset(node_types)
+                    for addr, node_types in reverse_map.items()
+                },
             )
             object.__setattr__(self, "_power_monitor_address_map_cache", cached)
 
         forward_cache, reverse_cache = cached
         return (
-            {node_type: list(addresses) for node_type, addresses in forward_cache.items()},
+            {
+                node_type: list(addresses)
+                for node_type, addresses in forward_cache.items()
+            },
             {addr: set(node_types) for addr, node_types in reverse_cache.items()},
         )
 
@@ -747,13 +784,13 @@ class Inventory:
     @staticmethod
     def require_from_context(
         *,
-        inventory: "Inventory" | None = None,
+        inventory: Inventory | None = None,
         container: Mapping[str, Any] | MutableMapping[str, Any] | None = None,
         hass: Any | None = None,
         entry_id: str | None = None,
         coordinator: Any | None = None,
         store: bool = True,
-    ) -> "Inventory":
+    ) -> Inventory:
         """Return the shared inventory associated with a Home Assistant entry."""
 
         resolved: Inventory | None = None
@@ -806,7 +843,7 @@ class Inventory:
         *,
         attr: str = "inventory",
         context: str | None = None,
-    ) -> "Inventory":
+    ) -> Inventory:
         """Return the cached inventory stored within ``record``."""
 
         if not isinstance(record, Mapping):
@@ -941,7 +978,9 @@ def addresses_by_node_type(
 
     known: set[str] | None = None
     if known_types is not None:
-        known = {normalize_node_type(node_type) for node_type in known_types if node_type}
+        known = {
+            normalize_node_type(node_type) for node_type in known_types if node_type
+        }
 
     result: dict[str, list[str]] = {}
     seen: dict[str, set[str]] = {}
@@ -1016,7 +1055,6 @@ def heater_platform_details_from_inventory(
     """Return heater platform metadata derived from ``inventory``."""
 
     nodes_by_type = inventory.nodes_by_type
-    explicit_names = inventory.explicit_heater_names
     forward_map, _ = inventory.heater_address_map
     addrs_by_type = {
         node_type: list(forward_map.get(node_type, []))
@@ -1190,7 +1228,9 @@ def heater_sample_subscription_targets(
     if not any(normalized_map.values()):
         return []
 
-    other_types = sorted(node_type for node_type in normalized_map if node_type != "htr")
+    other_types = sorted(
+        node_type for node_type in normalized_map if node_type != "htr"
+    )
     order = ["htr", *other_types]
     return [
         (node_type, addr)
@@ -1414,7 +1454,7 @@ def _iter_snapshot_section(
 
 
 def _collect_snapshot_addresses(
-    section: Mapping[str, Any]
+    section: Mapping[str, Any],
 ) -> dict[str, list[Mapping[str, Any]]]:
     """Return mapping of addresses to candidate payloads from ``section``."""
 
