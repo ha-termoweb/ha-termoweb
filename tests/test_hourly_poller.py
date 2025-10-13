@@ -1,5 +1,7 @@
+from collections.abc import Callable
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -18,7 +20,9 @@ async def test_hourly_poller_runs_previous_hour(
     inventory = inventory_from_map({"htr": ["A"], "pmo": ["M"]})
     backend = AsyncMock()
     backend.fetch_hourly_samples = AsyncMock(
-        return_value={("htr", "A"): [{"ts": datetime.now(timezone.utc), "energy_wh": 1_200.0}]}
+        return_value={
+            ("htr", "A"): [{"ts": datetime.now(timezone.utc), "energy_wh": 1_200.0}]
+        }
     )
     coordinator = AsyncMock()
     coordinator.merge_samples_for_window = AsyncMock()
@@ -58,3 +62,68 @@ async def test_hourly_poller_runs_previous_hour(
         dt_util.set_default_time_zone(original_tz)
 
     await poller.async_shutdown()
+
+
+def test_hourly_poller_on_time_threadsafe(inventory_from_map) -> None:
+    """Ensure the time trigger schedules work on the event loop thread safely."""
+
+    hass = HomeAssistant()
+    hass.loop = MagicMock()
+    captured: dict[str, Any] = {}
+
+    def _capture(callback: Callable[[], None], /, *args: Any) -> None:
+        captured["callback"] = callback
+        captured["args"] = args
+
+    hass.loop.call_soon_threadsafe.side_effect = _capture
+
+    class FakeTask:
+        def __init__(self, coro: Any) -> None:
+            self.coro = coro
+            self._callbacks: list[Callable[["FakeTask"], None]] = []
+
+        def add_done_callback(self, callback: Callable[["FakeTask"], None]) -> None:
+            self._callbacks.append(callback)
+
+        def done(self) -> bool:
+            return False
+
+        def cancelled(self) -> bool:
+            return False
+
+        def exception(self) -> BaseException | None:
+            return None
+
+        def trigger(self) -> None:
+            for callback in list(self._callbacks):
+                callback(self)
+
+    created_tasks: list[FakeTask] = []
+
+    def _make_task(coro: Any) -> FakeTask:
+        task = FakeTask(coro)
+        created_tasks.append(task)
+        return task
+
+    hass.async_create_task = MagicMock(side_effect=_make_task)
+
+    inventory = inventory_from_map({"htr": ["A"]})
+    backend = AsyncMock()
+    coordinator = AsyncMock()
+    poller = HourlySamplesPoller(hass, coordinator, backend, inventory)
+
+    poller._on_time(None)
+
+    hass.loop.call_soon_threadsafe.assert_called_once()
+    hass.async_create_task.assert_not_called()
+    callback = captured["callback"]
+    args = captured["args"]
+
+    callback(*args)
+
+    hass.async_create_task.assert_called_once()
+    fake_task = created_tasks[0]
+    assert poller._active_task is fake_task
+
+    fake_task.trigger()
+    assert poller._active_task is None
