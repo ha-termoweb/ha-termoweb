@@ -766,18 +766,20 @@ class WebSocketClient(_WSCommon):
     ) -> dict[str, dict[str, dict[str, Any]]]:
         """Convert list-based node payloads into the nested mapping schema."""
 
+        inventory = self._inventory if isinstance(self._inventory, Inventory) else None
+        if inventory is None:
+            _LOGGER.error(
+                "WS: missing inventory for nodes list translation on %s",
+                self.dev_id,
+            )
+            return {}
+
         translated: dict[str, dict[str, dict[str, Any]]] = {}
-        for entry in nodes:
-            if not isinstance(entry, Mapping):
-                continue
-            node_type = normalize_node_type(entry.get("type"))
-            addr = normalize_node_addr(entry.get("addr"))
-            if not node_type or not addr:
-                continue
+        for node_type, addr, entry in inventory.iter_known_entries(nodes):
             node_bucket = translated.setdefault(node_type, {})
             added = False
             for key, value in entry.items():
-                if key in {"type", "addr"}:
+                if key in {"type", "addr", "node_type", "address"}:
                     continue
                 if not isinstance(key, str):
                     continue
@@ -787,10 +789,7 @@ class WebSocketClient(_WSCommon):
                 section_bucket = node_bucket.setdefault(section, {})
                 if nested_key:
                     existing = section_bucket.get(addr)
-                    if isinstance(existing, Mapping):
-                        merged = dict(existing)
-                    else:
-                        merged = {}
+                    merged = dict(existing) if isinstance(existing, Mapping) else {}
                     merged[nested_key] = deepcopy(value)
                     section_bucket[addr] = merged
                 else:

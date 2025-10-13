@@ -852,63 +852,6 @@ def test_handle_dev_data_and_update(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_extract_and_translate_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """List based node payloads should be converted into the mapping schema."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    payload = {"nodes": [{"type": "htr", "addr": "1", "settings": {"temp": 20}}]}
-    nodes = client._extract_nodes(payload)
-    assert nodes and "htr" in nodes
-    assert payload["nodes"]["htr"]
-
-
-def test_translate_nodes_list_invalid_entries(monkeypatch: pytest.MonkeyPatch) -> None:
-    """translate_nodes_list should skip invalid entries gracefully."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    nodes = client._translate_nodes_list(
-        [
-            "invalid",
-            {"type": None, "addr": "1"},
-            {"type": "htr", "addr": None},
-            {"type": "htr", "addr": "", "settings": {}},
-            {"type": "htr", "addr": "1", 1: {}},
-            {"type": "htr", "addr": "2", "": {}},
-            {"type": "htr", "addr": "3", "advanced_setup": {"k": 1}},
-            {"type": "htr", "addr": "3", "advanced_setup": {"j": 2}},
-        ]
-    )
-    assert "htr" in nodes and "advanced" in nodes["htr"]
-
-
-def test_translate_nodes_list_merges_nested_updates(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Multiple entries for the same node should merge nested payloads."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    merged = client._translate_nodes_list(
-        [
-            {
-                "type": "htr",
-                "addr": "1",
-                "advanced_setup": {"first": 1},
-            },
-            {
-                "type": "htr",
-                "addr": "1",
-                "advanced_setup": {"second": 2},
-            },
-            {
-                "type": "htr",
-                "addr": "1",
-                "status": {"mode": "auto"},
-            },
-        ]
-    )
-    advanced = merged["htr"]["advanced"]["1"]
-    assert advanced == {"advanced_setup": {"second": 2}}
-    assert merged["htr"]["status"]["1"] == {"mode": "auto"}
-
-
 def test_apply_nodes_payload_merges_and_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
     """Applying node payloads should normalize and dispatch updates."""
 
@@ -1681,20 +1624,6 @@ def test_apply_nodes_payload_translation(monkeypatch: pytest.MonkeyPatch) -> Non
     dispatcher.assert_called()
 
 
-def test_translate_nodes_list_handles_entries(monkeypatch: pytest.MonkeyPatch) -> None:
-    """List-based node payloads should be normalised into mappings."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    nodes = [
-        {"type": "htr", "addr": "1", "status": {"temp": 21}},
-        {"type": "htr", "addr": "1", "advanced_setup": {"mode": "eco"}},
-        {"type": "bad", "addr": None},
-    ]
-    translated = client._translate_nodes_list(nodes)
-    assert translated["htr"]["status"]["1"]["temp"] == 21
-    assert translated["htr"]["advanced"]["1"]["advanced_setup"]["mode"] == "eco"
-
-
 def test_forward_sample_updates_invokes_handler(monkeypatch: pytest.MonkeyPatch) -> None:
     """Forwarding sample updates should notify the energy coordinator handler."""
 
@@ -1717,6 +1646,12 @@ def test_extract_nodes_variants(monkeypatch: pytest.MonkeyPatch) -> None:
     """_extract_nodes should handle dicts, lists, and invalid payloads."""
 
     client, _sio, _ = _make_client(monkeypatch)
+    inventory = Inventory(
+        "device",
+        {"nodes": [{"type": "htr", "addr": "1"}]},
+        build_node_inventory([{"type": "htr", "addr": "1"}]),
+    )
+    client._inventory = inventory
     assert client._extract_nodes({"nodes": {"htr": {}}}) == {"htr": {}}
     converted = client._extract_nodes({"nodes": [{"type": "htr", "addr": "1", "status": {}}]})
     assert "htr" in converted

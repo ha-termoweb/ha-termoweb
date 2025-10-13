@@ -528,6 +528,11 @@ def test_extract_dev_data_payload_variants(monkeypatch: pytest.MonkeyPatch) -> N
     """dev_data payload extraction should walk nested containers safely."""
 
     client = _make_client(monkeypatch)
+    client._inventory = Inventory(
+        client.dev_id,
+        {"nodes": [{"type": "htr", "addr": "1"}]},
+        build_node_inventory([{"type": "htr", "addr": "1"}]),
+    )
     nodes = {"nodes": {"htr": {}}}
     wrapper = {"data": nodes}
 
@@ -773,6 +778,11 @@ async def test_read_loop_handles_list_snapshot(
     """List-based dev_data snapshots should be coerced into mapping payloads."""
 
     client = _make_client(monkeypatch)
+    client._inventory = Inventory(
+        client.dev_id,
+        {"nodes": [{"type": "htr", "addr": "1"}]},
+        build_node_inventory([{"type": "htr", "addr": "1"}]),
+    )
     monkeypatch.setattr(client, "_subscribe_feeds", AsyncMock(return_value=2))
     dispatched: list[dict[str, Any]] = []
     client._dispatcher = lambda *_args: dispatched.append(_args[2])
