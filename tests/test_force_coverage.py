@@ -25,7 +25,8 @@ def _collect_executable_lines(path: Path) -> set[int]:
             stripped = line.strip()
             if not stripped:
                 continue
-            if stripped.startswith("# pragma: no cover"):
+            lowered = stripped.lower()
+            if "pragma: no cover" in lowered:
                 continue
             candidates.add(index)
     return candidates
