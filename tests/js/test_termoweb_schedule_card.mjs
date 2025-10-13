@@ -42,12 +42,25 @@ class FakeShadowRoot {
 class FakeHTMLElement {
   constructor() {
     this.shadowRoot = null;
+    this.childNodes = [];
   }
 
   attachShadow() {
     const root = new FakeShadowRoot();
     this.shadowRoot = root;
     return root;
+  }
+
+  appendChild(node) {
+    if (node) {
+      this.childNodes.push(node);
+      node.parentNode = this;
+    }
+    return node;
+  }
+
+  removeChild(node) {
+    this.childNodes = this.childNodes.filter((child) => child !== node);
   }
 
   addEventListener() {}
@@ -57,6 +70,113 @@ class FakeHTMLElement {
   connectedCallback() {}
 
   disconnectedCallback() {}
+}
+
+class FakeDomElement extends FakeHTMLElement {
+  constructor(tagName) {
+    super();
+    this.tagName = tagName ? tagName.toUpperCase() : "";
+    this.childNodes = [];
+    this.parentNode = null;
+    this.dataset = {};
+    this.style = {};
+    this.textContent = "";
+    this.className = "";
+    this.classList = {
+      toggle() {},
+      add() {},
+      remove() {},
+    };
+    this.value = "";
+    this.hidden = false;
+    this._innerHTML = "";
+    this._idMap = new Map();
+    this._isSelect = this.tagName === "SELECT";
+    this.options = [];
+  }
+
+  set innerHTML(markup) {
+    this._innerHTML = String(markup);
+    this._idMap.clear();
+    const regex = /id="([^"]+)"/g;
+    let match;
+    while ((match = regex.exec(this._innerHTML)) !== null) {
+      const el = new FakeDomElement("div");
+      el.id = match[1];
+      this._idMap.set(`#${el.id}`, el);
+    }
+  }
+
+  get innerHTML() {
+    return this._innerHTML;
+  }
+
+  appendChild(node) {
+    if (node) {
+      this.childNodes.push(node);
+      node.parentNode = this;
+      if (this._isSelect && !this.options.includes(node)) {
+        this.options.push(node);
+      }
+    }
+    return node;
+  }
+
+  append(...nodes) {
+    nodes.forEach((node) => this.appendChild(node));
+  }
+
+  add(option, index) {
+    if (!this._isSelect || !option) {
+      return;
+    }
+    if (index == null || index >= this.options.length) {
+      this.options.push(option);
+    } else {
+      this.options.splice(index, 0, option);
+    }
+    option.parentNode = this;
+  }
+
+  remove(index) {
+    if (this._isSelect && typeof index === "number") {
+      if (index >= 0 && index < this.options.length) {
+        const [removed] = this.options.splice(index, 1);
+        if (removed) {
+          removed.parentNode = null;
+        }
+      }
+      return;
+    }
+    if (!this.parentNode) {
+      return;
+    }
+    this.parentNode.childNodes = this.parentNode.childNodes.filter(
+      (node) => node !== this,
+    );
+    this.parentNode = null;
+  }
+
+  querySelector(selector) {
+    return this._idMap.get(selector) || null;
+  }
+
+  querySelectorAll() {
+    return [];
+  }
+
+  addEventListener() {}
+
+  removeEventListener() {}
+
+  contains(target) {
+    if (target === this) {
+      return true;
+    }
+    return this.childNodes.some((child) =>
+      typeof child.contains === "function" && child.contains(target),
+    );
+  }
 }
 
 const windowStub = {
@@ -87,15 +207,10 @@ const windowStub = {
 };
 
 const documentStub = {
-  body: {
-    appendChild() {},
-  },
-  createElement() {
-    return {
-      style: {},
-      textContent: "",
-      remove() {},
-    };
+  body: new FakeDomElement("body"),
+  activeElement: null,
+  createElement(tagName) {
+    return new FakeDomElement(tagName);
   },
 };
 
@@ -142,141 +257,107 @@ const assert = (condition, message) => {
 };
 
 const card = new cardClass();
+card.setConfig({ entity: "climate.test" });
 
-// ---------- _copyDay tests ----------
-card._progLocal = Array.from({ length: 168 }, (_, i) => i % 3);
+const makeProg = (value) => Array.from({ length: 168 }, () => value);
+
+const hass = {
+  states: {
+    "climate.test": {
+      attributes: {
+        friendly_name: "Alpha Heater",
+        prog: makeProg(0),
+        ptemp: [10, 15, 20],
+        units: "C",
+      },
+    },
+    "climate.other": {
+      attributes: {
+        friendly_name: "Beta Heater",
+        prog: makeProg(1),
+        ptemp: [5, 10, 15],
+        units: "C",
+      },
+    },
+  },
+  callServiceCalls: [],
+  callService(domain, service, data) {
+    this.callServiceCalls.push({ domain, service, data });
+  },
+};
+
+card.hass = hass;
+
+assert(Array.isArray(card._progLocal), "Card should hydrate program array");
+assert(card._progLocal.length === 168, "Program array should have 168 slots");
+assert(Array.isArray(card._ptempLocal), "Preset temperatures should hydrate");
+assert(card._entities.length === 2, "Two climate entities should be detected");
+
+// ---------- _copyDays behaviour ----------
+card._progLocal = Array.from({ length: 168 }, (_, idx) => (idx % 3));
+card._copyFrom = 1;
+card._copyTo = 3;
 card._dirtyProg = false;
-card._copyDay(1, 3);
-for (let h = 0; h < 24; h++) {
-  const srcIdx = card._idx(1, h);
-  const dstIdx = card._idx(3, h);
+card._copyDays();
+for (let hour = 0; hour < 24; hour++) {
+  const srcIndex = 1 * 24 + hour;
+  const dstIndex = 3 * 24 + hour;
   assert(
-    card._progLocal[srcIdx] === card._progLocal[dstIdx],
-    "copyDay should copy selected day values",
+    card._progLocal[srcIndex] === card._progLocal[dstIndex],
+    "Copying a single day should mirror values",
   );
 }
+assert(card._dirtyProg === true, "Copying days marks program dirty");
 
-card._progLocal = Array.from({ length: 168 }, (_, i) => (i < 24 ? 1 : 0));
-card._copyDay(0, "All");
+card._copyFrom = 0;
+card._copyTo = "All";
+card._dirtyProg = false;
+card._copyDays();
 for (let day = 1; day < 7; day++) {
-  for (let h = 0; h < 24; h++) {
-    const srcIdx = card._idx(0, h);
-    const dstIdx = card._idx(day, h);
+  for (let hour = 0; hour < 24; hour++) {
+    const base = hour;
+    const compare = day * 24 + hour;
     assert(
-      card._progLocal[srcIdx] === card._progLocal[dstIdx],
-      "copyDay should copy to all days when All is selected",
+      card._progLocal[base] === card._progLocal[compare],
+      "Copying to All should duplicate the source day",
     );
   }
 }
 
-// ---------- _canHydrateFromState tests ----------
-card._progLocal = null;
-card._ptempLocal = [null, null, null];
-card._dirtyProg = false;
-card._dirtyPresets = false;
-card._editingPresetIdx = -1;
-card._freezeUntil = 0;
-assert(
-  card._canHydrateFromState({ freezeActive: false }) === true,
-  "Should hydrate when no local data",
-);
-
-card._progLocal = new Array(168).fill(0);
-card._dirtyProg = true;
-assert(
-  card._canHydrateFromState({ freezeActive: false }) === false,
-  "Dirty program prevents hydrate",
-);
-card._dirtyProg = false;
-card._dirtyPresets = true;
-assert(
-  card._canHydrateFromState({ freezeActive: false }) === false,
-  "Dirty presets prevent hydrate",
-);
-card._dirtyPresets = false;
-card._editingPresetIdx = 1;
-assert(
-  card._canHydrateFromState({ freezeActive: false }) === false,
-  "Editing preset prevents hydrate",
-);
-card._editingPresetIdx = -1;
-assert(
-  card._canHydrateFromState({ freezeActive: true }) === false,
-  "Freeze prevents hydrate",
-);
-assert(
-  card._canHydrateFromState({ freezeActive: false }) === true,
-  "Clean state hydrates",
-);
-
-// ---------- Pointer drag helper tests ----------
-card._progLocal = new Array(168).fill(0);
+// ---------- Painting cells ----------
 card._selectedMode = 2;
+card._paintCell(0, 0);
+assert(card._progLocal[0] === 2, "Painting a cell should set selected mode");
+const paintedCell = card._els.cells[0];
+assert(
+  paintedCell.style.background === "#FB8C00",
+  "Painting should apply the mode colour",
+);
+
+// ---------- Copying to another entity ----------
+const clonedProg = Array.from({ length: 168 }, (_, idx) => (idx % 2));
+card._progLocal = clonedProg.slice();
+card._ptempLocal = [11, 22, 33];
 card._dirtyProg = false;
-let renderCalls = 0;
-let statusCalls = 0;
-let colorCalls = 0;
-card._renderGridOnly = () => {
-  renderCalls += 1;
-};
-card._updateStatusIndicators = () => {
-  statusCalls += 1;
-};
-card._colorCell = () => {
-  colorCalls += 1;
-};
+card._dirtyPresets = false;
+card._copyEntityTarget = "climate.other";
+card._copyToEntity();
 
-const cellStub = {
-  _captured: false,
-  setPointerCaptureCalls: [],
-  releasePointerCaptureCalls: [],
-  setPointerCapture(id) {
-    this._captured = true;
-    this.setPointerCaptureCalls.push(id);
-  },
-  releasePointerCapture(id) {
-    this._captured = false;
-    this.releasePointerCaptureCalls.push(id);
-  },
-  hasPointerCapture() {
-    return this._captured;
-  },
-};
-
-const makePointerEvent = (overrides = {}) => ({
-  pointerId: 101,
-  currentTarget: cellStub,
-  preventDefault() {},
-  ...overrides,
-});
-
-card._onPointerDown(makePointerEvent(), 0, 0);
-assert(card._dragging === true, "Pointer down should start dragging");
-assert(card._paintValue === 2, "Pointer down should set paint value");
-assert(card._progLocal[0] === 2, "Pointer down should paint initial cell");
-assert(card._dirtyProg === true, "Pointer down marks program dirty");
-assert(renderCalls === 1, "Pointer down should render grid");
-assert(statusCalls === 1, "Pointer down should update status");
-assert(cellStub.setPointerCaptureCalls.length === 1, "Pointer down captures pointer once");
-assert(cellStub.releasePointerCaptureCalls.length === 1, "Pointer capture released immediately to allow enters");
-assert(windowStub._listeners.has("pointerup"), "Pointer down should register global pointerup listener");
-assert(windowStub._listeners.has("pointercancel"), "Pointer down should register global pointercancel listener");
-
-card._onPointerEnter(makePointerEvent({ pointerId: 101 }), 0, 1);
-assert(card._progLocal[1] === 2, "Pointer enter should paint new cells while dragging");
-assert(colorCalls === 1, "Pointer enter should color cell when value changes");
-assert(statusCalls === 2, "Pointer enter should update status when painting");
-
-card._onPointerEnter(makePointerEvent({ pointerId: 101 }), 0, 1);
-assert(colorCalls === 1, "Pointer enter should not repaint identical values");
-
-const pointerUpEvent = makePointerEvent({ pointerId: 101, currentTarget: windowStub });
-windowStub.dispatchEvent("pointerup", pointerUpEvent);
-assert(card._dragging === false, "Pointer up should stop dragging");
-assert(card._paintValue === null, "Pointer up clears paint value");
-assert(card._activePointerId === null, "Pointer up clears active pointer id");
-assert(!windowStub._listeners.has("pointerup"), "Pointer up listener should clear after firing");
-assert(!windowStub._listeners.has("pointercancel"), "Pointer cancel listener should clear after pointer finishes");
-assert(card._windowPointerTracking === false, "Pointer tracking flag should reset after finish");
+assert(card._entity === "climate.other", "Copy to entity should retarget entity");
+assert(card._dirtyProg === true, "Copy to entity marks program dirty");
+assert(card._dirtyPresets === true, "Copy to entity marks presets dirty");
+assert(
+  JSON.stringify(card._progLocal) === JSON.stringify(clonedProg),
+  "Program data should be cloned to target",
+);
+assert(
+  JSON.stringify(card._ptempLocal) === JSON.stringify([11, 22, 33]),
+  "Preset temperatures should be cloned to target",
+);
+assert(
+  card._els.entitySelect.value === "climate.other",
+  "Entity select should track the new target",
+);
+assert(card._els.warn.textContent === "", "Valid program keeps warning hidden");
 
 console.log("All schedule card JS checks passed");
