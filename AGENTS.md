@@ -25,6 +25,7 @@ End users are non-technical Home Assistant operators. Documentation must be task
 
 ## Development Standards
 * Follow the Python version declared in `pyproject.toml` and add type hints to all new code.
+* USe uv as the package and environment manager
 * Provide a concise one-line docstring for every function.
 * Apply the **minimal viable change** for each task; avoid touching unrelated code.
 * Adhere to DRY principles and practice defensive programming—anticipate invalid input, communication failures, and other error conditions, and handle them gracefully.
@@ -39,6 +40,8 @@ End users are non-technical Home Assistant operators. Documentation must be task
 
 ## Documentation Responsibilities
 Document every new feature or behavior change and keep existing documentation in sync.
+Add docstrings to all functions
+Save all functions and docstrings in docs/function_map.txt
 
 ## Pull Request Expectations
 * Keep each PR focused on a single feature or test with the minimal supporting changes.
