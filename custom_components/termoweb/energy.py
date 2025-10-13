@@ -7,11 +7,29 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import logging
-from typing import Any, cast
+from typing import Any, TYPE_CHECKING, cast
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import entity_registry as er, service
+
+try:  # pragma: no cover - compatibility shim
+    from homeassistant.helpers import target as target_helpers
+except ImportError:  # pragma: no cover - compatibility shim
+    target_helpers = None
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    try:
+        from homeassistant.helpers.target import SelectedEntities as TargetSelectedEntities
+    except ImportError:  # pragma: no cover - typing only
+        TargetSelectedEntities = Any  # type: ignore[assignment]
+    try:
+        from homeassistant.helpers.service import SelectedEntities as ServiceSelectedEntities
+    except ImportError:  # pragma: no cover - typing only
+        ServiceSelectedEntities = Any  # type: ignore[assignment]
+    SelectedEntitiesType = TargetSelectedEntities | ServiceSelectedEntities
+else:  # pragma: no cover - runtime fallback
+    SelectedEntitiesType = Any
 
 from .api import RESTClient
 from .const import DOMAIN
@@ -126,6 +144,16 @@ def _resolve_statistics_helpers(
         sync=sync_helper,
         async_fn=async_helper,
     )
+
+
+async def _async_extract_selected_entities(
+    hass: HomeAssistant, call: ServiceCall
+) -> SelectedEntitiesType:
+    """Resolve referenced entities using available Home Assistant helpers."""
+
+    if target_helpers is not None:
+        return target_helpers.async_extract_referenced_entity_ids(hass, call)
+    return await service.async_extract_referenced_entity_ids(hass, call)
 
 
 def _iso_date(ts: int) -> str:
@@ -853,7 +881,7 @@ async def async_register_import_energy_history_service(
         max_days = call.data.get("max_history_retrieval")
 
         ent_ids: set[str] = set()
-        extracted = await service.async_extract_referenced_entity_ids(hass, call)
+        extracted = await _async_extract_selected_entities(hass, call)
         ent_ids.update(extracted.referenced_entity_ids)
         ent_ids.update(extracted.indirectly_referenced_entity_ids)
 
