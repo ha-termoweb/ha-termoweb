@@ -160,6 +160,51 @@ class Inventory:
 
         return self._nodes
 
+    def has_node(self, node_type: Any, addr: Any) -> bool:
+        """Return ``True`` when ``node_type``/``addr`` exists in the inventory."""
+
+        normalized_type = normalize_node_type(
+            node_type,
+            use_default_when_falsey=True,
+        )
+        normalized_addr = normalize_node_addr(
+            addr,
+            use_default_when_falsey=True,
+        )
+        if not normalized_type or not normalized_addr:
+            return False
+
+        addresses = self._ensure_addresses_by_type_cache()
+        candidates = addresses.get(normalized_type)
+        if not candidates:
+            return False
+        return normalized_addr in candidates
+
+    def iter_known_entries(
+        self, entries: Iterable[Any]
+    ) -> Iterator[tuple[str, str, Mapping[str, Any]]]:
+        """Yield ``(node_type, addr, entry)`` for payload entries in the inventory."""
+
+        for entry in entries:
+            if not isinstance(entry, Mapping):
+                continue
+
+            node_type = normalize_node_type(
+                entry.get("type") or entry.get("node_type"),
+                use_default_when_falsey=True,
+            )
+            addr = normalize_node_addr(
+                entry.get("addr") or entry.get("address"),
+                use_default_when_falsey=True,
+            )
+
+            if not node_type or not addr:
+                continue
+            if not self.has_node(node_type, addr):
+                continue
+
+            yield node_type, addr, entry
+
     def _ensure_addresses_by_type_cache(self) -> dict[str, tuple[str, ...]]:
         """Return cached node addresses grouped by normalised type."""
 

@@ -688,26 +688,20 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         if not isinstance(nodes, Iterable):
             return None
 
-        snapshot: dict[str, Any] = {}
-        for entry in nodes:
-            if not isinstance(entry, Mapping):
-                continue
-            node_type = normalize_node_type(
-                entry.get("type") or entry.get("node_type"),
-                use_default_when_falsey=True,
+        inventory = self._inventory if isinstance(self._inventory, Inventory) else None
+        if inventory is None:
+            _LOGGER.error(
+                "WS (ducaheat): cannot coerce nodes payload without inventory for %s",
+                self.dev_id,
             )
-            if not node_type:
-                continue
+            return None
+
+        snapshot: dict[str, Any] = {}
+        for node_type, addr, entry in inventory.iter_known_entries(nodes):
             type_bucket = snapshot.setdefault(node_type, {})
             for key in _NODE_TYPE_LEVEL_KEYS:
                 if key in entry and key not in type_bucket:
                     type_bucket[key] = entry[key]
-            addr = normalize_node_addr(
-                entry.get("addr") or entry.get("address"),
-                use_default_when_falsey=True,
-            )
-            if not addr:
-                continue
             for key, value in entry.items():
                 if key in _NODE_METADATA_KEYS or key in _NODE_TYPE_LEVEL_KEYS:
                     continue
