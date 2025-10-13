@@ -42,21 +42,11 @@ async def async_get_config_entry_diagnostics(
         if isinstance(candidate, Mapping):
             record = candidate
 
-    raw_nodes: list[Any] = []
-    if record is None:
-        _LOGGER.error(
-            "Config entry %s is missing integration data; node inventory unavailable",
-            entry.entry_id,
-        )
-    else:
-        candidate = record.get("inventory")
-        if isinstance(candidate, Inventory):
-            raw_nodes = list(candidate.nodes)
-        else:
-            _LOGGER.error(
-                "Config entry %s does not expose a cached Inventory; node inventory unavailable",
-                entry.entry_id,
-            )
+    inventory = Inventory.require_from_record(
+        record,
+        context=f"diagnostics for config entry {entry.entry_id}",
+    )
+    raw_nodes = list(inventory.nodes)
 
     filtered_nodes: list[Node] = [
         node for node in raw_nodes if isinstance(node, Node)
@@ -74,7 +64,9 @@ async def async_get_config_entry_diagnostics(
     ]
     node_inventory.sort(key=lambda item: (str(item["addr"]), str(item["type"])))
 
-    version = record.get("version") if isinstance(record, Mapping) else None
+    assert record is not None  # Inventory.require_from_record guarantees mapping
+
+    version = record.get("version")
     if version is None:
         version = await async_get_integration_version(hass)
     version_str = str(version)

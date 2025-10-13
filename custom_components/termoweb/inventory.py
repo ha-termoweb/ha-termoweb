@@ -578,6 +578,99 @@ class Inventory:
             object.__setattr__(self, "_power_monitor_sample_targets_cache", cached)
         return [tuple(pair) for pair in cached]
 
+    def sample_alias_map(
+        self,
+        *,
+        base_aliases: Mapping[str, str] | None = None,
+        include_types: Iterable[str] | None = None,
+        restrict_to: Iterable[str] | None = None,
+    ) -> dict[str, str]:
+        """Return compatibility aliases for sample payload processing."""
+
+        alias_map: dict[str, str] = {}
+
+        def _merge_alias(raw_type: Any, canonical_type: Any) -> None:
+            """Insert a normalised alias pair into ``alias_map``."""
+
+            normalized_raw = _normalize_node_identifier(
+                raw_type,
+                use_default_when_falsey=True,
+                lowercase=True,
+            )
+            if not normalized_raw:
+                return
+            normalized_canonical = normalize_node_type(
+                canonical_type,
+                use_default_when_falsey=True,
+            )
+            if not normalized_canonical:
+                if isinstance(canonical_type, str):
+                    normalized_canonical = canonical_type.strip().lower()
+                if not normalized_canonical:
+                    return
+            alias_map[normalized_raw] = normalized_canonical
+
+        canonical_types: set[str] = set()
+
+        heater_forward, heater_aliases = self.heater_sample_address_map
+        power_forward, power_aliases = self.power_monitor_sample_address_map
+
+        for node_type in heater_forward:
+            normalized = normalize_node_type(
+                node_type,
+                use_default_when_falsey=True,
+            )
+            if normalized:
+                canonical_types.add(normalized)
+        for node_type in power_forward:
+            normalized = normalize_node_type(
+                node_type,
+                use_default_when_falsey=True,
+            )
+            if normalized:
+                canonical_types.add(normalized)
+
+        if include_types is not None:
+            for node_type in include_types:
+                normalized = normalize_node_type(
+                    node_type,
+                    use_default_when_falsey=True,
+                )
+                if normalized:
+                    canonical_types.add(normalized)
+
+        if isinstance(base_aliases, Mapping):
+            for raw_type, canonical_type in base_aliases.items():
+                _merge_alias(raw_type, canonical_type)
+
+        for raw_type, canonical_type in heater_aliases.items():
+            _merge_alias(raw_type, canonical_type)
+        for raw_type, canonical_type in power_aliases.items():
+            _merge_alias(raw_type, canonical_type)
+
+        for node_type in canonical_types:
+            alias_map.setdefault(node_type, node_type)
+
+        if restrict_to is not None:
+            allowed: set[str] = {
+                normalized
+                for node_type in restrict_to
+                if (
+                    normalized := normalize_node_type(
+                        node_type,
+                        use_default_when_falsey=True,
+                    )
+                )
+            }
+            if allowed:
+                alias_map = {
+                    key: value
+                    for key, value in alias_map.items()
+                    if key in allowed or value in allowed
+                }
+
+        return alias_map
+
     def heater_name_map(
         self, default_factory: Callable[[str], str] | None = None
     ) -> dict[Any, Any]:
@@ -650,6 +743,26 @@ class Inventory:
         self._heater_name_map_cache[key] = mapping
         self._heater_name_map_factories[key] = factory
         return mapping
+
+    @staticmethod
+    def require_from_record(
+        record: Mapping[str, Any] | None,
+        *,
+        attr: str = "inventory",
+        context: str | None = None,
+    ) -> "Inventory":
+        """Return the cached inventory stored within ``record``."""
+
+        if not isinstance(record, Mapping):
+            raise LookupError(
+                f"{context or 'inventory'} record is unavailable; integration state missing"
+            )
+        candidate = record.get(attr)
+        if not isinstance(candidate, Inventory):
+            raise LookupError(
+                f"{context or 'inventory'} record is unavailable; cached inventory missing"
+            )
+        return candidate
 
 
 def resolve_record_inventory(

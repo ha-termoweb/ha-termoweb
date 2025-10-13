@@ -68,35 +68,19 @@ def forward_ws_sample_updates(
     if not callable(handler):
         return
 
-    alias_map: dict[str, str] = {"htr": "htr", "acm": "acm", "pmo": "pmo"}
+    try:
+        inventory = Inventory.require_from_record(
+            record,
+            context=f"{log_prefix} sample forwarding entry={entry_id}",
+        )
+    except LookupError as err:
+        active_logger = logger or _LOGGER
+        active_logger.error("%s: %s", log_prefix, err)
+        return
 
-    def _merge_aliases(candidate: Mapping[str, str] | None) -> None:
-        if not isinstance(candidate, Mapping):
-            return
-        for raw_type, canonical in candidate.items():
-            normalized_raw = normalize_node_type(raw_type, use_default_when_falsey=True)
-            normalized_canonical = normalize_node_type(
-                canonical,
-                use_default_when_falsey=True,
-            )
-            if normalized_raw:
-                alias_map[normalized_raw] = normalized_canonical or canonical
-
-    inventory: Inventory | None = None
-    candidate = record.get("inventory")
-    if isinstance(candidate, Inventory):
-        inventory = candidate
-    if inventory is None:
-        coordinator = record.get("coordinator")
-        candidate = getattr(coordinator, "inventory", None)
-        if isinstance(candidate, Inventory):
-            inventory = candidate
-
-    if isinstance(inventory, Inventory):
-        _, heater_aliases = inventory.heater_sample_address_map
-        _, pmo_aliases = inventory.power_monitor_sample_address_map
-        _merge_aliases(heater_aliases)
-        _merge_aliases(pmo_aliases)
+    alias_map = inventory.sample_alias_map(
+        base_aliases={"htr": "htr", "acm": "acm", "pmo": "pmo"}
+    )
 
     normalized_updates: dict[str, dict[str, Any]] = {}
     lease_seconds: float | None = None

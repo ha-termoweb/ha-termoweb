@@ -383,15 +383,11 @@ async def async_import_energy_history(
         return
 
     forward_map, reverse_map = inventory.heater_address_map
-    _, alias_map = inventory.heater_sample_address_map
     available_types = set(forward_map)
-    alias_lookup: dict[str, str] = {}
-    for raw_type, canonical in alias_map.items():
-        normalized_key = normalize_node_type(raw_type, use_default_when_falsey=True)
-        if normalized_key:
-            alias_lookup[normalized_key] = canonical
-    for node_type in available_types:
-        alias_lookup.setdefault(node_type, node_type)
+    alias_lookup = inventory.sample_alias_map(
+        include_types=available_types,
+        restrict_to=available_types,
+    )
 
     requested_pairs: set[tuple[str, str]] = set()
     desired_pairs: set[tuple[str, str]] = set()
