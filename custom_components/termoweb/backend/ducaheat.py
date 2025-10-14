@@ -23,7 +23,11 @@ from custom_components.termoweb.backend.sanitize import (
     redact_text,
     validate_boost_minutes,
 )
-from custom_components.termoweb.const import BRAND_DUCAHEAT, WS_NAMESPACE
+from custom_components.termoweb.const import (
+    BRAND_DUCAHEAT,
+    NODE_SAMPLES_PATH_FMT,
+    WS_NAMESPACE,
+)
 from custom_components.termoweb.inventory import Inventory, NodeDescriptor
 
 _LOGGER = logging.getLogger(__name__)
@@ -137,6 +141,47 @@ class DucaheatRESTClient(RESTClient):
             payload=payload,
         )
         return payload
+
+    async def get_node_samples(
+        self,
+        dev_id: str,
+        node: NodeDescriptor,
+        start: float,
+        end: float,
+    ) -> list[dict[str, str | int]]:
+        """Return heater samples with millisecond timestamps normalised to seconds.
+
+        Non-heater nodes delegate to the base implementation.
+        """
+
+        node_type, addr = self._resolve_node_descriptor(node)
+        if node_type != "htr":
+            return await super().get_node_samples(
+                dev_id,
+                (node_type, addr),
+                start,
+                end,
+            )
+
+        headers = await self.authed_headers()
+        path = NODE_SAMPLES_PATH_FMT.format(
+            dev_id=dev_id,
+            node_type=node_type,
+            addr=addr,
+        )
+        params = {
+            "start": int(start * 1000),
+            "end": int(end * 1000),
+        }
+        data = await self._request("GET", path, headers=headers, params=params)
+        self._log_non_htr_payload(
+            node_type=node_type,
+            dev_id=dev_id,
+            addr=addr,
+            stage="GET samples",
+            payload=data,
+        )
+        return self._extract_samples(data, timestamp_divisor=1000.0)
 
     async def set_node_settings(
         self,

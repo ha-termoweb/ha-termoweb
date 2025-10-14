@@ -284,18 +284,35 @@ async def _async_import_energy_history(
     hass: HomeAssistant,
     entry: ConfigEntry,
     *,
+    nodes: Inventory | None = None,
+    node_types: Iterable[str] | None = None,
+    addresses: Iterable[str] | None = None,
+    day_chunk_hours: int = 24,
     reset_progress: bool = False,
     max_days: int | None = None,
 ) -> None:
-    """Delegate to the energy helper with shared rate limiting."""
+    """Delegate to the energy helper with shared rate limiting and filters."""
 
     rate_state = default_samples_rate_limit_state()
+    kwargs: dict[str, Any] = {
+        "reset_progress": reset_progress,
+        "max_days": max_days,
+        "rate_limit": rate_state,
+    }
+
+    if nodes is not None:
+        kwargs["nodes"] = nodes
+    if node_types is not None:
+        kwargs["node_types"] = tuple(node_types)
+    if addresses is not None:
+        kwargs["addresses"] = tuple(addresses)
+    if day_chunk_hours != 24:
+        kwargs["day_chunk_hours"] = day_chunk_hours
+
     await _async_import_energy_history_impl(
         hass,
         entry,
-        reset_progress=reset_progress,
-        max_days=max_days,
-        rate_limit=rate_state,
+        **kwargs,
     )
 
 
@@ -591,7 +608,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
 
         should_recalc = False
         if isinstance(payload, Mapping):
-            if payload.get("health_changed") or payload.get("payload_changed") or payload.get("reason") == "status":
+            if (
+                payload.get("health_changed")
+                or payload.get("payload_changed")
+                or payload.get("reason") == "status"
+            ):
                 should_recalc = True
         else:
             should_recalc = True

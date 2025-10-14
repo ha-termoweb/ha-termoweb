@@ -11,7 +11,7 @@ custom_components/termoweb/__init__.py :: create_rest_client
 custom_components/termoweb/__init__.py :: async_list_devices
     Call ``list_devices`` logging auth/connection issues consistently.
 custom_components/termoweb/__init__.py :: _async_import_energy_history
-    Delegate to the energy helper with shared rate limiting.
+    Delegate to the energy helper with shared rate limiting and filters.
 custom_components/termoweb/__init__.py :: async_setup_entry
     Set up the TermoWeb integration for a config entry.
 custom_components/termoweb/__init__.py :: async_setup_entry._async_handle_hass_stop
@@ -131,7 +131,7 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend.fetch_hourly_s
 custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend.get_instant_power
     Return the instantaneous power for ``node`` in watts when available.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.get_node_samples
-    Return samples converting epoch seconds to milliseconds for the API.
+    Return heater samples with millisecond timestamps normalised to seconds. Non-heater nodes delegate to the base implementation.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.normalise_ws_nodes
     Normalise websocket nodes payloads for Ducaheat specifics.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_ws_settings
@@ -697,11 +697,11 @@ custom_components/termoweb/coordinator.py :: StateCoordinator._instant_power_sna
 custom_components/termoweb/coordinator.py :: StateCoordinator._sync_instant_power_data
     Publish the latest instant power snapshot to listeners.
 custom_components/termoweb/coordinator.py :: StateCoordinator._record_instant_power
-    Store an instant power reading and return True when changed.
+    Store an instant power reading and return ``True`` when changed.
 custom_components/termoweb/coordinator.py :: StateCoordinator._ingest_instant_power_payload
     Extract and record power metadata from a payload.
 custom_components/termoweb/coordinator.py :: StateCoordinator._should_skip_rest_power
-    Return True when websocket data is fresh enough to skip REST power.
+    Return ``True`` when websocket data is fresh enough to skip REST power.
 custom_components/termoweb/coordinator.py :: StateCoordinator._async_fetch_settings_by_address
     Fetch settings for every address and update ``settings_by_type``.
 custom_components/termoweb/coordinator.py :: StateCoordinator._clone_inventory

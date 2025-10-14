@@ -1158,15 +1158,22 @@ async def async_register_import_energy_history_service(
                     entry_entry_id,
                 )
                 continue
+            kwargs: dict[str, Any] = {
+                "reset_progress": reset,
+                "max_days": max_days,
+            }
+            if node_types_filter is not None:
+                kwargs["node_types"] = node_types_filter
+            if addresses_filter is not None:
+                kwargs["addresses"] = addresses_filter
+            if day_chunk_hours != 24:
+                kwargs["day_chunk_hours"] = day_chunk_hours
+
             try:
                 coro = import_fn(
                     hass,
                     ent,
-                    node_types=node_types_filter,
-                    addresses=addresses_filter,
-                    day_chunk_hours=day_chunk_hours,
-                    reset_progress=reset,
-                    max_days=max_days,
+                    **kwargs,
                 )
             except ValueError as err:
                 logger.error(
