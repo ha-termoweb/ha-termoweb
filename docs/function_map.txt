@@ -110,6 +110,8 @@ custom_components/termoweb/backend/base.py :: Backend.create_ws_client
     Create a websocket client for the given device.
 custom_components/termoweb/backend/base.py :: Backend.fetch_hourly_samples
     Return normalised hourly samples grouped by node descriptor.
+custom_components/termoweb/backend/base.py :: Backend.get_instant_power
+    Return the instantaneous power for ``node`` in watts when available.
 custom_components/termoweb/backend/base.py :: normalise_sample_records
     Return sorted sample dictionaries containing ``ts`` and ``energy_wh``.
 custom_components/termoweb/backend/base.py :: fetch_normalised_hourly_samples
@@ -126,6 +128,8 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.set_node_se
     Write heater settings using the segmented endpoints.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend.fetch_hourly_samples
     Return hourly samples for ``nodes`` using the segmented API.
+custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend.get_instant_power
+    Return the instantaneous power for ``node`` in watts when available.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.get_node_samples
     Return samples converting epoch seconds to milliseconds for the API.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.normalise_ws_nodes
@@ -250,6 +254,8 @@ custom_components/termoweb/backend/termoweb.py :: TermoWebBackend.create_ws_clie
     Instantiate the unified websocket client for TermoWeb.
 custom_components/termoweb/backend/termoweb.py :: TermoWebBackend.fetch_hourly_samples
     Return hourly samples for ``nodes`` using the REST API.
+custom_components/termoweb/backend/termoweb.py :: TermoWebBackend.get_instant_power
+    Return the instantaneous power for ``node`` in watts when available.
 custom_components/termoweb/backend/termoweb_ws.py :: HandshakeError.__init__
     Initialise the error with the HTTP response details.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient.__init__
@@ -446,6 +452,8 @@ custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._update_status
     Publish websocket status updates to Home Assistant listeners.
 custom_components/termoweb/backend/ws_client.py :: _prepare_nodes_dispatch
     Normalise node payload data for downstream websocket dispatch.
+custom_components/termoweb/backend/ws_client.py :: _WSCommon._process_power_updates
+    Extract instantaneous power readings from websocket payloads.
 custom_components/termoweb/backend/ws_client.py :: _WSCommon.__init__
     Initialise shared websocket state.
 custom_components/termoweb/backend/ws_client.py :: __getattr__
@@ -682,6 +690,18 @@ custom_components/termoweb/coordinator.py :: StateCoordinator.__init__
     Initialize the TermoWeb device coordinator.
 custom_components/termoweb/coordinator.py :: StateCoordinator._collect_previous_settings
     Return normalised settings carried over from previous poll.
+custom_components/termoweb/coordinator.py :: StateCoordinator._instant_power_key
+    Return a normalized key for instant power tracking.
+custom_components/termoweb/coordinator.py :: StateCoordinator._instant_power_snapshot
+    Return the current instant power cache grouped by node type.
+custom_components/termoweb/coordinator.py :: StateCoordinator._sync_instant_power_data
+    Publish the latest instant power snapshot to listeners.
+custom_components/termoweb/coordinator.py :: StateCoordinator._record_instant_power
+    Store an instant power reading and return True when changed.
+custom_components/termoweb/coordinator.py :: StateCoordinator._ingest_instant_power_payload
+    Extract and record power metadata from a payload.
+custom_components/termoweb/coordinator.py :: StateCoordinator._should_skip_rest_power
+    Return True when websocket data is fresh enough to skip REST power.
 custom_components/termoweb/coordinator.py :: StateCoordinator._async_fetch_settings_by_address
     Fetch settings for every address and update ``settings_by_type``.
 custom_components/termoweb/coordinator.py :: StateCoordinator._clone_inventory
@@ -712,6 +732,12 @@ custom_components/termoweb/coordinator.py :: StateCoordinator._apply_accumulator
     Store derived boost metadata on ``payload``.
 custom_components/termoweb/coordinator.py :: StateCoordinator._apply_boost_metadata_for_settings
     Apply boost metadata derivation to every settings payload.
+custom_components/termoweb/coordinator.py :: StateCoordinator.handle_instant_power_update
+    Process a websocket instant power update.
+custom_components/termoweb/coordinator.py :: StateCoordinator.instant_power_entry
+    Return the cached instant power entry for ``(node_type, addr)``.
+custom_components/termoweb/coordinator.py :: StateCoordinator.instant_power_overview
+    Return a diagnostics-friendly snapshot of instant power values.
 custom_components/termoweb/coordinator.py :: StateCoordinator._should_defer_pending_setting
     Return True when a pending write should defer payload merging.
 custom_components/termoweb/coordinator.py :: StateCoordinator._merge_nodes_by_type
@@ -908,6 +934,8 @@ custom_components/termoweb/identifiers.py :: build_power_monitor_device_unique_i
     Return the canonical unique ID for a power monitor device.
 custom_components/termoweb/identifiers.py :: build_power_monitor_energy_unique_id
     Return the canonical unique ID for a power monitor energy sensor.
+custom_components/termoweb/identifiers.py :: build_power_monitor_instant_power_unique_id
+    Return the canonical unique ID for a power monitor instant power sensor.
 custom_components/termoweb/identifiers.py :: build_power_monitor_power_unique_id
     Return the canonical unique ID for a power monitor power sensor.
 custom_components/termoweb/inventory.py :: _default_heater_name
@@ -1060,6 +1088,8 @@ custom_components/termoweb/number.py :: AccumulatorBoostTemperatureNumber._valid
     Return a valid boost temperature within supported limits.
 custom_components/termoweb/sensor.py :: _looks_like_integer_string
     Return True if the string looks like an integer number.
+custom_components/termoweb/sensor.py :: _instant_power_entry
+    Return the instant power entry for ``(node_type, addr)`` when available.
 custom_components/termoweb/sensor.py :: _normalise_energy_value
     Try to coerce a raw energy reading into kWh.
 custom_components/termoweb/sensor.py :: async_setup_entry
@@ -1090,6 +1120,16 @@ custom_components/termoweb/sensor.py :: HeaterEnergyBase.extra_state_attributes
     Return identifiers that locate the heater metric.
 custom_components/termoweb/sensor.py :: HeaterEnergyTotalSensor._coerce_native_value
     Normalise the raw energy metric into kWh.
+custom_components/termoweb/sensor.py :: HeaterInstantPowerSensor.__init__
+    Initialise the heater instant power sensor entity.
+custom_components/termoweb/sensor.py :: HeaterInstantPowerSensor._instant_entry
+    Return the cached instant power entry for this heater.
+custom_components/termoweb/sensor.py :: HeaterInstantPowerSensor.available
+    Return True when the coordinator tracks instant power for this heater.
+custom_components/termoweb/sensor.py :: HeaterInstantPowerSensor.native_value
+    Return the instantaneous power draw in watts.
+custom_components/termoweb/sensor.py :: HeaterInstantPowerSensor.extra_state_attributes
+    Return metadata describing the instant power source.
 custom_components/termoweb/sensor.py :: HeaterBoostMinutesRemainingSensor.native_value
     Return the remaining boost duration in minutes.
 custom_components/termoweb/sensor.py :: HeaterBoostMinutesRemainingSensor.extra_state_attributes
@@ -1101,7 +1141,7 @@ custom_components/termoweb/sensor.py :: HeaterBoostEndSensor.state
 custom_components/termoweb/sensor.py :: HeaterBoostEndSensor.extra_state_attributes
     Return metadata about the boost session.
 custom_components/termoweb/sensor.py :: _create_heater_sensors
-    Create the three heater node sensors for the given node.
+    Create the heater node sensors for the given node.
 custom_components/termoweb/sensor.py :: _create_boost_sensors
     Create the boost-related sensors for a heater node.
 custom_components/termoweb/sensor.py :: PowerMonitorSensorBase.__init__
@@ -1126,6 +1166,20 @@ custom_components/termoweb/sensor.py :: PowerMonitorSensorBase.device_info
     Return the Home Assistant device metadata for the power monitor.
 custom_components/termoweb/sensor.py :: PowerMonitorEnergySensor._coerce_native_value
     Normalise the raw energy metric into kWh.
+custom_components/termoweb/sensor.py :: PowerMonitorInstantPowerSensor.__init__
+    Initialise the instant power monitor sensor.
+custom_components/termoweb/sensor.py :: PowerMonitorInstantPowerSensor.gateway_signal
+    Return the dispatcher signal for gateway websocket data.
+custom_components/termoweb/sensor.py :: PowerMonitorInstantPowerSensor._instant_entry
+    Return the cached instant power entry for this monitor.
+custom_components/termoweb/sensor.py :: PowerMonitorInstantPowerSensor.available
+    Return True when the coordinator tracks this power monitor.
+custom_components/termoweb/sensor.py :: PowerMonitorInstantPowerSensor.native_value
+    Return the instantaneous power draw in watts.
+custom_components/termoweb/sensor.py :: PowerMonitorInstantPowerSensor.extra_state_attributes
+    Return metadata describing the instant power source.
+custom_components/termoweb/sensor.py :: PowerMonitorInstantPowerSensor.device_info
+    Return the Home Assistant device metadata for the power monitor.
 custom_components/termoweb/sensor.py :: InstallationTotalEnergySensor.__init__
     Initialise the installation-wide energy sensor.
 custom_components/termoweb/sensor.py :: InstallationTotalEnergySensor.gateway_signal
@@ -1166,6 +1220,16 @@ custom_components/termoweb/utils.py :: build_power_monitor_device_info
     Return canonical ``DeviceInfo`` for a TermoWeb power monitor.
 custom_components/termoweb/utils.py :: float_or_none
     Return value as ``float`` if possible, else ``None``.
+custom_components/termoweb/utils.py :: coerce_power_watts
+    Return a non-negative watt value parsed from ``value`` when possible.
+custom_components/termoweb/utils.py :: _coerce_timestamp
+    Return a UNIX timestamp parsed from ``value`` when possible.
+custom_components/termoweb/utils.py :: extract_power_timestamp
+    Return the newest timestamp discovered in ``payload``.
+custom_components/termoweb/utils.py :: extract_power_watts
+    Return the first instantaneous power value discovered within ``payload``.
+custom_components/termoweb/utils.py :: format_timestamp_iso
+    Return an ISO timestamp string for ``timestamp`` when available.
 scripts/generate_function_map.py :: DocExtractor.__init__
     Initialise the extractor for ``file_path``.
 scripts/generate_function_map.py :: DocExtractor.visit_ClassDef
