@@ -251,27 +251,6 @@ class DucaheatRESTClient(RESTClient):
             cancel_boost=cancel_boost,
         )
 
-    async def get_node_samples(
-        self,
-        dev_id: str,
-        node: NodeDescriptor,
-        start: float,
-        stop: float,
-    ) -> list[dict[str, str | int]]:
-        """Return samples converting epoch seconds to milliseconds for the API."""
-
-        node_type, addr = self._resolve_node_descriptor(node)
-        if node_type != "htr":
-            return await super().get_node_samples(
-                dev_id, (node_type, addr), start, stop
-            )
-
-        headers = await self.authed_headers()
-        path = f"/api/v2/devs/{dev_id}/htr/{addr}/samples"
-        params = {"start": int(start * 1000), "end": int(stop * 1000)}
-        data = await self._request("GET", path, headers=headers, params=params)
-        return self._extract_samples(data, timestamp_divisor=1000)
-
     def normalise_ws_nodes(self, nodes: dict[str, Any]) -> dict[str, Any]:
         """Normalise websocket nodes payloads for Ducaheat specifics."""
 
