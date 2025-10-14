@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from itertools import chain
 import logging
+import math
 import time
 from time import monotonic as time_mod
 from typing import Any, TypeVar
@@ -54,6 +55,15 @@ class PendingSetting:
     mode: str | None
     stemp: float | None
     expires_at: float
+
+
+@dataclass(slots=True)
+class InstantPowerEntry:
+    """Represent a cached instant power reading."""
+
+    watts: float
+    timestamp: float
+    source: str
 
 
 def _device_display_name(device: Mapping[str, Any] | None, dev_id: str) -> str:
@@ -107,6 +117,7 @@ class StateCoordinator(
         self._pending_settings: dict[tuple[str, str], PendingSetting] = {}
         self._rtc_reference: datetime | None = None
         self._rtc_reference_monotonic: float | None = None
+        self._instant_power: dict[tuple[str, str], InstantPowerEntry] = {}
         self.update_nodes(nodes, inventory=inventory)
 
     @staticmethod
@@ -137,6 +148,148 @@ class StateCoordinator(
             preserved.setdefault(node_type, {})
 
         return preserved
+
+    def _instant_power_key(
+        self, node_type: str, addr: str
+    ) -> tuple[str, str] | None:
+        """Return a normalized key for instant power tracking."""
+
+        normalized_type = normalize_node_type(
+            node_type,
+            use_default_when_falsey=True,
+        )
+        normalized_addr = normalize_node_addr(
+            addr,
+            use_default_when_falsey=True,
+        )
+        if not normalized_type or not normalized_addr:
+            return None
+        return normalized_type, normalized_addr
+
+    def _instant_power_snapshot(self) -> dict[str, dict[str, dict[str, Any]]]:
+        """Return the current instant power cache grouped by node type."""
+
+        snapshot: dict[str, dict[str, dict[str, Any]]] = {}
+        for (node_type, addr), entry in self._instant_power.items():
+            bucket = snapshot.setdefault(node_type, {})
+            bucket[addr] = {
+                "watts": entry.watts,
+                "timestamp": entry.timestamp,
+                "source": entry.source,
+            }
+        return snapshot
+
+    def _sync_instant_power_data(self) -> None:
+        """Publish the latest instant power snapshot to listeners."""
+
+        if self.data is not None:
+            self.async_set_updated_data(self.data)
+
+    def _record_instant_power(
+        self,
+        node_type: str,
+        addr: str,
+        watts: float,
+        *,
+        timestamp: float | None = None,
+        source: str,
+    ) -> bool:
+        """Store an instant power reading and return ``True`` when changed."""
+
+        key = self._instant_power_key(node_type, addr)
+        if key is None:
+            return False
+
+        if not isinstance(watts, (int, float)):
+            return False
+
+        candidate = float(watts)
+        if math.isnan(candidate) or candidate < 0:
+            return False
+
+        if timestamp is None:
+            timestamp = time.time()
+        current_ts = float(timestamp)
+
+        existing = self._instant_power.get(key)
+        if existing is not None:
+            if existing.timestamp >= current_ts and existing.source == source:
+                return False
+            if (
+                existing.source == "ws"
+                and source == "rest"
+                and existing.timestamp >= current_ts
+            ):
+                return False
+            if (
+                existing.timestamp == current_ts
+                and existing.watts == candidate
+                and existing.source == source
+            ):
+                return False
+
+        self._instant_power[key] = InstantPowerEntry(
+            watts=candidate,
+            timestamp=current_ts,
+            source=source,
+        )
+        self._sync_instant_power_data()
+        return True
+
+    def handle_instant_power_update(
+        self,
+        dev_id: str,
+        node_type: str,
+        addr: str,
+        watts: float,
+        *,
+        timestamp: float | None = None,
+    ) -> None:
+        """Process a websocket instant power update."""
+
+        if dev_id != self._dev_id:
+            return
+
+        if not isinstance(watts, (int, float)):
+            return
+
+        candidate = float(watts)
+        if math.isnan(candidate) or candidate < 0:
+            return
+
+        self._record_instant_power(
+            node_type,
+            addr,
+            candidate,
+            timestamp=timestamp,
+            source="ws",
+        )
+
+    def instant_power_entry(
+        self, node_type: str, addr: str
+    ) -> InstantPowerEntry | None:
+        """Return the cached instant power entry for ``(node_type, addr)``."""
+
+        key = self._instant_power_key(node_type, addr)
+        if key is None:
+            return None
+        return self._instant_power.get(key)
+
+    def instant_power_overview(self) -> dict[str, dict[str, dict[str, Any]]]:
+        """Return a diagnostics-friendly snapshot of instant power values."""
+
+        return self._instant_power_snapshot()
+
+    def _should_skip_rest_power(self, node_type: str, addr: str) -> bool:
+        """Return ``True`` when websocket data is fresh enough to skip REST power."""
+
+        entry = self.instant_power_entry(node_type, addr)
+        if entry is None or entry.source != "ws":
+            return False
+
+        now = time.time()
+        interval = self.update_interval.total_seconds()
+        return now - entry.timestamp < interval
 
     async def _async_fetch_settings_by_address(
         self,

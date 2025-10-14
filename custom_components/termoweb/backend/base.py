@@ -19,6 +19,7 @@ from custom_components.termoweb.inventory import (
 )
 from custom_components.termoweb.utils import float_or_none
 
+
 _LOGGER = logging.getLogger(__name__)
 
 _SAMPLE_COUNTER_SCALES: dict[str, float] = {
