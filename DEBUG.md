@@ -57,6 +57,7 @@ The integration exposes the `termoweb.import_energy_history` service to backfill
 
 - Inventory drives the target selection. Filters are applied *after* expanding the Inventory and before de-duplication.
 - Sample timestamps always use seconds-since-epoch normalization performed by the REST adapter.
+- Imports request history through the current minute to ensure today’s samples are merged with existing statistics.
 - The importer clears overlapping statistics whenever recorder helpers are available; otherwise it logs a one-time INFO message and continues safely.
 - Device resets are detected when the cumulative counter drops by more than **0.2 kWh**. The integration starts a new accumulation segment without breaking the monotonic sum expected by Home Assistant.
 - Duplicate timestamps are discarded to avoid redundant statistics writes.
