@@ -6,7 +6,7 @@ from asyncio import CancelledError, Task
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 import logging
-from typing import Any, Protocol
+from typing import Any, Protocol, TypedDict
 
 from homeassistant.util import dt as dt_util
 
@@ -26,6 +26,15 @@ _SAMPLE_COUNTER_SCALES: dict[str, float] = {
     "acm": 1000.0,
     "pmo": 3_600_000.0,
 }
+
+
+class EnergySample(TypedDict, total=False):
+    """Normalised representation of an energy sample."""
+
+    t_s: int
+    counter_kwh: float
+    min_w: float | None
+    max_w: float | None
 
 
 class HttpClientProto(Protocol):
@@ -116,6 +125,72 @@ class Backend(ABC):
         end_local: datetime,
     ) -> dict[tuple[str, str], list[dict[str, Any]]]:
         """Return normalised hourly samples grouped by node descriptor."""
+
+    async def get_energy_samples(
+        self,
+        dev_id: str,
+        node: NodeDescriptor,
+        start_s: int,
+        end_s: int,
+    ) -> list[EnergySample]:
+        """Return normalised energy samples between ``start_s`` and ``end_s``."""
+
+        normalized_type, normalized_addr = self._resolve_node_descriptor(node)
+        if end_s <= start_s:
+            return []
+
+        try:
+            raw_samples = await self.client.get_node_samples(
+                dev_id,
+                (normalized_type, normalized_addr),
+                start_s,
+                end_s,
+            )
+        except CancelledError:
+            raise
+        except Exception as err:  # noqa: BLE001 - propagate via logging
+            _LOGGER.warning(
+                "%s energy samples failed for %s/%s node_type=%s: %s",
+                self.brand,
+                mask_identifier(dev_id),
+                mask_identifier(normalized_addr),
+                normalized_type,
+                err,
+            )
+            return []
+
+        context = (
+            f"{self.brand} energy {mask_identifier(dev_id)}/"
+            f"{mask_identifier(normalized_addr)} ({normalized_type})"
+        )
+        return normalise_energy_samples(
+            normalized_type,
+            raw_samples or [],
+            logger=_LOGGER,
+            context=context,
+            detect_millisecond_overflow=True,
+        )
+
+    def _resolve_node_descriptor(self, node: NodeDescriptor) -> tuple[str, str]:
+        """Return canonical ``(node_type, addr)`` for ``node``."""
+
+        if isinstance(node, tuple) and len(node) == 2:
+            node_type, addr = node
+        else:
+            node_type = getattr(node, "type", None)
+            addr = getattr(node, "addr", None)
+        normalized_type = normalize_node_type(
+            node_type,
+            use_default_when_falsey=True,
+        )
+        normalized_addr = normalize_node_addr(
+            addr,
+            use_default_when_falsey=True,
+        )
+        if not normalized_type or not normalized_addr:
+            msg = f"Invalid node descriptor: {node!r}"
+            raise ValueError(msg)
+        return normalized_type, normalized_addr
 
 
 def normalise_sample_records(
@@ -211,3 +286,88 @@ async def fetch_normalised_hourly_samples(
         if normalised:
             results[(normalized_type, normalized_addr)] = normalised
     return results
+
+
+def _coerce_timestamp_seconds(
+    value: Any,
+    *,
+    logger: logging.Logger,
+    context: str,
+    divisor: float = 1.0,
+    detect_millisecond_overflow: bool = False,
+) -> float | None:
+    """Return ``value`` coerced to seconds since epoch when possible."""
+
+    ts = float_or_none(value)
+    if ts is None:
+        return None
+    if detect_millisecond_overflow and ts > 100_000_000_000:
+        logger.warning("%s returned millisecond timestamps; coercing to seconds", context)
+        ts /= 1000.0
+    if divisor and divisor != 1.0:
+        ts /= divisor
+    return ts
+
+
+def _coerce_counter_kwh(node_type: str, value: Any) -> float | None:
+    """Return ``value`` interpreted as a kWh counter when possible."""
+
+    numeric = float_or_none(value)
+    if numeric is None:
+        return None
+    scale = float(_SAMPLE_COUNTER_SCALES.get(node_type, 1000.0) or 1000.0)
+    if scale <= 0:
+        scale = 1000.0
+    return numeric / scale
+
+
+def normalise_energy_samples(
+    node_type: str,
+    records: Iterable[Mapping[str, Any] | Any],
+    *,
+    logger: logging.Logger,
+    context: str,
+    timestamp_divisor: float = 1.0,
+    detect_millisecond_overflow: bool = False,
+) -> list[EnergySample]:
+    """Return energy samples expressed in epoch seconds and kWh."""
+
+    samples: list[EnergySample] = []
+
+    for record in records:
+        if not isinstance(record, Mapping):
+            continue
+        timestamp = _coerce_timestamp_seconds(
+            record.get("t"),
+            logger=logger,
+            context=context,
+            divisor=timestamp_divisor,
+            detect_millisecond_overflow=detect_millisecond_overflow,
+        )
+        if timestamp is None:
+            continue
+        counter_value = record.get("counter")
+        if counter_value is None:
+            counter_value = (
+                record.get("counter_max")
+                or record.get("counter_min")
+                or record.get("value")
+                or record.get("energy")
+            )
+        counter_kwh = _coerce_counter_kwh(node_type, counter_value)
+        if counter_kwh is None:
+            continue
+        sample: EnergySample = {
+            "t_s": int(timestamp),
+            "counter_kwh": counter_kwh,
+        }
+        min_power = record.get("power_min") or record.get("min_power")
+        max_power = record.get("power_max") or record.get("max_power")
+        if min_power is not None:
+            sample["min_w"] = float_or_none(min_power)
+        if max_power is not None:
+            sample["max_w"] = float_or_none(max_power)
+        samples.append(sample)
+
+    samples.sort(key=lambda sample: sample["t_s"])
+    return samples
