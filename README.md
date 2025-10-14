@@ -38,7 +38,7 @@ These product lines are documented to work with the **TermoWeb** portal/app:
 
 ## Ducasa with Ducaheat app.
 
-Support for Ducasa branded heaters (with the Ducaheat app), accumulators and other devices is currently in testing (See Issue #1), because Ducasa use a different backend with a more modern and slightly different API. We expect to have a working prototype in early October 2025 and will be working towards full implementation before the end of the year. 
+Ducasa branded heaters (with the Ducaheat app), accumulators and other devices, are now supported with basic functionality tested and working. Heaters support temperature setting, weekly programming, switching modes (auto, manual, off). Preliminary support for "boost" on accumulators is currently in testing. Energy and power readings are also in testing with some basic support. Work is ongoing with full support expected before the end of the year. 
 
 ## Tevolve app
 
