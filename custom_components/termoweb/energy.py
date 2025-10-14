@@ -394,7 +394,6 @@ async def _clear_statistics_compat(  # pragma: no cover - compatibility shim
     return "delete"  # pragma: no cover - dependent on async helper availability
 
 
-
 async def async_import_energy_history(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -523,9 +522,7 @@ async def async_import_energy_history(
     target_pairs = [
         pair
         for pair in all_pairs
-        if (
-            normalized_type_filters is None or pair[0] in normalized_type_filters
-        )
+        if (normalized_type_filters is None or pair[0] in normalized_type_filters)
         and (
             normalized_address_filters is None or pair[1] in normalized_address_filters
         )
@@ -561,8 +558,8 @@ async def async_import_energy_history(
 
     now_dt = datetime_mod.now(UTC)
     run_started_iso = now_dt.isoformat()
-    start_of_today = now_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-    now_ts = int(start_of_today.timestamp()) - 1
+    current_minute = now_dt.replace(second=0, microsecond=0)
+    now_ts = int(current_minute.timestamp())
     if max_days is None:
         raw_max_days = entry.options.get(OPTION_MAX_HISTORY_RETRIEVED)
         try:
@@ -611,7 +608,9 @@ async def async_import_energy_history(
     )
 
     filters_snapshot = {
-        "node_types": sorted(normalized_type_filters) if normalized_type_filters else [],
+        "node_types": sorted(normalized_type_filters)
+        if normalized_type_filters
+        else [],
         "addresses": sorted(normalized_address_filters)
         if normalized_address_filters
         else [],
@@ -824,7 +823,9 @@ async def async_import_energy_history(
                 if before_values:
                     sorted_before = sorted(
                         before_values,
-                        key=lambda row: cast(datetime, _statistics_row_get(row, "start")),
+                        key=lambda row: cast(
+                            datetime, _statistics_row_get(row, "start")
+                        ),
                     )
                     last_before = sorted_before[-1]
         else:
@@ -840,7 +841,10 @@ async def async_import_energy_history(
                     if vals:
                         candidate = vals[0]
                         start_dt = _statistics_row_get(candidate, "start")
-                        if isinstance(start_dt, datetime) and start_dt < import_start_dt:
+                        if (
+                            isinstance(start_dt, datetime)
+                            and start_dt < import_start_dt
+                        ):
                             last_before = candidate
             except async_mod.CancelledError:  # pragma: no cover - allow cancellation
                 raise
@@ -1103,6 +1107,7 @@ async def async_register_import_energy_history_service(
 
     logger = _LOGGER
     async_mod = asyncio
+
     async def _service_import_energy_history(call) -> None:
         """Handle the import_energy_history service call."""
 
