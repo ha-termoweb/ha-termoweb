@@ -13,6 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import CONF_BRAND, DEFAULT_BRAND, DOMAIN, get_brand_label
+from .energy import SUMMARY_KEY_LAST_RUN
 from .inventory import Inventory
 from .utils import async_get_integration_version
 
@@ -102,6 +103,15 @@ async def async_get_config_entry_diagnostics(
 
     if time_zone_str is not None:
         diagnostics["home_assistant"]["time_zone"] = time_zone_str
+
+    last_import = record.get(SUMMARY_KEY_LAST_RUN)
+    energy_section: dict[str, Any] = {}
+    if isinstance(last_import, Mapping):
+        energy_section["last_run"] = dict(last_import)
+    elif last_import is not None:
+        energy_section["last_run"] = last_import
+    if energy_section:
+        diagnostics["energy_import"] = energy_section
 
     _LOGGER.debug(
         "Diagnostics inventory cache for %s: raw=%d, filtered=%d",
