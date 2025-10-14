@@ -809,7 +809,7 @@ custom_components/termoweb/energy.py :: _get_last_statistics_compat
 custom_components/termoweb/energy.py :: _clear_statistics_compat
     Clear statistics using whichever helper is available.
 custom_components/termoweb/energy.py :: async_import_energy_history
-    Fetch historical hourly samples and insert statistics.
+    Fetch historical hourly samples and insert statistics with filters.
 custom_components/termoweb/energy.py :: async_register_import_energy_history_service
     Register the import_energy_history service if it is missing.
 custom_components/termoweb/energy.py :: async_register_import_energy_history_service._service_import_energy_history

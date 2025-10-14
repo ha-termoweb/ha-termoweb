@@ -18,7 +18,7 @@ from homeassistant.helpers import entity_registry as er
 from .api import RESTClient
 from .const import DOMAIN
 from .identifiers import build_heater_energy_unique_id
-from .inventory import Inventory
+from .inventory import Inventory, normalize_node_addr, normalize_node_type
 from .throttle import MonotonicRateLimiter
 
 _LOGGER = logging.getLogger(__name__)
@@ -28,6 +28,8 @@ OPTION_ENERGY_HISTORY_PROGRESS = "energy_history_progress"
 OPTION_MAX_HISTORY_RETRIEVED = "max_history_retrieved"
 
 DEFAULT_MAX_HISTORY_DAYS = 7
+RESET_DELTA_THRESHOLD_KWH = 0.2
+SUMMARY_KEY_LAST_RUN = "last_energy_import_summary"
 
 
 @dataclass(slots=True)
@@ -392,16 +394,20 @@ async def _clear_statistics_compat(  # pragma: no cover - compatibility shim
     return "delete"  # pragma: no cover - dependent on async helper availability
 
 
+
 async def async_import_energy_history(
     hass: HomeAssistant,
     entry: ConfigEntry,
     nodes: Inventory | None = None,
     *,
+    node_types: Iterable[str] | None = None,
+    addresses: Iterable[str] | None = None,
+    day_chunk_hours: int = 24,
     reset_progress: bool = False,
     max_days: int | None = None,
     rate_limit: MonotonicRateLimiter,
 ) -> None:
-    """Fetch historical hourly samples and insert statistics."""
+    """Fetch historical hourly samples and insert statistics with filters."""
 
     logger = _LOGGER
     async_mod = asyncio
@@ -464,14 +470,97 @@ async def async_import_energy_history(
         logger.debug("Energy import: no nodes available for device")
         return
 
-    target_pairs = list(all_pairs)
+    available_types = {node_type for node_type, _ in all_pairs}
+    available_addresses = {addr for _, addr in all_pairs}
+
+    normalized_type_filters: set[str] | None = None
+    if node_types is not None:
+        normalized_type_filters = set()
+        invalid_types: list[str] = []
+        for candidate in node_types:
+            normalized = normalize_node_type(
+                candidate,
+                use_default_when_falsey=True,
+            )
+            if not normalized:
+                continue
+            if normalized not in available_types:
+                invalid_types.append(str(candidate))
+                continue
+            normalized_type_filters.add(normalized)
+        if invalid_types:
+            raise ValueError(
+                "Unsupported node_types for import_energy_history: "
+                + ", ".join(sorted(invalid_types))
+            )
+        if not normalized_type_filters:
+            normalized_type_filters = None
+
+    normalized_address_filters: set[str] | None = None
+    if addresses is not None:
+        normalized_address_filters = set()
+        unknown_addresses: list[str] = []
+        for candidate in addresses:
+            normalized_addr = normalize_node_addr(
+                candidate,
+                use_default_when_falsey=True,
+            )
+            if not normalized_addr:
+                continue
+            if normalized_addr not in available_addresses:
+                unknown_addresses.append(normalized_addr)
+                continue
+            normalized_address_filters.add(normalized_addr)
+        if unknown_addresses:
+            logger.warning(
+                "%s: ignoring unknown addresses for energy import: %s",
+                dev_id,
+                ", ".join(sorted(set(unknown_addresses))),
+            )
+        if not normalized_address_filters:
+            normalized_address_filters = None
+
+    target_pairs = [
+        pair
+        for pair in all_pairs
+        if (
+            normalized_type_filters is None or pair[0] in normalized_type_filters
+        )
+        and (
+            normalized_address_filters is None or pair[1] in normalized_address_filters
+        )
+    ]
 
     if not target_pairs:
-        logger.debug("Energy import: no nodes available for device")
+        logger.debug("Energy import: no nodes available for device after filtering")
         return
 
+    try:
+        chunk_hours_value = int(day_chunk_hours)
+    except (TypeError, ValueError):
+        logger.warning(
+            "%s: invalid day_chunk_hours %s; defaulting to 24",
+            dev_id,
+            day_chunk_hours,
+        )
+        chunk_hours_value = 24
+
+    if chunk_hours_value <= 0:
+        logger.warning("%s: day_chunk_hours must be positive; defaulting to 24", dev_id)
+        chunk_hours_value = 24
+    elif chunk_hours_value > 24:
+        logger.debug(
+            "%s: capping day_chunk_hours=%s to 24 hours",
+            dev_id,
+            chunk_hours_value,
+        )
+        chunk_hours_value = 24
+
     day = 24 * 3600
+    chunk_seconds = day if chunk_hours_value >= 24 else chunk_hours_value * 3600
+
     now_dt = datetime_mod.now(UTC)
+    run_started_iso = now_dt.isoformat()
     start_of_today = now_dt.replace(hour=0, minute=0, second=0, microsecond=0)
     now_ts = int(start_of_today.timestamp()) - 1
     if max_days is None:
@@ -515,11 +604,26 @@ async def async_import_energy_history(
         logger.debug("%s: energy history already imported", entry.entry_id)
         return
 
-    if not target_pairs:
-        logger.debug("Energy import: no heater nodes selected for device")
-        return
+    logger.debug(
+        "Energy import: fetching hourly samples down to %s (chunk=%sh)",
+        _iso_date(target),
+        chunk_hours_value,
+    )
 
-    logger.debug("Energy import: fetching hourly samples down to %s", _iso_date(target))
+    filters_snapshot = {
+        "node_types": sorted(normalized_type_filters) if normalized_type_filters else [],
+        "addresses": sorted(normalized_address_filters)
+        if normalized_address_filters
+        else [],
+        "day_chunk_hours": chunk_hours_value,
+    }
+
+    node_summaries: list[dict[str, Any]] = []
+    total_nodes_processed = 0
+    total_samples_fetched = 0
+    total_samples_written = 0
+    total_resets_detected = 0
+    overlap_warning_logged = False
 
     async def _rate_limited_fetch(
         node_type: str, addr: str, start: int, stop: int
@@ -551,6 +655,7 @@ async def async_import_energy_history(
 
     ent_reg: er.EntityRegistry | None = registry_mod.async_get(hass)
     for node_type, addr in target_pairs:
+        total_nodes_processed += 1
         logger.debug(
             "Energy import: importing history for %s %s",
             node_type,
@@ -558,29 +663,38 @@ async def async_import_energy_history(
         )
         all_samples: list[dict[str, Any]] = []
         start_ts = _progress_value(node_type, addr)
+        node_raw_samples = 0
+
         while start_ts > target:
             chunk_start = max(start_ts - day, target)
-            samples = await _rate_limited_fetch(node_type, addr, chunk_start, start_ts)
-
-            logger.debug(
-                "%s:%s: fetched %d samples for %s-%s",
-                node_type,
-                addr,
-                len(samples),
-                _iso_date(chunk_start),
-                _iso_date(start_ts),
-            )
-
-            all_samples.extend(samples)
+            sub_stop = start_ts
+            while sub_stop > chunk_start:
+                sub_start = max(sub_stop - chunk_seconds, chunk_start)
+                samples = await _rate_limited_fetch(
+                    node_type,
+                    addr,
+                    sub_start,
+                    sub_stop,
+                )
+                fetched = len(samples)
+                if fetched:
+                    logger.debug(
+                        "%s:%s: fetched %d samples for %s-%s",
+                        node_type,
+                        addr,
+                        fetched,
+                        _iso_date(sub_start),
+                        _iso_date(sub_stop),
+                    )
+                    all_samples.extend(samples)
+                total_samples_fetched += fetched
+                node_raw_samples += fetched
+                sub_stop = sub_start
 
             start_ts = chunk_start
             progress[f"{node_type}:{addr}"] = start_ts
             progress.pop(addr, None)
             _write_progress_options(progress)
-
-        if not all_samples:
-            logger.debug("%s: no samples fetched", addr)
-            continue
 
         all_samples_sorted = sorted(all_samples, key=lambda s: s.get("t", 0))
 
@@ -597,14 +711,76 @@ async def async_import_energy_history(
             )
         if not entity_id:
             logger.debug("%s:%s: no energy sensor found", node_type, addr)
+            node_summary = {
+                "node_type": node_type,
+                "address": addr,
+                "entity_id": None,
+                "first_ts": None,
+                "last_ts": None,
+                "raw_samples": node_raw_samples,
+                "samples": 0,
+                "written": 0,
+                "resets": 0,
+                "running_sum": 0.0,
+            }
+            node_summaries.append(node_summary)
+            logger.info(
+                "%s:%s energy import summary first=%s last=%s samples=%d "
+                "written=%d resets=%d sum=%.3f",
+                node_type,
+                addr,
+                "n/a",
+                "n/a",
+                0,
+                0,
+                0,
+                0.0,
+            )
             continue
 
-        first_ts = int(all_samples_sorted[0].get("t", 0))
-        last_ts = int(all_samples_sorted[-1].get("t", 0))
-        import_start_dt = datetime_mod.fromtimestamp(first_ts, UTC).replace(
+        first_ts_val: int | None = None
+        last_ts_val: int | None = None
+        for sample in all_samples_sorted:
+            try:
+                ts_candidate = int(sample.get("t"))
+            except (TypeError, ValueError):
+                continue
+            if first_ts_val is None:
+                first_ts_val = ts_candidate
+            last_ts_val = ts_candidate
+
+        if first_ts_val is None or last_ts_val is None:
+            node_summary = {
+                "node_type": node_type,
+                "address": addr,
+                "entity_id": entity_id,
+                "first_ts": None,
+                "last_ts": None,
+                "raw_samples": node_raw_samples,
+                "samples": 0,
+                "written": 0,
+                "resets": 0,
+                "running_sum": 0.0,
+            }
+            node_summaries.append(node_summary)
+            logger.info(
+                "%s:%s energy import summary first=%s last=%s samples=%d "
+                "written=%d resets=%d sum=%.3f",
+                node_type,
+                addr,
+                "n/a",
+                "n/a",
+                0,
+                0,
+                0,
+                0.0,
+            )
+            continue
+
+        import_start_dt = datetime_mod.fromtimestamp(first_ts_val, UTC).replace(
             minute=0, second=0, microsecond=0
         )
-        import_end_dt = datetime_mod.fromtimestamp(last_ts, UTC).replace(
+        import_end_dt = datetime_mod.fromtimestamp(last_ts_val, UTC).replace(
             minute=0, second=0, microsecond=0
         )
 
@@ -646,21 +822,26 @@ async def async_import_energy_history(
                     < import_start_dt
                 ]
                 if before_values:
-                    last_before = before_values[-1]
-
-        if last_before is None:
+                    sorted_before = sorted(
+                        before_values,
+                        key=lambda row: cast(datetime, _statistics_row_get(row, "start")),
+                    )
+                    last_before = sorted_before[-1]
+        else:
             try:
-                existing = await last_stats_fn(
+                last_stats = await last_stats_fn(
                     hass,
                     1,
                     entity_id,
-                    types={"state", "sum"},
+                    start_time=import_start_dt,
                 )
-                if existing and (vals := existing.get(entity_id)):
-                    candidate = vals[0]
-                    start_dt = _statistics_row_get(candidate, "start")
-                    if isinstance(start_dt, datetime) and start_dt < import_start_dt:
-                        last_before = candidate
+                if last_stats:
+                    vals = last_stats.get(entity_id) or []
+                    if vals:
+                        candidate = vals[0]
+                        start_dt = _statistics_row_get(candidate, "start")
+                        if isinstance(start_dt, datetime) and start_dt < import_start_dt:
+                            last_before = candidate
             except async_mod.CancelledError:  # pragma: no cover - allow cancellation
                 raise
             except Exception as err:  # pragma: no cover - defensive
@@ -734,9 +915,16 @@ async def async_import_energy_history(
                         "%s: cleared overlapping statistics for %s", addr, entity_id
                     )
                 else:
+                    if not overlap_warning_logged:
+                        logger.info(
+                            "%s: recorder overlap clearing helpers unavailable; proceeding "
+                            "without deleting existing statistics",
+                            dev_id,
+                        )
+                        overlap_warning_logged = True
                     logger.debug(
                         "%s: statistics helpers unavailable to clear overlap", addr
-                    )  # pragma: no cover - informational fallback
+                    )
             except async_mod.CancelledError:  # pragma: no cover - allow cancellation
                 raise
             except Exception as err:  # pragma: no cover - defensive
@@ -749,6 +937,10 @@ async def async_import_energy_history(
 
         stats: list[dict[str, Any]] = []
         running_sum: float = sum_offset
+        previous_ts: int | None = None
+        node_samples_processed = 0
+        node_resets_detected = 0
+
         for sample in all_samples_sorted:
             t_val = sample.get("t")
             counter_val = sample.get("counter")
@@ -759,15 +951,23 @@ async def async_import_energy_history(
                 logger.debug("%s: invalid sample %s", addr, sample)
                 continue
 
+            if previous_ts is not None and ts == previous_ts:
+                continue
+            previous_ts = ts
+            node_samples_processed += 1
+
             start_dt = datetime_mod.fromtimestamp(ts, UTC).replace(
                 minute=0, second=0, microsecond=0
             )
+
             if previous_kwh is None:
                 previous_kwh = kwh
                 continue
 
             delta = kwh - previous_kwh
             if delta <= 0:
+                if previous_kwh - kwh >= RESET_DELTA_THRESHOLD_KWH:
+                    node_resets_detected += 1
                 previous_kwh = kwh
                 continue
 
@@ -775,8 +975,36 @@ async def async_import_energy_history(
             stats.append({"start": start_dt, "state": kwh, "sum": running_sum})
             previous_kwh = kwh
 
+        first_iso = datetime_mod.fromtimestamp(first_ts_val, UTC).isoformat()
+        last_iso = datetime_mod.fromtimestamp(last_ts_val, UTC).isoformat()
+
         if not stats:
-            logger.debug("%s: no positive deltas found", addr)
+            total_resets_detected += node_resets_detected
+            node_summary = {
+                "node_type": node_type,
+                "address": addr,
+                "entity_id": entity_id,
+                "first_ts": first_iso,
+                "last_ts": last_iso,
+                "raw_samples": node_raw_samples,
+                "samples": node_samples_processed,
+                "written": 0,
+                "resets": node_resets_detected,
+                "running_sum": running_sum,
+            }
+            node_summaries.append(node_summary)
+            logger.info(
+                "%s:%s energy import summary first=%s last=%s samples=%d "
+                "written=%d resets=%d sum=%.3f",
+                node_type,
+                addr,
+                first_iso,
+                last_iso,
+                node_samples_processed,
+                0,
+                node_resets_detected,
+                running_sum,
+            )
             continue
 
         logger.debug("%s: inserting statistics for %s", addr, entity_id)
@@ -792,16 +1020,76 @@ async def async_import_energy_history(
             "has_mean": False,
         }
         logger.debug("%s: adding %d stats entries", addr, len(stats))
+        store_failed = False
         try:
             store_stats(hass, metadata, stats)
         except Exception as err:  # pragma: no cover - log & continue
+            store_failed = True
             logger.exception("%s: statistics insert failed: %s", addr, err)
 
+        written_count = 0 if store_failed else len(stats)
+        if not store_failed:
+            total_samples_written += len(stats)
+        total_resets_detected += node_resets_detected
+
+        node_summary = {
+            "node_type": node_type,
+            "address": addr,
+            "entity_id": entity_id,
+            "first_ts": first_iso,
+            "last_ts": last_iso,
+            "raw_samples": node_raw_samples,
+            "samples": node_samples_processed,
+            "written": written_count,
+            "resets": node_resets_detected,
+            "running_sum": running_sum,
+        }
+        node_summaries.append(node_summary)
+        logger.info(
+            "%s:%s energy import summary first=%s last=%s samples=%d "
+            "written=%d resets=%d sum=%.3f",
+            node_type,
+            addr,
+            first_iso,
+            last_iso,
+            node_samples_processed,
+            written_count,
+            node_resets_detected,
+            running_sum,
+        )
+
     imported_flag: bool | None = None
-    if all(_progress_value(node_type, addr) <= target for node_type, addr in all_pairs):
+    if target_pairs and all(
+        _progress_value(node_type, addr) <= target for node_type, addr in target_pairs
+    ):
         imported_flag = True
     _write_progress_options(progress, imported=imported_flag)
-    logger.debug("%s: energy import complete", entry.entry_id)
+
+    run_summary = {
+        "device_id": dev_id,
+        "started_at": run_started_iso,
+        "completed_at": datetime_mod.now(UTC).isoformat(),
+        "filters": filters_snapshot,
+        "nodes_processed": total_nodes_processed,
+        "samples_fetched": total_samples_fetched,
+        "samples_written": total_samples_written,
+        "resets_detected": total_resets_detected,
+        "nodes": node_summaries,
+    }
+
+    try:
+        rec[SUMMARY_KEY_LAST_RUN] = run_summary  # type: ignore[index]
+    except Exception:  # pragma: no cover - defensive
+        logger.debug("%s: unable to store energy import summary on record", dev_id)
+
+    logger.info(
+        "%s: energy history import summary nodes=%d samples=%d written=%d resets=%d",
+        dev_id,
+        total_nodes_processed,
+        total_samples_fetched,
+        total_samples_written,
+        total_resets_detected,
+    )
 
 
 async def async_register_import_energy_history_service(
@@ -821,6 +1109,34 @@ async def async_register_import_energy_history_service(
         logger.debug("service import_energy_history called")
         reset = bool(call.data.get("reset_progress", False))
         max_days = call.data.get("max_history_retrieval")
+        node_types_raw = call.data.get("node_types")
+        addresses_raw = call.data.get("addresses")
+        day_chunk_raw = call.data.get("day_chunk_hours", 24)
+
+        node_types_filter: tuple[str, ...] | None
+        if node_types_raw is None:
+            node_types_filter = None
+        elif isinstance(node_types_raw, (list, tuple, set)):
+            node_types_filter = tuple(str(value) for value in node_types_raw)
+        else:
+            node_types_filter = (str(node_types_raw),)
+
+        addresses_filter: tuple[str, ...] | None
+        if addresses_raw is None:
+            addresses_filter = None
+        elif isinstance(addresses_raw, (list, tuple, set)):
+            addresses_filter = tuple(str(value) for value in addresses_raw)
+        else:
+            addresses_filter = (str(addresses_raw),)
+
+        try:
+            day_chunk_hours = int(day_chunk_raw)
+        except (TypeError, ValueError):
+            logger.warning(
+                "import_energy_history: invalid day_chunk_hours %s; defaulting to 24",
+                day_chunk_raw,
+            )
+            day_chunk_hours = 24
 
         tasks = []
         records = hass.data.get(DOMAIN, {})
@@ -842,14 +1158,24 @@ async def async_register_import_energy_history_service(
                     entry_entry_id,
                 )
                 continue
-            tasks.append(
-                import_fn(
+            try:
+                coro = import_fn(
                     hass,
                     ent,
+                    node_types=node_types_filter,
+                    addresses=addresses_filter,
+                    day_chunk_hours=day_chunk_hours,
                     reset_progress=reset,
                     max_days=max_days,
                 )
-            )
+            except ValueError as err:
+                logger.error(
+                    "%s: import_energy_history rejected input: %s",
+                    rec.get("dev_id"),
+                    err,
+                )
+                continue
+            tasks.append(coro)
         if tasks:
             logger.debug("import_energy_history: awaiting %d tasks", len(tasks))
             results = await async_mod.gather(*tasks, return_exceptions=True)

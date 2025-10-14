@@ -39,4 +39,25 @@ This guide shows a non-technical end‑user how to capture **startup and runtime
 - The **Termoweb diagnostics JSON** file.
 - Optionally, screenshots of any visible errors in **Settings → System → Logs** filtered by `custom_components.termoweb`.
 
-> Tip: The TermoWeb integration makes an effort to redact sensitive and identifying info such as the gateeway ID and session tokens. However, many other components in HA do not, so you should review the log before posting it to avoid revealing information that is private. 
+> Tip: The TermoWeb integration makes an effort to redact sensitive and identifying info such as the gateeway ID and session tokens. However, many other components in HA do not, so you should review the log before posting it to avoid revealing information that is private.
+
+---
+
+## Energy history import service
+
+The integration exposes the `termoweb.import_energy_history` service to backfill hourly energy statistics. The service supports the following fields:
+
+- `reset_progress` *(bool, optional)* — clear the internal per-node cursor and re-import everything. Statistics are not removed.
+- `max_history_retrieval` *(int, optional)* — clamp the lookback window (in days). When omitted, the integration falls back to the entry option or the default (7 days).
+- `node_types` *(list[str], optional)* — restrict the import to canonical node types such as `"htr"`, `"acm"`, or `"pmo"`. Invalid values are rejected immediately.
+- `addresses` *(list[str], optional)* — restrict the import to specific node addresses. Addresses that are not part of the Inventory are ignored with a warning.
+- `day_chunk_hours` *(int, optional, default=24)* — split the 24-hour windows into sub-chunks for oversized devices. The importer still enforces the same rate limiter across all chunks.
+
+### Internal rules
+
+- Inventory drives the target selection. Filters are applied *after* expanding the Inventory and before de-duplication.
+- Sample timestamps always use seconds-since-epoch normalization performed by the REST adapter.
+- The importer clears overlapping statistics whenever recorder helpers are available; otherwise it logs a one-time INFO message and continues safely.
+- Device resets are detected when the cumulative counter drops by more than **0.2 kWh**. The integration starts a new accumulation segment without breaking the monotonic sum expected by Home Assistant.
+- Duplicate timestamps are discarded to avoid redundant statistics writes.
+- A per-node summary and a final run summary are logged at INFO level. The most recent summary is also exposed in diagnostics (`energy_import.last_run`).
