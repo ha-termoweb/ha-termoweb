@@ -22,8 +22,14 @@ from custom_components.termoweb.utils import (
     _entry_gateway_record,
     async_get_integration_version,
     build_gateway_device_info,
+    coerce_power_watts,
+    extract_power_timestamp,
+    extract_power_watts,
     float_or_none,
+    format_timestamp_iso,
 )
+
+
 def test_addresses_by_node_type_skips_invalid_entries() -> None:
     nodes = [
         types.SimpleNamespace(type=" ", addr="skip"),
@@ -162,9 +168,7 @@ def test_build_gateway_device_info_respects_include_version_flag() -> None:
         }
     )
 
-    info = build_gateway_device_info(
-        hass, "entry", "dev", include_version=False
-    )
+    info = build_gateway_device_info(hass, "entry", "dev", include_version=False)
 
     assert info["manufacturer"] == "Ducaheat"
     assert info["model"] == "Controller"
@@ -305,6 +309,89 @@ def test_build_heater_energy_unique_id_requires_components(
 )
 def test_parse_heater_energy_unique_id_invalid(value) -> None:
     assert parse_heater_energy_unique_id(value) is None
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    (
+        (0, 0.0),
+        (5.5, 5.5),
+        ("12", 12.0),
+        ("15 W", 15.0),
+        ("1.2kW", 1200.0),
+        ({"power": "3.5"}, 3.5),
+        (["skip", {"watts": 7}], 7.0),
+    ),
+)
+def test_coerce_power_watts_variants(value: Any, expected: float) -> None:
+    """Instant power coercion should normalise multiple payload shapes."""
+
+    assert coerce_power_watts(value) == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        -5,
+        "-4",
+        float("nan"),
+        float("inf"),
+        "-1kW",
+        {"value": -1},
+    ),
+)
+def test_coerce_power_watts_rejects_invalid(value: Any) -> None:
+    """Negative and non-finite inputs should be rejected."""
+
+    assert coerce_power_watts(value) is None
+
+
+def test_extract_power_watts_nested_payload() -> None:
+    """Instant power extraction should drill into nested payloads."""
+
+    payload = {
+        "status": {
+            "data": [
+                {"value": "ignore"},
+                {"power": {"watts": "45"}},
+            ]
+        }
+    }
+
+    assert extract_power_watts(payload) == 45.0
+
+
+def test_extract_power_watts_handles_missing_values() -> None:
+    """Payloads without power data should return ``None``."""
+
+    assert extract_power_watts({"status": {"data": []}}) is None
+
+
+def test_extract_power_timestamp_variants() -> None:
+    """Timestamp extraction should handle integers, milliseconds, and strings."""
+
+    iso_ts = "2024-01-01T00:00:05+00:00"
+    payload = {
+        "ts": 1_700_000_000_000,
+        "status": {"metrics": [{"updatedAt": iso_ts}]},
+    }
+
+    assert extract_power_timestamp(payload) == 1_700_000_000.0
+
+    assert extract_power_timestamp({"status": {"updated_at": iso_ts}}) == pytest.approx(
+        extract_power_timestamp(iso_ts)
+    )
+
+
+def test_format_timestamp_iso_handles_values() -> None:
+    """Timestamp formatter should convert seconds to an ISO string."""
+
+    assert format_timestamp_iso(None) is None
+    assert format_timestamp_iso("not-a-number") is None
+
+    iso_value = format_timestamp_iso(1_700_000_000.0)
+    assert isinstance(iso_value, str)
+    assert iso_value.endswith("+00:00")
 
 
 @pytest.mark.asyncio

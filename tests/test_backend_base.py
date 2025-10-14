@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from custom_components.termoweb.backend.base import Backend
+from custom_components.termoweb.backend.base import Backend, NodeRef
 
 
 class DummyWsClient:
@@ -50,6 +50,11 @@ class ExampleBackend(Backend):
     def __init__(self, *, brand: str, client: Any) -> None:
         super().__init__(brand=brand, client=client)
         self.calls: list[dict[str, Any]] = []
+
+    async def get_instant_power(self, node: NodeRef) -> float | None:
+        """Return ``None`` for the abstract backend helper."""
+
+        return None
 
     def create_ws_client(
         self,
