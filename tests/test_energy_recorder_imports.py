@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import sys
+from datetime import UTC, datetime
 from importlib.machinery import ModuleSpec
 from types import ModuleType, SimpleNamespace
+
+import pytest
 
 from custom_components.termoweb import energy
 
@@ -83,3 +86,64 @@ def test_resolve_recorder_imports_module_missing(monkeypatch: "pytest.MonkeyPatc
     assert first is second
     assert first.get_instance is None
     assert first.statistics is None
+
+
+@pytest.mark.asyncio
+async def test_clear_statistics_compat_uses_instance_async(
+    monkeypatch: "pytest.MonkeyPatch",
+) -> None:
+    """Use recorder instance async delete helper when available."""
+
+    monkeypatch.setattr(energy, "_RECORDER_IMPORTS", None)
+
+    calls: list[tuple[list[str], dict[str, datetime]]] = []
+
+    class _Recorder:
+        """Stub recorder with async deletion helpers."""
+
+        async def async_delete_statistics(
+            self,
+            statistic_ids: list[str],
+            *,
+            start_time: datetime | None = None,
+            end_time: datetime | None = None,
+        ) -> None:
+            calls.append(
+                (
+                    list(statistic_ids),
+                    {
+                        "start_time": start_time,
+                        "end_time": end_time,
+                    },
+                )
+            )
+
+        async def async_add_executor_job(self, *args, **kwargs):
+            raise AssertionError("executor helper should not be used")
+
+    recorder = _Recorder()
+
+    recorder_mod = ModuleType("homeassistant.components.recorder")
+    recorder_mod.get_instance = lambda hass: recorder  # type: ignore[attr-defined]
+    recorder_mod.statistics = SimpleNamespace()  # type: ignore[attr-defined]
+
+    _install_fake_homeassistant(monkeypatch, recorder_mod)
+
+    hass = SimpleNamespace()
+    start = datetime(2025, 10, 1, tzinfo=UTC)
+    end = datetime(2025, 10, 2, tzinfo=UTC)
+
+    result = await energy._clear_statistics_compat(
+        hass,
+        "sensor.energy_total",
+        start_time=start,
+        end_time=end,
+    )
+
+    assert result == "delete"
+    assert calls == [
+        (
+            ["sensor.energy_total"],
+            {"start_time": start, "end_time": end},
+        )
+    ]
