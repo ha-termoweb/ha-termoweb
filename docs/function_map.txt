@@ -1220,16 +1220,6 @@ custom_components/termoweb/utils.py :: build_power_monitor_device_info
     Return canonical ``DeviceInfo`` for a TermoWeb power monitor.
 custom_components/termoweb/utils.py :: float_or_none
     Return value as ``float`` if possible, else ``None``.
-custom_components/termoweb/utils.py :: coerce_power_watts
-    Return a non-negative watt value parsed from ``value`` when possible.
-custom_components/termoweb/utils.py :: _coerce_timestamp
-    Return a UNIX timestamp parsed from ``value`` when possible.
-custom_components/termoweb/utils.py :: extract_power_timestamp
-    Return the newest timestamp discovered in ``payload``.
-custom_components/termoweb/utils.py :: extract_power_watts
-    Return the first instantaneous power value discovered within ``payload``.
-custom_components/termoweb/utils.py :: format_timestamp_iso
-    Return an ISO timestamp string for ``timestamp`` when available.
 scripts/generate_function_map.py :: DocExtractor.__init__
     Initialise the extractor for ``file_path``.
 scripts/generate_function_map.py :: DocExtractor.visit_ClassDef
