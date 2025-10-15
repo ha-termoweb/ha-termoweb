@@ -257,6 +257,7 @@ async def test_import_energy_history_uses_union_statistics_for_offset(
         minute=0, second=0, microsecond=0
     )
 
+    external_id = "sensor:test_energy"
     dot_rows = [
         {
             "start": import_start_dt - timedelta(hours=2),
@@ -277,6 +278,11 @@ async def test_import_energy_history_uses_union_statistics_for_offset(
         },
     ]
 
+    remaining_rows: dict[str, list[dict[str, Any]]] = {
+        entity_id: [dict(row) for row in dot_rows],
+        external_id: [dict(row) for row in external_rows],
+    }
+
     requested_stat_sets: list[set[str]] = []
 
     async def _fake_stats_period(
@@ -287,11 +293,15 @@ async def test_import_energy_history_uses_union_statistics_for_offset(
     ) -> dict[str, list[dict[str, Any]]]:
         ids = set(statistic_ids)
         requested_stat_sets.append(ids)
-        if ids == {entity_id, "sensor:test_energy"}:
-            return {entity_id: dot_rows, "sensor:test_energy": external_rows}
-        if ids == {"sensor:test_energy"}:
-            return {"sensor:test_energy": []}
-        return {}
+        response: dict[str, list[dict[str, Any]]] = {}
+        for stat_id in ids:
+            rows = [
+                dict(row)
+                for row in remaining_rows.get(stat_id, [])
+                if start_time <= row["start"] < end_time
+            ]
+            response[stat_id] = rows
+        return response
 
     clear_calls: list[tuple[str, datetime, datetime]] = []
 
@@ -303,6 +313,11 @@ async def test_import_energy_history_uses_union_statistics_for_offset(
         end_time: datetime,
     ) -> str:
         clear_calls.append((statistic_id, start_time, end_time))
+        existing = remaining_rows.get(statistic_id, [])
+        if existing:
+            remaining_rows[statistic_id] = [
+                row for row in existing if not (start_time <= row["start"] < end_time)
+            ]
         return "clear"
 
     stored_stats: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
@@ -313,6 +328,17 @@ async def test_import_energy_history_uses_union_statistics_for_offset(
         stats: list[dict[str, Any]],
     ) -> None:
         stored_stats.append((metadata, stats))
+        stat_id = metadata["statistic_id"]
+        domain, obj_id = stat_id.split(".", 1)
+        target_id = f"{domain}:{obj_id}"
+        existing = {
+            row["start"]: dict(row) for row in remaining_rows.get(target_id, [])
+        }
+        for row in stats:
+            existing[row["start"]] = dict(row)
+        remaining_rows[target_id] = sorted(
+            existing.values(), key=lambda row: row["start"]
+        )
 
     monkeypatch.setattr(
         energy,
@@ -336,11 +362,11 @@ async def test_import_energy_history_uses_union_statistics_for_offset(
     )
 
     assert requested_stat_sets
-    assert requested_stat_sets[0] == {entity_id, "sensor:test_energy"}
-    assert requested_stat_sets[-1] == {"sensor:test_energy"}
+    assert requested_stat_sets[0] == {entity_id, external_id}
+    assert requested_stat_sets[-1] == {external_id}
 
     assert len(clear_calls) == 2
-    assert {call[0] for call in clear_calls} == {entity_id, "sensor:test_energy"}
+    assert {call[0] for call in clear_calls} == {entity_id, external_id}
     for _, start_time, end_time in clear_calls:
         assert start_time == import_start_dt
         assert end_time == import_end_dt + timedelta(hours=1)
@@ -352,6 +378,22 @@ async def test_import_energy_history_uses_union_statistics_for_offset(
     assert all(entry.keys() == {"start", "sum"} for entry in stored_entries)
     assert stored_entries[0]["sum"] == pytest.approx(5.0), stored_entries
     assert stored_entries[-1]["sum"] == pytest.approx(7.5)
+
+    remaining_dot = [
+        row
+        for row in remaining_rows.get(entity_id, [])
+        if import_start_dt <= row["start"] < import_end_dt + timedelta(hours=1)
+    ]
+    assert not remaining_dot
+
+    remaining_external = [
+        row
+        for row in remaining_rows.get(external_id, [])
+        if import_start_dt <= row["start"] < import_end_dt + timedelta(hours=1)
+    ]
+    assert len(remaining_external) == 3
+    assert remaining_external[0]["sum"] == pytest.approx(5.0)
+    assert remaining_external[-1]["sum"] == pytest.approx(7.5)
 
 
 @pytest.mark.asyncio
