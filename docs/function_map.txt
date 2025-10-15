@@ -936,8 +936,6 @@ custom_components/termoweb/identifiers.py :: build_heater_energy_unique_id
     Return the canonical unique ID for a heater energy sensor.
 custom_components/termoweb/identifiers.py :: build_power_monitor_unique_id
     Return the canonical unique ID for a power monitor node or entity.
-custom_components/termoweb/identifiers.py :: build_power_monitor_device_unique_id
-    Return the canonical unique ID for a power monitor device.
 custom_components/termoweb/identifiers.py :: build_power_monitor_energy_unique_id
     Return the canonical unique ID for a power monitor energy sensor.
 custom_components/termoweb/identifiers.py :: build_power_monitor_instant_power_unique_id
