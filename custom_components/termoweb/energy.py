@@ -40,6 +40,8 @@ class _RecorderStatisticsHelpers:
     sync_target: Any | None
     sync: Callable[..., Any] | None
     async_fn: Callable[..., Awaitable[Any]] | None
+    instance: Any | None
+    instance_async: Callable[..., Awaitable[Any]] | None
 
 
 @dataclass(slots=True)
@@ -104,6 +106,8 @@ def _resolve_statistics_helpers(
     async_helper: Callable[..., Awaitable[Any]] | None = None
     executor: Callable[..., Awaitable[Any]] | None = None
     sync_target: Any | None = None
+    instance: Any | None = None
+    instance_async: Callable[..., Awaitable[Any]] | None = None
 
     if statistics_mod is not None:
         sync_candidate = getattr(statistics_mod, sync_name, None)
@@ -114,16 +118,27 @@ def _resolve_statistics_helpers(
         if callable(async_candidate):
             async_helper = async_candidate
 
-    if sync_helper is not None and imports.get_instance is not None:
+    if imports.get_instance is not None:
         instance = imports.get_instance(hass)
-        executor = instance.async_add_executor_job
+        instance_async_candidate = getattr(instance, async_name, None)
+        if callable(instance_async_candidate):
+            instance_async = instance_async_candidate
+
+        add_executor = getattr(instance, "async_add_executor_job", None)
+        if callable(add_executor):
+            executor = add_executor
+
         sync_target = instance if sync_uses_instance else hass
+    else:
+        instance = None
 
     return _RecorderStatisticsHelpers(
         executor=executor,
         sync_target=sync_target,
         sync=sync_helper,
         async_fn=async_helper,
+        instance=instance,
+        instance_async=instance_async,
     )
 
 
@@ -361,6 +376,19 @@ async def _clear_statistics_compat(  # pragma: no cover - compatibility shim
         except TypeError:  # pragma: no cover - older signature fallback
             await helpers.async_fn(hass, [statistic_id])
         return "delete"  # pragma: no cover - dependent on async helper availability
+
+    if helpers.instance_async is not None:
+        delete_args: dict[str, Any] = {}
+        if start_time is not None:
+            delete_args["start_time"] = start_time
+        if end_time is not None:
+            delete_args["end_time"] = end_time
+
+        try:
+            await helpers.instance_async([statistic_id], **delete_args)
+        except TypeError:  # pragma: no cover - instance signature fallback
+            await helpers.instance_async([statistic_id])
+        return "delete"
 
     if helpers.sync and helpers.executor and helpers.sync_target is not None:
         await helpers.executor(
