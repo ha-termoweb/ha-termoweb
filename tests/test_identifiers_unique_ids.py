@@ -9,7 +9,6 @@ from custom_components.termoweb import identifiers as identifiers_module
 from custom_components.termoweb.identifiers import (
     build_heater_entity_unique_id,
     build_heater_unique_id,
-    build_power_monitor_device_unique_id,
     build_power_monitor_energy_unique_id,
     build_power_monitor_power_unique_id,
     build_power_monitor_unique_id,
@@ -51,7 +50,7 @@ def test_power_monitor_helpers_defers_to_heater_unique_id(monkeypatch: pytest.Mo
     monkeypatch.setattr(identifiers_module, "build_heater_unique_id", _record)
 
     assert build_power_monitor_unique_id("dev", "03", suffix="daily") == "uid"
-    assert build_power_monitor_device_unique_id("dev", "03") == "uid"
+    assert build_power_monitor_unique_id("dev", "03") == "uid"
     assert build_power_monitor_energy_unique_id("dev", "03") == "uid"
     assert build_power_monitor_power_unique_id("dev", "03") == "uid"
     assert calls == [
