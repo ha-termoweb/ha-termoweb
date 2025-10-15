@@ -355,6 +355,226 @@ async def test_import_energy_history_uses_union_statistics_for_offset(
 
 
 @pytest.mark.asyncio
+async def test_import_skips_duplicate_sample_timestamps(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_hass,
+    inventory_from_map,
+) -> None:
+    """Importer should ignore duplicate raw samples sharing the same timestamp."""
+
+    entry = _StubConfigEntry("entry")
+    stub_hass.config_entries.add(entry)
+
+    base_ts = 1_700_100_000
+    samples = [
+        {"t": base_ts, "counter": 1_000},
+        {"t": base_ts, "counter": 1_200},
+        {"t": base_ts + 3600, "counter": 2_200},
+    ]
+
+    class _SampleClient:
+        def __init__(self, payload: list[dict[str, int]]) -> None:
+            self.payload = payload
+
+        async def get_node_samples(self, dev_id, node, start, stop):
+            return self.payload
+
+    client = _SampleClient(samples)
+
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev-dup")
+    stub_hass.data.setdefault(energy.DOMAIN, {})[entry.entry_id] = {
+        "client": client,
+        "dev_id": "dev-dup",
+        "inventory": inventory,
+    }
+
+    entity_id = "sensor.dup_energy"
+    external_id = "sensor:dup_energy"
+
+    class _Registry:
+        def async_get_entity_id(self, domain, platform, unique_id):
+            if domain == "sensor" and platform == energy.DOMAIN:
+                return entity_id
+            return None
+
+        def async_get(self, requested):
+            if requested == entity_id:
+                return SimpleNamespace(original_name="Dup Energy")
+            return None
+
+    registry = _Registry()
+    monkeypatch.setattr(energy.er, "async_get", lambda hass: registry, raising=False)
+
+    async def _fake_stats_period(hass, start_time, end_time, statistic_ids):
+        ids = set(statistic_ids)
+        if ids == {entity_id, external_id}:
+            return {entity_id: [], external_id: []}
+        if ids == {external_id}:
+            return {external_id: []}
+        return {}
+
+    async def _fake_clear_statistics(
+        hass,
+        statistic_id: str,
+        *,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> str:
+        return "clear"
+
+    stored_payloads: list[list[dict[str, Any]]] = []
+
+    def _capture_store(hass, metadata: dict[str, Any], stats: list[dict[str, Any]]):
+        stored_payloads.append(stats)
+
+    async def _noop_enforce(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        energy,
+        "_statistics_during_period_compat",
+        _fake_stats_period,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        energy,
+        "_clear_statistics_compat",
+        _fake_clear_statistics,
+        raising=False,
+    )
+    monkeypatch.setattr(energy, "_store_statistics", _capture_store, raising=False)
+    monkeypatch.setattr(energy, "_enforce_monotonic_sum", _noop_enforce, raising=False)
+
+    await energy.async_import_energy_history(
+        stub_hass,
+        entry,
+        rate_limit=_ImmediateRateLimiter(),
+        max_days=1,
+    )
+
+    assert stored_payloads, "No statistics were recorded"
+    stats = stored_payloads[0]
+    assert len(stats) == 1
+    expected_start = datetime.fromtimestamp(base_ts + 3600, UTC).replace(
+        minute=0, second=0, microsecond=0
+    )
+    assert stats[0]["start"] == expected_start
+    assert stats[0]["sum"] == pytest.approx(1.2)
+
+
+@pytest.mark.asyncio
+async def test_import_skips_negative_deltas_after_reset(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_hass,
+    inventory_from_map,
+) -> None:
+    """Importer should drop negative deltas caused by counter resets."""
+
+    entry = _StubConfigEntry("entry")
+    stub_hass.config_entries.add(entry)
+
+    base_ts = 1_700_200_000
+    samples = [
+        {"t": base_ts, "counter": 5_000},
+        {"t": base_ts + 3600, "counter": 200},
+        {"t": base_ts + 7200, "counter": 700},
+    ]
+
+    class _SampleClient:
+        def __init__(self, payload: list[dict[str, int]]) -> None:
+            self.payload = payload
+
+        async def get_node_samples(self, dev_id, node, start, stop):
+            return self.payload
+
+    client = _SampleClient(samples)
+
+    inventory = inventory_from_map({"htr": ["B"]}, dev_id="dev-reset")
+    stub_hass.data.setdefault(energy.DOMAIN, {})[entry.entry_id] = {
+        "client": client,
+        "dev_id": "dev-reset",
+        "inventory": inventory,
+    }
+
+    entity_id = "sensor.reset_energy"
+    external_id = "sensor:reset_energy"
+
+    class _Registry:
+        def async_get_entity_id(self, domain, platform, unique_id):
+            if domain == "sensor" and platform == energy.DOMAIN:
+                return entity_id
+            return None
+
+        def async_get(self, requested):
+            if requested == entity_id:
+                return SimpleNamespace(original_name="Reset Energy")
+            return None
+
+    registry = _Registry()
+    monkeypatch.setattr(energy.er, "async_get", lambda hass: registry, raising=False)
+
+    async def _fake_stats_period(hass, start_time, end_time, statistic_ids):
+        ids = set(statistic_ids)
+        if ids == {entity_id, external_id}:
+            return {entity_id: [], external_id: []}
+        if ids == {external_id}:
+            return {external_id: []}
+        return {}
+
+    async def _fake_clear_statistics(
+        hass,
+        statistic_id: str,
+        *,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> str:
+        return "clear"
+
+    stored_payloads: list[list[dict[str, Any]]] = []
+
+    def _capture_store(hass, metadata: dict[str, Any], stats: list[dict[str, Any]]):
+        stored_payloads.append(stats)
+
+    async def _noop_enforce(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        energy,
+        "_statistics_during_period_compat",
+        _fake_stats_period,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        energy,
+        "_clear_statistics_compat",
+        _fake_clear_statistics,
+        raising=False,
+    )
+    monkeypatch.setattr(energy, "_store_statistics", _capture_store, raising=False)
+    monkeypatch.setattr(energy, "_enforce_monotonic_sum", _noop_enforce, raising=False)
+
+    await energy.async_import_energy_history(
+        stub_hass,
+        entry,
+        rate_limit=_ImmediateRateLimiter(),
+        max_days=1,
+    )
+
+    assert stored_payloads, "No statistics were recorded"
+    stats = stored_payloads[0]
+    assert len(stats) == 1
+    expected_start = datetime.fromtimestamp(base_ts + 7200, UTC).replace(
+        minute=0, second=0, microsecond=0
+    )
+    assert stats[0]["start"] == expected_start
+    assert stats[0]["sum"] == pytest.approx(0.5)
+
+    summary = stub_hass.data[energy.DOMAIN][entry.entry_id][energy.SUMMARY_KEY_LAST_RUN]
+    node_summary = summary["nodes"][0]
+    assert node_summary["resets"] == 1
+
+
+@pytest.mark.asyncio
 async def test_enforce_monotonic_sum_clamps_descending(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

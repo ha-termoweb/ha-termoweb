@@ -1106,6 +1106,7 @@ async def async_import_energy_history(
                 continue
 
             if previous_ts is not None and ts == previous_ts:
+                # Ignore duplicate raw samples that share the same timestamp.
                 continue
             previous_ts = ts
             node_samples_processed += 1
@@ -1113,6 +1114,7 @@ async def async_import_energy_history(
             start_dt = datetime_mod.fromtimestamp(ts, UTC).replace(
                 minute=0, second=0, microsecond=0
             )
+            # Bucket to UTC hour boundaries so statistics align deterministically.
 
             if previous_kwh is None:
                 previous_kwh = kwh
