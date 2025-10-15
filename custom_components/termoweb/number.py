@@ -54,6 +54,11 @@ from .heater import (
     set_boost_runtime_minutes,
     set_boost_temperature,
 )
+from .i18n import (
+    async_get_fallback_translations,
+    attach_fallbacks,
+    format_fallback,
+)
 from .identifiers import build_heater_entity_unique_id
 from .inventory import Inventory, boostable_accumulator_details_for_entry
 from .utils import float_or_none
@@ -67,10 +72,19 @@ async def async_setup_entry(hass, entry, async_add_entities):
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
+
+    fallbacks = await async_get_fallback_translations(hass, data)
+    attach_fallbacks(coordinator, fallbacks)
+
     def default_name(addr: str) -> str:
         """Return the fallback name for an accumulator node."""
 
-        return f"Heater {addr}"
+        return format_fallback(
+            fallbacks,
+            "fallbacks.heater_name",
+            "Heater {addr}",
+            addr=addr,
+        )
     heater_details, accumulator_nodes = boostable_accumulator_details_for_entry(
         data,
         default_name_simple=default_name,
@@ -149,13 +163,12 @@ class AccumulatorBoostDurationNumber(RestoreEntity, HeaterNodeBase, NumberEntity
             entry_id,
             dev_id,
             addr,
-            f"{base_name} Boost duration",
+            None,
             unique_id,
             device_name=base_name,
             node_type=node_type,
             inventory=inventory,
         )
-        self._attr_name = "Boost duration"
         self._minutes = DEFAULT_BOOST_DURATION
 
     async def async_added_to_hass(self) -> None:
@@ -293,13 +306,12 @@ class AccumulatorBoostTemperatureNumber(
             entry_id,
             dev_id,
             addr,
-            f"{base_name} Boost temperature",
+            None,
             unique_id,
             device_name=base_name,
             node_type=node_type,
             inventory=inventory,
         )
-        self._attr_name = "Boost temperature"
         self._temperature = DEFAULT_BOOST_TEMPERATURE
         self._climate_entity_id: str | None = None
 

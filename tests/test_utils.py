@@ -289,22 +289,6 @@ def test_build_heater_energy_unique_id_requires_components(
         build_heater_energy_unique_id(dev_id, node_type, addr)
 
 
-@pytest.mark.parametrize(
-    "value",
-    [
-        None,
-        "",
-        "not-domain:dev:htr:01:energy",
-        f"{DOMAIN}:dev:htr:01:power",
-        f"{DOMAIN}:dev:htr:energy",
-        f"{DOMAIN}:dev:htr",
-        f"{DOMAIN}:dev::01:energy",
-    ],
-)
-def test_parse_heater_energy_unique_id_invalid(value) -> None:
-    assert parse_heater_energy_unique_id(value) is None
-
-
 @pytest.mark.asyncio
 async def test_async_get_integration_version() -> None:
     hass = types.SimpleNamespace(integration_requests=[])

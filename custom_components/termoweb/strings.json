@@ -27,7 +27,21 @@
       }
     }
   },
+  "fallbacks": {
+    "heater_name": "Heater {addr}",
+    "node_name": "Node {addr}",
+    "power_monitor_name": "Power Monitor {addr}",
+    "never": "Never"
+  },
   "entity": {
+    "binary_sensor": {
+      "gateway_online": {
+        "name": "Gateway online"
+      },
+      "boost_active": {
+        "name": "Boost active"
+      }
+    },
     "button": {
       "force_refresh": {
         "name": "Force refresh"
@@ -46,9 +60,66 @@
       "accumulator_boost_temperature": {
         "name": "Boost temperature"
       }
+    },
+    "sensor": {
+      "heater_temperature": {
+        "name": "Temperature"
+      },
+      "heater_energy_total": {
+        "name": "Energy"
+      },
+      "heater_power": {
+        "name": "Power"
+      },
+      "power_monitor_energy": {
+        "name": "Energy"
+      },
+      "power_monitor_power": {
+        "name": "Power"
+      },
+      "installation_total_energy": {
+        "name": "Total energy"
+      },
+      "boost_minutes_remaining": {
+        "name": "Boost minutes remaining"
+      },
+      "boost_end": {
+        "name": "Boost end"
+      }
     }
   },
   "services": {
+    "set_acm_preset": {
+      "name": "Configure accumulator boost preset",
+      "description": "Update the default boost duration and/or temperature for a TermoWeb accumulator. Minutes must be between 60 and 600 in 60-minute increments; omit a field to keep the existing value.",
+      "fields": {
+        "minutes": {
+          "name": "Default boost duration",
+          "description": "Number of minutes the boost should run when no override is provided (60–600, step 60).",
+          "example": "120"
+        },
+        "temperature": {
+          "name": "Boost temperature",
+          "description": "Optional boost setpoint to apply during the boost session (°C or °F).",
+          "example": "22.5"
+        }
+      }
+    },
+    "start_boost": {
+      "name": "Start accumulator boost",
+      "description": "Trigger an immediate boost on a TermoWeb accumulator. Provide a duration to override the default (60–600 minutes in 60-minute increments), or omit it to use the stored preset.",
+      "fields": {
+        "minutes": {
+          "name": "Boost duration",
+          "description": "Duration of the boost session in minutes (60–600, step 60). Optional.",
+          "example": "180"
+        }
+      }
+    },
+    "cancel_boost": {
+      "name": "Cancel accumulator boost",
+      "description": "Cancel the active boost session on a TermoWeb accumulator."
+    },
     "set_schedule": {
       "name": "Set weekly schedule",
       "description": "Set the 7×24 weekly program for a TermoWeb heater. The program is a list of 168 integers, where each value corresponds to one hour of the week starting Monday 00:00. Use 0 for the cold preset, 1 for the night preset and 2 for the day preset.",

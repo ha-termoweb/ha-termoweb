@@ -34,6 +34,7 @@ from .heater import (
     resolve_boost_runtime_minutes,
     resolve_boost_temperature,
 )
+from .i18n import attach_fallbacks, async_get_fallback_translations
 from .identifiers import build_heater_entity_unique_id
 from .inventory import AccumulatorNode, Inventory
 from .utils import build_gateway_device_info
@@ -115,6 +116,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
+
+    fallbacks = await async_get_fallback_translations(hass, data)
+    attach_fallbacks(coordinator, fallbacks)
     entities: list[ButtonEntity] = [
         StateRefreshButton(coordinator, entry.entry_id, dev_id)
     ]
@@ -140,7 +144,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
 class StateRefreshButton(CoordinatorEntity, ButtonEntity):
     """Button that requests an immediate coordinator refresh."""
 
-    _attr_name = "Force refresh"
     _attr_has_entity_name = True
     _attr_translation_key = "force_refresh"
 
@@ -176,7 +179,7 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
         coordinator,
         context: AccumulatorBoostContext,
         *,
-        label: str,
+        label: str | None,
         unique_suffix: str,
         icon: str | None = None,
     ) -> None:
@@ -184,7 +187,8 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
 
         super().__init__(coordinator)
         self._context = context
-        self._attr_name = label
+        if label:
+            self._attr_name = label
         self._attr_unique_id = context.unique_id(unique_suffix)
         if icon is not None:
             self._attr_icon = icon
@@ -315,12 +319,11 @@ class AccumulatorBoostButton(AccumulatorBoostButtonBase):
         """Initialise the boost helper button that uses stored presets."""
 
         self._metadata = metadata
-        label = metadata.label or "Start boost"
         icon = metadata.icon or None
         super().__init__(
             coordinator,
             context,
-            label=label,
+            label=None,
             unique_suffix=metadata.unique_suffix,
             icon=icon,
         )
@@ -407,12 +410,11 @@ class AccumulatorBoostCancelButton(AccumulatorBoostButtonBase):
     ) -> None:
         """Initialise the boost cancellation helper button."""
 
-        label = metadata.label or "Cancel boost"
         icon = metadata.icon or None
         super().__init__(
             coordinator,
             context,
-            label=label,
+            label=None,
             unique_suffix=metadata.unique_suffix,
             icon=icon,
         )

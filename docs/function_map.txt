@@ -926,6 +926,16 @@ custom_components/termoweb/heater.py :: HeaterNodeBase._units
     Return the configured temperature units for this heater.
 custom_components/termoweb/heater.py :: HeaterNodeBase.device_info
     Expose Home Assistant device metadata for the heater.
+custom_components/termoweb/i18n.py :: async_get_translations
+    Return an empty translation mapping when helpers are unavailable.
+custom_components/termoweb/i18n.py :: _tr
+    Return the translated string for ``key`` with ``placeholders``.
+custom_components/termoweb/i18n.py :: async_get_fallback_translations
+    Return cached fallback translation templates for the current language.
+custom_components/termoweb/i18n.py :: format_fallback
+    Return the formatted fallback string for ``key``.
+custom_components/termoweb/i18n.py :: attach_fallbacks
+    Attach fallback translations to ``target`` when supported.
 custom_components/termoweb/identifiers.py :: build_heater_unique_id
     Return the canonical unique ID for a heater node.
 custom_components/termoweb/identifiers.py :: build_heater_entity_unique_id

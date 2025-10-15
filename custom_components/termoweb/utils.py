@@ -11,6 +11,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.loader import async_get_integration as loader_async_get_integration
 
 from .const import DOMAIN
+from .i18n import FALLBACK_TRANSLATIONS_KEY, format_fallback
 from .inventory import normalize_node_addr
 
 
@@ -134,8 +135,19 @@ def build_power_monitor_device_info(
     )
     identifier = (DOMAIN, str(dev_id), "pmo", normalized_addr)
     display_name = (name or "").strip()
+    entry_data = _entry_gateway_record(hass, entry_id)
     if not display_name:
-        display_name = f"Power Monitor {normalized_addr}"
+        fallbacks: Mapping[str, str] | None = None
+        if isinstance(entry_data, Mapping):
+            entry_fallbacks = entry_data.get(FALLBACK_TRANSLATIONS_KEY)
+            if isinstance(entry_fallbacks, Mapping):
+                fallbacks = entry_fallbacks
+        display_name = format_fallback(
+            fallbacks,
+            "fallbacks.power_monitor_name",
+            "Power Monitor {addr}",
+            addr=normalized_addr,
+        )
 
     info: DeviceInfo = DeviceInfo(
         identifiers={identifier},
@@ -145,7 +157,6 @@ def build_power_monitor_device_info(
         via_device=(DOMAIN, str(dev_id)),
     )
 
-    entry_data = _entry_gateway_record(hass, entry_id)
     return apply_entry_device_overrides(info, entry_data)
 
 

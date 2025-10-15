@@ -24,6 +24,7 @@ from .heater import (
     derive_boost_state,
     log_skipped_nodes,
 )
+from .i18n import attach_fallbacks, async_get_fallback_translations
 from .identifiers import build_heater_entity_unique_id
 from .inventory import (
     HEATER_NODE_TYPES,
@@ -43,6 +44,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     data = hass.data[DOMAIN][entry.entry_id]
     coord: StateCoordinator = data["coordinator"]
     dev_id = data["dev_id"]
+
+    fallbacks = await async_get_fallback_translations(hass, data)
+    attach_fallbacks(coord, fallbacks)
     gateway = GatewayOnlineBinarySensor(coord, entry.entry_id, dev_id)
 
     try:
@@ -72,8 +76,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 dev_id,
                 node_type,
                 addr_str,
-                f"{base_name} Boost Active",
-                unique_id,
+                name=None,
+                unique_id=unique_id,
                 inventory=inventory,
                 settings_resolver=settings_resolver,
                 device_name=base_name,
@@ -96,7 +100,9 @@ class GatewayOnlineBinarySensor(
 ):
     """Connectivity sensor for the TermoWeb hub (gateway)."""
 
+    _attr_has_entity_name = True
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_translation_key = "gateway_online"
     _attr_should_poll = False
 
     def __init__(
@@ -106,7 +112,6 @@ class GatewayOnlineBinarySensor(
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._dev_id = str(dev_id)
-        self._attr_name = "TermoWeb Gateway Online"
         self._attr_unique_id = f"{self._dev_id}_online"
 
     @property
@@ -161,7 +166,9 @@ class HeaterBoostActiveBinarySensor(
     """Binary sensor indicating whether a heater boost is active."""
 
     _attr_device_class = getattr(BinarySensorDeviceClass, "HEAT", "heat")
+    _attr_has_entity_name = True
     _attr_should_poll = False
+    _attr_translation_key = "boost_active"
 
     def __init__(
         self,
@@ -170,7 +177,7 @@ class HeaterBoostActiveBinarySensor(
         dev_id: str,
         node_type: str,
         addr: str,
-        name: str,
+        name: str | None,
         unique_id: str,
         *,
         inventory: Inventory,
@@ -190,11 +197,11 @@ class HeaterBoostActiveBinarySensor(
         self._dev_id = str(dev_id)
         self._node_type = canonical_type
         self._addr = canonical_addr
-        self._attr_name = name
         self._attr_unique_id = unique_id
         self._inventory = inventory
         self._settings_resolver = settings_resolver
-        self._device_name = device_name or name
+        resolved_device_name = device_name or name
+        self._device_name = resolved_device_name if resolved_device_name else ""
         self._ws_subscription = DispatcherSubscriptionHelper(self)
 
     @property

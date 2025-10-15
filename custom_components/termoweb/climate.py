@@ -31,6 +31,11 @@ from .heater import (
     register_climate_entity_id,
     resolve_boost_runtime_minutes,
 )
+from .i18n import (
+    async_get_fallback_translations,
+    attach_fallbacks,
+    format_fallback,
+)
 from .identifiers import build_heater_entity_unique_id
 from .inventory import (
     HeaterNode,
@@ -54,6 +59,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
 
+    fallbacks = await async_get_fallback_translations(hass, data)
+    attach_fallbacks(coordinator, fallbacks)
+
     try:
         inventory = Inventory.require_from_context(container=data)
     except LookupError as err:
@@ -65,7 +73,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
     def default_name_simple(addr: str) -> str:
         """Return fallback name for heater nodes."""
 
-        return f"Heater {addr}"
+        return format_fallback(
+            fallbacks,
+            "fallbacks.heater_name",
+            "Heater {addr}",
+            addr=addr,
+        )
     new_entities: list[ClimateEntity] = []
 
     heater_details = HeaterPlatformDetails(

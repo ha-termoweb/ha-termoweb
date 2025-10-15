@@ -16,6 +16,7 @@ from homeassistant.util import dt as dt_util
 
 from .boost import coerce_boost_bool, coerce_boost_minutes, supports_boost
 from .const import DOMAIN, signal_ws_data
+from .i18n import COORDINATOR_FALLBACK_ATTR, format_fallback
 from .inventory import (
     HEATER_NODE_TYPES,
     Inventory,
@@ -553,6 +554,9 @@ def derive_boost_state(
     """Return derived boost metadata for ``settings`` using ``coordinator``."""
 
     source = settings if isinstance(settings, Mapping) else {}
+    fallback_source = getattr(coordinator, COORDINATOR_FALLBACK_ATTR, None)
+    fallbacks: Mapping[str, str] | None
+    fallbacks = fallback_source if isinstance(fallback_source, Mapping) else None
 
     boost_active = coerce_boost_bool(source.get("boost_active"))
     if boost_active is None:
@@ -660,7 +664,11 @@ def derive_boost_state(
 
     end_label: str | None = None
     if boost_active is False and boost_end_dt is None and boost_end_iso is None:
-        end_label = "Never"
+        end_label = format_fallback(
+            fallbacks,
+            "fallbacks.never",
+            "Never",
+        )
 
     return BoostState(
         active=boost_active,
@@ -809,7 +817,7 @@ class HeaterNodeBase(CoordinatorEntity):
         entry_id: str,
         dev_id: str,
         addr: str,
-        name: str,
+        name: str | None,
         unique_id: str | None = None,
         *,
         device_name: str | None = None,
@@ -822,7 +830,8 @@ class HeaterNodeBase(CoordinatorEntity):
         self._entry_id = entry_id
         self._dev_id = dev_id
         self._addr = normalize_node_addr(addr)
-        self._attr_name = name
+        if name is not None:
+            self._attr_name = name
         resolved_type = (
             normalize_node_type(
                 node_type,
