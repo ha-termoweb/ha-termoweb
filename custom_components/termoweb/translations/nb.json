@@ -7,8 +7,7 @@
         "data": {
           "brand": "Merkevare",
           "username": "E-post",
-          "password": "Passord",
-          "poll_interval": "Base poll-intervall (sekunder)"
+          "password": "Passord"
         }
       }
     },
@@ -25,7 +24,6 @@
         "title": "Alternativer for TermoWeb",
         "description": "Versjon: {version}",
         "data": {
-          "poll_interval": "Base poll-intervall (sekunder)",
           "debug": "Aktivere feilsøkingshjelpere"
         }
       }

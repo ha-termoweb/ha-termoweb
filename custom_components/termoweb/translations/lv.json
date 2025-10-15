@@ -7,8 +7,7 @@
         "data": {
           "brand": "Zīmols",
           "username": "E-pasts",
-          "password": "Parole",
-          "poll_interval": "Bāzes aptaujas intervāls (sekundes)"
+          "password": "Parole"
         }
       }
     },
@@ -25,7 +24,6 @@
         "title": "TermoWeb opcijas",
         "description": "Versija: {version}",
         "data": {
-          "poll_interval": "Bāzes aptaujas intervāls (sekundes)",
           "debug": "Debug palīgrīku iespējošana"
         }
       }

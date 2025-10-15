@@ -320,11 +320,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     """Set up the TermoWeb integration for a config entry."""
     username = entry.data["username"]
     password = entry.data["password"]
-    base_interval = int(
-        entry.options.get(
-            "poll_interval", entry.data.get("poll_interval", DEFAULT_POLL_INTERVAL)
-        )
-    )
+    base_interval = int(DEFAULT_POLL_INTERVAL)
+    if "poll_interval" in entry.data or "poll_interval" in entry.options:
+        new_data = dict(entry.data)
+        new_options = dict(entry.options)
+        new_data.pop("poll_interval", None)
+        new_options.pop("poll_interval", None)
+        hass.config_entries.async_update_entry(entry, data=new_data, options=new_options)
     brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
 
     if SupportsDiagnostics is not None and hasattr(entry, "supports_diagnostics"):

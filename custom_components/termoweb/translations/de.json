@@ -7,8 +7,7 @@
         "data": {
           "brand": "Marke",
           "username": "E-Mail",
-          "password": "Passwort",
-          "poll_interval": "Basisabfrageintervall (Sekunden)"
+          "password": "Passwort"
         }
       }
     },
@@ -25,7 +24,6 @@
         "title": "TermoWeb Optionen",
         "description": "Version: {version}",
         "data": {
-          "poll_interval": "Basisabfrageintervall (Sekunden)",
           "debug": "Debug-Hilfsmittel einschalten"
         }
       }

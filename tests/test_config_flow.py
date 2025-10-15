@@ -153,8 +153,9 @@ def test_async_step_user_initial_form(monkeypatch: pytest.MonkeyPatch) -> None:
 
     schema = result["data_schema"]
     assert _schema_default(schema, "username") == ""
-    assert _schema_default(schema, "poll_interval") == config_flow.DEFAULT_POLL_INTERVAL
     assert _schema_default(schema, "brand") == config_flow.DEFAULT_BRAND
+    with pytest.raises(AssertionError):
+        _schema_default(schema, "poll_interval")
 
 
 def test_async_step_user_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -180,7 +181,6 @@ def test_async_step_user_success(monkeypatch: pytest.MonkeyPatch) -> None:
                 "brand": config_flow.BRAND_DUCAHEAT,
                 "username": "  new_user  ",
                 "password": "pw",
-                "poll_interval": 200,
             }
         )
     )
@@ -191,7 +191,6 @@ def test_async_step_user_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result["data"] == {
         "username": "new_user",
         "password": "pw",
-        "poll_interval": 200,
         config_flow.CONF_BRAND: config_flow.BRAND_DUCAHEAT,
         "supports_diagnostics": True,
     }
@@ -227,7 +226,6 @@ def test_async_step_user_errors(
         "brand": config_flow.BRAND_DUCAHEAT,
         "username": "  trouble  ",
         "password": "pw",
-        "poll_interval": 321,
     }
     result = asyncio.run(flow.async_step_user(user_input))
 
@@ -237,8 +235,9 @@ def test_async_step_user_errors(
 
     schema = result["data_schema"]
     assert _schema_default(schema, "username") == "trouble"
-    assert _schema_default(schema, "poll_interval") == 321
     assert _schema_default(schema, "brand") == config_flow.BRAND_DUCAHEAT
+    with pytest.raises(AssertionError):
+        _schema_default(schema, "poll_interval")
 
 
 def test_async_step_reconfigure_initial_form(
@@ -273,8 +272,9 @@ def test_async_step_reconfigure_initial_form(
 
     schema = result["data_schema"]
     assert _schema_default(schema, "username") == "existing"
-    assert _schema_default(schema, "poll_interval") == 180
     assert _schema_default(schema, "brand") == config_flow.BRAND_DUCAHEAT
+    with pytest.raises(AssertionError):
+        _schema_default(schema, "poll_interval")
 
 
 def test_async_step_reconfigure_invalid_brand_defaults(
@@ -346,7 +346,6 @@ def test_async_step_reconfigure_success(
                 "brand": config_flow.BRAND_DUCAHEAT,
                 "username": "  updated  ",
                 "password": "new-pass",
-                "poll_interval": 300,
             }
         )
     )
@@ -357,11 +356,10 @@ def test_async_step_reconfigure_success(
     expected_data = {
         "username": "updated",
         "password": "new-pass",
-        "poll_interval": 300,
         "other": "keep",
         config_flow.CONF_BRAND: config_flow.BRAND_DUCAHEAT,
     }
-    expected_options = {"poll_interval": 300, "extra": True}
+    expected_options = {"extra": True}
 
     assert hass.config_entries.updated_entries == [
         (entry, expected_data, expected_options)
@@ -412,7 +410,6 @@ def test_async_step_reconfigure_errors(
         "brand": config_flow.BRAND_DUCAHEAT,
         "username": " candidate ",
         "password": "pw",
-        "poll_interval": 210,
     }
     result = asyncio.run(flow.async_step_reconfigure(user_input))
 
@@ -422,8 +419,9 @@ def test_async_step_reconfigure_errors(
 
     schema = result["data_schema"]
     assert _schema_default(schema, "username") == "candidate"
-    assert _schema_default(schema, "poll_interval") == 210
     assert _schema_default(schema, "brand") == config_flow.BRAND_DUCAHEAT
+    with pytest.raises(AssertionError):
+        _schema_default(schema, "poll_interval")
     assert hass.config_entries.updated_entries == []
 
 
@@ -433,8 +431,8 @@ def test_options_flow_init_and_submit(
     hass = HomeAssistant()
     entry = ConfigEntry(
         "entry-id",
-        data={"poll_interval": 60},
-        options={"poll_interval": 10},
+        data={},
+        options={"poll_interval": 10, "debug": False},
     )
 
     options_flow = asyncio.run(config_flow.async_get_options_flow(entry))
@@ -450,8 +448,12 @@ def test_options_flow_init_and_submit(
     assert initial["description_placeholders"] == {"version": "6.6.6"}
 
     schema = initial["data_schema"]
-    assert _schema_default(schema, "poll_interval") == config_flow.MIN_POLL_INTERVAL
+    assert _schema_default(schema, "debug") is False
+    with pytest.raises(AssertionError):
+        _schema_default(schema, "poll_interval")
 
-    created = asyncio.run(options_flow.async_step_init({"poll_interval": 240}))
+    created = asyncio.run(
+        options_flow.async_step_init({"debug": True, "poll_interval": 240})
+    )
     assert created["type"] == "create_entry"
-    assert created["data"] == {"poll_interval": 240}
+    assert created["data"] == {"debug": True}

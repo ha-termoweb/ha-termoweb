@@ -7,8 +7,7 @@
         "data": {
           "brand": "Marchio",
           "username": "Email",
-          "password": "Password",
-          "poll_interval": "Intervallo poll base (secondi)"
+          "password": "Password"
         }
       }
     },
@@ -25,7 +24,6 @@
         "title": "Opzioni TermoWeb",
         "description": "Versione: {version}",
         "data": {
-          "poll_interval": "Intervallo poll base (secondi)",
           "debug": "Abilitare gli helper di debug"
         }
       }

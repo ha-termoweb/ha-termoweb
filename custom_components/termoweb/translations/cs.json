@@ -7,8 +7,7 @@
         "data": {
           "brand": "Značka",
           "username": "E-mail",
-          "password": "Heslo",
-          "poll_interval": "Interval základního dotazování (sekundy)"
+          "password": "Heslo"
         }
       }
     },
@@ -25,7 +24,6 @@
         "title": "Možnosti TermoWebu",
         "description": "Verze: {version}",
         "data": {
-          "poll_interval": "Interval základního dotazování (sekundy)",
           "debug": "Povolení pomocníků ladění"
         }
       }
