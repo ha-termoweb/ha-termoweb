@@ -54,6 +54,11 @@ from .heater import (
     set_boost_runtime_minutes,
     set_boost_temperature,
 )
+from .i18n import (
+    async_get_fallback_translations,
+    attach_fallbacks,
+    format_fallback,
+)
 from .identifiers import build_heater_entity_unique_id
 from .inventory import Inventory, boostable_accumulator_details_for_entry
 from .utils import float_or_none
@@ -67,10 +72,19 @@ async def async_setup_entry(hass, entry, async_add_entities):
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
+
+    fallbacks = await async_get_fallback_translations(hass, data)
+    attach_fallbacks(coordinator, fallbacks)
+
     def default_name(addr: str) -> str:
         """Return the fallback name for an accumulator node."""
 
-        return f"Heater {addr}"
+        return format_fallback(
+            fallbacks,
+            "fallbacks.heater_name",
+            "Heater {addr}",
+            addr=addr,
+        )
     heater_details, accumulator_nodes = boostable_accumulator_details_for_entry(
         data,
         default_name_simple=default_name,

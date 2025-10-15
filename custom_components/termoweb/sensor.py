@@ -46,6 +46,11 @@ from .identifiers import (
     build_power_monitor_power_unique_id,
 )
 from .inventory import Inventory, PowerMonitorNode, normalize_node_addr
+from .i18n import (
+    async_get_fallback_translations,
+    attach_fallbacks,
+    format_fallback,
+)
 from .utils import (
     build_gateway_device_info,
     build_power_monitor_device_info,
@@ -114,7 +119,9 @@ def _normalise_energy_value(coordinator: Any, raw: Any) -> float | None:
     return numeric * scale
 
 
-def _power_monitor_display_name(node: PowerMonitorNode, addr: str) -> str:
+def _power_monitor_display_name(
+    node: PowerMonitorNode, addr: str, fallbacks: Mapping[str, str] | None
+) -> str:
     """Return the display name for a power monitor address."""
 
     raw_name = getattr(node, "name", None)
@@ -133,7 +140,12 @@ def _power_monitor_display_name(node: PowerMonitorNode, addr: str) -> str:
             if fallback_trimmed:
                 return fallback_trimmed
 
-    return f"Power Monitor {addr}"
+    return format_fallback(
+        fallbacks,
+        "fallbacks.power_monitor_name",
+        "Power Monitor {addr}",
+        addr=addr,
+    )
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -142,10 +154,18 @@ async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
 
+    fallbacks = await async_get_fallback_translations(hass, data)
+    attach_fallbacks(coordinator, fallbacks)
+
     def default_name(addr: str) -> str:
         """Return a placeholder name for heater nodes."""
 
-        return f"Node {addr}"
+        return format_fallback(
+            fallbacks,
+            "fallbacks.node_name",
+            "Node {addr}",
+            addr=addr,
+        )
 
     heater_details = heater_platform_details_for_entry(
         data,
@@ -163,8 +183,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
         )
         data["energy_coordinator"] = energy_coordinator
         await energy_coordinator.async_config_entry_first_refresh()
+        attach_fallbacks(energy_coordinator, fallbacks)
     else:
         energy_coordinator.update_addresses(inventory)
+        attach_fallbacks(energy_coordinator, fallbacks)
 
     power_monitor_entries: list[tuple[str, str]] = []
     candidate_power_monitors = inventory.nodes_by_type.get("pmo", [])
@@ -180,7 +202,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         addr_norm = normalize_node_addr(node.addr, use_default_when_falsey=True)
         if not addr_norm:
             continue
-        display_name = _power_monitor_display_name(node, addr_norm)
+        display_name = _power_monitor_display_name(node, addr_norm, fallbacks)
         power_monitor_entries.append((addr_norm, display_name))
 
     power_monitor_entities: list[SensorEntity] = []

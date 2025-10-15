@@ -31,6 +31,12 @@
       }
     }
   },
+  "fallbacks": {
+    "heater_name": "Calefactor {addr}",
+    "node_name": "Nodo {addr}",
+    "power_monitor_name": "Monitor de potencia {addr}",
+    "never": "Nunca"
+  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

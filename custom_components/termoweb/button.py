@@ -34,6 +34,7 @@ from .heater import (
     resolve_boost_runtime_minutes,
     resolve_boost_temperature,
 )
+from .i18n import attach_fallbacks, async_get_fallback_translations
 from .identifiers import build_heater_entity_unique_id
 from .inventory import AccumulatorNode, Inventory
 from .utils import build_gateway_device_info
@@ -115,6 +116,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
     dev_id = data["dev_id"]
+
+    fallbacks = await async_get_fallback_translations(hass, data)
+    attach_fallbacks(coordinator, fallbacks)
     entities: list[ButtonEntity] = [
         StateRefreshButton(coordinator, entry.entry_id, dev_id)
     ]

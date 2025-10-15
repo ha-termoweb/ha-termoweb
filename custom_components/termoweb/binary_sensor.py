@@ -24,6 +24,7 @@ from .heater import (
     derive_boost_state,
     log_skipped_nodes,
 )
+from .i18n import attach_fallbacks, async_get_fallback_translations
 from .identifiers import build_heater_entity_unique_id
 from .inventory import (
     HEATER_NODE_TYPES,
@@ -43,6 +44,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     data = hass.data[DOMAIN][entry.entry_id]
     coord: StateCoordinator = data["coordinator"]
     dev_id = data["dev_id"]
+
+    fallbacks = await async_get_fallback_translations(hass, data)
+    attach_fallbacks(coord, fallbacks)
     gateway = GatewayOnlineBinarySensor(coord, entry.entry_id, dev_id)
 
     try:
