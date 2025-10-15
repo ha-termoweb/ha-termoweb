@@ -1614,61 +1614,6 @@ from custom_components.termoweb.const import DOMAIN  # noqa: E402
 
 
 @pytest.fixture
-def heater_node_factory() -> Callable[..., SimpleNamespace]:
-    """Return a factory that creates heater node stubs."""
-
-    def _factory(
-        addr: str,
-        *,
-        node_type: str = "acm",
-        supports_boost: bool | None = None,
-        **extra: Any,
-    ) -> SimpleNamespace:
-        flag = True if supports_boost is None else supports_boost
-        node = SimpleNamespace(addr=str(addr), type=node_type, **extra)
-        node._supports_boost_flag = bool(flag)
-        node.supports_boost = lambda: node._supports_boost_flag  # type: ignore[attr-defined]
-        return node
-
-    return _factory
-
-
-@pytest.fixture
-def boost_capable_node(
-    heater_node_factory: Callable[..., SimpleNamespace],
-) -> SimpleNamespace:
-    """Return a boost-capable accumulator node stub."""
-
-    return heater_node_factory("01", supports_boost=True)
-
-
-@pytest.fixture
-def non_boost_node(
-    heater_node_factory: Callable[..., SimpleNamespace],
-) -> SimpleNamespace:
-    """Return a node stub without boost support."""
-
-    return heater_node_factory("02", supports_boost=False)
-
-
-@pytest.fixture
-def boost_runtime_store() -> Callable[
-    [str, str, int | None], dict[str, dict[str, int]]
-]:
-    """Return a factory producing boost runtime store dictionaries."""
-
-    def _factory(
-        node_type: str, addr: str, minutes: int | None = None
-    ) -> dict[str, dict[str, int]]:
-        store: dict[str, dict[str, int]] = {node_type: {}}
-        if minutes is not None:
-            store[node_type][str(addr)] = minutes
-        return store
-
-    return _factory
-
-
-@pytest.fixture
 def heater_hass_data() -> Callable[..., dict[str, Any]]:
     """Return helper to attach TermoWeb domain data to a Home Assistant stub."""
 
