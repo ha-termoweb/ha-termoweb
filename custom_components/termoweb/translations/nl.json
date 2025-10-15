@@ -1,0 +1,195 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Verbinding maken met TermoWeb familieverwarmers",
+        "description": "Versie: {version}\n\nKies uw merk TermoWeb of Ducaheat en voer uw accountgegevens in.",
+        "data": {
+          "brand": "Merk",
+          "username": "E-mail",
+          "password": "Wachtwoord",
+          "poll_interval": "Basis poll interval (seconden)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Ongeldige gebruikersnaam of wachtwoord (of clientsleutel).",
+      "cannot_connect": "Kan geen verbinding maken met TermoWeb - netwerk/DNS/SSL-fout.",
+      "rate_limited": "Tijdelijk beperkt door API. Probeer het later nog eens.",
+      "unknown": "Onbekende fout"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "TermoWeb Opties",
+        "description": "Versie: {version}",
+        "data": {
+          "poll_interval": "Basis poll interval (seconden)",
+          "debug": "Debughelpers inschakelen"
+        }
+      }
+    }
+  },
+  "fallbacks": {
+    "heater_name": "Verwarming {addr}",
+    "node_name": "Knooppunt {addr}",
+    "power_monitor_name": "Vermogensmonitor {addr}",
+    "never": "Nooit"
+  },
+  "entity": {
+    "binary_sensor": {
+      "gateway_online": {
+        "name": "Gateway online"
+      },
+      "boost_active": {
+        "name": "Actieve boost"
+      }
+    },
+    "button": {
+      "force_refresh": {
+        "name": "Forceer verversen"
+      },
+      "accumulator_boost_start": {
+        "name": "Startboost"
+      },
+      "accumulator_boost_cancel": {
+        "name": "Boost annuleren"
+      }
+    },
+    "number": {
+      "accumulator_boost_duration": {
+        "name": "Duur van boost"
+      },
+      "accumulator_boost_temperature": {
+        "name": "Verhoogde temperatuur"
+      }
+    },
+    "sensor": {
+      "heater_temperature": {
+        "name": "Temperatuur"
+      },
+      "heater_energy_total": {
+        "name": "Energie"
+      },
+      "heater_power": {
+        "name": "Stroom"
+      },
+      "power_monitor_energy": {
+        "name": "Energie"
+      },
+      "power_monitor_power": {
+        "name": "Stroom"
+      },
+      "installation_total_energy": {
+        "name": "Totale energie"
+      },
+      "boost_minutes_remaining": {
+        "name": "Boost resterende minuten"
+      },
+      "boost_end": {
+        "name": "Einde boost"
+      }
+    }
+  },
+  "services": {
+    "set_acm_preset": {
+      "name": "Accumulator boost preset configureren",
+      "description": "Update de standaard boost-duur en/of temperatuur voor een TermoWeb accumulator. Minuten moeten tussen 60 en 600 liggen in stappen van 60 minuten; laat een veld weg om de bestaande waarde te behouden.",
+      "fields": {
+        "minutes": {
+          "name": "Standaard boost duur",
+          "description": "Aantal minuten dat de boost moet draaien als er geen override is voorzien (60-600, stap 60).",
+          "example": "120"
+        },
+        "temperature": {
+          "name": "Verhoogde temperatuur",
+          "description": "Optioneel boost-setpoint om toe te passen tijdens de boost-sessie (°C of °F).",
+          "example": "22.5"
+        }
+      }
+    },
+    "start_boost": {
+      "name": "Accumulator boost starten",
+      "description": "Activeer een onmiddellijke boost op een TermoWeb accumulator. Geef een tijdsduur op om de standaardwaarde te overschrijven (60-600 minuten in stappen van 60 minuten), of laat deze weg om de opgeslagen voorinstelling te gebruiken.",
+      "fields": {
+        "minutes": {
+          "name": "Duur van boost",
+          "description": "Duur van de boostsessie in minuten (60-600, stap 60). Optioneel.",
+          "example": "180"
+        }
+      }
+    },
+    "cancel_boost": {
+      "name": "Accumulator boost annuleren",
+      "description": "De actieve boost-sessie op een TermoWeb accumulator annuleren."
+    },
+    "set_schedule": {
+      "name": "Weekschema opstellen",
+      "description": "Stel het 7×24 weekprogramma in voor een TermoWeb verwarming. Het programma is een lijst van 168 gehele getallen, waarbij elke waarde overeenkomt met één uur van de week vanaf maandag 00:00 uur. Gebruik 0 voor de koude voorinstelling, 1 voor de nacht voorinstelling en 2 voor de dag voorinstelling.",
+      "fields": {
+        "prog": {
+          "name": "Programma",
+          "description": "Een lijst van 168 gehele getallen (0, 1 of 2) die het weekschema van de verwarming voorstelt. Index 0 is maandag 00:00, index 1 is maandag 01:00, enzovoort.",
+          "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
+        }
+      }
+    },
+    "set_preset_temperatures": {
+      "name": "Vooraf ingestelde temperaturen instellen",
+      "description": "Stel de vooringestelde temperaturen voor koude, nacht en dag in voor een TermoWeb verwarming. U kunt alle drie de temperaturen als één lijst opgeven (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "fields": {
+        "ptemp": {
+          "name": "Vooraf ingestelde temperaturen",
+          "description": "Een lijst van drie temperaturen [koud, nacht, dag] in dezelfde eenheden als de verwarmer (°C of °F). Indien opgegeven, overschrijft dit de individuele waarden voor koud, nacht en dag.",
+          "example": "[10.0, 16.0, 20.0]"
+        },
+        "cold": {
+          "name": "Koude voorinstelling",
+          "description": "Temperatuur voor de koude voorinstelling (°C of °F).",
+          "example": "10.0"
+        },
+        "night": {
+          "name": "Voorkeuze nacht",
+          "description": "Temperatuur voor de nachtinstelling (°C of °F).",
+          "example": "16.0"
+        },
+        "day": {
+          "name": "Dag voorinstelling",
+          "description": "Vooringestelde temperatuur voor de dag (°C of °F).",
+          "example": "20.0"
+        }
+      }
+    },
+    "import_energy_history": {
+      "name": "Energie importeren geschiedenis",
+      "description": "Importeer historische uurlijkse energietellers voor TermoWeb verwarmers tot een jaar geleden in de statistieken van Home Assistant voor elke geconfigureerde verwarmer.",
+      "fields": {
+        "reset_progress": {
+          "name": "Voortgang resetten",
+          "description": "Wis opgeslagen voortgang en importeer de geschiedenis opnieuw."
+        },
+        "max_history_retrieval": {
+          "name": "Max geschiedenis dagen",
+          "description": "Aantal dagen geschiedenis om op te halen. Overschrijft de geconfigureerde standaard alleen voor deze import."
+        }
+      }
+    },
+    "ws_debug_probe": {
+      "name": "Zend websocket debug probe uit",
+      "description": "Vraag een onmiddellijke ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update`` framematen aan. Schakel de debug-optie in de integratie-instellingen in voordat je deze helper gebruikt.",
+      "fields": {
+        "entry_id": {
+          "name": "Configuratie invoer ID",
+          "description": "Beperk de controleregel tot een enkele TermoWeb configuratie-invoer.",
+          "example": "abcd1234doodbeef"
+        },
+        "dev_id": {
+          "name": "Apparaat-ID",
+          "description": "Beperk de probe tot een enkel gateway-apparaat.",
+          "example": "0000abcd"
+        }
+      }
+    }
+  }
+}

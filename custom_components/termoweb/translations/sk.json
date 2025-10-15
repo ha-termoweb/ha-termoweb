@@ -2,20 +2,20 @@
   "config": {
     "step": {
       "user": {
-        "title": "Pripojte sa k ohrievačom rodiny TermoWeb",
-        "description": "Verzia: {version}\n\nVyberte si svoju značku TermoWeb alebo Ducaheat a zadajte prihlasovacie údaje.",
+        "title": "Pripojenie k ohrievačom rodiny TermoWeb",
+        "description": "Verzia: {version}\n\nVyberte si značku TermoWeb alebo Ducaheat a zadajte prihlasovacie údaje k účtu.",
         "data": {
           "brand": "Značka",
           "username": "E-mail",
           "password": "Heslo",
-          "poll_interval": "Základný interval dotazovania (sekundy)"
+          "poll_interval": "Interval základného prieskumu (sekundy)"
         }
       }
     },
     "error": {
-      "invalid_auth": "Neplatné používateľské meno alebo heslo (alebo klientský kľúč).",
-      "cannot_connect": "Nedá sa pripojiť k TermoWebu — chyba siete/DNS/SSL.",
-      "rate_limited": "API je dočasne obmedzené. Skúste to znova neskôr.",
+      "invalid_auth": "Nesprávne používateľské meno alebo heslo (alebo klientsky kľúč).",
+      "cannot_connect": "Nemožno sa pripojiť k TermoWebu - chyba siete/DNS/SSL.",
+      "rate_limited": "Dočasne obmedzená rýchlosť podľa API. Skúste to neskôr.",
       "unknown": "Neznáma chyba"
     }
   },
@@ -25,8 +25,8 @@
         "title": "Možnosti TermoWeb",
         "description": "Verzia: {version}",
         "data": {
-          "poll_interval": "Základný interval dotazovania (sekundy)",
-          "debug": "Povoliť ladiace pomôcky"
+          "poll_interval": "Interval základného prieskumu (sekundy)",
+          "debug": "Povolenie pomocníkov ladenia"
         }
       }
     }
@@ -37,7 +37,7 @@
         "name": "Brána online"
       },
       "boost_active": {
-        "name": "Zvýšenie aktívne"
+        "name": "Zvýšenie aktívneho"
       }
     },
     "button": {
@@ -45,10 +45,10 @@
         "name": "Vynútiť obnovenie"
       },
       "accumulator_boost_start": {
-        "name": "Spustiť zvýšenie"
+        "name": "Spustenie posilnenia"
       },
       "accumulator_boost_cancel": {
-        "name": "Zrušiť zvýšenie"
+        "name": "Zrušiť podporu"
       }
     },
     "number": {
@@ -56,7 +56,7 @@
         "name": "Trvanie zvýšenia"
       },
       "accumulator_boost_temperature": {
-        "name": "Teplota zvýšenia"
+        "name": "Zvýšenie teploty"
       }
     },
     "sensor": {
@@ -67,120 +67,120 @@
         "name": "Energia"
       },
       "heater_power": {
-        "name": "Výkon"
+        "name": "Napájanie"
       },
       "power_monitor_energy": {
         "name": "Energia"
       },
       "power_monitor_power": {
-        "name": "Výkon"
+        "name": "Napájanie"
       },
       "installation_total_energy": {
         "name": "Celková energia"
       },
       "boost_minutes_remaining": {
-        "name": "Zostávajúce minúty zvýšenia"
+        "name": "Zostávajúce minúty na zvýšenie"
       },
       "boost_end": {
-        "name": "Koniec zvýšenia"
+        "name": "Zvýšenie koncovej hodnoty"
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Nastaviť predvoľbu zvýšenia akumulátora",
-      "description": "Aktualizujte predvolené trvanie a/alebo teplotu zvýšenia pre TermoWeb akumulátor. Minúty musia byť medzi 60 a 600 v krokoch po 60; pole vynechajte, ak chcete zachovať existujúcu hodnotu.",
+      "name": "Konfigurácia predvoľby zvýšenia akumulátora",
+      "description": "Aktualizácia predvoleného trvania zvyšovania a/alebo teploty pre akumulátor TermoWeb. Minúty musia byť v rozmedzí od 60 do 600 v 60-minútových prírastkoch; vynechajte pole, ak chcete zachovať existujúcu hodnotu.",
       "fields": {
         "minutes": {
-          "name": "Predvolené trvanie zvýšenia",
-          "description": "Počet minút, počas ktorých má zvýšenie prebiehať, keď nie je zadané prepísanie (60–600, krok 60).",
+          "name": "Predvolené trvanie posilnenia",
+          "description": "Počet minút, počas ktorých by malo zvýšenie tlaku bežať, ak nie je k dispozícii žiadne ovládanie (60-600, krok 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Teplota zvýšenia",
-          "description": "Voliteľná teplota, ktorá sa má použiť počas relácie zvýšenia (°C alebo °F).",
+          "name": "Zvýšenie teploty",
+          "description": "Voliteľná nastavená hodnota zvýšenia, ktorá sa použije počas relácie zvýšenia (°C alebo °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Spustiť zvýšenie akumulátora",
-      "description": "Okamžite spustite zvýšenie na TermoWeb akumulátore. Uveďte trvanie, aby ste prepísali predvolenú hodnotu (60–600 minút v krokoch po 60), alebo ho vynechajte a použite uložené nastavenie.",
+      "name": "Spustenie akumulátora boost",
+      "description": "Spustite okamžité zvýšenie na akumulátore TermoWeb. Zadajte trvanie, aby ste zrušili predvolené nastavenie (60-600 minút v 60-minútových krokoch), alebo ho vynechajte, aby ste použili uloženú predvoľbu.",
       "fields": {
         "minutes": {
           "name": "Trvanie zvýšenia",
-          "description": "Trvanie relácie zvýšenia v minútach (60–600, krok 60). Voliteľné.",
+          "description": "Trvanie relácie posilňovania v minútach (60-600, krok 60). Voliteľné.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
       "name": "Zrušiť zvýšenie akumulátora",
-      "description": "Zrušte aktívnu reláciu zvýšenia na TermoWeb akumulátore."
+      "description": "Zrušenie aktívnej relácie boostu na akumulátore TermoWeb."
     },
     "set_schedule": {
-      "name": "Nastaviť týždenný harmonogram",
-      "description": "Nastavte 7×24 hodinový týždenný program pre TermoWeb ohrievač. Program je zoznam 168 celých čísel, kde každá hodnota zodpovedá jednej hodine v týždni počnúc pondelkom 00:00. Použite 0 pre studený, 1 pre nočný a 2 pre denný režim.",
+      "name": "Nastavenie týždenného plánu",
+      "description": "Nastavenie týždenného programu 7×24 pre ohrievač TermoWeb. Program je zoznam 168 celých čísel, kde každá hodnota zodpovedá jednej hodine v týždni počnúc pondelkom 00:00. Pre studenú predvoľbu použite 0, pre nočnú predvoľbu 1 a pre dennú predvoľbu 2.",
       "fields": {
         "prog": {
           "name": "Program",
-          "description": "Zoznam 168 celých čísel (0, 1 alebo 2), ktoré predstavujú týždenný harmonogram ohrievača. Index 0 je pondelok 00:00, index 1 je pondelok 01:00 a tak ďalej.",
+          "description": "Zoznam 168 celých čísel (0, 1 alebo 2), ktoré predstavujú týždenný plán ohrievača. Index 0 je pondelok 00:00, index 1 je pondelok 01:00 atď.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Nastaviť predvolené teploty",
-      "description": "Nastavte predvolené studené, nočné a denné teploty pre TermoWeb ohrievač. Môžete zadať všetky tri teploty ako jediný zoznam (``ptemp``) alebo každú uviesť samostatne (``cold``, ``night`` a ``day``).",
+      "name": "Nastavenie prednastavených teplôt",
+      "description": "Nastavenie prednastavených studených, nočných a denných teplôt pre ohrievač TermoWeb. Všetky tri teploty môžete zadať buď ako jeden zoznam (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
       "fields": {
         "ptemp": {
-          "name": "Predvolené teploty",
-          "description": "Zoznam troch teplôt [studená, nočná, denná] v rovnakých jednotkách ako ohrievač (°C alebo °F). Ak je zadaný, prepíše individuálne hodnoty studená, noc a deň.",
+          "name": "Prednastavené teploty",
+          "description": "Zoznam troch teplôt [chlad, noc, deň] v rovnakých jednotkách ako ohrievač (°C alebo °F). Ak je uvedený, potlačí jednotlivé hodnoty studenej, nočnej a dennej teploty.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Studený režim",
-          "description": "Teplota pre studený režim (°C alebo °F).",
+          "name": "Prednastavenie za studena",
+          "description": "Teplota pre studenú predvoľbu (°C alebo °F).",
           "example": "10.0"
         },
         "night": {
-          "name": "Nočný režim",
-          "description": "Teplota pre nočný režim (°C alebo °F).",
+          "name": "Nočná predvoľba",
+          "description": "Teplota pre nočnú predvoľbu (°C alebo °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Denný režim",
-          "description": "Teplota pre denný režim (°C alebo °F).",
+          "name": "Prednastavený deň",
+          "description": "Prednastavená teplota pre daný deň (°C alebo °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Importovať históriu energie",
-      "description": "Importujte historické hodinové energetické počítadlá pre TermoWeb ohrievače až rok dozadu do štatistík Home Assistanta pre všetky nakonfigurované ohrievače.",
+      "name": "História dovozu energie",
+      "description": "Importujte historické hodinové počítadlá energie pre ohrievače TermoWeb až rok dozadu do štatistík Home Assistant pre každý nakonfigurovaný ohrievač.",
       "fields": {
         "reset_progress": {
-          "name": "Obnoviť postup",
-          "description": "Vymažte uložený postup a importujte históriu od začiatku znova."
+          "name": "Obnovenie postupu",
+          "description": "Vymazať uložený priebeh a znovu importovať históriu od začiatku."
         },
         "max_history_retrieval": {
-          "name": "Max. dní histórie",
-          "description": "Počet dní histórie na načítanie. Nahrádza predvolené nastavenie iba pre tento import."
+          "name": "Maximálny počet dní histórie",
+          "description": "Počet dní histórie na načítanie. Prepíše nakonfigurované predvolené nastavenie len pre tento import."
         }
       }
     },
     "ws_debug_probe": {
-      "name": "Spustiť diagnostiku websocketu",
-      "description": "Vyžiadajte si okamžité obnovenie ``dev_data`` od websocket klienta a zaznamenajte veľkosti nasledujúcich rámcov ``dev_handshake`` a ``update``. Pred použitím tohto pomocníka povoľte možnosť ladenia v nastaveniach integrácie.",
+      "name": "Odoslanie ladiacej sondy websocket",
+      "description": "Vyžiadajte si okamžité veľkosti snímok ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update``. Pred použitím tohto pomocníka povoľte možnosť ladenia v nastaveniach integrácie.",
       "fields": {
         "entry_id": {
-          "name": "ID konfiguračného záznamu",
-          "description": "Obmedzte diagnostiku na jeden TermoWeb konfiguračný záznam.",
+          "name": "ID položky konfigurácie",
+          "description": "Obmedzenie sondy na jednu položku konfigurácie TermoWebu.",
           "example": "abcd1234deadbeef"
         },
         "dev_id": {
           "name": "ID zariadenia",
-          "description": "Obmedzte diagnostiku na jedno bránové zariadenie.",
+          "description": "Obmedzenie sondy na jedno zariadenie brány.",
           "example": "0000abcd"
         }
       }

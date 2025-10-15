@@ -2,35 +2,44 @@
   "config": {
     "step": {
       "user": {
-        "title": "Se connecter aux radiateurs de la famille TermoWeb",
-        "description": "Version : {version}\\n\\nChoisissez votre marque TermoWeb ou Ducaheat et saisissez les identifiants de votre compte.",
+        "title": "Se connecter aux chauffages de la famille TermoWeb",
+        "description": "Version : {version}\n\nChoisissez votre marque TermoWeb ou Ducaheat et entrez vos identifiants de compte.",
         "data": {
           "brand": "Marque",
-          "username": "E-mail",
+          "username": "Courriel",
           "password": "Mot de passe",
-          "poll_interval": "Intervalle de requête de base (secondes)"
+          "poll_interval": "Intervalle d'interrogation de la base (secondes)"
         }
       }
     },
     "error": {
-      "invalid_auth": "Nom d’utilisateur, mot de passe ou clé client invalide.",
-      "cannot_connect": "Impossible de se connecter à TermoWeb — erreur réseau/DNS/SSL.",
-      "rate_limited": "API temporairement limitée. Réessayez plus tard.",
+      "invalid_auth": "Nom d'utilisateur ou mot de passe (ou clé client) invalide.",
+      "cannot_connect": "Impossible de se connecter à TermoWeb - erreur de réseau/DNS/SSL.",
+      "rate_limited": "Taux temporairement limité par l'API. Réessayez plus tard.",
       "unknown": "Erreur inconnue"
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Options TermoWeb",
+        "title": "Options de TermoWeb",
         "description": "Version : {version}",
         "data": {
-          "poll_interval": "Intervalle de requête de base (secondes)",
-          "debug": "Activer les assistants de débogage"
+          "poll_interval": "Intervalle d'interrogation de la base (secondes)",
+          "debug": "Activer les aides au débogage"
         }
       }
     }
   },
+<<<<<<< HEAD
+=======
+  "fallbacks": {
+    "heater_name": "Chauffage {addr}",
+    "node_name": "Nœud {addr}",
+    "power_monitor_name": "Moniteur de puissance {addr}",
+    "never": "Jamais"
+  },
+>>>>>>> b059849 (Updated machine translations for several languages using DeepL)
   "entity": {
     "binary_sensor": {
       "gateway_online": {
@@ -42,13 +51,13 @@
     },
     "button": {
       "force_refresh": {
-        "name": "Forcer l’actualisation"
+        "name": "Forcer le rafraîchissement"
       },
       "accumulator_boost_start": {
-        "name": "Démarrer le boost"
+        "name": "Démarrer l'impulsion"
       },
       "accumulator_boost_cancel": {
-        "name": "Annuler le boost"
+        "name": "Annuler le coup de pouce"
       }
     },
     "number": {
@@ -56,7 +65,7 @@
         "name": "Durée du boost"
       },
       "accumulator_boost_temperature": {
-        "name": "Température du boost"
+        "name": "Température de suralimentation"
       }
     },
     "sensor": {
@@ -64,13 +73,13 @@
         "name": "Température"
       },
       "heater_energy_total": {
-        "name": "Énergie"
+        "name": "L'énergie"
       },
       "heater_power": {
         "name": "Puissance"
       },
       "power_monitor_energy": {
-        "name": "Énergie"
+        "name": "L'énergie"
       },
       "power_monitor_power": {
         "name": "Puissance"
@@ -79,108 +88,108 @@
         "name": "Énergie totale"
       },
       "boost_minutes_remaining": {
-        "name": "Minutes de boost restantes"
+        "name": "Boost minutes restantes"
       },
       "boost_end": {
-        "name": "Fin du boost"
+        "name": "Fin de course"
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Configurer le préréglage de boost de l’accumulateur",
-      "description": "Met à jour la durée et/ou la température par défaut du boost pour un accumulateur TermoWeb. Les minutes doivent être comprises entre 60 et 600 par incréments de 60 ; laissez un champ vide pour conserver la valeur existante.",
+      "name": "Configurer le préréglage de l'augmentation de l'accumulateur",
+      "description": "Mise à jour de la durée et/ou de la température de boost par défaut pour un accumulateur TermoWeb. Les minutes doivent être comprises entre 60 et 600 par incréments de 60 minutes ; omettre un champ pour conserver la valeur existante.",
       "fields": {
         "minutes": {
-          "name": "Durée de boost par défaut",
-          "description": "Nombre de minutes pendant lesquelles le boost doit fonctionner lorsqu’aucun remplacement n’est fourni (60–600, pas de 60).",
+          "name": "Durée de l'impulsion par défaut",
+          "description": "Nombre de minutes pendant lesquelles l'impulsion doit fonctionner lorsqu'il n'y a pas de commande prioritaire (60-600, étape 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Température du boost",
-          "description": "Point de consigne optionnel à appliquer pendant la session de boost (°C ou °F).",
+          "name": "Température de suralimentation",
+          "description": "Point de consigne de suralimentation optionnel à appliquer pendant la session de suralimentation (°C ou °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Démarrer le boost de l’accumulateur",
-      "description": "Déclenche immédiatement un boost sur un accumulateur TermoWeb. Fournissez une durée pour remplacer la valeur par défaut (60–600 minutes par incréments de 60), ou laissez vide pour utiliser le préréglage enregistré.",
+      "name": "Démarrage de l'augmentation de l'accumulateur",
+      "description": "Déclenche un boost immédiat sur un accumulateur TermoWeb. Indiquez une durée pour remplacer la valeur par défaut (60-600 minutes par incréments de 60 minutes), ou ne l'indiquez pas pour utiliser le préréglage stocké.",
       "fields": {
         "minutes": {
           "name": "Durée du boost",
-          "description": "Durée de la session de boost en minutes (60–600, pas de 60). Facultatif.",
+          "description": "Durée de la session de stimulation en minutes (60-600, étape 60). En option.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Annuler le boost de l’accumulateur",
-      "description": "Annule la session de boost active sur un accumulateur TermoWeb."
+      "name": "Annuler le renforcement de l'accumulateur",
+      "description": "Annuler la session de boost active sur un accumulateur TermoWeb."
     },
     "set_schedule": {
-      "name": "Définir le programme hebdomadaire",
-      "description": "Définit le programme hebdomadaire 7×24 pour un radiateur TermoWeb. Le programme est une liste de 168 entiers, où chaque valeur correspond à une heure de la semaine à partir du lundi 00:00. Utilisez 0 pour le préréglage froid, 1 pour le préréglage nuit et 2 pour le préréglage jour.",
+      "name": "Établir un programme hebdomadaire",
+      "description": "Définir le programme hebdomadaire 7×24 d'un chauffage TermoWeb. Le programme est une liste de 168 entiers, où chaque valeur correspond à une heure de la semaine à partir du lundi 00:00. Utilisez 0 pour le préréglage froid, 1 pour le préréglage nuit et 2 pour le préréglage jour.",
       "fields": {
         "prog": {
           "name": "Programme",
-          "description": "Liste de 168 entiers (0, 1 ou 2) représentant le programme hebdomadaire du radiateur. L’indice 0 correspond au lundi 00:00, l’indice 1 au lundi 01:00, etc.",
+          "description": "Une liste de 168 entiers (0, 1 ou 2) représentant l'horaire hebdomadaire de l'appareil de chauffage. L'indice 0 correspond au lundi 00:00, l'indice 1 au lundi 01:00, et ainsi de suite.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Définir les températures des préréglages",
-      "description": "Définit les températures des préréglages froid, nuit et jour pour un radiateur TermoWeb. Vous pouvez fournir les trois températures sous forme d’une liste unique (``ptemp``) ou les spécifier individuellement (``cold``, ``night`` et ``day``).",
+      "name": "Régler les températures préréglées",
+      "description": "Définir les températures de consigne du froid, de la nuit et du jour pour un appareil de chauffage TermoWeb. Vous pouvez soit fournir les trois températures sous forme de liste unique (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
       "fields": {
         "ptemp": {
-          "name": "Températures des préréglages",
-          "description": "Liste de trois températures [froid, nuit, jour] dans les mêmes unités que le radiateur (°C ou °F). Si elle est fournie, elle remplace les valeurs individuelles froid, nuit et jour.",
+          "name": "Températures préréglées",
+          "description": "Une liste de trois températures [froid, nuit, jour] dans les mêmes unités que le chauffage (°C ou °F). Si elle est fournie, cette liste prévaut sur les valeurs individuelles de froid, de nuit et de jour.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Préréglage froid",
-          "description": "Température du préréglage froid (°C ou °F).",
+          "name": "Préréglage du froid",
+          "description": "Température de la présélection froide (°C ou °F).",
           "example": "10.0"
         },
         "night": {
-          "name": "Préréglage nuit",
-          "description": "Température du préréglage nuit (°C ou °F).",
+          "name": "Préréglage de nuit",
+          "description": "Température de la présélection de nuit (°C ou °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Préréglage jour",
-          "description": "Température du préréglage jour (°C ou °F).",
+          "name": "Préréglage du jour",
+          "description": "Température du jour préréglée (°C ou °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Importer l’historique énergétique",
-      "description": "Importe les compteurs d’énergie horaires historiques des radiateurs TermoWeb jusqu’à un an en arrière dans les statistiques de Home Assistant pour chaque radiateur configuré.",
+      "name": "Historique des importations d'énergie",
+      "description": "Importer les compteurs d'énergie horaires des chauffages TermoWeb jusqu'à un an auparavant dans les statistiques de Home Assistant pour chaque chauffage configuré.",
       "fields": {
         "reset_progress": {
           "name": "Réinitialiser la progression",
-          "description": "Efface la progression enregistrée et réimporte l’historique depuis le début."
+          "description": "Effacer les progrès enregistrés et réimporter l'historique à partir de zéro."
         },
         "max_history_retrieval": {
-          "name": "Jours d’historique maximum",
-          "description": "Nombre de jours d’historique à récupérer. Remplace la valeur par défaut configurée uniquement pour cette importation."
+          "name": "Nombre maximal de jours d'antériorité",
+          "description": "Nombre de jours d'historique à récupérer. Remplace la valeur par défaut configurée pour cette importation uniquement."
         }
       }
     },
     "ws_debug_probe": {
-      "name": "Émettre une sonde de débogage websocket",
-      "description": "Demande un rafraîchissement immédiat de ``dev_data`` auprès du client websocket et journalise la taille des prochaines trames ``dev_handshake`` et ``update``. Activez l’option de débogage dans les paramètres de l’intégration avant d’utiliser cet assistant.",
+      "name": "Emission d'une sonde de débogage websocket",
+      "description": "Demande une taille d'image immédiate ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update``. Activez l'option de débogage dans les paramètres d'intégration avant d'utiliser cette aide.",
       "fields": {
         "entry_id": {
-          "name": "ID d’entrée de configuration",
-          "description": "Limite la sonde à une seule entrée de configuration TermoWeb.",
+          "name": "ID de l'entrée de configuration",
+          "description": "Restreindre la sonde à une seule entrée de configuration TermoWeb.",
           "example": "abcd1234deadbeef"
         },
         "dev_id": {
-          "name": "ID de l’appareil",
-          "description": "Limite la sonde à une seule passerelle.",
+          "name": "ID de l'appareil",
+          "description": "Limiter la sonde à un seul dispositif de passerelle.",
           "example": "0000abcd"
         }
       }

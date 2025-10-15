@@ -2,20 +2,20 @@
   "config": {
     "step": {
       "user": {
-        "title": "Połącz się z grzejnikami rodziny TermoWeb",
-        "description": "Wersja: {version}\\n\\nWybierz swoją markę TermoWeb lub Ducaheat i wprowadź dane logowania do konta.",
+        "title": "Połącz się z grzejnikami rodzinnymi TermoWeb",
+        "description": "Wersja: {version}\n\nWybierz markę TermoWeb lub Ducaheat i wprowadź dane logowania do konta.",
         "data": {
           "brand": "Marka",
-          "username": "Adres e-mail",
+          "username": "E-mail",
           "password": "Hasło",
-          "poll_interval": "Podstawowy interwał odpytywania (sekundy)"
+          "poll_interval": "Interwał odpytywania bazy (sekundy)"
         }
       }
     },
     "error": {
-      "invalid_auth": "Nieprawidłowa nazwa użytkownika, hasło lub klucz klienta.",
-      "cannot_connect": "Nie można połączyć z TermoWeb — błąd sieci/DNS/SSL.",
-      "rate_limited": "Interfejs API tymczasowo ograniczony. Spróbuj ponownie później.",
+      "invalid_auth": "Nieprawidłowa nazwa użytkownika lub hasło (lub klucz klienta).",
+      "cannot_connect": "Nie można połączyć się z TermoWeb - błąd sieci/DNS/SSL.",
+      "rate_limited": "Tymczasowe ograniczenie szybkości przez API. Spróbuj ponownie później.",
       "unknown": "Nieznany błąd"
     }
   },
@@ -25,8 +25,8 @@
         "title": "Opcje TermoWeb",
         "description": "Wersja: {version}",
         "data": {
-          "poll_interval": "Podstawowy interwał odpytywania (sekundy)",
-          "debug": "Włącz narzędzia debugowania"
+          "poll_interval": "Interwał odpytywania bazy (sekundy)",
+          "debug": "Włącz pomocników debugowania"
         }
       }
     }
@@ -37,15 +37,15 @@
         "name": "Bramka online"
       },
       "boost_active": {
-        "name": "Doładowanie aktywne"
+        "name": "Aktywne wzmocnienie"
       }
     },
     "button": {
       "force_refresh": {
-        "name": "Wymuś odświeżenie"
+        "name": "Wymuś odświeżanie"
       },
       "accumulator_boost_start": {
-        "name": "Uruchom doładowanie"
+        "name": "Rozpoczęcie doładowania"
       },
       "accumulator_boost_cancel": {
         "name": "Anuluj doładowanie"
@@ -56,7 +56,7 @@
         "name": "Czas trwania doładowania"
       },
       "accumulator_boost_temperature": {
-        "name": "Temperatura doładowania"
+        "name": "Podwyższona temperatura"
       }
     },
     "sensor": {
@@ -79,7 +79,7 @@
         "name": "Całkowita energia"
       },
       "boost_minutes_remaining": {
-        "name": "Pozostałe minuty doładowania"
+        "name": "Boost minutes remaining"
       },
       "boost_end": {
         "name": "Koniec doładowania"
@@ -88,99 +88,99 @@
   },
   "services": {
     "set_acm_preset": {
-      "name": "Skonfiguruj domyślne ustawienie doładowania akumulatora",
-      "description": "Aktualizuje domyślny czas trwania i/lub temperaturę doładowania dla akumulatora TermoWeb. Minuty muszą mieścić się w zakresie 60–600 w krokach po 60; pozostaw pole puste, aby zachować bieżącą wartość.",
+      "name": "Konfiguracja wstępnego ustawienia doładowania akumulatora",
+      "description": "Aktualizacja domyślnego czasu trwania doładowania i/lub temperatury dla akumulatora TermoWeb. Minuty muszą zawierać się w przedziale od 60 do 600 w 60-minutowych przyrostach; pomiń pole, aby zachować istniejącą wartość.",
       "fields": {
         "minutes": {
           "name": "Domyślny czas trwania doładowania",
-          "description": "Liczba minut, przez które ma działać doładowanie, gdy nie podano nadpisania (60–600, krok 60).",
+          "description": "Liczba minut, przez które powinno działać doładowanie, gdy nie jest dostępne żadne wymuszenie (60-600, krok 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Temperatura doładowania",
-          "description": "Opcjonalna temperatura zadana stosowana podczas sesji doładowania (°C lub °F).",
+          "name": "Podwyższona temperatura",
+          "description": "Opcjonalna wartość zadana doładowania stosowana podczas sesji doładowania (°C lub °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Uruchom doładowanie akumulatora",
-      "description": "Natychmiast rozpoczyna doładowanie akumulatora TermoWeb. Podaj czas trwania, aby zastąpić wartość domyślną (60–600 minut w krokach po 60), lub pozostaw puste, aby użyć zapisanego ustawienia.",
+      "name": "Uruchomienie doładowania akumulatora",
+      "description": "Wyzwala natychmiastowe doładowanie akumulatora TermoWeb. Podaj czas trwania, aby zastąpić ustawienie domyślne (60-600 minut w 60-minutowych odstępach) lub pomiń je, aby użyć zapisanego ustawienia wstępnego.",
       "fields": {
         "minutes": {
           "name": "Czas trwania doładowania",
-          "description": "Czas trwania sesji doładowania w minutach (60–600, krok 60). Opcjonalne.",
+          "description": "Czas trwania sesji doładowania w minutach (60-600, krok 60). Opcjonalnie.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Anuluj doładowanie akumulatora",
-      "description": "Anuluje aktywną sesję doładowania w akumulatorze TermoWeb."
+      "name": "Anulowanie doładowania akumulatora",
+      "description": "Anulowanie aktywnej sesji doładowania na akumulatorze TermoWeb."
     },
     "set_schedule": {
       "name": "Ustaw harmonogram tygodniowy",
-      "description": "Ustawia tygodniowy program 7×24 dla grzejnika TermoWeb. Program to lista 168 liczb całkowitych, gdzie każda wartość odpowiada jednej godzinie tygodnia zaczynając od poniedziałku 00:00. Użyj 0 dla ustawienia zimnego, 1 dla nocnego i 2 dla dziennego.",
+      "description": "Ustaw program tygodniowy 7×24 dla grzejnika TermoWeb. Program jest listą 168 liczb całkowitych, gdzie każda wartość odpowiada jednej godzinie w tygodniu, począwszy od poniedziałku 00:00. Użyj 0 dla nastawy zimna, 1 dla nastawy nocnej i 2 dla nastawy dziennej.",
       "fields": {
         "prog": {
           "name": "Program",
-          "description": "Lista 168 liczb całkowitych (0, 1 lub 2) reprezentujących harmonogram tygodniowy grzejnika. Indeks 0 to poniedziałek 00:00, indeks 1 to poniedziałek 01:00 itd.",
+          "description": "Lista 168 liczb całkowitych (0, 1 lub 2) reprezentujących tygodniowy harmonogram grzejnika. Indeks 0 to poniedziałek 00:00, indeks 1 to poniedziałek 01:00 itd.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Ustaw temperatury presetów",
-      "description": "Ustawia temperatury presetów zimnego, nocnego i dziennego dla grzejnika TermoWeb. Możesz podać wszystkie trzy temperatury jako jedną listę (``ptemp``) lub określić każdą osobno (``cold``, ``night`` i ``day``).",
+      "name": "Ustawianie zaprogramowanych temperatur",
+      "description": "Ustawienie temperatury zimnej, nocnej i dziennej dla grzejnika TermoWeb. Można podać wszystkie trzy temperatury jako jedną listę (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
       "fields": {
         "ptemp": {
-          "name": "Temperatury presetów",
-          "description": "Lista trzech temperatur [zimna, nocna, dzienna] w tych samych jednostkach co grzejnik (°C lub °F). Jeśli podasz, zastąpi ona wartości dla zimnej, nocnej i dziennej.",
+          "name": "Wstępnie ustawione temperatury",
+          "description": "Lista trzech temperatur [zimna, nocna, dzienna] w tych samych jednostkach co grzejnik (°C lub °F). Jeśli zostanie podana, zastąpi indywidualne wartości zimna, nocy i dnia.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Preset zimny",
-          "description": "Temperatura dla presetu zimnego (°C lub °F).",
+          "name": "Ustawienie wstępne zimna",
+          "description": "Temperatura dla zimnego ustawienia wstępnego (°C lub °F).",
           "example": "10.0"
         },
         "night": {
-          "name": "Preset nocny",
-          "description": "Temperatura dla presetu nocnego (°C lub °F).",
+          "name": "Ustawienie wstępne noc",
+          "description": "Temperatura dla nastawy nocnej (°C lub °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Preset dzienny",
-          "description": "Temperatura dla presetu dziennego (°C lub °F).",
+          "name": "Ustawienie wstępne dnia",
+          "description": "Ustawiona temperatura dla danego dnia (°C lub °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Importuj historię energii",
-      "description": "Importuje historyczne godzinowe liczniki energii grzejników TermoWeb do roku wstecz do statystyk Home Assistant dla każdego skonfigurowanego grzejnika.",
+      "name": "Historia importu energii",
+      "description": "Importowanie historycznych godzinowych liczników energii dla grzejników TermoWeb sprzed roku do statystyk Home Assistant dla każdego skonfigurowanego grzejnika.",
       "fields": {
         "reset_progress": {
-          "name": "Zresetuj postęp",
-          "description": "Czyści zapisany postęp i ponownie importuje historię od początku."
+          "name": "Resetowanie postępu",
+          "description": "Wyczyść zapisany postęp i ponownie zaimportuj historię od zera."
         },
         "max_history_retrieval": {
           "name": "Maksymalna liczba dni historii",
-          "description": "Liczba dni historii do pobrania. Zastępuje skonfigurowaną domyślną wartość tylko dla tego importu."
+          "description": "Liczba dni historii do pobrania. Zastępuje skonfigurowane ustawienia domyślne tylko dla tego importu."
         }
       }
     },
     "ws_debug_probe": {
-      "name": "Wywołaj sondę debugowania websocket",
-      "description": "Żąda natychmiastowego odświeżenia ``dev_data`` od klienta websocket i rejestruje rozmiary kolejnych ramek ``dev_handshake`` i ``update``. Włącz opcję debugowania w ustawieniach integracji przed użyciem tego narzędzia.",
+      "name": "Wysyłanie sondy debugowania websocket",
+      "description": "Żądanie natychmiastowych rozmiarów ramek ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update``. Przed użyciem tego pomocnika należy włączyć opcję debugowania w ustawieniach integracji.",
       "fields": {
         "entry_id": {
           "name": "Identyfikator wpisu konfiguracji",
-          "description": "Ogranicza sondę do pojedynczego wpisu konfiguracji TermoWeb.",
+          "description": "Ograniczenie sondy do pojedynczego wpisu konfiguracji TermoWeb.",
           "example": "abcd1234deadbeef"
         },
         "dev_id": {
           "name": "Identyfikator urządzenia",
-          "description": "Ogranicza sondę do pojedynczej bramki.",
+          "description": "Ograniczenie sondy do jednego urządzenia bramy.",
           "example": "0000abcd"
         }
       }

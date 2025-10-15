@@ -1,0 +1,195 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Povežite se z družinskimi grelniki TermoWeb",
+        "description": "Različica: {version}\n\nIzberite blagovno znamko TermoWeb ali Ducaheat in vnesite poverilnice za račun.",
+        "data": {
+          "brand": "Blagovna znamka",
+          "username": "E-pošta",
+          "password": "Geslo",
+          "poll_interval": "Interval anketiranja baze (sekunde)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Nepravilno uporabniško ime ali geslo (ali ključ odjemalca).",
+      "cannot_connect": "Ne morem se povezati s TermoWebom - napaka omrežja/DNS/SSL.",
+      "rate_limited": "Začasno omejena stopnja z API. Poskusite znova pozneje.",
+      "unknown": "Neznana napaka"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Možnosti TermoWeb",
+        "description": "Različica: {version}",
+        "data": {
+          "poll_interval": "Interval anketiranja baze (sekunde)",
+          "debug": "Omogočite pomočnike za odpravljanje napak"
+        }
+      }
+    }
+  },
+  "fallbacks": {
+    "heater_name": "Grelnik {addr}",
+    "node_name": "Vozlišče {addr}",
+    "power_monitor_name": "Monitor moči {addr}",
+    "never": "Nikoli"
+  },
+  "entity": {
+    "binary_sensor": {
+      "gateway_online": {
+        "name": "Spletni portal Gateway"
+      },
+      "boost_active": {
+        "name": "Povečati aktivno"
+      }
+    },
+    "button": {
+      "force_refresh": {
+        "name": "Osvežitev na silo"
+      },
+      "accumulator_boost_start": {
+        "name": "Začetni zagon"
+      },
+      "accumulator_boost_cancel": {
+        "name": "Prekliči spodbudo"
+      }
+    },
+    "number": {
+      "accumulator_boost_duration": {
+        "name": "Trajanje povečanja"
+      },
+      "accumulator_boost_temperature": {
+        "name": "Povečanje temperature"
+      }
+    },
+    "sensor": {
+      "heater_temperature": {
+        "name": "Temperatura"
+      },
+      "heater_energy_total": {
+        "name": "Energija"
+      },
+      "heater_power": {
+        "name": "Napajanje"
+      },
+      "power_monitor_energy": {
+        "name": "Energija"
+      },
+      "power_monitor_power": {
+        "name": "Napajanje"
+      },
+      "installation_total_energy": {
+        "name": "Skupna energija"
+      },
+      "boost_minutes_remaining": {
+        "name": "Preostanek minut do konca tekme"
+      },
+      "boost_end": {
+        "name": "Konec povečanja"
+      }
+    }
+  },
+  "services": {
+    "set_acm_preset": {
+      "name": "Konfiguracija prednastavitve povečanja akumulatorja",
+      "description": "Posodobite privzeto trajanje in/ali temperaturo povečanja za akumulator TermoWeb. Število minut mora biti med 60 in 600 v 60-minutnih korakih; če želite ohraniti obstoječo vrednost, polje izpustite.",
+      "fields": {
+        "minutes": {
+          "name": "Privzeto trajanje povečanja",
+          "description": "Število minut, ko naj bi ojačevalnik deloval, če ni zagotovljen noben preklic (60-600, korak 60).",
+          "example": "120"
+        },
+        "temperature": {
+          "name": "Povečanje temperature",
+          "description": "Izbirna nastavitvena vrednost povečanja, ki se uporabi med sejo povečanja (°C ali °F).",
+          "example": "22.5"
+        }
+      }
+    },
+    "start_boost": {
+      "name": "Začetek povečanja akumulatorja",
+      "description": "Sprožite takojšnje povečanje v akumulatorju TermoWeb. Navedite trajanje, da spremenite privzeto nastavitev (60-600 minut v 60-minutnih korakih), ali ga izpustite, da uporabite shranjeno prednastavitev.",
+      "fields": {
+        "minutes": {
+          "name": "Trajanje povečanja",
+          "description": "Trajanje seje povečanja v minutah (60-600, korak 60). Neobvezno.",
+          "example": "180"
+        }
+      }
+    },
+    "cancel_boost": {
+      "name": "Prekliči povečanje akumulatorja",
+      "description": "Prekličite aktivno sejo povečanja v akumulatorju TermoWeb."
+    },
+    "set_schedule": {
+      "name": "Določite tedenski urnik",
+      "description": "Nastavite tedenski program 7×24 za grelnik TermoWeb. Program je seznam 168 celih števil, pri čemer vsaka vrednost ustreza eni uri v tednu, ki se začne v ponedeljek ob 00:00. Uporabite 0 za hladno prednastavitev, 1 za nočno prednastavitev in 2 za dnevno prednastavitev.",
+      "fields": {
+        "prog": {
+          "name": "Program",
+          "description": "Seznam 168 celih števil (0, 1 ali 2), ki predstavljajo tedenski urnik grelnika. Indeks 0 je ponedeljek 00:00, indeks 1 je ponedeljek 01:00 in tako naprej.",
+          "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
+        }
+      }
+    },
+    "set_preset_temperatures": {
+      "name": "Nastavitev prednastavljenih temperatur",
+      "description": "Nastavite hladno, nočno in dnevno prednastavljeno temperaturo za grelnik TermoWeb. Vse tri temperature lahko navedete kot en seznam (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "fields": {
+        "ptemp": {
+          "name": "Prednastavljene temperature",
+          "description": "Seznam treh temperatur [mraz, noč, dan] v enakih enotah kot pri grelniku (°C ali °F). Če je ta naveden, bo razveljavil posamezne vrednosti za hladno, nočno in dnevno temperaturo.",
+          "example": "[10.0, 16.0, 20.0]"
+        },
+        "cold": {
+          "name": "Hladna prednastavitev",
+          "description": "Temperatura za hladno prednastavitev (°C ali °F).",
+          "example": "10.0"
+        },
+        "night": {
+          "name": "Nočna prednastavitev",
+          "description": "Temperatura za nočno prednastavitev (°C ali °F).",
+          "example": "16.0"
+        },
+        "day": {
+          "name": "Prednastavitev dneva",
+          "description": "Prednastavljena temperatura za dan (°C ali °F).",
+          "example": "20.0"
+        }
+      }
+    },
+    "import_energy_history": {
+      "name": "Zgodovina uvoza energije",
+      "description": "Uvozite zgodovinske urne števce porabe energije za grelnike TermoWeb do enega leta nazaj v statistiko Home Assistant za vsak konfiguriran grelnik.",
+      "fields": {
+        "reset_progress": {
+          "name": "Ponastavitev napredka",
+          "description": "Izbrišite shranjeni napredek in ponovno uvozite zgodovino od začetka."
+        },
+        "max_history_retrieval": {
+          "name": "Največ dni zgodovine",
+          "description": "Število dni zgodovine, ki jih želite priklicati. Nadomešča nastavljeno privzeto vrednost samo za ta uvoz."
+        }
+      }
+    },
+    "ws_debug_probe": {
+      "name": "Oddajte sondo za odpravljanje napak v spletnem vtičniku",
+      "description": "Zahtevajte takojšnje ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update`` velikosti okvirjev. Pred uporabo tega pomočnika v nastavitvah integracije omogočite možnost razhroščevanja.",
+      "fields": {
+        "entry_id": {
+          "name": "ID konfiguracijskega vnosa",
+          "description": "Omejite sondo na en sam vnos konfiguracije TermoWeb.",
+          "example": "abcd1234deadbeef"
+        },
+        "dev_id": {
+          "name": "ID naprave",
+          "description": "Omejite sondo na eno samo prehodno napravo.",
+          "example": "0000abcd"
+        }
+      }
+    }
+  }
+}

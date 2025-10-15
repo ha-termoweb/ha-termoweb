@@ -1,0 +1,195 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Savienot ar TermoWeb ģimenes sildītājiem",
+        "description": "Versija: {version}\n\nIzvēlieties savu TermoWeb vai Ducaheat zīmolu un ievadiet konta akreditācijas datus.",
+        "data": {
+          "brand": "Zīmols",
+          "username": "E-pasts",
+          "password": "Parole",
+          "poll_interval": "Bāzes aptaujas intervāls (sekundes)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Nederīgs lietotājvārds vai parole (vai klienta atslēga).",
+      "cannot_connect": "Nevar izveidot savienojumu ar TermoWeb - tīkla/DNS/SSL kļūda.",
+      "rate_limited": "API uz laiku ierobežo ātrumu. Mēģiniet vēlreiz vēlāk.",
+      "unknown": "Nezināma kļūda"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "TermoWeb opcijas",
+        "description": "Versija: {version}",
+        "data": {
+          "poll_interval": "Bāzes aptaujas intervāls (sekundes)",
+          "debug": "Debug palīgrīku iespējošana"
+        }
+      }
+    }
+  },
+  "fallbacks": {
+    "heater_name": "Sildītājs {addr}",
+    "node_name": "Mezgls {addr}",
+    "power_monitor_name": "Enerģijas monitora {addr}",
+    "never": "Nekad"
+  },
+  "entity": {
+    "binary_sensor": {
+      "gateway_online": {
+        "name": "Gateway tiešsaistē"
+      },
+      "boost_active": {
+        "name": "Palielināt aktīvo"
+      }
+    },
+    "button": {
+      "force_refresh": {
+        "name": "Atsvaidzināšana piespiedu kārtā"
+      },
+      "accumulator_boost_start": {
+        "name": "Sākuma palielinājums"
+      },
+      "accumulator_boost_cancel": {
+        "name": "Atcelt palielināt"
+      }
+    },
+    "number": {
+      "accumulator_boost_duration": {
+        "name": "Pastiprināšanas ilgums"
+      },
+      "accumulator_boost_temperature": {
+        "name": "Paaugstināt temperatūru"
+      }
+    },
+    "sensor": {
+      "heater_temperature": {
+        "name": "Temperatūra"
+      },
+      "heater_energy_total": {
+        "name": "Enerģija"
+      },
+      "heater_power": {
+        "name": "Power"
+      },
+      "power_monitor_energy": {
+        "name": "Enerģija"
+      },
+      "power_monitor_power": {
+        "name": "Power"
+      },
+      "installation_total_energy": {
+        "name": "Kopējā enerģija"
+      },
+      "boost_minutes_remaining": {
+        "name": "Palielināt atlikušās minūtes"
+      },
+      "boost_end": {
+        "name": "Paaugstināšanas beigas"
+      }
+    }
+  },
+  "services": {
+    "set_acm_preset": {
+      "name": "Konfigurēt akumulatora palielinājuma iepriekš iestatījumu",
+      "description": "Atjauniniet TermoWeb akumulatora standartpievienošanas ilgumu un/vai temperatūru. Minūtēm jābūt no 60 līdz 600 ar 60 minūšu soli; lai saglabātu esošo vērtību, lauku izlaidiet.",
+      "fields": {
+        "minutes": {
+          "name": "Noklusējuma palielināšanas ilgums",
+          "description": "Minūšu skaits, cik minūšu jāstrādā pastiprinātājs, ja nav nodrošināta pārslēgšana (60-600, 60. solis).",
+          "example": "120"
+        },
+        "temperature": {
+          "name": "Paaugstināt temperatūru",
+          "description": "Neobligātā paaugstināšanas iestatītā vērtība, kas jāpiemēro paaugstināšanas sesijas laikā (°C vai °F).",
+          "example": "22.5"
+        }
+      }
+    },
+    "start_boost": {
+      "name": "Sākt akumulatora palielināšanu",
+      "description": "Tūlītēja TermoWeb akumulatora palielinājuma iedarbināšana. Norādiet ilgumu, lai aizstātu noklusējuma iestatījumu (60-600 minūtes ar 60 minūšu soli), vai nenorādiet to, lai izmantotu saglabāto iepriekš iestatīto.",
+      "fields": {
+        "minutes": {
+          "name": "Pastiprināšanas ilgums",
+          "description": "Pastiprināšanas sesijas ilgums minūtēs (60-600, solis 60). Pēc izvēles.",
+          "example": "180"
+        }
+      }
+    },
+    "cancel_boost": {
+      "name": "Atcelt akumulatora palielinājumu",
+      "description": "Atcelt TermoWeb akumulatora aktīvo palielināšanas sesiju."
+    },
+    "set_schedule": {
+      "name": "Iestatiet nedēļas grafiku",
+      "description": "Iestatiet iknedēļas programmu 7×24 TermoWeb sildītājam. Programma ir 168 veselu skaitļu saraksts, kur katra vērtība atbilst vienai nedēļas stundai, sākot no pirmdienas 00:00. Izmantojiet 0 aukstajam iestatījumam, 1 - nakts iestatījumam un 2 - dienas iestatījumam.",
+      "fields": {
+        "prog": {
+          "name": "Programma",
+          "description": "168 veselu skaitļu (0, 1 vai 2) saraksts, kas attēlo sildītāja nedēļas grafiku. Indekss 0 ir pirmdiena 00:00, indekss 1 ir pirmdiena 01:00 utt.",
+          "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
+        }
+      }
+    },
+    "set_preset_temperatures": {
+      "name": "Iepriekš iestatītas temperatūras iestatīšana",
+      "description": "Iestatiet TermoWeb sildītāja aukstuma, nakts un dienas iepriekš iestatītās temperatūras. Jūs varat norādīt visas trīs temperatūras kā vienu sarakstu (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "fields": {
+        "ptemp": {
+          "name": "Iepriekš iestatītās temperatūras",
+          "description": "Trīs temperatūru saraksts [aukstums, nakts, diena] tajās pašās vienībās, kurās ir sildītājs (°C vai °F). Ja tas ir norādīts, tas aizstās individuālās aukstuma, nakts un dienas vērtības.",
+          "example": "[10.0, 16.0, 20.0]"
+        },
+        "cold": {
+          "name": "Iepriekš iestatīts aukstais iestatījums",
+          "description": "Aukstuma iepriekš iestatītā temperatūra (°C vai °F).",
+          "example": "10.0"
+        },
+        "night": {
+          "name": "Nakts iestatījums",
+          "description": "Temperatūra nakts iestatījumam (°C vai °F).",
+          "example": "16.0"
+        },
+        "day": {
+          "name": "Dienas iepriekš iestatījums",
+          "description": "Dienas iepriekš iestatītā temperatūra (°C vai °F).",
+          "example": "20.0"
+        }
+      }
+    },
+    "import_energy_history": {
+      "name": "Enerģijas importa vēsture",
+      "description": "Importējiet vēsturiskos TermoWeb sildītāju stundu enerģijas skaitītājus par katru konfigurēto sildītāju līdz pat vienam gadam atpakaļ Home Assistant statistikā.",
+      "fields": {
+        "reset_progress": {
+          "name": "Atiestatīt progresu",
+          "description": "Notīriet saglabāto progresu un importējiet vēsturi no jauna."
+        },
+        "max_history_retrieval": {
+          "name": "Maksimālais vēstures dienu skaits",
+          "description": "Atgūstamo vēstures dienu skaits. Aizstāj konfigurēto noklusējuma iestatījumu tikai šim importam."
+        }
+      }
+    },
+    "ws_debug_probe": {
+      "name": "Emitēt Websocket atkļūdošanas zondi",
+      "description": "Pieprasīt tūlītēju ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update`` kadru izmēru. Pirms šī palīgrīka izmantošanas integrācijas iestatījumos iespējojiet atkļūdošanas opciju.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurācijas ieraksta ID",
+          "description": "Ierobežojiet zondes darbību līdz vienam TermoWeb konfigurācijas ierakstam.",
+          "example": "abcd1234deadbeef"
+        },
+        "dev_id": {
+          "name": "Ierīces ID",
+          "description": "Ierobežojiet zondes darbību tikai uz vienu vārtejas ierīci.",
+          "example": "0000abcd"
+        }
+      }
+    }
+  }
+}

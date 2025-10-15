@@ -2,20 +2,20 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connetti i riscaldatori della famiglia TermoWeb",
-        "description": "Versione: {version}\\n\\nScegli il tuo marchio TermoWeb o Ducaheat e inserisci le credenziali del tuo account.",
+        "title": "Collegarsi ai riscaldatori della famiglia TermoWeb",
+        "description": "Versione: {version}\n\nScegliere il marchio TermoWeb o Ducaheat e inserire le credenziali dell'account.",
         "data": {
           "brand": "Marchio",
           "username": "Email",
           "password": "Password",
-          "poll_interval": "Intervallo di polling di base (secondi)"
+          "poll_interval": "Intervallo poll base (secondi)"
         }
       }
     },
     "error": {
-      "invalid_auth": "Nome utente, password o chiave client non validi.",
-      "cannot_connect": "Impossibile connettersi a TermoWeb — errore di rete/DNS/SSL.",
-      "rate_limited": "API temporaneamente limitata. Riprova più tardi.",
+      "invalid_auth": "Nome utente o password (o chiave client) non validi.",
+      "cannot_connect": "Impossibile connettersi a TermoWeb - errore di rete/DNS/SSL.",
+      "rate_limited": "Velocità temporaneamente limitata da API. Riprovare più tardi.",
       "unknown": "Errore sconosciuto"
     }
   },
@@ -25,8 +25,8 @@
         "title": "Opzioni TermoWeb",
         "description": "Versione: {version}",
         "data": {
-          "poll_interval": "Intervallo di polling di base (secondi)",
-          "debug": "Abilita gli strumenti di debug"
+          "poll_interval": "Intervallo poll base (secondi)",
+          "debug": "Abilitare gli helper di debug"
         }
       }
     }
@@ -37,26 +37,26 @@
         "name": "Gateway online"
       },
       "boost_active": {
-        "name": "Boost attivo"
+        "name": "Potenziamento attivo"
       }
     },
     "button": {
       "force_refresh": {
-        "name": "Forza aggiornamento"
+        "name": "Aggiornamenti forzati"
       },
       "accumulator_boost_start": {
-        "name": "Avvia boost"
+        "name": "Avvio della spinta"
       },
       "accumulator_boost_cancel": {
-        "name": "Annulla boost"
+        "name": "Annullamento della spinta"
       }
     },
     "number": {
       "accumulator_boost_duration": {
-        "name": "Durata boost"
+        "name": "Durata della spinta"
       },
       "accumulator_boost_temperature": {
-        "name": "Temperatura boost"
+        "name": "Temperatura di sovralimentazione"
       }
     },
     "sensor": {
@@ -79,108 +79,108 @@
         "name": "Energia totale"
       },
       "boost_minutes_remaining": {
-        "name": "Minuti di boost rimanenti"
+        "name": "Mancano pochi minuti all'inizio"
       },
       "boost_end": {
-        "name": "Fine boost"
+        "name": "Fine della spinta"
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Configura preset boost accumulatore",
-      "description": "Aggiorna la durata e/o la temperatura predefinite del boost per un accumulatore TermoWeb. I minuti devono essere tra 60 e 600 con incrementi di 60; lascia un campo vuoto per mantenere il valore esistente.",
+      "name": "Configurazione della preimpostazione dell'accumulatore",
+      "description": "Aggiorna la durata e/o la temperatura di boost predefinita per un accumulatore TermoWeb. I minuti devono essere compresi tra 60 e 600 con incrementi di 60 minuti; omettere un campo per mantenere il valore esistente.",
       "fields": {
         "minutes": {
-          "name": "Durata boost predefinita",
-          "description": "Numero di minuti in cui il boost deve funzionare quando non viene fornita un’eccezione (60–600, passo 60).",
+          "name": "Durata predefinita del boost",
+          "description": "Numero di minuti in cui il boost deve funzionare quando non è previsto l'override (60-600, passo 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Temperatura boost",
-          "description": "Impostazione opzionale applicata durante la sessione di boost (°C o °F).",
+          "name": "Temperatura di sovralimentazione",
+          "description": "Setpoint boost opzionale da applicare durante la sessione boost (°C o °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Avvia boost accumulatore",
-      "description": "Avvia immediatamente un boost su un accumulatore TermoWeb. Fornisci una durata per sovrascrivere il valore predefinito (60–600 minuti in incrementi di 60) oppure lasciala vuota per usare il preset salvato.",
+      "name": "Avvio della spinta dell'accumulatore",
+      "description": "Attiva una spinta immediata su un accumulatore TermoWeb. Indicare una durata per sovrascrivere l'impostazione predefinita (60-600 minuti con incrementi di 60 minuti), oppure ometterla per utilizzare la preimpostazione memorizzata.",
       "fields": {
         "minutes": {
-          "name": "Durata boost",
-          "description": "Durata della sessione di boost in minuti (60–600, passo 60). Facoltativo.",
+          "name": "Durata della spinta",
+          "description": "Durata della sessione di boost in minuti (60-600, passo 60). Opzionale.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Annulla boost accumulatore",
+      "name": "Annullamento della spinta dell'accumulatore",
       "description": "Annulla la sessione di boost attiva su un accumulatore TermoWeb."
     },
     "set_schedule": {
-      "name": "Imposta programma settimanale",
-      "description": "Imposta il programma settimanale 7×24 per un riscaldatore TermoWeb. Il programma è un elenco di 168 interi, dove ogni valore corrisponde a un’ora della settimana a partire da lunedì alle 00:00. Usa 0 per il preset freddo, 1 per il preset notte e 2 per il preset giorno.",
+      "name": "Impostare il programma settimanale",
+      "description": "Impostare il programma settimanale 7×24 per un riscaldatore TermoWeb. Il programma è un elenco di 168 numeri interi, dove ogni valore corrisponde a un'ora della settimana a partire dalle 00:00 di lunedì. Utilizzare 0 per la preimpostazione del freddo, 1 per la preimpostazione della notte e 2 per la preimpostazione del giorno.",
       "fields": {
         "prog": {
           "name": "Programma",
-          "description": "Elenco di 168 interi (0, 1 o 2) che rappresentano il programma settimanale del riscaldatore. L’indice 0 è lunedì 00:00, l’indice 1 è lunedì 01:00 e così via.",
+          "description": "Un elenco di 168 numeri interi (0, 1 o 2) che rappresentano la programmazione settimanale del riscaldatore. L'indice 0 corrisponde a lunedì 00:00, l'indice 1 a lunedì 01:00 e così via.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Imposta temperature preset",
-      "description": "Imposta le temperature dei preset freddo, notte e giorno per un riscaldatore TermoWeb. Puoi fornire tutte e tre le temperature come un unico elenco (``ptemp``) oppure specificarle singolarmente (``cold``, ``night`` e ``day``).",
+      "name": "Impostazione delle temperature preimpostate",
+      "description": "Impostare le temperature preimpostate per il freddo, la notte e il giorno per un riscaldatore TermoWeb. È possibile fornire tutte e tre le temperature come un unico elenco (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
       "fields": {
         "ptemp": {
-          "name": "Temperature preset",
-          "description": "Elenco di tre temperature [freddo, notte, giorno] nelle stesse unità del riscaldatore (°C o °F). Se fornito, sovrascrive i valori freddo, notte e giorno.",
+          "name": "Temperature preimpostate",
+          "description": "Un elenco di tre temperature [freddo, notte, giorno] nelle stesse unità del riscaldatore (°C o °F). Se fornito, questo elenco sostituisce i singoli valori di freddo, notte e giorno.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Preset freddo",
-          "description": "Temperatura per il preset freddo (°C o °F).",
+          "name": "Preimpostazione a freddo",
+          "description": "Temperatura per la preimpostazione del freddo (°C o °F).",
           "example": "10.0"
         },
         "night": {
-          "name": "Preset notte",
-          "description": "Temperatura per il preset notte (°C o °F).",
+          "name": "Predisposizione per la notte",
+          "description": "Temperatura per la preselezione notturna (°C o °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Preset giorno",
-          "description": "Temperatura per il preset giorno (°C o °F).",
+          "name": "Preimpostazione del giorno",
+          "description": "Temperatura del giorno preimpostata (°C o °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Importa cronologia energia",
-      "description": "Importa i contatori storici orari di energia dei riscaldatori TermoWeb fino a un anno fa nelle statistiche di Home Assistant per ogni riscaldatore configurato.",
+      "name": "Storia dell'energia importata",
+      "description": "Importazione dei contatori energetici orari storici dei riscaldatori TermoWeb fino a un anno fa nelle statistiche dell'Assistente Casa per ogni riscaldatore configurato.",
       "fields": {
         "reset_progress": {
-          "name": "Reimposta avanzamento",
-          "description": "Cancella l’avanzamento salvato e reimporta la cronologia da capo."
+          "name": "Azzeramento dei progressi",
+          "description": "Cancellare i progressi memorizzati e reimportare la cronologia da zero."
         },
         "max_history_retrieval": {
-          "name": "Giorni massimi di cronologia",
+          "name": "Giorni massimi di storia",
           "description": "Numero di giorni di cronologia da recuperare. Sovrascrive il valore predefinito configurato solo per questa importazione."
         }
       }
     },
     "ws_debug_probe": {
-      "name": "Esegui probe di debug websocket",
-      "description": "Richiede un aggiornamento immediato di ``dev_data`` dal client websocket e registra la dimensione dei successivi frame ``dev_handshake`` e ``update``. Abilita l’opzione di debug nelle impostazioni dell’integrazione prima di usare questo strumento.",
+      "name": "Emettere una sonda di debug websocket",
+      "description": "Richiedere una dimensione immediata dei fotogrammi ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update``. Abilitare l'opzione di debug nelle impostazioni di integrazione prima di usare questo helper.",
       "fields": {
         "entry_id": {
           "name": "ID voce di configurazione",
-          "description": "Limita il probe a una singola voce di configurazione TermoWeb.",
+          "description": "Limita la sonda a una singola voce di configurazione di TermoWeb.",
           "example": "abcd1234deadbeef"
         },
         "dev_id": {
           "name": "ID dispositivo",
-          "description": "Limita il probe a un singolo gateway.",
+          "description": "Limitare la sonda a un solo dispositivo gateway.",
           "example": "0000abcd"
         }
       }

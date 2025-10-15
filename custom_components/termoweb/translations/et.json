@@ -1,0 +1,195 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Ühendage TermoWebi perekonna kütteseadmetega",
+        "description": "Versioon: {version}\n\nValige oma TermoWeb või Ducaheat kaubamärk ja sisestage oma konto andmed.",
+        "data": {
+          "brand": "Bränd",
+          "username": "E-post",
+          "password": "Parool",
+          "poll_interval": "Baasküsitlusintervall (sekundid)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Vale kasutajanimi või salasõna (või kliendi võti).",
+      "cannot_connect": "TermoWebiga ei saa ühendust - võrgu/DNS/SSL viga.",
+      "rate_limited": "Ajutiselt piiratud kiirusega API poolt. Proovige hiljem uuesti.",
+      "unknown": "Teadmata viga"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "TermoWebi valikud",
+        "description": "Versioon: {version}",
+        "data": {
+          "poll_interval": "Baasküsitlusintervall (sekundid)",
+          "debug": "Lubage silumisvahendid sisse lülitada"
+        }
+      }
+    }
+  },
+  "fallbacks": {
+    "heater_name": "Kütteseade {addr}",
+    "node_name": "Sõlm {addr}",
+    "power_monitor_name": "Võimsusmonitor {addr}",
+    "never": "Mitte kunagi"
+  },
+  "entity": {
+    "binary_sensor": {
+      "gateway_online": {
+        "name": "Gateway online"
+      },
+      "boost_active": {
+        "name": "Boost aktiivne"
+      }
+    },
+    "button": {
+      "force_refresh": {
+        "name": "Force refresh"
+      },
+      "accumulator_boost_start": {
+        "name": "Start boost"
+      },
+      "accumulator_boost_cancel": {
+        "name": "Tühista boost"
+      }
+    },
+    "number": {
+      "accumulator_boost_duration": {
+        "name": "Boost kestus"
+      },
+      "accumulator_boost_temperature": {
+        "name": "Temperatuuri tõstmine"
+      }
+    },
+    "sensor": {
+      "heater_temperature": {
+        "name": "Temperatuur"
+      },
+      "heater_energy_total": {
+        "name": "Energia"
+      },
+      "heater_power": {
+        "name": "Võimsus"
+      },
+      "power_monitor_energy": {
+        "name": "Energia"
+      },
+      "power_monitor_power": {
+        "name": "Võimsus"
+      },
+      "installation_total_energy": {
+        "name": "Kogu energia"
+      },
+      "boost_minutes_remaining": {
+        "name": "Boost minutit jäänud"
+      },
+      "boost_end": {
+        "name": "Boost otsa"
+      }
+    }
+  },
+  "services": {
+    "set_acm_preset": {
+      "name": "Akumulaatori võimenduse eelseadistuse konfigureerimine",
+      "description": "TermoWebi aku vaikimisi võimenduse kestuse ja/või temperatuuri ajakohastamine. Minutid peavad olema vahemikus 60 kuni 600 60-minutiliste sammude kaupa; olemasoleva väärtuse säilitamiseks jäta väli ära.",
+      "fields": {
+        "minutes": {
+          "name": "Vaikimisi võimenduse kestus",
+          "description": "Minutite arv, mille jooksul peaks võimendus töötama, kui ei ole ette nähtud ületoomist (60-600, samm 60).",
+          "example": "120"
+        },
+        "temperature": {
+          "name": "Temperatuuri tõstmine",
+          "description": "Valikuline võimendussihi seadepunkt, mida rakendatakse võimendussessiooni ajal (°C või °F).",
+          "example": "22.5"
+        }
+      }
+    },
+    "start_boost": {
+      "name": "Akumulaatori võimenduse käivitamine",
+      "description": "Lülitage TermoWebi akumulaatorile kohene võimendus. Sisestage kestus, et tühistada vaikimisi (60-600 minutit 60-minutiliste sammudega), või jätke see ära, et kasutada salvestatud eelseadistust.",
+      "fields": {
+        "minutes": {
+          "name": "Boost kestus",
+          "description": "Boostingu kestus minutites (60-600, samm 60). Vabatahtlik.",
+          "example": "180"
+        }
+      }
+    },
+    "cancel_boost": {
+      "name": "Tühista akumulaatori võimendus",
+      "description": "TermoWebi aku aktiivse võimendussessiooni tühistamine."
+    },
+    "set_schedule": {
+      "name": "Määrake iganädalane ajakava",
+      "description": "Seadistage TermoWebi kütteseadme 7×24 nädala programm. Programm on 168 täisarvu nimekiri, kus iga väärtus vastab ühele tunnile nädalas alates esmaspäevast 00:00. Kasutage 0 külma eelseadistuse jaoks, 1 öise eelseadistuse jaoks ja 2 päevase eelseadistuse jaoks.",
+      "fields": {
+        "prog": {
+          "name": "Programm",
+          "description": "168 täisarvu (0, 1 või 2) loetelu, mis tähistab kütteseadme nädalaplaani. Indeks 0 on esmaspäev 00:00, indeks 1 on esmaspäev 01:00 jne.",
+          "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
+        }
+      }
+    },
+    "set_preset_temperatures": {
+      "name": "Eelseadistatud temperatuuride seadistamine",
+      "description": "Seadistage TermoWebi kütteseadme külma-, öö- ja päevatemperatuuri eelseaded. Võite anda kõik kolm temperatuuri kas ühe loeteluna (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "fields": {
+        "ptemp": {
+          "name": "Eelseadistatud temperatuurid",
+          "description": "Kolmest temperatuurist [külm, öö, päev] koosnev loetelu, mille mõõtühikud on samad kui kütteallikal (°C või °F). Kui see on esitatud, siis see tühistab üksikud külma, öise ja päevase temperatuuri väärtused.",
+          "example": "[10.0, 16.0, 20.0]"
+        },
+        "cold": {
+          "name": "Külm eelseadistus",
+          "description": "Külma eelseadistuse temperatuur (°C või °F).",
+          "example": "10.0"
+        },
+        "night": {
+          "name": "Öine eelseadistus",
+          "description": "Temperatuur ööseks eelseadistatud (°C või °F).",
+          "example": "16.0"
+        },
+        "day": {
+          "name": "Päeva eelseadistus",
+          "description": "Päeva eelseadistatud temperatuur (°C või °F).",
+          "example": "20.0"
+        }
+      }
+    },
+    "import_energy_history": {
+      "name": "Energia impordi ajalugu",
+      "description": "Importige TermoWebi kütteseadmete ajaloolised tunnipõhised energiaarvestid kuni aasta tagasi iga seadistatud kütteseadme kohta Home Assistant'i statistikasse.",
+      "fields": {
+        "reset_progress": {
+          "name": "Progressi lähtestamine",
+          "description": "Tühjendage salvestatud edusammud ja importige ajalugu uuesti nullist."
+        },
+        "max_history_retrieval": {
+          "name": "Maksimaalne ajaloopäevad",
+          "description": "Ajaloo päevade arv, mis tuleb välja otsida. Kõrvaldab ainult selle impordi puhul seadistatud vaikimisi väärtuse."
+        }
+      }
+    },
+    "ws_debug_probe": {
+      "name": "Emit websocket debug sond",
+      "description": "Taotle koheselt ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update`` kaadri suurust. Enne selle abimehe kasutamist lülitage integratsiooni seadetes sisse debugimisvõimalus.",
+      "fields": {
+        "entry_id": {
+          "name": "Config kirje ID",
+          "description": "Piirake sondi kasutamine ühe TermoWebi konfiguratsioonikandega.",
+          "example": "abcd1234deadbeef"
+        },
+        "dev_id": {
+          "name": "Seadme ID",
+          "description": "Piirake sondi kasutamine ühe väravaseadmega.",
+          "example": "0000abcd"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,195 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Liity TermoWeb-perheen lämmittimiin",
+        "description": "Versio: {version}__\n\nValitse TermoWeb- tai Ducaheat-tuotemerkki ja anna tilitietosi.",
+        "data": {
+          "brand": "Merkki",
+          "username": "Sähköposti",
+          "password": "Salasana",
+          "poll_interval": "Tukiaseman kyselyväli (sekuntia)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Virheellinen käyttäjänimi tai salasana (tai asiakasavain).",
+      "cannot_connect": "Yhteyttä TermoWebiin ei voida muodostaa - verkko/DNS/SSL-virhe.",
+      "rate_limited": "API rajoittaa tilapäisesti nopeutta. Yritä myöhemmin uudelleen.",
+      "unknown": "Tuntematon virhe"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "TermoWeb-vaihtoehdot",
+        "description": "Versio: {version}__",
+        "data": {
+          "poll_interval": "Tukiaseman kyselyväli (sekuntia)",
+          "debug": "Ota käyttöön debug-avustajat"
+        }
+      }
+    }
+  },
+  "fallbacks": {
+    "heater_name": "Lämmitin {addr}",
+    "node_name": "Solmu {addr}",
+    "power_monitor_name": "Tehonvalvonta {addr}__",
+    "never": "Ei koskaan"
+  },
+  "entity": {
+    "binary_sensor": {
+      "gateway_online": {
+        "name": "Gateway verkossa"
+      },
+      "boost_active": {
+        "name": "Boost aktiivinen"
+      }
+    },
+    "button": {
+      "force_refresh": {
+        "name": "Pakota päivitys"
+      },
+      "accumulator_boost_start": {
+        "name": "Start boost"
+      },
+      "accumulator_boost_cancel": {
+        "name": "Peruuta nosto"
+      }
+    },
+    "number": {
+      "accumulator_boost_duration": {
+        "name": "Boostin kesto"
+      },
+      "accumulator_boost_temperature": {
+        "name": "Boost-lämpötila"
+      }
+    },
+    "sensor": {
+      "heater_temperature": {
+        "name": "Lämpötila"
+      },
+      "heater_energy_total": {
+        "name": "Energia"
+      },
+      "heater_power": {
+        "name": "Teho"
+      },
+      "power_monitor_energy": {
+        "name": "Energia"
+      },
+      "power_monitor_power": {
+        "name": "Teho"
+      },
+      "installation_total_energy": {
+        "name": "Kokonaisenergia"
+      },
+      "boost_minutes_remaining": {
+        "name": "Boost minuuttia jäljellä"
+      },
+      "boost_end": {
+        "name": "Boost-pääte"
+      }
+    }
+  },
+  "services": {
+    "set_acm_preset": {
+      "name": "Akun tehostuksen esiasetuksen määrittäminen",
+      "description": "Päivitä TermoWeb-akun oletusarvoinen tehostuksen kesto ja/tai lämpötila. Minuuttien on oltava 60 ja 600 välillä 60 minuutin välein; jätä kenttä pois, jos haluat säilyttää nykyisen arvon.",
+      "fields": {
+        "minutes": {
+          "name": "Tehostuksen oletuskesto",
+          "description": "Niiden minuuttien määrä, joiden ajan tehostuksen pitäisi toimia, kun ohitusta ei ole annettu (60-600, askel 60).",
+          "example": "120"
+        },
+        "temperature": {
+          "name": "Boost-lämpötila",
+          "description": "Valinnainen tehostusasetuspiste, jota käytetään tehostusjakson aikana (°C tai °F).",
+          "example": "22.5"
+        }
+      }
+    },
+    "start_boost": {
+      "name": "Käynnistä akun lisäys",
+      "description": "Käynnistää TermoWeb-akun välittömän lisäyksen. Anna kesto, joka ohittaa oletusarvon (60-600 minuuttia 60 minuutin välein), tai jätä se pois, jos haluat käyttää tallennettua esiasetusta.",
+      "fields": {
+        "minutes": {
+          "name": "Boostin kesto",
+          "description": "Tehostusistunnon kesto minuutteina (60-600, askel 60). Valinnainen.",
+          "example": "180"
+        }
+      }
+    },
+    "cancel_boost": {
+      "name": "Peruuta akun lisäys",
+      "description": "Peruuttaa TermoWeb-akun aktiivisen tehostusistunnon."
+    },
+    "set_schedule": {
+      "name": "Aseta viikoittainen aikataulu",
+      "description": "Aseta TermoWeb-lämmittimen 7×24-viikko-ohjelma. Ohjelma on 168 kokonaisluvun luettelo, jossa jokainen arvo vastaa yhtä viikkotuntia maanantaista 00:00 alkaen. Käytä 0 kylmää esiasetusta, 1 yötä esiasetusta ja 2 päivää esiasetusta varten.",
+      "fields": {
+        "prog": {
+          "name": "Ohjelma",
+          "description": "168 kokonaisluvun (0, 1 tai 2) luettelo, joka edustaa lämmittimen viikko-ohjelmaa. Indeksi 0 on maanantai 00:00, indeksi 1 on maanantai 01:00 jne.",
+          "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
+        }
+      }
+    },
+    "set_preset_temperatures": {
+      "name": "Aseta esiasetetut lämpötilat",
+      "description": "Aseta TermoWeb-lämmittimen kylmän, yön ja päivän esiasetetut lämpötilat. Voit joko antaa kaikki kolme lämpötilaa yhtenä luettelona (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "fields": {
+        "ptemp": {
+          "name": "Esiasetetut lämpötilat",
+          "description": "Luettelo kolmesta lämpötilasta [kylmä, yö, päivä] samoissa yksiköissä kuin lämmitin (°C tai °F). Jos tämä annetaan, se ohittaa yksittäiset kylmän, yön ja päivän arvot.",
+          "example": "[10.0, 16.0, 20.0]"
+        },
+        "cold": {
+          "name": "Kylmä esiasetus",
+          "description": "Kylmän esiasetuksen lämpötila (°C tai °F).",
+          "example": "10.0"
+        },
+        "night": {
+          "name": "Yön esiasetus",
+          "description": "Lämpötila yön esiasetusta varten (°C tai °F).",
+          "example": "16.0"
+        },
+        "day": {
+          "name": "Päivän esiasetus",
+          "description": "Päivän esiasetettu lämpötila (°C tai °F).",
+          "example": "20.0"
+        }
+      }
+    },
+    "import_energy_history": {
+      "name": "Energian tuontihistoria",
+      "description": "Tuo TermoWeb-lämmittimien historialliset tuntikohtaiset energialaskurit vuoden takaisiin tilastoihin Home Assistant -ohjelmassa jokaisen määritetyn lämmittimen osalta.",
+      "fields": {
+        "reset_progress": {
+          "name": "Nollaa edistyminen",
+          "description": "Tyhjennä tallennettu edistyminen ja tuo historia uudelleen tyhjästä."
+        },
+        "max_history_retrieval": {
+          "name": "Enintään historian päiviä",
+          "description": "Haettavien päivien lukumäärä. Ohittaa vain tälle tuonnille määritetyn oletusarvon."
+        }
+      }
+    },
+    "ws_debug_probe": {
+      "name": "Lähettää websocket debug anturi",
+      "description": "Pyydä välitöntä ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update`` kehyskokoa. Ota debug-vaihtoehto käyttöön integraatioasetuksissa ennen tämän apuvälineen käyttöä.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurointimerkinnän ID",
+          "description": "Rajoita koetin yhteen TermoWebin konfigurointimerkintään.",
+          "example": "abcd1234deadbeef"
+        },
+        "dev_id": {
+          "name": "Laitteen tunnus",
+          "description": "Rajoita luotain yhteen yhdyskäytävälaitteeseen.",
+          "example": "0000abcd"
+        }
+      }
+    }
+  }
+}

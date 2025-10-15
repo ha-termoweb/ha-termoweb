@@ -2,35 +2,44 @@
   "config": {
     "step": {
       "user": {
-        "title": "Mit TermoWeb-Heizgeräten verbinden",
-        "description": "Version: {version}\\n\\nWähle deine TermoWeb- oder Ducaheat-Marke und gib deine Kontozugangsdaten ein.",
+        "title": "Anschluss an TermoWeb Familienheizungen",
+        "description": "Version: {version}\n\nWählen Sie Ihre TermoWeb- oder Ducaheat-Marke und geben Sie Ihre Kontodaten ein.",
         "data": {
           "brand": "Marke",
           "username": "E-Mail",
           "password": "Passwort",
-          "poll_interval": "Grundlegendes Abfrageintervall (Sekunden)"
+          "poll_interval": "Basisabfrageintervall (Sekunden)"
         }
       }
     },
     "error": {
-      "invalid_auth": "Ungültiger Benutzername, Passwort oder Client-Schlüssel.",
-      "cannot_connect": "Verbindung zu TermoWeb nicht möglich – Netzwerk-/DNS-/SSL-Fehler.",
-      "rate_limited": "API vorübergehend gedrosselt. Bitte später erneut versuchen.",
+      "invalid_auth": "Ungültiger Benutzername oder Passwort (oder Client-Schlüssel).",
+      "cannot_connect": "Kann keine Verbindung zu TermoWeb herstellen - Netzwerk/DNS/SSL-Fehler.",
+      "rate_limited": "Vorübergehend ratenbeschränkt durch API. Versuchen Sie es später noch einmal.",
       "unknown": "Unbekannter Fehler"
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "TermoWeb-Optionen",
+        "title": "TermoWeb Optionen",
         "description": "Version: {version}",
         "data": {
-          "poll_interval": "Grundlegendes Abfrageintervall (Sekunden)",
-          "debug": "Debug-Hilfen aktivieren"
+          "poll_interval": "Basisabfrageintervall (Sekunden)",
+          "debug": "Debug-Hilfsmittel einschalten"
         }
       }
     }
   },
+<<<<<<< HEAD
+=======
+  "fallbacks": {
+    "heater_name": "Heizgerät {addr}",
+    "node_name": "Knoten {addr}",
+    "power_monitor_name": "Leistungsmonitor {addr}",
+    "never": "Niemals"
+  },
+>>>>>>> b059849 (Updated machine translations for several languages using DeepL)
   "entity": {
     "binary_sensor": {
       "gateway_online": {
@@ -45,7 +54,7 @@
         "name": "Aktualisierung erzwingen"
       },
       "accumulator_boost_start": {
-        "name": "Boost starten"
+        "name": "Starthilfe"
       },
       "accumulator_boost_cancel": {
         "name": "Boost abbrechen"
@@ -53,10 +62,10 @@
     },
     "number": {
       "accumulator_boost_duration": {
-        "name": "Boost-Dauer"
+        "name": "Dauer der Aufladung"
       },
       "accumulator_boost_temperature": {
-        "name": "Boost-Temperatur"
+        "name": "Temperatur erhöhen"
       }
     },
     "sensor": {
@@ -67,120 +76,120 @@
         "name": "Energie"
       },
       "heater_power": {
-        "name": "Leistung"
+        "name": "Strom"
       },
       "power_monitor_energy": {
         "name": "Energie"
       },
       "power_monitor_power": {
-        "name": "Leistung"
+        "name": "Strom"
       },
       "installation_total_energy": {
-        "name": "Gesamtenergie"
+        "name": "Energie insgesamt"
       },
       "boost_minutes_remaining": {
-        "name": "Verbleibende Boost-Minuten"
+        "name": "Verbleibende Minuten verstärken"
       },
       "boost_end": {
-        "name": "Boost-Ende"
+        "name": "Boost Ende"
       }
     }
   },
   "services": {
     "set_acm_preset": {
-      "name": "Boost-Voreinstellung des Akkumulators konfigurieren",
-      "description": "Aktualisiert die Standarddauer und/oder Temperatur des Boosts für einen TermoWeb-Akkumulator. Minuten müssen zwischen 60 und 600 in 60-Minuten-Schritten liegen; lasse ein Feld leer, um den bestehenden Wert zu behalten.",
+      "name": "Voreinstellung der Akkumulatorenverstärkung konfigurieren",
+      "description": "Aktualisieren Sie die Standard-Boostdauer und/oder -temperatur für einen TermoWeb-Akkumulator. Die Minuten müssen zwischen 60 und 600 in 60-Minuten-Schritten liegen; lassen Sie ein Feld aus, um den bestehenden Wert beizubehalten.",
       "fields": {
         "minutes": {
-          "name": "Standard-Boostdauer",
-          "description": "Anzahl der Minuten, die der Boost laufen soll, wenn kein Override angegeben ist (60–600, Schrittweite 60).",
+          "name": "Standard-Boost-Dauer",
+          "description": "Anzahl der Minuten, die der Boost laufen soll, wenn keine Übersteuerung vorgesehen ist (60-600, Schritt 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Boost-Temperatur",
-          "description": "Optionale Solltemperatur, die während der Boost-Sitzung angewendet wird (°C oder °F).",
+          "name": "Temperatur erhöhen",
+          "description": "Optionaler Boost-Sollwert, der während des Boost-Vorgangs gelten soll (°C oder °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Boost des Akkumulators starten",
-      "description": "Startet sofort einen Boost auf einem TermoWeb-Akkumulator. Gib eine Dauer an, um den Standardwert zu überschreiben (60–600 Minuten in 60-Minuten-Schritten), oder lasse sie leer, um die gespeicherte Voreinstellung zu verwenden.",
+      "name": "Start Akkumulator-Boost",
+      "description": "Lösen Sie eine sofortige Erhöhung eines TermoWeb-Akkumulators aus. Geben Sie eine Dauer an, um die Standardeinstellung zu überschreiben (60-600 Minuten in 60-Minuten-Schritten), oder lassen Sie sie weg, um die gespeicherte Voreinstellung zu verwenden.",
       "fields": {
         "minutes": {
-          "name": "Boost-Dauer",
-          "description": "Dauer der Boost-Sitzung in Minuten (60–600, Schrittweite 60). Optional.",
+          "name": "Dauer der Aufladung",
+          "description": "Dauer der Boost-Sitzung in Minuten (60-600, Stufe 60). Optional.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Boost des Akkumulators abbrechen",
-      "description": "Bricht die aktive Boost-Sitzung auf einem TermoWeb-Akkumulator ab."
+      "name": "Aufhebung der Akkumulatorenanhebung",
+      "description": "Abbrechen der aktiven Boost-Sitzung auf einem TermoWeb-Akkumulator."
     },
     "set_schedule": {
-      "name": "Wochenprogramm festlegen",
-      "description": "Legt das 7×24-Wochenprogramm für ein TermoWeb-Heizgerät fest. Das Programm ist eine Liste von 168 Ganzzahlen, wobei jeder Wert einer Stunde der Woche entspricht, beginnend am Montag um 00:00. Verwende 0 für das Kaltprofil, 1 für das Nachtprofil und 2 für das Tagesprofil.",
+      "name": "Wochenplan festlegen",
+      "description": "Stellen Sie das 7×24-Wochenprogramm für eine TermoWeb-Heizung ein. Das Programm ist eine Liste von 168 Ganzzahlen, wobei jeder Wert einer Stunde der Woche ab Montag 00:00 Uhr entspricht. Verwenden Sie 0 für die Kaltvoreinstellung, 1 für die Nachtvoreinstellung und 2 für die Tagesvoreinstellung.",
       "fields": {
         "prog": {
           "name": "Programm",
-          "description": "Liste von 168 Ganzzahlen (0, 1 oder 2), die den Wochenplan des Heizgeräts darstellen. Index 0 ist Montag 00:00, Index 1 ist Montag 01:00 usw.",
+          "description": "Eine Liste von 168 ganzen Zahlen (0, 1 oder 2), die den Wochenplan des Heizgeräts darstellen. Index 0 ist Montag 00:00, Index 1 ist Montag 01:00, usw.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Voreingestellte Temperaturen festlegen",
-      "description": "Legt die Temperaturen der Kalt-, Nacht- und Tagprofile für ein TermoWeb-Heizgerät fest. Du kannst entweder alle drei Temperaturen als Liste (``ptemp``) angeben oder jede einzeln (``cold``, ``night`` und ``day``).",
+      "name": "Voreingestellte Temperaturen einstellen",
+      "description": "Legen Sie die voreingestellten Temperaturen für Kälte, Nacht und Tag für eine TermoWeb-Heizung fest. Sie können entweder alle drei Temperaturen als eine einzige Liste angeben (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
       "fields": {
         "ptemp": {
           "name": "Voreingestellte Temperaturen",
-          "description": "Liste mit drei Temperaturen [kalt, nacht, tag] in denselben Einheiten wie das Heizgerät (°C oder °F). Wenn angegeben, überschreibt sie die einzelnen Werte kalt, nacht und tag.",
+          "description": "Eine Liste von drei Temperaturen [Kälte, Nacht, Tag] in denselben Einheiten wie das Heizgerät (°C oder °F). Falls angegeben, hat dies Vorrang vor den einzelnen Werten für Kälte, Nacht und Tag.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Kaltprofil",
-          "description": "Temperatur für das Kaltprofil (°C oder °F).",
+          "name": "Kalt voreingestellt",
+          "description": "Temperatur für die Kaltvoreinstellung (°C oder °F).",
           "example": "10.0"
         },
         "night": {
-          "name": "Nachtprofil",
-          "description": "Temperatur für das Nachtprofil (°C oder °F).",
+          "name": "Voreinstellung Nacht",
+          "description": "Temperatur für die Nachtvorwahl (°C oder °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Tagesprofil",
-          "description": "Temperatur für das Tagesprofil (°C oder °F).",
+          "name": "Tag voreingestellt",
+          "description": "Vorgegebene Temperatur für den Tag (°C oder °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Energieverlauf importieren",
-      "description": "Importiert historische stündliche Energiewerte von TermoWeb-Heizgeräten bis zu einem Jahr zurück in die Home-Assistant-Statistiken für jedes konfigurierte Heizgerät.",
+      "name": "Energiegeschichte importieren",
+      "description": "Importieren Sie die stündlichen Zählerstände der TermoWeb-Heizungen bis zu einem Jahr zurück in die Statistiken des Home Assistant für jede konfigurierte Heizung.",
       "fields": {
         "reset_progress": {
           "name": "Fortschritt zurücksetzen",
-          "description": "Löscht den gespeicherten Fortschritt und importiert den Verlauf erneut von Anfang an."
+          "description": "Löschen Sie den gespeicherten Fortschritt und importieren Sie den Verlauf von Grund auf neu."
         },
         "max_history_retrieval": {
-          "name": "Maximale Verlauftage",
-          "description": "Anzahl der abzurufenden Verlauftage. Überschreibt den konfigurierten Standardwert nur für diesen Import."
+          "name": "Max Geschichte Tage",
+          "description": "Anzahl der Tage des abzurufenden Verlaufs. Setzt die konfigurierte Vorgabe nur für diesen Import außer Kraft."
         }
       }
     },
     "ws_debug_probe": {
-      "name": "Websocket-Debug-Prüfung auslösen",
-      "description": "Fordert eine sofortige Aktualisierung von ``dev_data`` durch den Websocket-Client an und protokolliert die Größe der nächsten ``dev_handshake``- und ``update``-Frames. Aktiviere die Debug-Option in den Integrations-Einstellungen, bevor du diese Hilfe nutzt.",
+      "name": "Websocket-Debug-Sonde aussenden",
+      "description": "Fordert eine sofortige ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update``-Framegröße an. Aktivieren Sie die Debug-Option in den Integrationseinstellungen, bevor Sie diese Hilfestellung verwenden.",
       "fields": {
         "entry_id": {
-          "name": "Konfigurations-Eintrags-ID",
-          "description": "Beschränkt die Prüfung auf einen einzelnen TermoWeb-Konfigurationseintrag.",
+          "name": "Konfig-Eintrag ID",
+          "description": "Beschränken Sie die Sonde auf einen einzigen TermoWeb-Konfigurationseintrag.",
           "example": "abcd1234deadbeef"
         },
         "dev_id": {
           "name": "Geräte-ID",
-          "description": "Beschränkt die Prüfung auf ein einzelnes Gateway.",
+          "description": "Beschränken Sie die Sonde auf ein einzelnes Gateway-Gerät.",
           "example": "0000abcd"
         }
       }

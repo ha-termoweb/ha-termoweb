@@ -1,0 +1,195 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Csatlakozás a TermoWeb családi fűtőberendezésekhez",
+        "description": "Változat: {version}\n\nVálassza ki a TermoWeb vagy Ducaheat márkát, és adja meg a fiókja hitelesítő adatait.",
+        "data": {
+          "brand": "Márka",
+          "username": "E-mail",
+          "password": "Jelszó",
+          "poll_interval": "Bázis lekérdezési időköz (másodperc)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Érvénytelen felhasználónév vagy jelszó (vagy ügyfélkulcs).",
+      "cannot_connect": "Nem lehet csatlakozni a TermoWebhez - hálózati/DNS/SSL hiba.",
+      "rate_limited": "Átmenetileg az API által korlátozott sebességgel. Próbálja meg később újra.",
+      "unknown": "Ismeretlen hiba"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "TermoWeb lehetőségek",
+        "description": "Változat: {version}",
+        "data": {
+          "poll_interval": "Bázis lekérdezési időköz (másodperc)",
+          "debug": "A hibakeresési segédprogramok engedélyezése"
+        }
+      }
+    }
+  },
+  "fallbacks": {
+    "heater_name": "Fűtés {addr}",
+    "node_name": "Csomópont {addr}",
+    "power_monitor_name": "Teljesítményfigyelő {addr}",
+    "never": "Soha"
+  },
+  "entity": {
+    "binary_sensor": {
+      "gateway_online": {
+        "name": "Gateway online"
+      },
+      "boost_active": {
+        "name": "Boost aktív"
+      }
+    },
+    "button": {
+      "force_refresh": {
+        "name": "Frissítés kikényszerítése"
+      },
+      "accumulator_boost_start": {
+        "name": "Start boost"
+      },
+      "accumulator_boost_cancel": {
+        "name": "Cancel boost"
+      }
+    },
+    "number": {
+      "accumulator_boost_duration": {
+        "name": "Boost időtartam"
+      },
+      "accumulator_boost_temperature": {
+        "name": "Boost hőmérséklet"
+      }
+    },
+    "sensor": {
+      "heater_temperature": {
+        "name": "Hőmérséklet"
+      },
+      "heater_energy_total": {
+        "name": "Energia"
+      },
+      "heater_power": {
+        "name": "Teljesítmény"
+      },
+      "power_monitor_energy": {
+        "name": "Energia"
+      },
+      "power_monitor_power": {
+        "name": "Teljesítmény"
+      },
+      "installation_total_energy": {
+        "name": "Teljes energia"
+      },
+      "boost_minutes_remaining": {
+        "name": "Boost percek hátralévő"
+      },
+      "boost_end": {
+        "name": "Boost vége"
+      }
+    }
+  },
+  "services": {
+    "set_acm_preset": {
+      "name": "Akkumulátor boost preset beállítása",
+      "description": "A TermoWeb akkumulátor alapértelmezett feltöltési időtartamának és/vagy hőmérsékletének frissítése. A perceknek 60 és 600 között kell lenniük, 60 perces lépésekben; a mező kihagyásával a meglévő érték marad.",
+      "fields": {
+        "minutes": {
+          "name": "Alapértelmezett lökés időtartama",
+          "description": "Azon percek száma, amelyekig a nyomásfokozónak működnie kell, ha nincs felülbírálat (60-600, 60. lépés).",
+          "example": "120"
+        },
+        "temperature": {
+          "name": "Boost hőmérséklet",
+          "description": "Választható boost beállítási pont, amelyet a boost munkamenet során alkalmazni kell (°C vagy °F).",
+          "example": "22.5"
+        }
+      }
+    },
+    "start_boost": {
+      "name": "Akkumulátor-növelés indítása",
+      "description": "Azonnali lökést indíthat el egy TermoWeb akkumulátoron. Adjon meg egy időtartamot az alapértelmezett érték felülbírálásához (60-600 perc 60 perces lépésekben), vagy hagyja ki, hogy a tárolt előbeállítást használja.",
+      "fields": {
+        "minutes": {
+          "name": "Boost időtartam",
+          "description": "A boost munkamenet időtartama percben (60-600, 60-as lépés). Választható.",
+          "example": "180"
+        }
+      }
+    },
+    "cancel_boost": {
+      "name": "Akkumulátor-növelés megszüntetése",
+      "description": "A TermoWeb akkumulátor aktív boost munkamenetének törlése."
+    },
+    "set_schedule": {
+      "name": "Heti ütemterv beállítása",
+      "description": "Állítsa be a TermoWeb fűtőberendezés 7×24-es heti programját. A program egy 168 egész számból álló lista, ahol minden érték a hét egy órájának felel meg, hétfőn 00:00-tól kezdődően. A 0 a hideg előbeállításhoz, az 1 az éjszakai előbeállításhoz és a 2 a nappali előbeállításhoz.",
+      "fields": {
+        "prog": {
+          "name": "Program",
+          "description": "168 egész számból álló lista (0, 1 vagy 2), amely a fűtőberendezés heti ütemezését jelöli. A 0 index hétfő 00:00, az 1 index hétfő 01:00, és így tovább.",
+          "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
+        }
+      }
+    },
+    "set_preset_temperatures": {
+      "name": "Előre beállított hőmérséklet beállítása",
+      "description": "Állítsa be a TermoWeb fűtőberendezés hideg, éjszakai és nappali előre beállított hőmérsékletét. Mindhárom hőmérsékletet megadhatja egyetlen listaként (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "fields": {
+        "ptemp": {
+          "name": "Előre beállított hőmérsékletek",
+          "description": "Három hőmérséklet [hideg, éjszaka, nappal] listája a fűtőegységgel megegyező mértékegységben (°C vagy °F). Ha megadják, ez felülírja az egyedi hideg, éjszakai és nappali értékeket.",
+          "example": "[10.0, 16.0, 20.0]"
+        },
+        "cold": {
+          "name": "Hideg előbeállítás",
+          "description": "A hideg előbeállítás hőmérséklete (°C vagy °F).",
+          "example": "10.0"
+        },
+        "night": {
+          "name": "Éjszakai előbeállítás",
+          "description": "Az éjszakai előbeállítás hőmérséklete (°C vagy °F).",
+          "example": "16.0"
+        },
+        "day": {
+          "name": "Nap előre beállított",
+          "description": "A napra előre beállított hőmérséklet (°C vagy °F).",
+          "example": "20.0"
+        }
+      }
+    },
+    "import_energy_history": {
+      "name": "Az energia behozatalának története",
+      "description": "Importálja a TermoWeb fűtőberendezések egy évvel ezelőtti historikus óránkénti energiaszámlálóit a Home Assistant statisztikáiba minden konfigurált fűtőberendezéshez.",
+      "fields": {
+        "reset_progress": {
+          "name": "Haladás visszaállítása",
+          "description": "Törölje a tárolt előrehaladást és importálja újra az előzményeket a nulláról."
+        },
+        "max_history_retrieval": {
+          "name": "Max történelem napok",
+          "description": "A lekérdezendő előzmények napjainak száma. Csak erre az importra vonatkozóan írja felül a konfigurált alapértelmezett értéket."
+        }
+      }
+    },
+    "ws_debug_probe": {
+      "name": "Websocket hibakereső szonda küldése",
+      "description": "Azonnali ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update`` keretméretek kérése. Engedélyezze a debug opciót az integrációs beállításokban, mielőtt ezt a segédprogramot használná.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurációs bejegyzés azonosítója",
+          "description": "A szonda korlátozása egyetlen TermoWeb konfigurációs bejegyzésre.",
+          "example": "abcd1234deadbeef"
+        },
+        "dev_id": {
+          "name": "Eszköz azonosítója",
+          "description": "A szonda egyetlen átjáróeszközre való korlátozása.",
+          "example": "0000abcd"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,195 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Prisijunkite prie \"TermoWeb\" šeimos šildytuvų",
+        "description": "Versija: {version}\n\nPasirinkite \"TermoWeb\" arba \"Ducaheat\" prekės ženklą ir įveskite savo paskyros duomenis.",
+        "data": {
+          "brand": "Prekės ženklas",
+          "username": "El. paštas",
+          "password": "Slaptažodis",
+          "poll_interval": "Bazinės apklausos intervalas (sekundės)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Netinkamas vartotojo vardas arba slaptažodis (arba kliento raktas).",
+      "cannot_connect": "Nepavyksta prisijungti prie \"TermoWeb\" - tinklo/DNS/SSL klaida.",
+      "rate_limited": "Laikinai apribota API norma. Pabandykite dar kartą vėliau.",
+      "unknown": "Nežinoma klaida"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "\"TermoWeb\" parinktys",
+        "description": "Versija: {version}",
+        "data": {
+          "poll_interval": "Bazinės apklausos intervalas (sekundės)",
+          "debug": "Įjungti derinimo pagalbininkus"
+        }
+      }
+    }
+  },
+  "fallbacks": {
+    "heater_name": "Šildytuvas {addr}",
+    "node_name": "Mazgas {addr}",
+    "power_monitor_name": "Maitinimo monitorius {addr}",
+    "never": "Niekada"
+  },
+  "entity": {
+    "binary_sensor": {
+      "gateway_online": {
+        "name": "Vartai internetu"
+      },
+      "boost_active": {
+        "name": "Didinti aktyvumą"
+      }
+    },
+    "button": {
+      "force_refresh": {
+        "name": "Priverstinis atnaujinimas"
+      },
+      "accumulator_boost_start": {
+        "name": "Pradėti didinti"
+      },
+      "accumulator_boost_cancel": {
+        "name": "Atšaukti postūmį"
+      }
+    },
+    "number": {
+      "accumulator_boost_duration": {
+        "name": "Didinimo trukmė"
+      },
+      "accumulator_boost_temperature": {
+        "name": "Padidinti temperatūrą"
+      }
+    },
+    "sensor": {
+      "heater_temperature": {
+        "name": "Temperatūra"
+      },
+      "heater_energy_total": {
+        "name": "Energija"
+      },
+      "heater_power": {
+        "name": "Maitinimas"
+      },
+      "power_monitor_energy": {
+        "name": "Energija"
+      },
+      "power_monitor_power": {
+        "name": "Maitinimas"
+      },
+      "installation_total_energy": {
+        "name": "Bendra energija"
+      },
+      "boost_minutes_remaining": {
+        "name": "Likusios \"Boost\" minutės"
+      },
+      "boost_end": {
+        "name": "Didinimo pabaiga"
+      }
+    }
+  },
+  "services": {
+    "set_acm_preset": {
+      "name": "Sukonfigūruokite išankstinę akumuliatoriaus didinimo nuostatą",
+      "description": "Atnaujinkite numatytąją \"TermoWeb\" akumuliatoriaus didinimo trukmę ir (arba) temperatūrą. Minučių intervalas turi būti nuo 60 iki 600 minučių su 60 minučių žingsniu; jei norite išlaikyti esamą vertę, lauką praleiskite.",
+      "fields": {
+        "minutes": {
+          "name": "Numatytoji didinimo trukmė",
+          "description": "Minučių skaičius, kiek turėtų veikti postūmis, kai nenumatytas joks valdymas (60-600, žingsnis 60).",
+          "example": "120"
+        },
+        "temperature": {
+          "name": "Padidinti temperatūrą",
+          "description": "Neprivaloma didinimo nustatyta vertė, kuri taikoma didinimo seanso metu (°C arba °F).",
+          "example": "22.5"
+        }
+      }
+    },
+    "start_boost": {
+      "name": "Akumuliatoriaus paleidimo postūmis",
+      "description": "Iš karto padidinkite \"TermoWeb\" akumuliatoriaus apkrovą. Nurodykite trukmę, kad pakeistumėte numatytuosius nustatymus (60-600 minučių po 60 minučių), arba jos nenurodykite, kad būtų naudojamas išsaugotas išankstinis nustatymas.",
+      "fields": {
+        "minutes": {
+          "name": "Didinimo trukmė",
+          "description": "Padidinimo seanso trukmė minutėmis (60-600, žingsnis 60). Neprivaloma.",
+          "example": "180"
+        }
+      }
+    },
+    "cancel_boost": {
+      "name": "Atšaukti akumuliatoriaus didinimą",
+      "description": "Atšaukite aktyvią \"TermoWeb\" akumuliatoriaus didinimo sesiją."
+    },
+    "set_schedule": {
+      "name": "Nustatykite savaitės tvarkaraštį",
+      "description": "Nustatykite \"TermoWeb\" šildytuvo 7×24 savaitinę programą. Programą sudaro 168 sveikųjų skaičių sąrašas, kuriame kiekviena reikšmė atitinka vieną savaitės valandą, prasidedančią pirmadienį 00:00. Naudokite 0 šaltajam išankstiniam nustatymui, 1 - naktiniam išankstiniam nustatymui ir 2 - dienos išankstiniam nustatymui.",
+      "fields": {
+        "prog": {
+          "name": "Programa",
+          "description": "168 sveikųjų skaičių (0, 1 arba 2) sąrašas, nurodantis šildytuvo savaitės tvarkaraštį. Indeksas 0 reiškia pirmadienį 00:00, indeksas 1 - pirmadienį 01:00 ir t. t.",
+          "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
+        }
+      }
+    },
+    "set_preset_temperatures": {
+      "name": "Nustatykite iš anksto nustatytą temperatūrą",
+      "description": "Nustatykite \"TermoWeb\" šildytuvo šalčio, nakties ir dienos iš anksto nustatytą temperatūrą. Galite pateikti visas tris temperatūras kaip vieną sąrašą (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "fields": {
+        "ptemp": {
+          "name": "Iš anksto nustatyta temperatūra",
+          "description": "Trijų temperatūrų [šalčio, nakties, dienos] sąrašas tais pačiais vienetais kaip ir šildytuvas (°C arba °F). Jei pateikta, ji bus viršesnė už atskiras šalčio, nakties ir dienos vertes.",
+          "example": "[10.0, 16.0, 20.0]"
+        },
+        "cold": {
+          "name": "Šaltasis išankstinis nustatymas",
+          "description": "Iš anksto nustatyta šalčio temperatūra (°C arba °F).",
+          "example": "10.0"
+        },
+        "night": {
+          "name": "Nakties išankstinis nustatymas",
+          "description": "Nakties temperatūros nustatymas (°C arba °F).",
+          "example": "16.0"
+        },
+        "day": {
+          "name": "Iš anksto nustatyta diena",
+          "description": "Nustatyta dienos temperatūra (°C arba °F).",
+          "example": "20.0"
+        }
+      }
+    },
+    "import_energy_history": {
+      "name": "Energijos importo istorija",
+      "description": "Importuokite \"TermoWeb\" šildytuvų istorinius valandinius energijos skaitiklius iki vienerių metų atgal į \"Home Assistant\" statistiką kiekvienam sukonfigūruotam šildytuvui.",
+      "fields": {
+        "reset_progress": {
+          "name": "Iš naujo nustatyti pažangą",
+          "description": "Išvalykite išsaugotą pažangą ir iš naujo importuokite istoriją iš naujo."
+        },
+        "max_history_retrieval": {
+          "name": "Maksimalus istorijos dienų skaičius",
+          "description": "Atkuriamos istorijos dienų skaičius. Pakeičia tik šiam importui sukonfigūruotą numatytąjį nustatymą."
+        }
+      }
+    },
+    "ws_debug_probe": {
+      "name": "Išsiųsti žiniatinklio sąsajos derinimo zondą",
+      "description": "Prašyti nedelsiant ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update`` kadrų dydžių. Prieš naudodami šią pagalbinę priemonę, integracijos nustatymuose įjunkite derinimo parinktį.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigūravimo įrašo ID",
+          "description": "Apriboti zondą vienu \"TermoWeb\" konfigūracijos įrašu.",
+          "example": "abcd1234deadbeef"
+        },
+        "dev_id": {
+          "name": "Įrenginio ID",
+          "description": "Apriboti zondą vienu šliuzo įrenginiu.",
+          "example": "0000abcd"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,195 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Opret forbindelse til TermoWeb-familiens varmeapparater",
+        "description": "Version: {version}\n\nVælg dit TermoWeb- eller Ducaheat-mærke, og indtast dine kontooplysninger.",
+        "data": {
+          "brand": "Brand",
+          "username": "E-mail",
+          "password": "Adgangskode",
+          "poll_interval": "Base poll-interval (sekunder)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Ugyldigt brugernavn eller adgangskode (eller klientnøgle).",
+      "cannot_connect": "Kan ikke oprette forbindelse til TermoWeb - netværks-/DNS/SSL-fejl.",
+      "rate_limited": "Midlertidigt hastighedsbegrænset af API. Prøv igen senere.",
+      "unknown": "Ukendt fejl"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "TermoWeb-indstillinger",
+        "description": "Version: {version}",
+        "data": {
+          "poll_interval": "Base poll-interval (sekunder)",
+          "debug": "Aktivér fejlfindingshjælpere"
+        }
+      }
+    }
+  },
+  "fallbacks": {
+    "heater_name": "Varmeapparat {addr}",
+    "node_name": "Knudepunkt {addr}",
+    "power_monitor_name": "Strømovervågning {addr}",
+    "never": "Aldrig"
+  },
+  "entity": {
+    "binary_sensor": {
+      "gateway_online": {
+        "name": "Gateway online"
+      },
+      "boost_active": {
+        "name": "Boost aktiv"
+      }
+    },
+    "button": {
+      "force_refresh": {
+        "name": "Fremtving opdatering"
+      },
+      "accumulator_boost_start": {
+        "name": "Start boost"
+      },
+      "accumulator_boost_cancel": {
+        "name": "Annuller boost"
+      }
+    },
+    "number": {
+      "accumulator_boost_duration": {
+        "name": "Varighed af boost"
+      },
+      "accumulator_boost_temperature": {
+        "name": "Boost-temperatur"
+      }
+    },
+    "sensor": {
+      "heater_temperature": {
+        "name": "Temperatur"
+      },
+      "heater_energy_total": {
+        "name": "Energi"
+      },
+      "heater_power": {
+        "name": "Kraft"
+      },
+      "power_monitor_energy": {
+        "name": "Energi"
+      },
+      "power_monitor_power": {
+        "name": "Kraft"
+      },
+      "installation_total_energy": {
+        "name": "Samlet energi"
+      },
+      "boost_minutes_remaining": {
+        "name": "Boost minutter tilbage"
+      },
+      "boost_end": {
+        "name": "Boost-ende"
+      }
+    }
+  },
+  "services": {
+    "set_acm_preset": {
+      "name": "Konfigurer akkumulatorens boost-forudindstilling",
+      "description": "Opdater standard boostvarighed og/eller -temperatur for en TermoWeb-akkumulator. Minutter skal være mellem 60 og 600 i intervaller på 60 minutter; udelad et felt for at beholde den eksisterende værdi.",
+      "fields": {
+        "minutes": {
+          "name": "Standard boost-varighed",
+          "description": "Antal minutter, boostet skal køre, når der ikke er nogen overstyring (60-600, trin 60).",
+          "example": "120"
+        },
+        "temperature": {
+          "name": "Boost-temperatur",
+          "description": "Valgfrit boost-setpunkt til anvendelse under boost-sessionen (°C eller °F).",
+          "example": "22.5"
+        }
+      }
+    },
+    "start_boost": {
+      "name": "Start akkumulator boost",
+      "description": "Udløs et øjeblikkeligt boost på en TermoWeb-akkumulator. Angiv en varighed for at tilsidesætte standardindstillingen (60-600 minutter i intervaller på 60 minutter), eller udelad den for at bruge den gemte forudindstilling.",
+      "fields": {
+        "minutes": {
+          "name": "Varighed af boost",
+          "description": "Varighed af boost-sessionen i minutter (60-600, trin 60). Valgfri indstilling.",
+          "example": "180"
+        }
+      }
+    },
+    "cancel_boost": {
+      "name": "Annuller akkumulator-boost",
+      "description": "Afbryd den aktive boost-session på en TermoWeb-akkumulator."
+    },
+    "set_schedule": {
+      "name": "Lav en ugentlig tidsplan",
+      "description": "Indstil 7×24-ugeprogrammet for et TermoWeb-varmelegeme. Programmet er en liste med 168 heltal, hvor hver værdi svarer til en time i ugen med start mandag 00:00. Brug 0 for kuldeindstilling, 1 for natindstilling og 2 for dagindstilling.",
+      "fields": {
+        "prog": {
+          "name": "Program",
+          "description": "En liste med 168 heltal (0, 1 eller 2), der repræsenterer varmeapparatets ugentlige tidsplan. Indeks 0 er mandag 00:00, indeks 1 er mandag 01:00 og så videre.",
+          "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
+        }
+      }
+    },
+    "set_preset_temperatures": {
+      "name": "Indstil forudindstillede temperaturer",
+      "description": "Indstil de forudindstillede temperaturer for kulde, nat og dag for en TermoWeb-varmer. Du kan enten angive alle tre temperaturer som en enkelt liste (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
+      "fields": {
+        "ptemp": {
+          "name": "Forudindstillede temperaturer",
+          "description": "En liste med tre temperaturer [kulde, nat, dag] i samme enheder som varmelegemet (°C eller °F). Hvis den er angivet, vil den tilsidesætte de individuelle værdier for kulde, nat og dag.",
+          "example": "[10.0, 16.0, 20.0]"
+        },
+        "cold": {
+          "name": "Kold forudindstilling",
+          "description": "Temperatur for den kolde forudindstilling (°C eller °F).",
+          "example": "10.0"
+        },
+        "night": {
+          "name": "Forudindstillet til nat",
+          "description": "Temperatur for nattens forudindstilling (°C eller °F).",
+          "example": "16.0"
+        },
+        "day": {
+          "name": "Forudindstillet dag",
+          "description": "Temperatur for den forudindstillede dag (°C eller °F).",
+          "example": "20.0"
+        }
+      }
+    },
+    "import_energy_history": {
+      "name": "Import af energihistorie",
+      "description": "Importer historiske timebaserede energitællere for TermoWeb-varmere for op til et år siden til Home Assistant-statistikker for hver konfigureret varmer.",
+      "fields": {
+        "reset_progress": {
+          "name": "Nulstil fremskridt",
+          "description": "Slet gemte fremskridt og genimporter historikken fra bunden."
+        },
+        "max_history_retrieval": {
+          "name": "Max historie dage",
+          "description": "Antal dages historik, der skal hentes. Overstyrer kun den konfigurerede standard for denne import."
+        }
+      }
+    },
+    "ws_debug_probe": {
+      "name": "Udsend websocket-fejlsøgningsprobe",
+      "description": "Anmod om en øjeblikkelig ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update`` rammestørrelse. Aktivér debug-indstillingen i integrationsindstillingerne, før du bruger denne hjælper.",
+      "fields": {
+        "entry_id": {
+          "name": "ID for konfigurationspost",
+          "description": "Begræns proben til en enkelt TermoWeb-konfigurationsindgang.",
+          "example": "abcd1234deadbeef"
+        },
+        "dev_id": {
+          "name": "Enheds-ID",
+          "description": "Begræns proben til en enkelt gateway-enhed.",
+          "example": "0000abcd"
+        }
+      }
+    }
+  }
+}

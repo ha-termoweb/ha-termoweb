@@ -2,20 +2,20 @@
   "config": {
     "step": {
       "user": {
-        "title": "Conectar con los calefactores de la familia TermoWeb",
-        "description": "Versión: {version}\n\nElige tu marca TermoWeb o Ducaheat e introduce las credenciales de tu cuenta.",
+        "title": "Conéctate a los calentadores de la familia TermoWeb",
+        "description": "Versión: {version}\n\nElija su marca TermoWeb o Ducaheat e introduzca las credenciales de su cuenta.",
         "data": {
           "brand": "Marca",
           "username": "Correo electrónico",
           "password": "Contraseña",
-          "poll_interval": "Intervalo básico de sondeo (segundos)"
+          "poll_interval": "Intervalo de sondeo de la base (segundos)"
         }
       }
     },
     "error": {
-      "invalid_auth": "Usuario, contraseña o clave de cliente no válidos.",
-      "cannot_connect": "No se puede conectar con TermoWeb: error de red/DNS/SSL.",
-      "rate_limited": "API limitada temporalmente. Inténtalo de nuevo más tarde.",
+      "invalid_auth": "Nombre de usuario o contraseña (o clave de cliente) no válidos.",
+      "cannot_connect": "No se puede conectar a TermoWeb - error de red/DNS/SSL.",
+      "rate_limited": "Tarifa limitada temporalmente por la API. Vuelva a intentarlo más tarde.",
       "unknown": "Error desconocido"
     }
   },
@@ -25,12 +25,21 @@
         "title": "Opciones de TermoWeb",
         "description": "Versión: {version}",
         "data": {
-          "poll_interval": "Intervalo básico de sondeo (segundos)",
-          "debug": "Activar ayudas de depuración"
+          "poll_interval": "Intervalo de sondeo de la base (segundos)",
+          "debug": "Activar ayudantes de depuración"
         }
       }
     }
   },
+<<<<<<< HEAD
+=======
+  "fallbacks": {
+    "heater_name": "Calentador {addr}",
+    "node_name": "Nodo {addr}",
+    "power_monitor_name": "Monitor de potencia {addr}",
+    "never": "Nunca"
+  },
+>>>>>>> b059849 (Updated machine translations for several languages using DeepL)
   "entity": {
     "binary_sensor": {
       "gateway_online": {
@@ -45,7 +54,7 @@
         "name": "Forzar actualización"
       },
       "accumulator_boost_start": {
-        "name": "Iniciar impulso"
+        "name": "Impulso inicial"
       },
       "accumulator_boost_cancel": {
         "name": "Cancelar impulso"
@@ -56,7 +65,7 @@
         "name": "Duración del impulso"
       },
       "accumulator_boost_temperature": {
-        "name": "Temperatura del impulso"
+        "name": "Aumento de la temperatura"
       }
     },
     "sensor": {
@@ -79,7 +88,7 @@
         "name": "Energía total"
       },
       "boost_minutes_remaining": {
-        "name": "Minutos de impulso restantes"
+        "name": "Minutos restantes"
       },
       "boost_end": {
         "name": "Fin del impulso"
@@ -88,99 +97,99 @@
   },
   "services": {
     "set_acm_preset": {
-      "name": "Configurar el ajuste predeterminado del acumulador",
-      "description": "Actualiza la duración y/o temperatura predeterminada del impulso para un acumulador TermoWeb. Los minutos deben estar entre 60 y 600 en incrementos de 60; omite un campo para mantener el valor existente.",
+      "name": "Configurar el preajuste de refuerzo del acumulador",
+      "description": "Actualice la duración y/o la temperatura de refuerzo por defecto para un acumulador TermoWeb. Los minutos deben estar entre 60 y 600 en incrementos de 60 minutos; omita un campo para mantener el valor existente.",
       "fields": {
         "minutes": {
           "name": "Duración predeterminada del impulso",
-          "description": "Número de minutos que debe durar el impulso cuando no se proporciona una anulación (60-600, paso 60).",
+          "description": "Número de minutos que debe funcionar el refuerzo cuando no se proporciona anulación (60-600, paso 60).",
           "example": "120"
         },
         "temperature": {
-          "name": "Temperatura del impulso",
-          "description": "Punto de ajuste opcional que se aplicará durante la sesión de impulso (°C o °F).",
+          "name": "Aumento de la temperatura",
+          "description": "Valor de consigna de refuerzo opcional que se aplicará durante la sesión de refuerzo (°C o °F).",
           "example": "22.5"
         }
       }
     },
     "start_boost": {
-      "name": "Iniciar impulso del acumulador",
-      "description": "Activa inmediatamente un impulso en un acumulador TermoWeb. Indica una duración para sobrescribir el valor predeterminado (60-600 minutos en incrementos de 60) o déjalo vacío para usar el ajuste guardado.",
+      "name": "Acumulador de arranque",
+      "description": "Activar un aumento inmediato en un acumulador TermoWeb. Indique una duración para anular la predeterminada (60-600 minutos en incrementos de 60 minutos), u omítala para utilizar la predeterminada almacenada.",
       "fields": {
         "minutes": {
           "name": "Duración del impulso",
-          "description": "Duración de la sesión de impulso en minutos (60-600, paso 60). Opcional.",
+          "description": "Duración de la sesión de refuerzo en minutos (60-600, paso 60). Opcional.",
           "example": "180"
         }
       }
     },
     "cancel_boost": {
-      "name": "Cancelar impulso del acumulador",
-      "description": "Cancela la sesión de impulso activa en un acumulador TermoWeb."
+      "name": "Cancelar el aumento del acumulador",
+      "description": "Cancelar la sesión de refuerzo activa en un acumulador TermoWeb."
     },
     "set_schedule": {
-      "name": "Configurar horario semanal",
-      "description": "Define el programa semanal 7×24 para un calefactor TermoWeb. El programa es una lista de 168 enteros, donde cada valor corresponde a una hora de la semana empezando el lunes a las 00:00. Usa 0 para el ajuste frío, 1 para el nocturno y 2 para el diurno.",
+      "name": "Establecer el horario semanal",
+      "description": "Configure el programa semanal 7×24 para un calentador TermoWeb. El programa es una lista de 168 enteros, donde cada valor corresponde a una hora de la semana a partir del lunes a las 00:00. Utilice 0 para la preselección de frío, 1 para la preselección de noche y 2 para la preselección de día.",
       "fields": {
         "prog": {
           "name": "Programa",
-          "description": "Lista de 168 enteros (0, 1 o 2) que representan el horario semanal del calefactor. El índice 0 es el lunes 00:00, el índice 1 es el lunes 01:00, etc.",
+          "description": "Una lista de 168 enteros (0, 1 ó 2) que representan el horario semanal del calefactor. El índice 0 es el lunes a las 00:00, el índice 1 es el lunes a las 01:00, y así sucesivamente.",
           "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
         }
       }
     },
     "set_preset_temperatures": {
-      "name": "Configurar temperaturas preestablecidas",
-      "description": "Define las temperaturas de los ajustes frío, noche y día para un calefactor TermoWeb. Puedes proporcionar las tres temperaturas como una lista única (``ptemp``) o especificar cada una por separado (``cold``, ``night`` y ``day``).",
+      "name": "Fijar temperaturas preestablecidas",
+      "description": "Establezca las temperaturas prefijadas de frío, noche y día para un calefactor TermoWeb. Puede indicar las tres temperaturas en una sola lista (``ptemp``) or specify each one separately (``cold``, ``night`` and ``day``).",
       "fields": {
         "ptemp": {
           "name": "Temperaturas preestablecidas",
-          "description": "Lista de tres temperaturas [frío, noche, día] en las mismas unidades que el calefactor (°C o °F). Si se indica, sobrescribe los valores individuales frío, noche y día.",
+          "description": "Una lista de tres temperaturas [frío, noche, día] en las mismas unidades que el calefactor (°C o °F). Si se proporciona, anulará los valores individuales de frío, noche y día.",
           "example": "[10.0, 16.0, 20.0]"
         },
         "cold": {
-          "name": "Ajuste frío",
-          "description": "Temperatura para el ajuste frío (°C o °F).",
+          "name": "Preajuste en frío",
+          "description": "Temperatura para la preselección de frío (°C o °F).",
           "example": "10.0"
         },
         "night": {
-          "name": "Ajuste nocturno",
-          "description": "Temperatura para el ajuste nocturno (°C o °F).",
+          "name": "Preajuste nocturno",
+          "description": "Temperatura para la preselección nocturna (°C o °F).",
           "example": "16.0"
         },
         "day": {
-          "name": "Ajuste diurno",
-          "description": "Temperatura para el ajuste diurno (°C o °F).",
+          "name": "Día predefinido",
+          "description": "Temperatura prefijada para el día (°C o °F).",
           "example": "20.0"
         }
       }
     },
     "import_energy_history": {
-      "name": "Importar historial de energía",
-      "description": "Importa los contadores horarios históricos de energía de los calefactores TermoWeb de hasta un año atrás en las estadísticas de Home Assistant para cada calefactor configurado.",
+      "name": "Historial de importación de energía",
+      "description": "Importe los contadores históricos de energía por hora de los calefactores TermoWeb de hasta un año atrás en las estadísticas del Asistente doméstico para cada calefactor configurado.",
       "fields": {
         "reset_progress": {
           "name": "Restablecer progreso",
-          "description": "Borra el progreso almacenado y vuelve a importar el historial desde cero."
+          "description": "Borre el progreso almacenado y vuelva a importar el historial desde cero."
         },
         "max_history_retrieval": {
-          "name": "Días máximos de historial",
-          "description": "Número de días de historial que se deben recuperar. Sobrescribe el valor predeterminado configurado solo para esta importación."
+          "name": "Días de historia máxima",
+          "description": "Número de días de historial a recuperar. Anula el valor predeterminado configurado solo para esta importación."
         }
       }
     },
     "ws_debug_probe": {
       "name": "Emitir sonda de depuración websocket",
-      "description": "Solicita una actualización inmediata de ``dev_data`` al cliente websocket y registra los tamaños de los siguientes marcos ``dev_handshake`` y ``update``. Activa la opción de depuración en la configuración de la integración antes de usar esta ayuda.",
+      "description": "Solicita un tamaño de fotograma inmediato ``dev_data`` refresh from the websocket client and log the next ``dev_handshake`` and ``update``. Habilite la opción de depuración en los ajustes de integración antes de utilizar este ayudante.",
       "fields": {
         "entry_id": {
-          "name": "ID de la entrada de configuración",
-          "description": "Restringe la sonda a una única entrada de configuración de TermoWeb.",
+          "name": "ID de entrada de configuración",
+          "description": "Restringe la sonda a una única entrada de configuración TermoWeb.",
           "example": "abcd1234deadbeef"
         },
         "dev_id": {
           "name": "ID del dispositivo",
-          "description": "Restringe la sonda a una sola pasarela.",
+          "description": "Restringir la sonda a un único dispositivo de puerta de enlace.",
           "example": "0000abcd"
         }
       }
