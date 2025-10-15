@@ -1119,7 +1119,10 @@ async def async_import_energy_history(
                 continue
 
             running_sum += delta
-            stats.append({"start": start_dt, "sum": running_sum})
+            if stats and stats[-1]["start"] == start_dt:
+                stats[-1]["sum"] = running_sum
+            else:
+                stats.append({"start": start_dt, "sum": running_sum})
             previous_kwh = kwh
 
         first_iso = datetime_mod.fromtimestamp(first_ts_val, UTC).isoformat()
