@@ -801,9 +801,6 @@ __all__ = [
     "translate_path_update",
 ]
 
-time_mod = time.monotonic
-
-
 def __getattr__(name: str) -> Any:
     """Lazily expose backend websocket client implementations."""
 
