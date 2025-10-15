@@ -190,6 +190,53 @@ async def test_store_statistics_imports_entity_series(
 
 
 @pytest.mark.asyncio
+async def test_store_statistics_handles_sync_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_store_statistics must tolerate synchronous helpers."""
+
+    hass = object()
+    metadata = {
+        "source": "recorder",
+        "statistic_id": "sensor.sync_energy",
+        "name": "Sync Energy",
+        "unit_of_measurement": "kWh",
+        "has_sum": True,
+        "has_mean": False,
+    }
+    stats = [{"start": datetime(2024, 5, 1, tzinfo=UTC), "sum": 1.0}]
+    captured: dict[str, Any] = {}
+
+    recorder_mod = ModuleType("homeassistant.components.recorder")
+    statistics_mod = ModuleType("homeassistant.components.recorder.statistics")
+    statistics_mod.__spec__ = ModuleSpec(  # type: ignore[attr-defined]
+        "homeassistant.components.recorder.statistics", loader=None, is_package=False
+    )
+
+    def _capture_import_stats(hass_arg, metadata_arg, stats_arg) -> None:
+        captured["hass"] = hass_arg
+        captured["metadata"] = metadata_arg
+        captured["stats"] = stats_arg
+
+    statistics_mod.async_import_statistics = _capture_import_stats  # type: ignore[attr-defined]
+    recorder_mod.statistics = statistics_mod  # type: ignore[attr-defined]
+
+    _install_fake_homeassistant(monkeypatch, recorder_mod)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.components.recorder.statistics",
+        statistics_mod,
+    )
+
+    await energy._store_statistics(hass, metadata, stats)
+
+    assert captured["hass"] is hass
+    assert captured["metadata"]["statistic_id"] == "sensor.sync_energy"
+    assert captured["metadata"]["source"] == "recorder"
+    assert captured["stats"] == stats
+
+
+@pytest.mark.asyncio
 async def test_import_energy_history_uses_union_statistics_for_offset(
     monkeypatch: pytest.MonkeyPatch,
     stub_hass,

@@ -32,9 +32,7 @@ def _install_fake_homeassistant(
     setattr(homeassistant_mod, "components", components_mod)
 
     monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_mod)
-    monkeypatch.setitem(
-        sys.modules, "homeassistant.components", components_mod
-    )
+    monkeypatch.setitem(sys.modules, "homeassistant.components", components_mod)
 
     if recorder_module is not None:
         recorder_module.__spec__ = ModuleSpec(  # type: ignore[attr-defined]
@@ -54,7 +52,9 @@ def _install_fake_homeassistant(
         )
 
 
-def test_resolve_recorder_imports_missing_get_instance(monkeypatch: "pytest.MonkeyPatch") -> None:
+def test_resolve_recorder_imports_missing_get_instance(
+    monkeypatch: "pytest.MonkeyPatch",
+) -> None:
     """Cache recorder imports when ``get_instance`` is unavailable."""
 
     monkeypatch.setattr(energy, "_RECORDER_IMPORTS", None)
@@ -73,7 +73,9 @@ def test_resolve_recorder_imports_missing_get_instance(monkeypatch: "pytest.Monk
     assert first.statistics is statistics_module
 
 
-def test_resolve_recorder_imports_module_missing(monkeypatch: "pytest.MonkeyPatch") -> None:
+def test_resolve_recorder_imports_module_missing(
+    monkeypatch: "pytest.MonkeyPatch",
+) -> None:
     """Cache recorder imports when the recorder module is unavailable."""
 
     monkeypatch.setattr(energy, "_RECORDER_IMPORTS", None)
@@ -147,3 +149,48 @@ async def test_clear_statistics_compat_uses_instance_async(
             {"start_time": start, "end_time": end},
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_clear_statistics_compat_falls_back_to_async_clear(
+    monkeypatch: "pytest.MonkeyPatch",
+) -> None:
+    """Use recorder async_clear_statistics when delete helper missing."""
+
+    monkeypatch.setattr(energy, "_RECORDER_IMPORTS", None)
+
+    calls: list[list[str]] = []
+
+    class _Recorder:
+        """Stub recorder exposing async_clear_statistics only."""
+
+        async def async_clear_statistics(
+            self,
+            statistic_ids: list[str],
+            *,
+            on_done=None,
+        ) -> None:
+            calls.append(list(statistic_ids))
+
+        async def async_add_executor_job(self, *args, **kwargs):
+            raise AssertionError("executor helper should not be used")
+
+    recorder = _Recorder()
+
+    recorder_mod = ModuleType("homeassistant.components.recorder")
+    recorder_mod.get_instance = lambda hass: recorder  # type: ignore[attr-defined]
+    recorder_mod.statistics = SimpleNamespace()  # type: ignore[attr-defined]
+
+    _install_fake_homeassistant(monkeypatch, recorder_mod)
+
+    hass = SimpleNamespace()
+
+    result = await energy._clear_statistics_compat(
+        hass,
+        "sensor.energy_total",
+        start_time=datetime(2025, 10, 1, tzinfo=UTC),
+        end_time=datetime(2025, 10, 2, tzinfo=UTC),
+    )
+
+    assert result == "delete"
+    assert calls == [["sensor.energy_total"]]
