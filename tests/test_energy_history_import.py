@@ -141,10 +141,11 @@ async def test_import_energy_history_fetches_until_current_minute(
     assert OPTION_ENERGY_HISTORY_PROGRESS in options
 
 
-def test_store_statistics_writes_external_series(
+@pytest.mark.asyncio
+async def test_store_statistics_imports_entity_series(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """_store_statistics must always write to the external statistic id."""
+    """_store_statistics must import rows into the entity statistic id."""
 
     hass = object()
     metadata = {
@@ -164,12 +165,12 @@ def test_store_statistics_writes_external_series(
         "homeassistant.components.recorder.statistics", loader=None, is_package=False
     )
 
-    def _capture_external_stats(hass_arg, metadata_arg, stats_arg) -> None:
+    async def _capture_import_stats(hass_arg, metadata_arg, stats_arg) -> None:
         captured["hass"] = hass_arg
         captured["metadata"] = metadata_arg
         captured["stats"] = stats_arg
 
-    statistics_mod.async_add_external_statistics = _capture_external_stats
+    statistics_mod.async_import_statistics = _capture_import_stats
     recorder_mod.statistics = statistics_mod  # type: ignore[attr-defined]
 
     _install_fake_homeassistant(monkeypatch, recorder_mod)
@@ -179,10 +180,10 @@ def test_store_statistics_writes_external_series(
         statistics_mod,
     )
 
-    energy._store_statistics(hass, metadata, stats)
+    await energy._store_statistics(hass, metadata, stats)
 
     assert captured["hass"] is hass
-    assert captured["metadata"]["statistic_id"] == "sensor:test_energy"
+    assert captured["metadata"]["statistic_id"] == "sensor.test_energy"
     assert captured["metadata"]["source"] == "sensor"
     assert captured["stats"] == stats
     assert metadata["statistic_id"] == "sensor.test_energy"
@@ -322,21 +323,17 @@ async def test_import_energy_history_uses_union_statistics_for_offset(
 
     stored_stats: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
 
-    def _capture_store(
+    async def _capture_store(
         hass,
         metadata: dict[str, Any],
         stats: list[dict[str, Any]],
     ) -> None:
         stored_stats.append((metadata, stats))
         stat_id = metadata["statistic_id"]
-        domain, obj_id = stat_id.split(".", 1)
-        target_id = f"{domain}:{obj_id}"
-        existing = {
-            row["start"]: dict(row) for row in remaining_rows.get(target_id, [])
-        }
+        existing = {row["start"]: dict(row) for row in remaining_rows.get(stat_id, [])}
         for row in stats:
             existing[row["start"]] = dict(row)
-        remaining_rows[target_id] = sorted(
+        remaining_rows[stat_id] = sorted(
             existing.values(), key=lambda row: row["start"]
         )
 
@@ -363,7 +360,7 @@ async def test_import_energy_history_uses_union_statistics_for_offset(
 
     assert requested_stat_sets
     assert requested_stat_sets[0] == {entity_id, external_id}
-    assert requested_stat_sets[-1] == {external_id}
+    assert requested_stat_sets[-1] == {entity_id}
 
     assert len(clear_calls) == 2
     assert {call[0] for call in clear_calls} == {entity_id, external_id}
@@ -384,16 +381,16 @@ async def test_import_energy_history_uses_union_statistics_for_offset(
         for row in remaining_rows.get(entity_id, [])
         if import_start_dt <= row["start"] < import_end_dt + timedelta(hours=1)
     ]
-    assert not remaining_dot
+    assert len(remaining_dot) == 3
+    assert remaining_dot[0]["sum"] == pytest.approx(5.0)
+    assert remaining_dot[-1]["sum"] == pytest.approx(7.5)
 
     remaining_external = [
         row
         for row in remaining_rows.get(external_id, [])
         if import_start_dt <= row["start"] < import_end_dt + timedelta(hours=1)
     ]
-    assert len(remaining_external) == 3
-    assert remaining_external[0]["sum"] == pytest.approx(5.0)
-    assert remaining_external[-1]["sum"] == pytest.approx(7.5)
+    assert not remaining_external
 
 
 @pytest.mark.asyncio
@@ -466,7 +463,9 @@ async def test_import_skips_duplicate_sample_timestamps(
 
     stored_payloads: list[list[dict[str, Any]]] = []
 
-    def _capture_store(hass, metadata: dict[str, Any], stats: list[dict[str, Any]]):
+    async def _capture_store(
+        hass, metadata: dict[str, Any], stats: list[dict[str, Any]]
+    ) -> None:
         stored_payloads.append(stats)
 
     async def _noop_enforce(*args, **kwargs):
@@ -574,7 +573,9 @@ async def test_import_skips_negative_deltas_after_reset(
 
     stored_payloads: list[list[dict[str, Any]]] = []
 
-    def _capture_store(hass, metadata: dict[str, Any], stats: list[dict[str, Any]]):
+    async def _capture_store(
+        hass, metadata: dict[str, Any], stats: list[dict[str, Any]]
+    ) -> None:
         stored_payloads.append(stats)
 
     async def _noop_enforce(*args, **kwargs):
@@ -623,7 +624,6 @@ async def test_enforce_monotonic_sum_clamps_descending(
     """Monotonic guard should clamp descending sums within the window."""
 
     entity_id = "sensor.foo_energy"
-    external_id = "sensor:foo_energy"
     import_start = datetime(2024, 1, 1, 12, tzinfo=UTC)
     import_end = import_start + timedelta(hours=1)
 
@@ -632,31 +632,29 @@ async def test_enforce_monotonic_sum_clamps_descending(
         {"start": import_end, "sum": 7.5},
     ]
 
-    async def _fake_stats_period(hass, start, end, statistic_ids):
-        assert set(statistic_ids) == {external_id}
+    async def _fake_collect_statistics(hass, stat_id, start, end):
+        assert stat_id == entity_id
         assert start == import_start - timedelta(hours=1)
         assert end == import_end + timedelta(hours=6)
-        return {external_id: seam_rows}
+        return list(seam_rows)
 
     monkeypatch.setattr(
         energy,
-        "_statistics_during_period_compat",
-        _fake_stats_period,
+        "_collect_statistics",
+        _fake_collect_statistics,
         raising=False,
     )
+    monkeypatch.setattr(energy.er, "async_get", lambda hass: None, raising=False)
 
     rewrites: list[dict[str, Any]] = []
 
-    def _capture_rewrite(hass, statistic_id, rows):
-        assert statistic_id == external_id
+    async def _capture_store(
+        hass, metadata: dict[str, Any], rows: list[dict[str, Any]]
+    ) -> None:
         rewrites.extend(rows)
+        assert metadata["statistic_id"] == entity_id
 
-    monkeypatch.setattr(
-        energy,
-        "_rewrite_statistics",
-        _capture_rewrite,
-        raising=False,
-    )
+    monkeypatch.setattr(energy, "_store_statistics", _capture_store, raising=False)
 
     await energy._enforce_monotonic_sum(
         SimpleNamespace(),
@@ -749,8 +747,8 @@ async def test_import_enforces_monotonic_sum_at_seam(
         ids = set(statistic_ids)
         if ids == {entity_id, external_id}:
             return {}
-        if ids == {external_id}:
-            return {external_id: seam_rows}
+        if ids == {entity_id}:
+            return {entity_id: seam_rows}
         return {}
 
     monkeypatch.setattr(
@@ -776,33 +774,16 @@ async def test_import_enforces_monotonic_sum_at_seam(
         raising=False,
     )
 
-    stored_stats: list[list[dict[str, Any]]] = []
+    stored_stats: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
 
-    def _capture_store(
+    async def _capture_store(
         hass,
         metadata: dict[str, Any],
         stats: list[dict[str, Any]],
     ) -> None:
-        stored_stats.append(stats)
+        stored_stats.append((metadata, list(stats)))
 
-    monkeypatch.setattr(
-        energy,
-        "_store_statistics",
-        _capture_store,
-        raising=False,
-    )
-
-    rewrites: list[tuple[str, list[dict[str, Any]]]] = []
-
-    def _capture_rewrite(hass, statistic_id, rows):
-        rewrites.append((statistic_id, rows))
-
-    monkeypatch.setattr(
-        energy,
-        "_rewrite_statistics",
-        _capture_rewrite,
-        raising=False,
-    )
+    monkeypatch.setattr(energy, "_store_statistics", _capture_store, raising=False)
 
     await energy.async_import_energy_history(
         stub_hass,
@@ -812,9 +793,9 @@ async def test_import_enforces_monotonic_sum_at_seam(
     )
 
     assert stored_stats, "Import should write statistics"
-    assert rewrites, "Monotonic guard should rewrite seam hours"
-    seam_stat_id, seam_rows_written = rewrites[-1]
-    assert seam_stat_id == external_id
-    assert seam_rows_written == [
-        {"start": import_end_dt + timedelta(hours=1), "sum": 6.5}
-    ]
+    assert len(stored_stats) >= 2
+    metadata, initial_rows = stored_stats[0]
+    assert metadata["statistic_id"] == entity_id
+    assert len(initial_rows) >= 2
+    _, seam_rewrite = stored_stats[-1]
+    assert seam_rewrite == [{"start": import_end_dt + timedelta(hours=1), "sum": 6.5}]
