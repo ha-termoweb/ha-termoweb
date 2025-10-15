@@ -613,11 +613,6 @@ def test_prepare_nodes_dispatch_resolves_record_dev_id_and_coordinator_inventory
     hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": hass_record}})
     coordinator = SimpleNamespace(update_nodes=MagicMock())
 
-    def _fail(*_: Any, **__: Any) -> Any:
-        raise AssertionError("resolve_record_inventory should not be called")
-
-    monkeypatch.setattr(base_ws, "resolve_record_inventory", _fail, raising=False)
-
     context = base_ws._prepare_nodes_dispatch(
         hass,
         entry_id="entry",
