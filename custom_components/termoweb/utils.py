@@ -180,5 +180,3 @@ def float_or_none(value: Any) -> float | None:
         return num if math.isfinite(num) else None
     except Exception:  # noqa: BLE001
         return None
-
-
