@@ -184,7 +184,7 @@ async def test_store_statistics_imports_entity_series(
 
     assert captured["hass"] is hass
     assert captured["metadata"]["statistic_id"] == "sensor.test_energy"
-    assert captured["metadata"]["source"] == "sensor"
+    assert captured["metadata"]["source"] == "recorder"
     assert captured["stats"] == stats
     assert metadata["statistic_id"] == "sensor.test_energy"
 

@@ -147,9 +147,8 @@ async def _store_statistics(
     if not isinstance(stat_id, str) or "." not in stat_id:
         raise ValueError("metadata must include an entity statistic_id")
 
-    domain, _ = stat_id.split(".", 1)
     import_metadata = dict(metadata)
-    import_metadata.update({"source": domain, "statistic_id": stat_id})
+    import_metadata.update({"source": "recorder", "statistic_id": stat_id})
 
     await async_import_statistics(hass, import_metadata, stats)
 
@@ -350,6 +349,19 @@ async def _clear_statistics_compat(  # pragma: no cover - compatibility shim
         sync_uses_instance=True,
     )
 
+    if helpers.async_fn is not None:
+        delete_args: dict[str, Any] = {}
+        if start_time is not None:
+            delete_args["start_time"] = start_time
+        if end_time is not None:
+            delete_args["end_time"] = end_time
+
+        try:
+            await helpers.async_fn(hass, [statistic_id], **delete_args)
+        except TypeError:  # pragma: no cover - older signature fallback
+            await helpers.async_fn(hass, [statistic_id])
+        return "delete"  # pragma: no cover - dependent on async helper availability
+
     if helpers.sync and helpers.executor and helpers.sync_target is not None:
         await helpers.executor(
             helpers.sync,
@@ -358,20 +370,7 @@ async def _clear_statistics_compat(  # pragma: no cover - compatibility shim
         )
         return "clear"
 
-    if helpers.async_fn is None:
-        return None
-
-    delete_args: dict[str, Any] = {}
-    if start_time is not None:
-        delete_args["start_time"] = start_time
-    if end_time is not None:
-        delete_args["end_time"] = end_time
-
-    try:
-        await helpers.async_fn(hass, [statistic_id], **delete_args)
-    except TypeError:  # pragma: no cover - older signature fallback
-        await helpers.async_fn(hass, [statistic_id])
-    return "delete"  # pragma: no cover - dependent on async helper availability
+    return None
 
 
 async def _collect_statistics(
@@ -1108,9 +1107,7 @@ async def async_import_energy_history(
         ent_entry = ent_reg.async_get(entity_id) if ent_reg else None
         name = getattr(ent_entry, "original_name", None) or entity_id
 
-        domain, _ = entity_id.split(".", 1)
         metadata = {
-            "source": domain,
             "statistic_id": entity_id,
             "unit_of_measurement": "kWh",
             "name": name,
