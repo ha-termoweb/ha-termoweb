@@ -29,12 +29,6 @@
       }
     }
   },
-  "fallbacks": {
-    "heater_name": "Varmeapparat {addr}",
-    "node_name": "Knutepunkt {addr}",
-    "power_monitor_name": "Strømovervåkning {addr}",
-    "never": "Aldri"
-  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

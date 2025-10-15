@@ -29,12 +29,6 @@
       }
     }
   },
-  "fallbacks": {
-    "heater_name": "Sildītājs {addr}",
-    "node_name": "Mezgls {addr}",
-    "power_monitor_name": "Enerģijas monitora {addr}",
-    "never": "Nekad"
-  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

@@ -29,15 +29,6 @@
       }
     }
   },
-<<<<<<< HEAD
-=======
-  "fallbacks": {
-    "heater_name": "Θερμαντήρας {addr}",
-    "node_name": "Κόμβος {addr}",
-    "power_monitor_name": "Παρακολούθηση ισχύος {addr}",
-    "never": "Ποτέ"
-  },
->>>>>>> b059849 (Updated machine translations for several languages using DeepL)
   "entity": {
     "binary_sensor": {
       "gateway_online": {

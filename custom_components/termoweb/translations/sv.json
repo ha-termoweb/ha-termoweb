@@ -29,12 +29,6 @@
       }
     }
   },
-  "fallbacks": {
-    "heater_name": "Värmeelement {addr}",
-    "node_name": "Nod {addr}",
-    "power_monitor_name": "Strömövervakning {addr}",
-    "never": "Aldrig"
-  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

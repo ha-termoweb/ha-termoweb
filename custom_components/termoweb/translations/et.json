@@ -29,12 +29,6 @@
       }
     }
   },
-  "fallbacks": {
-    "heater_name": "Kütteseade {addr}",
-    "node_name": "Sõlm {addr}",
-    "power_monitor_name": "Võimsusmonitor {addr}",
-    "never": "Mitte kunagi"
-  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

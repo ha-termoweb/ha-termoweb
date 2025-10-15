@@ -29,15 +29,6 @@
       }
     }
   },
-<<<<<<< HEAD
-=======
-  "fallbacks": {
-    "heater_name": "Ohřívač {addr}",
-    "node_name": "Uzel {addr}",
-    "power_monitor_name": "Monitor napájení {addr}",
-    "never": "Nikdy"
-  },
->>>>>>> b059849 (Updated machine translations for several languages using DeepL)
   "entity": {
     "binary_sensor": {
       "gateway_online": {

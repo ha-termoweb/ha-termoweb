@@ -29,12 +29,6 @@
       }
     }
   },
-  "fallbacks": {
-    "heater_name": "Šildytuvas {addr}",
-    "node_name": "Mazgas {addr}",
-    "power_monitor_name": "Maitinimo monitorius {addr}",
-    "never": "Niekada"
-  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

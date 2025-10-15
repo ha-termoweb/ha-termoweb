@@ -29,15 +29,6 @@
       }
     }
   },
-<<<<<<< HEAD
-=======
-  "fallbacks": {
-    "heater_name": "Chauffage {addr}",
-    "node_name": "Nœud {addr}",
-    "power_monitor_name": "Moniteur de puissance {addr}",
-    "never": "Jamais"
-  },
->>>>>>> b059849 (Updated machine translations for several languages using DeepL)
   "entity": {
     "binary_sensor": {
       "gateway_online": {

@@ -29,12 +29,6 @@
       }
     }
   },
-  "fallbacks": {
-    "heater_name": "Нагревател {addr}",
-    "node_name": "Възел {addr}",
-    "power_monitor_name": "Монитор на захранването {addr}",
-    "never": "Никога"
-  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

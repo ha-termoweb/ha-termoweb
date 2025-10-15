@@ -29,15 +29,6 @@
       }
     }
   },
-<<<<<<< HEAD
-=======
-  "fallbacks": {
-    "heater_name": "Heizgerät {addr}",
-    "node_name": "Knoten {addr}",
-    "power_monitor_name": "Leistungsmonitor {addr}",
-    "never": "Niemals"
-  },
->>>>>>> b059849 (Updated machine translations for several languages using DeepL)
   "entity": {
     "binary_sensor": {
       "gateway_online": {

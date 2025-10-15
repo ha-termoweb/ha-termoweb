@@ -29,12 +29,6 @@
       }
     }
   },
-  "fallbacks": {
-    "heater_name": "Fűtés {addr}",
-    "node_name": "Csomópont {addr}",
-    "power_monitor_name": "Teljesítményfigyelő {addr}",
-    "never": "Soha"
-  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {
