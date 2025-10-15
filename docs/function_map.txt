@@ -828,8 +828,6 @@ custom_components/termoweb/entity.py :: GatewayDispatcherEntity.async_will_remov
     Unsubscribe from dispatcher updates before removal.
 custom_components/termoweb/entity.py :: GatewayDispatcherEntity._handle_gateway_dispatcher
     Handle dispatcher payloads targeting the entity.
-custom_components/termoweb/heater.py :: format_boost_duration_label
-    Return a human-readable label for boost durations.
 custom_components/termoweb/heater.py :: _build_boost_button_metadata
     Return the configured metadata describing boost helper buttons.
 custom_components/termoweb/heater.py :: HeaterPlatformDetails.__iter__
