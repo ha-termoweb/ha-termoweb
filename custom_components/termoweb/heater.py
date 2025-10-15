@@ -14,12 +14,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .boost import (
-    coerce_boost_bool,
-    coerce_boost_minutes,
-    coerce_boost_remaining_minutes,
-    supports_boost,
-)
+from .boost import coerce_boost_bool, coerce_boost_minutes, supports_boost
 from .const import DOMAIN, signal_ws_data
 from .inventory import (
     HEATER_NODE_TYPES,
@@ -616,7 +611,7 @@ def derive_boost_state(
             boost_minutes = resolved_minutes
 
     if boost_minutes is None:
-        boost_minutes = coerce_boost_remaining_minutes(source.get("boost_remaining"))
+        boost_minutes = coerce_boost_minutes(source.get("boost_remaining"))
 
     if boost_minutes is None and boost_end_dt is not None:
         delta_seconds = (boost_end_dt - dt_util.now()).total_seconds()
