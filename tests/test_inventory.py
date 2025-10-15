@@ -359,36 +359,6 @@ def test_inventory_heater_sample_targets_filters_invalid(
     targets = heater_inventory.heater_sample_targets
     assert targets == [("htr", "1")]
     assert ("acm", "2") not in targets
-def test_resolve_record_inventory_prefers_existing_container() -> None:
-    """Resolution should return stored inventory without rebuilding."""
-
-    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
-    container = Inventory(
-        "device",
-        raw_nodes,
-        inventory_module.build_node_inventory(raw_nodes),
-    )
-    record: dict[str, Any] = {"inventory": container}
-
-    resolution = inventory_module.resolve_record_inventory(record)
-
-    assert resolution.inventory is container
-    assert resolution.source == "inventory"
-    assert resolution.filtered_count == 1
-    assert resolution.raw_count == 1
-
-
-def test_resolve_record_inventory_missing_inventory_logs_error(caplog: pytest.LogCaptureFixture) -> None:
-    """Missing inventory should return a descriptive resolution."""
-
-    record: dict[str, Any] = {"dev_id": "device"}
-
-    resolution = inventory_module.resolve_record_inventory(record)
-
-    assert resolution.inventory is None
-    assert resolution.source == "missing"
-    assert resolution.filtered_count == 0
-    assert "device" in caplog.text
 
 
 def test_heater_platform_details_default_name(

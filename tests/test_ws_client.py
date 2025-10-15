@@ -525,11 +525,6 @@ def test_dispatch_nodes_reuses_record_inventory(monkeypatch: pytest.MonkeyPatch)
     dispatcher = MagicMock()
     monkeypatch.setattr(base_ws, "async_dispatcher_send", dispatcher)
 
-    def _fail(*_: Any, **__: Any) -> Any:
-        raise AssertionError("resolve_record_inventory should not be called")
-
-    monkeypatch.setattr(base_ws, "resolve_record_inventory", _fail, raising=False)
-
     class DummyCommon(base_ws._WSCommon):
         def __init__(self) -> None:
             self.hass = hass
@@ -577,11 +572,6 @@ def test_prepare_nodes_dispatch_resolves_record_dev_id_and_coordinator_inventory
     hass_record: dict[str, Any] = {"dev_id": "raw", "inventory": inventory}
     hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": hass_record}})
     coordinator = SimpleNamespace(update_nodes=MagicMock())
-
-    def _fail(*_: Any, **__: Any) -> Any:
-        raise AssertionError("resolve_record_inventory should not be called")
-
-    monkeypatch.setattr(base_ws, "resolve_record_inventory", _fail, raising=False)
 
     context = base_ws._prepare_nodes_dispatch(
         hass,
@@ -1350,8 +1340,6 @@ def test_ws_common_dispatch_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
     coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
     dispatcher = MagicMock()
     monkeypatch.setattr(base_ws, "async_dispatcher_send", dispatcher)
-
-    monkeypatch.setattr(base_ws, "resolve_record_inventory", lambda *_, **__: None, raising=False)
 
     class Dummy(base_ws._WSCommon):
         def __init__(self) -> None:
