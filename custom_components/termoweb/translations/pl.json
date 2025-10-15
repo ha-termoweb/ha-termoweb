@@ -7,8 +7,7 @@
         "data": {
           "brand": "Marka",
           "username": "E-mail",
-          "password": "Hasło",
-          "poll_interval": "Interwał odpytywania bazy (sekundy)"
+          "password": "Hasło"
         }
       }
     },
@@ -25,7 +24,6 @@
         "title": "Opcje TermoWeb",
         "description": "Wersja: {version}",
         "data": {
-          "poll_interval": "Interwał odpytywania bazy (sekundy)",
           "debug": "Włącz pomocników debugowania"
         }
       }

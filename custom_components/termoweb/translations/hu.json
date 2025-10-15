@@ -7,8 +7,7 @@
         "data": {
           "brand": "Márka",
           "username": "E-mail",
-          "password": "Jelszó",
-          "poll_interval": "Bázis lekérdezési időköz (másodperc)"
+          "password": "Jelszó"
         }
       }
     },
@@ -25,7 +24,6 @@
         "title": "TermoWeb lehetőségek",
         "description": "Változat: {version}",
         "data": {
-          "poll_interval": "Bázis lekérdezési időköz (másodperc)",
           "debug": "A hibakeresési segédprogramok engedélyezése"
         }
       }

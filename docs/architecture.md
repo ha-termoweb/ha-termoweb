@@ -293,7 +293,7 @@ classDiagram
     EnergyStateCoordinator --|> DataUpdateCoordinator
 
     TermoWebConfigFlow --> RESTClient : validates
-    TermoWebOptionsFlow --> StateCoordinator : updates poll interval
+    TermoWebOptionsFlow --> ConfigEntry : toggles debug helpers
     StateCoordinator --> RESTClient : polls nodes
     StateCoordinator --> Backend : starts websocket clients
     EnergyStateCoordinator --> RESTClient : fetches samples

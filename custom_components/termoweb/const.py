@@ -122,7 +122,7 @@ def signal_ws_status(entry_id: str) -> str:
     return f"{DOMAIN}_{entry_id}_ws_status"
 
 # Polling
-DEFAULT_POLL_INTERVAL: Final = 120  # seconds
+DEFAULT_POLL_INTERVAL: Final = 1800  # seconds (30 minutes)
 MIN_POLL_INTERVAL: Final = 30  # seconds
 MAX_POLL_INTERVAL: Final = 3600  # seconds
 

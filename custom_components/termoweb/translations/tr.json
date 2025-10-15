@@ -7,8 +7,7 @@
         "data": {
           "brand": "Marka",
           "username": "E-posta",
-          "password": "Şifre",
-          "poll_interval": "Baz yoklama aralığı (saniye)"
+          "password": "Şifre"
         }
       }
     },
@@ -25,7 +24,6 @@
         "title": "TermoWeb Seçenekleri",
         "description": "Versiyon: {version}",
         "data": {
-          "poll_interval": "Baz yoklama aralığı (saniye)",
           "debug": "Hata ayıklama yardımcılarını etkinleştirin"
         }
       }

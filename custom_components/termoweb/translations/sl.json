@@ -7,8 +7,7 @@
         "data": {
           "brand": "Blagovna znamka",
           "username": "E-pošta",
-          "password": "Geslo",
-          "poll_interval": "Interval anketiranja baze (sekunde)"
+          "password": "Geslo"
         }
       }
     },
@@ -25,7 +24,6 @@
         "title": "Možnosti TermoWeb",
         "description": "Različica: {version}",
         "data": {
-          "poll_interval": "Interval anketiranja baze (sekunde)",
           "debug": "Omogočite pomočnike za odpravljanje napak"
         }
       }

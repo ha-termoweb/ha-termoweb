@@ -7,8 +7,7 @@
         "data": {
           "brand": "Marca",
           "username": "Correo electrónico",
-          "password": "Contraseña",
-          "poll_interval": "Intervalo de sondeo de la base (segundos)"
+          "password": "Contraseña"
         }
       }
     },
@@ -25,7 +24,6 @@
         "title": "Opciones de TermoWeb",
         "description": "Versión: {version}",
         "data": {
-          "poll_interval": "Intervalo de sondeo de la base (segundos)",
           "debug": "Activar ayudantes de depuración"
         }
       }

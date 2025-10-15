@@ -7,8 +7,7 @@
         "data": {
           "brand": "Brand",
           "username": "E-mail",
-          "password": "Adgangskode",
-          "poll_interval": "Base poll-interval (sekunder)"
+          "password": "Adgangskode"
         }
       }
     },
@@ -25,7 +24,6 @@
         "title": "TermoWeb-indstillinger",
         "description": "Version: {version}",
         "data": {
-          "poll_interval": "Base poll-interval (sekunder)",
           "debug": "Aktivér fejlfindingshjælpere"
         }
       }

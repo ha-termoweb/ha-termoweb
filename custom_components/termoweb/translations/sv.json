@@ -7,8 +7,7 @@
         "data": {
           "brand": "Varumärke",
           "username": "E-post",
-          "password": "Lösenord",
-          "poll_interval": "Pollningsintervall för bas (sekunder)"
+          "password": "Lösenord"
         }
       }
     },
@@ -25,7 +24,6 @@
         "title": "TermoWeb Alternativ",
         "description": "Version: {version}__",
         "data": {
-          "poll_interval": "Pollningsintervall för bas (sekunder)",
           "debug": "Aktivera felsökningshjälpmedel"
         }
       }

@@ -7,8 +7,7 @@
         "data": {
           "brand": "Marca",
           "username": "E-mail",
-          "password": "Parolă",
-          "poll_interval": "Interval sondaj bază (secunde)"
+          "password": "Parolă"
         }
       }
     },
@@ -25,7 +24,6 @@
         "title": "Opțiuni TermoWeb",
         "description": "Versiune: {version}",
         "data": {
-          "poll_interval": "Interval sondaj bază (secunde)",
           "debug": "Activați ajutoarele de depanare"
         }
       }

@@ -7,8 +7,7 @@
         "data": {
           "brand": "Prekės ženklas",
           "username": "El. paštas",
-          "password": "Slaptažodis",
-          "poll_interval": "Bazinės apklausos intervalas (sekundės)"
+          "password": "Slaptažodis"
         }
       }
     },
@@ -25,7 +24,6 @@
         "title": "\"TermoWeb\" parinktys",
         "description": "Versija: {version}",
         "data": {
-          "poll_interval": "Bazinės apklausos intervalas (sekundės)",
           "debug": "Įjungti derinimo pagalbininkus"
         }
       }

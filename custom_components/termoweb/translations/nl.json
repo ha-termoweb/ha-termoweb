@@ -7,8 +7,7 @@
         "data": {
           "brand": "Merk",
           "username": "E-mail",
-          "password": "Wachtwoord",
-          "poll_interval": "Basis poll interval (seconden)"
+          "password": "Wachtwoord"
         }
       }
     },
@@ -25,7 +24,6 @@
         "title": "TermoWeb Opties",
         "description": "Versie: {version}",
         "data": {
-          "poll_interval": "Basis poll interval (seconden)",
           "debug": "Debughelpers inschakelen"
         }
       }

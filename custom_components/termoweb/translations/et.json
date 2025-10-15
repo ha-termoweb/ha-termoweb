@@ -7,8 +7,7 @@
         "data": {
           "brand": "Bränd",
           "username": "E-post",
-          "password": "Parool",
-          "poll_interval": "Baasküsitlusintervall (sekundid)"
+          "password": "Parool"
         }
       }
     },
@@ -25,7 +24,6 @@
         "title": "TermoWebi valikud",
         "description": "Versioon: {version}",
         "data": {
-          "poll_interval": "Baasküsitlusintervall (sekundid)",
           "debug": "Lubage silumisvahendid sisse lülitada"
         }
       }

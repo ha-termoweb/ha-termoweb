@@ -7,8 +7,7 @@
         "data": {
           "brand": "Marca",
           "username": "Email",
-          "password": "Palavra-passe",
-          "poll_interval": "Intervalo base de consulta (segundos)"
+          "password": "Palavra-passe"
         }
       }
     },
@@ -25,7 +24,6 @@
         "title": "Opções TermoWeb",
         "description": "Versão: {version}",
         "data": {
-          "poll_interval": "Intervalo base de consulta (segundos)",
           "debug": "Ativar auxiliares de depuração"
         }
       }
