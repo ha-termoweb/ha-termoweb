@@ -33,9 +33,13 @@ End users are non-technical Home Assistant operators. Documentation must be task
 * Format and lint all changes with `ruff` before committing.
 
 ## Testing Requirements
-* Execute `timeout 30s pytest --cov=custom_components.termoweb --cov-report=term-missing` (or the equivalent platform-specific command) and ensure the suite finishes within 30 seconds with 100% coverage before committing.
-* Capture partial logs whenever the timed run aborts; treat timeouts as failures requiring investigation. During debugging, you may run targeted, no-coverage subsets, but rerun the full timed command before completion.
+* Execute `timeout 30s pytest --cov=custom_components.termoweb --cov-report=term-missing`.
+* Capture partial logs whenever the timed run aborts; treat timeouts as failures requiring investigation. 
+* During debugging, run targeted, no-coverage subsets.
 * If tests approach the 30-second limit, suspect an asynchronous wait issue and stop the run rather than letting it hang.
+* Test only the code files you have changed. Do not try to fix failing tests unrelated to your changes.
+* If you remove duplicate or redundant code, remove the corresponding tests. Do not leave code or tests behind for backwards compatibility. 
+* Get 100% coverage on the code you are chaging.
 * Write meaningful tests that exercise edge cases, error handling, and invalid inputs, with particular focus on component interfaces.
 
 ## Documentation Responsibilities
