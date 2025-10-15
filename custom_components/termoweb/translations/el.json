@@ -31,12 +31,6 @@
       }
     }
   },
-  "fallbacks": {
-    "heater_name": "Θερμαντικό {addr}",
-    "node_name": "Κόμβος {addr}",
-    "power_monitor_name": "Μετρητής ενέργειας {addr}",
-    "never": "Ποτέ"
-  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

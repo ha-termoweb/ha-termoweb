@@ -31,12 +31,6 @@
       }
     }
   },
-  "fallbacks": {
-    "heater_name": "Обігрівач {addr}",
-    "node_name": "Вузол {addr}",
-    "power_monitor_name": "Лічильник енергії {addr}",
-    "never": "Ніколи"
-  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

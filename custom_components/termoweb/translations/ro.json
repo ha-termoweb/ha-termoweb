@@ -31,12 +31,6 @@
       }
     }
   },
-  "fallbacks": {
-    "heater_name": "Încălzitor {addr}",
-    "node_name": "Nod {addr}",
-    "power_monitor_name": "Monitor de energie {addr}",
-    "never": "Niciodată"
-  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

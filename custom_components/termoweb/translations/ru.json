@@ -31,12 +31,6 @@
       }
     }
   },
-  "fallbacks": {
-    "heater_name": "Обогреватель {addr}",
-    "node_name": "Узел {addr}",
-    "power_monitor_name": "Монитор энергии {addr}",
-    "never": "Никогда"
-  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

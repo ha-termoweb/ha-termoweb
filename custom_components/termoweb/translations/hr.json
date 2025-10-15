@@ -31,12 +31,6 @@
       }
     }
   },
-  "fallbacks": {
-    "heater_name": "Grijač {addr}",
-    "node_name": "Čvor {addr}",
-    "power_monitor_name": "Mjerač energije {addr}",
-    "never": "Nikada"
-  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

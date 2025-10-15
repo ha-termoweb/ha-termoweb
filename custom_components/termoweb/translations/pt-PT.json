@@ -31,12 +31,6 @@
       }
     }
   },
-  "fallbacks": {
-    "heater_name": "Aquecedor {addr}",
-    "node_name": "Nó {addr}",
-    "power_monitor_name": "Monitor de energia {addr}",
-    "never": "Nunca"
-  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

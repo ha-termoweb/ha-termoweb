@@ -31,12 +31,6 @@
       }
     }
   },
-  "fallbacks": {
-    "heater_name": "Heater {addr}",
-    "node_name": "Node {addr}",
-    "power_monitor_name": "Power Monitor {addr}",
-    "never": "Never"
-  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

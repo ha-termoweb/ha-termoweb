@@ -31,12 +31,6 @@
       }
     }
   },
-  "fallbacks": {
-    "heater_name": "Isıtıcı {addr}",
-    "node_name": "Düğüm {addr}",
-    "power_monitor_name": "Güç izleyicisi {addr}",
-    "never": "Asla"
-  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

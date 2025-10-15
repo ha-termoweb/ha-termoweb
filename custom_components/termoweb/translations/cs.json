@@ -31,12 +31,6 @@
       }
     }
   },
-  "fallbacks": {
-    "heater_name": "Topidlo {addr}",
-    "node_name": "Uzel {addr}",
-    "power_monitor_name": "Monitor energie {addr}",
-    "never": "Nikdy"
-  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

@@ -6,6 +6,7 @@ from collections.abc import Mapping, MutableMapping
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+
 try:  # pragma: no cover - fallback for stripped Home Assistant stubs in tests
     from homeassistant.helpers.translation import async_get_translations
 except ImportError:  # pragma: no cover - executed in unit test stubs
@@ -17,7 +18,9 @@ except ImportError:  # pragma: no cover - executed in unit test stubs
 
         return {}
 
+
 from .const import DOMAIN
+from .fallback_translations import get_fallback_translations
 
 FALLBACK_TRANSLATIONS_KEY = "fallback_translations"
 COORDINATOR_FALLBACK_ATTR = "_termoweb_fallback_translations"
@@ -54,13 +57,7 @@ async def async_get_fallback_translations(
     if not language:
         language = getattr(hass.config, "default_language", None) or "en"
 
-    strings = await async_get_translations(hass, language, DOMAIN)
-    prefix = f"component.{DOMAIN}."
-    fallbacks = {
-        key[len(prefix) :]: value
-        for key, value in strings.items()
-        if key.startswith(f"{prefix}fallbacks.")
-    }
+    fallbacks = get_fallback_translations(language)
 
     if isinstance(entry_data, MutableMapping):
         entry_data[FALLBACK_TRANSLATIONS_KEY] = fallbacks
@@ -103,10 +100,10 @@ def attach_fallbacks(target: Any, fallbacks: Mapping[str, str] | None) -> None:
 
 
 __all__ = [
-    "attach_fallbacks",
     "COORDINATOR_FALLBACK_ATTR",
     "FALLBACK_TRANSLATIONS_KEY",
     "_tr",
     "async_get_fallback_translations",
+    "attach_fallbacks",
     "format_fallback",
 ]

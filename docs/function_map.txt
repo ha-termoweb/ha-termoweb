@@ -854,6 +854,10 @@ custom_components/termoweb/entity.py :: GatewayDispatcherEntity.async_will_remov
     Unsubscribe from dispatcher updates before removal.
 custom_components/termoweb/entity.py :: GatewayDispatcherEntity._handle_gateway_dispatcher
     Handle dispatcher payloads targeting the entity.
+custom_components/termoweb/fallback_translations.py :: language_candidates
+    Return ordered fallback language candidates for ``language``.
+custom_components/termoweb/fallback_translations.py :: get_fallback_translations
+    Return fallback translation strings for ``language``.
 custom_components/termoweb/heater.py :: _build_boost_button_metadata
     Return the configured metadata describing boost helper buttons.
 custom_components/termoweb/heater.py :: HeaterPlatformDetails.__iter__
