@@ -808,6 +808,12 @@ custom_components/termoweb/energy.py :: _get_last_statistics_compat
     Retrieve the last statistics row via synchronous or async helpers.
 custom_components/termoweb/energy.py :: _clear_statistics_compat
     Clear statistics using whichever helper is available.
+custom_components/termoweb/energy.py :: _collect_statistics
+    Return statistics rows for a single statistic id.
+custom_components/termoweb/energy.py :: _rewrite_statistics
+    Rewrite statistics rows using the external statistics writer.
+custom_components/termoweb/energy.py :: _enforce_monotonic_sum
+    Clamp external statistics so sums never decrease near import seams.
 custom_components/termoweb/energy.py :: async_import_energy_history
     Fetch historical hourly samples and insert statistics with filters.
 custom_components/termoweb/energy.py :: async_register_import_energy_history_service
@@ -828,8 +834,6 @@ custom_components/termoweb/entity.py :: GatewayDispatcherEntity.async_will_remov
     Unsubscribe from dispatcher updates before removal.
 custom_components/termoweb/entity.py :: GatewayDispatcherEntity._handle_gateway_dispatcher
     Handle dispatcher payloads targeting the entity.
-custom_components/termoweb/heater.py :: format_boost_duration_label
-    Return a human-readable label for boost durations.
 custom_components/termoweb/heater.py :: _build_boost_button_metadata
     Return the configured metadata describing boost helper buttons.
 custom_components/termoweb/heater.py :: HeaterPlatformDetails.__iter__
@@ -930,8 +934,6 @@ custom_components/termoweb/identifiers.py :: build_heater_energy_unique_id
     Return the canonical unique ID for a heater energy sensor.
 custom_components/termoweb/identifiers.py :: build_power_monitor_unique_id
     Return the canonical unique ID for a power monitor node or entity.
-custom_components/termoweb/identifiers.py :: build_power_monitor_device_unique_id
-    Return the canonical unique ID for a power monitor device.
 custom_components/termoweb/identifiers.py :: build_power_monitor_energy_unique_id
     Return the canonical unique ID for a power monitor energy sensor.
 custom_components/termoweb/identifiers.py :: build_power_monitor_instant_power_unique_id
@@ -988,8 +990,6 @@ custom_components/termoweb/inventory.py :: normalize_node_type
     Return ``value`` as a normalised node type string.
 custom_components/termoweb/inventory.py :: normalize_node_addr
     Return ``value`` as a normalised node address string.
-custom_components/termoweb/inventory.py :: parse_heater_energy_unique_id
-    Parse a heater energy sensor unique ID into its components.
 custom_components/termoweb/inventory.py :: addresses_by_node_type
     Return mapping of node type to address list, tracking unknown types.
 custom_components/termoweb/inventory.py :: build_heater_address_map

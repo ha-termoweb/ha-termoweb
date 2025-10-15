@@ -49,7 +49,6 @@ __all__ = [
     "HeaterNode",
     "Inventory",
     "InventoryNodeMetadata",
-    "InventoryResolution",
     "Node",
     "NodeDescriptor",
     "PowerMonitorNode",
@@ -65,9 +64,7 @@ __all__ = [
     "normalize_node_addr",
     "normalize_node_type",
     "normalize_power_monitor_addresses",
-    "parse_heater_energy_unique_id",
     "power_monitor_sample_subscription_targets",
-    "resolve_record_inventory",
 ]
 
 
@@ -79,16 +76,6 @@ HEATER_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm"})
 
 if TYPE_CHECKING:
     from .heater import HeaterPlatformDetails
-
-
-@dataclass(frozen=True, slots=True)
-class InventoryResolution:
-    """Describe the origin of an ``Inventory`` resolution attempt."""
-
-    inventory: Inventory | None
-    source: str
-    raw_count: int
-    filtered_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -858,29 +845,6 @@ class Inventory:
         return candidate
 
 
-def resolve_record_inventory(
-    record: Mapping[str, Any] | None,
-    *,
-    dev_id: str | None = None,
-    nodes_payload: Any | None = None,
-    node_list: Iterable[Node] | None = None,
-) -> InventoryResolution:
-    """Return the ``Inventory`` for ``record`` and describe its origin."""
-
-    mapping: Mapping[str, Any] | None = record if isinstance(record, Mapping) else None
-
-    if mapping is None:
-        return InventoryResolution(None, "missing", 0, 0)
-
-    candidate = mapping.get("inventory")
-    if isinstance(candidate, Inventory):
-        node_count = len(candidate.nodes)
-        return InventoryResolution(candidate, "inventory", node_count, node_count)
-
-    _LOGGER.error("Inventory metadata missing for record %s", mapping.get("dev_id"))
-    return InventoryResolution(None, "missing", 0, 0)
-
-
 def _normalize_node_identifier(
     value: Any,
     *,
@@ -948,25 +912,6 @@ def normalize_node_addr(
         use_default_when_falsey=use_default_when_falsey,
         lowercase=False,
     )
-
-
-def parse_heater_energy_unique_id(unique_id: str) -> tuple[str, str, str] | None:
-    """Parse a heater energy sensor unique ID into its components."""
-
-    if not isinstance(unique_id, str):
-        return None
-    stripped = unique_id.strip()
-    if not stripped or not stripped.startswith(f"{DOMAIN}:"):
-        return None
-    try:
-        domain, dev, node, address, metric = stripped.split(":", 4)
-    except ValueError:
-        return None
-    if domain != DOMAIN or metric != "energy":
-        return None
-    if not dev or not node or not address:
-        return None
-    return dev, node, address
 
 
 def addresses_by_node_type(

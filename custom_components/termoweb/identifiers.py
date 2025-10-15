@@ -59,12 +59,6 @@ def build_power_monitor_unique_id(
     return build_heater_unique_id(dev_id, "pmo", addr, suffix=suffix)
 
 
-def build_power_monitor_device_unique_id(dev_id: Any, addr: Any) -> str:
-    """Return the canonical unique ID for a power monitor device."""
-
-    return build_power_monitor_unique_id(dev_id, addr)
-
-
 def build_power_monitor_energy_unique_id(dev_id: Any, addr: Any) -> str:
     """Return the canonical unique ID for a power monitor energy sensor."""
 

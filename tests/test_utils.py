@@ -16,7 +16,6 @@ from custom_components.termoweb.inventory import (
     normalize_heater_addresses,
     normalize_node_addr,
     normalize_node_type,
-    parse_heater_energy_unique_id,
 )
 from custom_components.termoweb.utils import (
     _entry_gateway_record,
@@ -266,7 +265,6 @@ def test_build_heater_energy_unique_id_round_trip(
     unique_id = build_heater_energy_unique_id(" dev ", " ACM ", " 01 ")
 
     assert unique_id == f"{DOMAIN}:dev:acm:01:energy"
-    assert parse_heater_energy_unique_id(unique_id) == ("dev", "acm", "01")
     assert calls == [
         ("addr", " dev ", {}),
         ("type", " ACM ", {}),

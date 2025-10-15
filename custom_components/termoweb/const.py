@@ -125,7 +125,6 @@ def signal_ws_status(entry_id: str) -> str:
 DEFAULT_POLL_INTERVAL: Final = 120  # seconds
 MIN_POLL_INTERVAL: Final = 30  # seconds
 MAX_POLL_INTERVAL: Final = 3600  # seconds
-STRETCHED_POLL_INTERVAL: Final = 2700  # seconds (45 minutes) when WS healthy ≥5 minutes
 
 # Heater energy polling interval when relying on push updates
 HTR_ENERGY_UPDATE_INTERVAL: Final = timedelta(hours=1)

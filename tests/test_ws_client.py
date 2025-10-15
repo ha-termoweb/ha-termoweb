@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import gzip
 from types import MappingProxyType, ModuleType, SimpleNamespace
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 from urllib.parse import parse_qsl, urlsplit
 from unittest.mock import AsyncMock, MagicMock
 
@@ -104,6 +104,39 @@ def patch_async_client(monkeypatch: pytest.MonkeyPatch) -> None:
             self.events[(event, namespace)] = (event, data)
 
     monkeypatch.setattr(module.socketio, "AsyncClient", StubAsyncClient)
+
+
+@pytest.fixture
+def ws_common_stub() -> Callable[..., base_ws._WSCommon]:
+    """Provide a configurable ``_WSCommon`` test double."""
+
+    def _factory(
+        *,
+        hass: Any | None = None,
+        entry_id: str = "entry",
+        dev_id: str = "dev",
+        coordinator: Any | None = None,
+        inventory: Inventory | None = None,
+        call_base_init: bool = True,
+    ) -> base_ws._WSCommon:
+        class Stub(base_ws._WSCommon):
+            def __init__(self) -> None:
+                self.hass = hass or SimpleNamespace(
+                    data={base_ws.DOMAIN: {entry_id: {}}}
+                )
+                self.entry_id = entry_id
+                self.dev_id = dev_id
+                self._coordinator = coordinator or SimpleNamespace(
+                    update_nodes=MagicMock()
+                )
+                if call_base_init:
+                    super().__init__(inventory=inventory)
+                else:
+                    self._inventory = inventory
+
+        return Stub()
+
+    return _factory
 
 
 def _make_termoweb_client(
@@ -512,7 +545,10 @@ def test_handshake_error_exposes_status_and_url() -> None:
     assert error.response_snippet == "snippet"
 
 
-def test_dispatch_nodes_reuses_record_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_dispatch_nodes_reuses_record_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+    ws_common_stub: Callable[..., base_ws._WSCommon],
+) -> None:
     """Node dispatch should rely on the immutable inventory stored during setup."""
 
     payload = {"nodes": [{"addr": "1", "type": "htr"}]}
@@ -530,15 +566,14 @@ def test_dispatch_nodes_reuses_record_inventory(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(base_ws, "resolve_record_inventory", _fail, raising=False)
 
-    class DummyCommon(base_ws._WSCommon):
-        def __init__(self) -> None:
-            self.hass = hass
-            self.entry_id = "entry"
-            self.dev_id = "device"
-            self._coordinator = coordinator
-            self._inventory = None
-
-    DummyCommon()._dispatch_nodes(payload)
+    dummy = ws_common_stub(
+        hass=hass,
+        entry_id="entry",
+        dev_id="device",
+        coordinator=coordinator,
+    )
+    dummy._inventory = None
+    dummy._dispatch_nodes(payload)
 
     coordinator.update_nodes.assert_not_called()
     dispatcher.assert_called_once()
@@ -577,11 +612,6 @@ def test_prepare_nodes_dispatch_resolves_record_dev_id_and_coordinator_inventory
     hass_record: dict[str, Any] = {"dev_id": "raw", "inventory": inventory}
     hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": hass_record}})
     coordinator = SimpleNamespace(update_nodes=MagicMock())
-
-    def _fail(*_: Any, **__: Any) -> Any:
-        raise AssertionError("resolve_record_inventory should not be called")
-
-    monkeypatch.setattr(base_ws, "resolve_record_inventory", _fail, raising=False)
 
     context = base_ws._prepare_nodes_dispatch(
         hass,
@@ -648,18 +678,15 @@ def test_ws_status_tracker_processes_pending_cadence_hint() -> None:
     assert dummy._pending_default_cadence_hint is False
 
 
-def test_ws_common_ensure_type_bucket_handles_invalid_inputs() -> None:
+def test_ws_common_ensure_type_bucket_handles_invalid_inputs(
+    ws_common_stub: Callable[..., base_ws._WSCommon],
+) -> None:
     """Ensure type bucket helper should guard against invalid structures."""
 
-    class Dummy(base_ws._WSCommon):
-        def __init__(self) -> None:
-            self.hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
-            self.entry_id = "entry"
-            self.dev_id = "dev"
-            self._coordinator = SimpleNamespace()
-            base_ws._WSCommon.__init__(self, inventory=None)
-
-    dummy = Dummy()
+    dummy = ws_common_stub(
+        hass=SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}}),
+        coordinator=SimpleNamespace(),
+    )
     assert dummy._ensure_type_bucket([], "htr") is None
     assert dummy._ensure_type_bucket({}, "", dev_map=None) is None
 
@@ -667,18 +694,15 @@ def test_ws_common_ensure_type_bucket_handles_invalid_inputs() -> None:
     assert bucket == {}
 
 
-def test_ws_common_ensure_type_bucket_uses_inventory_without_clones() -> None:
+def test_ws_common_ensure_type_bucket_uses_inventory_without_clones(
+    ws_common_stub: Callable[..., base_ws._WSCommon],
+) -> None:
     """Ensure type bucket helper reuses immutable metadata containers."""
 
-    class Dummy(base_ws._WSCommon):
-        def __init__(self) -> None:
-            self.hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
-            self.entry_id = "entry"
-            self.dev_id = "dev"
-            self._coordinator = SimpleNamespace()
-            base_ws._WSCommon.__init__(self, inventory=None)
-
-    dummy = Dummy()
+    dummy = ws_common_stub(
+        hass=SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}}),
+        coordinator=SimpleNamespace(),
+    )
     raw_nodes = {
         "nodes": [
             {"type": "htr", "addr": "1"},
@@ -722,7 +746,9 @@ def test_ws_common_ensure_type_bucket_uses_inventory_without_clones() -> None:
     assert "addresses_by_type" not in dev_map_non_mapping_settings
 
 
-def test_ws_common_apply_heater_addresses_uses_inventory() -> None:
+def test_ws_common_apply_heater_addresses_uses_inventory(
+    ws_common_stub: Callable[..., base_ws._WSCommon],
+) -> None:
     """Heater address helper should reuse the immutable inventory data."""
 
     energy_coordinator = SimpleNamespace(update_addresses=MagicMock())
@@ -740,15 +766,10 @@ def test_ws_common_apply_heater_addresses_uses_inventory() -> None:
     }
     hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": hass_record}})
 
-    class Dummy(base_ws._WSCommon):
-        def __init__(self) -> None:
-            self.hass = hass
-            self.entry_id = "entry"
-            self.dev_id = "dev"
-            self._coordinator = SimpleNamespace()
-            base_ws._WSCommon.__init__(self, inventory=None)
-
-    dummy = Dummy()
+    dummy = ws_common_stub(
+        hass=hass,
+        coordinator=SimpleNamespace(),
+    )
     dummy._apply_heater_addresses({}, inventory=inventory)
 
     assert "sample_aliases" not in hass_record
@@ -1299,45 +1320,44 @@ def test_ws_lease_backoff_sequence() -> None:
     assert lease._next_backoff() == 5
 
 
-def test_ws_common_state_bucket(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ws_common_state_bucket(
+    monkeypatch: pytest.MonkeyPatch,
+    ws_common_stub: Callable[..., base_ws._WSCommon],
+) -> None:
     """WS common helper should create domain buckets when missing."""
 
     hass = SimpleNamespace(data={})
 
-    class Dummy(base_ws._WSCommon):
-        def __init__(self) -> None:
-            self.hass = hass
-            self.entry_id = "entry"
-            self.dev_id = "dev"
-            self._coordinator = SimpleNamespace(update_nodes=MagicMock())
-
-    dummy = Dummy()
+    dummy = ws_common_stub(
+        hass=hass,
+    )
     bucket = dummy._ws_state_bucket()
     assert bucket == {}
     assert base_ws.DOMAIN in hass.data
 
 
-def test_ws_common_update_status_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ws_common_update_status_dispatches(
+    monkeypatch: pytest.MonkeyPatch,
+    ws_common_stub: Callable[..., base_ws._WSCommon],
+) -> None:
     """WS common status helper should forward dispatcher signals."""
 
     hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
     dispatcher = MagicMock()
     monkeypatch.setattr(base_ws, "async_dispatcher_send", dispatcher)
 
-    class Dummy(base_ws._WSCommon):
-        def __init__(self) -> None:
-            self.hass = hass
-            self.entry_id = "entry"
-            self.dev_id = "dev"
-            self._coordinator = SimpleNamespace(update_nodes=MagicMock())
-
-    dummy = Dummy()
+    dummy = ws_common_stub(
+        hass=hass,
+    )
     dummy._update_status("connected")
 
     dispatcher.assert_called_once()
 
 
-def test_ws_common_dispatch_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ws_common_dispatch_nodes(
+    monkeypatch: pytest.MonkeyPatch,
+    ws_common_stub: Callable[..., base_ws._WSCommon],
+) -> None:
     """WS common dispatch should update coordinator and emit dispatcher events."""
 
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
@@ -1353,15 +1373,11 @@ def test_ws_common_dispatch_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(base_ws, "resolve_record_inventory", lambda *_, **__: None, raising=False)
 
-    class Dummy(base_ws._WSCommon):
-        def __init__(self) -> None:
-            self.hass = hass
-            self.entry_id = "entry"
-            self.dev_id = "dev"
-            self._coordinator = coordinator
-            self._inventory = None
-
-    dummy = Dummy()
+    dummy = ws_common_stub(
+        hass=hass,
+        coordinator=coordinator,
+    )
+    dummy._inventory = None
     payload = {"nodes": raw_nodes}
     dummy._dispatch_nodes(payload)
 
