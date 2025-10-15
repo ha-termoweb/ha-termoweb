@@ -96,6 +96,7 @@ class GatewayOnlineBinarySensor(
 ):
     """Connectivity sensor for the TermoWeb hub (gateway)."""
 
+    _attr_has_entity_name = True
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _attr_translation_key = "gateway_online"
     _attr_should_poll = False
