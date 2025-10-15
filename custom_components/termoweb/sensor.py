@@ -199,9 +199,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
                     entry.entry_id,
                     dev_id,
                     addr_str,
-                    f"{base_name} Energy",
                     energy_unique_id,
-                    base_name,
+                    device_name=base_name,
                     inventory=heater_details.inventory,
                 )
             )
@@ -211,9 +210,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
                     entry.entry_id,
                     dev_id,
                     addr_str,
-                    f"{base_name} Power",
                     power_unique_id,
-                    base_name,
+                    device_name=base_name,
                     inventory=heater_details.inventory,
                 )
             )
@@ -269,7 +267,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
             energy_coordinator,
             entry.entry_id,
             dev_id,
-            "Total Energy",
             uid_total,
             heater_details,
         )
@@ -284,8 +281,10 @@ class HeaterTemperatureSensor(HeaterNodeBase, SensorEntity):
     """Temperature sensor for a single heater node (read-only mtemp)."""
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_has_entity_name = True
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_translation_key = "heater_temperature"
 
     def __init__(
         self,
@@ -293,7 +292,6 @@ class HeaterTemperatureSensor(HeaterNodeBase, SensorEntity):
         entry_id: str,
         dev_id: str,
         addr: str,
-        name: str,
         unique_id: str,
         device_name: str,
         *,
@@ -306,7 +304,7 @@ class HeaterTemperatureSensor(HeaterNodeBase, SensorEntity):
             entry_id,
             dev_id,
             addr,
-            name,
+            None,
             unique_id,
             device_name=device_name,
             node_type=node_type,
@@ -341,7 +339,6 @@ class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
         entry_id: str,
         dev_id: str,
         addr: str,
-        name: str,
         unique_id: str,
         device_name: str,
         *,
@@ -354,7 +351,7 @@ class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
             entry_id,
             dev_id,
             addr,
-            name,
+            None,
             unique_id,
             device_name=device_name,
             node_type=node_type,
@@ -406,8 +403,10 @@ class HeaterEnergyTotalSensor(HeaterEnergyBase):
     """Total energy consumption sensor for a heater."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_has_entity_name = True
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_native_unit_of_measurement = "kWh"
+    _attr_translation_key = "heater_energy_total"
     _metric_key = "energy"
 
     def _coerce_native_value(self, raw: Any) -> float | None:  # type: ignore[override]
@@ -419,8 +418,10 @@ class HeaterPowerSensor(HeaterEnergyBase):
     """Power sensor for a heater."""
 
     _attr_device_class = SensorDeviceClass.POWER
+    _attr_has_entity_name = True
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "W"
+    _attr_translation_key = "heater_power"
     _metric_key = "power"
 
 
@@ -428,8 +429,38 @@ class HeaterBoostMinutesRemainingSensor(HeaterNodeBase, SensorEntity):
     """Sensor exposing the remaining minutes for the active boost."""
 
     _attr_device_class = getattr(SensorDeviceClass, "DURATION", "duration")
+    _attr_has_entity_name = True
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+    _attr_translation_key = "boost_minutes_remaining"
+
+    def __init__(
+        self,
+        coordinator,
+        entry_id: str,
+        dev_id: str,
+        addr: str,
+        name: str | None,
+        unique_id: str,
+        *,
+        device_name: str | None = None,
+        node_type: str | None = None,
+        inventory: Inventory | None = None,
+    ) -> None:
+        """Initialise the boost duration helper sensor."""
+
+        resolved_device_name = device_name or name
+        super().__init__(
+            coordinator,
+            entry_id,
+            dev_id,
+            addr,
+            name,
+            unique_id,
+            device_name=resolved_device_name,
+            node_type=node_type,
+            inventory=inventory,
+        )
 
     @property
     def native_value(self) -> int | None:
@@ -456,6 +487,36 @@ class HeaterBoostEndSensor(HeaterNodeBase, SensorEntity):
     """Sensor exposing the expected end timestamp for the active boost."""
 
     _attr_device_class = getattr(SensorDeviceClass, "TIMESTAMP", "timestamp")
+    _attr_has_entity_name = True
+    _attr_translation_key = "boost_end"
+
+    def __init__(
+        self,
+        coordinator,
+        entry_id: str,
+        dev_id: str,
+        addr: str,
+        name: str | None,
+        unique_id: str,
+        *,
+        device_name: str | None = None,
+        node_type: str | None = None,
+        inventory: Inventory | None = None,
+    ) -> None:
+        """Initialise the boost end timestamp sensor."""
+
+        resolved_device_name = device_name or name
+        super().__init__(
+            coordinator,
+            entry_id,
+            dev_id,
+            addr,
+            name,
+            unique_id,
+            device_name=resolved_device_name,
+            node_type=node_type,
+            inventory=inventory,
+        )
 
     @property
     def native_value(self) -> datetime | None:
@@ -522,9 +583,8 @@ def _create_heater_sensors(
         entry_id,
         dev_id,
         addr,
-        f"{base_name} Temperature",
         f"{uid_prefix}:temp",
-        base_name,
+        device_name=base_name,
         node_type=node_type,
         inventory=inventory,
     )
@@ -533,9 +593,8 @@ def _create_heater_sensors(
         entry_id,
         dev_id,
         addr,
-        f"{base_name} Energy",
         energy_unique_id,
-        base_name,
+        device_name=base_name,
         node_type=node_type,
         inventory=inventory,
     )
@@ -544,9 +603,8 @@ def _create_heater_sensors(
         entry_id,
         dev_id,
         addr,
-        f"{base_name} Power",
         f"{uid_prefix}:power",
-        base_name,
+        device_name=base_name,
         node_type=node_type,
         inventory=inventory,
     )
@@ -580,8 +638,8 @@ def _create_boost_sensors(
         entry_id,
         dev_id,
         addr,
-        f"{base_name} Boost Minutes Remaining",
-        f"{boost_prefix}:minutes_remaining",
+        name=None,
+        unique_id=f"{boost_prefix}:minutes_remaining",
         device_name=base_name,
         node_type=node_type,
         inventory=inventory,
@@ -591,8 +649,8 @@ def _create_boost_sensors(
         entry_id,
         dev_id,
         addr,
-        f"{base_name} Boost End",
-        f"{boost_prefix}:end",
+        name=None,
+        unique_id=f"{boost_prefix}:end",
         device_name=base_name,
         node_type=node_type,
         inventory=inventory,
@@ -612,7 +670,6 @@ class PowerMonitorSensorBase(CoordinatorEntity, SensorEntity):
         entry_id: str,
         dev_id: str,
         addr: str,
-        name: str,
         unique_id: str,
         device_name: str,
         *,
@@ -625,7 +682,6 @@ class PowerMonitorSensorBase(CoordinatorEntity, SensorEntity):
         self._dev_id = dev_id
         normalized_addr = normalize_node_addr(addr, use_default_when_falsey=True)
         self._addr = normalized_addr or str(addr)
-        self._attr_name = name
         self._attr_unique_id = unique_id
         self._device_name = device_name
         self._inventory: Inventory | None = inventory
@@ -726,8 +782,10 @@ class PowerMonitorEnergySensor(PowerMonitorSensorBase):
     """Energy consumption sensor for a power monitor."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_has_entity_name = True
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_native_unit_of_measurement = "kWh"
+    _attr_translation_key = "power_monitor_energy"
     _metric_key = "energy"
 
     def _coerce_native_value(self, raw: Any) -> float | None:  # type: ignore[override]
@@ -740,8 +798,10 @@ class PowerMonitorPowerSensor(PowerMonitorSensorBase):
     """Power sensor for a power monitor."""
 
     _attr_device_class = SensorDeviceClass.POWER
+    _attr_has_entity_name = True
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "W"
+    _attr_translation_key = "power_monitor_power"
     _metric_key = "power"
 
 
@@ -753,13 +813,13 @@ class InstallationTotalEnergySensor(
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_native_unit_of_measurement = "kWh"
+    _attr_translation_key = "installation_total_energy"
 
     def __init__(
         self,
         coordinator: EnergyStateCoordinator,
         entry_id: str,
         dev_id: str,
-        name: str,
         unique_id: str,
         details: HeaterPlatformDetails,
     ) -> None:
@@ -767,7 +827,6 @@ class InstallationTotalEnergySensor(
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._dev_id = dev_id
-        self._attr_name = name
         self._attr_unique_id = unique_id
         self._details = details
 

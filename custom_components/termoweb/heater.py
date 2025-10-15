@@ -809,7 +809,7 @@ class HeaterNodeBase(CoordinatorEntity):
         entry_id: str,
         dev_id: str,
         addr: str,
-        name: str,
+        name: str | None,
         unique_id: str | None = None,
         *,
         device_name: str | None = None,
@@ -822,7 +822,8 @@ class HeaterNodeBase(CoordinatorEntity):
         self._entry_id = entry_id
         self._dev_id = dev_id
         self._addr = normalize_node_addr(addr)
-        self._attr_name = name
+        if name is not None:
+            self._attr_name = name
         resolved_type = (
             normalize_node_type(
                 node_type,
