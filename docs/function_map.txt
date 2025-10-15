@@ -1220,6 +1220,8 @@ custom_components/termoweb/utils.py :: build_power_monitor_device_info
     Return canonical ``DeviceInfo`` for a TermoWeb power monitor.
 custom_components/termoweb/utils.py :: float_or_none
     Return value as ``float`` if possible, else ``None``.
+custom_components/termoweb/utils.py :: parse_heater_energy_unique_id
+    Return the ``dev_id``, ``node_type`` and ``addr`` from a heater energy ID.
 scripts/generate_function_map.py :: DocExtractor.__init__
     Initialise the extractor for ``file_path``.
 scripts/generate_function_map.py :: DocExtractor.visit_ClassDef

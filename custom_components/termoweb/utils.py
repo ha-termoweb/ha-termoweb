@@ -11,7 +11,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.loader import async_get_integration as loader_async_get_integration
 
 from .const import DOMAIN
-from .inventory import normalize_node_addr
+from .inventory import normalize_node_addr, normalize_node_type
 
 
 async def async_get_integration(*args, **kwargs):
@@ -171,3 +171,28 @@ def float_or_none(value: Any) -> float | None:
         return None
 
 
+def parse_heater_energy_unique_id(value: Any) -> tuple[str, str, str] | None:
+    """Return the ``dev_id``, ``node_type`` and ``addr`` from a heater energy ID."""
+
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+
+    parts = cleaned.split(":")
+    if len(parts) != 5:
+        return None
+
+    domain, dev_id, node_type, addr, suffix = parts
+    if domain != DOMAIN or suffix != "energy":
+        return None
+
+    dev_id = normalize_node_addr(dev_id)
+    node_type = normalize_node_type(node_type)
+    addr = normalize_node_addr(addr)
+
+    if not dev_id or not node_type or not addr:
+        return None
+
+    return dev_id, node_type, addr

@@ -22,6 +22,7 @@ from custom_components.termoweb.utils import (
     async_get_integration_version,
     build_gateway_device_info,
     float_or_none,
+    parse_heater_energy_unique_id,
 )
 
 
@@ -303,6 +304,12 @@ def test_build_heater_energy_unique_id_requires_components(
 )
 def test_parse_heater_energy_unique_id_invalid(value) -> None:
     assert parse_heater_energy_unique_id(value) is None
+
+
+def test_parse_heater_energy_unique_id_valid() -> None:
+    unique_id = build_heater_energy_unique_id(" Dev ", " ACM ", " 01 ")
+
+    assert parse_heater_energy_unique_id(unique_id) == ("Dev", "acm", "01")
 
 
 @pytest.mark.asyncio
