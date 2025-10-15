@@ -1,0 +1,195 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Povežite se s grijačima TermoWeb obitelji",
+        "description": "Verzija: {version}\n\nOdaberite svoju TermoWeb ili Ducaheat marku i unesite vjerodajnice računa.",
+        "data": {
+          "brand": "Marka",
+          "username": "E-mail",
+          "password": "Lozinka",
+          "poll_interval": "Osnovni interval dohvaćanja (sekunde)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Neispravno korisničko ime ili lozinka (ili klijentski ključ).",
+      "cannot_connect": "Nije moguće povezati se s TermoWebom — mrežna/DNS/SSL greška.",
+      "rate_limited": "API je privremeno ograničen. Pokušajte ponovno kasnije.",
+      "unknown": "Nepoznata greška"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "TermoWeb opcije",
+        "description": "Verzija: {version}",
+        "data": {
+          "poll_interval": "Osnovni interval dohvaćanja (sekunde)",
+          "debug": "Omogući pomoćnike za otklanjanje grešaka"
+        }
+      }
+    }
+  },
+  "fallbacks": {
+    "heater_name": "Grijač {addr}",
+    "node_name": "Čvor {addr}",
+    "power_monitor_name": "Mjerač energije {addr}",
+    "never": "Nikada"
+  },
+  "entity": {
+    "binary_sensor": {
+      "gateway_online": {
+        "name": "Gateway online"
+      },
+      "boost_active": {
+        "name": "Pojačanje aktivno"
+      }
+    },
+    "button": {
+      "force_refresh": {
+        "name": "Prisili osvježavanje"
+      },
+      "accumulator_boost_start": {
+        "name": "Pokreni pojačanje"
+      },
+      "accumulator_boost_cancel": {
+        "name": "Otkaži pojačanje"
+      }
+    },
+    "number": {
+      "accumulator_boost_duration": {
+        "name": "Trajanje pojačanja"
+      },
+      "accumulator_boost_temperature": {
+        "name": "Temperatura pojačanja"
+      }
+    },
+    "sensor": {
+      "heater_temperature": {
+        "name": "Temperatura"
+      },
+      "heater_energy_total": {
+        "name": "Energija"
+      },
+      "heater_power": {
+        "name": "Snaga"
+      },
+      "power_monitor_energy": {
+        "name": "Energija"
+      },
+      "power_monitor_power": {
+        "name": "Snaga"
+      },
+      "installation_total_energy": {
+        "name": "Ukupna energija"
+      },
+      "boost_minutes_remaining": {
+        "name": "Preostali minuti pojačanja"
+      },
+      "boost_end": {
+        "name": "Kraj pojačanja"
+      }
+    }
+  },
+  "services": {
+    "set_acm_preset": {
+      "name": "Postavi zadano pojačanje akumulatora",
+      "description": "Ažurirajte zadano trajanje i/ili temperaturu pojačanja za TermoWeb akumulator. Minute moraju biti između 60 i 600 u koracima od 60; izostavite polje kako biste zadržali postojeću vrijednost.",
+      "fields": {
+        "minutes": {
+          "name": "Zadano trajanje pojačanja",
+          "description": "Broj minuta koliko pojačanje traje kada nema nadjačavanja (60–600, korak 60).",
+          "example": "120"
+        },
+        "temperature": {
+          "name": "Temperatura pojačanja",
+          "description": "Neobvezna temperatura koju treba primijeniti tijekom sesije pojačanja (°C ili °F).",
+          "example": "22.5"
+        }
+      }
+    },
+    "start_boost": {
+      "name": "Pokreni pojačanje akumulatora",
+      "description": "Odmah pokrenite pojačanje na TermoWeb akumulatoru. Unesite trajanje kako biste nadjačali zadanu vrijednost (60–600 minuta u koracima od 60) ili ga izostavite kako biste koristili spremljenu postavku.",
+      "fields": {
+        "minutes": {
+          "name": "Trajanje pojačanja",
+          "description": "Trajanje sesije pojačanja u minutama (60–600, korak 60). Neobvezno.",
+          "example": "180"
+        }
+      }
+    },
+    "cancel_boost": {
+      "name": "Otkaži pojačanje akumulatora",
+      "description": "Otkažite aktivnu sesiju pojačanja na TermoWeb akumulatoru."
+    },
+    "set_schedule": {
+      "name": "Postavi tjedni raspored",
+      "description": "Postavite 7×24 tjedni program za TermoWeb grijač. Program je popis od 168 cijelih brojeva, gdje svaka vrijednost odgovara jednom satu u tjednu počevši od ponedjeljka 00:00. Koristite 0 za hladni, 1 za noćni, a 2 za dnevni režim.",
+      "fields": {
+        "prog": {
+          "name": "Program",
+          "description": "Popis od 168 cijelih brojeva (0, 1 ili 2) koji predstavljaju tjedni raspored grijača. Indeks 0 je ponedjeljak 00:00, indeks 1 je ponedjeljak 01:00 itd.",
+          "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
+        }
+      }
+    },
+    "set_preset_temperatures": {
+      "name": "Postavi zadane temperature",
+      "description": "Postavite hladnu, noćnu i dnevnu zadanu temperaturu za TermoWeb grijač. Možete unijeti sve tri temperature kao jedan popis (``ptemp``) ili svaku navesti zasebno (``cold``, ``night`` i ``day``).",
+      "fields": {
+        "ptemp": {
+          "name": "Zadane temperature",
+          "description": "Popis od tri temperature [hladna, noćna, dnevna] u istim jedinicama kao grijač (°C ili °F). Ako je navedeno, nadjačava pojedinačne vrijednosti hladno, noć i dan.",
+          "example": "[10.0, 16.0, 20.0]"
+        },
+        "cold": {
+          "name": "Hladni režim",
+          "description": "Temperatura za hladni režim (°C ili °F).",
+          "example": "10.0"
+        },
+        "night": {
+          "name": "Noćni režim",
+          "description": "Temperatura za noćni režim (°C ili °F).",
+          "example": "16.0"
+        },
+        "day": {
+          "name": "Dnevni režim",
+          "description": "Temperatura za dnevni režim (°C ili °F).",
+          "example": "20.0"
+        }
+      }
+    },
+    "import_energy_history": {
+      "name": "Uvezi povijest potrošnje energije",
+      "description": "Uvezite povijesne satne brojače energije za TermoWeb grijače do godinu dana unatrag u statistiku Home Assistanta za sve konfigurirane grijače.",
+      "fields": {
+        "reset_progress": {
+          "name": "Resetiraj napredak",
+          "description": "Obriši spremljeni napredak i ponovno uvezi povijest od početka."
+        },
+        "max_history_retrieval": {
+          "name": "Maks. dana povijesti",
+          "description": "Broj dana povijesti za dohvat. Zamjenjuje zadanu vrijednost samo za ovaj uvoz."
+        }
+      }
+    },
+    "ws_debug_probe": {
+      "name": "Pokreni websocket dijagnostiku",
+      "description": "Zatražite trenutažno osvježavanje ``dev_data`` od websocket klijenta i zabilježite veličine sljedećih okvira ``dev_handshake`` i ``update``. Omogućite opciju otklanjanja grešaka u postavkama integracije prije korištenja ovog pomoćnika.",
+      "fields": {
+        "entry_id": {
+          "name": "ID konfiguracijske stavke",
+          "description": "Ograniči dijagnostiku na jednu TermoWeb konfiguracijsku stavku.",
+          "example": "abcd1234deadbeef"
+        },
+        "dev_id": {
+          "name": "ID uređaja",
+          "description": "Ograniči dijagnostiku na jedan gateway uređaj.",
+          "example": "0000abcd"
+        }
+      }
+    }
+  }
+}

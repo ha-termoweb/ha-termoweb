@@ -1,0 +1,195 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Ligar aos aquecedores da família TermoWeb",
+        "description": "Versão: {version}\n\nEscolha a sua marca TermoWeb ou Ducaheat e introduza as credenciais da sua conta.",
+        "data": {
+          "brand": "Marca",
+          "username": "Email",
+          "password": "Palavra-passe",
+          "poll_interval": "Intervalo base de consulta (segundos)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Nome de utilizador ou palavra-passe inválidos (ou chave do cliente).",
+      "cannot_connect": "Não é possível ligar ao TermoWeb — erro de rede/DNS/SSL.",
+      "rate_limited": "API temporariamente limitada. Tente novamente mais tarde.",
+      "unknown": "Erro desconhecido"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opções TermoWeb",
+        "description": "Versão: {version}",
+        "data": {
+          "poll_interval": "Intervalo base de consulta (segundos)",
+          "debug": "Ativar auxiliares de depuração"
+        }
+      }
+    }
+  },
+  "fallbacks": {
+    "heater_name": "Aquecedor {addr}",
+    "node_name": "Nó {addr}",
+    "power_monitor_name": "Monitor de energia {addr}",
+    "never": "Nunca"
+  },
+  "entity": {
+    "binary_sensor": {
+      "gateway_online": {
+        "name": "Gateway online"
+      },
+      "boost_active": {
+        "name": "Reforço ativo"
+      }
+    },
+    "button": {
+      "force_refresh": {
+        "name": "Forçar atualização"
+      },
+      "accumulator_boost_start": {
+        "name": "Iniciar reforço"
+      },
+      "accumulator_boost_cancel": {
+        "name": "Cancelar reforço"
+      }
+    },
+    "number": {
+      "accumulator_boost_duration": {
+        "name": "Duração do reforço"
+      },
+      "accumulator_boost_temperature": {
+        "name": "Temperatura do reforço"
+      }
+    },
+    "sensor": {
+      "heater_temperature": {
+        "name": "Temperatura"
+      },
+      "heater_energy_total": {
+        "name": "Energia"
+      },
+      "heater_power": {
+        "name": "Potência"
+      },
+      "power_monitor_energy": {
+        "name": "Energia"
+      },
+      "power_monitor_power": {
+        "name": "Potência"
+      },
+      "installation_total_energy": {
+        "name": "Energia total"
+      },
+      "boost_minutes_remaining": {
+        "name": "Minutos de reforço restantes"
+      },
+      "boost_end": {
+        "name": "Fim do reforço"
+      }
+    }
+  },
+  "services": {
+    "set_acm_preset": {
+      "name": "Configurar predefinição de reforço do acumulador",
+      "description": "Atualize a duração e/ou a temperatura predefinidas do reforço para um acumulador TermoWeb. Os minutos devem estar entre 60 e 600 em incrementos de 60; omita um campo para manter o valor existente.",
+      "fields": {
+        "minutes": {
+          "name": "Duração predefinida do reforço",
+          "description": "Número de minutos que o reforço deve durar quando não existe substituição (60–600, passo 60).",
+          "example": "120"
+        },
+        "temperature": {
+          "name": "Temperatura do reforço",
+          "description": "Temperatura opcional a aplicar durante a sessão de reforço (°C ou °F).",
+          "example": "22.5"
+        }
+      }
+    },
+    "start_boost": {
+      "name": "Iniciar reforço do acumulador",
+      "description": "Inicie imediatamente um reforço num acumulador TermoWeb. Indique uma duração para substituir a predefinição (60–600 minutos em incrementos de 60) ou omita-a para usar a predefinição guardada.",
+      "fields": {
+        "minutes": {
+          "name": "Duração do reforço",
+          "description": "Duração da sessão de reforço em minutos (60–600, passo 60). Opcional.",
+          "example": "180"
+        }
+      }
+    },
+    "cancel_boost": {
+      "name": "Cancelar reforço do acumulador",
+      "description": "Cancele a sessão de reforço ativa num acumulador TermoWeb."
+    },
+    "set_schedule": {
+      "name": "Definir horário semanal",
+      "description": "Defina o programa semanal 7×24 para um aquecedor TermoWeb. O programa é uma lista de 168 inteiros, em que cada valor corresponde a uma hora da semana começando na segunda-feira às 00:00. Use 0 para a predefinição fria, 1 para a predefinição noturna e 2 para a predefinição diurna.",
+      "fields": {
+        "prog": {
+          "name": "Programa",
+          "description": "Uma lista de 168 inteiros (0, 1 ou 2) que representam o horário semanal do aquecedor. O índice 0 é segunda-feira 00:00, o índice 1 é segunda-feira 01:00 e assim sucessivamente.",
+          "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
+        }
+      }
+    },
+    "set_preset_temperatures": {
+      "name": "Definir temperaturas predefinidas",
+      "description": "Defina as temperaturas predefinidas fria, noturna e diurna para um aquecedor TermoWeb. Pode fornecer as três temperaturas numa única lista (``ptemp``) ou especificar cada uma separadamente (``cold``, ``night`` e ``day``).",
+      "fields": {
+        "ptemp": {
+          "name": "Temperaturas predefinidas",
+          "description": "Uma lista de três temperaturas [fria, noturna, diurna] nas mesmas unidades do aquecedor (°C ou °F). Se fornecida, substitui os valores individuais frio, noite e dia.",
+          "example": "[10.0, 16.0, 20.0]"
+        },
+        "cold": {
+          "name": "Predefinição fria",
+          "description": "Temperatura para a predefinição fria (°C ou °F).",
+          "example": "10.0"
+        },
+        "night": {
+          "name": "Predefinição noturna",
+          "description": "Temperatura para a predefinição noturna (°C ou °F).",
+          "example": "16.0"
+        },
+        "day": {
+          "name": "Predefinição diurna",
+          "description": "Temperatura para a predefinição diurna (°C ou °F).",
+          "example": "20.0"
+        }
+      }
+    },
+    "import_energy_history": {
+      "name": "Importar histórico de energia",
+      "description": "Importe contadores horários de energia histórica para aquecedores TermoWeb até um ano atrás nas estatísticas do Home Assistant para todos os aquecedores configurados.",
+      "fields": {
+        "reset_progress": {
+          "name": "Repor progresso",
+          "description": "Limpa o progresso armazenado e volta a importar o histórico desde o início."
+        },
+        "max_history_retrieval": {
+          "name": "Máximo de dias de histórico",
+          "description": "Número de dias de histórico a obter. Substitui a predefinição configurada apenas para esta importação."
+        }
+      }
+    },
+    "ws_debug_probe": {
+      "name": "Emitir sonda de depuração websocket",
+      "description": "Solicite uma atualização imediata de ``dev_data`` ao cliente websocket e registe os tamanhos dos próximos fotogramas ``dev_handshake`` e ``update``. Ative a opção de depuração nas definições da integração antes de usar este auxiliar.",
+      "fields": {
+        "entry_id": {
+          "name": "ID da entrada de configuração",
+          "description": "Restringe a sonda a uma única entrada de configuração TermoWeb.",
+          "example": "abcd1234deadbeef"
+        },
+        "dev_id": {
+          "name": "ID do dispositivo",
+          "description": "Restringe a sonda a um único dispositivo gateway.",
+          "example": "0000abcd"
+        }
+      }
+    }
+  }
+}

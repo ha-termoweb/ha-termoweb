@@ -1,0 +1,195 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Mit TermoWeb-Heizgeräten verbinden",
+        "description": "Version: {version}\\n\\nWähle deine TermoWeb- oder Ducaheat-Marke und gib deine Kontozugangsdaten ein.",
+        "data": {
+          "brand": "Marke",
+          "username": "E-Mail",
+          "password": "Passwort",
+          "poll_interval": "Grundlegendes Abfrageintervall (Sekunden)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Ungültiger Benutzername, Passwort oder Client-Schlüssel.",
+      "cannot_connect": "Verbindung zu TermoWeb nicht möglich – Netzwerk-/DNS-/SSL-Fehler.",
+      "rate_limited": "API vorübergehend gedrosselt. Bitte später erneut versuchen.",
+      "unknown": "Unbekannter Fehler"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "TermoWeb-Optionen",
+        "description": "Version: {version}",
+        "data": {
+          "poll_interval": "Grundlegendes Abfrageintervall (Sekunden)",
+          "debug": "Debug-Hilfen aktivieren"
+        }
+      }
+    }
+  },
+  "fallbacks": {
+    "heater_name": "Heizgerät {addr}",
+    "node_name": "Knoten {addr}",
+    "power_monitor_name": "Leistungsmonitor {addr}",
+    "never": "Nie"
+  },
+  "entity": {
+    "binary_sensor": {
+      "gateway_online": {
+        "name": "Gateway online"
+      },
+      "boost_active": {
+        "name": "Boost aktiv"
+      }
+    },
+    "button": {
+      "force_refresh": {
+        "name": "Aktualisierung erzwingen"
+      },
+      "accumulator_boost_start": {
+        "name": "Boost starten"
+      },
+      "accumulator_boost_cancel": {
+        "name": "Boost abbrechen"
+      }
+    },
+    "number": {
+      "accumulator_boost_duration": {
+        "name": "Boost-Dauer"
+      },
+      "accumulator_boost_temperature": {
+        "name": "Boost-Temperatur"
+      }
+    },
+    "sensor": {
+      "heater_temperature": {
+        "name": "Temperatur"
+      },
+      "heater_energy_total": {
+        "name": "Energie"
+      },
+      "heater_power": {
+        "name": "Leistung"
+      },
+      "power_monitor_energy": {
+        "name": "Energie"
+      },
+      "power_monitor_power": {
+        "name": "Leistung"
+      },
+      "installation_total_energy": {
+        "name": "Gesamtenergie"
+      },
+      "boost_minutes_remaining": {
+        "name": "Verbleibende Boost-Minuten"
+      },
+      "boost_end": {
+        "name": "Boost-Ende"
+      }
+    }
+  },
+  "services": {
+    "set_acm_preset": {
+      "name": "Boost-Voreinstellung des Akkumulators konfigurieren",
+      "description": "Aktualisiert die Standarddauer und/oder Temperatur des Boosts für einen TermoWeb-Akkumulator. Minuten müssen zwischen 60 und 600 in 60-Minuten-Schritten liegen; lasse ein Feld leer, um den bestehenden Wert zu behalten.",
+      "fields": {
+        "minutes": {
+          "name": "Standard-Boostdauer",
+          "description": "Anzahl der Minuten, die der Boost laufen soll, wenn kein Override angegeben ist (60–600, Schrittweite 60).",
+          "example": "120"
+        },
+        "temperature": {
+          "name": "Boost-Temperatur",
+          "description": "Optionale Solltemperatur, die während der Boost-Sitzung angewendet wird (°C oder °F).",
+          "example": "22.5"
+        }
+      }
+    },
+    "start_boost": {
+      "name": "Boost des Akkumulators starten",
+      "description": "Startet sofort einen Boost auf einem TermoWeb-Akkumulator. Gib eine Dauer an, um den Standardwert zu überschreiben (60–600 Minuten in 60-Minuten-Schritten), oder lasse sie leer, um die gespeicherte Voreinstellung zu verwenden.",
+      "fields": {
+        "minutes": {
+          "name": "Boost-Dauer",
+          "description": "Dauer der Boost-Sitzung in Minuten (60–600, Schrittweite 60). Optional.",
+          "example": "180"
+        }
+      }
+    },
+    "cancel_boost": {
+      "name": "Boost des Akkumulators abbrechen",
+      "description": "Bricht die aktive Boost-Sitzung auf einem TermoWeb-Akkumulator ab."
+    },
+    "set_schedule": {
+      "name": "Wochenprogramm festlegen",
+      "description": "Legt das 7×24-Wochenprogramm für ein TermoWeb-Heizgerät fest. Das Programm ist eine Liste von 168 Ganzzahlen, wobei jeder Wert einer Stunde der Woche entspricht, beginnend am Montag um 00:00. Verwende 0 für das Kaltprofil, 1 für das Nachtprofil und 2 für das Tagesprofil.",
+      "fields": {
+        "prog": {
+          "name": "Programm",
+          "description": "Liste von 168 Ganzzahlen (0, 1 oder 2), die den Wochenplan des Heizgeräts darstellen. Index 0 ist Montag 00:00, Index 1 ist Montag 01:00 usw.",
+          "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
+        }
+      }
+    },
+    "set_preset_temperatures": {
+      "name": "Voreingestellte Temperaturen festlegen",
+      "description": "Legt die Temperaturen der Kalt-, Nacht- und Tagprofile für ein TermoWeb-Heizgerät fest. Du kannst entweder alle drei Temperaturen als Liste (``ptemp``) angeben oder jede einzeln (``cold``, ``night`` und ``day``).",
+      "fields": {
+        "ptemp": {
+          "name": "Voreingestellte Temperaturen",
+          "description": "Liste mit drei Temperaturen [kalt, nacht, tag] in denselben Einheiten wie das Heizgerät (°C oder °F). Wenn angegeben, überschreibt sie die einzelnen Werte kalt, nacht und tag.",
+          "example": "[10.0, 16.0, 20.0]"
+        },
+        "cold": {
+          "name": "Kaltprofil",
+          "description": "Temperatur für das Kaltprofil (°C oder °F).",
+          "example": "10.0"
+        },
+        "night": {
+          "name": "Nachtprofil",
+          "description": "Temperatur für das Nachtprofil (°C oder °F).",
+          "example": "16.0"
+        },
+        "day": {
+          "name": "Tagesprofil",
+          "description": "Temperatur für das Tagesprofil (°C oder °F).",
+          "example": "20.0"
+        }
+      }
+    },
+    "import_energy_history": {
+      "name": "Energieverlauf importieren",
+      "description": "Importiert historische stündliche Energiewerte von TermoWeb-Heizgeräten bis zu einem Jahr zurück in die Home-Assistant-Statistiken für jedes konfigurierte Heizgerät.",
+      "fields": {
+        "reset_progress": {
+          "name": "Fortschritt zurücksetzen",
+          "description": "Löscht den gespeicherten Fortschritt und importiert den Verlauf erneut von Anfang an."
+        },
+        "max_history_retrieval": {
+          "name": "Maximale Verlauftage",
+          "description": "Anzahl der abzurufenden Verlauftage. Überschreibt den konfigurierten Standardwert nur für diesen Import."
+        }
+      }
+    },
+    "ws_debug_probe": {
+      "name": "Websocket-Debug-Prüfung auslösen",
+      "description": "Fordert eine sofortige Aktualisierung von ``dev_data`` durch den Websocket-Client an und protokolliert die Größe der nächsten ``dev_handshake``- und ``update``-Frames. Aktiviere die Debug-Option in den Integrations-Einstellungen, bevor du diese Hilfe nutzt.",
+      "fields": {
+        "entry_id": {
+          "name": "Konfigurations-Eintrags-ID",
+          "description": "Beschränkt die Prüfung auf einen einzelnen TermoWeb-Konfigurationseintrag.",
+          "example": "abcd1234deadbeef"
+        },
+        "dev_id": {
+          "name": "Geräte-ID",
+          "description": "Beschränkt die Prüfung auf ein einzelnes Gateway.",
+          "example": "0000abcd"
+        }
+      }
+    }
+  }
+}
