@@ -819,7 +819,7 @@ custom_components/termoweb/energy.py :: _normalize_heater_sources
 custom_components/termoweb/energy.py :: _iso_date
     Convert unix timestamp to ISO date.
 custom_components/termoweb/energy.py :: _store_statistics
-    Insert statistics using recorder helpers.
+    Insert entity statistics using the recorder import helper.
 custom_components/termoweb/energy.py :: _statistics_row_get
     Read a field from a statistics row regardless of its container type.
 custom_components/termoweb/energy.py :: _statistics_during_period_compat
@@ -830,10 +830,8 @@ custom_components/termoweb/energy.py :: _clear_statistics_compat
     Clear statistics using whichever helper is available.
 custom_components/termoweb/energy.py :: _collect_statistics
     Return statistics rows for a single statistic id.
-custom_components/termoweb/energy.py :: _rewrite_statistics
-    Rewrite statistics rows using the external statistics writer.
 custom_components/termoweb/energy.py :: _enforce_monotonic_sum
-    Clamp external statistics so sums never decrease near import seams.
+    Clamp entity statistics so sums never decrease near import seams.
 custom_components/termoweb/energy.py :: async_import_energy_history
     Fetch historical hourly samples and insert statistics with filters.
 custom_components/termoweb/energy.py :: async_register_import_energy_history_service

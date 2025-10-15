@@ -133,25 +133,25 @@ def _iso_date(ts: int) -> str:
     return datetime.fromtimestamp(ts, UTC).date().isoformat()
 
 
-def _store_statistics(
+async def _store_statistics(
     hass: HomeAssistant, metadata: dict[str, Any], stats: list[dict[str, Any]]
 ) -> None:
-    """Insert statistics using recorder helpers."""
+    """Insert entity statistics using the recorder import helper."""
 
-    from homeassistant.components.recorder.statistics import (
-        async_add_external_statistics,
-    )
+    if not stats:
+        return
 
-    stat_id: str = metadata["statistic_id"]
-    domain, obj_id = stat_id.split(".", 1)
-    ext_meta = dict(metadata)
-    ext_meta.update(
-        {
-            "statistic_id": f"{domain}:{obj_id}",
-            "source": domain,
-        }
-    )
-    async_add_external_statistics(hass, ext_meta, stats)
+    from homeassistant.components.recorder.statistics import async_import_statistics
+
+    stat_id = metadata.get("statistic_id")
+    if not isinstance(stat_id, str) or "." not in stat_id:
+        raise ValueError("metadata must include an entity statistic_id")
+
+    domain, _ = stat_id.split(".", 1)
+    import_metadata = dict(metadata)
+    import_metadata.update({"source": domain, "statistic_id": stat_id})
+
+    await async_import_statistics(hass, import_metadata, stats)
 
 
 def _statistics_row_get(row: Any, key: str) -> Any:
@@ -407,52 +407,21 @@ async def _collect_statistics(
     ]
 
 
-def _rewrite_statistics(
-    hass: HomeAssistant,
-    statistic_id: str,
-    rows: list[dict[str, Any]],
-) -> None:
-    """Rewrite statistics rows using the external statistics writer."""
-
-    if not rows:
-        return
-
-    if ":" in statistic_id:
-        domain, obj_id = statistic_id.split(":", 1)
-        metadata_id = f"{domain}.{obj_id}"
-    else:
-        domain, obj_id = statistic_id.split(".", 1)
-        metadata_id = statistic_id
-
-    metadata = {
-        "source": "recorder",
-        "statistic_id": metadata_id,
-        "unit_of_measurement": "kWh",
-        "name": metadata_id,
-        "has_sum": True,
-        "has_mean": False,
-    }
-
-    _store_statistics(hass, metadata, rows)
-
-
 async def _enforce_monotonic_sum(
     hass: HomeAssistant,
     entity_id: str,
     import_start_dt: datetime,
     import_end_dt: datetime,
 ) -> None:
-    """Clamp external statistics so sums never decrease near import seams."""
+    """Clamp entity statistics so sums never decrease near import seams."""
 
     if "." not in entity_id:
         return
 
-    domain, obj_id = entity_id.split(".", 1)
-    external_id = f"{domain}:{obj_id}"
     window_start = import_start_dt - timedelta(hours=1)
     window_end = import_end_dt + timedelta(hours=6)
 
-    rows = await _collect_statistics(hass, external_id, window_start, window_end)
+    rows = await _collect_statistics(hass, entity_id, window_start, window_end)
     if not rows:
         return
 
@@ -487,15 +456,32 @@ async def _enforce_monotonic_sum(
     if not rewrites:
         return
 
+    ent_reg = er.async_get(hass)
+    metadata_name = entity_id
+    if ent_reg:
+        entry = ent_reg.async_get(entity_id)
+        if entry is not None:
+            metadata_name = (
+                getattr(entry, "original_name", None)
+                or getattr(entry, "name", None)
+                or entity_id
+            )
+
+    metadata = {
+        "statistic_id": entity_id,
+        "name": metadata_name,
+        "unit_of_measurement": "kWh",
+        "has_sum": True,
+        "has_mean": False,
+    }
+
     try:
-        _rewrite_statistics(hass, external_id, rewrites)
+        await _store_statistics(hass, metadata, rewrites)
     except Exception:  # pragma: no cover - defensive
-        _LOGGER.exception("%s: failed to rewrite non-monotonic statistics", external_id)
+        _LOGGER.exception("%s: failed to rewrite non-monotonic statistics", entity_id)
         return
 
-    _LOGGER.info(
-        "%s: enforced monotonic sum for %d hour(s)", external_id, len(rewrites)
-    )
+    _LOGGER.info("%s: enforced monotonic sum for %d hour(s)", entity_id, len(rewrites))
 
 
 async def async_import_energy_history(
@@ -1008,86 +994,41 @@ async def async_import_energy_history(
                     )
                     previous_kwh = None
 
-        overlap_exists = False
-        if period_stats is not None:
-            for stat_id in clear_stat_ids:
-                if any(
-                    isinstance(_statistics_row_get(val, "start"), datetime)
-                    and import_start_dt
-                    <= cast(datetime, _statistics_row_get(val, "start"))
-                    <= import_end_dt
-                    for val in period_stats.get(stat_id, [])
-                ):
-                    overlap_exists = True
-                    break
-        else:
-            for stat_id in clear_stat_ids:
-                try:
-                    overlap_stats = await last_stats_fn(
-                        hass,
-                        1,
-                        stat_id,
-                        start_time=import_start_dt,
+        clear_end = import_end_dt + timedelta(hours=1)
+        for stat_id in clear_stat_ids:
+            try:
+                cleared = await clear_stats_fn(
+                    hass,
+                    stat_id,
+                    start_time=import_start_dt,
+                    end_time=clear_end,
+                )
+            except async_mod.CancelledError:  # pragma: no cover - allow cancellation
+                raise
+            except Exception as err:  # pragma: no cover - defensive
+                logger.error(
+                    "%s: failed to clear statistics for %s: %s",
+                    addr,
+                    stat_id,
+                    err,
+                    exc_info=True,
+                )
+                continue
+            if cleared == "clear":
+                logger.debug("%s: cleared statistics for %s", addr, stat_id)
+            elif cleared == "delete":
+                logger.debug("%s: deleted statistics for %s", addr, stat_id)
+            else:
+                if not overlap_warning_logged:
+                    logger.info(
+                        "%s: recorder statistics delete helpers unavailable; proceeding "
+                        "without deleting existing statistics",
+                        dev_id,
                     )
-                except (
-                    async_mod.CancelledError
-                ):  # pragma: no cover - allow cancellation
-                    raise
-                except Exception as err:  # pragma: no cover - defensive
-                    logger.error(
-                        "%s: error checking for overlapping statistics (%s): %s",
-                        addr,
-                        stat_id,
-                        err,
-                        exc_info=True,
-                    )
-                    continue
-                if overlap_stats and overlap_stats.get(stat_id):
-                    overlap_exists = True
-                    break
-
-        if overlap_exists:
-            clear_end = import_end_dt + timedelta(hours=1)
-            for stat_id in clear_stat_ids:
-                try:
-                    cleared = await clear_stats_fn(
-                        hass,
-                        stat_id,
-                        start_time=import_start_dt,
-                        end_time=clear_end,
-                    )
-                except (
-                    async_mod.CancelledError
-                ):  # pragma: no cover - allow cancellation
-                    raise
-                except Exception as err:  # pragma: no cover - defensive
-                    logger.error(
-                        "%s: failed to clear overlapping statistics for %s: %s",
-                        addr,
-                        stat_id,
-                        err,
-                        exc_info=True,
-                    )
-                    continue
-                if cleared == "clear":
-                    logger.debug("%s: cleared statistics for %s", addr, stat_id)
-                elif cleared == "delete":
-                    logger.debug(
-                        "%s: cleared overlapping statistics for %s", addr, stat_id
-                    )
-                else:
-                    if not overlap_warning_logged:
-                        logger.info(
-                            "%s: recorder overlap clearing helpers unavailable; proceeding "
-                            "without deleting existing statistics",
-                            dev_id,
-                        )
-                        overlap_warning_logged = True
-                    logger.debug(
-                        "%s: statistics helpers unavailable to clear overlap for %s",
-                        addr,
-                        stat_id,
-                    )
+                    overlap_warning_logged = True
+                logger.debug(
+                    "%s: statistics helpers unavailable to clear %s", addr, stat_id
+                )
 
         stats: list[dict[str, Any]] = []
         running_sum: float = sum_offset
@@ -1167,8 +1108,9 @@ async def async_import_energy_history(
         ent_entry = ent_reg.async_get(entity_id) if ent_reg else None
         name = getattr(ent_entry, "original_name", None) or entity_id
 
+        domain, _ = entity_id.split(".", 1)
         metadata = {
-            "source": "recorder",
+            "source": domain,
             "statistic_id": entity_id,
             "unit_of_measurement": "kWh",
             "name": name,
@@ -1178,7 +1120,7 @@ async def async_import_energy_history(
         logger.debug("%s: adding %d stats entries", addr, len(stats))
         store_failed = False
         try:
-            store_stats(hass, metadata, stats)
+            await store_stats(hass, metadata, stats)
         except Exception as err:  # pragma: no cover - log & continue
             store_failed = True
             logger.exception("%s: statistics insert failed: %s", addr, err)

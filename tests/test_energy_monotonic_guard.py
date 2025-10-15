@@ -27,7 +27,7 @@ async def test_enforce_monotonic_sum_rewrites_decreasing_hour(
         end_time: datetime,
     ) -> list[dict[str, Any]]:
         assert hass_arg is hass
-        assert statistic_id == "sensor:sample_energy"
+        assert statistic_id == "sensor.sample_energy"
         assert start_time == import_start - timedelta(hours=1)
         assert end_time == import_end + timedelta(hours=6)
         return [
@@ -37,15 +37,16 @@ async def test_enforce_monotonic_sum_rewrites_decreasing_hour(
 
     rewrites: list[dict[str, Any]] = []
 
-    def _fake_rewrite(
-        hass_arg: Any, statistic_id: str, rows: list[dict[str, Any]]
+    async def _fake_store(
+        hass_arg: Any, metadata: dict[str, Any], rows: list[dict[str, Any]]
     ) -> None:
         assert hass_arg is hass
-        assert statistic_id == "sensor:sample_energy"
+        assert metadata["statistic_id"] == "sensor.sample_energy"
         rewrites.extend(rows)
 
     monkeypatch.setattr(energy, "_collect_statistics", _fake_collect, raising=False)
-    monkeypatch.setattr(energy, "_rewrite_statistics", _fake_rewrite, raising=False)
+    monkeypatch.setattr(energy.er, "async_get", lambda hass: None, raising=False)
+    monkeypatch.setattr(energy, "_store_statistics", _fake_store, raising=False)
 
     await energy._enforce_monotonic_sum(
         hass,
@@ -82,22 +83,23 @@ async def test_enforce_monotonic_sum_clamps_import_to_live_seam(
         end_time: datetime,
     ) -> list[dict[str, Any]]:
         assert hass_arg is hass
-        assert statistic_id == "sensor:seam_energy"
+        assert statistic_id == "sensor.seam_energy"
         assert start_time == import_start - timedelta(hours=1)
         assert end_time == import_end + timedelta(hours=6)
         return rows
 
     rewrites: list[dict[str, Any]] = []
 
-    def _fake_rewrite(
-        hass_arg: Any, statistic_id: str, rows_arg: list[dict[str, Any]]
+    async def _fake_store(
+        hass_arg: Any, metadata: dict[str, Any], rows_arg: list[dict[str, Any]]
     ) -> None:
         assert hass_arg is hass
-        assert statistic_id == "sensor:seam_energy"
+        assert metadata["statistic_id"] == "sensor.seam_energy"
         rewrites.extend(rows_arg)
 
     monkeypatch.setattr(energy, "_collect_statistics", _fake_collect, raising=False)
-    monkeypatch.setattr(energy, "_rewrite_statistics", _fake_rewrite, raising=False)
+    monkeypatch.setattr(energy.er, "async_get", lambda hass: None, raising=False)
+    monkeypatch.setattr(energy, "_store_statistics", _fake_store, raising=False)
 
     await energy._enforce_monotonic_sum(
         hass,
