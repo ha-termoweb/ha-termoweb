@@ -31,12 +31,6 @@
       }
     }
   },
-  "fallbacks": {
-    "heater_name": "Heizgerät {addr}",
-    "node_name": "Knoten {addr}",
-    "power_monitor_name": "Leistungsmonitor {addr}",
-    "never": "Niemals"
-  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

@@ -31,12 +31,6 @@
       }
     }
   },
-  "fallbacks": {
-    "heater_name": "Verwarming {addr}",
-    "node_name": "Knooppunt {addr}",
-    "power_monitor_name": "Vermogensmonitor {addr}",
-    "never": "Nooit"
-  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

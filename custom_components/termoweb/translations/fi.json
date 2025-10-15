@@ -31,12 +31,6 @@
       }
     }
   },
-  "fallbacks": {
-    "heater_name": "Lämmitin {addr}",
-    "node_name": "Solmu {addr}",
-    "power_monitor_name": "Tehonvalvonta {addr}__",
-    "never": "Ei koskaan"
-  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

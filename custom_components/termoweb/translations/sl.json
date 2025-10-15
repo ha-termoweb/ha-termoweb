@@ -31,12 +31,6 @@
       }
     }
   },
-  "fallbacks": {
-    "heater_name": "Grelnik {addr}",
-    "node_name": "Vozlišče {addr}",
-    "power_monitor_name": "Monitor moči {addr}",
-    "never": "Nikoli"
-  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {
