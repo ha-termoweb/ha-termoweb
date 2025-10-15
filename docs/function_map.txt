@@ -808,6 +808,12 @@ custom_components/termoweb/energy.py :: _get_last_statistics_compat
     Retrieve the last statistics row via synchronous or async helpers.
 custom_components/termoweb/energy.py :: _clear_statistics_compat
     Clear statistics using whichever helper is available.
+custom_components/termoweb/energy.py :: _collect_statistics
+    Return statistics rows for a single statistic id.
+custom_components/termoweb/energy.py :: _rewrite_statistics
+    Rewrite statistics rows using the external statistics writer.
+custom_components/termoweb/energy.py :: _enforce_monotonic_sum
+    Clamp external statistics so sums never decrease near import seams.
 custom_components/termoweb/energy.py :: async_import_energy_history
     Fetch historical hourly samples and insert statistics with filters.
 custom_components/termoweb/energy.py :: async_register_import_energy_history_service

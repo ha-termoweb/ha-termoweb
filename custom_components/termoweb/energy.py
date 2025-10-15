@@ -374,6 +374,130 @@ async def _clear_statistics_compat(  # pragma: no cover - compatibility shim
     return "delete"  # pragma: no cover - dependent on async helper availability
 
 
+async def _collect_statistics(
+    hass: HomeAssistant,
+    statistic_id: str,
+    start: datetime,
+    end: datetime,
+) -> list[Any]:
+    """Return statistics rows for a single statistic id."""
+
+    try:
+        period = await _statistics_during_period_compat(
+            hass,
+            start,
+            end,
+            {statistic_id},
+        )
+    except Exception:  # pragma: no cover - defensive
+        _LOGGER.exception(
+            "%s: failed to collect statistics between %s and %s",
+            statistic_id,
+            start,
+            end,
+        )
+        return []
+
+    if not period:
+        return []
+
+    rows = period.get(statistic_id) or []
+    return [
+        row for row in rows if isinstance(_statistics_row_get(row, "start"), datetime)
+    ]
+
+
+def _rewrite_statistics(
+    hass: HomeAssistant,
+    statistic_id: str,
+    rows: list[dict[str, Any]],
+) -> None:
+    """Rewrite statistics rows using the external statistics writer."""
+
+    if not rows:
+        return
+
+    if ":" in statistic_id:
+        domain, obj_id = statistic_id.split(":", 1)
+        metadata_id = f"{domain}.{obj_id}"
+    else:
+        domain, obj_id = statistic_id.split(".", 1)
+        metadata_id = statistic_id
+
+    metadata = {
+        "source": "recorder",
+        "statistic_id": metadata_id,
+        "unit_of_measurement": "kWh",
+        "name": metadata_id,
+        "has_sum": True,
+        "has_mean": False,
+    }
+
+    _store_statistics(hass, metadata, rows)
+
+
+async def _enforce_monotonic_sum(
+    hass: HomeAssistant,
+    entity_id: str,
+    import_start_dt: datetime,
+    import_end_dt: datetime,
+) -> None:
+    """Clamp external statistics so sums never decrease near import seams."""
+
+    if "." not in entity_id:
+        return
+
+    domain, obj_id = entity_id.split(".", 1)
+    external_id = f"{domain}:{obj_id}"
+    window_start = import_start_dt - timedelta(hours=1)
+    window_end = import_end_dt + timedelta(hours=6)
+
+    rows = await _collect_statistics(hass, external_id, window_start, window_end)
+    if not rows:
+        return
+
+    ordered_rows = sorted(
+        rows,
+        key=lambda row: cast(datetime, _statistics_row_get(row, "start")),
+    )
+
+    rewrites: list[dict[str, Any]] = []
+    last_sum: float | None = None
+
+    for row in ordered_rows:
+        start_dt = cast(datetime, _statistics_row_get(row, "start"))
+        sum_value_raw = _statistics_row_get(row, "sum")
+        try:
+            sum_value = float(sum_value_raw) if sum_value_raw is not None else None
+        except (TypeError, ValueError):
+            sum_value = None
+
+        if last_sum is None:
+            if sum_value is None:
+                continue
+            last_sum = sum_value
+            continue
+
+        if sum_value is None or sum_value < last_sum:
+            rewrites.append({"start": start_dt, "sum": last_sum})
+            continue
+
+        last_sum = sum_value
+
+    if not rewrites:
+        return
+
+    try:
+        _rewrite_statistics(hass, external_id, rewrites)
+    except Exception:  # pragma: no cover - defensive
+        _LOGGER.exception("%s: failed to rewrite non-monotonic statistics", external_id)
+        return
+
+    _LOGGER.info(
+        "%s: enforced monotonic sum for %d hour(s)", external_id, len(rewrites)
+    )
+
+
 async def async_import_energy_history(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -1060,6 +1184,15 @@ async def async_import_energy_history(
         written_count = 0 if store_failed else len(stats)
         if not store_failed:
             total_samples_written += len(stats)
+            try:
+                await _enforce_monotonic_sum(
+                    hass,
+                    entity_id,
+                    import_start_dt,
+                    import_end_dt,
+                )
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("%s: monotonic sum enforcement failed", addr)
         total_resets_detected += node_resets_detected
 
         node_summary = {

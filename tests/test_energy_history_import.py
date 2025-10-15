@@ -287,8 +287,11 @@ async def test_import_energy_history_uses_union_statistics_for_offset(
     ) -> dict[str, list[dict[str, Any]]]:
         ids = set(statistic_ids)
         requested_stat_sets.append(ids)
-        assert ids == {entity_id, "sensor:test_energy"}
-        return {entity_id: dot_rows, "sensor:test_energy": external_rows}
+        if ids == {entity_id, "sensor:test_energy"}:
+            return {entity_id: dot_rows, "sensor:test_energy": external_rows}
+        if ids == {"sensor:test_energy"}:
+            return {"sensor:test_energy": []}
+        return {}
 
     clear_calls: list[tuple[str, datetime, datetime]] = []
 
@@ -334,6 +337,7 @@ async def test_import_energy_history_uses_union_statistics_for_offset(
 
     assert requested_stat_sets
     assert requested_stat_sets[0] == {entity_id, "sensor:test_energy"}
+    assert requested_stat_sets[-1] == {"sensor:test_energy"}
 
     assert len(clear_calls) == 2
     assert {call[0] for call in clear_calls} == {entity_id, "sensor:test_energy"}
@@ -348,3 +352,207 @@ async def test_import_energy_history_uses_union_statistics_for_offset(
     assert all(entry.keys() == {"start", "sum"} for entry in stored_entries)
     assert stored_entries[0]["sum"] == pytest.approx(5.0), stored_entries
     assert stored_entries[-1]["sum"] == pytest.approx(7.5)
+
+
+@pytest.mark.asyncio
+async def test_enforce_monotonic_sum_clamps_descending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Monotonic guard should clamp descending sums within the window."""
+
+    entity_id = "sensor.foo_energy"
+    external_id = "sensor:foo_energy"
+    import_start = datetime(2024, 1, 1, 12, tzinfo=UTC)
+    import_end = import_start + timedelta(hours=1)
+
+    seam_rows = [
+        {"start": import_start - timedelta(hours=1), "sum": 8.0},
+        {"start": import_end, "sum": 7.5},
+    ]
+
+    async def _fake_stats_period(hass, start, end, statistic_ids):
+        assert set(statistic_ids) == {external_id}
+        assert start == import_start - timedelta(hours=1)
+        assert end == import_end + timedelta(hours=6)
+        return {external_id: seam_rows}
+
+    monkeypatch.setattr(
+        energy,
+        "_statistics_during_period_compat",
+        _fake_stats_period,
+        raising=False,
+    )
+
+    rewrites: list[dict[str, Any]] = []
+
+    def _capture_rewrite(hass, statistic_id, rows):
+        assert statistic_id == external_id
+        rewrites.extend(rows)
+
+    monkeypatch.setattr(
+        energy,
+        "_rewrite_statistics",
+        _capture_rewrite,
+        raising=False,
+    )
+
+    await energy._enforce_monotonic_sum(
+        SimpleNamespace(),
+        entity_id,
+        import_start,
+        import_end,
+    )
+
+    assert rewrites == [{"start": import_end, "sum": 8.0}]
+
+
+@pytest.mark.asyncio
+async def test_import_enforces_monotonic_sum_at_seam(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_hass,
+    inventory_from_map,
+) -> None:
+    """Importer must clamp recorder seam hours using the monotonic guard."""
+
+    entry = _StubConfigEntry("entry")
+    stub_hass.config_entries.add(entry)
+
+    base_ts = 1_700_100_000
+    samples = [
+        {"t": base_ts, "counter": 1_000},
+        {"t": base_ts + 3_600, "counter": 2_000},
+        {"t": base_ts + 7_200, "counter": 3_400},
+    ]
+
+    class _SampleClient:
+        def __init__(self, payload: list[dict[str, int]]) -> None:
+            self.payload = payload
+
+        async def get_node_samples(
+            self,
+            dev_id: str,
+            node: tuple[str, str],
+            start: int,
+            stop: int,
+        ) -> list[dict[str, int]]:
+            return self.payload
+
+    client = _SampleClient(samples)
+
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev-1")
+    stub_hass.data.setdefault(energy.DOMAIN, {})[entry.entry_id] = {
+        "client": client,
+        "dev_id": "dev-1",
+        "inventory": inventory,
+    }
+
+    entity_id = "sensor.test_energy"
+    external_id = "sensor:test_energy"
+
+    class _Registry:
+        def async_get_entity_id(
+            self, domain: str, platform: str, unique_id: str
+        ) -> str | None:
+            if domain == "sensor" and platform == energy.DOMAIN:
+                return entity_id
+            return None
+
+        def async_get(self, requested: str) -> SimpleNamespace | None:
+            if requested == entity_id:
+                return SimpleNamespace(original_name="Test Energy")
+            return None
+
+    registry = _Registry()
+    monkeypatch.setattr(energy.er, "async_get", lambda hass: registry, raising=False)
+
+    import_start_dt = datetime.fromtimestamp(base_ts, UTC).replace(
+        minute=0, second=0, microsecond=0
+    )
+    import_end_dt = datetime.fromtimestamp(samples[-1]["t"], UTC).replace(
+        minute=0, second=0, microsecond=0
+    )
+
+    seam_rows = [
+        {"start": import_start_dt - timedelta(hours=1), "sum": 4.0},
+        {"start": import_end_dt, "sum": 6.5},
+        {"start": import_end_dt + timedelta(hours=1), "sum": 6.0},
+    ]
+
+    async def _fake_stats_period(
+        hass,
+        start_time,
+        end_time,
+        statistic_ids,
+    ) -> dict[str, list[dict[str, Any]]]:
+        ids = set(statistic_ids)
+        if ids == {entity_id, external_id}:
+            return {}
+        if ids == {external_id}:
+            return {external_id: seam_rows}
+        return {}
+
+    monkeypatch.setattr(
+        energy,
+        "_statistics_during_period_compat",
+        _fake_stats_period,
+        raising=False,
+    )
+
+    async def _fake_clear_statistics(
+        hass,
+        statistic_id: str,
+        *,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> str:
+        return "clear"
+
+    monkeypatch.setattr(
+        energy,
+        "_clear_statistics_compat",
+        _fake_clear_statistics,
+        raising=False,
+    )
+
+    stored_stats: list[list[dict[str, Any]]] = []
+
+    def _capture_store(
+        hass,
+        metadata: dict[str, Any],
+        stats: list[dict[str, Any]],
+    ) -> None:
+        stored_stats.append(stats)
+
+    monkeypatch.setattr(
+        energy,
+        "_store_statistics",
+        _capture_store,
+        raising=False,
+    )
+
+    rewrites: list[tuple[str, list[dict[str, Any]]]] = []
+
+    def _capture_rewrite(hass, statistic_id, rows):
+        rewrites.append((statistic_id, rows))
+
+    monkeypatch.setattr(
+        energy,
+        "_rewrite_statistics",
+        _capture_rewrite,
+        raising=False,
+    )
+
+    await energy.async_import_energy_history(
+        stub_hass,
+        entry,
+        rate_limit=_ImmediateRateLimiter(),
+        max_days=1,
+    )
+
+    assert stored_stats, "Import should write statistics"
+    assert rewrites, "Monotonic guard should rewrite seam hours"
+    seam_stat_id, seam_rows_written = rewrites[-1]
+    assert seam_stat_id == external_id
+    assert seam_rows_written == [
+        {"start": import_end_dt + timedelta(hours=1), "sum": 6.5}
+    ]
