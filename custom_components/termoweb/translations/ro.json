@@ -1,0 +1,195 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Conectați-vă la încălzitoarele din familia TermoWeb",
+        "description": "Versiune: {version}\n\nAlegeți marca TermoWeb sau Ducaheat și introduceți datele de autentificare ale contului.",
+        "data": {
+          "brand": "Marcă",
+          "username": "E-mail",
+          "password": "Parolă",
+          "poll_interval": "Interval de interogare de bază (secunde)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Nume de utilizator sau parolă invalide (sau cheie de client).",
+      "cannot_connect": "Nu se poate conecta la TermoWeb — eroare de rețea/DNS/SSL.",
+      "rate_limited": "API-ul este limitat temporar. Încercați din nou mai târziu.",
+      "unknown": "Eroare necunoscută"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opțiuni TermoWeb",
+        "description": "Versiune: {version}",
+        "data": {
+          "poll_interval": "Interval de interogare de bază (secunde)",
+          "debug": "Activează instrumentele de depanare"
+        }
+      }
+    }
+  },
+  "fallbacks": {
+    "heater_name": "Încălzitor {addr}",
+    "node_name": "Nod {addr}",
+    "power_monitor_name": "Monitor de energie {addr}",
+    "never": "Niciodată"
+  },
+  "entity": {
+    "binary_sensor": {
+      "gateway_online": {
+        "name": "Gateway online"
+      },
+      "boost_active": {
+        "name": "Boost activ"
+      }
+    },
+    "button": {
+      "force_refresh": {
+        "name": "Forțează reîmprospătarea"
+      },
+      "accumulator_boost_start": {
+        "name": "Pornește boost-ul"
+      },
+      "accumulator_boost_cancel": {
+        "name": "Anulează boost-ul"
+      }
+    },
+    "number": {
+      "accumulator_boost_duration": {
+        "name": "Durata boost-ului"
+      },
+      "accumulator_boost_temperature": {
+        "name": "Temperatura boost-ului"
+      }
+    },
+    "sensor": {
+      "heater_temperature": {
+        "name": "Temperatură"
+      },
+      "heater_energy_total": {
+        "name": "Energie"
+      },
+      "heater_power": {
+        "name": "Putere"
+      },
+      "power_monitor_energy": {
+        "name": "Energie"
+      },
+      "power_monitor_power": {
+        "name": "Putere"
+      },
+      "installation_total_energy": {
+        "name": "Energie totală"
+      },
+      "boost_minutes_remaining": {
+        "name": "Minute de boost rămase"
+      },
+      "boost_end": {
+        "name": "Sfârșitul boost-ului"
+      }
+    }
+  },
+  "services": {
+    "set_acm_preset": {
+      "name": "Configurează presetarea boost-ului pentru acumulator",
+      "description": "Actualizați durata și/sau temperatura implicită a boost-ului pentru un acumulator TermoWeb. Minutele trebuie să fie între 60 și 600 în pași de 60; omiteți un câmp pentru a păstra valoarea existentă.",
+      "fields": {
+        "minutes": {
+          "name": "Durata boost-ului implicită",
+          "description": "Numărul de minute cât ar trebui să ruleze boost-ul când nu există o suprascriere (60–600, pas 60).",
+          "example": "120"
+        },
+        "temperature": {
+          "name": "Temperatura boost-ului",
+          "description": "Temperatura opțională care se aplică în timpul sesiunii de boost (°C sau °F).",
+          "example": "22.5"
+        }
+      }
+    },
+    "start_boost": {
+      "name": "Pornește boost-ul acumulatorului",
+      "description": "Porniți imediat un boost pe un acumulator TermoWeb. Furnizați o durată pentru a suprascrie valoarea implicită (60–600 minute în pași de 60) sau omiteți-o pentru a folosi presetarea salvată.",
+      "fields": {
+        "minutes": {
+          "name": "Durata boost-ului",
+          "description": "Durata sesiunii de boost în minute (60–600, pas 60). Opțional.",
+          "example": "180"
+        }
+      }
+    },
+    "cancel_boost": {
+      "name": "Anulează boost-ul acumulatorului",
+      "description": "Anulați sesiunea de boost activă pe un acumulator TermoWeb."
+    },
+    "set_schedule": {
+      "name": "Setează programul săptămânal",
+      "description": "Setați programul săptămânal 7×24 pentru un încălzitor TermoWeb. Programul este o listă de 168 de numere întregi, unde fiecare valoare corespunde unei ore din săptămână începând de luni la 00:00. Folosiți 0 pentru presetarea rece, 1 pentru presetarea de noapte și 2 pentru presetarea de zi.",
+      "fields": {
+        "prog": {
+          "name": "Program",
+          "description": "O listă de 168 de numere întregi (0, 1 sau 2) care reprezintă programul săptămânal al încălzitorului. Indexul 0 este luni 00:00, indexul 1 este luni 01:00 și așa mai departe.",
+          "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
+        }
+      }
+    },
+    "set_preset_temperatures": {
+      "name": "Setează temperaturile presetate",
+      "description": "Setați temperaturile presetate rece, noapte și zi pentru un încălzitor TermoWeb. Puteți furniza toate cele trei temperaturi ca o singură listă (``ptemp``) sau le puteți specifica individual (``cold``, ``night`` și ``day``).",
+      "fields": {
+        "ptemp": {
+          "name": "Temperaturi presetate",
+          "description": "O listă de trei temperaturi [rece, noapte, zi] în aceleași unități ca încălzitorul (°C sau °F). Dacă este furnizată, suprascrie valorile individuale rece, noapte și zi.",
+          "example": "[10.0, 16.0, 20.0]"
+        },
+        "cold": {
+          "name": "Presetarea rece",
+          "description": "Temperatura pentru presetarea rece (°C sau °F).",
+          "example": "10.0"
+        },
+        "night": {
+          "name": "Presetarea de noapte",
+          "description": "Temperatura pentru presetarea de noapte (°C sau °F).",
+          "example": "16.0"
+        },
+        "day": {
+          "name": "Presetarea de zi",
+          "description": "Temperatura pentru presetarea de zi (°C sau °F).",
+          "example": "20.0"
+        }
+      }
+    },
+    "import_energy_history": {
+      "name": "Importă istoricul de energie",
+      "description": "Importați contoarele orare istorice de energie pentru încălzitoarele TermoWeb cu până la un an în urmă în statisticile Home Assistant pentru toate încălzitoarele configurate.",
+      "fields": {
+        "reset_progress": {
+          "name": "Resetează progresul",
+          "description": "Ștergeți progresul stocat și reimportați istoricul de la început."
+        },
+        "max_history_retrieval": {
+          "name": "Număr maxim de zile de istoric",
+          "description": "Numărul de zile de istoric de preluat. Suprascrie valoarea implicită configurată doar pentru acest import."
+        }
+      }
+    },
+    "ws_debug_probe": {
+      "name": "Pornește diagnosticul websocket",
+      "description": "Solicitați o actualizare imediată ``dev_data`` de la clientul websocket și înregistrați dimensiunile următoarelor cadre ``dev_handshake`` și ``update``. Activați opțiunea de depanare în setările integrării înainte de a utiliza acest instrument.",
+      "fields": {
+        "entry_id": {
+          "name": "ID-ul intrării de configurare",
+          "description": "Restrângeți diagnosticul la o singură intrare de configurare TermoWeb.",
+          "example": "abcd1234deadbeef"
+        },
+        "dev_id": {
+          "name": "ID dispozitiv",
+          "description": "Restrângeți diagnosticul la un singur dispozitiv gateway.",
+          "example": "0000abcd"
+        }
+      }
+    }
+  }
+}

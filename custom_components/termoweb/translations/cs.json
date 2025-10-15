@@ -1,0 +1,195 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Připojte se k topidlům rodiny TermoWeb",
+        "description": "Verze: {version}\n\nVyberte svou značku TermoWeb nebo Ducaheat a zadejte přihlašovací údaje.",
+        "data": {
+          "brand": "Značka",
+          "username": "E-mail",
+          "password": "Heslo",
+          "poll_interval": "Základní interval dotazování (sekundy)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Neplatné uživatelské jméno nebo heslo (nebo klíč klienta).",
+      "cannot_connect": "Nelze se připojit k TermoWebu — chyba sítě/DNS/SSL.",
+      "rate_limited": "API je dočasně omezené. Zkuste to znovu později.",
+      "unknown": "Neznámá chyba"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Možnosti TermoWeb",
+        "description": "Verze: {version}",
+        "data": {
+          "poll_interval": "Základní interval dotazování (sekundy)",
+          "debug": "Povolit ladicí pomocníky"
+        }
+      }
+    }
+  },
+  "fallbacks": {
+    "heater_name": "Topidlo {addr}",
+    "node_name": "Uzel {addr}",
+    "power_monitor_name": "Monitor energie {addr}",
+    "never": "Nikdy"
+  },
+  "entity": {
+    "binary_sensor": {
+      "gateway_online": {
+        "name": "Brána online"
+      },
+      "boost_active": {
+        "name": "Posílení aktivní"
+      }
+    },
+    "button": {
+      "force_refresh": {
+        "name": "Vynutit obnovení"
+      },
+      "accumulator_boost_start": {
+        "name": "Spustit posílení"
+      },
+      "accumulator_boost_cancel": {
+        "name": "Zrušit posílení"
+      }
+    },
+    "number": {
+      "accumulator_boost_duration": {
+        "name": "Doba posílení"
+      },
+      "accumulator_boost_temperature": {
+        "name": "Teplota posílení"
+      }
+    },
+    "sensor": {
+      "heater_temperature": {
+        "name": "Teplota"
+      },
+      "heater_energy_total": {
+        "name": "Energie"
+      },
+      "heater_power": {
+        "name": "Výkon"
+      },
+      "power_monitor_energy": {
+        "name": "Energie"
+      },
+      "power_monitor_power": {
+        "name": "Výkon"
+      },
+      "installation_total_energy": {
+        "name": "Celková energie"
+      },
+      "boost_minutes_remaining": {
+        "name": "Zbývající minuty posílení"
+      },
+      "boost_end": {
+        "name": "Konec posílení"
+      }
+    }
+  },
+  "services": {
+    "set_acm_preset": {
+      "name": "Nastavit předvolbu posílení akumulátoru",
+      "description": "Aktualizujte výchozí dobu a/nebo teplotu posílení pro akumulátor TermoWeb. Minuty musí být mezi 60 a 600 v krocích po 60; pole vynechejte, chcete-li ponechat stávající hodnotu.",
+      "fields": {
+        "minutes": {
+          "name": "Výchozí doba posílení",
+          "description": "Počet minut, po které má posílení běžet, pokud není zadáno přepsání (60–600, krok 60).",
+          "example": "120"
+        },
+        "temperature": {
+          "name": "Teplota posílení",
+          "description": "Volitelná teplota, která se použije během relace posílení (°C nebo °F).",
+          "example": "22.5"
+        }
+      }
+    },
+    "start_boost": {
+      "name": "Spustit posílení akumulátoru",
+      "description": "Okamžitě spusťte posílení na akumulátoru TermoWeb. Uveďte dobu, abyste přepsali výchozí hodnotu (60–600 minut v krocích po 60), nebo ji vynechejte a použijte uložené nastavení.",
+      "fields": {
+        "minutes": {
+          "name": "Doba posílení",
+          "description": "Doba trvání relace posílení v minutách (60–600, krok 60). Volitelné.",
+          "example": "180"
+        }
+      }
+    },
+    "cancel_boost": {
+      "name": "Zrušit posílení akumulátoru",
+      "description": "Zrušte aktivní relaci posílení na akumulátoru TermoWeb."
+    },
+    "set_schedule": {
+      "name": "Nastavit týdenní plán",
+      "description": "Nastavte 7×24 týdenní program pro topidlo TermoWeb. Program je seznam 168 celých čísel, kde každá hodnota odpovídá jedné hodině v týdnu počínaje pondělím 00:00. Použijte 0 pro studenou, 1 pro noční a 2 pro denní předvolbu.",
+      "fields": {
+        "prog": {
+          "name": "Program",
+          "description": "Seznam 168 celých čísel (0, 1 nebo 2), která představují týdenní plán topidla. Index 0 je pondělí 00:00, index 1 je pondělí 01:00 a tak dále.",
+          "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
+        }
+      }
+    },
+    "set_preset_temperatures": {
+      "name": "Nastavit přednastavené teploty",
+      "description": "Nastavte přednastavené teploty studená, noční a denní pro topidlo TermoWeb. Můžete zadat všechny tři teploty jako jeden seznam (``ptemp``) nebo je uvést jednotlivě (``cold``, ``night`` a ``day``).",
+      "fields": {
+        "ptemp": {
+          "name": "Přednastavené teploty",
+          "description": "Seznam tří teplot [studená, noční, denní] ve stejných jednotkách jako topidlo (°C nebo °F). Pokud je uveden, přepíše jednotlivé hodnoty studená, noc a den.",
+          "example": "[10.0, 16.0, 20.0]"
+        },
+        "cold": {
+          "name": "Studená předvolba",
+          "description": "Teplota pro studenou předvolbu (°C nebo °F).",
+          "example": "10.0"
+        },
+        "night": {
+          "name": "Noční předvolba",
+          "description": "Teplota pro noční předvolbu (°C nebo °F).",
+          "example": "16.0"
+        },
+        "day": {
+          "name": "Denní předvolba",
+          "description": "Teplota pro denní předvolbu (°C nebo °F).",
+          "example": "20.0"
+        }
+      }
+    },
+    "import_energy_history": {
+      "name": "Importovat historii energie",
+      "description": "Importujte historické hodinové energetické čítače pro topidla TermoWeb až rok zpět do statistik Home Assistant pro všechna nakonfigurovaná topidla.",
+      "fields": {
+        "reset_progress": {
+          "name": "Obnovit průběh",
+          "description": "Vymažte uložený průběh a znovu importujte historii od začátku."
+        },
+        "max_history_retrieval": {
+          "name": "Max. dnů historie",
+          "description": "Počet dnů historie ke stažení. Přepíše výchozí nastavení pouze pro tento import."
+        }
+      }
+    },
+    "ws_debug_probe": {
+      "name": "Spustit diagnostiku websocketu",
+      "description": "Vyžádejte si okamžitou aktualizaci ``dev_data`` od klienta websocket a zaznamenejte velikosti následujících rámců ``dev_handshake`` a ``update``. Před použitím tohoto pomocníka povolte možnost ladění v nastavení integrace.",
+      "fields": {
+        "entry_id": {
+          "name": "ID konfigurační položky",
+          "description": "Omezte diagnostiku na jednu konfigurační položku TermoWeb.",
+          "example": "abcd1234deadbeef"
+        },
+        "dev_id": {
+          "name": "ID zařízení",
+          "description": "Omezte diagnostiku na jedno bránové zařízení.",
+          "example": "0000abcd"
+        }
+      }
+    }
+  }
+}

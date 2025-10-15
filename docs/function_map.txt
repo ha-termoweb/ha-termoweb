@@ -78,6 +78,26 @@ custom_components/termoweb/api.py :: RESTClient.set_acm_boost_state
     Start or stop an accumulator boost session.
 custom_components/termoweb/api.py :: RESTClient.get_node_samples
     Return heater samples as list of {"t", "counter"} dicts.
+scripts/auto_translate.py :: parse_args
+    Return the parsed command-line arguments.
+scripts/auto_translate.py :: load_json
+    Load JSON content from ``path``.
+scripts/auto_translate.py :: dump_json
+    Write ``data`` as UTF-8 JSON to ``path``.
+scripts/auto_translate.py :: protect_tokens
+    Replace placeholders and code spans with sentinel tokens.
+scripts/auto_translate.py :: restore_tokens
+    Restore placeholder and code span tokens to their originals.
+scripts/auto_translate.py :: create_session
+    Configure and return a reusable Requests session.
+scripts/auto_translate.py :: _translate_once
+    Translate ``text`` via the Google web API and return the result.
+scripts/auto_translate.py :: translate_text
+    Translate ``text`` while preserving placeholder tokens and newlines.
+scripts/auto_translate.py :: translate_structure
+    Translate every string inside ``data`` recursively.
+scripts/auto_translate.py :: main
+    Entrypoint for the translation script.
 custom_components/termoweb/api.py :: RESTClient._resolve_node_descriptor
     Return ``(node_type, addr)`` for the provided descriptor.
 custom_components/termoweb/api.py :: RESTClient._log_non_htr_payload

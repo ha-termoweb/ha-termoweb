@@ -1,0 +1,195 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "TermoWeb ailesi ısıtıcılarına bağlan",
+        "description": "Sürüm: {version}\\n\\nTermoWeb veya Ducaheat markanı seç ve hesap kimlik bilgilerini gir.",
+        "data": {
+          "brand": "Marka",
+          "username": "E-posta",
+          "password": "Parola",
+          "poll_interval": "Temel sorgulama aralığı (saniye)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Geçersiz kullanıcı adı, parola veya istemci anahtarı.",
+      "cannot_connect": "TermoWeb’e bağlanılamıyor — ağ/DNS/SSL hatası.",
+      "rate_limited": "API geçici olarak sınırlandırıldı. Daha sonra tekrar deneyin.",
+      "unknown": "Bilinmeyen hata"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "TermoWeb Seçenekleri",
+        "description": "Sürüm: {version}",
+        "data": {
+          "poll_interval": "Temel sorgulama aralığı (saniye)",
+          "debug": "Hata ayıklama yardımcılarını etkinleştir"
+        }
+      }
+    }
+  },
+  "fallbacks": {
+    "heater_name": "Isıtıcı {addr}",
+    "node_name": "Düğüm {addr}",
+    "power_monitor_name": "Güç izleyicisi {addr}",
+    "never": "Asla"
+  },
+  "entity": {
+    "binary_sensor": {
+      "gateway_online": {
+        "name": "Ağ geçidi çevrimiçi"
+      },
+      "boost_active": {
+        "name": "Güçlendirme etkin"
+      }
+    },
+    "button": {
+      "force_refresh": {
+        "name": "Yenilemeyi zorla"
+      },
+      "accumulator_boost_start": {
+        "name": "Güçlendirmeyi başlat"
+      },
+      "accumulator_boost_cancel": {
+        "name": "Güçlendirmeyi iptal et"
+      }
+    },
+    "number": {
+      "accumulator_boost_duration": {
+        "name": "Güçlendirme süresi"
+      },
+      "accumulator_boost_temperature": {
+        "name": "Güçlendirme sıcaklığı"
+      }
+    },
+    "sensor": {
+      "heater_temperature": {
+        "name": "Sıcaklık"
+      },
+      "heater_energy_total": {
+        "name": "Enerji"
+      },
+      "heater_power": {
+        "name": "Güç"
+      },
+      "power_monitor_energy": {
+        "name": "Enerji"
+      },
+      "power_monitor_power": {
+        "name": "Güç"
+      },
+      "installation_total_energy": {
+        "name": "Toplam enerji"
+      },
+      "boost_minutes_remaining": {
+        "name": "Kalan güçlendirme dakikaları"
+      },
+      "boost_end": {
+        "name": "Güçlendirme bitişi"
+      }
+    }
+  },
+  "services": {
+    "set_acm_preset": {
+      "name": "Akümülatör güçlendirme ön ayarını yapılandır",
+      "description": "Bir TermoWeb akümülatörü için güçlendirmenin varsayılan süresini ve/veya sıcaklığını günceller. Dakikalar 60 ile 600 arasında ve 60’ar adımlarla olmalıdır; mevcut değeri korumak için alanı boş bırakın.",
+      "fields": {
+        "minutes": {
+          "name": "Varsayılan güçlendirme süresi",
+          "description": "Güçlendirme için geçersiz kılma sağlanmadığında çalışması gereken dakika sayısı (60–600, adım 60).",
+          "example": "120"
+        },
+        "temperature": {
+          "name": "Güçlendirme sıcaklığı",
+          "description": "Güçlendirme oturumu sırasında uygulanacak isteğe bağlı ayar sıcaklığı (°C veya °F).",
+          "example": "22.5"
+        }
+      }
+    },
+    "start_boost": {
+      "name": "Akümülatör güçlendirmesini başlat",
+      "description": "Bir TermoWeb akümülatöründe hemen güçlendirme başlatır. Varsayılan değeri değiştirmek için bir süre girin (60–600 dakika, 60 adım) veya kaydedilen ön ayarı kullanmak için boş bırakın.",
+      "fields": {
+        "minutes": {
+          "name": "Güçlendirme süresi",
+          "description": "Güçlendirme oturumunun dakika cinsinden süresi (60–600, adım 60). İsteğe bağlı.",
+          "example": "180"
+        }
+      }
+    },
+    "cancel_boost": {
+      "name": "Akümülatör güçlendirmesini iptal et",
+      "description": "TermoWeb akümülatöründeki etkin güçlendirme oturumunu iptal eder."
+    },
+    "set_schedule": {
+      "name": "Haftalık programı ayarla",
+      "description": "Bir TermoWeb ısıtıcı için 7×24 haftalık programı ayarlar. Program, değeri pazartesi 00:00’dan başlayarak haftanın her saatine karşılık gelen 168 tam sayıdan oluşan bir listedir. Soğuk ön ayarı için 0, gece için 1 ve gündüz için 2 kullanın.",
+      "fields": {
+        "prog": {
+          "name": "Program",
+          "description": "Isıtıcının haftalık programını temsil eden 168 tam sayıdan (0, 1 veya 2) oluşan liste. Dizin 0 pazartesi 00:00, dizin 1 pazartesi 01:00 vb.",
+          "example": "[0,0,0,1,1,2,2,0,1,2,0,...]"
+        }
+      }
+    },
+    "set_preset_temperatures": {
+      "name": "Ön ayarlı sıcaklıkları ayarla",
+      "description": "Bir TermoWeb ısıtıcı için soğuk, gece ve gündüz ön ayar sıcaklıklarını belirler. Üç sıcaklığı tek bir liste (``ptemp``) olarak sağlayabilir veya her birini ayrı ayrı (``cold``, ``night`` ve ``day``) belirtebilirsiniz.",
+      "fields": {
+        "ptemp": {
+          "name": "Ön ayarlı sıcaklıklar",
+          "description": "Isıtıcıyla aynı birimlerde [soğuk, gece, gündüz] olmak üzere üç sıcaklıktan oluşan liste (°C veya °F). Sağlanırsa soğuk, gece ve gündüz değerlerini geçersiz kılar.",
+          "example": "[10.0, 16.0, 20.0]"
+        },
+        "cold": {
+          "name": "Soğuk ön ayarı",
+          "description": "Soğuk ön ayarı sıcaklığı (°C veya °F).",
+          "example": "10.0"
+        },
+        "night": {
+          "name": "Gece ön ayarı",
+          "description": "Gece ön ayarı sıcaklığı (°C veya °F).",
+          "example": "16.0"
+        },
+        "day": {
+          "name": "Gündüz ön ayarı",
+          "description": "Gündüz ön ayarı sıcaklığı (°C veya °F).",
+          "example": "20.0"
+        }
+      }
+    },
+    "import_energy_history": {
+      "name": "Enerji geçmişini içe aktar",
+      "description": "TermoWeb ısıtıcılarının geçmiş saatlik enerji sayaçlarını, yapılandırılmış her ısıtıcı için Home Assistant istatistiklerine bir yıla kadar geri dönük olarak içe aktarır.",
+      "fields": {
+        "reset_progress": {
+          "name": "İlerlemeni sıfırla",
+          "description": "Kaydedilmiş ilerlemeyi siler ve geçmişi baştan içe aktarır."
+        },
+        "max_history_retrieval": {
+          "name": "Maksimum geçmiş gün sayısı",
+          "description": "Alınacak geçmiş gün sayısı. Yalnızca bu içe aktarma için yapılandırılmış varsayılan değeri geçersiz kılar."
+        }
+      }
+    },
+    "ws_debug_probe": {
+      "name": "Websocket hata ayıklama probu gönder",
+      "description": "Websocket istemcisinden derhal ``dev_data`` yenilemesi ister ve sonraki ``dev_handshake`` ve ``update`` çerçeve boyutlarını kaydeder. Bu yardımcıyı kullanmadan önce entegrasyon ayarlarında hata ayıklama seçeneğini etkinleştirin.",
+      "fields": {
+        "entry_id": {
+          "name": "Yapılandırma girişi kimliği",
+          "description": "Prob işlemini tek bir TermoWeb yapılandırma girişine sınırlar.",
+          "example": "abcd1234deadbeef"
+        },
+        "dev_id": {
+          "name": "Cihaz kimliği",
+          "description": "Prob işlemini tek bir ağ geçidine sınırlar.",
+          "example": "0000abcd"
+        }
+      }
+    }
+  }
+}
