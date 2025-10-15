@@ -16,7 +16,6 @@ from custom_components.termoweb.inventory import (
     normalize_heater_addresses,
     normalize_node_addr,
     normalize_node_type,
-    parse_heater_energy_unique_id,
 )
 from custom_components.termoweb.utils import (
     _entry_gateway_record,
@@ -270,7 +269,6 @@ def test_build_heater_energy_unique_id_round_trip(
     unique_id = build_heater_energy_unique_id(" dev ", " ACM ", " 01 ")
 
     assert unique_id == f"{DOMAIN}:dev:acm:01:energy"
-    assert parse_heater_energy_unique_id(unique_id) == ("dev", "acm", "01")
     assert calls == [
         ("addr", " dev ", {}),
         ("type", " ACM ", {}),
@@ -293,22 +291,6 @@ def test_build_heater_energy_unique_id_requires_components(
 ) -> None:
     with pytest.raises(ValueError):
         build_heater_energy_unique_id(dev_id, node_type, addr)
-
-
-@pytest.mark.parametrize(
-    "value",
-    [
-        None,
-        "",
-        "not-domain:dev:htr:01:energy",
-        f"{DOMAIN}:dev:htr:01:power",
-        f"{DOMAIN}:dev:htr:energy",
-        f"{DOMAIN}:dev:htr",
-        f"{DOMAIN}:dev::01:energy",
-    ],
-)
-def test_parse_heater_energy_unique_id_invalid(value) -> None:
-    assert parse_heater_energy_unique_id(value) is None
 
 
 @pytest.mark.parametrize(

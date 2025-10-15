@@ -994,8 +994,6 @@ custom_components/termoweb/inventory.py :: normalize_node_type
     Return ``value`` as a normalised node type string.
 custom_components/termoweb/inventory.py :: normalize_node_addr
     Return ``value`` as a normalised node address string.
-custom_components/termoweb/inventory.py :: parse_heater_energy_unique_id
-    Parse a heater energy sensor unique ID into its components.
 custom_components/termoweb/inventory.py :: addresses_by_node_type
     Return mapping of node type to address list, tracking unknown types.
 custom_components/termoweb/inventory.py :: build_heater_address_map

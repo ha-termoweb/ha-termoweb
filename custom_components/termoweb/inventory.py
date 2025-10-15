@@ -64,7 +64,6 @@ __all__ = [
     "normalize_node_addr",
     "normalize_node_type",
     "normalize_power_monitor_addresses",
-    "parse_heater_energy_unique_id",
     "power_monitor_sample_subscription_targets",
 ]
 
@@ -913,25 +912,6 @@ def normalize_node_addr(
         use_default_when_falsey=use_default_when_falsey,
         lowercase=False,
     )
-
-
-def parse_heater_energy_unique_id(unique_id: str) -> tuple[str, str, str] | None:
-    """Parse a heater energy sensor unique ID into its components."""
-
-    if not isinstance(unique_id, str):
-        return None
-    stripped = unique_id.strip()
-    if not stripped or not stripped.startswith(f"{DOMAIN}:"):
-        return None
-    try:
-        domain, dev, node, address, metric = stripped.split(":", 4)
-    except ValueError:
-        return None
-    if domain != DOMAIN or metric != "energy":
-        return None
-    if not dev or not node or not address:
-        return None
-    return dev, node, address
 
 
 def addresses_by_node_type(
