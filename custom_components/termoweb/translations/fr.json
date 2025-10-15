@@ -31,12 +31,6 @@
       }
     }
   },
-  "fallbacks": {
-    "heater_name": "Radiateur {addr}",
-    "node_name": "Nœud {addr}",
-    "power_monitor_name": "Surveillance d’énergie {addr}",
-    "never": "Jamais"
-  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {

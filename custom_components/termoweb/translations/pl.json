@@ -31,12 +31,6 @@
       }
     }
   },
-  "fallbacks": {
-    "heater_name": "Grzejnik {addr}",
-    "node_name": "Węzeł {addr}",
-    "power_monitor_name": "Monitor mocy {addr}",
-    "never": "Nigdy"
-  },
   "entity": {
     "binary_sensor": {
       "gateway_online": {
