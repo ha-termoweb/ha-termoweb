@@ -149,13 +149,12 @@ class AccumulatorBoostDurationNumber(RestoreEntity, HeaterNodeBase, NumberEntity
             entry_id,
             dev_id,
             addr,
-            f"{base_name} Boost duration",
+            None,
             unique_id,
             device_name=base_name,
             node_type=node_type,
             inventory=inventory,
         )
-        self._attr_name = "Boost duration"
         self._minutes = DEFAULT_BOOST_DURATION
 
     async def async_added_to_hass(self) -> None:
@@ -293,13 +292,12 @@ class AccumulatorBoostTemperatureNumber(
             entry_id,
             dev_id,
             addr,
-            f"{base_name} Boost temperature",
+            None,
             unique_id,
             device_name=base_name,
             node_type=node_type,
             inventory=inventory,
         )
-        self._attr_name = "Boost temperature"
         self._temperature = DEFAULT_BOOST_TEMPERATURE
         self._climate_entity_id: str | None = None
 
