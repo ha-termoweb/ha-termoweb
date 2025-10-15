@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
-from datetime import UTC, datetime
+from collections.abc import Mapping
 import math
 from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.loader import async_get_integration as loader_async_get_integration
-from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .inventory import normalize_node_addr
@@ -173,156 +171,3 @@ def float_or_none(value: Any) -> float | None:
         return None
 
 
-def coerce_power_watts(value: Any) -> float | None:
-    """Return a non-negative watt value parsed from ``value`` when possible."""
-
-    if isinstance(value, Mapping):
-        for key in ("value", "power", "watts", "w"):
-            nested = value.get(key)
-            coerced = coerce_power_watts(nested)
-            if coerced is not None:
-                return coerced
-        return None
-
-    if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
-        for item in value:
-            coerced = coerce_power_watts(item)
-            if coerced is not None:
-                return coerced
-        return None
-
-    multiplier = 1.0
-    candidate = value
-
-    if isinstance(candidate, str):
-        cleaned = candidate.strip()
-        if not cleaned:
-            return None
-        lowered = cleaned.lower()
-        if lowered.endswith("kw"):
-            multiplier = 1000.0
-            cleaned = cleaned[:-2].strip()
-        elif lowered.endswith("mw"):
-            multiplier = 1_000_000.0
-            cleaned = cleaned[:-2].strip()
-        elif lowered.endswith("w"):
-            cleaned = cleaned[:-1].strip()
-        cleaned = cleaned.replace(",", "")
-        candidate = cleaned
-
-    numeric = float_or_none(candidate)
-    if numeric is None or numeric < 0 or not math.isfinite(numeric):
-        return None
-
-    return numeric * multiplier
-
-
-def _coerce_timestamp(value: Any) -> float | None:
-    """Return a UNIX timestamp parsed from ``value`` when possible."""
-
-    if isinstance(value, (int, float)):
-        ts = float(value)
-        if not math.isfinite(ts):
-            return None
-        if ts > 1_000_000_000_000:  # milliseconds
-            ts /= 1000.0
-        return ts
-    if isinstance(value, str):
-        cleaned = value.strip()
-        if not cleaned:
-            return None
-        numeric = float_or_none(cleaned)
-        if numeric is not None:
-            return _coerce_timestamp(numeric)
-        parsed = dt_util.parse_datetime(cleaned)
-        if parsed is None:
-            return None
-        return dt_util.as_timestamp(parsed)
-    return None
-
-
-def extract_power_timestamp(payload: Any) -> float | None:
-    """Return the newest timestamp discovered in ``payload``."""
-
-    if isinstance(payload, Mapping):
-        for key in (
-            "timestamp",
-            "ts",
-            "t",
-            "updated_at",
-            "updatedAt",
-            "time",
-            "last_update",
-            "lastUpdate",
-        ):
-            if key in payload:
-                ts = _coerce_timestamp(payload.get(key))
-                if ts is not None:
-                    return ts
-        for key in ("power", "status", "data", "metrics"):
-            nested = payload.get(key)
-            ts = extract_power_timestamp(nested)
-            if ts is not None:
-                return ts
-        return None
-
-    if isinstance(payload, Iterable) and not isinstance(payload, (str, bytes)):
-        latest: float | None = None
-        for item in payload:
-            ts = extract_power_timestamp(item)
-            if ts is None:
-                continue
-            if latest is None or ts > latest:
-                latest = ts
-        return latest
-
-    return _coerce_timestamp(payload)
-
-
-def extract_power_watts(payload: Any) -> float | None:
-    """Return the first instantaneous power value discovered within ``payload``."""
-
-    if isinstance(payload, Mapping):
-        candidate_keys = (
-            "instant_power",
-            "instantPower",
-            "power_w",
-            "powerW",
-            "power_watts",
-            "watts",
-            "power",
-        )
-        for key in candidate_keys:
-            if key not in payload:
-                continue
-            value = payload.get(key)
-            coerced = coerce_power_watts(value)
-            if coerced is not None:
-                return coerced
-        for key in ("status", "data", "metrics"):
-            nested = payload.get(key)
-            coerced = extract_power_watts(nested)
-            if coerced is not None:
-                return coerced
-        return None
-
-    if isinstance(payload, Iterable) and not isinstance(payload, (str, bytes)):
-        for item in payload:
-            coerced = extract_power_watts(item)
-            if coerced is not None:
-                return coerced
-        return None
-
-    return coerce_power_watts(payload)
-
-
-def format_timestamp_iso(timestamp: float | None) -> str | None:
-    """Return an ISO timestamp string for ``timestamp`` when available."""
-
-    if timestamp is None:
-        return None
-    try:
-        dt = datetime.fromtimestamp(float(timestamp), tz=UTC)
-    except (TypeError, ValueError, OSError, OverflowError):
-        return None
-    return dt.isoformat()
