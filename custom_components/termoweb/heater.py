@@ -50,20 +50,6 @@ class BoostButtonMetadata:
     label: str
     icon: str
     action: str = "start"
-
-
-def format_boost_duration_label(minutes: int) -> str:
-    """Return a human-readable label for boost durations."""
-
-    if minutes <= 0:
-        return "0 minutes"
-    if minutes % 60:
-        return f"{minutes} minutes"
-    hours = minutes // 60
-    suffix = "hour" if hours == 1 else "hours"
-    return f"{hours} {suffix}"
-
-
 def _build_boost_button_metadata() -> tuple[BoostButtonMetadata, ...]:
     """Return the configured metadata describing boost helper buttons."""
 
