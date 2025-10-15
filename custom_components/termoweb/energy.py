@@ -138,26 +138,6 @@ def _store_statistics(
 ) -> None:
     """Insert statistics using recorder helpers."""
 
-    _import_stats: (
-        Callable[[HomeAssistant, Mapping[str, Any], list[dict[str, Any]]], None] | None
-    )
-
-    try:
-        from homeassistant.components.recorder.statistics import (
-            async_import_statistics as _async_import_statistics,
-        )
-    except ImportError:
-        _async_import_statistics = None
-
-    if _async_import_statistics is not None:
-        _import_stats = _async_import_statistics
-    else:
-        _import_stats = None
-
-    if _import_stats:
-        _import_stats(hass, metadata, stats)
-        return
-
     from homeassistant.components.recorder.statistics import (
         async_add_external_statistics,
     )
@@ -786,6 +766,20 @@ async def async_import_energy_history(
         sum_offset = 0.0
         previous_kwh: float | None = None
         last_before: dict[str, Any] | None = None
+        last_before_start: datetime | None = None
+
+        external_id: str | None = None
+        stat_ids: set[str] = {entity_id}
+        if "." in entity_id:
+            domain, obj_id = entity_id.split(".", 1)
+            external_id = f"{domain}:{obj_id}"
+            stat_ids.add(external_id)
+
+        clear_stat_ids: tuple[str, ...]
+        if external_id:
+            clear_stat_ids = (entity_id, external_id)
+        else:
+            clear_stat_ids = (entity_id,)
 
         lookback_days = max(2, max_days + 1)
         lookback_start = import_start_dt - timedelta(days=lookback_days)
@@ -796,7 +790,7 @@ async def async_import_energy_history(
                 hass,
                 lookback_start,
                 import_end_dt + timedelta(hours=1),
-                {entity_id},
+                stat_ids,
             )
         except async_mod.CancelledError:  # pragma: no cover - allow cancellation
             raise
@@ -811,7 +805,9 @@ async def async_import_energy_history(
             )
 
         if period_stats:
-            window_values = period_stats.get(entity_id) or []
+            window_values: list[Any] = []
+            for stat_id in stat_ids:
+                window_values.extend(period_stats.get(stat_id) or [])
             if window_values:
                 before_values = [
                     val
@@ -821,40 +817,52 @@ async def async_import_energy_history(
                     < import_start_dt
                 ]
                 if before_values:
-                    sorted_before = sorted(
+                    last_before = max(
                         before_values,
                         key=lambda row: cast(
                             datetime, _statistics_row_get(row, "start")
                         ),
                     )
-                    last_before = sorted_before[-1]
+                    last_before_start = cast(
+                        datetime, _statistics_row_get(last_before, "start")
+                    )
         else:
-            try:
-                last_stats = await last_stats_fn(
-                    hass,
-                    1,
-                    entity_id,
-                    start_time=import_start_dt,
-                )
-                if last_stats:
-                    vals = last_stats.get(entity_id) or []
-                    if vals:
-                        candidate = vals[0]
-                        start_dt = _statistics_row_get(candidate, "start")
-                        if (
-                            isinstance(start_dt, datetime)
-                            and start_dt < import_start_dt
-                        ):
-                            last_before = candidate
-            except async_mod.CancelledError:  # pragma: no cover - allow cancellation
-                raise
-            except Exception as err:  # pragma: no cover - defensive
-                logger.error(
-                    "%s: error fetching last statistics for offset: %s",
-                    addr,
-                    err,
-                    exc_info=True,
-                )
+            for stat_id in clear_stat_ids:
+                try:
+                    last_stats = await last_stats_fn(
+                        hass,
+                        1,
+                        stat_id,
+                        start_time=import_start_dt,
+                    )
+                except (
+                    async_mod.CancelledError
+                ):  # pragma: no cover - allow cancellation
+                    raise
+                except Exception as err:  # pragma: no cover - defensive
+                    logger.error(
+                        "%s: error fetching statistics window %s-%s: %s",
+                        addr,
+                        lookback_start,
+                        import_end_dt,
+                        err,
+                        exc_info=True,
+                    )
+                    continue
+                if not last_stats:
+                    continue
+                vals = last_stats.get(stat_id) or []
+                if not vals:
+                    continue
+                candidate = vals[0]
+                start_dt = _statistics_row_get(candidate, "start")
+                if not isinstance(start_dt, datetime):
+                    continue
+                if start_dt >= import_start_dt:
+                    continue
+                if last_before_start is None or start_dt > last_before_start:
+                    last_before = candidate
+                    last_before_start = start_dt
 
         if last_before:
             try:
@@ -878,45 +886,70 @@ async def async_import_energy_history(
 
         overlap_exists = False
         if period_stats is not None:
-            overlap_exists = any(
-                isinstance(_statistics_row_get(val, "start"), datetime)
-                and import_start_dt
-                <= cast(datetime, _statistics_row_get(val, "start"))
-                <= import_end_dt
-                for val in period_stats.get(entity_id, [])
-            )
+            for stat_id in clear_stat_ids:
+                if any(
+                    isinstance(_statistics_row_get(val, "start"), datetime)
+                    and import_start_dt
+                    <= cast(datetime, _statistics_row_get(val, "start"))
+                    <= import_end_dt
+                    for val in period_stats.get(stat_id, [])
+                ):
+                    overlap_exists = True
+                    break
         else:
-            try:
-                overlap_stats = await last_stats_fn(
-                    hass,
-                    1,
-                    entity_id,
-                    start_time=import_start_dt,
-                )
-                overlap_exists = bool(overlap_stats and overlap_stats.get(entity_id))
-            except async_mod.CancelledError:  # pragma: no cover - allow cancellation
-                raise
-            except Exception as err:  # pragma: no cover - defensive
-                logger.error(
-                    "%s: error checking for overlapping statistics: %s",
-                    addr,
-                    err,
-                    exc_info=True,
-                )
+            for stat_id in clear_stat_ids:
+                try:
+                    overlap_stats = await last_stats_fn(
+                        hass,
+                        1,
+                        stat_id,
+                        start_time=import_start_dt,
+                    )
+                except (
+                    async_mod.CancelledError
+                ):  # pragma: no cover - allow cancellation
+                    raise
+                except Exception as err:  # pragma: no cover - defensive
+                    logger.error(
+                        "%s: error checking for overlapping statistics (%s): %s",
+                        addr,
+                        stat_id,
+                        err,
+                        exc_info=True,
+                    )
+                    continue
+                if overlap_stats and overlap_stats.get(stat_id):
+                    overlap_exists = True
+                    break
 
         if overlap_exists:
-            try:
-                cleared = await clear_stats_fn(
-                    hass,
-                    entity_id,
-                    start_time=import_start_dt,
-                    end_time=import_end_dt + timedelta(hours=1),
-                )
+            clear_end = import_end_dt + timedelta(hours=1)
+            for stat_id in clear_stat_ids:
+                try:
+                    cleared = await clear_stats_fn(
+                        hass,
+                        stat_id,
+                        start_time=import_start_dt,
+                        end_time=clear_end,
+                    )
+                except (
+                    async_mod.CancelledError
+                ):  # pragma: no cover - allow cancellation
+                    raise
+                except Exception as err:  # pragma: no cover - defensive
+                    logger.error(
+                        "%s: failed to clear overlapping statistics for %s: %s",
+                        addr,
+                        stat_id,
+                        err,
+                        exc_info=True,
+                    )
+                    continue
                 if cleared == "clear":
-                    logger.debug("%s: cleared statistics for %s", addr, entity_id)
+                    logger.debug("%s: cleared statistics for %s", addr, stat_id)
                 elif cleared == "delete":
                     logger.debug(
-                        "%s: cleared overlapping statistics for %s", addr, entity_id
+                        "%s: cleared overlapping statistics for %s", addr, stat_id
                     )
                 else:
                     if not overlap_warning_logged:
@@ -927,17 +960,10 @@ async def async_import_energy_history(
                         )
                         overlap_warning_logged = True
                     logger.debug(
-                        "%s: statistics helpers unavailable to clear overlap", addr
+                        "%s: statistics helpers unavailable to clear overlap for %s",
+                        addr,
+                        stat_id,
                     )
-            except async_mod.CancelledError:  # pragma: no cover - allow cancellation
-                raise
-            except Exception as err:  # pragma: no cover - defensive
-                logger.error(
-                    "%s: failed to clear overlapping statistics: %s",
-                    addr,
-                    err,
-                    exc_info=True,
-                )
 
         stats: list[dict[str, Any]] = []
         running_sum: float = sum_offset
@@ -976,7 +1002,7 @@ async def async_import_energy_history(
                 continue
 
             running_sum += delta
-            stats.append({"start": start_dt, "state": kwh, "sum": running_sum})
+            stats.append({"start": start_dt, "sum": running_sum})
             previous_kwh = kwh
 
         first_iso = datetime_mod.fromtimestamp(first_ts_val, UTC).isoformat()
