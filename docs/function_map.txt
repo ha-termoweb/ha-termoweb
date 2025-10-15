@@ -506,7 +506,7 @@ custom_components/termoweb/boost.py :: coerce_boost_bool
     Return ``value`` as a boolean when possible.
 custom_components/termoweb/boost.py :: coerce_boost_minutes
     Return ``value`` as positive minutes when possible.
-custom_components/termoweb/boost.py :: coerce_boost_remaining_minutes
+custom_components/termoweb/boost.py :: _coerce_positive_minutes
     Return ``value`` as a positive integer minute count when possible.
 custom_components/termoweb/boost.py :: supports_boost
     Return ``True`` when ``node`` exposes boost controls.

@@ -61,6 +61,12 @@ def coerce_boost_bool(value: Any) -> bool | None:
 def coerce_boost_minutes(value: Any) -> int | None:
     """Return ``value`` as positive minutes when possible."""
 
+    return _coerce_positive_minutes(value)
+
+
+def _coerce_positive_minutes(value: Any) -> int | None:
+    """Return ``value`` as a positive integer minute count when possible."""
+
     if value is None or isinstance(value, bool):
         return None
 
@@ -69,19 +75,6 @@ def coerce_boost_minutes(value: Any) -> int | None:
         return None
 
     return minutes
-
-
-def coerce_boost_remaining_minutes(value: Any) -> int | None:
-    """Return ``value`` as a positive integer minute count when possible."""
-
-    if value is None or isinstance(value, bool):
-        return None
-
-    candidate = coerce_int(value)
-    if candidate is None or candidate <= 0:
-        return None
-
-    return candidate
 
 
 def supports_boost(node: Any) -> bool:

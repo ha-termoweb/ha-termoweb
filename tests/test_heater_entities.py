@@ -666,14 +666,11 @@ def test_coerce_boost_minutes_edge_cases() -> None:
     assert coerce("90") == 90
     assert coerce(120.7) == 120
 
-    remaining = boost_module.coerce_boost_remaining_minutes
-    assert remaining(0) is None
 
+def test_coerce_boost_minutes_filters_non_positive() -> None:
+    """Ensure boost minute coercion rejects falsey and negative values."""
 
-def test_coerce_boost_remaining_minutes_filters_non_positive() -> None:
-    """Ensure remaining minute coercion rejects falsey and negative values."""
-
-    coerce = boost_module.coerce_boost_remaining_minutes
+    coerce = boost_module.coerce_boost_minutes
     assert coerce(None) is None
     assert coerce(False) is None
     assert coerce(0) is None
@@ -682,10 +679,10 @@ def test_coerce_boost_remaining_minutes_filters_non_positive() -> None:
     assert coerce("15") == 15
 
 
-def test_coerce_boost_remaining_minutes_non_positive() -> None:
-    """Ensure boost remaining coercion rejects non-positive values."""
+def test_coerce_boost_minutes_non_positive_values() -> None:
+    """Ensure boost minute coercion rejects non-positive values."""
 
-    coerce = boost_module.coerce_boost_remaining_minutes
+    coerce = boost_module.coerce_boost_minutes
     assert coerce(None) is None
     assert coerce(False) is None
     assert coerce(0) is None
