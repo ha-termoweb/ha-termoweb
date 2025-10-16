@@ -1188,7 +1188,7 @@ def test_heater_sample_subscription_targets(monkeypatch: pytest.MonkeyPatch) -> 
     )
     client._inventory = inventory
 
-    targets = client._heater_sample_subscription_targets()
+    targets = list(client._heater_sample_subscription_targets())
 
     assert targets == inventory.heater_sample_targets
 
@@ -1208,7 +1208,7 @@ def test_heater_sample_subscription_targets_use_coordinator_inventory(
     client._inventory = None
     client._coordinator.inventory = inventory
 
-    targets = client._heater_sample_subscription_targets()
+    targets = list(client._heater_sample_subscription_targets())
 
     assert targets == inventory.heater_sample_targets
     assert client._inventory is inventory
@@ -1225,7 +1225,7 @@ def test_heater_sample_subscription_targets_logs_missing_inventory(
     client._coordinator.inventory = None
 
     with caplog.at_level(logging.ERROR):
-        targets = client._heater_sample_subscription_targets()
+        targets = list(client._heater_sample_subscription_targets())
 
     assert not targets
     assert any(
@@ -1244,7 +1244,7 @@ def test_heater_sample_targets_do_not_rebuild_from_record(monkeypatch: pytest.Mo
     client._inventory = None
     client._coordinator.inventory = None
 
-    targets = client._heater_sample_subscription_targets()
+    targets = list(client._heater_sample_subscription_targets())
 
     assert targets == []
     assert client._inventory is None
