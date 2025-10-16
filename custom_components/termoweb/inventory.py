@@ -49,6 +49,7 @@ __all__ = [
     "HeaterNode",
     "Inventory",
     "InventoryNodeMetadata",
+    "InventorySnapshot",
     "Node",
     "NodeDescriptor",
     "PowerMonitorNode",
@@ -86,6 +87,20 @@ class InventoryNodeMetadata:
     node: Node
     addr: str
     name: str
+
+
+@dataclass(frozen=True, slots=True)
+class InventorySnapshot:
+    """Represent a serialisable snapshot of inventory node metadata."""
+
+    raw_count: int
+    node_inventory: tuple[dict[str, str], ...]
+
+    @property
+    def filtered_count(self) -> int:
+        """Return the number of nodes included in the snapshot."""
+
+        return len(self.node_inventory)
 
 
 @dataclass(frozen=True, slots=True)
@@ -379,6 +394,24 @@ class Inventory:
                     addr=addr,
                     name=name,
                 )
+
+    def snapshot(self) -> InventorySnapshot:
+        """Return a serialisable snapshot of node metadata."""
+
+        entries = [
+            {
+                "name": metadata.name,
+                "addr": metadata.addr,
+                "type": metadata.node_type,
+            }
+            for metadata in self.iter_nodes_metadata()
+        ]
+
+        entries.sort(key=lambda item: (item["addr"], item["type"]))
+        return InventorySnapshot(
+            raw_count=len(self._nodes),
+            node_inventory=tuple(entries),
+        )
 
     @property
     def power_monitor_address_map(

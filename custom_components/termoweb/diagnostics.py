@@ -47,19 +47,10 @@ async def async_get_config_entry_diagnostics(
         record,
         context=f"diagnostics for config entry {entry.entry_id}",
     )
-    raw_count = len(inventory.nodes)
-    metadata = list(inventory.iter_nodes_metadata())
-    filtered_count = len(metadata)
-
-    node_inventory = [
-        {
-            "name": meta.name,
-            "addr": meta.addr,
-            "type": meta.node_type,
-        }
-        for meta in metadata
-    ]
-    node_inventory.sort(key=lambda item: (str(item["addr"]), str(item["type"])))
+    snapshot = inventory.snapshot()
+    raw_count = snapshot.raw_count
+    filtered_count = snapshot.filtered_count
+    node_inventory = list(snapshot.node_inventory)
 
     assert record is not None  # Inventory.require_from_record guarantees mapping
 
