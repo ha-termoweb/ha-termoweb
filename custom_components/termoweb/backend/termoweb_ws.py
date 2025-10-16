@@ -702,16 +702,17 @@ class WebSocketClient(_WSCommon):
         self._dispatch_nodes(nodes)
         if merge and _LOGGER.isEnabledFor(logging.DEBUG):
             inventory = self._inventory if isinstance(self._inventory, Inventory) else None
-            pairs: list[str] = []
+            pairs = ""
             if inventory is not None:
-                for node_type, addresses in inventory.addresses_by_type.items():
-                    if not isinstance(node_type, str) or not addresses:
-                        continue
-                    for addr in addresses:
-                        if isinstance(addr, str) and addr:
-                            pairs.append(f"{node_type}/{addr}")
+                pairs = ", ".join(
+                    f"{node_type}/{addr}"
+                    for node_type, addresses in inventory.addresses_by_type.items()
+                    if isinstance(node_type, str) and addresses
+                    for addr in addresses
+                    if isinstance(addr, str) and addr
+                )
             if pairs:
-                _LOGGER.debug("WS: update event for %s", ", ".join(sorted(pairs)))
+                _LOGGER.debug("WS: update event for %s", pairs)
             else:
                 _LOGGER.debug("WS: update event without address changes")
         if sample_updates:
@@ -862,7 +863,7 @@ class WebSocketClient(_WSCommon):
 
         return None
 
-    def _heater_sample_subscription_targets(self) -> list[tuple[str, str]]:
+    def _heater_sample_subscription_targets(self) -> Iterable[tuple[str, str]]:
         """Return ordered ``(node_type, addr)`` heater sample subscriptions."""
 
         inventory = self._inventory if isinstance(self._inventory, Inventory) else None
@@ -878,15 +879,20 @@ class WebSocketClient(_WSCommon):
                 self.entry_id,
                 self.dev_id,
             )
-            return []
+            return ()
 
-        try:
-            return list(inventory.heater_sample_targets)
-        except Exception:  # pragma: no cover - defensive cache guard
-            _LOGGER.debug(
-                "WS: failed to resolve heater sample targets", exc_info=True
-            )
-        return []
+        def _bind_inventory() -> Iterable[tuple[str, str]]:
+            """Yield subscription targets sourced from the inventory cache."""
+
+            try:
+                for target in inventory.heater_sample_targets:
+                    yield target
+            except Exception:  # pragma: no cover - defensive cache guard
+                _LOGGER.debug(
+                    "WS: failed to resolve heater sample targets", exc_info=True
+                )
+
+        return _bind_inventory()
 
     async def _subscribe_heater_samples(self) -> None:
         """Subscribe to heater and accumulator sample updates."""
@@ -1371,29 +1377,31 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
     async def _subscribe_htr_samples(self) -> None:
         """Subscribe to heater sample updates."""
 
-        targets = self._heater_sample_subscription_targets()
-        if not targets:
-            return
-        for target in targets:
-            if target is None:
-                continue
-            try:
-                node_type, addr = target
-            except (TypeError, ValueError):
-                continue
-            if not isinstance(node_type, str) or not isinstance(addr, str):
-                continue
-            node_type = node_type.strip()
-            addr = addr.strip()
-            if not node_type or not addr:
-                continue
-            payload = {
-                "name": "subscribe",
-                "args": [f"/{node_type}/{addr}/samples"],
-            }
-            await self._send_text(
-                f"5::{self._namespace}:{json.dumps(payload, separators=(',', ':'))}"
-            )
+        try:
+            for target in self._heater_sample_subscription_targets():
+                if target is None:
+                    continue
+                try:
+                    node_type, addr = target
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(node_type, str) or not isinstance(addr, str):
+                    continue
+                node_type = node_type.strip()
+                addr = addr.strip()
+                if not node_type or not addr:
+                    continue
+                payload = {
+                    "name": "subscribe",
+                    "args": [f"/{node_type}/{addr}/samples"],
+                }
+                await self._send_text(
+                    f"5::{self._namespace}:{json.dumps(payload, separators=(',', ':'))}"
+                )
+        except asyncio.CancelledError:  # pragma: no cover - task lifecycle
+            raise
+        except Exception:
+            _LOGGER.debug("WS: sample subscription setup failed", exc_info=True)
 
     async def _heartbeat_loop(self) -> None:
         """Send periodic heartbeat frames to keep the connection alive."""

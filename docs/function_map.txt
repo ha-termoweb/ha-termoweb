@@ -375,7 +375,7 @@ custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._apply_heat
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._heater_sample_subscription_targets
     Return ordered ``(node_type, addr)`` heater sample subscriptions.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._heater_sample_subscription_targets._bind_inventory
-    Cache ``container`` across runtime state helpers.
+    Yield subscription targets sourced from the inventory cache.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._subscribe_heater_samples
     Subscribe to heater and accumulator sample updates.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._mark_event
