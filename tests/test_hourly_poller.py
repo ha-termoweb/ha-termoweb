@@ -37,7 +37,9 @@ async def test_hourly_poller_runs_previous_hour(
 
         call = backend.fetch_hourly_samples.await_args
         assert call.args[0] == inventory.dev_id
-        assert set(call.args[1]) == {("htr", "A"), ("pmo", "M")}
+        nodes_arg = call.args[1]
+        assert isinstance(nodes_arg, tuple)
+        assert nodes_arg == (("htr", "A"), ("pmo", "M"))
         start_arg = call.args[2]
         end_arg = call.args[3]
         assert start_arg.tzinfo is not None
@@ -58,6 +60,43 @@ async def test_hourly_poller_runs_previous_hour(
         await poller._run_for_previous_hour(now_local)
         backend.fetch_hourly_samples.assert_not_called()
         coordinator.merge_samples_for_window.assert_not_called()
+    finally:
+        dt_util.set_default_time_zone(original_tz)
+
+    await poller.async_shutdown()
+
+
+@pytest.mark.asyncio
+async def test_hourly_poller_skips_inventories_without_targets(
+    inventory_from_map,
+) -> None:
+    """Inventories without sample targets are ignored during polling."""
+
+    hass = HomeAssistant()
+    empty_inventory = inventory_from_map(None, dev_id="empty")
+    populated_inventory = inventory_from_map({"htr": ["A"]}, dev_id="full")
+    backend = AsyncMock()
+    backend.fetch_hourly_samples = AsyncMock(return_value={})
+    coordinator = AsyncMock()
+    coordinator.merge_samples_for_window = AsyncMock()
+    poller = HourlySamplesPoller(
+        hass,
+        coordinator,
+        backend,
+        (empty_inventory, populated_inventory),
+    )
+
+    tz = dt_util.get_time_zone("Europe/Paris")
+    now_local = datetime(2023, 3, 27, 10, 5, tzinfo=tz)
+    original_tz = dt_util.DEFAULT_TIME_ZONE
+    dt_util.set_default_time_zone(tz)
+    try:
+        await poller._run_for_previous_hour(now_local)
+
+        backend.fetch_hourly_samples.assert_awaited_once()
+        call = backend.fetch_hourly_samples.await_args
+        assert call.args[0] == populated_inventory.dev_id
+        assert call.args[1] == (("htr", "A"),)
     finally:
         dt_util.set_default_time_zone(original_tz)
 

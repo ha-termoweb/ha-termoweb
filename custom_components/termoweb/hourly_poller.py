@@ -140,32 +140,6 @@ class HourlySamplesPoller:
 
         loop.call_soon_threadsafe(_schedule)
 
-    def _enumerate_nodes(self, inventory: Inventory) -> list[tuple[str, str]]:
-        """Return canonical ``(node_type, addr)`` pairs for ``inventory``."""
-
-        nodes: list[tuple[str, str]] = []
-        seen: set[tuple[str, str]] = set()
-        for node_type, addr in chain(
-            inventory.heater_sample_targets,
-            inventory.power_monitor_sample_targets,
-        ):
-            normalized_type = normalize_node_type(
-                node_type,
-                use_default_when_falsey=True,
-            )
-            normalized_addr = normalize_node_addr(
-                addr,
-                use_default_when_falsey=True,
-            )
-            if not normalized_type or not normalized_addr:
-                continue
-            pair = (normalized_type, normalized_addr)
-            if pair in seen:
-                continue
-            seen.add(pair)
-            nodes.append(pair)
-        return nodes
-
     async def _run_for_previous_hour(self, now_local: datetime) -> None:
         """Fetch and merge samples for the hour preceding ``now_local``."""
 
@@ -180,33 +154,33 @@ class HourlySamplesPoller:
             )
             return
 
-        device_nodes: dict[str, list[tuple[str, str]]] = {}
         total_nodes = 0
+        device_total = len(self._inventories)
+        tasks: list[asyncio.Task[None]] = []
         for container in self._inventories:
-            nodes = self._enumerate_nodes(container)
-            device_nodes[container.dev_id] = nodes
-            total_nodes += len(nodes)
+            heater_targets = container.heater_sample_targets
+            power_targets = container.power_monitor_sample_targets
+            if not heater_targets and not power_targets:
+                continue
+            total_nodes += len(heater_targets) + len(power_targets)
+            tasks.append(
+                asyncio.create_task(
+                    self._poll_device(
+                        container.dev_id,
+                        chain(heater_targets, power_targets),
+                        start_local,
+                        end_local,
+                    )
+                )
+            )
 
         _LOGGER.info(
             "Hourly samples poll: window=%s–%s devices=%d nodes=%d",
             start_local.isoformat(),
             end_local.isoformat(),
-            len(device_nodes),
+            device_total,
             total_nodes,
         )
-
-        tasks = [
-            asyncio.create_task(
-                self._poll_device(
-                    dev_id,
-                    nodes,
-                    start_local,
-                    end_local,
-                )
-            )
-            for dev_id, nodes in device_nodes.items()
-            if nodes
-        ]
 
         if tasks:
             await asyncio.gather(*tasks)
@@ -216,13 +190,26 @@ class HourlySamplesPoller:
     async def _poll_device(
         self,
         dev_id: str,
-        nodes: list[tuple[str, str]],
+        nodes: Iterable[tuple[str, str]],
         start_local: datetime,
         end_local: datetime,
     ) -> None:
         """Fetch samples for ``dev_id`` and merge them into the coordinator."""
 
-        if not nodes:
+        node_pairs = tuple(
+            (
+                normalize_node_type(node_type, use_default_when_falsey=True),
+                normalize_node_addr(addr, use_default_when_falsey=True),
+            )
+            for node_type, addr in nodes
+        )
+        node_pairs = tuple(
+            (node_type, addr)
+            for node_type, addr in node_pairs
+            if node_type and addr
+        )
+
+        if not node_pairs:
             return
 
         attempt = 1
@@ -232,7 +219,7 @@ class HourlySamplesPoller:
                 async with self._semaphore:
                     result = await self._backend.fetch_hourly_samples(
                         dev_id,
-                        nodes,
+                        node_pairs,
                         start_local,
                         end_local,
                     )

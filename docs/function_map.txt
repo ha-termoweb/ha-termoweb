@@ -800,8 +800,6 @@ custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller.async_shutdow
     Cancel scheduled triggers and pending polling tasks.
 custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller._on_time
     Callback invoked by Home Assistant's time tracker in a thread-safe way.
-custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller._enumerate_nodes
-    Return canonical ``(node_type, addr)`` pairs for ``inventory``.
 custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller._run_for_previous_hour
     Fetch and merge samples for the hour preceding ``now_local``.
 custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller._poll_device
