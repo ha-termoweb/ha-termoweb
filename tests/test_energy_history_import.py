@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sys
 from importlib.machinery import ModuleSpec
 from datetime import UTC, datetime, timedelta
@@ -139,6 +140,101 @@ async def test_import_energy_history_fetches_until_current_minute(
     _, _, options = last_update
     assert isinstance(options, dict)
     assert OPTION_ENERGY_HISTORY_PROGRESS in options
+
+
+@pytest.mark.asyncio
+async def test_import_energy_history_rejects_unsupported_node_types(
+    stub_hass,
+    inventory_from_map,
+) -> None:
+    """Importer should reject node types missing from the inventory."""
+
+    entry = _StubConfigEntry("entry-node-types")
+    stub_hass.config_entries.add(entry)
+
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev-node-type")
+    client = _RecordingClient()
+
+    stub_hass.data.setdefault(energy.DOMAIN, {})[entry.entry_id] = {
+        "client": client,
+        "dev_id": "dev-node-type",
+        "inventory": inventory,
+    }
+
+    with pytest.raises(ValueError) as err:
+        await energy.async_import_energy_history(
+            stub_hass,
+            entry,
+            rate_limit=_ImmediateRateLimiter(),
+            node_types=("unknown",),
+        )
+
+    assert "Unsupported node_types" in str(err.value)
+    assert client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_import_energy_history_filters_unknown_addresses(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_hass,
+    inventory_from_map,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Importer should ignore unknown addresses while logging a warning."""
+
+    entry = _StubConfigEntry("entry-addresses")
+    stub_hass.config_entries.add(entry)
+
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev-address")
+    client = _RecordingClient()
+
+    stub_hass.data.setdefault(energy.DOMAIN, {})[entry.entry_id] = {
+        "client": client,
+        "dev_id": "dev-address",
+        "inventory": inventory,
+    }
+
+    monkeypatch.setattr(energy, "datetime", _FixedDatetime, raising=False)
+    monkeypatch.setattr(energy.er, "async_get", lambda hass: None, raising=False)
+    async def _fake_stats_period(*args, **kwargs) -> dict[str, list[dict[str, Any]]]:
+        return {}
+
+    async def _fake_clear_stats(*args, **kwargs) -> str:
+        return "clear"
+
+    async def _capture_store(*args, **kwargs) -> None:
+        return None
+
+    async def _noop_enforce(*args, **kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(
+        energy,
+        "_statistics_during_period_compat",
+        _fake_stats_period,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        energy,
+        "_clear_statistics_compat",
+        _fake_clear_stats,
+        raising=False,
+    )
+    monkeypatch.setattr(energy, "_store_statistics", _capture_store, raising=False)
+    monkeypatch.setattr(energy, "_enforce_monotonic_sum", _noop_enforce, raising=False)
+
+    with caplog.at_level(logging.WARNING):
+        await energy.async_import_energy_history(
+            stub_hass,
+            entry,
+            rate_limit=_ImmediateRateLimiter(),
+            max_days=1,
+            addresses=("A", "Z"),
+        )
+
+    assert client.calls
+    assert client.calls[0][1] == ("htr", "A")
+    assert "unknown addresses" in caplog.text
 
 
 @pytest.mark.asyncio
