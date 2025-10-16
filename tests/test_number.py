@@ -102,6 +102,87 @@ async def test_duration_async_added_to_hass_prefers_stored_minutes(
 
 
 @pytest.mark.asyncio
+async def test_duration_async_added_to_hass_uses_last_state_when_cache_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Restore boost minutes from the previous state when cache is empty."""
+
+    entity = _make_duration_entity()
+    entity.async_write_ha_state = MagicMock()
+
+    monkeypatch.setattr(number_module, "get_boost_runtime_minutes", MagicMock(return_value=None))
+    set_mock = MagicMock()
+    monkeypatch.setattr(number_module, "set_boost_runtime_minutes", set_mock)
+    monkeypatch.setattr(
+        number_module.HeaterNodeBase,
+        "async_added_to_hass",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        number_module.RestoreEntity,
+        "async_added_to_hass",
+        AsyncMock(),
+    )
+
+    entity.async_get_last_state = AsyncMock(
+        return_value=type("state", (), {"state": "3"})(),
+    )
+
+    await entity.async_added_to_hass()
+
+    hass = entity.hass
+    assert hass is not None
+    set_mock.assert_called_once_with(
+        hass,
+        entity._entry_id,
+        entity._node_type,
+        entity._addr,
+        180,
+    )
+    assert entity.native_value == 3.0
+
+
+@pytest.mark.asyncio
+async def test_duration_async_added_to_hass_uses_settings_when_state_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Restore boost minutes from cached settings when state is missing."""
+
+    entity = _make_duration_entity()
+    entity.async_write_ha_state = MagicMock()
+    entity.heater_settings = MagicMock(return_value={"boost_time": 240})
+
+    monkeypatch.setattr(number_module, "get_boost_runtime_minutes", MagicMock(return_value=None))
+    set_mock = MagicMock()
+    monkeypatch.setattr(number_module, "set_boost_runtime_minutes", set_mock)
+    monkeypatch.setattr(
+        number_module.HeaterNodeBase,
+        "async_added_to_hass",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        number_module.RestoreEntity,
+        "async_added_to_hass",
+        AsyncMock(),
+    )
+
+    entity.async_get_last_state = AsyncMock(return_value=None)
+
+    await entity.async_added_to_hass()
+
+    hass = entity.hass
+    assert hass is not None
+    set_mock.assert_called_once_with(
+        hass,
+        entity._entry_id,
+        entity._node_type,
+        entity._addr,
+        240,
+    )
+    assert entity.native_value == 4.0
+
+
+@pytest.mark.asyncio
 async def test_duration_async_set_native_value_persists_valid_and_rejects_invalid(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -191,6 +272,87 @@ async def test_temperature_async_added_to_hass_prefers_stored_temperature(
     assert entity.extra_state_attributes == {
         "preferred_temperature": stored_temperature,
     }
+
+
+@pytest.mark.asyncio
+async def test_temperature_async_added_to_hass_uses_last_state_when_cache_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Restore boost temperature from the previous state when cache is empty."""
+
+    entity = _make_temperature_entity()
+    entity.async_write_ha_state = MagicMock()
+
+    monkeypatch.setattr(number_module, "get_boost_temperature", MagicMock(return_value=None))
+    set_mock = MagicMock()
+    monkeypatch.setattr(number_module, "set_boost_temperature", set_mock)
+    monkeypatch.setattr(
+        number_module.HeaterNodeBase,
+        "async_added_to_hass",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        number_module.RestoreEntity,
+        "async_added_to_hass",
+        AsyncMock(),
+    )
+
+    entity.async_get_last_state = AsyncMock(
+        return_value=type("state", (), {"state": "21.25"})(),
+    )
+
+    await entity.async_added_to_hass()
+
+    hass = entity.hass
+    assert hass is not None
+    set_mock.assert_called_once_with(
+        hass,
+        entity._entry_id,
+        entity._node_type,
+        entity._addr,
+        21.3,
+    )
+    assert entity.native_value == 21.3
+
+
+@pytest.mark.asyncio
+async def test_temperature_async_added_to_hass_uses_settings_when_state_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Restore boost temperature from cached settings when state is missing."""
+
+    entity = _make_temperature_entity()
+    entity.async_write_ha_state = MagicMock()
+    entity.heater_settings = MagicMock(return_value={"boost_temp": 24.4})
+
+    monkeypatch.setattr(number_module, "get_boost_temperature", MagicMock(return_value=None))
+    set_mock = MagicMock()
+    monkeypatch.setattr(number_module, "set_boost_temperature", set_mock)
+    monkeypatch.setattr(
+        number_module.HeaterNodeBase,
+        "async_added_to_hass",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        number_module.RestoreEntity,
+        "async_added_to_hass",
+        AsyncMock(),
+    )
+
+    entity.async_get_last_state = AsyncMock(return_value=None)
+
+    await entity.async_added_to_hass()
+
+    hass = entity.hass
+    assert hass is not None
+    set_mock.assert_called_once_with(
+        hass,
+        entity._entry_id,
+        entity._node_type,
+        entity._addr,
+        24.4,
+    )
+    assert entity.native_value == 24.4
 
 
 @pytest.mark.asyncio
