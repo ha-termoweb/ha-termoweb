@@ -1008,12 +1008,34 @@ custom_components/termoweb/inventory.py :: Inventory._ensure_power_monitor_sampl
     Return cached normalised power monitor address data for samples.
 custom_components/termoweb/inventory.py :: Inventory.heater_sample_address_map
     Return normalised heater addresses and compatibility aliases.
+custom_components/termoweb/inventory.py :: Inventory._ensure_heater_sample_targets
+    Return cached heater sample targets.
 custom_components/termoweb/inventory.py :: Inventory.heater_sample_targets
     Return ordered ``(node_type, addr)`` sample subscription targets.
+custom_components/termoweb/inventory.py :: Inventory.iter_heater_sample_targets
+    Yield heater sample subscription targets.
 custom_components/termoweb/inventory.py :: Inventory.power_monitor_sample_address_map
     Return normalised power monitor addresses and compatibility aliases.
+custom_components/termoweb/inventory.py :: Inventory._ensure_power_monitor_sample_targets
+    Return cached power monitor sample targets.
 custom_components/termoweb/inventory.py :: Inventory.power_monitor_sample_targets
     Return ordered power monitor sample subscription targets.
+custom_components/termoweb/inventory.py :: Inventory.iter_power_monitor_sample_targets
+    Yield power monitor sample subscription targets.
+custom_components/termoweb/inventory.py :: Inventory._ensure_canonical_node_types
+    Return cached canonical node types.
+custom_components/termoweb/inventory.py :: Inventory._ensure_canonical_node_addresses
+    Return cached canonical node addresses.
+custom_components/termoweb/inventory.py :: Inventory.canonical_node_types
+    Return canonical node types present in the inventory.
+custom_components/termoweb/inventory.py :: Inventory.canonical_node_addresses
+    Return canonical node addresses present in the inventory.
+custom_components/termoweb/inventory.py :: Inventory.canonical_node_type
+    Return canonical node type for ``candidate`` when available.
+custom_components/termoweb/inventory.py :: Inventory.canonical_node_address
+    Return canonical node address for ``candidate`` when available.
+custom_components/termoweb/inventory.py :: Inventory.canonical_sample_pair
+    Return canonical ``(node_type, addr)`` when the pair exists.
 custom_components/termoweb/inventory.py :: Inventory.heater_name_map
     Return cached heater name mapping for ``default_factory``.
 custom_components/termoweb/inventory.py :: _normalize_node_iterable

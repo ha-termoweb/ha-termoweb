@@ -128,6 +128,10 @@ class Inventory:
         tuple[dict[str, tuple[str, ...]], dict[str, str]] | None
     )
     _power_monitor_sample_targets_cache: tuple[tuple[str, str], ...] | None
+    _node_types_cache: tuple[str, ...] | None
+    _node_type_lookup: frozenset[str] | None
+    _node_addresses_cache: tuple[str, ...] | None
+    _node_address_lookup: frozenset[str] | None
     _heater_name_map_cache: dict[int, dict[Any, Any]]
     _heater_name_map_factories: dict[int, Callable[[str], str]]
 
@@ -152,6 +156,10 @@ class Inventory:
         object.__setattr__(self, "_power_monitor_address_map_cache", None)
         object.__setattr__(self, "_power_monitor_sample_address_cache", None)
         object.__setattr__(self, "_power_monitor_sample_targets_cache", None)
+        object.__setattr__(self, "_node_types_cache", None)
+        object.__setattr__(self, "_node_type_lookup", None)
+        object.__setattr__(self, "_node_addresses_cache", None)
+        object.__setattr__(self, "_node_address_lookup", None)
         object.__setattr__(self, "_heater_name_map_cache", {})
         object.__setattr__(self, "_heater_name_map_factories", {})
 
@@ -574,9 +582,8 @@ class Inventory:
             dict(compat_cache),
         )
 
-    @property
-    def heater_sample_targets(self) -> list[tuple[str, str]]:
-        """Return ordered ``(node_type, addr)`` sample subscription targets."""
+    def _ensure_heater_sample_targets(self) -> tuple[tuple[str, str], ...]:
+        """Return cached heater sample targets."""
 
         cached = self._heater_sample_targets_cache
         if cached is None:
@@ -595,7 +602,19 @@ class Inventory:
                     validated.append((node_clean, addr_clean))
             cached = tuple(validated)
             object.__setattr__(self, "_heater_sample_targets_cache", cached)
+        return cached
+
+    @property
+    def heater_sample_targets(self) -> list[tuple[str, str]]:
+        """Return ordered ``(node_type, addr)`` sample subscription targets."""
+
+        cached = self._ensure_heater_sample_targets()
         return [tuple(pair) for pair in cached]
+
+    def iter_heater_sample_targets(self) -> Iterator[tuple[str, str]]:
+        """Yield heater sample subscription targets."""
+
+        yield from self._ensure_heater_sample_targets()
 
     @property
     def power_monitor_sample_address_map(
@@ -612,9 +631,8 @@ class Inventory:
             dict(compat_cache),
         )
 
-    @property
-    def power_monitor_sample_targets(self) -> list[tuple[str, str]]:
-        """Return ordered power monitor sample subscription targets."""
+    def _ensure_power_monitor_sample_targets(self) -> tuple[tuple[str, str], ...]:
+        """Return cached power monitor sample targets."""
 
         cached = self._power_monitor_sample_targets_cache
         if cached is None:
@@ -633,7 +651,108 @@ class Inventory:
                     validated.append((node_clean, addr_clean))
             cached = tuple(validated)
             object.__setattr__(self, "_power_monitor_sample_targets_cache", cached)
+        return cached
+
+    @property
+    def power_monitor_sample_targets(self) -> list[tuple[str, str]]:
+        """Return ordered power monitor sample subscription targets."""
+
+        cached = self._ensure_power_monitor_sample_targets()
         return [tuple(pair) for pair in cached]
+
+    def iter_power_monitor_sample_targets(self) -> Iterator[tuple[str, str]]:
+        """Yield power monitor sample subscription targets."""
+
+        yield from self._ensure_power_monitor_sample_targets()
+
+    def _ensure_canonical_node_types(self) -> tuple[str, ...]:
+        """Return cached canonical node types."""
+
+        cached = self._node_types_cache
+        if cached is None:
+            grouped = self._ensure_nodes_by_type_cache()
+            ordered = tuple(node_type for node_type, nodes in grouped.items() if nodes)
+            object.__setattr__(self, "_node_types_cache", ordered)
+            object.__setattr__(self, "_node_type_lookup", frozenset(ordered))
+            return ordered
+        if self._node_type_lookup is None:
+            object.__setattr__(self, "_node_type_lookup", frozenset(cached))
+        return cached
+
+    def _ensure_canonical_node_addresses(self) -> tuple[str, ...]:
+        """Return cached canonical node addresses."""
+
+        cached = self._node_addresses_cache
+        if cached is None:
+            grouped = self._ensure_addresses_by_type_cache()
+            ordered: list[str] = []
+            seen: set[str] = set()
+            for addresses in grouped.values():
+                for addr in addresses:
+                    if addr in seen:
+                        continue
+                    seen.add(addr)
+                    ordered.append(addr)
+            cached = tuple(ordered)
+            object.__setattr__(self, "_node_addresses_cache", cached)
+            object.__setattr__(self, "_node_address_lookup", frozenset(seen))
+            return cached
+        if self._node_address_lookup is None:
+            object.__setattr__(self, "_node_address_lookup", frozenset(cached))
+        return cached
+
+    @property
+    def canonical_node_types(self) -> tuple[str, ...]:
+        """Return canonical node types present in the inventory."""
+
+        return self._ensure_canonical_node_types()
+
+    @property
+    def canonical_node_addresses(self) -> tuple[str, ...]:
+        """Return canonical node addresses present in the inventory."""
+
+        return self._ensure_canonical_node_addresses()
+
+    def canonical_node_type(self, candidate: Any) -> str | None:
+        """Return canonical node type for ``candidate`` when available."""
+
+        normalized = normalize_node_type(candidate, use_default_when_falsey=True)
+        if not normalized:
+            return None
+        lookup = self._node_type_lookup
+        if lookup is None:
+            self._ensure_canonical_node_types()
+            lookup = self._node_type_lookup
+        if lookup is None or normalized not in lookup:
+            return None
+        return normalized
+
+    def canonical_node_address(self, candidate: Any) -> str | None:
+        """Return canonical node address for ``candidate`` when available."""
+
+        normalized = normalize_node_addr(candidate, use_default_when_falsey=True)
+        if not normalized:
+            return None
+        lookup = self._node_address_lookup
+        if lookup is None:
+            self._ensure_canonical_node_addresses()
+            lookup = self._node_address_lookup
+        if lookup is None or normalized not in lookup:
+            return None
+        return normalized
+
+    def canonical_sample_pair(
+        self, node_type: Any, addr: Any
+    ) -> tuple[str, str] | None:
+        """Return canonical ``(node_type, addr)`` when the pair exists."""
+
+        canonical_type = self.canonical_node_type(node_type)
+        canonical_addr = self.canonical_node_address(addr)
+        if not canonical_type or not canonical_addr:
+            return None
+        if not self.has_node(canonical_type, canonical_addr):
+            return None
+        return canonical_type, canonical_addr
 
     def sample_alias_map(
         self,

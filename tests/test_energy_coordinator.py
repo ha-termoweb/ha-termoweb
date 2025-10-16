@@ -34,6 +34,34 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 
 EnergyStateCoordinator = coord_module.EnergyStateCoordinator
 StateCoordinator = coord_module.StateCoordinator
+
+
+def test_inventory_canonical_helpers() -> None:
+    """Inventory should expose canonical node metadata helpers."""
+
+    nodes = {
+        "nodes": [
+            {"addr": "A", "type": "htr"},
+            {"addr": "B", "type": "acm"},
+            {"addr": "01", "type": "pmo"},
+        ]
+    }
+    inventory = _inventory_from_nodes("dev", nodes)
+
+    assert list(inventory.iter_heater_sample_targets()) == inventory.heater_sample_targets
+    assert list(inventory.iter_power_monitor_sample_targets()) == (
+        inventory.power_monitor_sample_targets
+    )
+    assert set(inventory.canonical_node_types) == {"acm", "htr", "pmo"}
+    assert set(inventory.canonical_node_addresses) == {"01", "A", "B"}
+    assert inventory.canonical_node_type("HTR") == "htr"
+    assert inventory.canonical_node_type("unknown") is None
+    assert inventory.canonical_node_address(" B ") == "B"
+    assert inventory.canonical_node_address(" 999 ") is None
+    assert inventory.canonical_sample_pair("htr", "A") == ("htr", "A")
+    assert inventory.canonical_sample_pair("acm", "Z") is None
+
+
 def _inventory_from_nodes(dev_id: str, payload: Mapping[str, Any]) -> Inventory:
     """Return an Inventory built from ``payload``."""
 

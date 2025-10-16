@@ -18,7 +18,7 @@ from homeassistant.helpers import entity_registry as er
 from .api import RESTClient
 from .const import DOMAIN
 from .identifiers import build_heater_energy_unique_id
-from .inventory import Inventory, normalize_node_addr, normalize_node_type
+from .inventory import Inventory, normalize_node_addr
 from .throttle import MonotonicRateLimiter
 
 _LOGGER = logging.getLogger(__name__)
@@ -583,50 +583,21 @@ async def async_import_energy_history(
         )
         return
 
-    all_pairs: list[tuple[str, str]] = []
-    seen_pairs: set[tuple[str, str]] = set()
-
-    def _extend_targets(pairs: Iterable[tuple[str, str]]) -> None:
-        for node_type, addr in pairs:
-            normalized_type = node_type.strip() if isinstance(node_type, str) else ""
-            normalized_addr = addr.strip() if isinstance(addr, str) else ""
-            if not normalized_type or not normalized_addr:
-                continue
-            pair = (normalized_type, normalized_addr)
-            if pair in seen_pairs:
-                continue
-            seen_pairs.add(pair)
-            all_pairs.append(pair)
-
-    _extend_targets(inventory.heater_sample_targets)
-    _extend_targets(inventory.power_monitor_sample_targets)
-    _extend_targets(
-        (metadata.node_type, metadata.addr)
-        for metadata in inventory.iter_nodes_metadata()
-    )
-
-    if not all_pairs:
-        logger.debug("Energy import: no nodes available for device")
-        return
-
-    available_types = {node_type for node_type, _ in all_pairs}
-    available_addresses = {addr for _, addr in all_pairs}
-
     normalized_type_filters: set[str] | None = None
     if node_types is not None:
         normalized_type_filters = set()
         invalid_types: list[str] = []
         for candidate in node_types:
-            normalized = normalize_node_type(
-                candidate,
-                use_default_when_falsey=True,
-            )
-            if not normalized:
+            canonical_type = inventory.canonical_node_type(candidate)
+            if canonical_type:
+                normalized_type_filters.add(canonical_type)
                 continue
-            if normalized not in available_types:
-                invalid_types.append(str(candidate))
-                continue
-            normalized_type_filters.add(normalized)
+            try:
+                candidate_text = str(candidate).strip()
+            except Exception:  # pragma: no cover - defensive  # noqa: BLE001
+                candidate_text = ""
+            if candidate_text:
+                invalid_types.append(candidate_text)
         if invalid_types:
             raise ValueError(
                 "Unsupported node_types for import_energy_history: "
@@ -640,16 +611,16 @@ async def async_import_energy_history(
         normalized_address_filters = set()
         unknown_addresses: list[str] = []
         for candidate in addresses:
+            canonical_addr = inventory.canonical_node_address(candidate)
+            if canonical_addr:
+                normalized_address_filters.add(canonical_addr)
+                continue
             normalized_addr = normalize_node_addr(
                 candidate,
                 use_default_when_falsey=True,
             )
-            if not normalized_addr:
-                continue
-            if normalized_addr not in available_addresses:
+            if normalized_addr:
                 unknown_addresses.append(normalized_addr)
-                continue
-            normalized_address_filters.add(normalized_addr)
         if unknown_addresses:
             logger.warning(
                 "%s: ignoring unknown addresses for energy import: %s",
@@ -659,16 +630,50 @@ async def async_import_energy_history(
         if not normalized_address_filters:
             normalized_address_filters = None
 
-    target_pairs = [
-        pair
-        for pair in all_pairs
-        if (normalized_type_filters is None or pair[0] in normalized_type_filters)
-        and (
-            normalized_address_filters is None or pair[1] in normalized_address_filters
-        )
-    ]
+    processed_pairs: list[tuple[str, str]] = []
+    any_pairs = False
 
-    if not target_pairs:
+    def _iter_filtered_pairs() -> Iterable[tuple[str, str]]:
+        """Yield canonical target pairs matching the active filters."""
+
+        nonlocal any_pairs
+        seen: set[tuple[str, str]] = set()
+        sources: tuple[Iterable[tuple[Any, Any]], ...] = (
+            inventory.iter_heater_sample_targets(),
+            inventory.iter_power_monitor_sample_targets(),
+            (
+                (metadata.node_type, metadata.addr)
+                for metadata in inventory.iter_nodes_metadata()
+            ),
+        )
+        for source in sources:
+            for raw_type, raw_addr in source:
+                canonical = inventory.canonical_sample_pair(raw_type, raw_addr)
+                if canonical is None or canonical in seen:
+                    continue
+                seen.add(canonical)
+                any_pairs = True
+                node_type, addr = canonical
+                if (
+                    normalized_type_filters is not None
+                    and node_type not in normalized_type_filters
+                ):
+                    continue
+                if (
+                    normalized_address_filters is not None
+                    and addr not in normalized_address_filters
+                ):
+                    continue
+                yield canonical
+
+    for node_type, addr in _iter_filtered_pairs():
+        processed_pairs.append((node_type, addr))
+
+    if not any_pairs:
+        logger.debug("Energy import: no nodes available for device")
+        return
+
+    if not processed_pairs:
         logger.debug("Energy import: no nodes available for device after filtering")
         return
 
@@ -793,7 +798,7 @@ async def async_import_energy_history(
             return []
 
     ent_reg: er.EntityRegistry | None = registry_mod.async_get(hass)
-    for node_type, addr in target_pairs:
+    for node_type, addr in processed_pairs:
         total_nodes_processed += 1
         logger.debug(
             "Energy import: importing history for %s %s",
@@ -1217,8 +1222,8 @@ async def async_import_energy_history(
         )
 
     imported_flag: bool | None = None
-    if target_pairs and all(
-        _progress_value(node_type, addr) <= target for node_type, addr in target_pairs
+    if processed_pairs and all(
+        _progress_value(node_type, addr) <= target for node_type, addr in processed_pairs
     ):
         imported_flag = True
     _write_progress_options(progress, imported=imported_flag)

@@ -142,6 +142,81 @@ async def test_import_energy_history_fetches_until_current_minute(
 
 
 @pytest.mark.asyncio
+async def test_import_respects_canonical_filters(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_hass,
+    inventory_from_map,
+) -> None:
+    """Importer should filter using canonical inventory nodes lazily."""
+
+    entry = _StubConfigEntry("entry")
+    stub_hass.config_entries.add(entry)
+
+    inventory = inventory_from_map({"htr": ["A"], "pmo": ["01"]}, dev_id="dev-canon")
+    client = _RecordingClient()
+
+    stub_hass.data.setdefault(energy.DOMAIN, {})[entry.entry_id] = {
+        "client": client,
+        "dev_id": "dev-canon",
+        "inventory": inventory,
+    }
+
+    heater_iter_calls: list[None] = []
+    power_iter_calls: list[None] = []
+
+    def _custom_heater_iter(self):  # type: ignore[no-untyped-def]
+        heater_iter_calls.append(None)
+        yield ("htr", " A ")
+        yield ("htr", "A")
+
+    def _custom_power_iter(self):  # type: ignore[no-untyped-def]
+        power_iter_calls.append(None)
+        yield (" power_monitors ", " 01 ")
+        yield ("pmo", "01")
+
+    original_metadata_iter = inventory.iter_nodes_metadata
+
+    def _recording_metadata_iter(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        yield from original_metadata_iter(*args, **kwargs)
+
+    monkeypatch.setattr(
+        energy.Inventory,
+        "iter_heater_sample_targets",
+        _custom_heater_iter,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        energy.Inventory,
+        "iter_power_monitor_sample_targets",
+        _custom_power_iter,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        energy.Inventory,
+        "iter_nodes_metadata",
+        _recording_metadata_iter,
+        raising=False,
+    )
+
+    monkeypatch.setattr(energy.er, "async_get", lambda hass: None, raising=False)
+
+    await energy.async_import_energy_history(
+        stub_hass,
+        entry,
+        node_types=["power_monitors"],
+        addresses=[" 01 "],
+        rate_limit=_ImmediateRateLimiter(),
+        max_days=1,
+    )
+
+    assert len(heater_iter_calls) == 1
+    assert len(power_iter_calls) == 1
+    assert len(client.calls) == 1
+    _, node, _, _ = client.calls[0]
+    assert node == ("pmo", "01")
+
+
+@pytest.mark.asyncio
 async def test_store_statistics_imports_entity_series(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
