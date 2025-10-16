@@ -188,55 +188,44 @@ async def async_setup_entry(hass, entry, async_add_entities):
         energy_coordinator.update_addresses(inventory)
         attach_fallbacks(energy_coordinator, fallbacks)
 
-    power_monitor_entries: list[tuple[str, str]] = []
-    candidate_power_monitors = inventory.nodes_by_type.get("pmo", [])
-    if not isinstance(candidate_power_monitors, list):
-        if isinstance(candidate_power_monitors, tuple):
-            candidate_power_monitors = list(candidate_power_monitors)
-        else:
-            candidate_power_monitors = []
-
-    for node in candidate_power_monitors:
+    power_monitor_entities: list[SensorEntity] = []
+    discovered_power_monitors = False
+    for metadata in inventory.iter_nodes_metadata(node_types=("pmo",)):
+        node = metadata.node
         if not isinstance(node, PowerMonitorNode):
             continue
-        addr_norm = normalize_node_addr(node.addr, use_default_when_falsey=True)
-        if not addr_norm:
-            continue
-        display_name = _power_monitor_display_name(node, addr_norm, fallbacks)
-        power_monitor_entries.append((addr_norm, display_name))
+        discovered_power_monitors = True
+        display_name = _power_monitor_display_name(node, metadata.addr, fallbacks)
+        energy_unique_id = build_power_monitor_energy_unique_id(dev_id, metadata.addr)
+        power_unique_id = build_power_monitor_power_unique_id(dev_id, metadata.addr)
+        power_monitor_entities.append(
+            PowerMonitorEnergySensor(
+                energy_coordinator,
+                entry.entry_id,
+                dev_id,
+                metadata.addr,
+                energy_unique_id,
+                device_name=display_name,
+                inventory=heater_details.inventory,
+            )
+        )
+        power_monitor_entities.append(
+            PowerMonitorPowerSensor(
+                energy_coordinator,
+                entry.entry_id,
+                dev_id,
+                metadata.addr,
+                power_unique_id,
+                device_name=display_name,
+                inventory=heater_details.inventory,
+            )
+        )
 
-    power_monitor_entities: list[SensorEntity] = []
-    if not power_monitor_entries:
+    if not discovered_power_monitors:
         _LOGGER.debug(
             "No TermoWeb power monitors discovered for %s; skipping power sensors",
             dev_id,
         )
-    else:
-        for addr_str, base_name in sorted(power_monitor_entries):
-            energy_unique_id = build_power_monitor_energy_unique_id(dev_id, addr_str)
-            power_unique_id = build_power_monitor_power_unique_id(dev_id, addr_str)
-            power_monitor_entities.append(
-                PowerMonitorEnergySensor(
-                    energy_coordinator,
-                    entry.entry_id,
-                    dev_id,
-                    addr_str,
-                    energy_unique_id,
-                    device_name=base_name,
-                    inventory=heater_details.inventory,
-                )
-            )
-            power_monitor_entities.append(
-                PowerMonitorPowerSensor(
-                    energy_coordinator,
-                    entry.entry_id,
-                    dev_id,
-                    addr_str,
-                    power_unique_id,
-                    device_name=base_name,
-                    inventory=heater_details.inventory,
-                )
-            )
 
     new_entities: list[SensorEntity] = []
     for node_type, _node, addr_str, base_name in heater_details.iter_metadata():
@@ -768,8 +757,7 @@ class PowerMonitorSensorBase(CoordinatorEntity, SensorEntity):
         inventory = self._resolve_inventory()
         if not isinstance(inventory, Inventory):
             return False
-        addresses = inventory.addresses_by_type.get("pmo", [])
-        return self._addr in addresses
+        return inventory.has_node("pmo", self._addr)
 
     @property
     def native_value(self) -> float | None:
