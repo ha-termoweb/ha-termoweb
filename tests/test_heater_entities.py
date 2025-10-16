@@ -155,8 +155,8 @@ def test_heater_handle_ws_event_requires_loop_or_mock() -> None:
     assert called is False
 
 
-def test_heater_section_requires_inventory_for_addresses() -> None:
-    """Heater metadata should not fabricate addresses without inventory."""
+def test_heater_section_requires_inventory_for_name() -> None:
+    """Heater metadata should not fabricate inventory-backed details."""
 
     coordinator = SimpleNamespace(
         data={"dev": {"settings": {"htr": {"1": {"mode": "auto"}}}}}
@@ -165,9 +165,28 @@ def test_heater_section_requires_inventory_for_addresses() -> None:
 
     section = heater._heater_section()
 
-    assert section == {"addrs": [], "settings": {"1": {"mode": "auto"}}}
+    assert section == {"settings": {"1": {"mode": "auto"}}}
     assert heater.heater_settings() == {"mode": "auto"}
     assert heater.available is False
+
+
+def test_heater_section_includes_inventory_details() -> None:
+    """Heater metadata should expose inventory-backed name and availability."""
+
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "1", "name": "Living"}]}
+    inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+    coordinator = SimpleNamespace(
+        data={"dev": {"settings": {"htr": {"1": {"mode": "auto"}}}}},
+        inventory=inventory,
+    )
+    heater = HeaterNodeBase(coordinator, "entry", "dev", "1", None)
+
+    section = heater._heater_section()
+
+    assert section["settings"] == {"1": {"mode": "auto"}}
+    assert section["name"] == "Living"
+    assert heater.heater_settings() == {"mode": "auto"}
+    assert heater.available is True
 
 
 def test_heater_resolve_inventory_logs_missing(
