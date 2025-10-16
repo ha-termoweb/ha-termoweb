@@ -1728,6 +1728,7 @@ async def test_subscribe_feeds_stores_inventory_only(
 
     assert count == 2
     assert {path for _evt, path in emissions} == {"/htr/1/samples", "/htr/1/status"}
+    assert client._subscription_paths == {"/htr/1/samples", "/htr/1/status"}
     bucket = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
     stored = bucket.get("inventory")
     assert stored is inventory
@@ -1762,6 +1763,7 @@ async def test_subscribe_feeds_uses_inventory_cache(
         ("subscribe", "/htr/7/samples"),
         ("subscribe", "/htr/7/status"),
     ]
+    assert client._subscription_paths == {"/htr/7/samples", "/htr/7/status"}
     record = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
     inventory = record.get("inventory")
     assert isinstance(inventory, Inventory)
@@ -1796,6 +1798,7 @@ async def test_subscribe_feeds_uses_record_inventory_cache(
 
     assert count == 2
     assert set(emissions) == {"/htr/9/samples", "/htr/9/status"}
+    assert client._subscription_paths == {"/htr/9/samples", "/htr/9/status"}
 
 
 @pytest.mark.asyncio
@@ -1818,6 +1821,7 @@ async def test_subscribe_feeds_handles_missing_targets(
 
     assert count == 0
     emit_mock.assert_not_awaited()
+    assert client._subscription_paths == set()
 @pytest.mark.asyncio
 async def test_subscribe_feeds_prefers_coordinator_inventory(
     monkeypatch: pytest.MonkeyPatch,

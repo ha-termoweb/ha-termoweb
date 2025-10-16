@@ -1166,15 +1166,11 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                         exc_info=True,
                     )
 
-            targets = [tuple(target) for target in inventory_container.heater_sample_targets]
-            if not targets:
-                return 0
-
-            paths: set[str] = {
-                f"/{node_type}/{addr}/{section}"
-                for node_type, addr in targets
-                for section in ("status", "samples")
-            }
+            paths: set[str] = set()
+            for node_type, addr in inventory_container.heater_sample_targets:
+                base_path = f"/{node_type}/{addr}"
+                paths.add(f"{base_path}/status")
+                paths.add(f"{base_path}/samples")
 
             if not paths:
                 return 0
