@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import logging
 import math
-from typing import Any
+from typing import Any, TypeVar
 
 from homeassistant.components.number import NumberEntity, NumberMode
 
@@ -54,16 +55,38 @@ from .heater import (
     set_boost_runtime_minutes,
     set_boost_temperature,
 )
-from .i18n import (
-    async_get_fallback_translations,
-    attach_fallbacks,
-    format_fallback,
-)
+from .i18n import async_get_fallback_translations, attach_fallbacks, format_fallback
 from .identifiers import build_heater_entity_unique_id
 from .inventory import Inventory, boostable_accumulator_details_for_entry
 from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
+
+
+_T = TypeVar("_T")
+
+
+async def _restore_boost_value(
+    entity: RestoreEntity,
+    hass,
+    *,
+    cached_lookup: Callable[[], _T | None],
+    last_state_parser: Callable[[Any], _T | None],
+    settings_lookup: Callable[[], _T],
+    applier: Callable[[_T | None, bool], None],
+) -> None:
+    """Restore a boost preference from cache, state, or settings."""
+
+    value: _T | None = None
+    if hass is not None:
+        value = cached_lookup()
+    if value is None:
+        last_state = await entity.async_get_last_state()
+        if last_state is not None:
+            value = last_state_parser(last_state.state)
+    if value is None:
+        value = settings_lookup()
+    applier(value, persist=hass is not None)
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -178,24 +201,21 @@ class AccumulatorBoostDurationNumber(RestoreEntity, HeaterNodeBase, NumberEntity
         await RestoreEntity.async_added_to_hass(self)
 
         hass = self.hass
-        minutes: int | None = None
-        if hass is not None:
-            minutes = get_boost_runtime_minutes(
+        await _restore_boost_value(
+            self,
+            hass,
+            cached_lookup=lambda: None
+            if hass is None
+            else get_boost_runtime_minutes(
                 hass,
                 self._entry_id,
                 self._node_type,
                 self._addr,
-            )
-
-        if minutes is None:
-            last_state = await self.async_get_last_state()
-            if last_state is not None:
-                minutes = self._hours_to_minutes(last_state.state)
-
-        if minutes is None:
-            minutes = self._initial_minutes_from_settings()
-
-        self._apply_minutes(minutes, persist=hass is not None)
+            ),
+            last_state_parser=self._hours_to_minutes,
+            settings_lookup=self._initial_minutes_from_settings,
+            applier=self._apply_minutes,
+        )
         self.async_write_ha_state()
 
     @property
@@ -322,24 +342,21 @@ class AccumulatorBoostTemperatureNumber(
         await RestoreEntity.async_added_to_hass(self)
 
         hass = self.hass
-        temperature: float | None = None
-        if hass is not None:
-            temperature = get_boost_temperature(
+        await _restore_boost_value(
+            self,
+            hass,
+            cached_lookup=lambda: None
+            if hass is None
+            else get_boost_temperature(
                 hass,
                 self._entry_id,
                 self._node_type,
                 self._addr,
-            )
-
-        if temperature is None:
-            last_state = await self.async_get_last_state()
-            if last_state is not None:
-                temperature = float_or_none(last_state.state)
-
-        if temperature is None:
-            temperature = self._initial_temperature_from_settings()
-
-        self._apply_temperature(temperature, persist=hass is not None)
+            ),
+            last_state_parser=float_or_none,
+            settings_lookup=self._initial_temperature_from_settings,
+            applier=self._apply_temperature,
+        )
         self.async_write_ha_state()
 
     @property
@@ -458,5 +475,4 @@ class AccumulatorBoostTemperatureNumber(
             self._attr_native_max_value
         ):
             return None
-        scaled = math.floor(candidate * 10 + 0.5) / 10.0
-        return scaled
+        return math.floor(candidate * 10 + 0.5) / 10.0

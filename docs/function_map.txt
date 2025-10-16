@@ -1094,6 +1094,8 @@ custom_components/termoweb/inventory.py :: _normalise_with_fallback
     Return the first non-empty normalised value from ``candidates``.
 custom_components/termoweb/inventory.py :: build_node_inventory
     Return a list of :class:`Node` instances for the provided payload.
+custom_components/termoweb/number.py :: _restore_boost_value
+    Restore a boost preference from cache, state, or settings.
 custom_components/termoweb/number.py :: async_setup_entry
     Set up boost configuration number entities for accumulator nodes.
 custom_components/termoweb/number.py :: AccumulatorBoostDurationNumber.__init__
