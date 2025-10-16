@@ -46,13 +46,35 @@ Use `Authorization: Bearer <access_token>` for the endpoints below.
 ### GET `/api/v2/devs/`
 Returns devices you own and invitations.
 ```json
-{ "devs": [ { "dev_id": "abcdef...", "name": "Hub", "fw_version": "1.34", "serial_id": "1234" } ], "invited_to": [] }
+{
+  "devs": [
+    {
+      "dev_id": "abcdef...",
+      "name": "<gateway-friendly-name>",
+      "fw_version": "<gateway-fw-version>",
+      "serial_id": "<gateway-serial-number>"
+    }
+  ],
+  "invited_to": []
+}
 ```
 
 ### GET `/api/v2/devs/{dev_id}/mgr/nodes`
 Returns discovered nodes (heaters, etc.).
 ```json
-{ "nodes": [ { "type":"htr","addr":2,"name":"Living room ","installed":true,"lost":false,"hw_version":"1.5","fw_version":"1.13"} ] }
+{
+  "nodes": [
+    {
+      "type": "htr",
+      "addr": 2,
+      "name": "<node-friendly-name>",
+      "installed": true,
+      "lost": false,
+      "hw_version": "1.5",
+      "fw_version": "<node-fw-version>"
+    }
+  ]
+}
 ```
 
 ### GET `/api/v2/devs/{dev_id}/mgr/rtc/time`
