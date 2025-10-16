@@ -33,6 +33,7 @@ from custom_components.termoweb.const import BRAND_DUCAHEAT, CONF_BRAND, DOMAIN
 from custom_components.termoweb.diagnostics import async_get_config_entry_diagnostics
 from custom_components.termoweb.inventory import (
     Inventory,
+    InventorySnapshot,
     build_node_inventory,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -88,6 +89,7 @@ def _flatten(data: Any) -> list[str]:
 def test_diagnostics_with_cached_inventory(
     caplog: pytest.LogCaptureFixture,
     diagnostics_record: Callable[..., tuple[dict[str, Any], Inventory]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Diagnostics return cached inventory and redact sensitive keys."""
 
@@ -114,6 +116,17 @@ def test_diagnostics_with_cached_inventory(
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = record
 
+    captured_snapshots: list[InventorySnapshot] = []
+
+    original_snapshot = Inventory.snapshot
+
+    def _capture_snapshot(self: Inventory) -> InventorySnapshot:
+        snapshot = original_snapshot(self)
+        captured_snapshots.append(snapshot)
+        return snapshot
+
+    monkeypatch.setattr(Inventory, "snapshot", _capture_snapshot, raising=True)
+
     with caplog.at_level(logging.DEBUG):
         diagnostics = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
 
@@ -122,14 +135,14 @@ def test_diagnostics_with_cached_inventory(
     assert diagnostics["home_assistant"]["version"] == "2025.5.0"
     assert diagnostics["home_assistant"]["python_version"] == platform.python_version()
     assert diagnostics["home_assistant"]["time_zone"] == "Europe/London"
-    assert diagnostics["installation"]["node_inventory"] == [
+    expected_inventory = [
         {"name": "Heater One", "addr": "1", "type": "htr"},
         {"name": "Monitor", "addr": "2", "type": "pmo"},
     ]
+    assert diagnostics["installation"]["node_inventory"] == expected_inventory
 
-    forward_map, _ = inventory.power_monitor_address_map
-    assert forward_map == {"pmo": ["2"]}
-    assert inventory.power_monitor_sample_targets == [("pmo", "2")]
+    assert len(captured_snapshots) == 1
+    assert list(captured_snapshots[0].node_inventory) == expected_inventory
 
     flattened = _flatten(diagnostics)
     assert "dev_id" not in flattened
@@ -144,6 +157,7 @@ def test_diagnostics_with_cached_inventory(
 def test_diagnostics_with_inventory_missing_version(
     caplog: pytest.LogCaptureFixture,
     diagnostics_record: Callable[..., tuple[dict[str, Any], Inventory]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Diagnostics rely on stored inventory and fetch helper version."""
 
@@ -165,15 +179,28 @@ def test_diagnostics_with_inventory_missing_version(
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = record
 
+    captured_snapshots: list[InventorySnapshot] = []
+    original_snapshot = Inventory.snapshot
+
+    def _capture_snapshot(self: Inventory) -> InventorySnapshot:
+        snapshot = original_snapshot(self)
+        captured_snapshots.append(snapshot)
+        return snapshot
+
+    monkeypatch.setattr(Inventory, "snapshot", _capture_snapshot, raising=True)
+
     with caplog.at_level(logging.DEBUG):
         diagnostics = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
 
     assert hass.integration_requests == [DOMAIN]
     assert diagnostics["integration"]["version"] == "test-version"
     assert diagnostics["integration"]["brand"] == "TermoWeb"
-    assert diagnostics["installation"]["node_inventory"] == [
+    expected_inventory = [
         {"name": "Heater Two", "addr": "5", "type": "htr"},
     ]
+    assert diagnostics["installation"]["node_inventory"] == expected_inventory
+    assert len(captured_snapshots) == 1
+    assert list(captured_snapshots[0].node_inventory) == expected_inventory
     assert "dev_id" not in _flatten(diagnostics)
     assert "time_zone" not in diagnostics["home_assistant"]
 

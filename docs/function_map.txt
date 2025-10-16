@@ -1078,6 +1078,10 @@ custom_components/termoweb/inventory.py :: _extract_snapshot_name
     Return best candidate name extracted from ``payloads``.
 custom_components/termoweb/inventory.py :: Inventory.iter_nodes_metadata
     Yield canonical node metadata for the requested types.
+custom_components/termoweb/inventory.py :: Inventory.snapshot
+    Return a serialisable snapshot of node metadata.
+custom_components/termoweb/inventory.py :: InventorySnapshot.filtered_count
+    Return the number of nodes included in the snapshot.
 custom_components/termoweb/inventory.py :: _iter_node_payload
     Yield node dictionaries from a payload returned by the API.
 custom_components/termoweb/inventory.py :: _resolve_node_class
