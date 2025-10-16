@@ -775,11 +775,17 @@ custom_components/termoweb/coordinator.py :: StateCoordinator._async_update_data
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.__init__
     Initialize the heater energy coordinator.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.update_addresses
-    Replace the tracked heater addresses with ``addrs``.
+    Replace the tracked nodes using immutable inventory metadata.
+custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._iter_energy_targets
+    Yield normalised energy node targets from ``inventory``.
+custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._targets_by_type
+    Return energy node addresses grouped by canonical type.
+custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._prefill_energy_buckets
+    Seed energy and power buckets from cached coordinator state.
+custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._poll_recent_samples
+    Fetch recent energy samples for every tracked node.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._process_energy_sample
     Update cached energy and derived power for ``addr``.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._seed_cached_energy_and_power
-    Return energy and power buckets pre-populated from cached data.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._async_update_data
     Fetch recent heater energy samples and derive totals and power.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._should_skip_poll

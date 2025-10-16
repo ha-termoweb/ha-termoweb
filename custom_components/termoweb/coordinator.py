@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, MutableMapping
+from collections.abc import Iterable, Iterator, Mapping, MutableMapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from itertools import chain
@@ -883,23 +883,14 @@ class EnergyStateCoordinator(
             raise TypeError(msg)
         return inventory
 
-    def _tracked_address_map(
-        self, inventory: Inventory | None = None
-    ) -> dict[str, tuple[str, ...]]:
-        """Return canonical address tuples grouped by node type."""
-
-        resolved = self._resolve_inventory(inventory)
-        buckets: dict[str, list[str]] = {
-            node_type: [] for node_type in ENERGY_NODE_TYPES
-        }
-
-        def _record(node_type: str, addr: str) -> None:
-            bucket = buckets.setdefault(node_type, [])
-            if addr not in bucket:
-                bucket.append(addr)
+    def _iter_energy_targets(
+        self, inventory: Inventory
+    ) -> Iterator[tuple[str, str]]:
+        """Yield normalised energy node targets from ``inventory``."""
 
         for node_type, addr in chain(
-            resolved.heater_sample_targets, resolved.power_monitor_sample_targets
+            inventory.heater_sample_targets,
+            inventory.power_monitor_sample_targets,
         ):
             normalized_type = normalize_node_type(
                 node_type,
@@ -909,36 +900,123 @@ class EnergyStateCoordinator(
                 addr,
                 use_default_when_falsey=True,
             )
-            if not normalized_type or normalized_type not in ENERGY_NODE_TYPES:
+            if (
+                not normalized_type
+                or not normalized_addr
+                or normalized_type not in ENERGY_NODE_TYPES
+            ):
                 continue
-            if not normalized_addr:
+            if not inventory.has_node(normalized_type, normalized_addr):
                 continue
-            _record(normalized_type, normalized_addr)
+            yield normalized_type, normalized_addr
 
-        return {
-            node_type: tuple(addresses) for node_type, addresses in buckets.items()
-        }
+    def _targets_by_type(self, inventory: Inventory) -> dict[str, list[str]]:
+        """Return energy node addresses grouped by canonical type."""
 
-    def _tracked_address_pairs(
-        self, inventory: Inventory | None = None
-    ) -> set[tuple[str, str]]:
-        """Return the tracked ``(node_type, addr)`` pairs for ``inventory``."""
+        buckets: dict[str, list[str]] = {}
+        for node_type, addr in self._iter_energy_targets(inventory):
+            bucket = buckets.setdefault(node_type, [])
+            if addr not in bucket:
+                bucket.append(addr)
+        return buckets
 
-        address_map = self._tracked_address_map(inventory)
-        return {
-            (node_type, addr)
-            for node_type, addrs in address_map.items()
-            for addr in addrs
-        }
+    def _prefill_energy_buckets(
+        self,
+        dev_id: str,
+        targets_by_type: Mapping[str, list[str]],
+        energy_by_type: dict[str, dict[str, float]],
+        power_by_type: dict[str, dict[str, float]],
+    ) -> None:
+        """Seed energy and power buckets from cached coordinator state."""
 
-    def _alias_map(self) -> dict[str, str]:
-        """Return the compatibility aliases exposed by the inventory."""
+        cached_dev: Mapping[str, Any] | None = None
+        if isinstance(self.data, Mapping):
+            cached = self.data.get(dev_id)
+            if isinstance(cached, Mapping):
+                cached_dev = cached
 
-        inventory = self._resolve_inventory()
-        return inventory.sample_alias_map(
-            include_types=ENERGY_NODE_TYPES,
-            restrict_to=ENERGY_NODE_TYPES,
-        )
+        if cached_dev:
+            for node_type, addrs_for_type in targets_by_type.items():
+                prev_node = cached_dev.get(node_type)
+                if not isinstance(prev_node, Mapping):
+                    continue
+
+                prev_energy = prev_node.get("energy")
+                if isinstance(prev_energy, Mapping):
+                    energy_bucket = energy_by_type.setdefault(node_type, {})
+                    for addr in addrs_for_type:
+                        cached_energy = float_or_none(prev_energy.get(addr))
+                        if cached_energy is not None:
+                            energy_bucket.setdefault(addr, cached_energy)
+
+                prev_power = prev_node.get("power")
+                if isinstance(prev_power, Mapping):
+                    power_bucket = power_by_type.setdefault(node_type, {})
+                    for addr in addrs_for_type:
+                        cached_power = float_or_none(prev_power.get(addr))
+                        if cached_power is not None:
+                            power_bucket.setdefault(addr, cached_power)
+
+        for (node_type, addr), (_, kwh) in self._last.items():
+            addrs_for_type = targets_by_type.get(node_type)
+            if not addrs_for_type or addr not in addrs_for_type:
+                continue
+            energy_bucket = energy_by_type.setdefault(node_type, {})
+            energy_bucket.setdefault(addr, kwh)
+
+    async def _poll_recent_samples(
+        self,
+        dev_id: str,
+        targets_by_type: Mapping[str, list[str]],
+        energy_by_type: dict[str, dict[str, float]],
+        power_by_type: dict[str, dict[str, float]],
+    ) -> None:
+        """Fetch recent energy samples for every tracked node."""
+
+        for node_type, addrs_for_type in targets_by_type.items():
+            for addr in addrs_for_type:
+                now = time.time()
+                start = now - 3600  # fetch recent samples
+                try:
+                    samples = await self.client.get_node_samples(
+                        dev_id, (node_type, addr), start, now
+                    )
+                except (ClientError, BackendRateLimitError, BackendAuthError):
+                    samples = []
+
+                if not samples:
+                    _LOGGER.debug(
+                        "No energy samples for node_type=%s addr=%s",
+                        node_type,
+                        addr,
+                    )
+                    continue
+
+                last = samples[-1]
+                counter = float_or_none(last.get("counter"))
+                if counter is None:
+                    counter = float_or_none(last.get("counter_max"))
+                if counter is None:
+                    counter = float_or_none(last.get("counter_min"))
+                t = float_or_none(last.get("t"))
+                if counter is None or t is None:
+                    _LOGGER.debug(
+                        "Latest sample missing 't' or 'counter' for node_type=%s addr=%s",
+                        node_type,
+                        addr,
+                    )
+                    continue
+
+                energy_bucket = energy_by_type.setdefault(node_type, {})
+                power_bucket = power_by_type.setdefault(node_type, {})
+                self._process_energy_sample(
+                    node_type,
+                    addr,
+                    t,
+                    counter,
+                    energy_bucket,
+                    power_bucket,
+                )
 
     def update_addresses(
         self,
@@ -950,7 +1028,7 @@ class EnergyStateCoordinator(
             msg = "Energy inventory is unavailable"
             raise TypeError(msg)
 
-        valid_keys = self._tracked_address_pairs(inventory)
+        valid_keys = set(self._iter_energy_targets(inventory))
         self._inventory = inventory
         self._last = {key: value for key, value in self._last.items() if key in valid_keys}
 
@@ -999,57 +1077,6 @@ class EnergyStateCoordinator(
             return True
         return False
 
-    def _seed_cached_energy_and_power(
-        self, dev_id: str
-    ) -> tuple[dict[str, dict[str, float]], dict[str, dict[str, float]]]:
-        """Return energy and power buckets pre-populated from cached data."""
-
-        addresses_by_type = self._tracked_address_map()
-
-        energy_by_type: dict[str, dict[str, float]] = {
-            node_type: {} for node_type in addresses_by_type
-        }
-        power_by_type: dict[str, dict[str, float]] = {
-            node_type: {} for node_type in addresses_by_type
-        }
-
-        cached_dev: Mapping[str, Any] | None = None
-        if isinstance(self.data, Mapping):
-            cached = self.data.get(dev_id)
-            if isinstance(cached, Mapping):
-                cached_dev = cached
-
-        if cached_dev:
-            for node_type, addrs_for_type in addresses_by_type.items():
-                prev_node = cached_dev.get(node_type)
-                if not isinstance(prev_node, Mapping):
-                    continue
-
-                prev_energy = prev_node.get("energy")
-                if isinstance(prev_energy, Mapping):
-                    energy_bucket = energy_by_type.setdefault(node_type, {})
-                    for addr in addrs_for_type:
-                        cached_energy = float_or_none(prev_energy.get(addr))
-                        if cached_energy is not None:
-                            energy_bucket.setdefault(addr, cached_energy)
-
-                prev_power = prev_node.get("power")
-                if isinstance(prev_power, Mapping):
-                    power_bucket = power_by_type.setdefault(node_type, {})
-                    for addr in addrs_for_type:
-                        cached_power = float_or_none(prev_power.get(addr))
-                        if cached_power is not None:
-                            power_bucket.setdefault(addr, cached_power)
-
-        for (node_type, addr), (_, kwh) in self._last.items():
-            addrs_for_type = addresses_by_type.get(node_type)
-            if not addrs_for_type or addr not in addrs_for_type:
-                continue
-            energy_bucket = energy_by_type.setdefault(node_type, {})
-            energy_bucket.setdefault(addr, kwh)
-
-        return energy_by_type, power_by_type
-
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Fetch recent heater energy samples and derive totals and power."""
         if self._should_skip_poll():
@@ -1060,57 +1087,33 @@ class EnergyStateCoordinator(
             return dict(existing)
         dev_id = self._dev_id
         try:
-            energy_by_type, power_by_type = self._seed_cached_energy_and_power(dev_id)
+            inventory = self._resolve_inventory()
+            targets_by_type = self._targets_by_type(inventory)
 
-            addresses_by_type = self._tracked_address_map()
-            for node_type, addrs_for_type in addresses_by_type.items():
-                for addr in addrs_for_type:
-                    now = time.time()
-                    start = now - 3600  # fetch recent samples
-                    try:
-                        samples = await self.client.get_node_samples(
-                            dev_id, (node_type, addr), start, now
-                        )
-                    except (ClientError, BackendRateLimitError, BackendAuthError):
-                        samples = []
+            energy_by_type: dict[str, dict[str, float]] = {
+                node_type: {} for node_type in targets_by_type
+            }
+            power_by_type: dict[str, dict[str, float]] = {
+                node_type: {} for node_type in targets_by_type
+            }
 
-                    if not samples:
-                        _LOGGER.debug(
-                            "No energy samples for node_type=%s addr=%s",
-                            node_type,
-                            addr,
-                        )
-                        continue
+            self._prefill_energy_buckets(
+                dev_id,
+                targets_by_type,
+                energy_by_type,
+                power_by_type,
+            )
 
-                    last = samples[-1]
-                    counter = float_or_none(last.get("counter"))
-                    if counter is None:
-                        counter = float_or_none(last.get("counter_max"))
-                    if counter is None:
-                        counter = float_or_none(last.get("counter_min"))
-                    t = float_or_none(last.get("t"))
-                    if counter is None or t is None:
-                        _LOGGER.debug(
-                            "Latest sample missing 't' or 'counter' for node_type=%s addr=%s",
-                            node_type,
-                            addr,
-                        )
-                        continue
-
-                    energy_bucket = energy_by_type.setdefault(node_type, {})
-                    power_bucket = power_by_type.setdefault(node_type, {})
-                    self._process_energy_sample(
-                        node_type,
-                        addr,
-                        t,
-                        counter,
-                        energy_bucket,
-                        power_bucket,
-                    )
+            await self._poll_recent_samples(
+                dev_id,
+                targets_by_type,
+                energy_by_type,
+                power_by_type,
+            )
 
             dev_data: dict[str, Any] = {"dev_id": dev_id}
 
-            for node_type, addrs_for_type in self._tracked_address_map().items():
+            for node_type, addrs_for_type in targets_by_type.items():
                 bucket = {
                     "energy": dict(energy_by_type.get(node_type, {})),
                     "power": dict(power_by_type.get(node_type, {})),
@@ -1123,18 +1126,21 @@ class EnergyStateCoordinator(
                 heater_data = {
                     "energy": dict(energy_by_type.get("htr", {})),
                     "power": dict(power_by_type.get("htr", {})),
-                    "addrs": list(addresses_by_type.get("htr", ())),
+                    "addrs": list(targets_by_type.get("htr", ())),
                 }
                 dev_data["htr"] = heater_data
 
-            alias_map = self._alias_map()
+            alias_map = inventory.sample_alias_map(
+                include_types=ENERGY_NODE_TYPES,
+                restrict_to=ENERGY_NODE_TYPES,
+            )
             for alias, canonical in alias_map.items():
                 canonical_bucket = dev_data.get(canonical)
                 if not isinstance(canonical_bucket, dict):
                     canonical_bucket = {
                         "energy": {},
                         "power": {},
-                        "addrs": list(addresses_by_type.get(canonical, ())),
+                        "addrs": list(targets_by_type.get(canonical, ())),
                     }
                     dev_data[canonical] = canonical_bucket
                 dev_data[alias] = canonical_bucket
@@ -1241,15 +1247,24 @@ class EnergyStateCoordinator(
 
         changed = False
 
-        addresses_by_type = self._tracked_address_map()
-        alias_map = self._alias_map()
+        try:
+            inventory = self._resolve_inventory()
+        except TypeError:
+            return
+
+        targets_by_type = self._targets_by_type(inventory)
+
+        alias_map = inventory.sample_alias_map(
+            include_types=ENERGY_NODE_TYPES,
+            restrict_to=ENERGY_NODE_TYPES,
+        )
 
         for raw_type, payload in updates.items():
             node_type = normalize_node_type(raw_type)
             if not node_type:
                 continue
             canonical_type = alias_map.get(node_type, node_type)
-            tracked_addrs = addresses_by_type.get(canonical_type)
+            tracked_addrs = targets_by_type.get(canonical_type)
             if not tracked_addrs:
                 continue
             bucket = dev_data.get(canonical_type)
@@ -1306,8 +1321,17 @@ class EnergyStateCoordinator(
             dev_data = {"dev_id": dev_id}
             data[dev_id] = dev_data
 
-        addresses_by_type = self._tracked_address_map()
-        alias_map = self._alias_map()
+        try:
+            inventory = self._resolve_inventory()
+        except TypeError:
+            return
+
+        targets_by_type = self._targets_by_type(inventory)
+
+        alias_map = inventory.sample_alias_map(
+            include_types=ENERGY_NODE_TYPES,
+            restrict_to=ENERGY_NODE_TYPES,
+        )
         merge_counts: dict[tuple[str, str], int] = {}
 
         for descriptor, records in samples.items():
@@ -1327,7 +1351,7 @@ class EnergyStateCoordinator(
                 continue
 
             canonical_type = alias_map.get(node_type, node_type)
-            tracked_addrs = addresses_by_type.get(canonical_type)
+            tracked_addrs = targets_by_type.get(canonical_type)
             if not tracked_addrs or addr not in tracked_addrs:
                 continue
 
@@ -1382,7 +1406,7 @@ class EnergyStateCoordinator(
                     prune_power=True,
                 )
 
-        for canonical_type, addrs in addresses_by_type.items():
+        for canonical_type, addrs in targets_by_type.items():
             bucket = dev_data.get(canonical_type)
             if isinstance(bucket, dict):
                 bucket.setdefault("addrs", list(addrs))

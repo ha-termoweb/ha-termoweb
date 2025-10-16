@@ -1382,12 +1382,13 @@ def test_energy_state_coordinator_requires_inventory(
     inventory = inventory_from_map({"htr": ["A"], "acm": ["B"], "pmo": ["M"]})
     coord = EnergyStateCoordinator(hass, client, "dev", inventory)
 
-    assert coord._tracked_address_map() == {
-        "htr": ("A",),
-        "acm": ("B",),
-        "pmo": ("M",),
-    }
-    assert coord._alias_map() == {
+    resolved = coord._resolve_inventory()
+    targets = list(coord._iter_energy_targets(resolved))
+    assert targets == [("htr", "A"), ("acm", "B"), ("pmo", "M")]
+    assert resolved.sample_alias_map(
+        include_types=coord_module.ENERGY_NODE_TYPES,
+        restrict_to=coord_module.ENERGY_NODE_TYPES,
+    ) == {
         "htr": "htr",
         "acm": "acm",
         "pmo": "pmo",
