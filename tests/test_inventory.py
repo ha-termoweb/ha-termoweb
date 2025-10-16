@@ -251,7 +251,14 @@ def test_inventory_power_monitor_targets_filter_invalid(
 
     def _fake_targets(_map: Any) -> list[Any]:
         called.append(_map)
-        return [None, "bad", ("pmo", " 3 "), ("pmo", None), ("pmo", "4")]
+        return [
+            None,
+            "bad",
+            ("pmo", " 3 "),
+            ("pmo", None),
+            ("pmo", "4"),
+            ("pmo", " 4 "),
+        ]
 
     monkeypatch.setattr(
         inventory_module,
@@ -266,6 +273,28 @@ def test_inventory_power_monitor_targets_filter_invalid(
 
     assert inventory.power_monitor_sample_targets == [("pmo", "3"), ("pmo", "4")]
     assert called
+
+
+def test_inventory_power_monitor_targets_deduplicate_and_strip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Power monitor targets should deduplicate and sanitise entries."""
+
+    def _fake_targets(_map: Any) -> list[Any]:
+        return [("pmo", " 3 "), ("pmo", "3"), ("pmo", " 4 ")]
+
+    monkeypatch.setattr(
+        inventory_module,
+        "power_monitor_sample_subscription_targets",
+        _fake_targets,
+    )
+    inventory = Inventory(
+        "dev",
+        {"nodes": []},
+        [PowerMonitorNode(name="One", addr="3"), PowerMonitorNode(name="Two", addr="4")],
+    )
+
+    assert inventory.power_monitor_sample_targets == [("pmo", "3"), ("pmo", "4")]
 
 
 def test_normalize_power_monitor_addresses_variants() -> None:
@@ -347,6 +376,7 @@ def test_inventory_heater_sample_targets_filters_invalid(
             ("acm", None),
             ("acm", ""),
             ["acm", "2 "],
+            ("htr", "1"),
         ]
 
     monkeypatch.setattr(
@@ -359,6 +389,24 @@ def test_inventory_heater_sample_targets_filters_invalid(
     targets = heater_inventory.heater_sample_targets
     assert targets == [("htr", "1")]
     assert ("acm", "2") not in targets
+
+
+def test_inventory_heater_sample_targets_deduplicate_and_strip(
+    heater_inventory: Inventory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sample targets should strip whitespace and deduplicate pairs."""
+
+    def fake_targets(_: Mapping[Any, Iterable[Any]] | Iterable[Any] | None) -> list[Any]:
+        return [("htr", " 1 "), ("htr", "1"), ("acm", " 2 ")]
+
+    monkeypatch.setattr(
+        inventory_module,
+        "heater_sample_subscription_targets",
+        fake_targets,
+    )
+    object.__setattr__(heater_inventory, "_heater_sample_targets_cache", None)
+
+    assert heater_inventory.heater_sample_targets == [("htr", "1"), ("acm", "2")]
 
 
 def test_heater_platform_details_default_name(

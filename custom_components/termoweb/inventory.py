@@ -521,15 +521,22 @@ class Inventory:
             return f"Accumulator {addr_norm}"
         return factory(addr_norm)
 
-    def _ensure_heater_sample_addresses(
+    def _ensure_sample_addresses(
         self,
+        *,
+        cache_attr: str,
+        forward_map_factory: Callable[[], tuple[dict[str, list[str]], Any]],
+        normalizer: Callable[[Mapping[Any, Iterable[Any]] | Iterable[Any] | None], tuple[dict[str, list[str]], dict[str, str]]],
     ) -> tuple[dict[str, tuple[str, ...]], dict[str, str]]:
-        """Return cached normalised heater address data for samples."""
+        """Return cached normalised sample addresses for the provided inputs."""
 
-        cached = self._heater_sample_address_cache
+        cached = cast(
+            "tuple[dict[str, tuple[str, ...]], dict[str, str]] | None",
+            getattr(self, cache_attr),
+        )
         if cached is None:
-            forward_map, _ = self.heater_address_map
-            normalized_map, compat = normalize_heater_addresses(forward_map)
+            forward_map, _ = forward_map_factory()
+            normalized_map, compat = normalizer(forward_map)
             cached = (
                 {
                     node_type: tuple(addresses)
@@ -537,27 +544,30 @@ class Inventory:
                 },
                 dict(compat),
             )
-            object.__setattr__(self, "_heater_sample_address_cache", cached)
+            object.__setattr__(self, cache_attr, cached)
         return cached
+
+    def _ensure_heater_sample_addresses(
+        self,
+    ) -> tuple[dict[str, tuple[str, ...]], dict[str, str]]:
+        """Return cached normalised heater address data for samples."""
+
+        return self._ensure_sample_addresses(
+            cache_attr="_heater_sample_address_cache",
+            forward_map_factory=lambda: self.heater_address_map,
+            normalizer=normalize_heater_addresses,
+        )
 
     def _ensure_power_monitor_sample_addresses(
         self,
     ) -> tuple[dict[str, tuple[str, ...]], dict[str, str]]:
         """Return cached normalised power monitor address data for samples."""
 
-        cached = self._power_monitor_sample_address_cache
-        if cached is None:
-            forward_map, _ = self.power_monitor_address_map
-            normalized_map, compat = normalize_power_monitor_addresses(forward_map)
-            cached = (
-                {
-                    node_type: tuple(addresses)
-                    for node_type, addresses in normalized_map.items()
-                },
-                dict(compat),
-            )
-            object.__setattr__(self, "_power_monitor_sample_address_cache", cached)
-        return cached
+        return self._ensure_sample_addresses(
+            cache_attr="_power_monitor_sample_address_cache",
+            forward_map_factory=lambda: self.power_monitor_address_map,
+            normalizer=normalize_power_monitor_addresses,
+        )
 
     @property
     def heater_sample_address_map(
@@ -582,18 +592,7 @@ class Inventory:
         if cached is None:
             normalized_map, _ = self._ensure_heater_sample_addresses()
             raw_targets = heater_sample_subscription_targets(normalized_map)
-            validated: list[tuple[str, str]] = []
-            for item in raw_targets:
-                if not isinstance(item, tuple) or len(item) != 2:
-                    continue
-                node_type, addr = item
-                if not isinstance(node_type, str) or not isinstance(addr, str):
-                    continue
-                node_clean = node_type.strip()
-                addr_clean = addr.strip()
-                if node_clean and addr_clean:
-                    validated.append((node_clean, addr_clean))
-            cached = tuple(validated)
+            cached = self._validate_sample_targets(raw_targets)
             object.__setattr__(self, "_heater_sample_targets_cache", cached)
         return [tuple(pair) for pair in cached]
 
@@ -620,20 +619,33 @@ class Inventory:
         if cached is None:
             normalized_map, _ = self._ensure_power_monitor_sample_addresses()
             raw_targets = power_monitor_sample_subscription_targets(normalized_map)
-            validated: list[tuple[str, str]] = []
-            for item in raw_targets:
-                if not isinstance(item, tuple) or len(item) != 2:
-                    continue
-                node_type, addr = item
-                if not isinstance(node_type, str) or not isinstance(addr, str):
-                    continue
-                node_clean = node_type.strip()
-                addr_clean = addr.strip()
-                if node_clean and addr_clean:
-                    validated.append((node_clean, addr_clean))
-            cached = tuple(validated)
+            cached = self._validate_sample_targets(raw_targets)
             object.__setattr__(self, "_power_monitor_sample_targets_cache", cached)
         return [tuple(pair) for pair in cached]
+
+    def _validate_sample_targets(
+        self, targets: Iterable[Any]
+    ) -> tuple[tuple[str, str], ...]:
+        """Return deduplicated and sanitised sample target pairs."""
+
+        validated: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for item in targets:
+            if not isinstance(item, tuple) or len(item) != 2:
+                continue
+            node_type, addr = item
+            if not isinstance(node_type, str) or not isinstance(addr, str):
+                continue
+            node_clean = node_type.strip()
+            addr_clean = addr.strip()
+            if not node_clean or not addr_clean:
+                continue
+            pair = (node_clean, addr_clean)
+            if pair in seen:
+                continue
+            seen.add(pair)
+            validated.append(pair)
+        return tuple(validated)
 
     def sample_alias_map(
         self,

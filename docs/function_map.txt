@@ -1002,6 +1002,8 @@ custom_components/termoweb/inventory.py :: Inventory.heater_address_map
     Return forward and reverse heater address mappings.
 custom_components/termoweb/inventory.py :: Inventory.power_monitor_address_map
     Return forward and reverse power monitor address mappings.
+custom_components/termoweb/inventory.py :: Inventory._ensure_sample_addresses
+    Return cached normalised sample addresses for the provided inputs.
 custom_components/termoweb/inventory.py :: Inventory._ensure_heater_sample_addresses
     Return cached normalised heater address data for samples.
 custom_components/termoweb/inventory.py :: Inventory._ensure_power_monitor_sample_addresses
@@ -1014,6 +1016,8 @@ custom_components/termoweb/inventory.py :: Inventory.power_monitor_sample_addres
     Return normalised power monitor addresses and compatibility aliases.
 custom_components/termoweb/inventory.py :: Inventory.power_monitor_sample_targets
     Return ordered power monitor sample subscription targets.
+custom_components/termoweb/inventory.py :: Inventory._validate_sample_targets
+    Return deduplicated and sanitised sample target pairs.
 custom_components/termoweb/inventory.py :: Inventory.heater_name_map
     Return cached heater name mapping for ``default_factory``.
 custom_components/termoweb/inventory.py :: _normalize_node_iterable
