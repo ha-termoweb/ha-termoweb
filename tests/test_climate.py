@@ -820,6 +820,61 @@ def test_async_setup_entry_prefers_inventory_node_type(
     asyncio.run(_run())
 
 
+def test_settings_maps_include_inventory_aliases(
+    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory]
+) -> None:
+    """Ensure optimistic updates touch all alias mappings for an address."""
+
+    _reset_environment()
+    hass = HomeAssistant()
+    entry_id = "entry-alias"
+    dev_id = "dev-alias"
+    addr = "A1"
+    nodes = {"nodes": [{"type": "htr", "addr": addr}, {"type": "acm", "addr": addr}]}
+    inventory = climate_inventory(dev_id, nodes)
+
+    record = build_coordinator_device_state(
+        nodes=nodes,
+        settings={
+            "htr": {addr: {"mode": "auto"}},
+            "acm": {addr: {"mode": "auto"}},
+        },
+        sections={
+            "htr": {"settings": {addr: {"mode": "auto"}}},
+            "acm": {"settings": {addr: {"mode": "auto"}}},
+        },
+    )
+
+    coordinator = _make_coordinator(
+        hass,
+        dev_id,
+        record,
+        inventory=inventory,
+    )
+
+    entity = HeaterClimateEntity(
+        coordinator,
+        entry_id,
+        dev_id,
+        addr,
+        "Alias Heater",
+        node_type="htr",
+        inventory=inventory,
+    )
+    entity.hass = hass
+    entity.async_write_ha_state = MagicMock()
+
+    entity._optimistic_update(lambda payload: payload.__setitem__("mode", "manual"))
+
+    device_state = coordinator.data[dev_id]
+    assert device_state["settings"]["htr"][addr]["mode"] == "manual"
+    assert device_state["settings"]["acm"][addr]["mode"] == "manual"
+    assert device_state["htr"]["settings"][addr]["mode"] == "manual"
+    assert (
+        device_state["nodes_by_type"]["acm"]["settings"][addr]["mode"] == "manual"
+    )
+
+
 def test_accumulator_hvac_mode_reporting() -> None:
     """Ensure accumulator HVAC mode normalisation covers all branches."""
 

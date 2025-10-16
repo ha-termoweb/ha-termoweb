@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping
 import logging
 import time
 from typing import Any, cast
@@ -381,8 +381,9 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         except Exception:
             return None
 
-    def _settings_maps(self) -> list[dict[str, Any]]:
+    def _settings_maps(self) -> list[Mapping[str, Any]]:
         """Return all cached settings maps referencing this node."""
+
         try:
             data = (self.coordinator.data or {}).get(self._dev_id)
         except Exception:
@@ -392,53 +393,60 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
         inventory = self._shared_inventory()
         addr = self._addr
-        candidate_types: list[str]
-        if inventory is None or not addr:
-            candidate_types = [self._node_type]
-        else:
-            _, reverse_map = inventory.heater_address_map
-            addr_types = reverse_map.get(addr)
-            candidate_types = []
-            if addr_types:
-                for value in addr_types:
-                    canonical = normalize_node_type(
-                        value,
-                        use_default_when_falsey=True,
-                    )
-                    if canonical and canonical not in candidate_types:
-                        candidate_types.append(canonical)
-            if self._node_type not in candidate_types:
-                candidate_types.insert(0, self._node_type)
 
-        seen: set[int] = set()
-        results: list[dict[str, Any]] = []
+        def _iter_node_types() -> Iterator[str]:
+            """Yield node types that may hold settings for this address."""
 
-        settings_section = data.get("settings")
-        if isinstance(settings_section, Mapping):
-            for node_type in candidate_types:
+            seen_types: set[str] = set()
+            primary = normalize_node_type(
+                self._node_type,
+                use_default_when_falsey=True,
+            )
+            if primary:
+                seen_types.add(primary)
+                yield primary
+            if inventory is None or not addr:
+                return
+            try:
+                _, reverse_map = inventory.heater_address_map
+            except Exception:
+                reverse_map = {}
+            for alias in reverse_map.get(addr, ()):  # type: ignore[arg-type]
+                canonical = normalize_node_type(
+                    alias,
+                    use_default_when_falsey=True,
+                )
+                if not canonical or canonical in seen_types:
+                    continue
+                if not inventory.has_node(canonical, addr):
+                    continue
+                seen_types.add(canonical)
+                yield canonical
+
+        seen_maps: set[int] = set()
+        results: list[Mapping[str, Any]] = []
+
+        for node_type in _iter_node_types():
+            settings_section = data.get("settings")
+            if isinstance(settings_section, Mapping):
                 bucket = settings_section.get(node_type)
-                if not isinstance(bucket, Mapping):
-                    continue
-                mapping = bucket if isinstance(bucket, dict) else dict(bucket)
-                ident = id(mapping)
-                if ident in seen:
-                    continue
-                seen.add(ident)
-                results.append(mapping)
+                if isinstance(bucket, Mapping):
+                    ident = id(bucket)
+                    if ident not in seen_maps:
+                        seen_maps.add(ident)
+                        results.append(bucket)
 
-        for node_type in candidate_types:
             section = data.get(node_type)
             if not isinstance(section, Mapping):
                 continue
             bucket = section.get("settings")
             if not isinstance(bucket, Mapping):
                 continue
-            mapping = bucket if isinstance(bucket, dict) else dict(bucket)
-            ident = id(mapping)
-            if ident in seen:
+            ident = id(bucket)
+            if ident in seen_maps:
                 continue
-            seen.add(ident)
-            results.append(mapping)
+            seen_maps.add(ident)
+            results.append(bucket)
 
         return results
 
