@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import importlib
 from types import SimpleNamespace
-from typing import Callable
+from typing import Any, Callable
 from unittest.mock import MagicMock
 
 import pytest
 
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.coordinator import EnergyStateCoordinator
-from custom_components.termoweb.inventory import Inventory, build_node_inventory
+from custom_components.termoweb.inventory import (
+    Inventory,
+    PowerMonitorNode,
+    build_node_inventory,
+)
 from custom_components.termoweb.sensor import _normalise_energy_value
 from homeassistant.core import HomeAssistant
 
@@ -93,7 +97,22 @@ async def test_async_setup_entry_handles_missing_power_monitors(
     raw_nodes = [{"type": "htr", "addr": "1", "name": "Heater"}]
     node_inventory = build_node_inventory({"nodes": raw_nodes})
     inventory = Inventory("dev-1", {"nodes": raw_nodes}, node_inventory)
-    assert "pmo" not in inventory.nodes_by_type
+    iter_calls: list[tuple[Any, Any]] = []
+
+    def _iter_nodes_metadata_stub(
+        self,
+        *,
+        node_types: tuple[str, ...] | None = None,
+        default_name_simple: Callable[[str], str] | None = None,
+    ) -> object:
+        iter_calls.append((node_types, default_name_simple))
+        return iter(())
+
+    monkeypatch.setattr(
+        Inventory,
+        "iter_nodes_metadata",
+        _iter_nodes_metadata_stub,
+    )
 
     heater_details = SimpleNamespace(
         inventory=inventory,
@@ -144,9 +163,61 @@ async def test_async_setup_entry_handles_missing_power_monitors(
     await module.async_setup_entry(hass, entry, _async_add_entities)
 
     energy_coordinator.update_addresses.assert_called_once_with(inventory)
+    assert iter_calls == [(("pmo",), None)]
     assert added_entities[:3] == [
         "temp-sensor",
         "energy-sensor",
         "power-sensor",
     ]
     assert any(isinstance(entity, _DummyTotalEnergy) for entity in added_entities)
+
+
+def test_power_monitor_available_uses_inventory_has_node(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Power monitor availability should delegate to inventory.has_node."""
+
+    module = importlib.import_module("custom_components.termoweb.sensor")
+    monkeypatch.setattr(module, "Inventory", Inventory)
+
+    coordinator = SimpleNamespace(
+        data={"dev-1": {"pmo": {}}},
+        async_add_listener=lambda *_args, **_kwargs: None,
+        async_remove_listener=lambda *_args, **_kwargs: None,
+        inventory=None,
+    )
+    inventory = Inventory(
+        "dev-1",
+        {"nodes": []},
+        [PowerMonitorNode(name="Monitor", addr="01")],
+    )
+
+    calls: list[tuple[str, str]] = []
+
+    def _fake_has_node(
+        self, node_type: object, addr: object, *, _calls=calls
+    ) -> bool:
+        _calls.append((node_type, addr))
+        return True
+
+    monkeypatch.setattr(Inventory, "has_node", _fake_has_node)
+
+    sensor = module.PowerMonitorPowerSensor(
+        coordinator,
+        "entry-1",
+        "dev-1",
+        "01",
+        "uid-1",
+        device_name="Monitor",
+        inventory=inventory,
+    )
+
+    setattr(sensor, "_inventory", inventory)
+    setattr(sensor.coordinator, "inventory", inventory)
+    resolved = sensor._resolve_inventory()
+    assert resolved is inventory
+
+    calls.clear()
+    result = sensor.available
+    assert calls == [("pmo", "01")]
+    assert result is True
