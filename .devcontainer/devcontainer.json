@@ -1,6 +1,6 @@
 {
     "name": "ha-termoweb",
-    "image": "mcr.microsoft.com/devcontainers/python:3.13",
+    "image": "mcr.microsoft.com/devcontainers/python:3.14",
     "postCreateCommand": "/bin/bash -c 'if ! command -v uv >/dev/null; then curl -LsSf https://astral.sh/uv/install.sh | sh; fi && scripts/setup'",
     "forwardPorts": [
         8123
