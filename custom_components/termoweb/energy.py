@@ -583,34 +583,11 @@ async def async_import_energy_history(
         )
         return
 
-    all_pairs: list[tuple[str, str]] = []
-    seen_pairs: set[tuple[str, str]] = set()
+    addresses_by_type = inventory.addresses_by_type
 
-    def _extend_targets(pairs: Iterable[tuple[str, str]]) -> None:
-        for node_type, addr in pairs:
-            normalized_type = node_type.strip() if isinstance(node_type, str) else ""
-            normalized_addr = addr.strip() if isinstance(addr, str) else ""
-            if not normalized_type or not normalized_addr:
-                continue
-            pair = (normalized_type, normalized_addr)
-            if pair in seen_pairs:
-                continue
-            seen_pairs.add(pair)
-            all_pairs.append(pair)
-
-    _extend_targets(inventory.heater_sample_targets)
-    _extend_targets(inventory.power_monitor_sample_targets)
-    _extend_targets(
-        (metadata.node_type, metadata.addr)
-        for metadata in inventory.iter_nodes_metadata()
-    )
-
-    if not all_pairs:
+    if not any(addresses_by_type.values()):
         logger.debug("Energy import: no nodes available for device")
         return
-
-    available_types = {node_type for node_type, _ in all_pairs}
-    available_addresses = {addr for _, addr in all_pairs}
 
     normalized_type_filters: set[str] | None = None
     if node_types is not None:
@@ -623,7 +600,8 @@ async def async_import_energy_history(
             )
             if not normalized:
                 continue
-            if normalized not in available_types:
+            addresses = addresses_by_type.get(normalized)
+            if not addresses:
                 invalid_types.append(str(candidate))
                 continue
             normalized_type_filters.add(normalized)
@@ -646,7 +624,9 @@ async def async_import_energy_history(
             )
             if not normalized_addr:
                 continue
-            if normalized_addr not in available_addresses:
+            if not any(
+                normalized_addr in bucket for bucket in addresses_by_type.values()
+            ):
                 unknown_addresses.append(normalized_addr)
                 continue
             normalized_address_filters.add(normalized_addr)
@@ -659,14 +639,39 @@ async def async_import_energy_history(
         if not normalized_address_filters:
             normalized_address_filters = None
 
-    target_pairs = [
-        pair
-        for pair in all_pairs
-        if (normalized_type_filters is None or pair[0] in normalized_type_filters)
-        and (
-            normalized_address_filters is None or pair[1] in normalized_address_filters
-        )
-    ]
+    target_pairs: list[tuple[str, str]] = []
+    seen_pairs: set[tuple[str, str]] = set()
+
+    def _extend_targets(pairs: Iterable[tuple[str, str]]) -> None:
+        for node_type, addr in pairs:
+            normalized_type = node_type.strip() if isinstance(node_type, str) else ""
+            normalized_addr = addr.strip() if isinstance(addr, str) else ""
+            if not normalized_type or not normalized_addr:
+                continue
+            if not inventory.has_node(normalized_type, normalized_addr):
+                continue
+            if (
+                normalized_type_filters is not None
+                and normalized_type not in normalized_type_filters
+            ):
+                continue
+            if (
+                normalized_address_filters is not None
+                and normalized_addr not in normalized_address_filters
+            ):
+                continue
+            pair = (normalized_type, normalized_addr)
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            target_pairs.append(pair)
+
+    _extend_targets(inventory.heater_sample_targets)
+    _extend_targets(inventory.power_monitor_sample_targets)
+    _extend_targets(
+        (metadata.node_type, metadata.addr)
+        for metadata in inventory.iter_nodes_metadata()
+    )
 
     if not target_pairs:
         logger.debug("Energy import: no nodes available for device after filtering")
