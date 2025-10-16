@@ -940,8 +940,7 @@ class HeaterNodeBase(CoordinatorEntity):
             return False
 
         node_type = getattr(self, "_node_type", "htr")
-        forward_map, _ = inventory.heater_address_map
-        return self._addr in forward_map.get(node_type, [])
+        return inventory.has_node(node_type, self._addr)
 
     def _device_record(self) -> dict[str, Any] | None:
         """Return the coordinator cache entry for this device."""
@@ -987,15 +986,10 @@ class HeaterNodeBase(CoordinatorEntity):
             return {}
 
         node_type = getattr(self, "_node_type", "htr")
-        addresses: list[str] = []
         try:
             inventory = self._resolve_inventory()
         except ValueError:
             inventory = None
-
-        if isinstance(inventory, Inventory):
-            forward_map, _ = inventory.heater_address_map
-            addresses = list(forward_map.get(node_type, []))
 
         settings = {}
         cached_settings = record.get("settings")
@@ -1004,7 +998,26 @@ class HeaterNodeBase(CoordinatorEntity):
             if isinstance(node_settings, Mapping):
                 settings = node_settings
 
-        return {"addrs": addresses, "settings": settings}
+        section: dict[str, Any] = {"settings": settings}
+
+        if isinstance(inventory, Inventory) and inventory.has_node(node_type, self._addr):
+            device_name = getattr(self, "_device_name", None)
+
+            def _default_name(addr: str) -> str:
+                if isinstance(device_name, str) and device_name.strip():
+                    return device_name
+                attr_name = getattr(self, "_attr_name", None)
+                if isinstance(attr_name, str) and attr_name.strip():
+                    return attr_name
+                return f"Heater {addr}"
+
+            section["name"] = inventory.resolve_heater_name(
+                node_type,
+                self._addr,
+                default_factory=_default_name,
+            )
+
+        return section
 
     def heater_settings(self) -> dict[str, Any] | None:
         """Return the cached settings for this heater, if available."""
