@@ -151,7 +151,7 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend.fetch_hourly_s
 custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend.get_instant_power
     Return the instantaneous power for ``node`` in watts when available.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.get_node_samples
-    Return heater samples with millisecond timestamps normalised to seconds. Non-heater nodes delegate to the base implementation.
+    Return heater samples with timestamps normalised to seconds. Non-heater nodes delegate to the base implementation while detecting millisecond payloads automatically.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.normalise_ws_nodes
     Normalise websocket nodes payloads for Ducaheat specifics.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_ws_settings

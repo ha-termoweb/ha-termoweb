@@ -678,11 +678,7 @@ def test_request_preview_truncates_body(monkeypatch: pytest.MonkeyPatch) -> None
     asyncio.run(_run())
 
     preview_call = next(
-        (
-            call
-            for call in stub_logger.debug_calls
-            if "body[0:200]" in call[0]
-        ),
+        (call for call in stub_logger.debug_calls if "body[0:200]" in call[0]),
         None,
     )
     assert preview_call is not None, "Expected preview log entry"
@@ -1081,9 +1077,7 @@ def test_get_node_settings_acm_logs(
             f"GET settings node {mask_identifier('dev')}/{mask_identifier('7')}"
             " (acm) payload"
         )
-        assert any(
-            expected in record.getMessage() for record in caplog.records
-        )
+        assert any(expected in record.getMessage() for record in caplog.records)
 
     asyncio.run(_run())
 
@@ -1151,9 +1145,7 @@ def test_get_node_samples_logs_for_unknown_type(
             f"GET samples node {mask_identifier('dev')}/{mask_identifier('4')}"
             " (pmo) payload"
         )
-        assert any(
-            expected in record.getMessage() for record in caplog.records
-        )
+        assert any(expected in record.getMessage() for record in caplog.records)
 
     asyncio.run(_run())
 
@@ -1302,7 +1294,9 @@ def test_set_node_settings_invalid_program() -> None:
             await client.set_node_settings("dev", ("htr", "1"), prog=[0] * 167 + [5])
 
         with pytest.raises(ValueError, match="prog contains non-integer value"):
-            await client.set_node_settings("dev", ("htr", "1"), prog=[0] * 167 + ["bad"])
+            await client.set_node_settings(
+                "dev", ("htr", "1"), prog=[0] * 167 + ["bad"]
+            )
 
         assert not session.request_calls
         assert not session.post_calls
@@ -1599,7 +1593,9 @@ def test_build_acm_extra_options_payload_rejects_invalid_boost_temp() -> None:
 
 
 @pytest.mark.asyncio
-async def test_set_acm_extra_options_forwards_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_set_acm_extra_options_forwards_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     session = FakeSession()
     client = RESTClient(session, "user", "pass")
 
@@ -1607,7 +1603,9 @@ async def test_set_acm_extra_options_forwards_payload(monkeypatch: pytest.Monkey
     request_mock = AsyncMock(return_value={"ok": True})
     headers_mock = AsyncMock(return_value={"Authorization": "Bearer token"})
 
-    monkeypatch.setattr(client, "_build_acm_extra_options_payload", lambda *args: sentinel_payload)
+    monkeypatch.setattr(
+        client, "_build_acm_extra_options_payload", lambda *args: sentinel_payload
+    )
     monkeypatch.setattr(client, "_request", request_mock)
     monkeypatch.setattr(client, "authed_headers", headers_mock)
     monkeypatch.setattr(client, "_log_non_htr_payload", lambda **_: None)
@@ -1625,7 +1623,9 @@ async def test_set_acm_extra_options_forwards_payload(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
-async def test_set_acm_boost_state_formats_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_set_acm_boost_state_formats_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     session = FakeSession()
     client = RESTClient(session, "user", "pass")
 
@@ -2031,9 +2031,7 @@ def test_rest_client_set_node_settings_rejects_boost_time(
         monkeypatch.setattr(client, "authed_headers", fake_headers)
 
         with pytest.raises(ValueError):
-            await client.set_node_settings(
-                "dev", ("htr", "3"), boost_time=30
-            )
+            await client.set_node_settings("dev", ("htr", "3"), boost_time=30)
 
     asyncio.run(_run())
 
@@ -2044,7 +2042,7 @@ def test_ducaheat_get_node_samples_converts_ms(monkeypatch) -> None:
         session.queue_request(
             MockResponse(
                 200,
-                {"samples": [{"t": 1_234_500, "counter": 7.5}]},
+                {"samples": [{"t": 1_700_000_000_500, "counter": 7.5}]},
                 headers={"Content-Type": "application/json"},
             )
         )
@@ -2062,11 +2060,44 @@ def test_ducaheat_get_node_samples_converts_ms(monkeypatch) -> None:
         monkeypatch.setattr(client, "authed_headers", fake_headers)
 
         samples = await client.get_node_samples("dev", ("htr", "A"), 10, 20)
-        assert samples == [{"t": 1234, "counter": "7.5"}]
+        assert samples == [{"t": 1_700_000_000, "counter": "7.5"}]
 
         call = session.request_calls[0]
         assert call[1] == "https://api.termoweb.fake/api/v2/devs/dev/htr/A/samples"
-        assert call[2]["params"] == {"start": 10_000, "end": 20_000}
+        assert call[2]["params"] == {"start": 10, "end": 20}
+
+    asyncio.run(_run())
+
+
+def test_ducaheat_get_node_samples_keeps_second_payload(monkeypatch) -> None:
+    async def _run() -> None:
+        session = FakeSession()
+        session.queue_request(
+            MockResponse(
+                200,
+                {"samples": [{"t": 1_700_000_010, "counter": 3}]},
+                headers={"Content-Type": "application/json"},
+            )
+        )
+
+        client = DucaheatRESTClient(
+            session,
+            "user",
+            "pass",
+            api_base="https://api.termoweb.fake",
+        )
+
+        async def fake_headers() -> dict[str, str]:
+            return {"Authorization": "Bearer token"}
+
+        monkeypatch.setattr(client, "authed_headers", fake_headers)
+
+        samples = await client.get_node_samples("dev", ("htr", "A"), 5, 30)
+        assert samples == [{"t": 1_700_000_010, "counter": "3"}]
+
+        call = session.request_calls[0]
+        assert call[1] == "https://api.termoweb.fake/api/v2/devs/dev/htr/A/samples"
+        assert call[2]["params"] == {"start": 5, "end": 30}
 
     asyncio.run(_run())
 
