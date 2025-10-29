@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import Iterable, Mapping, MutableMapping
+from collections.abc import Collection, Iterable, Mapping, MutableMapping
 from copy import deepcopy
 import gzip
 import json
@@ -580,11 +580,21 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                     isinstance(normalised_update, dict)
                                     and normalised_update
                                 ):
-                                    sample_updates = self._collect_sample_updates(
-                                        normalised_update
+                                    self._dispatch_nodes(normalised_update)
+                                    inventory = (
+                                        self._inventory
+                                        if isinstance(self._inventory, Inventory)
+                                        else None
                                     )
-                                    if isinstance(normalised_update, Mapping):
-                                        self._dispatch_nodes(normalised_update)
+                                    allowed_types = (
+                                        inventory.energy_sample_types
+                                        if isinstance(inventory, Inventory)
+                                        else None
+                                    )
+                                    sample_updates = self._collect_sample_updates(
+                                        normalised_update,
+                                        allowed_types=allowed_types,
+                                    )
                                     if sample_updates:
                                         self._forward_sample_updates(sample_updates)
                             self._update_status("healthy")
@@ -1041,12 +1051,39 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             else:
                 target[key] = deepcopy(value)
 
-    def _collect_sample_updates(self, nodes: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    def _collect_sample_updates(
+        self,
+        nodes: Mapping[str, Any],
+        *,
+        allowed_types: Collection[str] | None = None,
+    ) -> dict[str, dict[str, Any]]:
         """Extract heater sample updates from a websocket payload."""
+
+        allowed: set[str] | None = None
+        if allowed_types is not None:
+            allowed = set()
+            for candidate in allowed_types:
+                normalized = normalize_node_type(
+                    candidate,
+                    use_default_when_falsey=True,
+                )
+                if normalized:
+                    allowed.add(normalized)
 
         updates: dict[str, dict[str, Any]] = {}
         for node_type, type_payload in nodes.items():
             if not isinstance(node_type, str) or not isinstance(type_payload, Mapping):
+                continue
+            canonical_type = normalize_node_type(
+                node_type,
+                use_default_when_falsey=True,
+            )
+            if canonical_type is None:
+                continue
+            if allowed is not None:
+                if canonical_type not in allowed:
+                    continue
+            elif canonical_type == "thm":
                 continue
             samples = type_payload.get("samples")
             if not isinstance(samples, Mapping):

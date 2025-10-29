@@ -36,7 +36,7 @@ from .i18n import (
     attach_fallbacks,
     format_fallback,
 )
-from .identifiers import build_heater_entity_unique_id
+from .identifiers import build_heater_entity_unique_id, thermostat_fallback_name
 from .inventory import (
     HeaterNode,
     Inventory,
@@ -107,6 +107,16 @@ async def async_setup_entry(hass, entry, async_add_entities):
         )
         if not canonical_type or not addr:
             continue
+        if canonical_type == "thm":
+            heater_fallback = default_name_simple(addr)
+            thermostat_default = format_fallback(
+                fallbacks,
+                "fallbacks.thermostat_name",
+                thermostat_fallback_name(addr),
+                addr=addr,
+            )
+            if base_name == heater_fallback:
+                base_name = thermostat_default
         unique_id = build_heater_entity_unique_id(
             dev_id,
             canonical_type,

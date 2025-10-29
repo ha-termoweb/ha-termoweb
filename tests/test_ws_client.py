@@ -206,7 +206,12 @@ def _ensure_inventory_record(
     """Populate ``hass`` domain data with a default inventory if needed."""
 
     if not isinstance(inventory, Inventory):
-        payload = {"nodes": [{"type": "htr", "addr": "1"}]}
+        payload = {
+            "nodes": [
+                {"type": "htr", "addr": "1"},
+                {"type": "pmo", "addr": "7"},
+            ]
+        }
         inventory = Inventory(dev_id, payload, build_node_inventory(payload))
     hass.data.setdefault(base_ws.DOMAIN, {}).setdefault(entry_id, {})
     hass.data[base_ws.DOMAIN][entry_id].setdefault("inventory", inventory)
@@ -296,6 +301,55 @@ def test_forward_ws_sample_updates_handles_power_monitors(
     assert args[0] == "dev"
     assert args[1] == {"pmo": {"7": {"power": 100}}}
     assert handler.call_args.kwargs.get("lease_seconds") == 90
+
+
+def test_forward_ws_sample_updates_skips_thermostats() -> None:
+    """Thermostat sample payloads should be ignored."""
+
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
+    raw_nodes = {"nodes": [{"type": "thm", "addr": "1"}]}
+    inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+    handler = MagicMock()
+    hass.data[base_ws.DOMAIN]["entry"] = {
+        "energy_coordinator": SimpleNamespace(handle_ws_samples=handler),
+        "inventory": inventory,
+        "nodes": raw_nodes,
+    }
+
+    base_ws.forward_ws_sample_updates(
+        hass,
+        "entry",
+        "dev",
+        {"thm": {"samples": {"1": {"counter": 1}}}},
+    )
+
+    handler.assert_not_called()
+
+
+def test_forward_ws_sample_updates_respect_inventory_types(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Samples for disallowed node types should be ignored."""
+
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "5"}]}
+    inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+    object.__setattr__(inventory, "_energy_sample_types_cache", frozenset({"pmo"}))
+    handler = MagicMock()
+    hass.data[base_ws.DOMAIN]["entry"] = {
+        "energy_coordinator": SimpleNamespace(handle_ws_samples=handler),
+        "inventory": inventory,
+        "nodes": raw_nodes,
+    }
+
+    base_ws.forward_ws_sample_updates(
+        hass,
+        "entry",
+        "dev",
+        {"htr": {"samples": {"5": {"counter": 1}}}},
+    )
+
+    handler.assert_not_called()
 
 
 def test_forward_ws_sample_updates_uses_coordinator_inventory(

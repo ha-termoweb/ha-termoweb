@@ -331,3 +331,13 @@ def test_heater_sample_subscription_targets_orders_types() -> None:
 def test_heater_sample_subscription_targets_handles_empty() -> None:
     assert heater_sample_subscription_targets({}) == []
     assert heater_sample_subscription_targets(None) == []
+
+
+def test_heater_sample_subscription_targets_skips_thermostats() -> None:
+    targets = heater_sample_subscription_targets({"thm": ["5"], "htr": ["1"]})
+
+    assert targets == [("htr", "1")]
+
+
+def test_heater_node_types_include_thermostat() -> None:
+    assert "thm" in inventory_module.HEATER_NODE_TYPES

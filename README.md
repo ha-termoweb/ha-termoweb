@@ -14,7 +14,7 @@
 
 # TermoWeb heaters for Home Assistant
 
-Control your **TermoWeb** or **Ducaheat** electric heaters in **Home Assistant** — from the HA app, automations, scenes, and voice assistants.
+Control your **TermoWeb** or **Ducaheat** electric heaters and thermostats in **Home Assistant** — from the HA app, automations, scenes, and voice assistants.
 
 [![Open in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ha-termoweb&repository=ha-termoweb&category=integration)
 [![Open your Home Assistant instance and start setting up the integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=termoweb)
@@ -53,12 +53,13 @@ We do not yet have integration with heaters using the Tevolve-app, but it looks 
 
 ## What you can do in Home Assistant
 
-- Turn heaters **On/Off** and set **target temperature**.
+- Turn heaters and thermostats **On/Off** and set **target temperature**.
 - Choose **Auto** or **Manual** mode.
 - See live room temperature and heating state (every heater is also a temperature sensor)
 - View and change the weekly schedule and temperature presets
 - See cumulative energy use and import energy use history from TermoWeb.
-- Add energy sensors to the HA energy dashboard so you can see current and historical use/cost. 
+- Add energy sensors to the HA energy dashboard so you can see current and historical use/cost.
+- Monitor thermostat battery level so you know when wireless controllers need attention.
 - Use HA **automations**, **scenes**, and **voice assistants** (including HA’s Google/Alexa integrations).
 
 ---

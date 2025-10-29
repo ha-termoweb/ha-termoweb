@@ -168,6 +168,8 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._merge_boos
     Assign a metadata value while respecting preference rules.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_settings
     Flatten the vendor payload into HA-friendly heater settings.
+custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_thm_settings
+    Return a normalised thermostat settings mapping.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_acm_capabilities
     Merge accumulator capability dictionaries into a single mapping.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_acm_capabilities._merge
@@ -982,6 +984,8 @@ custom_components/termoweb/identifiers.py :: build_power_monitor_instant_power_u
     Return the canonical unique ID for a power monitor instant power sensor.
 custom_components/termoweb/identifiers.py :: build_power_monitor_power_unique_id
     Return the canonical unique ID for a power monitor power sensor.
+custom_components/termoweb/identifiers.py :: thermostat_fallback_name
+    Return the fallback friendly name for a thermostat node.
 custom_components/termoweb/inventory.py :: _default_heater_name
     Return the default fallback name for a heater address.
 custom_components/termoweb/inventory.py :: Inventory.__init__
@@ -1018,6 +1022,8 @@ custom_components/termoweb/inventory.py :: Inventory.heater_sample_address_map
     Return normalised heater addresses and compatibility aliases.
 custom_components/termoweb/inventory.py :: Inventory.heater_sample_targets
     Return ordered ``(node_type, addr)`` sample subscription targets.
+custom_components/termoweb/inventory.py :: Inventory.energy_sample_types
+    Return canonical node types that expose energy or power samples.
 custom_components/termoweb/inventory.py :: Inventory.power_monitor_sample_address_map
     Return normalised power monitor addresses and compatibility aliases.
 custom_components/termoweb/inventory.py :: Inventory.power_monitor_sample_targets
@@ -1156,6 +1162,12 @@ custom_components/termoweb/sensor.py :: HeaterTemperatureSensor.native_value
     Return the latest temperature reported by the heater.
 custom_components/termoweb/sensor.py :: HeaterTemperatureSensor.extra_state_attributes
     Return metadata describing the heater temperature source.
+custom_components/termoweb/sensor.py :: ThermostatBatterySensor.__init__
+    Initialise the thermostat battery sensor entity.
+custom_components/termoweb/sensor.py :: ThermostatBatterySensor.native_value
+    Return the thermostat battery percentage as 0–100.
+custom_components/termoweb/sensor.py :: ThermostatBatterySensor.extra_state_attributes
+    Return additional thermostat battery metadata.
 custom_components/termoweb/sensor.py :: HeaterEnergyBase.__init__
     Initialise a heater energy-derived sensor entity.
 custom_components/termoweb/sensor.py :: HeaterEnergyBase._device_available
@@ -1193,7 +1205,7 @@ custom_components/termoweb/sensor.py :: HeaterBoostEndSensor.state
 custom_components/termoweb/sensor.py :: HeaterBoostEndSensor.extra_state_attributes
     Return metadata about the boost session.
 custom_components/termoweb/sensor.py :: _create_heater_sensors
-    Create the heater node sensors for the given node.
+    Create heater node sensors for the given node, skipping energy outputs for thermostats.
 custom_components/termoweb/sensor.py :: _create_boost_sensors
     Create the boost-related sensors for a heater node.
 custom_components/termoweb/sensor.py :: PowerMonitorSensorBase.__init__

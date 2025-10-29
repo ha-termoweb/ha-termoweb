@@ -116,7 +116,7 @@ def test_inventory_heater_metadata_properties(heater_inventory: Inventory) -> No
     expected_nodes = tuple(
         node
         for node in nodes
-        if getattr(node, "type", "").strip().lower() in {"htr", "acm"}
+        if getattr(node, "type", "").strip().lower() in {"htr", "acm", "thm"}
     )
     actual_pairs = {
         (
@@ -134,20 +134,32 @@ def test_inventory_heater_metadata_properties(heater_inventory: Inventory) -> No
     }
     assert actual_pairs == expected_pairs
 
-    assert heater_inventory.explicit_heater_names == {("htr", "1"), ("acm", "2")}
+    assert heater_inventory.explicit_heater_names == {
+        ("htr", "1"),
+        ("acm", "2"),
+        ("thm", "9"),
+    }
 
     forward, reverse = heater_inventory.heater_address_map
 
-    assert forward == {"htr": ["1", "2"], "acm": ["2"]}
-    assert reverse == {"1": {"htr"}, "2": {"htr", "acm"}}
+    assert forward == {"htr": ["1", "2"], "acm": ["2"], "thm": ["9"]}
+    assert reverse == {
+        "1": {"htr"},
+        "2": {"htr", "acm"},
+        "9": {"thm"},
+    }
 
     # Mutating the returned maps must not corrupt cached state.
     forward["htr"].append("bogus")
     reverse.setdefault("3", set()).add("htr")
 
     cached_forward, cached_reverse = heater_inventory.heater_address_map
-    assert cached_forward == {"htr": ["1", "2"], "acm": ["2"]}
-    assert cached_reverse == {"1": {"htr"}, "2": {"htr", "acm"}}
+    assert cached_forward == {"htr": ["1", "2"], "acm": ["2"], "thm": ["9"]}
+    assert cached_reverse == {
+        "1": {"htr"},
+        "2": {"htr", "acm"},
+        "9": {"thm"},
+    }
 
 
 def test_inventory_heater_sample_address_map_caches(heater_inventory: Inventory) -> None:
@@ -158,7 +170,7 @@ def test_inventory_heater_sample_address_map_caches(heater_inventory: Inventory)
     forward, compat = heater_inventory.heater_sample_address_map
 
     assert heater_inventory._heater_sample_address_cache is not None
-    assert forward == {"htr": ["1", "2"], "acm": ["2"]}
+    assert forward == {"htr": ["1", "2"], "acm": ["2"], "thm": ["9"]}
     assert compat == {"htr": "htr"}
 
     forward["htr"].append("bogus")
@@ -166,7 +178,7 @@ def test_inventory_heater_sample_address_map_caches(heater_inventory: Inventory)
 
     cached_forward, cached_compat = heater_inventory.heater_sample_address_map
 
-    assert cached_forward == {"htr": ["1", "2"], "acm": ["2"]}
+    assert cached_forward == {"htr": ["1", "2"], "acm": ["2"], "thm": ["9"]}
     assert cached_compat == {"htr": "htr"}
 
 
@@ -185,6 +197,19 @@ def test_inventory_heater_sample_targets_cache_and_order(heater_inventory: Inven
     cached = heater_inventory.heater_sample_targets
     assert cached == [("htr", "1"), ("htr", "2"), ("acm", "2")]
     assert cached is not targets
+
+
+def test_inventory_energy_sample_types_excludes_thermostats(
+    heater_inventory: Inventory,
+) -> None:
+    """Thermostat nodes should not appear in the energy sample type set."""
+
+    types = heater_inventory.energy_sample_types
+
+    assert "htr" in types
+    assert "acm" in types
+    assert "pmo" in types
+    assert "thm" not in types
 
 
 def test_inventory_heater_sample_alias_handling(heater_inventory: Inventory) -> None:
@@ -440,6 +465,6 @@ def test_heater_platform_details_default_name(
     )
 
     assert set(nodes_by_type) == {"htr", "acm"}
-    assert addrs_by_type == {"htr": ["1"], "acm": ["2"]}
+    assert addrs_by_type == {"htr": ["1"], "acm": ["2"], "thm": []}
     assert resolver("htr", "1") == "Heater 1"
     assert resolver("acm", "2") == "Accumulator 2"

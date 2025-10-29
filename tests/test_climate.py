@@ -433,6 +433,56 @@ def test_accumulator_preferred_boost_defaults_without_hass() -> None:
     assert entity._preferred_boost_minutes() == DEFAULT_BOOST_DURATION
 
 
+def test_thermostat_climate_entity_maps_settings(
+    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory]
+) -> None:
+    _reset_environment()
+    hass = HomeAssistant()
+    dev_id = "dev-thm"
+    raw_nodes = {"nodes": [{"type": "thm", "addr": "T1"}]}
+    inventory = climate_inventory(dev_id, raw_nodes)
+
+    prog = [0, 0, 0, 1, 1, 1] * 28
+    payload = {
+        "mode": "manual",
+        "state": "on",
+        "stemp": "21.5",
+        "mtemp": "20.3",
+        "units": "C",
+        "ptemp": ["16.0", "19.0", "20.0"],
+        "prog": prog,
+        "batt_level": 5,
+    }
+
+    coordinator_record = build_coordinator_device_state(
+        nodes=raw_nodes,
+        settings={"thm": {"T1": payload}},
+    )
+    coordinator = _make_coordinator(
+        hass,
+        dev_id,
+        coordinator_record,
+        client=AsyncMock(),
+        inventory=inventory,
+    )
+
+    entity = HeaterClimateEntity(
+        coordinator,
+        "entry-thm",
+        dev_id,
+        "T1",
+        "Thermostat T1",
+        node_type="thm",
+        inventory=inventory,
+    )
+
+    assert entity.hvac_mode == HVACMode.HEAT
+    assert entity.hvac_action == HVACAction.HEATING
+    assert entity.current_temperature == pytest.approx(20.3)
+    assert entity.target_temperature == pytest.approx(21.5)
+    assert entity.extra_state_attributes["prog"] == prog
+
+
 def test_async_setup_entry_default_names_and_invalid_nodes(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -447,6 +497,7 @@ def test_async_setup_entry_default_names_and_invalid_nodes(
             "nodes": [
                 {"type": "htr", "addr": "1"},
                 {"type": "acm", "addr": "2"},
+                {"type": "thm", "addr": "T1"},
                 {"type": "pmo", "addr": "P1"},
                 {"type": "  ", "addr": "extra"},
                 {"type": "htr", "addr": " "},
@@ -456,7 +507,7 @@ def test_async_setup_entry_default_names_and_invalid_nodes(
 
         coordinator_record = build_coordinator_device_state(
             nodes={},
-            settings={"htr": {}},
+            settings={"htr": {}, "thm": {}},
         )
         coordinator = _make_coordinator(
             hass,
@@ -493,7 +544,7 @@ def test_async_setup_entry_default_names_and_invalid_nodes(
             inventory_or_details: Any,
             *,
             logger: logging.Logger | None = None,
-            skipped_types: Iterable[str] = ("pmo", "thm"),
+            skipped_types: Iterable[str] = ("pmo",),
         ) -> None:
             calls.append((platform_name, inventory_or_details))
             original_helper(
@@ -511,8 +562,8 @@ def test_async_setup_entry_default_names_and_invalid_nodes(
             await async_setup_entry(hass, entry, _add_entities)
 
         names = sorted(entity._attr_name for entity in added)
-        assert names == ["Accumulator 2", "Heater 1"]
-        assert all(entity._addr in {"1", "2"} for entity in added)
+        assert names == ["Accumulator 2", "Heater 1", "Thermostat T1"]
+        assert all(entity._addr in {"1", "2", "T1"} for entity in added)
 
         assert calls and calls[0][0] == "climate"
         logged_details = calls[0][1]
