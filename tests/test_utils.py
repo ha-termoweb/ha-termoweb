@@ -17,10 +17,12 @@ from custom_components.termoweb.inventory import (
     normalize_node_addr,
     normalize_node_type,
 )
+from custom_components.termoweb.i18n import FALLBACK_TRANSLATIONS_KEY
 from custom_components.termoweb.utils import (
     _entry_gateway_record,
     async_get_integration_version,
     build_gateway_device_info,
+    build_power_monitor_device_info,
     float_or_none,
 )
 
@@ -196,6 +198,27 @@ def test_build_gateway_device_info_ignores_non_mapping_coordinator_data() -> Non
     info = build_gateway_device_info(hass, "entry", "dev")
 
     assert info["model"] == "Gateway/Controller"
+
+
+def test_build_power_monitor_device_info_uses_fallback_translation() -> None:
+    """Fallback translation strings should provide a display name."""
+
+    hass = types.SimpleNamespace(
+        data={
+            DOMAIN: {
+                "entry": {
+                    FALLBACK_TRANSLATIONS_KEY: {
+                        "fallbacks.power_monitor_name": "Meter {addr}",
+                    }
+                }
+            }
+        }
+    )
+
+    info = build_power_monitor_device_info(hass, "entry", "dev", " 01 ")
+
+    assert info["name"] == "Meter 01"
+    assert info["identifiers"] == {(DOMAIN, "dev", "pmo", "01")}
 
 
 def test_build_gateway_device_info_discards_truthy_non_mapping_data() -> None:
