@@ -679,9 +679,28 @@ class WebSocketClient(_WSCommon):
             _LOGGER.debug(
                 "WS: dev_data snapshot contains %d node groups", len(nodes)
             )
+        self._dispatch_nodes(nodes)
+        inventory = self._inventory if isinstance(self._inventory, Inventory) else None
+        allowed_types = (
+            set(inventory.energy_sample_types)
+            if isinstance(inventory, Inventory)
+            else None
+        )
+
         sample_updates: dict[str, dict[str, Any]] = {}
         for node_type, type_payload in nodes.items():
             if not isinstance(node_type, str) or not isinstance(type_payload, Mapping):
+                continue
+            canonical_type = normalize_node_type(
+                node_type,
+                use_default_when_falsey=True,
+            )
+            if canonical_type is None:
+                continue
+            if allowed_types is not None:
+                if canonical_type not in allowed_types:
+                    continue
+            elif canonical_type == "thm":
                 continue
             samples = type_payload.get("samples")
             if not isinstance(samples, Mapping):
@@ -698,8 +717,6 @@ class WebSocketClient(_WSCommon):
                     "samples": bucket,
                     "lease_seconds": lease_seconds,
                 }
-
-        self._dispatch_nodes(nodes)
         if merge and _LOGGER.isEnabledFor(logging.DEBUG):
             inventory = self._inventory if isinstance(self._inventory, Inventory) else None
             pairs = ""

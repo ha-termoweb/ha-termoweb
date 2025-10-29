@@ -69,3 +69,12 @@ def build_power_monitor_power_unique_id(dev_id: Any, addr: Any) -> str:
     """Return the canonical unique ID for a power monitor power sensor."""
 
     return build_power_monitor_unique_id(dev_id, addr, suffix=":power")
+
+
+def thermostat_fallback_name(addr: Any) -> str:
+    """Return the fallback friendly name for a thermostat node."""
+
+    address = normalize_node_addr(addr, use_default_when_falsey=True)
+    if not address:
+        return "Thermostat"
+    return f"Thermostat {address}"

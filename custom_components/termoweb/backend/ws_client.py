@@ -83,6 +83,7 @@ def forward_ws_sample_updates(
     alias_map = inventory.sample_alias_map(
         base_aliases={"htr": "htr", "acm": "acm", "pmo": "pmo"}
     )
+    allowed_types = inventory.energy_sample_types
 
     normalized_updates: dict[str, dict[str, Any]] = {}
     lease_seconds: float | None = None
@@ -93,6 +94,14 @@ def forward_ws_sample_updates(
         if not node_type:
             continue
         canonical_type = alias_map.get(node_type, node_type)
+        if allowed_types is not None:
+            allowed = canonical_type in allowed_types
+            if not allowed and canonical_type in {"heater", "heaters"}:
+                allowed = "htr" in allowed_types
+            if not allowed:
+                continue
+        elif canonical_type == "thm":
+            continue
         samples_section: Mapping[str, Any] | None = None
         lease_candidate: Any = None
         if "samples" in section and isinstance(section.get("samples"), Mapping):

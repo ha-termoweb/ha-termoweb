@@ -41,11 +41,18 @@ from .heater import (
     log_skipped_nodes,
 )
 from .identifiers import (
+    build_heater_entity_unique_id,
     build_heater_energy_unique_id,
     build_power_monitor_energy_unique_id,
     build_power_monitor_power_unique_id,
+    thermostat_fallback_name,
 )
-from .inventory import Inventory, PowerMonitorNode, normalize_node_addr
+from .inventory import (
+    Inventory,
+    PowerMonitorNode,
+    normalize_node_addr,
+    normalize_node_type,
+)
 from .i18n import (
     async_get_fallback_translations,
     attach_fallbacks,
@@ -229,22 +236,59 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     new_entities: list[SensorEntity] = []
     for node_type, _node, addr_str, base_name in heater_details.iter_metadata():
-        energy_unique_id = build_heater_energy_unique_id(dev_id, node_type, addr_str)
-        uid_prefix = energy_unique_id.rsplit(":", 1)[0]
+        canonical_type = normalize_node_type(
+            node_type,
+            use_default_when_falsey=True,
+        )
+        addr = normalize_node_addr(
+            addr_str,
+            use_default_when_falsey=True,
+        )
+        if not canonical_type or not addr:
+            continue
+        if canonical_type == "thm":
+            heater_fallback = default_name(addr)
+            thermostat_default = format_fallback(
+                fallbacks,
+                "fallbacks.thermostat_name",
+                thermostat_fallback_name(addr),
+                addr=addr,
+            )
+            if base_name == heater_fallback:
+                base_name = thermostat_default
+
         new_entities.extend(
             _create_heater_sensors(
                 coordinator,
                 energy_coordinator,
                 entry.entry_id,
                 dev_id,
-                addr_str,
+                addr,
                 base_name,
-                uid_prefix,
-                energy_unique_id,
-                node_type=node_type,
+                node_type=canonical_type,
                 inventory=heater_details.inventory,
             )
         )
+
+        if canonical_type == "thm":
+            battery_unique_id = build_heater_entity_unique_id(
+                dev_id,
+                canonical_type,
+                addr,
+                ":battery",
+            )
+            new_entities.append(
+                ThermostatBatterySensor(
+                    coordinator,
+                    entry.entry_id,
+                    dev_id,
+                    addr,
+                    unique_id=battery_unique_id,
+                    device_name=base_name,
+                    node_type=canonical_type,
+                    inventory=heater_details.inventory,
+                )
+            )
     for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
         heater_details,
     ):
@@ -336,6 +380,87 @@ class HeaterTemperatureSensor(HeaterNodeBase, SensorEntity):
             "dev_id": self._dev_id,
             "addr": self._addr,
             "units": s.get("units"),
+        }
+
+
+class ThermostatBatterySensor(HeaterNodeBase, SensorEntity):
+    """Battery level sensor for battery-powered thermostat nodes."""
+
+    _attr_device_class = getattr(SensorDeviceClass, "BATTERY", None)
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        coordinator,
+        entry_id: str,
+        dev_id: str,
+        addr: str,
+        *,
+        unique_id: str,
+        device_name: str,
+        node_type: str | None = None,
+        inventory: Inventory | None = None,
+    ) -> None:
+        """Initialise the thermostat battery sensor entity."""
+
+        super().__init__(
+            coordinator,
+            entry_id,
+            dev_id,
+            addr,
+            None,
+            unique_id,
+            device_name=device_name,
+            node_type=node_type,
+            inventory=inventory,
+        )
+        if device_name:
+            self._attr_name = f"{device_name} Battery"
+        else:
+            self._attr_name = "Thermostat Battery"
+
+    @staticmethod
+    def _coerce_level(value: Any) -> int | None:
+        """Return a clamped 0–5 battery level from ``value`` when possible."""
+
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return int(value)
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            try:
+                numeric = float(str(value).strip())
+            except (TypeError, ValueError):
+                return None
+        if math.isnan(numeric):
+            return None
+        clamped = max(0, min(5, int(numeric)))
+        return clamped
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the thermostat battery percentage as 0–100."""
+
+        settings = self.heater_settings() or {}
+        raw_level = settings.get("batt_level")
+        level = self._coerce_level(raw_level)
+        if level is None:
+            return None
+        return level * 20
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional thermostat battery metadata."""
+
+        settings = self.heater_settings() or {}
+        level = self._coerce_level(settings.get("batt_level"))
+        return {
+            "dev_id": self._dev_id,
+            "addr": self._addr,
+            "batt_level_steps": level,
         }
 
 
@@ -574,53 +699,80 @@ def _create_heater_sensors(
     dev_id: str,
     addr: str,
     base_name: str,
-    uid_prefix: str,
-    energy_unique_id: str,
     *,
     node_type: str | None = None,
     inventory: Inventory | None = None,
     temperature_cls: type[HeaterTemperatureSensor] = HeaterTemperatureSensor,
     energy_cls: type[HeaterEnergyTotalSensor] = HeaterEnergyTotalSensor,
     power_cls: type[HeaterPowerSensor] = HeaterPowerSensor,
-) -> tuple[
-    HeaterTemperatureSensor,
-    HeaterEnergyTotalSensor,
-    HeaterPowerSensor,
-]:
-    """Create the three heater node sensors for the given node."""
+) -> tuple[SensorEntity, ...]:
+    """Create heater node sensors for ``addr`` including energy when available."""
 
-    temperature = temperature_cls(
-        coordinator,
-        entry_id,
-        dev_id,
-        addr,
-        f"{uid_prefix}:temp",
-        device_name=base_name,
-        node_type=node_type,
-        inventory=inventory,
+    canonical_type = normalize_node_type(
+        node_type,
+        use_default_when_falsey=True,
     )
-    energy = energy_cls(
-        energy_coordinator,
-        entry_id,
-        dev_id,
+    canonical_addr = normalize_node_addr(
         addr,
-        energy_unique_id,
-        device_name=base_name,
-        node_type=node_type,
-        inventory=inventory,
-    )
-    power = power_cls(
-        energy_coordinator,
-        entry_id,
+        use_default_when_falsey=True,
+    ) or normalize_node_addr(addr)
+    if not canonical_addr:
+        canonical_addr = str(addr)
+
+    target_type = canonical_type or "htr"
+    temperature_unique_id = build_heater_entity_unique_id(
         dev_id,
-        addr,
-        f"{uid_prefix}:power",
-        device_name=base_name,
-        node_type=node_type,
-        inventory=inventory,
+        target_type,
+        canonical_addr,
+        ":temp",
     )
 
-    return (temperature, energy, power)
+    sensors: list[SensorEntity] = [
+        temperature_cls(
+            coordinator,
+            entry_id,
+            dev_id,
+            canonical_addr,
+            temperature_unique_id,
+            device_name=base_name,
+            node_type=target_type,
+            inventory=inventory,
+        )
+    ]
+
+    if target_type != "thm":
+        energy_unique_id = build_heater_energy_unique_id(
+            dev_id,
+            target_type,
+            canonical_addr,
+        )
+        power_unique_id = f"{energy_unique_id.rsplit(':', 1)[0]}:power"
+        sensors.extend(
+            (
+                energy_cls(
+                    energy_coordinator,
+                    entry_id,
+                    dev_id,
+                    canonical_addr,
+                    energy_unique_id,
+                    device_name=base_name,
+                    node_type=target_type,
+                    inventory=inventory,
+                ),
+                power_cls(
+                    energy_coordinator,
+                    entry_id,
+                    dev_id,
+                    canonical_addr,
+                    power_unique_id,
+                    device_name=base_name,
+                    node_type=target_type,
+                    inventory=inventory,
+                ),
+            )
+        )
+
+    return tuple(sensors)
 
 
 def _create_boost_sensors(

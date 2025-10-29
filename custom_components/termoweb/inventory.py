@@ -61,6 +61,7 @@ __all__ = [
     "build_node_inventory",
     "heater_platform_details_from_inventory",
     "heater_sample_subscription_targets",
+    "energy_sample_types",
     "normalize_heater_addresses",
     "normalize_node_addr",
     "normalize_node_type",
@@ -72,7 +73,7 @@ __all__ = [
 _LOGGER = logging.getLogger(__name__)
 
 
-HEATER_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm"})
+HEATER_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm", "thm"})
 
 
 if TYPE_CHECKING:
@@ -121,6 +122,7 @@ class Inventory:
         tuple[dict[str, tuple[str, ...]], dict[str, str]] | None
     )
     _heater_sample_targets_cache: tuple[tuple[str, str], ...] | None
+    _energy_sample_types_cache: frozenset[str] | None
     _power_monitor_address_map_cache: (
         tuple[dict[str, tuple[str, ...]], dict[str, frozenset[str]]] | None
     )
@@ -154,6 +156,7 @@ class Inventory:
         object.__setattr__(self, "_power_monitor_sample_targets_cache", None)
         object.__setattr__(self, "_heater_name_map_cache", {})
         object.__setattr__(self, "_heater_name_map_factories", {})
+        object.__setattr__(self, "_energy_sample_types_cache", None)
 
     @property
     def dev_id(self) -> str:
@@ -597,6 +600,31 @@ class Inventory:
         return [tuple(pair) for pair in cached]
 
     @property
+    def energy_sample_types(self) -> frozenset[str]:
+        """Return canonical node types that expose energy or power samples."""
+
+        cached = self._energy_sample_types_cache
+        if cached is None:
+            sample_types: set[str] = set()
+            for node_type, _ in self.heater_sample_targets:
+                normalized = normalize_node_type(
+                    node_type,
+                    use_default_when_falsey=True,
+                )
+                if normalized:
+                    sample_types.add(normalized)
+            for node_type, _ in self.power_monitor_sample_targets:
+                normalized = normalize_node_type(
+                    node_type,
+                    use_default_when_falsey=True,
+                )
+                if normalized:
+                    sample_types.add(normalized)
+            cached = frozenset(sample_types)
+            object.__setattr__(self, "_energy_sample_types_cache", cached)
+        return cached
+
+    @property
     def power_monitor_sample_address_map(
         self,
     ) -> tuple[dict[str, list[str]], dict[str, str]]:
@@ -805,6 +833,10 @@ class Inventory:
             bucket[addr] = resolved
 
         mapping: dict[Any, Any] = {"htr": dict(by_type.get("htr", {}))}
+        if "acm" in by_type:
+            mapping["acm"] = dict(by_type.get("acm", {}))
+        if "thm" in by_type:
+            mapping["thm"] = dict(by_type.get("thm", {}))
         if by_type:
             mapping["by_type"] = {k: dict(v) for k, v in by_type.items()}
         mapping.update(by_node)
@@ -1218,14 +1250,17 @@ def heater_sample_subscription_targets(
     if not any(normalized_map.values()):
         return []
 
-    other_types = sorted(
-        node_type for node_type in normalized_map if node_type != "htr"
-    )
+    other_types = [
+        node_type
+        for node_type in sorted(normalized_map)
+        if node_type not in {"htr", "thm"}
+    ]
     order = ["htr", *other_types]
     return [
         (node_type, addr)
         for node_type in order
         for addr in normalized_map.get(node_type, []) or []
+        if addr
     ]
 
 

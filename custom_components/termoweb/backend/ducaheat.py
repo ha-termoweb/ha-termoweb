@@ -119,6 +119,18 @@ class DucaheatRESTClient(RESTClient):
 
         node_type, addr = self._resolve_node_descriptor(node)
         headers = await self.authed_headers()
+        if node_type == "thm":
+            path = f"/api/v2/devs/{dev_id}/thm/{addr}/settings"
+            payload = await self._request("GET", path, headers=headers)
+            self._log_non_htr_payload(
+                node_type=node_type,
+                dev_id=dev_id,
+                addr=addr,
+                stage="GET settings",
+                payload=payload,
+            )
+            return self._normalise_thm_settings(payload)
+
         path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}"
         payload = await self._request("GET", path, headers=headers)
 
@@ -157,6 +169,14 @@ class DucaheatRESTClient(RESTClient):
         """
 
         node_type, addr = self._resolve_node_descriptor(node)
+        if node_type == "thm":
+            _LOGGER.debug(
+                "Skipping samples for thermostat node (dev=%s addr=%s)",
+                mask_identifier(dev_id),
+                mask_identifier(addr),
+            )
+            return []
+
         if node_type != "htr":
             return await super().get_node_samples(
                 dev_id,
@@ -295,6 +315,44 @@ class DucaheatRESTClient(RESTClient):
                     )
             return responses
 
+        if node_type == "thm":
+            headers = await self.authed_headers()
+            path = f"/api/v2/devs/{dev_id}/thm/{addr}/settings"
+            payload: dict[str, Any] = {}
+
+            if mode is not None:
+                payload["mode"] = str(mode).lower()
+            if stemp is not None:
+                try:
+                    payload["stemp"] = self._ensure_temperature(stemp)
+                except ValueError as err:
+                    raise ValueError(f"Invalid stemp value: {stemp}") from err
+                payload["units"] = self._ensure_units(units)
+            if prog is not None:
+                payload["prog"] = self._serialise_prog(prog)
+            if ptemp is not None:
+                payload["ptemp"] = self._serialise_prog_temps(ptemp)
+
+            if not payload:
+                return {}
+
+            try:
+                return await self._request(
+                    "PATCH",
+                    path,
+                    headers=headers,
+                    json=payload,
+                )
+            except ClientResponseError as err:
+                if err.status not in {404, 405}:
+                    raise
+                return await self._request(
+                    "POST",
+                    path,
+                    headers=headers,
+                    json=payload,
+                )
+
         if node_type == "acm":
             return await self._set_acm_settings(
                 dev_id,
@@ -343,7 +401,10 @@ class DucaheatRESTClient(RESTClient):
                         addr_map[addr] = payload
                         continue
 
-                    addr_map[addr] = self._normalise_ws_settings(payload)
+                    if node_type == "thm":
+                        addr_map[addr] = self._normalise_thm_settings(payload)
+                    else:
+                        addr_map[addr] = self._normalise_ws_settings(payload)
 
                 section_map[section] = addr_map
 
@@ -525,6 +586,74 @@ class DucaheatRESTClient(RESTClient):
                 flattened["capabilities"] = capabilities
 
         return flattened
+
+    def _normalise_thm_settings(self, payload: Any) -> dict[str, Any]:
+        """Return a normalised thermostat settings mapping."""
+
+        if not isinstance(payload, dict):
+            return {}
+
+        def _to_float(value: Any) -> float | None:
+            """Return ``value`` coerced to float when possible."""
+
+            if value is None:
+                return None
+            try:
+                candidate = float(value)
+            except (TypeError, ValueError):
+                try:
+                    candidate = float(str(value).strip())
+                except (TypeError, ValueError):
+                    return None
+            return candidate
+
+        normalised: dict[str, Any] = {}
+
+        mode = payload.get("mode")
+        if isinstance(mode, str):
+            normalised["mode"] = mode.lower()
+
+        state = payload.get("state")
+        if isinstance(state, str):
+            normalised["state"] = state.lower()
+
+        stemp = _to_float(payload.get("stemp"))
+        if stemp is not None:
+            normalised["stemp"] = stemp
+
+        mtemp = _to_float(payload.get("mtemp"))
+        if mtemp is not None:
+            normalised["mtemp"] = mtemp
+
+        units = payload.get("units")
+        if isinstance(units, str):
+            normalised["units"] = units.upper()
+
+        ptemp_raw = payload.get("ptemp")
+        if isinstance(ptemp_raw, Iterable) and not isinstance(ptemp_raw, (str, bytes)):
+            preset = [value for value in (_to_float(v) for v in ptemp_raw) if value is not None]
+            if preset:
+                normalised["ptemp"] = preset
+
+        prog = self._normalise_prog(payload.get("prog"))
+        if prog is not None:
+            normalised["prog"] = prog
+
+        batt_level = payload.get("batt_level")
+        try:
+            batt_value = int(batt_level)
+        except (TypeError, ValueError):
+            batt_value = None
+        if batt_value is not None:
+            normalised["batt_level"] = max(0, min(5, batt_value))
+
+        sync_status = payload.get("sync_status")
+        if isinstance(sync_status, str):
+            normalised["sync_status"] = sync_status
+
+        normalised["raw"] = deepcopy(payload)
+
+        return normalised
 
     def _normalise_acm_capabilities(self, payload: Any) -> dict[str, Any]:
         """Merge accumulator capability dictionaries into a single mapping."""

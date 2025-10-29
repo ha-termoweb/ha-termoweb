@@ -742,7 +742,7 @@ def log_skipped_nodes(
     inventory: Inventory | HeaterPlatformDetails | None,
     *,
     logger: logging.Logger | None = None,
-    skipped_types: Iterable[str] = ("pmo", "thm"),
+    skipped_types: Iterable[str] = ("pmo",),
 ) -> None:
     """Log skipped TermoWeb nodes for a given platform."""
 

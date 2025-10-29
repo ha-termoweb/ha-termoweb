@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from aiohttp import ClientResponseError
 
 
 def test_ducaheat_rest_normalise_ws_nodes_passthrough_scalars() -> None:
@@ -129,3 +134,82 @@ def test_ducaheat_rest_normalise_ws_settings_boost_fields() -> None:
     # Direct fields should take precedence over derived values.
     assert result["boost_end_day"] == 3
     assert result["boost_end_min"] == 15
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_get_node_settings_normalises_thm() -> None:
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+    sample_prog = [0, 0, 0, 1, 1, 1] * 28
+    payload = {
+        "mode": "Manual",
+        "state": "On",
+        "stemp": "21.5",
+        "mtemp": "20.3",
+        "units": "c",
+        "ptemp": ["16.0", "19.0", "20.0"],
+        "prog": sample_prog,
+        "batt_level": "5",
+    }
+
+    with (
+        patch.object(client, "authed_headers", AsyncMock(return_value={})),
+        patch.object(client, "_request", AsyncMock(return_value=payload)) as mock_request,
+    ):
+        result = await client.get_node_settings("dev", ("thm", "01"))
+
+    mock_request.assert_awaited_once()
+    method, path = mock_request.await_args.args[:2]
+    assert method == "GET"
+    assert path == "/api/v2/devs/dev/thm/01/settings"
+    assert result["mode"] == "manual"
+    assert result["state"] == "on"
+    assert result["stemp"] == pytest.approx(21.5)
+    assert result["mtemp"] == pytest.approx(20.3)
+    assert result["ptemp"] == [16.0, 19.0, 20.0]
+    assert result["prog"] == sample_prog
+    assert result["batt_level"] == 5
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_get_node_samples_skips_thm() -> None:
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+
+    with (
+        patch.object(client, "authed_headers", AsyncMock()) as mock_headers,
+        patch.object(client, "_request", AsyncMock()) as mock_request,
+    ):
+        result = await client.get_node_samples("dev", ("thm", "01"), 0, 10)
+
+    mock_headers.assert_not_called()
+    mock_request.assert_not_called()
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_set_node_settings_thm_fallback_post() -> None:
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+    response = {"status": "ok"}
+    side_effect = [
+        ClientResponseError(SimpleNamespace(real_url=None), (), status=405, message=""),
+        response,
+    ]
+
+    with (
+        patch.object(client, "authed_headers", AsyncMock(return_value={})),
+        patch.object(client, "_request", AsyncMock(side_effect=side_effect)) as mock_request,
+    ):
+        result = await client.set_node_settings(
+            "dev",
+            ("thm", "01"),
+            mode="auto",
+            stemp=21.0,
+        )
+
+    assert result is response
+    first_call = mock_request.await_args_list[0]
+    second_call = mock_request.await_args_list[1]
+    assert first_call.args[:2] == ("PATCH", "/api/v2/devs/dev/thm/01/settings")
+    assert second_call.args[:2] == ("POST", "/api/v2/devs/dev/thm/01/settings")
+    payload = second_call.kwargs["json"]
+    assert payload["mode"] == "auto"
+    assert payload["stemp"] == "21.0"
