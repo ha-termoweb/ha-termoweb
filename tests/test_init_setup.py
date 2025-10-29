@@ -519,6 +519,72 @@ def test_async_setup_entry_sets_supports_diagnostics(
     assert entry.supports_diagnostics is sentinel.YES
 
 
+def test_async_setup_entry_unknown_node_probe(
+    termoweb_init: Any,
+    stub_hass: HomeAssistant,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ProbeClient(BaseFakeClient):
+        instances: list["ProbeClient"] = []
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            self.probe_calls: list[
+                tuple[str, Mapping[str, str], Mapping[str, str]]
+            ] = []
+            self._headers = {"Authorization": "Bearer token", "User-Agent": "UA"}
+            ProbeClient.instances.append(self)
+
+        async def authed_headers(self) -> Mapping[str, str]:
+            return dict(self._headers)
+
+        async def list_devices(self) -> list[dict[str, Any]]:
+            return [{"dev_id": "dev-1"}]
+
+        async def get_nodes(self, dev_id: str) -> dict[str, Any]:
+            await super().get_nodes(dev_id)
+            return {"nodes": [{"addr": "9", "type": "foo"}]}
+
+        async def debug_probe_get(
+            self,
+            path: str,
+            *,
+            headers: Mapping[str, str] | None = None,
+            params: Mapping[str, Any] | None = None,
+        ) -> None:
+            header_map = dict(headers or {})
+            param_map = {str(k): str(v) for k, v in (params or {}).items()}
+            self.probe_calls.append((path, header_map, param_map))
+
+    monkeypatch.setattr(termoweb_init, "RESTClient", ProbeClient)
+
+    entry = ConfigEntry("probe", data={"username": "user", "password": "pw"})
+    stub_hass.config_entries.add(entry)
+
+    caplog.set_level(logging.DEBUG, logger="custom_components.termoweb")
+
+    async def _run() -> bool:
+        result = await termoweb_init.async_setup_entry(stub_hass, entry)
+        await _drain_tasks(stub_hass)
+        return result
+
+    assert asyncio.run(_run()) is True
+
+    assert ProbeClient.instances, "REST client was not instantiated"
+    client = ProbeClient.instances[0]
+    assert [call[0] for call in client.probe_calls] == [
+        "/api/v2/devs/dev-1/foo/9",
+        "/api/v2/devs/dev-1/foo/9/settings",
+        "/api/v2/devs/dev-1/foo/9/samples",
+    ]
+    assert client.probe_calls[2][2] == {"end": "0", "start": "0"}
+    assert any(
+        record.message == "Unknown node type found: foo/9"
+        for record in caplog.records
+        if record.name.startswith("custom_components.termoweb")
+    )
+
 def test_async_setup_entry_backfills_diagnostics_marker(
     termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:

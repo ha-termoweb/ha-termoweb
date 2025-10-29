@@ -10,6 +10,10 @@ custom_components/termoweb/__init__.py :: create_rest_client
     Return a REST client configured for the selected brand.
 custom_components/termoweb/__init__.py :: async_list_devices
     Call ``list_devices`` logging auth/connection issues consistently.
+custom_components/termoweb/__init__.py :: _build_unknown_node_probe_requests
+    Return common REST endpoints to query for an unknown node type.
+custom_components/termoweb/__init__.py :: _async_probe_unknown_node_types
+    Log discovery probes for node types not yet supported.
 custom_components/termoweb/__init__.py :: _async_import_energy_history
     Delegate to the energy helper with shared rate limiting and filters.
 custom_components/termoweb/__init__.py :: async_setup_entry
@@ -60,6 +64,8 @@ custom_components/termoweb/api.py :: RESTClient.get_node_settings
     Return settings/state for a node.
 custom_components/termoweb/api.py :: RESTClient.get_rtc_time
     Return RTC metadata for a device's manager endpoint.
+custom_components/termoweb/api.py :: RESTClient.debug_probe_get
+    Issue a GET request with verbose logging for discovery probes.
 custom_components/termoweb/api.py :: RESTClient._ensure_temperature
     Normalise a numeric temperature to a string with one decimal.
 custom_components/termoweb/api.py :: RESTClient._ensure_prog

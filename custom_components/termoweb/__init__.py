@@ -42,6 +42,7 @@ except ImportError:  # pragma: no cover - tests provide stubbed setup helper
 
 from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend import Backend, DucaheatRESTClient, WsClientProto, create_backend
+from .backend.sanitize import redact_text
 from .const import (
     BRAND_DUCAHEAT,
     CONF_BRAND,
@@ -59,7 +60,12 @@ from .energy import (
     async_register_import_energy_history_service,
 )
 from .hourly_poller import HourlySamplesPoller
-from .inventory import Inventory, build_node_inventory
+from .inventory import (
+    Inventory,
+    build_node_inventory,
+    normalize_node_addr,
+    normalize_node_type,
+)
 from .throttle import default_samples_rate_limit_state, reset_samples_rate_limit_state
 from .utils import async_get_integration_version as _async_get_integration_version
 
@@ -75,6 +81,118 @@ PLATFORMS = ["button", "binary_sensor", "climate", "number", "sensor"]
 DIAGNOSTICS_RETRY_DELAY = 0.5
 
 reset_samples_rate_limit_state()
+
+_SUPPORTED_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm", "pmo"})
+
+
+def _build_unknown_node_probe_requests(
+    brand: str,
+    dev_id: str,
+    node_type: str,
+    addr: str,
+) -> tuple[tuple[str, Mapping[str, str] | None], ...]:
+    """Return common REST endpoints to query for an unknown node type."""
+
+    dev_id_str = str(dev_id).strip()
+    normalized_type = normalize_node_type(
+        node_type,
+        use_default_when_falsey=True,
+    )
+    normalized_addr = normalize_node_addr(
+        addr,
+        use_default_when_falsey=True,
+    )
+    if not dev_id_str or not normalized_type:
+        return ()
+
+    base_path = f"/api/v2/devs/{dev_id_str}/{normalized_type}"
+    node_path = base_path if not normalized_addr else f"{base_path}/{normalized_addr}"
+
+    requests: list[tuple[str, Mapping[str, str] | None]] = []
+    seen_paths: set[str] = set()
+
+    def _append(path: str, params: Mapping[str, str] | None = None) -> None:
+        if path in seen_paths:
+            return
+        seen_paths.add(path)
+        requests.append((path, params))
+
+    if brand == BRAND_DUCAHEAT and normalized_addr:
+        _append(base_path)
+
+    _append(node_path)
+    _append(f"{node_path}/settings")
+    if normalized_addr:
+        _append(f"{node_path}/samples", {"start": "0", "end": "0"})
+    return tuple(requests)
+
+
+async def _async_probe_unknown_node_types(
+    backend: Backend,
+    dev_id: str,
+    inventory: Inventory,
+) -> None:
+    """Log discovery probes for node types not yet supported."""
+
+    if not _LOGGER.isEnabledFor(logging.DEBUG):
+        return
+
+    client = getattr(backend, "client", None)
+    probe_get = getattr(client, "debug_probe_get", None)
+    authed_headers = getattr(client, "authed_headers", None)
+    if not callable(probe_get) or not callable(authed_headers):
+        return
+
+    seen: set[tuple[str, str]] = set()
+    for node in inventory.nodes:
+        node_type = normalize_node_type(
+            getattr(node, "type", None),
+            use_default_when_falsey=True,
+        )
+        if not node_type or node_type in _SUPPORTED_NODE_TYPES:
+            continue
+        addr = normalize_node_addr(
+            getattr(node, "addr", None),
+            use_default_when_falsey=True,
+        )
+        dedupe_key = (node_type, addr)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        display_addr = addr or "<missing>"
+        _LOGGER.debug("Unknown node type found: %s/%s", node_type, display_addr)
+
+        requests = _build_unknown_node_probe_requests(
+            backend.brand,
+            dev_id,
+            node_type,
+            addr,
+        )
+        if not requests:
+            continue
+
+        try:
+            headers = await authed_headers()
+        except Exception as err:  # noqa: BLE001 - best-effort logging only
+            _LOGGER.debug(
+                "Probe header preparation failed for %s/%s: %s",
+                node_type,
+                display_addr,
+                redact_text(str(err)),
+            )
+            continue
+
+        for path, params in requests:
+            try:
+                await probe_get(path, headers=headers, params=params)
+            except Exception as err:  # noqa: BLE001 - best-effort logging only
+                _LOGGER.debug(
+                    "Probe GET %s failed for %s/%s: %s",
+                    path,
+                    node_type,
+                    display_addr,
+                    redact_text(str(err)),
+                )
 
 
 def _register_diagnostics_platform(
@@ -396,6 +514,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     # Inventory-centric design: build and freeze the gateway/node topology once
     # during setup so every runtime component can trust the shared metadata.
     inventory = Inventory(dev_id, nodes, node_inventory)
+    await _async_probe_unknown_node_types(backend, dev_id, inventory)
     if inventory.nodes:
         type_counts = Counter(node.type for node in inventory.nodes)
         summary = ", ".join(
