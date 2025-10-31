@@ -552,6 +552,8 @@ custom_components/termoweb/button.py :: StateRefreshButton.async_press
     Request an immediate coordinator refresh when pressed.
 custom_components/termoweb/button.py :: AccumulatorBoostButtonBase.__init__
     Initialise an accumulator boost helper button.
+custom_components/termoweb/button.py :: AccumulatorBoostButtonBase.boost_context
+    Return the inventory-derived context for this entity.
 custom_components/termoweb/button.py :: AccumulatorBoostButtonBase._service_minutes
     Return the minutes payload passed to the helper service.
 custom_components/termoweb/button.py :: AccumulatorBoostButtonBase.async_press

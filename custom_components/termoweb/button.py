@@ -186,12 +186,18 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
         """Initialise an accumulator boost helper button."""
 
         super().__init__(coordinator)
-        self._context = context
+        self._boost_context = context
         if label:
             self._attr_name = label
         self._attr_unique_id = context.unique_id(unique_suffix)
         if icon is not None:
             self._attr_icon = icon
+
+    @property
+    def boost_context(self) -> AccumulatorBoostContext:
+        """Return the inventory-derived context for this entity."""
+
+        return self._boost_context
 
     @property
     def _service_minutes(self) -> int | None:
@@ -203,8 +209,10 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
     def available(self) -> bool:
         """Return True when the inventory exposes this accumulator."""
 
-        forward_map, _ = self._context.inventory.heater_address_map
-        return self._context.addr in forward_map.get(self._context.node_type, ())
+        forward_map, _ = self.boost_context.inventory.heater_address_map
+        return self.boost_context.addr in forward_map.get(
+            self.boost_context.node_type, ()
+        )
 
     async def async_added_to_hass(self) -> None:
         """Register coordinator listener hooks once the entity is added."""
@@ -230,15 +238,15 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
         if not isinstance(data, Mapping):
             return None
 
-        record = data.get(self._context.dev_id)
+        record = data.get(self.boost_context.dev_id)
         if not isinstance(record, Mapping):
             return None
 
         settings_by_type = record.get("settings")
         if isinstance(settings_by_type, Mapping):
-            type_settings = settings_by_type.get(self._context.node_type)
+            type_settings = settings_by_type.get(self.boost_context.node_type)
             if isinstance(type_settings, Mapping):
-                settings = type_settings.get(self._context.addr)
+                settings = type_settings.get(self.boost_context.addr)
                 if isinstance(settings, Mapping):
                     return dict(settings)
 
@@ -257,11 +265,13 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
         """Return Home Assistant device metadata for the accumulator."""
 
         return DeviceInfo(
-            identifiers={(DOMAIN, self._context.dev_id, self._context.addr)},
-            name=self._context.base_name,
+            identifiers={
+                (DOMAIN, self.boost_context.dev_id, self.boost_context.addr)
+            },
+            name=self.boost_context.base_name,
             manufacturer="TermoWeb",
             model="Accumulator",
-            via_device=(DOMAIN, self._context.dev_id),
+            via_device=(DOMAIN, self.boost_context.dev_id),
         )
 
     async def async_press(self) -> None:
@@ -272,10 +282,10 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
             return
 
         data: dict[str, Any] = {
-            "entry_id": self._context.entry_id,
-            "dev_id": self._context.dev_id,
-            "node_type": self._context.node_type,
-            "addr": self._context.addr,
+            "entry_id": self.boost_context.entry_id,
+            "dev_id": self.boost_context.dev_id,
+            "node_type": self.boost_context.node_type,
+            "addr": self.boost_context.addr,
         }
         minutes = self._service_minutes
         if minutes is not None:
@@ -291,15 +301,15 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
         except ServiceNotFound as err:
             _LOGGER.error(
                 "Boost helper service unavailable for %s (%s): %s",
-                self._context.addr,
-                self._context.node_type,
+                self.boost_context.addr,
+                self.boost_context.node_type,
                 err,
             )
         except HomeAssistantError as err:  # pragma: no cover - defensive logging
             _LOGGER.error(
                 "Boost helper service failed for %s (%s): %s",
-                self._context.addr,
-                self._context.node_type,
+                self.boost_context.addr,
+                self.boost_context.node_type,
                 err,
             )
 
@@ -337,38 +347,38 @@ class AccumulatorBoostButton(AccumulatorBoostButtonBase):
 
         minutes = resolve_boost_runtime_minutes(
             hass,
-            self._context.entry_id,
-            self._context.node_type,
-            self._context.addr,
+            self.boost_context.entry_id,
+            self.boost_context.node_type,
+            self.boost_context.addr,
         )
         if minutes is None or minutes <= 0:
             _LOGGER.error(
                 "Boost start requires a stored duration for %s (%s)",
-                self._context.addr,
-                self._context.node_type,
+                self.boost_context.addr,
+                self.boost_context.node_type,
             )
             return
 
         temperature = resolve_boost_temperature(
             hass,
-            self._context.entry_id,
-            self._context.node_type,
-            self._context.addr,
+            self.boost_context.entry_id,
+            self.boost_context.node_type,
+            self.boost_context.addr,
             default=DEFAULT_BOOST_TEMPERATURE,
         )
         if temperature is None:
             _LOGGER.error(
                 "Boost start requires a stored temperature for %s (%s)",
-                self._context.addr,
-                self._context.node_type,
+                self.boost_context.addr,
+                self.boost_context.node_type,
             )
             return
 
         data: dict[str, Any] = {
-            "entry_id": self._context.entry_id,
-            "dev_id": self._context.dev_id,
-            "node_type": self._context.node_type,
-            "addr": self._context.addr,
+            "entry_id": self.boost_context.entry_id,
+            "dev_id": self.boost_context.dev_id,
+            "node_type": self.boost_context.node_type,
+            "addr": self.boost_context.addr,
             "minutes": minutes,
             "temperature": round(float(temperature), 1),
         }
@@ -383,15 +393,15 @@ class AccumulatorBoostButton(AccumulatorBoostButtonBase):
         except ServiceNotFound as err:
             _LOGGER.error(
                 "Boost helper service unavailable for %s (%s): %s",
-                self._context.addr,
-                self._context.node_type,
+                self.boost_context.addr,
+                self.boost_context.node_type,
                 err,
             )
         except HomeAssistantError as err:  # pragma: no cover - defensive logging
             _LOGGER.error(
                 "Boost helper service failed for %s (%s): %s",
-                self._context.addr,
-                self._context.node_type,
+                self.boost_context.addr,
+                self.boost_context.node_type,
                 err,
             )
 
@@ -435,10 +445,10 @@ class AccumulatorBoostCancelButton(AccumulatorBoostButtonBase):
             return
 
         data: dict[str, Any] = {
-            "entry_id": self._context.entry_id,
-            "dev_id": self._context.dev_id,
-            "node_type": self._context.node_type,
-            "addr": self._context.addr,
+            "entry_id": self.boost_context.entry_id,
+            "dev_id": self.boost_context.dev_id,
+            "node_type": self.boost_context.node_type,
+            "addr": self.boost_context.addr,
         }
 
         try:
@@ -451,15 +461,15 @@ class AccumulatorBoostCancelButton(AccumulatorBoostButtonBase):
         except ServiceNotFound as err:
             _LOGGER.error(
                 "Boost cancel service unavailable for %s (%s): %s",
-                self._context.addr,
-                self._context.node_type,
+                self.boost_context.addr,
+                self.boost_context.node_type,
                 err,
             )
         except HomeAssistantError as err:  # pragma: no cover - defensive logging
             _LOGGER.error(
                 "Boost cancel service failed for %s (%s): %s",
-                self._context.addr,
-                self._context.node_type,
+                self.boost_context.addr,
+                self.boost_context.node_type,
                 err,
             )
 
