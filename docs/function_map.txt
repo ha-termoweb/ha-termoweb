@@ -166,6 +166,8 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._merge_boos
     Copy boost metadata from ``source`` into ``target`` safely.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._merge_boost_metadata._assign
     Assign a metadata value while respecting preference rules.
+custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._merge_accumulator_charge_metadata
+    Copy accumulator charge metadata from ``source`` into ``target``.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_settings
     Flatten the vendor payload into HA-friendly heater settings.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_thm_settings
@@ -665,7 +667,7 @@ custom_components/termoweb/climate.py :: AccumulatorClimateEntity.preset_mode
 custom_components/termoweb/climate.py :: AccumulatorClimateEntity.async_set_preset_mode
     Set the accumulator preset mode.
 custom_components/termoweb/climate.py :: AccumulatorClimateEntity.extra_state_attributes
-    Return accumulator attributes including boost metadata.
+    Return accumulator attributes including boost and charge metadata.
 custom_components/termoweb/climate.py :: AccumulatorClimateEntity._validate_boost_minutes
     Return a validated boost duration or ``None`` when absent.
 custom_components/termoweb/climate.py :: AccumulatorClimateEntity.async_set_acm_preset

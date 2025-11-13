@@ -1178,6 +1178,9 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
         "boost_end_min": 60,
         "boost_end": None,
         "boost_remaining": None,
+        "charging": False,
+        "current_charge_per": 67,
+        "target_charge_per": 90,
     }
 
     coordinator = _make_coordinator(
@@ -1234,6 +1237,9 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
     assert attrs["boost_minutes_remaining"] == 60
     assert attrs["boost_end"] == "2024-01-01T01:00:00+00:00"
     assert attrs["boost_end_label"] is None
+    assert attrs["charging"] is False
+    assert attrs["current_charge_per"] == 67
+    assert attrs["target_charge_per"] == 90
 
     class RaisingResolver:
         def __call__(self, day: Any, minute: Any) -> tuple[dt.datetime | None, int | None]:

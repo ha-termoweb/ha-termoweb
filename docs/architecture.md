@@ -183,7 +183,7 @@ Representative payload emitted after a successful write:
 
 - **Controls:** Boost duration and setpoint sliders constrained to **1–10 hours (60–600 minutes)** and **5–30 °C** respectively.
 - **Helpers:** Single **Start boost** button pulls the stored duration and temperature presets before invoking the boost service.
-- **Attributes:** expose `boost`, `boost_end_day`, `boost_end_min`, `stemp`, and `units` so dashboards mirror cloud state.
+- **Attributes:** expose `boost`, `boost_end_day`, `boost_end_min`, `stemp`, and `units`, plus accumulator charge fields `charging`, `current_charge_per`, and `target_charge_per` so dashboards mirror cloud state.
 - **Defaults:** cache `/setup` values (`extra_options.boost_time`, `boost_temp`) to pre-populate selectors without toggling Boost directly.
 
 ### Services
