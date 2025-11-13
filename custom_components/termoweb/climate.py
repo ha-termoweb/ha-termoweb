@@ -1268,7 +1268,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
 
     @property
     def extra_state_attributes(self) -> Mapping[str, Any] | None:
-        """Return accumulator attributes including boost metadata."""
+        """Return accumulator attributes including boost and charge metadata."""
 
         base_attrs = super().extra_state_attributes
         attrs: dict[str, Any] = dict(base_attrs) if base_attrs is not None else {}
@@ -1280,6 +1280,17 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         attrs["boost_end"] = boost_state.end_iso
         attrs["boost_end_label"] = boost_state.end_label
         attrs["preferred_boost_minutes"] = self._preferred_boost_minutes()
+
+        charging = settings.get("charging")
+        if isinstance(charging, bool):
+            attrs["charging"] = charging
+        elif charging is not None:
+            attrs["charging"] = bool(charging)
+
+        for key in ("current_charge_per", "target_charge_per"):
+            value = settings.get(key)
+            if isinstance(value, (int, float)):
+                attrs[key] = int(value)
 
         return attrs
 

@@ -136,6 +136,32 @@ def test_ducaheat_rest_normalise_ws_settings_boost_fields() -> None:
     assert result["boost_end_min"] == 15
 
 
+def test_ducaheat_rest_normalise_settings_charge_fields() -> None:
+    """Accumulator settings should expose normalised charge metadata."""
+
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+
+    payload = {
+        "status": {
+            "mode": "auto",
+            "charging": "1",
+            "current_charge_per": "45.5",
+            "target_charge_per": 120,
+        },
+        "setup": {
+            "extra_options": {
+                "current_charge_per": 10,
+            }
+        },
+    }
+
+    result = client._normalise_settings(payload, node_type="acm")
+
+    assert result["charging"] is True
+    assert result["current_charge_per"] == 45
+    assert result["target_charge_per"] == 100
+
+
 @pytest.mark.asyncio
 async def test_ducaheat_get_node_settings_normalises_thm() -> None:
     client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")

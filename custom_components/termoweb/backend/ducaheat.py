@@ -23,6 +23,7 @@ from custom_components.termoweb.backend.sanitize import (
     redact_text,
     validate_boost_minutes,
 )
+from custom_components.termoweb.boost import coerce_boost_bool, coerce_int
 from custom_components.termoweb.const import (
     BRAND_DUCAHEAT,
     NODE_SAMPLES_PATH_FMT,
@@ -423,6 +424,7 @@ class DucaheatRESTClient(RESTClient):
             settings["prog"] = normalised_prog
 
         self._merge_boost_metadata(settings, settings)
+        self._merge_accumulator_charge_metadata(settings, settings)
 
         return settings
 
@@ -468,6 +470,37 @@ class DucaheatRESTClient(RESTClient):
             if isinstance(boost_end, Mapping):
                 _assign("boost_end_day", boost_end.get("day"), prefer=True)
                 _assign("boost_end_min", boost_end.get("minute"), prefer=True)
+
+    def _merge_accumulator_charge_metadata(
+        self,
+        target: dict[str, Any],
+        source: Mapping[str, Any] | None,
+        *,
+        prefer_existing: bool = False,
+    ) -> None:
+        """Copy accumulator charge metadata from ``source`` into ``target``."""
+
+        if not isinstance(source, Mapping):
+            return
+
+        def _should_assign(key: str) -> bool:
+            if not prefer_existing:
+                return True
+            if key not in target:
+                return True
+            return target[key] is None
+
+        charging_value = coerce_boost_bool(source.get("charging"))
+        if charging_value is not None and _should_assign("charging"):
+            target["charging"] = charging_value
+
+        for key in ("current_charge_per", "target_charge_per"):
+            if not _should_assign(key):
+                continue
+            coerced = coerce_int(source.get(key))
+            if coerced is None:
+                continue
+            target[key] = max(0, min(100, coerced))
 
     def _normalise_settings(
         self, payload: Any, *, node_type: str = "htr"
@@ -540,6 +573,7 @@ class DucaheatRESTClient(RESTClient):
 
         if include_boost:
             self._merge_boost_metadata(flattened, status_dict)
+            self._merge_accumulator_charge_metadata(flattened, status_dict)
 
             extra = setup_dict.get("extra_options")
             if isinstance(extra, dict):
@@ -551,8 +585,14 @@ class DucaheatRESTClient(RESTClient):
                         flattened["boost_temp"] = formatted
 
                 self._merge_boost_metadata(flattened, extra, prefer_existing=True)
+                self._merge_accumulator_charge_metadata(
+                    flattened, extra, prefer_existing=True
+                )
 
             self._merge_boost_metadata(flattened, setup_dict, prefer_existing=True)
+            self._merge_accumulator_charge_metadata(
+                flattened, setup_dict, prefer_existing=True
+            )
 
             if "boost_temp" not in flattened:
                 boost_temp = status_dict.get("boost_temp")
