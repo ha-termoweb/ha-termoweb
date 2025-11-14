@@ -40,9 +40,10 @@ from .heater import (
     iter_boostable_heater_nodes,
     log_skipped_nodes,
 )
+from .i18n import async_get_fallback_translations, attach_fallbacks, format_fallback
 from .identifiers import (
-    build_heater_entity_unique_id,
     build_heater_energy_unique_id,
+    build_heater_entity_unique_id,
     build_power_monitor_energy_unique_id,
     build_power_monitor_power_unique_id,
     thermostat_fallback_name,
@@ -52,11 +53,6 @@ from .inventory import (
     PowerMonitorNode,
     normalize_node_addr,
     normalize_node_type,
-)
-from .i18n import (
-    async_get_fallback_translations,
-    attach_fallbacks,
-    format_fallback,
 )
 from .utils import (
     build_gateway_device_info,
@@ -437,8 +433,7 @@ class ThermostatBatterySensor(HeaterNodeBase, SensorEntity):
                 return None
         if math.isnan(numeric):
             return None
-        clamped = max(0, min(5, int(numeric)))
-        return clamped
+        return max(0, min(5, int(numeric)))
 
     @property
     def native_value(self) -> int | None:
@@ -462,6 +457,84 @@ class ThermostatBatterySensor(HeaterNodeBase, SensorEntity):
             "addr": self._addr,
             "batt_level_steps": level,
         }
+
+
+class AccumulatorChargeSensorBase(HeaterNodeBase, SensorEntity):
+    """Base helper exposing accumulator charge metadata sensors."""
+
+    _metric_key: str
+
+    def _raw_value(self) -> Any:
+        """Return the raw setting backing this accumulator charge sensor."""
+
+        settings = self.heater_settings() or {}
+        return settings.get(self._metric_key)
+
+    def _coerce_value(self, raw: Any) -> StateType:
+        """Convert a raw accumulator charge setting into a Home Assistant state."""
+
+        return raw
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the processed accumulator charge metric."""
+
+        return self._coerce_value(self._raw_value())
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return identifiers that locate the accumulator charge metric."""
+
+        return {"dev_id": self._dev_id, "addr": self._addr}
+
+
+class AccumulatorChargingSensor(AccumulatorChargeSensorBase):
+    """Boolean sensor indicating whether the accumulator is charging."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "accumulator_charging"
+    _metric_key = "charging"
+
+    def _coerce_value(self, raw: Any) -> StateType:  # type: ignore[override]
+        """Return a canonical boolean charging state when available."""
+
+        if isinstance(raw, bool):
+            return raw
+        if raw is None:
+            return None
+        if isinstance(raw, (int, float)):
+            return bool(raw)
+        return None
+
+
+class AccumulatorChargePercentageSensor(AccumulatorChargeSensorBase):
+    """Base helper converting accumulator charge percentages."""
+
+    _attr_has_entity_name = True
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def _coerce_value(self, raw: Any) -> StateType:  # type: ignore[override]
+        """Return the accumulator charge percentage as an integer."""
+
+        numeric = float_or_none(raw)
+        if numeric is None or not math.isfinite(numeric):
+            return None
+        return max(0, min(100, int(numeric)))
+
+
+class AccumulatorCurrentChargeSensor(AccumulatorChargePercentageSensor):
+    """Sensor exposing the accumulator's current charge percentage."""
+
+    _attr_translation_key = "accumulator_current_charge"
+    _metric_key = "current_charge_per"
+
+
+class AccumulatorTargetChargeSensor(AccumulatorChargePercentageSensor):
+    """Sensor exposing the accumulator's target charge percentage."""
+
+    _attr_translation_key = "accumulator_target_charge"
+    _metric_key = "target_charge_per"
 
 
 class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
@@ -739,6 +812,63 @@ def _create_heater_sensors(
             inventory=inventory,
         )
     ]
+
+    if target_type == "acm":
+        charging_unique_id = build_heater_entity_unique_id(
+            dev_id,
+            target_type,
+            canonical_addr,
+            ":charging",
+        )
+        current_charge_unique_id = build_heater_entity_unique_id(
+            dev_id,
+            target_type,
+            canonical_addr,
+            ":current_charge_per",
+        )
+        target_charge_unique_id = build_heater_entity_unique_id(
+            dev_id,
+            target_type,
+            canonical_addr,
+            ":target_charge_per",
+        )
+        sensors.extend(
+            (
+                AccumulatorChargingSensor(
+                    coordinator,
+                    entry_id,
+                    dev_id,
+                    canonical_addr,
+                    None,
+                    charging_unique_id,
+                    device_name=base_name,
+                    node_type=target_type,
+                    inventory=inventory,
+                ),
+                AccumulatorCurrentChargeSensor(
+                    coordinator,
+                    entry_id,
+                    dev_id,
+                    canonical_addr,
+                    None,
+                    current_charge_unique_id,
+                    device_name=base_name,
+                    node_type=target_type,
+                    inventory=inventory,
+                ),
+                AccumulatorTargetChargeSensor(
+                    coordinator,
+                    entry_id,
+                    dev_id,
+                    canonical_addr,
+                    None,
+                    target_charge_unique_id,
+                    device_name=base_name,
+                    node_type=target_type,
+                    inventory=inventory,
+                ),
+            )
+        )
 
     if target_type != "thm":
         energy_unique_id = build_heater_energy_unique_id(

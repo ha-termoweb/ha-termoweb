@@ -1172,6 +1172,18 @@ custom_components/termoweb/sensor.py :: ThermostatBatterySensor.native_value
     Return the thermostat battery percentage as 0–100.
 custom_components/termoweb/sensor.py :: ThermostatBatterySensor.extra_state_attributes
     Return additional thermostat battery metadata.
+custom_components/termoweb/sensor.py :: AccumulatorChargeSensorBase._raw_value
+    Return the raw setting backing this accumulator charge sensor.
+custom_components/termoweb/sensor.py :: AccumulatorChargeSensorBase._coerce_value
+    Convert a raw accumulator charge setting into a Home Assistant state.
+custom_components/termoweb/sensor.py :: AccumulatorChargeSensorBase.native_value
+    Return the processed accumulator charge metric.
+custom_components/termoweb/sensor.py :: AccumulatorChargeSensorBase.extra_state_attributes
+    Return identifiers that locate the accumulator charge metric.
+custom_components/termoweb/sensor.py :: AccumulatorChargingSensor._coerce_value
+    Return a canonical boolean charging state when available.
+custom_components/termoweb/sensor.py :: AccumulatorChargePercentageSensor._coerce_value
+    Return the accumulator charge percentage as an integer.
 custom_components/termoweb/sensor.py :: HeaterEnergyBase.__init__
     Initialise a heater energy-derived sensor entity.
 custom_components/termoweb/sensor.py :: HeaterEnergyBase._device_available

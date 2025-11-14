@@ -81,6 +81,15 @@
       },
       "boost_end": {
         "name": "Boost otsa"
+      },
+      "accumulator_charging": {
+        "name": "Charging"
+      },
+      "accumulator_current_charge": {
+        "name": "Current charge"
+      },
+      "accumulator_target_charge": {
+        "name": "Target charge"
       }
     }
   },
