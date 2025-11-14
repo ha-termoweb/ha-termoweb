@@ -60,6 +60,7 @@ We do not yet have integration with heaters using the Tevolve-app, but it looks 
 - See cumulative energy use and import energy use history from TermoWeb.
 - Add energy sensors to the HA energy dashboard so you can see current and historical use/cost.
 - Monitor thermostat battery level so you know when wireless controllers need attention.
+- Track accumulator charging status and charge targets to understand storage heater behaviour.
 - Use HA **automations**, **scenes**, and **voice assistants** (including HA’s Google/Alexa integrations).
 
 ---
