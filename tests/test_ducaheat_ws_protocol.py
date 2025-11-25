@@ -311,7 +311,7 @@ def test_dispatch_nodes_includes_inventory_metadata(
 
     assert client._dispatcher.call_count == 1
     dispatched = client._dispatcher.call_args[0][2]
-    assert "nodes" not in dispatched
+    assert dispatched["nodes"] == payload
     assert "nodes_by_type" not in dispatched
     assert "addresses_by_type" not in dispatched
     assert "addr_map" not in dispatched
@@ -340,7 +340,7 @@ def test_incremental_updates_preserve_address_payload(
     client._dispatch_nodes(base)
 
     first_payload = client._dispatcher.call_args_list[-1][0][2]
-    assert "nodes" not in first_payload
+    assert first_payload["nodes"] == base
     assert "nodes_by_type" not in first_payload
     assert "addresses_by_type" not in first_payload
     assert "addr_map" not in first_payload
@@ -350,7 +350,7 @@ def test_incremental_updates_preserve_address_payload(
     client._dispatch_nodes(update)
 
     dispatched = client._dispatcher.call_args_list[-1][0][2]
-    assert "nodes" not in dispatched
+    assert dispatched["nodes"] == update
     assert "nodes_by_type" not in dispatched
     assert "addresses_by_type" not in dispatched
     assert "addr_map" not in dispatched
