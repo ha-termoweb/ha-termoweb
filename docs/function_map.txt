@@ -482,6 +482,8 @@ custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._update_status
     Publish websocket status updates to Home Assistant listeners.
 custom_components/termoweb/backend/ws_client.py :: _prepare_nodes_dispatch
     Normalise node payload data for downstream websocket dispatch.
+custom_components/termoweb/backend/ws_client.py :: _nodes_payload_from_inventory
+    Return the inventory node payload when updates omit mapping data.
 custom_components/termoweb/backend/ws_client.py :: _WSCommon._process_power_updates
     Extract instantaneous power readings from websocket payloads.
 custom_components/termoweb/backend/ws_client.py :: _WSCommon.__init__
@@ -930,6 +932,8 @@ custom_components/termoweb/heater.py :: HeaterNodeBase.async_will_remove_from_ha
     Tidy up websocket listeners before the entity is removed.
 custom_components/termoweb/heater.py :: HeaterNodeBase._handle_ws_message
     Process websocket payloads addressed to this heater.
+custom_components/termoweb/heater.py :: HeaterNodeBase._merge_ws_settings
+    Merge websocket settings updates into the coordinator cache.
 custom_components/termoweb/heater.py :: HeaterNodeBase._payload_matches_heater
     Return True when the websocket payload targets this heater.
 custom_components/termoweb/heater.py :: HeaterNodeBase._handle_ws_event
