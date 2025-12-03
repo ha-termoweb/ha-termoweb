@@ -881,52 +881,7 @@ class HeaterNodeBase(CoordinatorEntity):
         """Process websocket payloads addressed to this heater."""
         if not self._payload_matches_heater(payload):
             return
-        self._merge_ws_settings(payload)
         self._handle_ws_event(payload)
-
-    def _merge_ws_settings(self, payload: Mapping[str, Any]) -> None:
-        """Merge websocket settings updates into the coordinator cache."""
-
-        nodes = payload.get("nodes")
-        if not isinstance(nodes, Mapping):
-            return
-
-        data = getattr(self.coordinator, "data", None)
-        if not isinstance(data, dict):
-            return
-
-        dev_data = data.get(self._dev_id)
-        if not isinstance(dev_data, dict):
-            return
-
-        settings_bucket = dev_data.setdefault("settings", {})
-        if not isinstance(settings_bucket, dict):
-            return
-
-        for raw_type, sections in nodes.items():
-            node_type = normalize_node_type(raw_type, use_default_when_falsey=True)
-            if not node_type or node_type != self._node_type:
-                continue
-            if not isinstance(sections, Mapping):
-                continue
-            settings_section = sections.get("settings")
-            if not isinstance(settings_section, Mapping):
-                continue
-            node_settings = settings_bucket.setdefault(node_type, {})
-            if not isinstance(node_settings, dict):
-                continue
-            for raw_addr, update in settings_section.items():
-                addr = normalize_node_addr(raw_addr, use_default_when_falsey=True)
-                if not addr or addr != self._addr or not isinstance(update, Mapping):
-                    continue
-                existing = node_settings.get(addr)
-                merged = dict(existing) if isinstance(existing, Mapping) else {}
-                merged.update(update)
-                node_settings[addr] = merged
-
-        setter = getattr(self.coordinator, "async_set_updated_data", None)
-        if callable(setter):
-            setter(data)
 
     def _payload_matches_heater(self, payload: dict) -> bool:
         """Return True when the websocket payload targets this heater."""

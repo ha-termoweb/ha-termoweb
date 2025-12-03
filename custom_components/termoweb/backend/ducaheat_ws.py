@@ -25,7 +25,6 @@ from custom_components.termoweb.backend.ws_client import (
     DUCAHEAT_NAMESPACE,
     HandshakeError,
     WSStats,
-    _nodes_payload_from_inventory,
     _prepare_nodes_dispatch,
     _WSCommon,
     _WsLeaseMixin,
@@ -1012,10 +1011,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             _LOGGER.error("WS (ducaheat): missing inventory for node dispatch on %s", self.dev_id)
             return
 
-        nodes_payload = _nodes_payload_from_inventory(raw_nodes, inventory)
-
         self._apply_heater_addresses(
-            nodes_payload,
+            raw_nodes,
             inventory=inventory,
             log_prefix="WS (ducaheat)",
             logger=_LOGGER,
@@ -1025,7 +1022,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             "dev_id": self.dev_id,
             "node_type": None,
             "inventory": inventory,
-            "nodes": nodes_payload,
         }
 
         cadence_payload = cadence_source or context.payload

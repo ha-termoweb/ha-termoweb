@@ -155,45 +155,6 @@ def test_heater_handle_ws_event_requires_loop_or_mock() -> None:
     assert called is False
 
 
-def test_heater_merges_ws_settings_into_cache() -> None:
-    hass = HomeAssistant()
-    payload = {
-        "dev_id": "dev",
-        "node_type": "acm",
-        "addr": "01",
-        "nodes": {
-            "acm": {
-                "settings": {
-                    "01": {
-                        "charging": True,
-                        "current_charge_per": 80,
-                    }
-                }
-            }
-        },
-    }
-    data = {"dev": {"settings": {"acm": {"01": {"charging": False}}}}}
-    setter = MagicMock()
-    coordinator = SimpleNamespace(data=data, async_set_updated_data=setter, hass=hass)
-    heater = HeaterNodeBase(
-        coordinator,
-        "entry",
-        "dev",
-        "01",
-        "Heater 1",
-        node_type="acm",
-    )
-    heater.hass = hass
-    heater.schedule_update_ha_state = MagicMock()  # type: ignore[assignment]
-
-    heater._handle_ws_message(payload)
-
-    settings = data["dev"]["settings"]["acm"]["01"]
-    assert settings["charging"] is True
-    assert settings["current_charge_per"] == 80
-    setter.assert_called_once_with(data)
-
-
 def test_heater_section_requires_inventory_for_name() -> None:
     """Heater metadata should not fabricate inventory-backed details."""
 

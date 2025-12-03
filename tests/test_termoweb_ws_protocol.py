@@ -903,7 +903,7 @@ def test_dispatch_nodes_with_inventory(monkeypatch: pytest.MonkeyPatch, caplog: 
     client._coordinator.update_nodes.assert_not_called()
     dispatcher.assert_called_once()
     _, _, payload = dispatcher.call_args[0]
-    assert payload["nodes"] == {"htr": {"settings": {"1": {}}}}
+    assert "nodes" not in payload
     assert payload["inventory"] is client._inventory
     assert "inventory_addresses" not in payload
     assert client._inventory.addresses_by_type["htr"] == ["1"]
@@ -926,7 +926,7 @@ def test_dispatch_nodes_handles_unknown_types(monkeypatch: pytest.MonkeyPatch) -
     client._coordinator.update_nodes.assert_not_called()
     dispatcher.assert_called_once()
     _, _, payload = dispatcher.call_args[0]
-    assert payload["nodes"] == {}
+    assert "nodes" not in payload
     assert "inventory_addresses" not in payload
     assert "unknown_types" not in payload
 

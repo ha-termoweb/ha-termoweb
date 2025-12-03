@@ -55,7 +55,6 @@ from custom_components.termoweb.inventory import (
 from .ws_client import (
     HandshakeError,
     WSStats,
-    _nodes_payload_from_inventory,
     _prepare_nodes_dispatch,
     _WSCommon,
     forward_ws_sample_updates,
@@ -847,10 +846,8 @@ class WebSocketClient(_WSCommon):
             _LOGGER.error("WS: missing inventory for node dispatch on %s", self.dev_id)
             return None
 
-        nodes_payload = _nodes_payload_from_inventory(raw_nodes, inventory)
-
         self._apply_heater_addresses(
-            nodes_payload,
+            raw_nodes,
             inventory=inventory,
             log_prefix="WS",
             logger=_LOGGER,
@@ -860,7 +857,6 @@ class WebSocketClient(_WSCommon):
             "dev_id": self.dev_id,
             "node_type": None,
             "inventory": inventory,
-            "nodes": nodes_payload,
         }
 
         self._mark_ws_payload(

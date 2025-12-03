@@ -564,15 +564,6 @@ def _prepare_nodes_dispatch(
     )
 
 
-def _nodes_payload_from_inventory(raw_nodes: Any, inventory: Inventory | None) -> Any:
-    """Return the inventory node payload when updates omit mapping data."""
-
-    if isinstance(inventory, Inventory) and not isinstance(raw_nodes, Mapping):
-        return inventory.payload
-
-    return raw_nodes
-
-
 class _WSCommon(_WSStatusMixin):
     """Shared helpers for websocket clients."""
 
@@ -711,10 +702,8 @@ class _WSCommon(_WSStatusMixin):
         if inventory is not None and not isinstance(self._inventory, Inventory):
             self._inventory = inventory
 
-        nodes_payload = _nodes_payload_from_inventory(raw_nodes, inventory)
-
         self._apply_heater_addresses(
-            nodes_payload,
+            raw_nodes,
             inventory=inventory,
             log_prefix="WS",
             logger=_LOGGER,
@@ -728,7 +717,6 @@ class _WSCommon(_WSStatusMixin):
             "dev_id": self.dev_id,
             "node_type": None,
             "inventory": inventory,
-            "nodes": nodes_payload,
         }
         async_dispatcher_send(self.hass, signal_ws_data(self.entry_id), payload_copy)
 

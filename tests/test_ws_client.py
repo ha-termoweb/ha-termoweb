@@ -634,41 +634,7 @@ def test_dispatch_nodes_reuses_record_inventory(
     dispatched_payload = dispatcher.call_args.args[2]
     assert dispatched_payload["inventory"] is inventory
     assert "addresses_by_type" not in dispatched_payload
-    assert dispatched_payload["nodes"] == payload["nodes"]
-
-
-def test_dispatch_nodes_prefers_inventory_payload(
-    monkeypatch: pytest.MonkeyPatch,
-    ws_common_stub: Callable[..., base_ws._WSCommon],
-) -> None:
-    """Non-mapping payloads should be replaced by the inventory snapshot."""
-
-    inventory_payload = {"nodes": [{"addr": "1", "type": "htr"}]}
-    node_inventory = build_node_inventory(inventory_payload)
-    inventory = Inventory("device", inventory_payload, node_inventory)
-
-    hass_record: dict[str, Any] = {"dev_id": "device", "inventory": inventory}
-    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": hass_record}})
-    coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
-    dispatcher = MagicMock()
-    monkeypatch.setattr(base_ws, "async_dispatcher_send", dispatcher)
-
-    dummy = ws_common_stub(
-        hass=hass,
-        entry_id="entry",
-        dev_id="device",
-        coordinator=coordinator,
-    )
-    dummy._inventory = inventory
-
-    payload = {"nodes": ["unexpected"]}
-    dummy._dispatch_nodes(payload)
-
-    coordinator.update_nodes.assert_not_called()
-    dispatcher.assert_called_once()
-    dispatched_payload = dispatcher.call_args.args[2]
-    assert dispatched_payload["inventory"] is inventory
-    assert dispatched_payload["nodes"] == inventory_payload
+    assert "nodes" not in dispatched_payload
 
 
 def test_prepare_nodes_dispatch_uses_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1478,7 +1444,6 @@ def test_ws_common_dispatch_nodes(
         "dev_id": "dev",
         "node_type": None,
         "inventory": inventory_obj,
-        "nodes": raw_nodes,
     }
 
 
