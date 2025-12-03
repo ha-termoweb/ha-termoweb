@@ -432,7 +432,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     remaining = deadline - time.time()
                     if remaining <= 0:
                         now = time.time()
-                        self._refresh_ws_payload_state(now=now, reason="payload_timeout")
+                        self._refresh_ws_payload_state(
+                            now=now, reason="payload_timeout"
+                        )
                         if tracker.payload_stale and tracker.status == "healthy":
                             self._update_status("connected")
                         remaining = 1.0
@@ -552,7 +554,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                 if isinstance(nodes_candidate, Mapping):
                                     nodes_map = nodes_candidate
                                 else:
-                                    nodes_map = self._coerce_dev_data_nodes(nodes_candidate)
+                                    nodes_map = self._coerce_dev_data_nodes(
+                                        nodes_candidate
+                                    )
                             if isinstance(nodes_map, Mapping):
                                 self._log_nodes_summary(nodes_map)
                                 normalised = self._normalise_nodes_payload(nodes_map)
@@ -807,7 +811,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 or node_type
             )
             section_root = dev_map.get("settings")
-            if section_root is not None and not isinstance(section_root, MutableMapping):
+            if section_root is not None and not isinstance(
+                section_root, MutableMapping
+            ):
                 return False
             if canonical_type and isinstance(section_root, MutableMapping):
                 existing_section = section_root.get(canonical_type)
@@ -1003,13 +1009,26 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             inventory=self._inventory,
         )
 
-        inventory = context.inventory if isinstance(context.inventory, Inventory) else None
+        inventory = (
+            context.inventory if isinstance(context.inventory, Inventory) else None
+        )
         if isinstance(inventory, Inventory):
             self._inventory = inventory
 
         if not isinstance(inventory, Inventory):
-            _LOGGER.error("WS (ducaheat): missing inventory for node dispatch on %s", self.dev_id)
+            _LOGGER.error(
+                "WS (ducaheat): missing inventory for node dispatch on %s", self.dev_id
+            )
             return
+
+        normalised_nodes: Mapping[str, Any] | None = None
+        if isinstance(raw_nodes, Mapping):
+            normalised_nodes = raw_nodes
+        elif isinstance(payload, Mapping):
+            normalised_nodes = payload
+
+        if isinstance(normalised_nodes, Mapping):
+            self._mirror_nodes_in_dev_map(normalised_nodes, inventory=inventory)
 
         self._apply_heater_addresses(
             raw_nodes,
@@ -1036,6 +1055,73 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             stale_after=self._payload_stale_after,
         )
         self._dispatcher(self.hass, signal_ws_data(self.entry_id), payload_copy)
+
+    def _mirror_nodes_in_dev_map(
+        self,
+        nodes: Mapping[str, Any],
+        *,
+        inventory: Inventory,
+    ) -> None:
+        """Merge websocket node settings into the coordinator cache."""
+
+        coordinator_data = getattr(self._coordinator, "data", None)
+        data_map: MutableMapping[str, Any] | None
+        if isinstance(coordinator_data, MutableMapping):
+            data_map = coordinator_data
+        elif isinstance(coordinator_data, Mapping):
+            data_map = dict(coordinator_data)
+            try:
+                self._coordinator.data = data_map  # type: ignore[attr-defined]
+            except Exception:  # pragma: no cover - defensive
+                data_map = None
+        else:
+            data_map = None
+
+        if data_map is None:
+            return
+
+        dev_map_candidate = data_map.get(self.dev_id)
+        if isinstance(dev_map_candidate, MutableMapping):
+            dev_map = dev_map_candidate
+        elif isinstance(dev_map_candidate, Mapping):
+            dev_map = dict(dev_map_candidate)
+            data_map[self.dev_id] = dev_map
+        else:
+            dev_map = {"dev_id": self.dev_id, "inventory": inventory}
+            data_map[self.dev_id] = dev_map
+
+        settings_section = dev_map.get("settings")
+        if isinstance(settings_section, MutableMapping):
+            settings_map = settings_section
+        elif isinstance(settings_section, Mapping):
+            settings_map = dict(settings_section)
+            dev_map["settings"] = settings_map
+        else:
+            settings_map = {}
+            dev_map["settings"] = settings_map
+
+        for node_type, node_payload in nodes.items():
+            if not isinstance(node_payload, Mapping):
+                continue
+            canonical_type = normalize_node_type(
+                node_type,
+                use_default_when_falsey=True,
+            )
+            if not canonical_type:
+                continue
+            settings_payload = node_payload.get("settings")
+            if not isinstance(settings_payload, Mapping):
+                continue
+            existing_bucket = settings_map.get(canonical_type)
+            if isinstance(existing_bucket, MutableMapping):
+                target_bucket = existing_bucket
+            elif isinstance(existing_bucket, Mapping):
+                target_bucket = dict(existing_bucket)
+                settings_map[canonical_type] = target_bucket
+            else:
+                target_bucket = {}
+                settings_map[canonical_type] = target_bucket
+            self._merge_nodes(target_bucket, settings_payload)
 
     @staticmethod
     def _merge_nodes(target: dict[str, Any], source: Mapping[str, Any]) -> None:
@@ -1094,7 +1180,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 if not normalised_addr:
                     continue
                 bucket[normalised_addr] = payload
-            sample_lease = samples.get("lease_seconds") if isinstance(samples, Mapping) else None
+            sample_lease = (
+                samples.get("lease_seconds") if isinstance(samples, Mapping) else None
+            )
             if sample_lease is not None:
                 self._apply_payload_window_hint(
                     source="sample_section",

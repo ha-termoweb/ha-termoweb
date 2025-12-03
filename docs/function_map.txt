@@ -252,6 +252,8 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._reset_pay
     Reset the payload stale window to the default.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._dispatch_nodes
     Publish node updates with inventory-aware cache refresh.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._mirror_nodes_in_dev_map
+    Merge websocket node settings into the coordinator cache.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._merge_nodes
     Deep merge ``source`` updates into ``target`` in place.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._collect_sample_updates
