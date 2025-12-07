@@ -162,6 +162,32 @@ def test_ducaheat_rest_normalise_settings_charge_fields() -> None:
     assert result["target_charge_per"] == 100
 
 
+def test_ducaheat_rest_normalise_ws_status_merges_charge_fields() -> None:
+    """Status updates should refresh accumulator charge metadata in settings."""
+
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+
+    payload = {
+        "acm": {
+            "settings": {"01": {"mode": "charge", "current_charge_per": 5}},
+            "status": {
+                "01": {
+                    "charging": "1",
+                    "current_charge_per": "15.2",
+                    "target_charge_per": 80,
+                }
+            },
+        }
+    }
+
+    normalised = client.normalise_ws_nodes(payload)
+
+    settings = normalised["acm"]["settings"]["01"]
+    assert settings["charging"] is True
+    assert settings["current_charge_per"] == 15
+    assert settings["target_charge_per"] == 80
+
+
 @pytest.mark.asyncio
 async def test_ducaheat_get_node_settings_normalises_thm() -> None:
     client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
