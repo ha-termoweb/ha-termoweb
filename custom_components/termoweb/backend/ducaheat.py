@@ -379,7 +379,7 @@ class DucaheatRESTClient(RESTClient):
         )
 
     def normalise_ws_nodes(self, nodes: dict[str, Any]) -> dict[str, Any]:
-        """Normalise websocket nodes payloads for Ducaheat specifics."""
+        """Normalise websocket payloads and merge accumulator charge metadata."""
 
         if not isinstance(nodes, dict):
             return nodes

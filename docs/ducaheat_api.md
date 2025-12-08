@@ -35,6 +35,8 @@ Each thermal node (`htr` or `acm`) has a consolidated REST read at:
 
 with sections like `status`, `setup`, `prog`, `prog_temps` (presence may vary by model/firmware). Echo the shape you read back to the server when writing program structures.
 
+Accumulator websocket `status` updates surface charge metadata (`charging`, `current_charge_per`, `target_charge_per`) even when the corresponding `settings` payload omits them; consumers should merge those fields into their normalised settings so charge sensors stay accurate.
+
 ---
 
 ## Writes — segmented endpoints
