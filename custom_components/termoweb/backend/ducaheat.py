@@ -379,7 +379,7 @@ class DucaheatRESTClient(RESTClient):
         )
 
     def normalise_ws_nodes(self, nodes: dict[str, Any]) -> dict[str, Any]:
-        """Normalise websocket nodes payloads for Ducaheat specifics."""
+        """Normalise websocket payloads and merge accumulator charge metadata."""
 
         if not isinstance(nodes, dict):
             return nodes
@@ -408,6 +408,23 @@ class DucaheatRESTClient(RESTClient):
                         addr_map[addr] = self._normalise_ws_settings(payload)
 
                 section_map[section] = addr_map
+
+            if (
+                node_type == "acm"
+                and isinstance(section_map.get("settings"), dict)
+                and isinstance(section_map.get("status"), Mapping)
+            ):
+                settings_map = section_map["settings"]
+                status_map = section_map["status"]
+                for addr, status_payload in status_map.items():
+                    if not isinstance(status_payload, Mapping):
+                        continue
+                    target_settings = settings_map.get(addr)
+                    if not isinstance(target_settings, dict):
+                        continue
+                    self._merge_accumulator_charge_metadata(
+                        target_settings, status_payload
+                    )
 
             normalised[node_type] = section_map
 

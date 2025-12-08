@@ -159,7 +159,7 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend.get_instant_po
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.get_node_samples
     Return heater samples with timestamps normalised to seconds. Non-heater nodes delegate to the base implementation while detecting millisecond payloads automatically.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.normalise_ws_nodes
-    Normalise websocket nodes payloads for Ducaheat specifics.
+    Normalise websocket payloads and merge accumulator charge metadata.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_ws_settings
     Normalise half-hourly program data within websocket settings.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._merge_boost_metadata
