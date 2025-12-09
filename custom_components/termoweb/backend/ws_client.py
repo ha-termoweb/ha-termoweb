@@ -245,7 +245,9 @@ class HandshakeError(RuntimeError):
         self.status = status
         self.url = url
         self.detail = detail
-        self.response_snippet = response_snippet if response_snippet is not None else detail
+        self.response_snippet = (
+            response_snippet if response_snippet is not None else detail
+        )
 
 
 class _WsLeaseMixin:
@@ -279,6 +281,47 @@ class _WSStatusMixin:
 
         return False
 
+    def _ws_bucket_sizes(
+        self,
+        *,
+        entry_bucket: Mapping[str, Any] | None = None,
+        ws_bucket: Mapping[str, Any] | None = None,
+        trackers: Mapping[str, Any] | None = None,
+    ) -> tuple[int, int]:
+        """Return the current websocket state and tracker bucket sizes."""
+
+        hass_data = getattr(self.hass, "data", None)
+        domain_bucket: Mapping[str, Any] | None = None
+        if isinstance(hass_data, Mapping):
+            domain_bucket = hass_data.get(DOMAIN)
+
+        if entry_bucket is None and isinstance(domain_bucket, Mapping):
+            entry_bucket = domain_bucket.get(self.entry_id)
+        if ws_bucket is None and isinstance(entry_bucket, Mapping):
+            ws_bucket = entry_bucket.get("ws_state")
+        if trackers is None and isinstance(entry_bucket, Mapping):
+            trackers = entry_bucket.get("ws_trackers")
+
+        ws_size = len(ws_bucket) if isinstance(ws_bucket, Mapping) else 0
+        trackers_size = len(trackers) if isinstance(trackers, Mapping) else 0
+
+        footprint = getattr(self, "_ws_bucket_baseline", None)
+        snapshot = (ws_size, trackers_size)
+        if footprint is None:
+            setattr(self, "_ws_bucket_baseline", snapshot)
+        else:
+            grew = snapshot[0] > footprint[0] or snapshot[1] > footprint[1]
+            if grew and _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug(
+                    "WS: websocket bucket footprint grew from %s to %s for %s",  # pragma: no cover - debug only
+                    footprint,
+                    snapshot,
+                    getattr(self, "dev_id", "unknown"),
+                )
+            if grew:
+                setattr(self, "_ws_bucket_baseline", snapshot)
+        return snapshot
+
     def _ws_state_bucket(self) -> dict[str, Any]:
         """Return the websocket state bucket for the current device."""
 
@@ -296,6 +339,7 @@ class _WSStatusMixin:
         ws_bucket = entry_bucket.setdefault("ws_state", {})
         ws_state = ws_bucket.setdefault(self.dev_id, {})
         setattr(self, "_ws_state", ws_state)
+        self._ws_bucket_sizes(entry_bucket=entry_bucket, ws_bucket=ws_bucket)
         return ws_state
 
     def _ws_health_tracker(self) -> WsHealthTracker:
@@ -349,6 +393,7 @@ class _WSStatusMixin:
         ):
             tracker.last_heartbeat_at = float(legacy_heartbeat)
         setattr(self, "_ws_tracker", tracker)
+        self._ws_bucket_sizes(entry_bucket=entry_bucket, trackers=trackers)
         should_apply_hint = created and hasattr(self, "_apply_payload_window_hint")
         if should_apply_hint and getattr(self, "_suppress_default_cadence_hint", False):
             should_apply_hint = False
@@ -358,8 +403,10 @@ class _WSStatusMixin:
                 lease_seconds=120,
                 candidates=[30, 75, "90"],
             )
-        elif getattr(self, "_pending_default_cadence_hint", False) and hasattr(
-            self, "_apply_payload_window_hint"
+        elif (
+            getattr(self, "_pending_default_cadence_hint", False)
+            and hasattr(self, "_apply_payload_window_hint")
+            and not getattr(self, "_suppress_default_cadence_hint", False)
         ):
             self._pending_default_cadence_hint = False
             self._apply_payload_window_hint(
@@ -368,6 +415,35 @@ class _WSStatusMixin:
                 candidates=[30, 75, "90"],
             )
         return tracker
+
+    def _cleanup_ws_state(self) -> None:
+        """Remove cached websocket state and tracker entries for this device."""
+
+        hass_data = getattr(self.hass, "data", None)
+        if not isinstance(hass_data, MutableMapping):
+            return
+        domain_bucket = hass_data.get(DOMAIN)
+        if not isinstance(domain_bucket, MutableMapping):
+            return
+        entry_bucket = domain_bucket.get(self.entry_id)
+        if not isinstance(entry_bucket, MutableMapping):
+            return
+
+        ws_bucket = entry_bucket.get("ws_state")
+        if isinstance(ws_bucket, MutableMapping):
+            ws_bucket.pop(self.dev_id, None)
+            if not ws_bucket:
+                entry_bucket.pop("ws_state", None)
+
+        trackers = entry_bucket.get("ws_trackers")
+        if isinstance(trackers, MutableMapping):
+            trackers.pop(self.dev_id, None)
+            if not trackers:
+                entry_bucket.pop("ws_trackers", None)
+
+        setattr(self, "_ws_state", None)
+        setattr(self, "_ws_tracker", None)
+        setattr(self, "_ws_bucket_baseline", None)
 
     def _notify_ws_status(
         self,
@@ -577,6 +653,27 @@ class _WSCommon(_WSStatusMixin):
 
         self._inventory: Inventory | None = inventory
 
+    def _bind_inventory_from_context(self) -> Inventory | None:
+        """Attach the shared inventory stored on the Home Assistant entry."""
+
+        try:
+            inventory = Inventory.require_from_context(
+                inventory=self._inventory,
+                container=self.hass.data.get(DOMAIN, {}).get(self.entry_id),
+                hass=self.hass,
+                entry_id=self.entry_id,
+                coordinator=self._coordinator,
+            )
+        except LookupError:
+            return None
+
+        if isinstance(inventory, Inventory):
+            self._inventory = inventory
+            record = self.hass.data.setdefault(DOMAIN, {}).setdefault(self.entry_id, {})
+            if isinstance(record, MutableMapping):
+                record["inventory"] = inventory
+        return inventory
+
     def _ensure_type_bucket(
         self,
         nodes_by_type: Mapping[str, Any] | MutableMapping[str, Any],
@@ -698,7 +795,9 @@ class _WSCommon(_WSStatusMixin):
             raw_nodes=raw_nodes,
             inventory=self._inventory,
         )
-        inventory = context.inventory if isinstance(context.inventory, Inventory) else None
+        inventory = (
+            context.inventory if isinstance(context.inventory, Inventory) else None
+        )
         if inventory is not None and not isinstance(self._inventory, Inventory):
             self._inventory = inventory
 
@@ -710,7 +809,9 @@ class _WSCommon(_WSStatusMixin):
         )
 
         if not isinstance(inventory, Inventory):
-            _LOGGER.error("WS: missing inventory for dispatch on device %s", self.dev_id)
+            _LOGGER.error(
+                "WS: missing inventory for dispatch on device %s", self.dev_id
+            )
             return
 
         payload_copy = {
@@ -809,6 +910,7 @@ __all__ = [
     "resolve_ws_update_section",
     "translate_path_update",
 ]
+
 
 def __getattr__(name: str) -> Any:
     """Lazily expose backend websocket client implementations."""

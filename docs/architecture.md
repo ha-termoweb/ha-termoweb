@@ -23,6 +23,10 @@ subscriptions and UI naming hints while assuming that the set of devices and
 addresses remains stable across the lifetime of the entry. When hardware changes
 are required, users are expected to reload the integration so a fresh inventory is
 captured from the backend.【F:custom_components/termoweb/inventory.py†L138-L236】【F:custom_components/termoweb/__init__.py†L320-L411】
+Websocket clients reuse this immutable inventory directly when dispatching
+snapshots or reconnecting after a disconnect, and they clear their per-device
+`ws_state`/`ws_trackers` buckets whenever a session stops so repeated retries do
+not allocate extra dictionaries beyond the shared inventory entry.【F:custom_components/termoweb/backend/ws_client.py†L266-L349】【F:custom_components/termoweb/backend/termoweb_ws.py†L20-L117】【F:custom_components/termoweb/backend/ducaheat_ws.py†L139-L221】
 
 Power monitors (`pmo`) ride alongside heaters in the captured `dev_data`
 snapshot. The snapshot also exposes a `pmo_system` block with global power

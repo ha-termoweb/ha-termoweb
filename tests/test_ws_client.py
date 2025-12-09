@@ -42,21 +42,6 @@ class DummyREST:
         await self._ensure_token()
 
 
-class DummyLoop:
-    """Simple event loop stub recording created tasks."""
-
-    def __init__(self) -> None:
-        self.created_tasks: list[DummyTask] = []
-
-    def create_task(self, coro: Any, **_: Any) -> "DummyTask":
-        task = DummyTask(coro)
-        self.created_tasks.append(task)
-        return task
-
-    def call_soon_threadsafe(self, callback: Any, *args: Any) -> None:
-        callback(*args)
-
-
 class DummyTask:
     """Track coroutine execution for idle restart tests."""
 
@@ -76,11 +61,34 @@ class DummyTask:
     def done(self) -> bool:
         return self._completed
 
+    def __await__(self) -> Any:
+        async def _finished() -> None:
+            return None
+
+        if self._completed:
+            return _finished().__await__()
+        return self.run().__await__()
+
     async def run(self) -> Any:
         try:
             return await self.coro
         finally:
             self._completed = True
+
+
+class DummyLoop:
+    """Simple event loop stub recording created tasks."""
+
+    def __init__(self) -> None:
+        self.created_tasks: list[DummyTask] = []
+
+    def create_task(self, coro: Any, **_: Any) -> DummyTask:
+        task = DummyTask(coro)
+        self.created_tasks.append(task)
+        return task
+
+    def call_soon_threadsafe(self, callback: Any, *args: Any) -> None:
+        callback(*args)
 
 
 @pytest.fixture(autouse=True)
@@ -90,9 +98,13 @@ def patch_async_client(monkeypatch: pytest.MonkeyPatch) -> None:
     class StubAsyncClient:
         def __init__(self, **_: Any) -> None:
             self.events: dict[tuple[str, str | None], Any] = {}
+            self.connected = False
 
         def on(self, event: str, *, handler: Any, namespace: str | None = None) -> None:
             self.events[(event, namespace)] = handler
+
+        async def disconnect(self) -> None:
+            self.connected = False
 
         async def emit(
             self,
@@ -194,6 +206,85 @@ def _make_ducaheat_client(
     )
     client._dispatcher_mock = dispatcher  # type: ignore[attr-defined]
     return client
+
+
+@pytest.mark.asyncio
+async def test_ws_state_cleanup_and_reuse() -> None:
+    """Stop cycles should clean up state buckets without duplicating metadata."""
+
+    loop = DummyLoop()
+    hass = SimpleNamespace(
+        loop=loop, data={base_ws.DOMAIN: {"entry": {"dev_id": "device"}}}
+    )
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
+    inventory = Inventory("device", raw_nodes, build_node_inventory(raw_nodes))
+    hass.data[base_ws.DOMAIN]["entry"]["inventory"] = inventory
+
+    client = module.WebSocketClient(
+        hass,
+        entry_id="entry",
+        dev_id="device",
+        api_client=DummyREST(),
+        coordinator=SimpleNamespace(update_nodes=MagicMock()),
+        session=SimpleNamespace(),
+        inventory=inventory,
+    )
+
+    for _ in range(3):
+        client.start()
+        client._ws_state_bucket()
+        client._ws_health_tracker()
+        assert client._ws_bucket_sizes() == (1, 1)
+        assert hass.data[base_ws.DOMAIN]["entry"]["inventory"] is inventory
+        assert set(hass.data[base_ws.DOMAIN]["entry"].keys()) <= {
+            "inventory",
+            "dev_id",
+            "ws_state",
+            "ws_trackers",
+        }
+
+        await client.stop()
+        assert hass.data[base_ws.DOMAIN]["entry"].get("ws_state", {}) == {}
+        assert hass.data[base_ws.DOMAIN]["entry"].get("ws_trackers", {}) == {}
+        assert client._ws_bucket_sizes() == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_ws_cleanup_and_buckets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure Ducaheat websocket cleanup removes tracker buckets across retries."""
+
+    loop = DummyLoop()
+    hass = SimpleNamespace(
+        loop=loop, data={base_ws.DOMAIN: {"entry": {"dev_id": "device"}}}
+    )
+    raw_nodes = {"nodes": [{"type": "pmo", "addr": "7"}]}
+    inventory = Inventory("device", raw_nodes, build_node_inventory(raw_nodes))
+    hass.data[base_ws.DOMAIN]["entry"]["inventory"] = inventory
+
+    rest_client = DummyREST(is_ducaheat=True)
+    dispatcher = MagicMock()
+    monkeypatch.setattr(ducaheat_ws, "async_dispatcher_send", dispatcher, raising=False)
+    client = ducaheat_ws.DucaheatWSClient(
+        hass,
+        entry_id="entry",
+        dev_id="device",
+        api_client=rest_client,
+        coordinator=SimpleNamespace(update_nodes=MagicMock()),
+        session=SimpleNamespace(),
+        inventory=inventory,
+    )
+
+    for _ in range(2):
+        client.start()
+        client._ws_state_bucket()
+        client._ws_health_tracker()
+        assert client._ws_bucket_sizes() == (1, 1)
+        assert hass.data[base_ws.DOMAIN]["entry"]["inventory"] is inventory
+
+        await client.stop()
+        assert hass.data[base_ws.DOMAIN]["entry"].get("ws_state", {}) == {}
+        assert hass.data[base_ws.DOMAIN]["entry"].get("ws_trackers", {}) == {}
+        assert client._ws_bucket_sizes() == (0, 0)
 
 
 def _ensure_inventory_record(
@@ -583,6 +674,7 @@ def test_ws_state_bucket_initialises_missing_data(
     assert module.DOMAIN in client.hass.data
     assert client.hass.data[module.DOMAIN]["entry"]["ws_state"]["device"] is bucket
 
+
 def test_handshake_error_exposes_status_and_url() -> None:
     """Ensure ``HandshakeError`` forwards the status and URL details."""
 
@@ -643,7 +735,9 @@ def test_prepare_nodes_dispatch_uses_inventory(monkeypatch: pytest.MonkeyPatch) 
     hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
     coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
     node_inventory = build_node_inventory([{"type": "htr", "addr": "4"}])
-    inventory = Inventory("dev", {"nodes": [{"type": "htr", "addr": "4"}]}, node_inventory)
+    inventory = Inventory(
+        "dev", {"nodes": [{"type": "htr", "addr": "4"}]}, node_inventory
+    )
     context = base_ws._prepare_nodes_dispatch(
         hass,
         entry_id="entry",
@@ -677,7 +771,9 @@ def test_prepare_nodes_dispatch_resolves_record_dev_id_and_coordinator_inventory
     coordinator.update_nodes.assert_not_called()
 
     hass_numeric_record: dict[str, Any] = {"dev_id": 99}
-    hass_numeric = SimpleNamespace(data={base_ws.DOMAIN: {"entry": hass_numeric_record}})
+    hass_numeric = SimpleNamespace(
+        data={base_ws.DOMAIN: {"entry": hass_numeric_record}}
+    )
     coordinator_numeric = SimpleNamespace(update_nodes=MagicMock(), inventory=inventory)
 
     context_numeric = base_ws._prepare_nodes_dispatch(
@@ -714,7 +810,7 @@ def test_ws_status_tracker_applies_default_cadence_hint() -> None:
 
 
 def test_ws_status_tracker_processes_pending_cadence_hint() -> None:
-    """Deferred cadence hints should execute when suppression is active."""
+    """Deferred cadence hints should wait until suppression is lifted."""
 
     class Dummy(base_ws._WSStatusMixin):
         def __init__(self) -> None:
@@ -728,7 +824,16 @@ def test_ws_status_tracker_processes_pending_cadence_hint() -> None:
     dummy = Dummy()
     dummy._ws_health_tracker()
 
-    dummy._apply_payload_window_hint.assert_called_once()
+    dummy._apply_payload_window_hint.assert_not_called()
+    assert dummy._pending_default_cadence_hint is True
+
+    dummy._suppress_default_cadence_hint = False
+    dummy._ws_health_tracker()
+    dummy._apply_payload_window_hint.assert_called_once_with(
+        source="cadence",
+        lease_seconds=120,
+        candidates=[30, 75, "90"],
+    )
     assert dummy._pending_default_cadence_hint is False
 
 
@@ -790,12 +895,16 @@ def test_ws_common_ensure_type_bucket_uses_inventory_without_clones(
     assert "addresses_by_type" not in dev_map
 
     dev_map_second = {"settings": {"htr": {"existing": 1}}, "inventory": inventory}
-    bucket_again = dummy._ensure_type_bucket({"htr": bucket}, "htr", dev_map=dev_map_second)
+    bucket_again = dummy._ensure_type_bucket(
+        {"htr": bucket}, "htr", dev_map=dev_map_second
+    )
     assert bucket_again is bucket
     assert dev_map_second["settings"]["htr"] == {"existing": 1}
 
     dev_map_non_mapping_settings = {"settings": None, "inventory": inventory}
-    dummy._ensure_type_bucket({"htr": bucket}, "htr", dev_map=dev_map_non_mapping_settings)
+    dummy._ensure_type_bucket(
+        {"htr": bucket}, "htr", dev_map=dev_map_non_mapping_settings
+    )
     assert dev_map_non_mapping_settings["settings"]["htr"] == {}
     assert "addresses_by_type" not in dev_map_non_mapping_settings
 
@@ -867,6 +976,7 @@ async def test_websocket_client_reuses_delegate(
 
     client._delegate = None
     assert await client.ws_url() == ""
+
 
 def test_ducaheat_brand_headers_include_expected_fields() -> None:
     """Verify Ducaheat brand headers contain required keys."""
@@ -1425,7 +1535,9 @@ def test_ws_common_dispatch_nodes(
     dispatcher = MagicMock()
     monkeypatch.setattr(base_ws, "async_dispatcher_send", dispatcher)
 
-    monkeypatch.setattr(base_ws, "resolve_record_inventory", lambda *_, **__: None, raising=False)
+    monkeypatch.setattr(
+        base_ws, "resolve_record_inventory", lambda *_, **__: None, raising=False
+    )
 
     dummy = ws_common_stub(
         hass=hass,

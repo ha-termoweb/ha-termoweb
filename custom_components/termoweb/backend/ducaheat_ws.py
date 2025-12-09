@@ -190,6 +190,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         finally:
             self._suppress_default_cadence_hint = False
         self._pending_default_cadence_hint = True
+        self._bind_inventory_from_context()
 
     @property
     def _ws_health(self) -> WsHealthTracker:
@@ -219,6 +220,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             except asyncio.CancelledError:
                 pass
             self._task = None
+        self._cleanup_ws_state()
 
     def is_running(self) -> bool:
         return bool(self._task and not self._task.done())
@@ -432,7 +434,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     remaining = deadline - time.time()
                     if remaining <= 0:
                         now = time.time()
-                        self._refresh_ws_payload_state(now=now, reason="payload_timeout")
+                        self._refresh_ws_payload_state(
+                            now=now, reason="payload_timeout"
+                        )
                         if tracker.payload_stale and tracker.status == "healthy":
                             self._update_status("connected")
                         remaining = 1.0
@@ -552,7 +556,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                 if isinstance(nodes_candidate, Mapping):
                                     nodes_map = nodes_candidate
                                 else:
-                                    nodes_map = self._coerce_dev_data_nodes(nodes_candidate)
+                                    nodes_map = self._coerce_dev_data_nodes(
+                                        nodes_candidate
+                                    )
                             if isinstance(nodes_map, Mapping):
                                 self._log_nodes_summary(nodes_map)
                                 normalised = self._normalise_nodes_payload(nodes_map)
@@ -807,7 +813,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 or node_type
             )
             section_root = dev_map.get("settings")
-            if section_root is not None and not isinstance(section_root, MutableMapping):
+            if section_root is not None and not isinstance(
+                section_root, MutableMapping
+            ):
                 return False
             if canonical_type and isinstance(section_root, MutableMapping):
                 existing_section = section_root.get(canonical_type)
@@ -1003,12 +1011,16 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             inventory=self._inventory,
         )
 
-        inventory = context.inventory if isinstance(context.inventory, Inventory) else None
+        inventory = (
+            context.inventory if isinstance(context.inventory, Inventory) else None
+        )
         if isinstance(inventory, Inventory):
             self._inventory = inventory
 
         if not isinstance(inventory, Inventory):
-            _LOGGER.error("WS (ducaheat): missing inventory for node dispatch on %s", self.dev_id)
+            _LOGGER.error(
+                "WS (ducaheat): missing inventory for node dispatch on %s", self.dev_id
+            )
             return
 
         self._apply_heater_addresses(
@@ -1094,7 +1106,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 if not normalised_addr:
                     continue
                 bucket[normalised_addr] = payload
-            sample_lease = samples.get("lease_seconds") if isinstance(samples, Mapping) else None
+            sample_lease = (
+                samples.get("lease_seconds") if isinstance(samples, Mapping) else None
+            )
             if sample_lease is not None:
                 self._apply_payload_window_hint(
                     source="sample_section",
@@ -1256,6 +1270,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 _LOGGER.debug("WS (ducaheat): close failed", exc_info=True)
             self._ws = None
         self._pending_dev_data = False
+        self._cleanup_ws_state()
         self._ping_interval = None
         self._ping_timeout = None
         previous_suppression = getattr(self, "_suppress_default_cadence_hint", False)
