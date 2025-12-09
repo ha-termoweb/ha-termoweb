@@ -258,6 +258,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         try:
             while True:
                 try:
+                    await self._throttle_connection_attempt()
                     await self._connect_once()
                     await self._read_loop_ws()
                 except asyncio.CancelledError:

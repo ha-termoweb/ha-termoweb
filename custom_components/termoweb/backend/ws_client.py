@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping, MutableMapping
+from collections import deque
+from collections.abc import Awaitable, Callable, Mapping, MutableMapping
 from dataclasses import dataclass
 import logging
 import time
@@ -31,6 +32,53 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 from .ws_health import WsHealthTracker
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class ConnectionRateLimiter:
+    """Throttle websocket connection attempts within a fixed window."""
+
+    def __init__(
+        self,
+        *,
+        min_interval: float = 1.0,
+        max_attempts: int = 3,
+        window_seconds: float = 10.0,
+        clock: Callable[[], float] | None = None,
+        sleeper: Callable[[float], Awaitable[None]] | None = None,
+    ) -> None:
+        """Initialise the limiter with optional clock and sleep hooks."""
+
+        self._min_interval = float(min_interval)
+        self._max_attempts = max(1, int(max_attempts))
+        self._window_seconds = max(1.0, float(window_seconds))
+        self._clock = clock or time.monotonic
+        self._sleep = sleeper or asyncio.sleep
+        self._recent = deque[float]()
+        self._last_attempt = 0.0
+        self._lock = asyncio.Lock()
+
+    async def wait_for_slot(self) -> float:
+        """Sleep if necessary before allowing the next connection attempt."""
+
+        async with self._lock:
+            now = self._clock()
+            while self._recent and now - self._recent[0] > self._window_seconds:
+                self._recent.popleft()
+
+            delay = 0.0
+            if self._recent:
+                delay = max(0.0, self._last_attempt + self._min_interval - now)
+            if len(self._recent) >= self._max_attempts:
+                window_wait = self._window_seconds - (now - self._recent[0])
+                delay = max(delay, window_wait)
+
+            target_time = now + delay
+            self._recent.append(target_time)
+            self._last_attempt = target_time
+
+        if delay > 0:
+            await self._sleep(delay)
+        return delay
 
 
 def resolve_ws_update_section(section: str | None) -> tuple[str | None, str | None]:
@@ -652,6 +700,15 @@ class _WSCommon(_WSStatusMixin):
         """Initialise shared websocket state."""
 
         self._inventory: Inventory | None = inventory
+        self._connect_limiter = ConnectionRateLimiter()
+
+    async def _throttle_connection_attempt(self) -> None:
+        """Apply a defensive rate limit before dialing the backend."""
+
+        limiter = getattr(self, "_connect_limiter", None)
+        wait = getattr(limiter, "wait_for_slot", None)
+        if callable(wait):
+            await wait()
 
     def _bind_inventory_from_context(self) -> Inventory | None:
         """Attach the shared inventory stored on the Home Assistant entry."""
@@ -902,6 +959,7 @@ class WebSocketClient(_WsLeaseMixin, _WSStatusMixin):
 
 __all__ = [
     "DUCAHEAT_NAMESPACE",
+    "ConnectionRateLimiter",
     "HandshakeError",
     "WSStats",
     "WebSocketClient",

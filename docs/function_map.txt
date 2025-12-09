@@ -490,8 +490,14 @@ custom_components/termoweb/backend/ws_client.py :: _prepare_nodes_dispatch
     Normalise node payload data for downstream websocket dispatch.
 custom_components/termoweb/backend/ws_client.py :: _WSCommon._process_power_updates
     Extract instantaneous power readings from websocket payloads.
+custom_components/termoweb/backend/ws_client.py :: ConnectionRateLimiter.__init__
+    Initialise the limiter with optional clock and sleep hooks.
+custom_components/termoweb/backend/ws_client.py :: ConnectionRateLimiter.wait_for_slot
+    Sleep if necessary before allowing the next connection attempt.
 custom_components/termoweb/backend/ws_client.py :: _WSCommon.__init__
     Initialise shared websocket state.
+custom_components/termoweb/backend/ws_client.py :: _WSCommon._throttle_connection_attempt
+    Apply a defensive rate limit before dialing the backend.
 custom_components/termoweb/backend/ws_client.py :: __getattr__
     Lazily expose backend websocket client implementations.
 custom_components/termoweb/backend/ws_health.py :: WsHealthTracker.update_status
