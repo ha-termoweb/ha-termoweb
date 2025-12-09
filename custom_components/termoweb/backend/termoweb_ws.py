@@ -364,6 +364,7 @@ class WebSocketClient(_WSCommon):
             while not self._closing:
                 error: Exception | None = None
                 try:
+                    await self._throttle_connection_attempt()
                     await self._connect_once()
                     await self._wait_for_events()
                 except asyncio.CancelledError:
@@ -850,7 +851,7 @@ class WebSocketClient(_WSCommon):
 
         if not isinstance(inventory, Inventory):
             _LOGGER.error("WS: missing inventory for node dispatch on %s", self.dev_id)
-            return None
+            return
 
         self._apply_heater_addresses(
             raw_nodes,
@@ -882,7 +883,7 @@ class WebSocketClient(_WSCommon):
         else:  # pragma: no cover - legacy hass loop stub
             _send()
 
-        return None
+        return
 
     def _heater_sample_subscription_targets(self) -> Iterable[tuple[str, str]]:
         """Return ordered ``(node_type, addr)`` heater sample subscriptions."""
@@ -1222,6 +1223,7 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         while not self._closing:
             should_retry = True
             try:
+                await self._throttle_connection_attempt()
                 _LOGGER.debug("WS: initiating Socket.IO 0.9 handshake")
                 sid, hb_timeout = await self._handshake()
                 _LOGGER.debug(
