@@ -118,6 +118,12 @@ custom_components/termoweb/backend/base.py :: HttpClientProto.get_nodes
     Return the node description for the given device.
 custom_components/termoweb/backend/base.py :: HttpClientProto.get_node_settings
     Return settings for the specified node.
+custom_components/termoweb/backend/ws_client.py :: _WSCommon._bind_inventory_from_context
+    Attach the shared inventory stored on the Home Assistant entry.
+custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._ws_bucket_sizes
+    Return the current websocket state and tracker bucket sizes.
+custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._cleanup_ws_state
+    Remove cached websocket state and tracker entries for this device.
 custom_components/termoweb/backend/base.py :: HttpClientProto.set_node_settings
     Update node settings for the specified node.
 custom_components/termoweb/backend/base.py :: HttpClientProto.get_node_samples

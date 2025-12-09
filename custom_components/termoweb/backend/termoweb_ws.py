@@ -69,6 +69,8 @@ _SENSITIVE_PLACEHOLDERS: Mapping[str, tuple[str, Callable[[str | None], str]]] =
     "dev_id": ("{dev_id}", mask_identifier),
     "sid": ("{sid}", mask_identifier),
 }
+
+
 class WebSocketClient(_WSCommon):
     """Unified websocket client wrapping ``socketio.AsyncClient``."""
 
@@ -185,6 +187,7 @@ class WebSocketClient(_WSCommon):
         state = self._ws_state_bucket()
         state.setdefault("last_payload_at", None)
         state.setdefault("idle_restart_pending", False)
+        self._bind_inventory_from_context()
 
     def _brand_headers(self, *, origin: str | None = None) -> dict[str, str]:
         """Return baseline headers aligned with the REST client brand."""
@@ -328,6 +331,7 @@ class WebSocketClient(_WSCommon):
                 await self._task
             self._task = None
         self._update_status("stopped")
+        self._cleanup_ws_state()
 
     def is_running(self) -> bool:
         """Return True if the websocket client task is active."""
@@ -448,6 +452,7 @@ class WebSocketClient(_WSCommon):
             except Exception:
                 _LOGGER.debug("WS: disconnect due to %s failed", reason, exc_info=True)
         self._disconnected.set()
+        self._cleanup_ws_state()
 
     async def _build_engineio_target(self) -> tuple[str, str]:
         """Return the Engine.IO base URL and path."""
@@ -529,6 +534,7 @@ class WebSocketClient(_WSCommon):
         self._subscription_refresh_failed = False
         self._handshake_logged = False
         self._disconnected.set()
+        self._cleanup_ws_state()
 
     async def _on_reconnect(self) -> None:
         """Handle socket reconnection attempts."""
@@ -676,9 +682,7 @@ class WebSocketClient(_WSCommon):
             except Exception:  # pragma: no cover - defensive logging only
                 _LOGGER.debug("WS: normalise_ws_nodes failed; using raw payload")
         if _LOGGER.isEnabledFor(logging.DEBUG) and not merge:
-            _LOGGER.debug(
-                "WS: dev_data snapshot contains %d node groups", len(nodes)
-            )
+            _LOGGER.debug("WS: dev_data snapshot contains %d node groups", len(nodes))
         self._dispatch_nodes(nodes)
         inventory = self._inventory if isinstance(self._inventory, Inventory) else None
         allowed_types = (
@@ -718,7 +722,9 @@ class WebSocketClient(_WSCommon):
                     "lease_seconds": lease_seconds,
                 }
         if merge and _LOGGER.isEnabledFor(logging.DEBUG):
-            inventory = self._inventory if isinstance(self._inventory, Inventory) else None
+            inventory = (
+                self._inventory if isinstance(self._inventory, Inventory) else None
+            )
             pairs = ""
             if inventory is not None:
                 pairs = ", ".join(
@@ -867,9 +873,7 @@ class WebSocketClient(_WSCommon):
         def _send() -> None:
             """Fire the dispatcher signal with the latest node payload."""
 
-            self._dispatcher(
-                self.hass, signal_ws_data(self.entry_id), payload_copy
-            )
+            self._dispatcher(self.hass, signal_ws_data(self.entry_id), payload_copy)
 
         loop = getattr(self.hass, "loop", None)
         call_soon = getattr(loop, "call_soon_threadsafe", None)
@@ -1533,7 +1537,9 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             if not candidate and value is not None and not isinstance(value, str):
                 candidate = str(value).strip() or None
 
-            inventory = self._inventory if isinstance(self._inventory, Inventory) else None
+            inventory = (
+                self._inventory if isinstance(self._inventory, Inventory) else None
+            )
             if candidate and inventory is not None:
                 try:
                     addresses_map = inventory.addresses_by_type
