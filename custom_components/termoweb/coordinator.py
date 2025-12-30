@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Mapping, MutableMapping
+import asyncio
+from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from itertools import chain
@@ -24,6 +25,7 @@ from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
 from .domain.ids import NodeId as DomainNodeId, NodeType as DomainNodeType
 from .domain.legacy_view import store_to_legacy_coordinator_data
 from .domain.state import DomainStateStore, NodeSettingsDelta
+from .domain.view import DomainStateView
 from .inventory import Inventory, normalize_node_addr, normalize_node_type
 from .utils import float_or_none
 
@@ -124,7 +126,27 @@ class StateCoordinator(
         self._rtc_reference: datetime | None = None
         self._rtc_reference_monotonic: float | None = None
         self._instant_power: dict[tuple[str, str], InstantPowerEntry] = {}
+        self._domain_view = DomainStateView(
+            dev_id,
+            None,
+            self._legacy_device_payload,
+        )
         self.update_nodes(nodes, inventory=inventory)
+
+    def _legacy_device_payload(self) -> Mapping[str, Any] | None:
+        """Return the legacy coordinator payload for this device."""
+
+        data = self.data
+        if not isinstance(data, Mapping):
+            return None
+        record = data.get(self._dev_id)
+        return record if isinstance(record, Mapping) else None
+
+    @property
+    def domain_view(self) -> DomainStateView:
+        """Return the read-only domain state view."""
+
+        return self._domain_view
 
     @staticmethod
     def _collect_previous_settings(
@@ -725,6 +747,7 @@ class StateCoordinator(
         else:
             self._inventory = None
             self._state_store = None
+            self._domain_view.update_store(None)
 
     def _ensure_inventory(self) -> Inventory | None:
         """Ensure cached inventory metadata is available."""
@@ -754,6 +777,7 @@ class StateCoordinator(
 
         if self._is_ducaheat:
             self._state_store = None
+            self._domain_view.update_store(None)
             return None
 
         node_ids = self._node_ids_from_inventory(inventory)
@@ -761,6 +785,7 @@ class StateCoordinator(
             self._state_store = DomainStateStore(node_ids)
         else:
             self._state_store.reset_nodes(node_ids)
+        self._domain_view.update_store(self._state_store)
         return self._state_store
 
     def _seed_state_store_from_coordinator(self, store: DomainStateStore) -> None:
@@ -838,6 +863,49 @@ class StateCoordinator(
         new_data = dict(self.data or {})
         new_data.update(device_record)
         self.async_set_updated_data(new_data)
+
+    def apply_entity_patch(
+        self, node_type: str, addr: str, mutator: Callable[[dict[str, Any]], None]
+    ) -> bool:
+        """Apply an optimistic patch through the domain store when available."""
+
+        if self._is_ducaheat:
+            return False
+
+        inventory = self._inventory
+        store = self._state_store
+        if store is None or not isinstance(inventory, Inventory):
+            return False
+
+        try:
+            current_state = store.get_state(node_type, addr)
+            base = current_state.to_legacy() if current_state else {}
+            payload = dict(base)
+            mutator(payload)
+            store.apply_patch(node_type, addr, payload)
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:  # pragma: no cover - defensive  # noqa: BLE001
+            _LOGGER.debug(
+                "Failed to apply optimistic patch type=%s addr=%s: %s",
+                node_type,
+                addr,
+                err,
+            )
+            return False
+
+        dev_name = _device_display_name(self._device, self._dev_id)
+        device_record = store_to_legacy_coordinator_data(
+            self._dev_id,
+            store,
+            inventory,
+            device_name=dev_name,
+            device_raw=self._device,
+        )
+        new_data = dict(self.data or {})
+        new_data.update(device_record)
+        self.async_set_updated_data(new_data)
+        return True
 
     async def async_refresh_heater(self, node: str | tuple[str, str]) -> None:
         """Refresh settings for a specific node and push the update to listeners."""

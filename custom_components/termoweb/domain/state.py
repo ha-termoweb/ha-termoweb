@@ -386,17 +386,9 @@ class DomainStateStore:
     def _resolve_node_id(self, node_type: NodeType | str, addr: Any) -> NodeId | None:
         """Return a canonical NodeId when permitted by the inventory."""
 
-        try:
-            normalized_type = (
-                node_type
-                if isinstance(node_type, NodeType)
-                else NodeType(str(node_type))
-            )
-        except ValueError:
-            try:
-                normalized_type = NodeType(str(node_type).lower())
-            except ValueError:
-                return None
+        normalized_type = _normalize_node_type(node_type)
+        if normalized_type is None:
+            return None
 
         try:
             candidate = NodeId(normalized_type, addr)
@@ -513,3 +505,31 @@ class DomainStateStore:
                     continue
                 bucket[addr] = state.to_legacy()
         return legacy
+
+
+def _normalize_node_type(node_type: NodeType | str) -> NodeType | None:
+    """Return a canonical ``NodeType`` when possible."""
+
+    if isinstance(node_type, NodeType):
+        return node_type
+
+    try:
+        return NodeType(str(node_type))
+    except ValueError:
+        try:
+            return NodeType(str(node_type).lower())
+        except ValueError:
+            return None
+
+
+def build_state_from_payload(
+    node_type: NodeType | str, payload: Mapping[str, Any]
+) -> DomainState | None:
+    """Return a domain state instance derived from a legacy payload."""
+
+    normalized_type = _normalize_node_type(node_type)
+    if normalized_type is None:
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    return _build_state(normalized_type, payload)

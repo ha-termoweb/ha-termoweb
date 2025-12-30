@@ -16,6 +16,7 @@ from homeassistant.util import dt as dt_util
 
 from .boost import coerce_boost_bool, coerce_boost_minutes, supports_boost
 from .const import DOMAIN, signal_ws_data
+from .domain import DomainStateView
 from .i18n import COORDINATOR_FALLBACK_ATTR, format_fallback
 from .inventory import (
     HEATER_NODE_TYPES,
@@ -46,6 +47,8 @@ class BoostButtonMetadata:
     label: str
     icon: str
     action: str = "start"
+
+
 def _build_boost_button_metadata() -> tuple[BoostButtonMetadata, ...]:
     """Return the configured metadata describing boost helper buttons."""
 
@@ -942,6 +945,12 @@ class HeaterNodeBase(CoordinatorEntity):
         node_type = getattr(self, "_node_type", "htr")
         return inventory.has_node(node_type, self._addr)
 
+    def _domain_state_view(self) -> DomainStateView | None:
+        """Return the domain state view exposed by the coordinator."""
+
+        view = getattr(self.coordinator, "domain_view", None)
+        return view if isinstance(view, DomainStateView) else None
+
     def _device_record(self) -> dict[str, Any] | None:
         """Return the coordinator cache entry for this device."""
         data = getattr(self.coordinator, "data", {}) or {}
@@ -954,13 +963,44 @@ class HeaterNodeBase(CoordinatorEntity):
                 record = dict.get(data, self._dev_id)
             else:
                 return None
-        except Exception:  # pragma: no cover - defensive
+        except Exception:  # pragma: no cover - defensive  # noqa: BLE001
             _LOGGER.debug(
                 "Failed to resolve device record for %s", self._dev_id, exc_info=True
             )
             return None
 
         return record if isinstance(record, dict) else None
+
+    def _heater_state_payload(self) -> Mapping[str, Any] | None:
+        """Return the canonical heater settings payload."""
+
+        view = self._domain_state_view()
+        if view is not None:
+            state = view.get_heater_state(self._node_type, self._addr)
+            if state is not None:
+                return state.to_legacy()
+
+        record = self._device_record()
+        if not isinstance(record, Mapping):
+            return None
+
+        settings_by_type = record.get("settings")
+        if isinstance(settings_by_type, Mapping):
+            per_type = settings_by_type.get(self._node_type)
+            if isinstance(per_type, Mapping):
+                payload = per_type.get(self._addr)
+                if isinstance(payload, Mapping):
+                    return payload
+
+        node_section = record.get(self._node_type)
+        if isinstance(node_section, Mapping):
+            per_type_settings = node_section.get("settings")
+            if isinstance(per_type_settings, Mapping):
+                payload = per_type_settings.get(self._addr)
+                if isinstance(payload, Mapping):
+                    return payload
+
+        return None
 
     def _resolve_inventory(self) -> Inventory:
         """Return the cached inventory for this entity, if available."""
@@ -981,26 +1021,22 @@ class HeaterNodeBase(CoordinatorEntity):
     def _heater_section(self) -> dict[str, Any]:
         """Return the heater-specific metadata cached for this entity."""
 
-        record = self._device_record()
-        if not isinstance(record, Mapping):
-            return {}
-
         node_type = getattr(self, "_node_type", "htr")
         try:
             inventory = self._resolve_inventory()
         except ValueError:
             inventory = None
 
-        settings = {}
-        cached_settings = record.get("settings")
-        if isinstance(cached_settings, Mapping):
-            node_settings = cached_settings.get(node_type)
-            if isinstance(node_settings, Mapping):
-                settings = node_settings
+        settings: dict[str, Any] = {}
+        payload = self._heater_state_payload()
+        if isinstance(payload, Mapping):
+            settings = {self._addr: dict(payload)}
 
         section: dict[str, Any] = {"settings": settings}
 
-        if isinstance(inventory, Inventory) and inventory.has_node(node_type, self._addr):
+        if isinstance(inventory, Inventory) and inventory.has_node(
+            node_type, self._addr
+        ):
             device_name = getattr(self, "_device_name", None)
 
             def _default_name(addr: str) -> str:
@@ -1021,12 +1057,8 @@ class HeaterNodeBase(CoordinatorEntity):
 
     def heater_settings(self) -> dict[str, Any] | None:
         """Return the cached settings for this heater, if available."""
-        section = self._heater_section()
-        settings_map = section.get("settings")
-        if not isinstance(settings_map, Mapping):
-            return None
-        settings = settings_map.get(self._addr)
-        return settings if isinstance(settings, dict) else None
+        payload = self._heater_state_payload()
+        return dict(payload) if isinstance(payload, Mapping) else None
 
     def _hass_for_runtime(self) -> HomeAssistant | None:
         """Return the best-effort Home Assistant instance for runtime access."""

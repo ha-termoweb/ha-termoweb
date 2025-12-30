@@ -17,6 +17,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .boost import supports_boost
 from .const import DOMAIN, signal_ws_data, signal_ws_status
 from .coordinator import StateCoordinator
+from .domain import DomainStateView
 from .entity import GatewayDispatcherEntity
 from .heater import (
     BoostState,
@@ -24,7 +25,7 @@ from .heater import (
     derive_boost_state,
     log_skipped_nodes,
 )
-from .i18n import attach_fallbacks, async_get_fallback_translations
+from .i18n import async_get_fallback_translations, attach_fallbacks
 from .identifiers import build_heater_entity_unique_id
 from .inventory import (
     HEATER_NODE_TYPES,
@@ -332,17 +333,12 @@ def _build_settings_resolver(
     """Return callable resolving boost settings for a heater node."""
 
     def _resolver() -> Mapping[str, Any] | None:
-        data = coordinator.data or {}
-        device = data.get(dev_id)
-        if not isinstance(device, Mapping):
-            return None
-        settings_by_type = device.get("settings")
-        if not isinstance(settings_by_type, Mapping):
-            return None
-        per_type = settings_by_type.get(node_type)
-        if not isinstance(per_type, Mapping):
-            return None
-        settings = per_type.get(addr)
-        return settings if isinstance(settings, Mapping) else None
+        view = getattr(coordinator, "domain_view", None)
+        if isinstance(view, DomainStateView):
+            state = view.get_heater_state(node_type, addr)
+            if state is not None:
+                payload = state.to_legacy()
+                return payload if isinstance(payload, Mapping) else None
+        return None
 
     return _resolver
