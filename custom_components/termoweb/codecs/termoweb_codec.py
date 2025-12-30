@@ -7,10 +7,27 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
+from custom_components.termoweb.backend.sanitize import validate_boost_minutes
+from custom_components.termoweb.domain.commands import (
+    AccumulatorCommand,
+    BaseCommand,
+    SetExtraOptions,
+    SetMode,
+    SetPresetTemps,
+    SetProgram,
+    SetSetpoint,
+    SetUnits,
+    StartBoost,
+    StopBoost,
+)
+
 from .termoweb_models import (
+    AcmBoostWritePayload,
+    AcmExtraOptionsWritePayload,
     DevListResponse,
     DevSummary,
     HeaterSettingsPayload,
+    NodeSettingsWritePayload,
     NodesResponse,
     PowerMonitorPayload,
     SamplesResponse,
@@ -30,6 +47,167 @@ def encode_payload(data: Any) -> Any:
     """Encode data for TermoWeb payloads."""
 
     raise NotImplementedError
+
+
+def _format_temperature(value: Any, *, label: str) -> str:
+    """Format numeric temperatures to a one-decimal string."""
+
+    try:
+        return f"{float(value):.1f}"
+    except (TypeError, ValueError) as err:
+        raise ValueError(f"Invalid {label} value: {value!r}") from err
+
+
+def _validate_units(units: str | None, *, trim: bool = False) -> str:
+    """Validate and normalise temperature units."""
+
+    raw = "" if units is None else str(units)
+    unit_value = raw.strip().upper() if trim else raw.upper()
+    if unit_value not in {"C", "F"}:
+        raise ValueError(f"Invalid units: {units!r}")
+    return unit_value
+
+
+def _validate_prog(prog: list[int]) -> list[int]:
+    """Validate a weekly program sequence."""
+
+    if not isinstance(prog, list) or len(prog) != 168:
+        raise ValueError("prog must be a list of 168 integers (0, 1, or 2)")
+    normalised: list[int] = []
+    for value in prog:
+        try:
+            ivalue = int(value)
+        except (TypeError, ValueError) as err:
+            raise ValueError(f"prog contains non-integer value: {value!r}") from err
+        if ivalue not in (0, 1, 2):
+            raise ValueError(f"prog values must be 0, 1, or 2; got {ivalue}")
+        normalised.append(ivalue)
+    return normalised
+
+
+def _validate_ptemp(ptemp: list[float | str]) -> list[str]:
+    """Validate preset temperatures and return formatted strings."""
+
+    if not isinstance(ptemp, list) or len(ptemp) != 3:
+        raise ValueError(
+            "ptemp must be a list of three numeric values [cold, night, day]"
+        )
+    formatted: list[str] = []
+    for value in ptemp:
+        try:
+            formatted.append(_format_temperature(value, label="temperature"))
+        except ValueError as err:
+            raise ValueError(f"ptemp contains non-numeric value: {value}") from err
+    return formatted
+
+
+def _normalise_mode(mode: str) -> str:
+    """Lower-case and normalise heater modes."""
+
+    mode_str = str(mode).lower()
+    if mode_str == "heat":
+        return "manual"
+    return mode_str
+
+
+def build_settings_payload(
+    node_type: str, commands: list[BaseCommand]
+) -> dict[str, Any]:
+    """Encode node setting commands into a TermoWeb payload."""
+
+    _ = node_type  # reserved for future branching on node type
+    mode: str | None = None
+    stemp: str | None = None
+    prog: list[int] | None = None
+    ptemp: list[str] | None = None
+    units: str | None = None
+
+    for command in commands:
+        if isinstance(command, SetMode):
+            mode = _normalise_mode(command.mode)
+        elif isinstance(command, SetSetpoint):
+            stemp = _format_temperature(command.setpoint, label="stemp")
+        elif isinstance(command, SetProgram):
+            prog = _validate_prog(command.program)
+        elif isinstance(command, SetPresetTemps):
+            ptemp = _validate_ptemp(command.presets)
+        elif isinstance(command, SetUnits):
+            units = _validate_units(command.units)
+        else:
+            raise TypeError(f"Unsupported command type: {type(command).__name__}")
+
+    payload: dict[str, Any] = {}
+    if mode is not None:
+        payload["mode"] = mode
+    if stemp is not None:
+        payload["stemp"] = stemp
+    if prog is not None:
+        payload["prog"] = prog
+    if ptemp is not None:
+        payload["ptemp"] = ptemp
+    if units is not None:
+        payload["units"] = units
+
+    model = NodeSettingsWritePayload.model_validate(payload)
+    return model.model_dump(exclude_none=True)
+
+
+def build_extra_options_payload(command: SetExtraOptions) -> dict[str, Any]:
+    """Encode accumulator extra options for TermoWeb."""
+
+    extra: dict[str, Any] = {}
+    minutes = validate_boost_minutes(command.boost_time)
+    if minutes is not None:
+        extra["boost_time"] = minutes
+    if command.boost_temp is not None:
+        try:
+            extra["boost_temp"] = _format_temperature(
+                command.boost_temp, label="boost_temp"
+            )
+        except ValueError as err:
+            raise ValueError(
+                f"Invalid boost_temp value: {command.boost_temp!r}"
+            ) from err
+    if not extra:
+        raise ValueError("boost_time or boost_temp must be provided")
+
+    payload = AcmExtraOptionsWritePayload.model_validate({"extra_options": extra})
+    return payload.model_dump(exclude_none=True)
+
+
+def build_boost_payload(command: AccumulatorCommand) -> dict[str, Any]:
+    """Encode accumulator boost commands for TermoWeb."""
+
+    boost_flag: bool
+    stemp_value: str | float | None
+    units_value: str | None
+    minutes: int | None
+    if isinstance(command, StartBoost):
+        boost_flag = True
+        stemp_value = command.stemp
+        units_value = command.units
+        minutes = validate_boost_minutes(command.boost_time)
+    elif isinstance(command, StopBoost):
+        boost_flag = False
+        stemp_value = command.stemp
+        units_value = command.units
+        minutes = validate_boost_minutes(command.boost_time)
+    else:  # pragma: no cover - defensive guard
+        raise TypeError(f"Unsupported boost command: {type(command).__name__}")
+
+    payload: dict[str, Any] = {"boost": boost_flag}
+    if minutes is not None:
+        payload["boost_time"] = minutes
+    if stemp_value is not None:
+        try:
+            payload["stemp"] = _format_temperature(stemp_value, label="stemp")
+        except ValueError as err:
+            raise ValueError(f"Invalid stemp value: {stemp_value!r}") from err
+    if units_value is not None:
+        payload["units"] = _validate_units(units_value, trim=True)
+
+    model = AcmBoostWritePayload.model_validate(payload)
+    return model.model_dump(exclude_none=True)
 
 
 def decode_devs_payload(raw: Any) -> list[dict[str, Any]]:

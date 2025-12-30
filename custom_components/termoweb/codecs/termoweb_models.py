@@ -252,3 +252,70 @@ class SamplesResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     samples: list[SampleItem] | None = None
+
+
+class NodeSettingsWritePayload(BaseModel):
+    """Payload for TermoWeb node settings writes."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    mode: str | None = None
+    stemp: str | None = None
+    prog: list[int] | None = None
+    ptemp: list[str] | None = None
+    units: str | None = None
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _normalise_mode(cls, value: Any) -> Any:
+        """Lower-case mode strings when provided."""
+
+        if value is None:
+            return value
+        return str(value).lower()
+
+    @field_validator("units", mode="before")
+    @classmethod
+    def _normalise_units(cls, value: Any) -> Any:
+        """Upper-case temperature unit identifiers."""
+
+        if value is None:
+            return value
+        return str(value).strip().upper()
+
+
+class ExtraOptionsPayload(BaseModel):
+    """Accumulator extra options payload."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    boost_time: int | None = None
+    boost_temp: str | None = None
+
+
+class AcmExtraOptionsWritePayload(BaseModel):
+    """Wrapper for accumulator extra options writes."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    extra_options: ExtraOptionsPayload
+
+
+class AcmBoostWritePayload(BaseModel):
+    """Accumulator boost payload."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    boost: bool
+    boost_time: int | None = None
+    stemp: str | None = None
+    units: str | None = None
+
+    @field_validator("units", mode="before")
+    @classmethod
+    def _normalise_units(cls, value: Any) -> Any:
+        """Upper-case temperature units for boost writes."""
+
+        if value is None:
+            return value
+        return str(value).strip().upper()
