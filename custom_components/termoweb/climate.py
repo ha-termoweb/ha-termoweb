@@ -1,3 +1,5 @@
+# ruff: noqa: D100,BLE001,TRY301
+
 from __future__ import annotations
 
 import asyncio
@@ -24,27 +26,16 @@ from .const import BRAND_DUCAHEAT, DOMAIN
 from .heater import (
     DEFAULT_BOOST_DURATION,
     HeaterNodeBase,
-    clear_climate_entity_id,
     HeaterPlatformDetails,
+    clear_climate_entity_id,
     derive_boost_state,
     log_skipped_nodes,
     register_climate_entity_id,
     resolve_boost_runtime_minutes,
 )
-from .i18n import (
-    async_get_fallback_translations,
-    attach_fallbacks,
-    format_fallback,
-)
+from .i18n import async_get_fallback_translations, attach_fallbacks, format_fallback
 from .identifiers import build_heater_entity_unique_id, thermostat_fallback_name
-from .inventory import (
-    HeaterNode,
-    Inventory,
-    heater_platform_details_from_inventory,
-    normalize_node_addr,
-    normalize_node_type,
-)
-
+from .inventory import HeaterNode, Inventory, normalize_node_addr, normalize_node_type
 from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
@@ -53,6 +44,8 @@ _LOGGER = logging.getLogger(__name__)
 _WRITE_DEBOUNCE = 0.2
 # If WS echo doesn't arrive quickly after a successful write, force a refresh
 _WS_ECHO_FALLBACK_REFRESH = 4.0
+
+
 async def async_setup_entry(hass, entry, async_add_entities):
     """Discover heater nodes and create climate entities."""
     data = hass.data[DOMAIN][entry.entry_id]
@@ -65,9 +58,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     try:
         inventory = Inventory.require_from_context(container=data)
     except LookupError as err:
-        _LOGGER.error(
-            "TermoWeb climate setup missing inventory for device %s", dev_id
-        )
+        _LOGGER.error("TermoWeb climate setup missing inventory for device %s", dev_id)
         raise ValueError("TermoWeb inventory unavailable for climate platform") from err
 
     def default_name_simple(addr: str) -> str:
@@ -79,6 +70,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             "Heater {addr}",
             addr=addr,
         )
+
     new_entities: list[ClimateEntity] = []
 
     heater_details = HeaterPlatformDetails(
@@ -225,15 +217,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
             temperature=call.data.get("temperature"),
         )
 
-    async def _svc_start_boost(
-        entity: HeaterClimateEntity, call: ServiceCall
-    ) -> None:
+    async def _svc_start_boost(entity: HeaterClimateEntity, call: ServiceCall) -> None:
         """Handle accumulator boost start service."""
 
         if not isinstance(entity, AccumulatorClimateEntity):
-            _LOGGER.error(
-                "termoweb.start_boost only applies to accumulator entities"
-            )
+            _LOGGER.error("termoweb.start_boost only applies to accumulator entities")
             return
 
         _LOGGER.info(
@@ -247,9 +235,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         """Handle accumulator boost cancellation service."""
 
         if not isinstance(entity, AccumulatorClimateEntity):
-            _LOGGER.error(
-                "termoweb.cancel_boost only applies to accumulator entities"
-            )
+            _LOGGER.error("termoweb.cancel_boost only applies to accumulator entities")
             return
 
         _LOGGER.info(
@@ -475,8 +461,22 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
     def _optimistic_update(self, mutator: Callable[[dict[str, Any]], None]) -> None:
         """Apply ``mutator`` to cached settings and refresh state if changed."""
         try:
-            updated = False
+            applied = False
+            coordinator = getattr(self, "coordinator", None)
+            apply_patch = getattr(coordinator, "apply_entity_patch", None)
+            if callable(apply_patch):
+                applied = bool(apply_patch(self._node_type, self._addr, mutator))
+
+            if applied:
+                self.async_write_ha_state()
+                hass = self.hass
+                refresh = getattr(self.coordinator, "async_request_refresh", None)
+                if hass is not None and callable(refresh):
+                    hass.async_create_task(refresh())
+                return
+
             boost_changed = False
+            updated = False
             for settings_map in self._settings_maps():
                 cur = settings_map.get(self._addr)
                 if isinstance(cur, dict):
@@ -527,6 +527,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         ptemp: list[float] | None = None,
     ) -> bool:
         """Submit a settings update to the TermoWeb API."""
+
         async def _submit(client: Any) -> None:
             await self._async_submit_settings(
                 client,
@@ -657,7 +658,10 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             )
             if canonical_type != node_type:
                 continue
-            if normalize_node_addr(sample_addr, use_default_when_falsey=True) == normalized_addr:
+            if (
+                normalize_node_addr(sample_addr, use_default_when_falsey=True)
+                == normalized_addr
+            ):
                 return True
 
         return False
@@ -986,7 +990,11 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 fallback_mode = self._default_mode_for_setpoint()
                 if fallback_mode is not None:
                     mode = fallback_mode
-        if mode is not None and stemp is None and self._requires_setpoint_with_mode(mode):
+        if (
+            mode is not None
+            and stemp is None
+            and self._requires_setpoint_with_mode(mode)
+        ):
             current = self.target_temperature
             if current is not None:
                 stemp = float(current)
@@ -1081,9 +1089,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 status = str(ws_state.get("status") or "").lower()
                 if status in {"connected", "healthy"}:
                     last_payload_at = ws_state.get("last_payload_at")
-                    idle_restart_pending = bool(
-                        ws_state.get("idle_restart_pending")
-                    )
+                    idle_restart_pending = bool(ws_state.get("idle_restart_pending"))
                     recent_payload = False
                     if isinstance(last_payload_at, (int, float)):
                         recent_payload = (time.time() - last_payload_at) <= (
@@ -1256,9 +1262,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
 
         if value == "boost":
             self._boost_resume_mode = self.hvac_mode
-            await self.async_start_boost(
-                minutes=self._preferred_boost_minutes()
-            )
+            await self.async_start_boost(minutes=self._preferred_boost_minutes())
             return
 
         resume_mode = self._boost_resume_mode or self.hvac_mode
@@ -1497,7 +1501,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
             boost_state = None
             try:
                 boost_state = self.boost_state()
-            except Exception as err:  # noqa: BLE001 - defensive
+            except Exception as err:  # defensive
                 _LOGGER.debug(
                     "Failed to derive boost state for cancel heuristic addr=%s: %s",
                     self._addr,
