@@ -29,6 +29,7 @@ from .const import (
     get_brand_requested_with,
     get_brand_user_agent,
 )
+from .codecs.termoweb_codec import decode_devs_payload, decode_nodes_payload
 from .inventory import Node, NodeDescriptor, normalize_node_addr, normalize_node_type
 
 _LOGGER = logging.getLogger(__name__)
@@ -322,24 +323,20 @@ class RESTClient:
         """Return normalized device list: [{'dev_id', ...}, ...]."""
         headers = await self.authed_headers()
         data = await self._request("GET", DEVS_PATH, headers=headers)
-
-        if isinstance(data, list):
-            return [d for d in data if isinstance(d, dict)]
-        if isinstance(data, dict):
-            if isinstance(data.get("devs"), list):
-                return [d for d in data["devs"] if isinstance(d, dict)]
-            if isinstance(data.get("devices"), list):
-                return [d for d in data["devices"] if isinstance(d, dict)]
-        _LOGGER.debug(
-            "Unexpected /devs shape (%s); returning empty list", type(data).__name__
-        )
-        return []
+        devices = decode_devs_payload(data)
+        if not devices:
+            _LOGGER.debug(
+                "Unexpected /devs shape (%s); returning empty list",
+                type(data).__name__,
+            )
+        return devices
 
     async def get_nodes(self, dev_id: str) -> Any:
         """Return raw nodes payload for a device (shape varies by firmware)."""
         headers = await self.authed_headers()
         path = NODES_PATH_FMT.format(dev_id=dev_id)
-        return await self._request("GET", path, headers=headers)
+        raw = await self._request("GET", path, headers=headers)
+        return decode_nodes_payload(raw)
 
     async def get_node_settings(self, dev_id: str, node: NodeDescriptor) -> Any:
         """Return settings/state for a node."""

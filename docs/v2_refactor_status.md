@@ -9,5 +9,5 @@
 - The refactor progresses via a strangler pattern: new domain/codecs coexist with legacy code until fully migrated.
 
 ## Progress log
-- **v2.0.0-pre2**: Added accumulator domain scaffolding (state + commands) building on heater model; no runtime behavior changes. Testing: targeted unit tests for domain ids/inventory/state.
+- **v2.0.0-pre2**: Added TermoWeb REST codec and Pydantic v2 models for device and node inventory responses; wired REST client through codecs without changing return shapes. Testing: unit tests for codec payload normalization and API paths.
 - **v2.0.0-pre1**: Added domain and codec scaffolding; no runtime behavior changes. Testing: targeted unit tests for domain ids/inventory.
