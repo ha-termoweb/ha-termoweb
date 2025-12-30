@@ -22,7 +22,9 @@ def cadence_probe() -> CadenceProbe:
     return CadenceProbe()
 
 
-def test_normalise_cadence_value_filters_invalid_inputs(cadence_probe: CadenceProbe) -> None:
+def test_normalise_cadence_value_filters_invalid_inputs(
+    cadence_probe: CadenceProbe,
+) -> None:
     """Ensure invalid cadence values are rejected."""
 
     invalid_values = [
@@ -39,7 +41,9 @@ def test_normalise_cadence_value_filters_invalid_inputs(cadence_probe: CadencePr
         assert cadence_probe._normalise_cadence_value(candidate) is None
 
 
-def test_normalise_cadence_value_accepts_positive_inputs(cadence_probe: CadenceProbe) -> None:
+def test_normalise_cadence_value_accepts_positive_inputs(
+    cadence_probe: CadenceProbe,
+) -> None:
     """Ensure positive strings and floats are accepted."""
 
     assert cadence_probe._normalise_cadence_value("30") == pytest.approx(30.0)

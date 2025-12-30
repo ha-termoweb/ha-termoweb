@@ -26,7 +26,9 @@ def build_heater_unique_id(
     suffix_str = ""
     if suffix:
         suffix_clean = str(suffix)
-        suffix_str = suffix_clean if suffix_clean.startswith(":") else f":{suffix_clean}"
+        suffix_str = (
+            suffix_clean if suffix_clean.startswith(":") else f":{suffix_clean}"
+        )
 
     return f"{DOMAIN}:{dev}:{node}:{address}{suffix_str}"
 

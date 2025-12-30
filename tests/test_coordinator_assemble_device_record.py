@@ -3,9 +3,11 @@
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
-from homeassistant.core import HomeAssistant
-
-from custom_components.termoweb.coordinator import StateCoordinator
+from custom_components.termoweb.domain.ids import NodeId, NodeType
+from custom_components.termoweb.domain.legacy_view import (
+    store_to_legacy_coordinator_data,
+)
+from custom_components.termoweb.domain.state import DomainStateStore
 from custom_components.termoweb.inventory import AccumulatorNode, HeaterNode
 
 
@@ -13,11 +15,10 @@ def test_assemble_device_record_uses_inventory_maps(
     inventory_builder: Callable[
         [str, Mapping[str, Any] | None, Iterable[Any] | None],
         Any,
-    ]
+    ],
 ) -> None:
     """Device records should expose inventory-derived metadata."""
 
-    hass = HomeAssistant()
     inventory = inventory_builder(
         "dev",
         {},
@@ -26,30 +27,32 @@ def test_assemble_device_record_uses_inventory_maps(
             AccumulatorNode(name="Store", addr="07"),
         ],
     )
-    coordinator = StateCoordinator(
-        hass,
-        client=None,  # type: ignore[arg-type]
-        base_interval=30,
-        dev_id="dev",
-        device={},
-        nodes=inventory.payload,
-        inventory=inventory,
-    )
 
     settings = {
         "htr": {"01": {"target": 21}},
         "acm": {"07": {"mode": "auto"}},
-        "extra": {"Z": {"raw": True}},
     }
 
-    record = coordinator._assemble_device_record(
-        inventory=inventory,
-        settings_by_type=settings,
-        name="Device dev",
+    store = DomainStateStore(
+        [NodeId(NodeType.HEATER, "01"), NodeId(NodeType.ACCUMULATOR, "07")]
+    )
+    for node_type, bucket in settings.items():
+        if not isinstance(bucket, Mapping):
+            continue
+        for addr, payload in bucket.items():
+            store.apply_full_snapshot(node_type, addr, payload)
+
+    record = store_to_legacy_coordinator_data(
+        "dev",
+        store,
+        inventory,
+        device_name="Device dev",
+        device_raw={"name": "Device dev"},
     )
 
-    assert record["inventory"] is inventory
-    assert "addresses_by_type" not in record
-    assert "heater_address_map" not in record
-    assert "power_monitor_address_map" not in record
-    assert record["settings"] == settings
+    device = record["dev"]
+    assert device["inventory"] is inventory
+    assert "addresses_by_type" not in device
+    assert "heater_address_map" not in device
+    assert "power_monitor_address_map" not in device
+    assert device["settings"] == settings

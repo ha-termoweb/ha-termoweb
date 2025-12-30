@@ -62,7 +62,9 @@ def decode_settings(
     if node_type is NodeType.THERMOSTAT:
         return _decode_thm_settings(payload, include_raw=include_raw)
     if node_type in {NodeType.HEATER, NodeType.ACCUMULATOR}:
-        return _decode_status_payload(payload, node_type=node_type, include_raw=include_raw)
+        return _decode_status_payload(
+            payload, node_type=node_type, include_raw=include_raw
+        )
     return payload if isinstance(payload, dict) else {}
 
 
@@ -150,14 +152,10 @@ def _decode_status_payload(  # noqa: C901
                     flattened["boost_temp"] = formatted
 
             _merge_boost_metadata(flattened, extra, prefer_existing=True)
-            _merge_accumulator_charge_metadata(
-                flattened, extra, prefer_existing=True
-            )
+            _merge_accumulator_charge_metadata(flattened, extra, prefer_existing=True)
 
         _merge_boost_metadata(flattened, setup_dict, prefer_existing=True)
-        _merge_accumulator_charge_metadata(
-            flattened, setup_dict, prefer_existing=True
-        )
+        _merge_accumulator_charge_metadata(flattened, setup_dict, prefer_existing=True)
 
         if "boost_temp" not in flattened:
             boost_temp = status_dict.get("boost_temp")
@@ -241,6 +239,15 @@ def _decode_thm_settings(payload: Any, *, include_raw: bool) -> dict[str, Any]:
         cleaned = _normalise_prog_temps(ptemp_raw)
         if cleaned is not None:
             normalised["ptemp"] = cleaned
+    elif isinstance(ptemp_raw, list):
+        cleaned_list: list[float] = []
+        for value in ptemp_raw:
+            converted = _to_float(value)
+            if converted is None:
+                break
+            cleaned_list.append(converted)
+        if len(cleaned_list) == len(ptemp_raw):
+            normalised["ptemp"] = cleaned_list
 
     prog = _normalise_prog(payload.get("prog"))
     if prog is not None:
@@ -394,7 +401,12 @@ def _normalise_prog(data: Any) -> list[int] | None:
     if isinstance(data.get("days"), dict):
         days_section = data["days"]
     else:
-        candidate = {k: v for k, v in data.items() if str(k) in {"mon","tue","wed","thu","fri","sat","sun"} or str(k).isdigit()}
+        candidate = {
+            k: v
+            for k, v in data.items()
+            if str(k) in {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+            or str(k).isdigit()
+        }
         if candidate:
             days_section = candidate
 

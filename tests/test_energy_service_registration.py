@@ -20,23 +20,25 @@ class _StubServices:
 
     def __init__(self, *, existing: bool = True) -> None:
         self._existing = existing
-        self.registrations: list[
-            tuple[str, str, Any]
-        ] = []
+        self.registrations: list[tuple[str, str, Any]] = []
 
     def has_service(self, domain: str, service: str) -> bool:
         """Pretend the service is already registered."""
 
         return self._existing
 
-    def async_register(self, domain: str, service: str, handler) -> None:  # pragma: no cover - defensive
+    def async_register(
+        self, domain: str, service: str, handler
+    ) -> None:  # pragma: no cover - defensive
         """Record registrations for inspection."""
 
         self.registrations.append((domain, service, handler))
 
 
 @pytest.mark.asyncio
-async def test_async_register_import_energy_history_service_skips_registration() -> None:
+async def test_async_register_import_energy_history_service_skips_registration() -> (
+    None
+):
     """The service registration is skipped when it already exists."""
 
     hass = SimpleNamespace(services=_StubServices())

@@ -19,8 +19,9 @@ def test_log_legacy_update_lists_unique_addresses() -> None:
 
     expected_pairs = sorted(["acm/2", "htr/1", "thm/3"])
     with (
-        patch.object(termoweb_ws._LOGGER, "isEnabledFor", return_value=True)
-        as mock_enabled,
+        patch.object(
+            termoweb_ws._LOGGER, "isEnabledFor", return_value=True
+        ) as mock_enabled,
         patch.object(termoweb_ws._LOGGER, "debug") as mock_debug,
     ):
         _call_log_legacy_update(
@@ -38,8 +39,9 @@ def test_log_legacy_update_notes_node_refresh() -> None:
     """Ensure the legacy nodes refresh message is logged when required."""
 
     with (
-        patch.object(termoweb_ws._LOGGER, "isEnabledFor", return_value=True)
-        as mock_enabled,
+        patch.object(
+            termoweb_ws._LOGGER, "isEnabledFor", return_value=True
+        ) as mock_enabled,
         patch.object(termoweb_ws._LOGGER, "debug") as mock_debug,
     ):
         _call_log_legacy_update(
@@ -55,8 +57,9 @@ def test_log_legacy_update_skips_logging_when_debug_disabled() -> None:
     """Confirm no logging occurs if debug logging is disabled."""
 
     with (
-        patch.object(termoweb_ws._LOGGER, "isEnabledFor", return_value=False)
-        as mock_enabled,
+        patch.object(
+            termoweb_ws._LOGGER, "isEnabledFor", return_value=False
+        ) as mock_enabled,
         patch.object(termoweb_ws._LOGGER, "debug") as mock_debug,
     ):
         _call_log_legacy_update(

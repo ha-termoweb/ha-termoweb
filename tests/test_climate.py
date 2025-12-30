@@ -27,7 +27,11 @@ from custom_components.termoweb.const import (
     DOMAIN,
     signal_ws_data,
 )
-from custom_components.termoweb.inventory import HeaterNode, Inventory, build_node_inventory
+from custom_components.termoweb.inventory import (
+    HeaterNode,
+    Inventory,
+    build_node_inventory,
+)
 from homeassistant.components.climate import HVACAction, HVACMode
 from homeassistant.const import ATTR_TEMPERATURE
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -42,7 +46,9 @@ async_setup_entry = climate_module.async_setup_entry
 
 @pytest.fixture
 def climate_inventory(
-    inventory_builder: Callable[[str, Mapping[str, Any] | None, Iterable[Any] | None], Inventory]
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], Inventory
+    ],
 ) -> Callable[[str, Mapping[str, Any]], Inventory]:
     """Return helper that constructs inventory containers for climate tests."""
 
@@ -105,7 +111,9 @@ def _make_coordinator(
         }
         _merge_settings(node_type, section.get("settings"))
         addrs_value = section.get("addrs")
-        if isinstance(addrs_value, Iterable) and not isinstance(addrs_value, (str, bytes)):
+        if isinstance(addrs_value, Iterable) and not isinstance(
+            addrs_value, (str, bytes)
+        ):
             _merge_addresses(node_type, addrs_value)
         if extras:
             section_extras.setdefault(node_type, {}).update(extras)
@@ -113,7 +121,9 @@ def _make_coordinator(
     settings_section = base_record.get("settings")
     if isinstance(settings_section, Mapping):
         for node_type, bucket in settings_section.items():
-            _merge_settings(str(node_type), bucket if isinstance(bucket, Mapping) else None)
+            _merge_settings(
+                str(node_type), bucket if isinstance(bucket, Mapping) else None
+            )
 
     addresses_section = base_record.get("addresses_by_type")
     inventory_obj = base_record.get("inventory")
@@ -121,12 +131,16 @@ def _make_coordinator(
         addresses_section = inventory_obj.addresses_by_type
     if isinstance(addresses_section, Mapping):
         for node_type, addrs in addresses_section.items():
-            _merge_addresses(str(node_type), addrs if isinstance(addrs, Iterable) else None)
+            _merge_addresses(
+                str(node_type), addrs if isinstance(addrs, Iterable) else None
+            )
 
     nodes_by_type = base_record.get("nodes_by_type")
     if isinstance(nodes_by_type, Mapping):
         for node_type, section in nodes_by_type.items():
-            _merge_section(str(node_type), section if isinstance(section, Mapping) else None)
+            _merge_section(
+                str(node_type), section if isinstance(section, Mapping) else None
+            )
 
     for candidate_type in ("htr", "acm", "heater"):
         _merge_section(candidate_type, base_record.get(candidate_type))
@@ -434,7 +448,7 @@ def test_accumulator_preferred_boost_defaults_without_hass() -> None:
 
 
 def test_thermostat_climate_entity_maps_settings(
-    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory]
+    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory],
 ) -> None:
     _reset_environment()
     hass = HomeAssistant()
@@ -584,7 +598,7 @@ def test_async_setup_entry_default_names_and_invalid_nodes(
 
 
 def test_async_setup_entry_skips_blank_addresses(
-    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory]
+    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory],
 ) -> None:
     async def _run() -> None:
         _reset_environment()
@@ -634,7 +648,7 @@ def test_async_setup_entry_skips_blank_addresses(
 
 
 def test_async_setup_entry_creates_accumulator_entity(
-    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory]
+    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory],
 ) -> None:
     async def _run() -> None:
         _reset_environment()
@@ -808,6 +822,7 @@ def test_async_setup_entry_prefers_inventory_node_type(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Prefer inventory node metadata when classifying heater entities."""
+
     async def _run() -> None:
         _reset_environment()
         hass = HomeAssistant()
@@ -872,7 +887,7 @@ def test_async_setup_entry_prefers_inventory_node_type(
 
 
 def test_settings_maps_include_inventory_aliases(
-    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory]
+    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory],
 ) -> None:
     """Ensure optimistic updates touch all alias mappings for an address."""
 
@@ -921,9 +936,7 @@ def test_settings_maps_include_inventory_aliases(
     assert device_state["settings"]["htr"][addr]["mode"] == "manual"
     assert device_state["settings"]["acm"][addr]["mode"] == "manual"
     assert device_state["htr"]["settings"][addr]["mode"] == "manual"
-    assert (
-        device_state["nodes_by_type"]["acm"]["settings"][addr]["mode"] == "manual"
-    )
+    assert device_state["nodes_by_type"]["acm"]["settings"][addr]["mode"] == "manual"
 
 
 def test_accumulator_hvac_mode_reporting() -> None:
@@ -979,10 +992,6 @@ def test_accumulator_hvac_mode_reporting() -> None:
     settings["mode"] = "unexpected"
     assert entity.hvac_mode == HVACMode.HEAT
     assert entity.preset_mode == "none"
-
-
-
-
 
 
 def _make_accumulator_for_validation() -> climate_module.AccumulatorClimateEntity:
@@ -1242,7 +1251,9 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
     assert attrs["target_charge_per"] == 90
 
     class RaisingResolver:
-        def __call__(self, day: Any, minute: Any) -> tuple[dt.datetime | None, int | None]:
+        def __call__(
+            self, day: Any, minute: Any
+        ) -> tuple[dt.datetime | None, int | None]:
             raise ValueError("resolver error")
 
     settings["boost_active"] = " OFF "
@@ -1279,6 +1290,7 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
     assert attrs["boost_minutes_remaining"] == 7
     assert attrs["boost_end"] == "2024-01-01T00:07:00+00:00"
     assert attrs["boost_end_label"] is None
+
 
 def test_accumulator_submit_settings_brand_switch() -> None:
     """Verify accumulator writes use Ducaheat client when the brand matches."""
@@ -1358,7 +1370,12 @@ def test_accumulator_submit_settings_handles_boost_state_error() -> None:
         entry_id = "entry-acm-cancel"
         dev_id = "dev-acm-cancel"
         addr = "6"
-        settings = {"boost_active": True, "mode": "auto", "units": "C", "prog": [0] * 168}
+        settings = {
+            "boost_active": True,
+            "mode": "auto",
+            "units": "C",
+            "prog": [0] * 168,
+        }
 
         coordinator = _make_coordinator(
             hass,
@@ -1913,8 +1930,6 @@ def test_heater_additional_cancelled_edges(
             await heater._refresh_fallback
 
     asyncio.run(_run())
-
-
 
 
 def test_write_after_debounce_registers_pending(
@@ -2602,8 +2617,6 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
         assert heater._refresh_fallback is None
 
     asyncio.run(_run())
-
-
 
 
 def test_heater_cancelled_paths_propagate(

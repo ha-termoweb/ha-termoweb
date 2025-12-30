@@ -34,6 +34,8 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 
 EnergyStateCoordinator = coord_module.EnergyStateCoordinator
 StateCoordinator = coord_module.StateCoordinator
+
+
 def _inventory_from_nodes(dev_id: str, payload: Mapping[str, Any]) -> Inventory:
     """Return an Inventory built from ``payload``."""
 
@@ -90,9 +92,13 @@ def test_update_nodes_accepts_inventory_container(
 
     coord.update_nodes(inventory=container)
     assert coord._inventory is container
+
+
 def test_power_calculation(
     monkeypatch: pytest.MonkeyPatch,
-    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
 ) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
@@ -548,7 +554,7 @@ def test_refresh_heater_handles_tuple_and_acm() -> None:
         coord.data = {
             "dev": {
                 "inventory": inventory_container,
-                "settings": {"acm": {"1": {"prev": True}}},
+                "settings": {"acm": {"3": {"prev": True}}},
             }
         }
 
@@ -563,7 +569,7 @@ def test_refresh_heater_handles_tuple_and_acm() -> None:
             coord,
         )
 
-        await coord.async_refresh_heater(("acm", "2"))
+        await coord.async_refresh_heater(("acm", "3"))
 
         client.get_node_settings.assert_awaited_once()
         assert updates, "Expected coordinator data to be updated"
@@ -571,7 +577,7 @@ def test_refresh_heater_handles_tuple_and_acm() -> None:
         assert latest["inventory"] is inventory_container
         addrs = latest["inventory"].addresses_by_type["acm"]
         assert addrs == ["3"]
-        assert latest["settings"]["acm"]["2"] == {"mode": "auto"}
+        assert latest["settings"]["acm"]["3"] == {"mode": "auto"}
 
     asyncio.run(_run())
 
@@ -752,7 +758,9 @@ def test_state_coordinator_async_update_data_reuses_previous() -> None:
         client.get_node_settings = AsyncMock(return_value={"mode": "eco"})
 
         hass = HomeAssistant()
-        nodes = {"nodes": [{"type": "acm", "addr": "7"}]}
+        nodes = {
+            "nodes": [{"type": "acm", "addr": "7"}, {"type": "htr", "addr": "legacy"}]
+        }
         inventory_nodes = list(build_node_inventory(nodes))
         inventory = Inventory("dev", nodes, inventory_nodes)
         coord = StateCoordinator(
@@ -778,12 +786,12 @@ def test_state_coordinator_async_update_data_reuses_previous() -> None:
 
         result = await coord._async_update_data()
 
-        client.get_node_settings.assert_awaited_once()
+        assert client.get_node_settings.await_count == 2
         dev_data = result["dev"]
         assert dev_data["settings"]["acm"]["7"] == {"mode": "eco"}
-        assert dev_data["settings"]["htr"]["legacy"] == {"mode": "auto"}
+        assert dev_data["settings"]["htr"]["legacy"] == {"mode": "eco"}
         assert dev_data["inventory"] is inventory
-        assert dev_data["inventory"].addresses_by_type.get("htr") in (None, [])
+        assert dev_data["inventory"].addresses_by_type.get("htr") == ["legacy"]
 
     asyncio.run(_run())
 
@@ -856,7 +864,9 @@ def test_async_update_data_skips_non_dict_sections() -> None:
 
 def test_counter_reset(
     monkeypatch: pytest.MonkeyPatch,
-    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
 ) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
@@ -891,7 +901,9 @@ def test_counter_reset(
 
 def test_energy_processing_consistent_between_poll_and_ws(
     monkeypatch: pytest.MonkeyPatch,
-    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
 ) -> None:
     async def _run() -> None:
         monkeypatch.setattr(coord_module.time, "time", lambda: 4000.0)
@@ -940,7 +952,9 @@ def test_energy_processing_consistent_between_poll_and_ws(
 
 
 def test_merge_samples_for_window_updates_energy(
-    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
 ) -> None:
     """Normalised hourly samples should merge into coordinator caches."""
 
@@ -978,10 +992,10 @@ def test_merge_samples_for_window_updates_energy(
     asyncio.run(_run())
 
 
-
-
 def test_energy_samples_missing_fields(
-    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
 ) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
@@ -1000,7 +1014,9 @@ def test_energy_samples_missing_fields(
 
 
 def test_energy_samples_invalid_strings(
-    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
 ) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
@@ -1021,7 +1037,9 @@ def test_energy_samples_invalid_strings(
 
 
 def test_energy_coordinator_alias_creates_canonical_bucket(
-    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
 ) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
@@ -1041,7 +1059,9 @@ def test_energy_coordinator_alias_creates_canonical_bucket(
 
 
 def test_update_interval_constant(
-    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
 ) -> None:
     hass = HomeAssistant()
     client = types.SimpleNamespace()
@@ -1052,7 +1072,9 @@ def test_update_interval_constant(
 
 def test_ws_samples_update_defers_polling(
     monkeypatch: pytest.MonkeyPatch,
-    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
 ) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
@@ -1110,7 +1132,9 @@ def test_ws_samples_update_defers_polling(
 
 def test_should_skip_poll_conditions(
     monkeypatch: pytest.MonkeyPatch,
-    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
 ) -> None:
     """Exercise websocket-driven polling skip decisions."""
 
@@ -1137,7 +1161,9 @@ def test_should_skip_poll_conditions(
 
 def test_async_update_data_uses_cached_samples(
     monkeypatch: pytest.MonkeyPatch,
-    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
 ) -> None:
     """Ensure websocket freshness skips API polling and returns cached data."""
 
@@ -1170,7 +1196,9 @@ def test_async_update_data_uses_cached_samples(
 
 
 def test_ws_margin_seconds_bounds(
-    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
 ) -> None:
     """Verify the websocket margin respects defaults and upper bounds."""
 
@@ -1186,10 +1214,10 @@ def test_ws_margin_seconds_bounds(
     assert coord._ws_margin_seconds() == 600.0
 
 
-
-
 def test_handle_ws_samples_skips_empty_points(
-    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory]
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
 ) -> None:
     """Ensure empty websocket samples do not update coordinator state."""
 
@@ -1213,7 +1241,9 @@ def test_handle_ws_samples_skips_empty_points(
 
 
 def test_pmo_samples_scale_and_power(
-    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory]
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
 ) -> None:
     """Power monitor counters should convert from watt-seconds to kWh."""
 
@@ -1249,7 +1279,9 @@ def test_pmo_samples_scale_and_power(
 
 
 def test_heater_energy_samples_empty_on_api_error(
-    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory]
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
 ) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
@@ -1275,7 +1307,9 @@ def test_heater_energy_samples_empty_on_api_error(
 
 def test_heater_energy_client_error_update_failed(
     monkeypatch: pytest.MonkeyPatch,
-    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
 ) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
@@ -1303,12 +1337,10 @@ def test_heater_energy_client_error_update_failed(
     asyncio.run(_run())
 
 
-
-
-
-
 def test_energy_coordinator_handles_rate_limit_per_node(
-    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory]
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
 ) -> None:
     async def _run() -> None:
         hass = HomeAssistant()
@@ -1342,8 +1374,6 @@ def test_energy_coordinator_handles_rate_limit_per_node(
     asyncio.run(_run())
 
 
-
-
 def test_state_coordinator_update_nodes_uses_provided_inventory(
     inventory_builder: Callable[
         [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
@@ -1375,7 +1405,9 @@ def test_state_coordinator_update_nodes_uses_provided_inventory(
 
 
 def test_energy_state_coordinator_requires_inventory(
-    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory]
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
 ) -> None:
     hass = HomeAssistant()
     client = types.SimpleNamespace()
@@ -1524,7 +1556,9 @@ def test_coordinator_client_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_ws_driven_refresh(
     monkeypatch: pytest.MonkeyPatch,
-    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory],
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
 ) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
@@ -1562,7 +1596,9 @@ def test_ws_driven_refresh(
 
 
 def test_energy_poll_preserves_cached_samples(
-    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory]
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
 ) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()
@@ -1625,7 +1661,9 @@ def test_coordinator_timeout() -> None:
 
 
 def test_heater_energy_timeout(
-    inventory_from_map: Callable[[Mapping[str, Iterable[str]] | None, str], coord_module.Inventory]
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
 ) -> None:
     async def _run() -> None:
         client = types.SimpleNamespace()

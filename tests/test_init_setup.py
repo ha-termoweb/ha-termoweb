@@ -585,6 +585,7 @@ def test_async_setup_entry_unknown_node_probe(
         if record.name.startswith("custom_components.termoweb")
     )
 
+
 def test_async_setup_entry_backfills_diagnostics_marker(
     termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:

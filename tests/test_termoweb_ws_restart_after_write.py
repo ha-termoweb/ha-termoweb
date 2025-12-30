@@ -106,4 +106,3 @@ async def test_maybe_restart_after_write_schedules_restart_when_idle_window_exce
         idle_for=pytest.approx(idle_gap),
         source="write notification",
     )
-

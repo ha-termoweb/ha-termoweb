@@ -110,7 +110,9 @@ async def test_duration_async_added_to_hass_uses_last_state_when_cache_empty(
     entity = _make_duration_entity()
     entity.async_write_ha_state = MagicMock()
 
-    monkeypatch.setattr(number_module, "get_boost_runtime_minutes", MagicMock(return_value=None))
+    monkeypatch.setattr(
+        number_module, "get_boost_runtime_minutes", MagicMock(return_value=None)
+    )
     set_mock = MagicMock()
     monkeypatch.setattr(number_module, "set_boost_runtime_minutes", set_mock)
     monkeypatch.setattr(
@@ -152,7 +154,9 @@ async def test_duration_async_added_to_hass_uses_settings_when_state_missing(
     entity.async_write_ha_state = MagicMock()
     entity.heater_settings = MagicMock(return_value={"boost_time": 240})
 
-    monkeypatch.setattr(number_module, "get_boost_runtime_minutes", MagicMock(return_value=None))
+    monkeypatch.setattr(
+        number_module, "get_boost_runtime_minutes", MagicMock(return_value=None)
+    )
     set_mock = MagicMock()
     monkeypatch.setattr(number_module, "set_boost_runtime_minutes", set_mock)
     monkeypatch.setattr(
@@ -283,7 +287,9 @@ async def test_temperature_async_added_to_hass_uses_last_state_when_cache_empty(
     entity = _make_temperature_entity()
     entity.async_write_ha_state = MagicMock()
 
-    monkeypatch.setattr(number_module, "get_boost_temperature", MagicMock(return_value=None))
+    monkeypatch.setattr(
+        number_module, "get_boost_temperature", MagicMock(return_value=None)
+    )
     set_mock = MagicMock()
     monkeypatch.setattr(number_module, "set_boost_temperature", set_mock)
     monkeypatch.setattr(
@@ -325,7 +331,9 @@ async def test_temperature_async_added_to_hass_uses_settings_when_state_missing(
     entity.async_write_ha_state = MagicMock()
     entity.heater_settings = MagicMock(return_value={"boost_temp": 24.4})
 
-    monkeypatch.setattr(number_module, "get_boost_temperature", MagicMock(return_value=None))
+    monkeypatch.setattr(
+        number_module, "get_boost_temperature", MagicMock(return_value=None)
+    )
     set_mock = MagicMock()
     monkeypatch.setattr(number_module, "set_boost_temperature", set_mock)
     monkeypatch.setattr(
@@ -442,10 +450,14 @@ async def test_async_setup_entry_creates_number_entities(
         "dev_id": dev_id,
     }
 
-    calls: list[list[AccumulatorBoostDurationNumber | AccumulatorBoostTemperatureNumber]] = []
+    calls: list[
+        list[AccumulatorBoostDurationNumber | AccumulatorBoostTemperatureNumber]
+    ] = []
 
     def fake_add(
-        entities: list[AccumulatorBoostDurationNumber | AccumulatorBoostTemperatureNumber],
+        entities: list[
+            AccumulatorBoostDurationNumber | AccumulatorBoostTemperatureNumber
+        ],
     ) -> None:
         calls.append(entities)
 
@@ -458,7 +470,9 @@ async def test_async_setup_entry_creates_number_entities(
     assert calls, "async_add_entities should receive number entities"
     created = calls[0]
     assert any(isinstance(entity, AccumulatorBoostDurationNumber) for entity in created)
-    assert any(isinstance(entity, AccumulatorBoostTemperatureNumber) for entity in created)
+    assert any(
+        isinstance(entity, AccumulatorBoostTemperatureNumber) for entity in created
+    )
 
     for entity in created:
         assert getattr(entity, "_attr_has_entity_name", None) is True

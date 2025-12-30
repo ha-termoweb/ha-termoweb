@@ -183,7 +183,6 @@ async def test_ducaheat_rest_set_node_settings_routes_non_special(
     )
 
 
-
 @pytest.mark.asyncio
 async def test_ducaheat_rest_set_htr_mode_uses_status_segment(
     monkeypatch: pytest.MonkeyPatch,
@@ -223,16 +222,13 @@ async def test_ducaheat_rest_set_htr_mode_uses_status_segment(
     assert calls[0][2] == "htr"
 
     status_calls = [call for call in calls if call[0].endswith("/status")]
-    assert status_calls == [
-        ("/api/v2/devs/dev/htr/2/status", {"mode": "auto"}, "htr")
-    ]
+    assert status_calls == [("/api/v2/devs/dev/htr/2/status", {"mode": "auto"}, "htr")]
 
     assert all(not path.endswith("/mode") for path, _, _ in calls)
 
     assert calls[-1][0].endswith("/select")
     assert calls[-1][1] == {"select": False}
     assert calls[-1][2] == "htr"
-
 
 
 @pytest.mark.asyncio
@@ -254,7 +250,9 @@ async def test_ducaheat_rest_set_htr_full_segment_payload(
     async def fake_select(**kwargs: Any) -> None:
         select_calls.append(bool(kwargs.get("select")))
 
-    monkeypatch.setattr(client, "_select_segmented_node", AsyncMock(side_effect=fake_select))
+    monkeypatch.setattr(
+        client, "_select_segmented_node", AsyncMock(side_effect=fake_select)
+    )
 
     async def fake_post_segmented(
         path: str,
@@ -322,7 +320,9 @@ async def test_ducaheat_rest_set_htr_units_only(
     async def fake_select(**kwargs: Any) -> None:
         select_calls.append(bool(kwargs.get("select")))
 
-    monkeypatch.setattr(client, "_select_segmented_node", AsyncMock(side_effect=fake_select))
+    monkeypatch.setattr(
+        client, "_select_segmented_node", AsyncMock(side_effect=fake_select)
+    )
 
     payloads: dict[str, Mapping[str, Any]] = {}
 
@@ -344,9 +344,7 @@ async def test_ducaheat_rest_set_htr_units_only(
     responses = await client.set_node_settings("dev", ("htr", "9"), units="F")
 
     assert responses == {"status": {"segment": "status", "payload": {"units": "F"}}}
-    assert payloads == {
-        "/api/v2/devs/dev/htr/9/status": {"units": "F"}
-    }
+    assert payloads == {"/api/v2/devs/dev/htr/9/status": {"units": "F"}}
     assert select_calls == [True, False]
 
 
@@ -370,8 +368,6 @@ async def test_ducaheat_rest_set_node_settings_acm_invalid_inputs(
 
     with pytest.raises(ValueError):
         await ducaheat_rest_client.set_node_settings("dev", ("acm", "3"), **kwargs)
-
-
 
 
 @pytest.mark.asyncio
@@ -400,11 +396,7 @@ def test_ducaheat_rest_normalise_ws_nodes_prog() -> None:
         "acm": {
             "settings": {
                 "02": {
-                    "prog": {
-                        "prog": {
-                            str(day): [day % 3] * 48 for day in range(7)
-                        }
-                    },
+                    "prog": {"prog": {str(day): [day % 3] * 48 for day in range(7)}},
                     "mode": "auto",
                 }
             },

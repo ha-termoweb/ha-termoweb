@@ -1,4 +1,5 @@
 """Backend abstractions for brand-specific behavior."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -73,6 +74,7 @@ class HttpClientProto(Protocol):
         stop: float,
     ) -> list[dict[str, str | int]]:
         """Return historical samples for the specified node."""
+
 
 class WsClientProto(Protocol):
     """Protocol for websocket clients used by the integration."""
@@ -303,7 +305,9 @@ def _coerce_timestamp_seconds(
     if ts is None:
         return None
     if detect_millisecond_overflow and ts > 100_000_000_000:
-        logger.warning("%s returned millisecond timestamps; coercing to seconds", context)
+        logger.warning(
+            "%s returned millisecond timestamps; coercing to seconds", context
+        )
         ts /= 1000.0
     if divisor and divisor != 1.0:
         ts /= divisor

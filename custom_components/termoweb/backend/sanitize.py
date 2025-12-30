@@ -1,4 +1,5 @@
 """Shared sanitisation helpers for backend clients."""
+
 from __future__ import annotations
 
 import re
@@ -109,4 +110,3 @@ __all__ = [
     "redact_token_fragment",
     "validate_boost_minutes",
 ]
-

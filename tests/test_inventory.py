@@ -42,7 +42,9 @@ def sample_nodes() -> List[DummyNode]:
 
 
 @pytest.fixture
-def inventory(sample_payload: dict[str, Any], sample_nodes: List[DummyNode]) -> Inventory:
+def inventory(
+    sample_payload: dict[str, Any], sample_nodes: List[DummyNode]
+) -> Inventory:
     """Build an inventory instance for tests."""
 
     return Inventory("abc123", sample_payload, sample_nodes)
@@ -162,7 +164,9 @@ def test_inventory_heater_metadata_properties(heater_inventory: Inventory) -> No
     }
 
 
-def test_inventory_heater_sample_address_map_caches(heater_inventory: Inventory) -> None:
+def test_inventory_heater_sample_address_map_caches(
+    heater_inventory: Inventory,
+) -> None:
     """Normalised heater sample addresses should cache and defend against mutation."""
 
     assert heater_inventory._heater_sample_address_cache is None
@@ -182,7 +186,9 @@ def test_inventory_heater_sample_address_map_caches(heater_inventory: Inventory)
     assert cached_compat == {"htr": "htr"}
 
 
-def test_inventory_heater_sample_targets_cache_and_order(heater_inventory: Inventory) -> None:
+def test_inventory_heater_sample_targets_cache_and_order(
+    heater_inventory: Inventory,
+) -> None:
     """Sample targets should be cached and maintain canonical ordering."""
 
     assert heater_inventory._heater_sample_targets_cache is None
@@ -293,7 +299,10 @@ def test_inventory_power_monitor_targets_filter_invalid(
     inventory = Inventory(
         "dev",
         {"nodes": []},
-        [PowerMonitorNode(name="One", addr="3"), PowerMonitorNode(name="Two", addr="4")],
+        [
+            PowerMonitorNode(name="One", addr="3"),
+            PowerMonitorNode(name="Two", addr="4"),
+        ],
     )
 
     assert inventory.power_monitor_sample_targets == [("pmo", "3"), ("pmo", "4")]
@@ -316,7 +325,10 @@ def test_inventory_power_monitor_targets_deduplicate_and_strip(
     inventory = Inventory(
         "dev",
         {"nodes": []},
-        [PowerMonitorNode(name="One", addr="3"), PowerMonitorNode(name="Two", addr="4")],
+        [
+            PowerMonitorNode(name="One", addr="3"),
+            PowerMonitorNode(name="Two", addr="4"),
+        ],
     )
 
     assert inventory.power_monitor_sample_targets == [("pmo", "3"), ("pmo", "4")]
@@ -332,7 +344,9 @@ def test_normalize_power_monitor_addresses_variants() -> None:
     list_map, _ = normalize_power_monitor_addresses(["A", "A", " "])
     assert list_map == {"pmo": ["A"]}
 
-    alias_map, alias_compat = normalize_power_monitor_addresses({"power_monitor": ["B"]})
+    alias_map, alias_compat = normalize_power_monitor_addresses(
+        {"power_monitor": ["B"]}
+    )
     assert alias_map == {"pmo": ["B"]}
     assert alias_compat["power_monitor"] == "pmo"
 
@@ -454,12 +468,15 @@ def test_inventory_heater_name_map_supports_default_factory_optional(
     assert first[("htr", "1")] == "Heater 1"
     assert first[("acm", "2")] == "Storage"
 
+
 def test_inventory_heater_sample_targets_filters_invalid(
     heater_inventory: Inventory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Sample targets property should discard invalid entries from helpers."""
 
-    def fake_targets(_: Mapping[Any, Iterable[Any]] | Iterable[Any] | None) -> list[Any]:
+    def fake_targets(
+        _: Mapping[Any, Iterable[Any]] | Iterable[Any] | None,
+    ) -> list[Any]:
         return [
             None,
             "bad",
@@ -487,7 +504,9 @@ def test_inventory_heater_sample_targets_deduplicate_and_strip(
 ) -> None:
     """Sample targets should strip whitespace and deduplicate pairs."""
 
-    def fake_targets(_: Mapping[Any, Iterable[Any]] | Iterable[Any] | None) -> list[Any]:
+    def fake_targets(
+        _: Mapping[Any, Iterable[Any]] | Iterable[Any] | None,
+    ) -> list[Any]:
         return [("htr", " 1 "), ("htr", "1"), ("acm", " 2 ")]
 
     monkeypatch.setattr(

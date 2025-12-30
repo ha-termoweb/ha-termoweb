@@ -103,9 +103,7 @@ def format_entries(entries: Iterable[FunctionDoc], root: Path) -> str:
     lines = ["# TermoWeb Function Map", ""]
     for entry in entries:
         rel_path = entry.file.relative_to(root)
-        lines.append(
-            f"{rel_path} :: {entry.qualname}\n    {entry.summary}"
-        )
+        lines.append(f"{rel_path} :: {entry.qualname}\n    {entry.summary}")
     return "\n".join(lines) + "\n"
 
 

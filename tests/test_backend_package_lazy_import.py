@@ -1,4 +1,5 @@
 """Tests for lazy imports in the backend package."""
+
 from __future__ import annotations
 
 import importlib

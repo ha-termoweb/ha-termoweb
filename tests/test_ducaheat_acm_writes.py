@@ -15,8 +15,6 @@ from custom_components.termoweb.backend.ducaheat import (
 from custom_components.termoweb.const import BRAND_DUCAHEAT, get_brand_user_agent
 
 
-
-
 def test_ducaheat_acm_request_error(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
@@ -51,7 +49,7 @@ def test_ducaheat_acm_request_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_ducaheat_acm_mode_invalid_boost_time(
-    ducaheat_rest_harness: Callable[..., Any]
+    ducaheat_rest_harness: Callable[..., Any],
 ) -> None:
     async def _run() -> None:
         harness = ducaheat_rest_harness()
@@ -65,7 +63,7 @@ def test_ducaheat_acm_mode_invalid_boost_time(
 
 
 def test_ducaheat_acm_mode_boost_invalid_minutes(
-    ducaheat_rest_harness: Callable[..., Any]
+    ducaheat_rest_harness: Callable[..., Any],
 ) -> None:
     async def _run() -> None:
         harness = ducaheat_rest_harness()
@@ -94,7 +92,7 @@ def test_ducaheat_acm_mode_boost_invalid_minutes_type(
 
 @pytest.mark.asyncio
 async def test_ducaheat_acm_extra_options_segmented_post(
-    ducaheat_rest_harness: Callable[..., Any]
+    ducaheat_rest_harness: Callable[..., Any],
 ) -> None:
     """Ensure extra options payload uses segmented POST with formatted fields."""
 
@@ -110,14 +108,12 @@ async def test_ducaheat_acm_extra_options_segmented_post(
     ]
     assert len(setup_calls) == 1
     setup_payload = setup_calls[0]["payload"]
-    assert setup_payload == {
-        "extra_options": {"boost_time": 180, "boost_temp": "55.5"}
-    }
+    assert setup_payload == {"extra_options": {"boost_time": 180, "boost_temp": "55.5"}}
 
 
 @pytest.mark.asyncio
 async def test_ducaheat_acm_boost_metadata_fallback_releases_selection(
-    ducaheat_rest_harness: Callable[..., Any]
+    ducaheat_rest_harness: Callable[..., Any],
 ) -> None:
     """Verify boost metadata falls back and selection is released when RTC fails."""
 
@@ -246,7 +242,7 @@ async def test_ducaheat_acm_settings_boost_flow(
 
 @pytest.mark.asyncio
 async def test_ducaheat_acm_settings_mode_only_collects_custom_rtc(
-    ducaheat_rest_harness: Callable[..., Any]
+    ducaheat_rest_harness: Callable[..., Any],
 ) -> None:
     """Ensure non-boost mode writes run metadata collection when RTC is patched."""
 
@@ -316,7 +312,7 @@ async def test_ducaheat_acm_settings_cancel_boost_status_refresh(
 
 @pytest.mark.asyncio
 async def test_ducaheat_acm_settings_cancel_only(
-    ducaheat_rest_harness: Callable[..., Any]
+    ducaheat_rest_harness: Callable[..., Any],
 ) -> None:
     """Validate the standalone cancel boost path without status payload."""
 
@@ -359,7 +355,7 @@ async def test_ducaheat_acm_settings_cancel_with_units(
 
 @pytest.mark.asyncio
 async def test_ducaheat_acm_settings_boost_mode_segment(
-    ducaheat_rest_harness: Callable[..., Any]
+    ducaheat_rest_harness: Callable[..., Any],
 ) -> None:
     """Ensure boost mode writes include a dedicated mode payload."""
 
@@ -381,7 +377,7 @@ async def test_ducaheat_acm_settings_boost_mode_segment(
 
 @pytest.mark.asyncio
 async def test_collect_boost_metadata_rtc_exception_inactive(
-    ducaheat_rest_harness: Callable[..., Any]
+    ducaheat_rest_harness: Callable[..., Any],
 ) -> None:
     """RTC errors for inactive boosts should use fallback defaults."""
 
@@ -405,7 +401,7 @@ async def test_collect_boost_metadata_rtc_exception_inactive(
 
 @pytest.mark.asyncio
 async def test_collect_boost_metadata_invalid_payload(
-    ducaheat_rest_harness: Callable[..., Any]
+    ducaheat_rest_harness: Callable[..., Any],
 ) -> None:
     """Invalid RTC payloads should mark metadata as fallback with minutes."""
 
@@ -421,7 +417,7 @@ async def test_collect_boost_metadata_invalid_payload(
 
 @pytest.mark.asyncio
 async def test_collect_boost_metadata_invalid_payload_inactive(
-    ducaheat_rest_harness: Callable[..., Any]
+    ducaheat_rest_harness: Callable[..., Any],
 ) -> None:
     """Inactive boosts with invalid payloads should default minutes to zero."""
 
@@ -437,7 +433,7 @@ async def test_collect_boost_metadata_invalid_payload_inactive(
 
 @pytest.mark.asyncio
 async def test_collect_boost_metadata_inactive_valid(
-    ducaheat_rest_harness: Callable[..., Any]
+    ducaheat_rest_harness: Callable[..., Any],
 ) -> None:
     """Inactive boosts should derive zeroed end metadata from RTC payloads."""
 
@@ -557,7 +553,9 @@ async def test_post_acm_endpoint_server_error(monkeypatch: pytest.MonkeyPatch) -
 
 
 @pytest.mark.asyncio
-async def test_select_segmented_node_client_error(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_select_segmented_node_client_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Selection failures should surface as ``DucaheatRequestError``."""
 
     client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
@@ -582,7 +580,9 @@ async def test_select_segmented_node_client_error(monkeypatch: pytest.MonkeyPatc
 
 
 @pytest.mark.asyncio
-async def test_select_segmented_node_server_error(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_select_segmented_node_server_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Server-side failures should propagate to the caller."""
 
     client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
@@ -606,23 +606,21 @@ async def test_select_segmented_node_server_error(monkeypatch: pytest.MonkeyPatc
 
 @pytest.mark.asyncio
 async def test_set_acm_boost_state_invalid_stemp(
-    ducaheat_rest_harness: Callable[..., Any]
+    ducaheat_rest_harness: Callable[..., Any],
 ) -> None:
     """Invalid stemp values should raise immediately."""
 
     harness = ducaheat_rest_harness()
 
     with pytest.raises(ValueError) as err:
-        await harness.client.set_acm_boost_state(
-            "dev", "12", boost=True, stemp="bad"
-        )
+        await harness.client.set_acm_boost_state("dev", "12", boost=True, stemp="bad")
 
     assert "Invalid stemp value" in str(err.value)
 
 
 @pytest.mark.asyncio
 async def test_set_acm_boost_state_cancel_minutes(
-    ducaheat_rest_harness: Callable[..., Any]
+    ducaheat_rest_harness: Callable[..., Any],
 ) -> None:
     """Cancelling boosts should log zero minutes and collect metadata."""
 
@@ -686,4 +684,3 @@ def test_ensure_units_blank_defaults() -> None:
     client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
 
     assert client._ensure_units("") == "C"
-

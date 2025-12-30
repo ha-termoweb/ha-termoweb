@@ -38,7 +38,9 @@ class StubTracker:
         return True
 
 
-def _make_client(monkeypatch: pytest.MonkeyPatch, tracker: StubTracker) -> ducaheat_ws.DucaheatWSClient:
+def _make_client(
+    monkeypatch: pytest.MonkeyPatch, tracker: StubTracker
+) -> ducaheat_ws.DucaheatWSClient:
     """Create a websocket client with a patched health tracker."""
 
     loop = asyncio.new_event_loop()
@@ -67,7 +69,9 @@ def _make_client(monkeypatch: pytest.MonkeyPatch, tracker: StubTracker) -> ducah
     return client
 
 
-def test_reset_payload_window_restores_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reset_payload_window_restores_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """_reset_payload_window should restore defaults and update state buckets."""
 
     tracker = StubTracker()

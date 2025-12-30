@@ -102,7 +102,8 @@ def test_backend_module_exports_expected_classes() -> None:
     """The backend module exposes the concrete backend implementations."""
 
     backend_module = __import__(
-        Backend.__module__.rsplit(".", 1)[0], fromlist=["DucaheatBackend", "TermoWebBackend"]
+        Backend.__module__.rsplit(".", 1)[0],
+        fromlist=["DucaheatBackend", "TermoWebBackend"],
     )
 
     assert getattr(backend_module, "DucaheatBackend") is DucaheatBackend
@@ -135,7 +136,9 @@ async def test_termoweb_backend_fetch_hourly_samples_normalises() -> None:
     call = client.get_node_samples.await_args
     assert call.args[0] == "dev"
     assert call.args[1] == ("htr", "A")
-    assert call.args[2] == pytest.approx(start_local.astimezone(timezone.utc).timestamp())
+    assert call.args[2] == pytest.approx(
+        start_local.astimezone(timezone.utc).timestamp()
+    )
     assert call.args[3] == pytest.approx(end_local.astimezone(timezone.utc).timestamp())
 
     bucket = result[("htr", "A")]

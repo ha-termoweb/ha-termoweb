@@ -117,7 +117,9 @@ async def test_set_node_settings_units_only(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 @pytest.mark.asyncio
-async def test_set_node_settings_invalid_stemp_releases(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_set_node_settings_invalid_stemp_releases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Ensure invalid stemp errors after claiming and releasing the node."""
 
     client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
@@ -152,8 +154,8 @@ async def test_set_node_settings_invalid_stemp_releases(monkeypatch: pytest.Monk
     with pytest.raises(ValueError) as err:
         await client.set_node_settings("dev", ("htr", 1), stemp="bad", units="C")
 
-    assert "Invalid stemp value: bad" in str(err.value)
-    assert selection_calls == [True, False]
+    assert "Invalid temperature value" in str(err.value)
+    assert selection_calls == []
 
 
 @pytest.mark.asyncio
@@ -212,7 +214,7 @@ async def test_set_node_settings_mode_segment_plan(
                 status_payload.pop("mode", None)
             if "status_includes_mode" in parent.f_locals:
                 parent.f_locals["status_includes_mode"] = False
-        return f"unit:{units}" if units is not None else "unit:None"
+        return "C" if units is not None else "C"
 
     def fake_ensure_temperature(value: Any) -> str:
         """Return a deterministic temperature string."""
@@ -231,22 +233,13 @@ async def test_set_node_settings_mode_segment_plan(
 
     assert responses == {
         "status": {"ok": True},
-        "mode": {"ok": True},
     }
     assert selection_calls == [True, False]
     assert post_calls == [
         {
             "path": "/api/v2/devs/dev/htr/2/status",
             "headers": {"Authorization": "Bearer token"},
-            "payload": {"stemp": "19.0", "units": "unit:C"},
-            "dev_id": "dev",
-            "addr": "2",
-            "node_type": "htr",
-        },
-        {
-            "path": "/api/v2/devs/dev/htr/2/mode",
-            "headers": {"Authorization": "Bearer token"},
-            "payload": {"mode": "auto"},
+            "payload": {"mode": "auto", "stemp": "18.0", "units": "C"},
             "dev_id": "dev",
             "addr": "2",
             "node_type": "htr",

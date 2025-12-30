@@ -20,6 +20,7 @@ except ImportError:  # pragma: no cover - executed in unit test stubs
         CELSIUS = "°C"
         FAHRENHEIT = "°F"
 
+
 try:  # pragma: no cover - fallback for stripped Home Assistant stubs in tests
     from homeassistant.const import UnitOfTime
 except ImportError:  # pragma: no cover - executed in unit test stubs
@@ -30,6 +31,7 @@ except ImportError:  # pragma: no cover - executed in unit test stubs
         __slots__ = ()
         HOURS = "h"
 
+
 try:  # pragma: no cover - fallback for stripped Home Assistant stubs in tests
     from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
 except ImportError:  # pragma: no cover - executed in unit test stubs
@@ -39,6 +41,7 @@ except ImportError:  # pragma: no cover - executed in unit test stubs
 
     class ServiceNotFound(HomeAssistantError):
         """Fallback service lookup error used in unit tests."""
+
 
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -108,6 +111,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             "Heater {addr}",
             addr=addr,
         )
+
     heater_details, accumulator_nodes = boostable_accumulator_details_for_entry(
         data,
         default_name_simple=default_name,
@@ -292,9 +296,7 @@ class AccumulatorBoostDurationNumber(RestoreEntity, HeaterNodeBase, NumberEntity
         return minutes if minutes > 0 else None
 
 
-class AccumulatorBoostTemperatureNumber(
-    RestoreEntity, HeaterNodeBase, NumberEntity
-):
+class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEntity):
     """Number entity exposing preferred boost temperature per accumulator."""
 
     _attr_entity_category = EntityCategory.CONFIG

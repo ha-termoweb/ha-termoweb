@@ -1,4 +1,5 @@
 """Unit tests for Ducaheat temperature utilities."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -32,7 +33,7 @@ def test_format_temp_accepts_numeric_values(
     assert ducaheat_client._format_temp(value) == expected
 
 
-@pytest.mark.parametrize("value", [None, "abc", object(), ""]) 
+@pytest.mark.parametrize("value", [None, "abc", object(), ""])
 def test_format_temp_rejects_invalid_values(
     ducaheat_client: DucaheatRESTClient, value: object
 ) -> None:

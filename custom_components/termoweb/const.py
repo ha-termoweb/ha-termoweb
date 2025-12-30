@@ -104,6 +104,7 @@ def get_brand_socketio_path(brand: str) -> str:
         return path.lstrip("/")
     return "socket.io"
 
+
 # Socket.IO namespace used by the websocket client implementation
 WS_NAMESPACE: Final = "/api/v2/socket_io"
 
@@ -121,6 +122,7 @@ def signal_ws_status(entry_id: str) -> str:
 
     return f"{DOMAIN}_{entry_id}_ws_status"
 
+
 # Polling
 DEFAULT_POLL_INTERVAL: Final = 1800  # seconds (30 minutes)
 MIN_POLL_INTERVAL: Final = 30  # seconds
@@ -128,4 +130,3 @@ MAX_POLL_INTERVAL: Final = 3600  # seconds
 
 # Heater energy polling interval when relying on push updates
 HTR_ENERGY_UPDATE_INTERVAL: Final = timedelta(hours=1)
-

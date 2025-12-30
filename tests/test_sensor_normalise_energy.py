@@ -132,7 +132,9 @@ async def test_async_setup_entry_handles_missing_power_monitors(
     monkeypatch.setattr(module, "PowerMonitorEnergySensor", _unexpected_power_monitor)
     monkeypatch.setattr(module, "PowerMonitorPowerSensor", _unexpected_power_monitor)
 
-    def _create_heater_sensors_stub(*_args: object, **_kwargs: object) -> tuple[str, ...]:
+    def _create_heater_sensors_stub(
+        *_args: object, **_kwargs: object
+    ) -> tuple[str, ...]:
         return ("temp-sensor", "energy-sensor", "power-sensor")
 
     monkeypatch.setattr(module, "_create_heater_sensors", _create_heater_sensors_stub)
@@ -194,9 +196,7 @@ def test_power_monitor_available_uses_inventory_has_node(
 
     calls: list[tuple[str, str]] = []
 
-    def _fake_has_node(
-        self, node_type: object, addr: object, *, _calls=calls
-    ) -> bool:
+    def _fake_has_node(self, node_type: object, addr: object, *, _calls=calls) -> bool:
         _calls.append((node_type, addr))
         return True
 

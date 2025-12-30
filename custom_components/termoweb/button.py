@@ -265,9 +265,7 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
         """Return Home Assistant device metadata for the accumulator."""
 
         return DeviceInfo(
-            identifiers={
-                (DOMAIN, self.boost_context.dev_id, self.boost_context.addr)
-            },
+            identifiers={(DOMAIN, self.boost_context.dev_id, self.boost_context.addr)},
             name=self.boost_context.base_name,
             manufacturer="TermoWeb",
             model="Accumulator",

@@ -110,7 +110,9 @@ class StubAsyncClient:
         object.__setattr__(self, "_connected", False)
         object.__setattr__(self, "disconnect_calls", self.disconnect_calls + 1)
 
-    async def emit(self, event: str, data: Any | None = None, *, namespace: str | None = None) -> None:
+    async def emit(
+        self, event: str, data: Any | None = None, *, namespace: str | None = None
+    ) -> None:
         self.emit_calls.append((event, data, namespace))
 
     @property
@@ -223,17 +225,25 @@ def test_init_populates_defaults_and_preserves_existing_http(
         existing_eio_http=existing_http,
     )
 
-    assert client._requested_with == module.get_brand_requested_with(module.BRAND_TERMOWEB)
+    assert client._requested_with == module.get_brand_requested_with(
+        module.BRAND_TERMOWEB
+    )
     assert hasattr(client._sio.http, "closed")
     assert sio.eio.http is existing_http
 
 
 @pytest.mark.asyncio
-async def test_connect_once_invokes_socketio_connect(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_connect_once_invokes_socketio_connect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """_connect_once should reset backoff and call the AsyncClient."""
 
     client, sio, _ = _make_client(monkeypatch)
-    monkeypatch.setattr(client, "_build_engineio_target", AsyncMock(return_value=("wss://ws", "socket.io")))
+    monkeypatch.setattr(
+        client,
+        "_build_engineio_target",
+        AsyncMock(return_value=("wss://ws", "socket.io")),
+    )
     client._stop_event.clear()
 
     await client._connect_once()
@@ -243,7 +253,9 @@ async def test_connect_once_invokes_socketio_connect(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
-async def test_connect_once_aborts_when_stopping(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_connect_once_aborts_when_stopping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """_connect_once should exit early when stop is requested."""
 
     client, sio, _ = _make_client(monkeypatch)
@@ -267,7 +279,9 @@ async def test_ws_url_returns_target(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_debug_probe_handles_logging(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+async def test_debug_probe_handles_logging(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """debug_probe should respect logging configuration and handle emit failures."""
 
     client, sio, _ = _make_client(monkeypatch)
@@ -286,7 +300,9 @@ async def test_debug_probe_handles_logging(monkeypatch: pytest.MonkeyPatch, capl
 
 
 @pytest.mark.asyncio
-async def test_wait_for_events_cancels_pending_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_wait_for_events_cancels_pending_tasks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """_wait_for_events should cancel whichever wait completes second."""
 
     loop = asyncio.get_running_loop()
@@ -304,7 +320,9 @@ async def test_wait_for_events_cancels_pending_tasks(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
-async def test_runner_handles_errors_and_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_runner_handles_errors_and_backoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The connection runner should retry until ``_closing`` is set."""
 
     client, _sio, dispatcher = _make_client(monkeypatch)
@@ -373,7 +391,9 @@ async def test_runner_performs_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_handle_connection_lost_updates_state(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_handle_connection_lost_updates_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Losing the connection should persist restart metadata."""
 
     client, _sio, _ = _make_client(monkeypatch)
@@ -396,7 +416,9 @@ def test_mark_event_tracks_paths(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_disconnect_logs_exceptions(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+async def test_disconnect_logs_exceptions(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """_disconnect should swallow errors from the socket client."""
 
     client, sio, _ = _make_client(monkeypatch)
@@ -419,7 +441,9 @@ async def test_disconnect_calls_socketio(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 @pytest.mark.asyncio
-async def test_get_token_requires_authorization(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_get_token_requires_authorization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """_get_token should raise when the Authorization header is missing."""
 
     client, _sio, _ = _make_client(monkeypatch, rest_headers={"Authorization": ""})
@@ -428,7 +452,9 @@ async def test_get_token_requires_authorization(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.asyncio
-async def test_force_refresh_token_resets_access(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_force_refresh_token_resets_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """_force_refresh_token should clear cached credentials and ensure tokens."""
 
     client, _sio, _ = _make_client(monkeypatch)
@@ -455,7 +481,9 @@ def test_ws_state_bucket_initialises_storage(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.asyncio
-async def test_build_engineio_target_uses_token(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_build_engineio_target_uses_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Engine.IO URL builder should include the token and device id."""
 
     client, _sio, _ = _make_client(monkeypatch)
@@ -467,7 +495,9 @@ async def test_build_engineio_target_uses_token(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.asyncio
-async def test_on_connect_schedules_idle_monitor(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_on_connect_schedules_idle_monitor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Connecting should reset metrics and schedule the idle monitor."""
 
     loop = asyncio.get_running_loop()
@@ -501,7 +531,9 @@ async def test_namespace_connect_emits_join(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 @pytest.mark.asyncio
-async def test_namespace_connect_handles_failure(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+async def test_namespace_connect_handles_failure(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """Namespace join failures should be logged at DEBUG level."""
 
     client, sio, _ = _make_client(monkeypatch)
@@ -511,7 +543,9 @@ async def test_namespace_connect_handles_failure(monkeypatch: pytest.MonkeyPatch
     assert "namespace join failed" in caplog.text
 
 
-def test_register_debug_catch_all_installs_handler(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+def test_register_debug_catch_all_installs_handler(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """Debug catch-all registration should wrap the AsyncClient when DEBUG is enabled."""
 
     client, sio, _ = _make_client(monkeypatch)
@@ -551,7 +585,9 @@ async def test_on_disconnect_cancels_monitor(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.asyncio
-async def test_misc_event_logging(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+async def test_misc_event_logging(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """Event handlers should log diagnostic messages when DEBUG is enabled."""
 
     client, _sio, _ = _make_client(monkeypatch)
@@ -581,7 +617,9 @@ async def test_refresh_subscription_emits(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.mark.asyncio
-async def test_refresh_subscription_requires_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_refresh_subscription_requires_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Refreshing while disconnected should raise an error."""
 
     client, _sio, _ = _make_client(monkeypatch)
@@ -590,7 +628,9 @@ async def test_refresh_subscription_requires_connection(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
-async def test_idle_monitor_refreshes_and_exits(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_idle_monitor_refreshes_and_exits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The idle monitor should attempt to refresh and exit when closing."""
 
     client, sio, _ = _make_client(monkeypatch)
@@ -610,7 +650,9 @@ async def test_idle_monitor_refreshes_and_exits(monkeypatch: pytest.MonkeyPatch)
     async def fake_sleep(_: float) -> None:
         await real_sleep(0)
 
-    monkeypatch.setattr(client, "_refresh_subscription", AsyncMock(side_effect=fake_refresh))
+    monkeypatch.setattr(
+        client, "_refresh_subscription", AsyncMock(side_effect=fake_refresh)
+    )
     monkeypatch.setattr(module.asyncio, "sleep", fake_sleep)
     monkeypatch.setattr(asyncio, "sleep", fake_sleep)
     monkeypatch.setattr(module.time, "time", lambda: 200.0)
@@ -621,7 +663,9 @@ async def test_idle_monitor_refreshes_and_exits(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.asyncio
-async def test_idle_monitor_breaks_when_disconnected(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_idle_monitor_breaks_when_disconnected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The idle monitor should exit when disconnected from the socket."""
 
     client, sio, _ = _make_client(monkeypatch)
@@ -637,7 +681,9 @@ async def test_idle_monitor_breaks_when_disconnected(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
-async def test_idle_monitor_skips_without_last_event(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_idle_monitor_skips_without_last_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Idle monitor should continue when no last event timestamp is available."""
 
     client, sio, _ = _make_client(monkeypatch)
@@ -655,7 +701,9 @@ async def test_idle_monitor_skips_without_last_event(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
-async def test_idle_monitor_waits_for_disconnect(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_idle_monitor_waits_for_disconnect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Idle monitor should continue when disconnected flag is unset."""
 
     client, sio, _ = _make_client(monkeypatch)
@@ -694,7 +742,9 @@ async def test_idle_monitor_schedules_restart_on_refresh_failure(
 
 
 @pytest.mark.asyncio
-async def test_idle_monitor_retries_failed_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_idle_monitor_retries_failed_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """When the previous refresh failed the monitor should retry quickly."""
 
     client, sio, _ = _make_client(monkeypatch)
@@ -731,10 +781,18 @@ def test_translate_path_update_and_resolve(monkeypatch: pytest.MonkeyPatch) -> N
         "body": {"foo": 1},
     }
     translated_setup = translate_update(setup_payload)
-    assert translated_setup == {"htr": {"settings": {"1": {"setup": {"program": {"foo": 1}}}}}}
+    assert translated_setup == {
+        "htr": {"settings": {"1": {"setup": {"program": {"foo": 1}}}}}
+    }
     assert client._translate_path_update(setup_payload) == translated_setup
-    assert module.WebSocketClient._resolve_update_section("advanced_setup") == ("advanced", "advanced_setup")
-    assert module.WebSocketClient._resolve_update_section("prog") == ("settings", "prog")
+    assert module.WebSocketClient._resolve_update_section("advanced_setup") == (
+        "advanced",
+        "advanced_setup",
+    )
+    assert module.WebSocketClient._resolve_update_section("prog") == (
+        "settings",
+        "prog",
+    )
     assert module.WebSocketClient._resolve_update_section(None) == (None, None)
 
 
@@ -761,7 +819,9 @@ def test_translate_path_update_rejects_unknown_nodes(
         assert client._translate_path_update(payload) is None
 
 
-def test_handle_handshake_logging(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+def test_handle_handshake_logging(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """Handshake handling should log keys and ignore invalid payloads."""
 
     client, _sio, _ = _make_client(monkeypatch)
@@ -778,7 +838,9 @@ def test_handle_handshake_logging(monkeypatch: pytest.MonkeyPatch, caplog: pytes
 
 
 @pytest.mark.asyncio
-async def test_handshake_cache_resets_on_reconnect(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_handshake_cache_resets_on_reconnect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Handshake cache should not grow across reconnect cycles."""
 
     client, _sio, _ = _make_client(monkeypatch)
@@ -820,7 +882,9 @@ async def test_handshake_cache_resets_on_reconnect(monkeypatch: pytest.MonkeyPat
     assert len(refreshed_state) == baseline_len
 
 
-def test_forward_sample_updates_invokes_handler(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_forward_sample_updates_invokes_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Sample update forwarding should call the energy coordinator hook."""
 
     client, _sio, _ = _make_client(monkeypatch)
@@ -835,7 +899,9 @@ def test_forward_sample_updates_invokes_handler(monkeypatch: pytest.MonkeyPatch)
     assert handler.call_args.kwargs.get("lease_seconds") == 30
 
 
-def test_forward_sample_updates_handles_missing_handler(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_forward_sample_updates_handles_missing_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Sample update forwarding should safely no-op when no handler exists."""
 
     client, _sio, _ = _make_client(monkeypatch)
@@ -909,7 +975,9 @@ def test_handle_dev_data_and_update(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_apply_nodes_payload_merges_and_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_apply_nodes_payload_merges_and_dispatches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Applying node payloads should normalize and dispatch updates."""
 
     client, _sio, dispatcher = _make_client(monkeypatch)
@@ -928,16 +996,22 @@ def test_apply_nodes_payload_merges_and_dispatches(monkeypatch: pytest.MonkeyPat
     client._mark_event.assert_called()
 
 
-def test_dispatch_nodes_with_inventory(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+def test_dispatch_nodes_with_inventory(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """dispatch_nodes should support pre-existing inventory records."""
 
     client, _sio, dispatcher = _make_client(monkeypatch)
     record = client.hass.data[module.DOMAIN]["entry"]
     record["inventory"] = Inventory(client.dev_id, {"nodes": {}}, ())
-    energy = SimpleNamespace(update_addresses=MagicMock(), handle_ws_samples=MagicMock())
+    energy = SimpleNamespace(
+        update_addresses=MagicMock(), handle_ws_samples=MagicMock()
+    )
     record["energy_coordinator"] = energy
     client._coordinator.update_nodes = MagicMock()
-    client._coordinator.data = {"device": {"inventory": record["inventory"], "settings": {}}}
+    client._coordinator.data = {
+        "device": {"inventory": record["inventory"], "settings": {}}
+    }
     nodes_payload = {"nodes": [{"type": "htr", "addr": "1"}]}
     client._inventory = Inventory(
         client.dev_id,
@@ -1036,7 +1110,9 @@ def test_handle_event_includes_inventory_metadata(
 
     dispatcher = MagicMock()
     monkeypatch.setattr(module, "async_dispatcher_send", dispatcher)
-    monkeypatch.setattr(module.TermoWebWSClient, "_install_write_hook", lambda self: None)
+    monkeypatch.setattr(
+        module.TermoWebWSClient, "_install_write_hook", lambda self: None
+    )
     monkeypatch.setattr(
         module.TermoWebWSClient,
         "_dispatch_nodes",
@@ -1099,11 +1175,7 @@ def test_handle_event_includes_inventory_metadata(
     assert "inventory_addresses" not in nodes_payload
 
     settings_payload = next(
-        (
-            payload
-            for payload in payloads
-            if payload.get("kind") == "htr_settings"
-        ),
+        (payload for payload in payloads if payload.get("kind") == "htr_settings"),
         None,
     )
     assert settings_payload is not None
@@ -1116,7 +1188,9 @@ def test_handle_event_includes_inventory_metadata(
     assert "addresses_by_type" not in dev_state
 
 
-def test_update_legacy_settings_updates_settings_map(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_update_legacy_settings_updates_settings_map(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Settings updates should refresh both legacy and normalized caches."""
 
     client, _sio, _ = _make_client(monkeypatch)
@@ -1150,6 +1224,8 @@ def test_update_legacy_settings_updates_settings_map(monkeypatch: pytest.MonkeyP
     assert updated_again is True
     assert settings_map["01"]["mode"] == "eco"
     assert settings_map["01"]["pending"] == {"mode": "auto"}
+
+
 def test_apply_heater_addresses_normalises_from_inventory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1196,7 +1272,10 @@ def test_apply_heater_addresses_includes_power_monitors(
     assert record.get("inventory") is inventory
     assert "sample_aliases" not in record
 
-def test_apply_heater_addresses_requires_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_apply_heater_addresses_requires_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Inventory must be present when applying heater addresses."""
 
     client, _sio, _ = _make_client(monkeypatch)
@@ -1205,7 +1284,9 @@ def test_apply_heater_addresses_requires_inventory(monkeypatch: pytest.MonkeyPat
     assert client._coordinator.data == {}
 
 
-def test_apply_heater_addresses_updates_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_apply_heater_addresses_updates_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Applying heater addresses should refresh stored inventory when present."""
 
     client, _sio, _ = _make_client(monkeypatch)
@@ -1276,12 +1357,12 @@ def test_heater_sample_subscription_targets_logs_missing_inventory(
         targets = list(client._heater_sample_subscription_targets())
 
     assert not targets
-    assert any(
-        "missing inventory" in record.message for record in caplog.records
-    )
+    assert any("missing inventory" in record.message for record in caplog.records)
 
 
-def test_heater_sample_targets_do_not_rebuild_from_record(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_heater_sample_targets_do_not_rebuild_from_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Raw node snapshots should not trigger inventory rebuilds."""
 
     client, _sio, _ = _make_client(monkeypatch)
@@ -1298,7 +1379,9 @@ def test_heater_sample_targets_do_not_rebuild_from_record(monkeypatch: pytest.Mo
     assert client._inventory is None
 
 
-def test_apply_heater_addresses_filters_non_heaters(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_apply_heater_addresses_filters_non_heaters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Non-heater node types should be ignored when applying addresses."""
 
     client, _sio, _ = _make_client(monkeypatch)
@@ -1346,10 +1429,6 @@ def test_apply_heater_addresses_logs_invalid_inventory(
     assert "missing inventory" not in caplog.text
 
 
-
-
-
-
 @pytest.mark.asyncio
 async def test_subscribe_heater_samples_emits(monkeypatch: pytest.MonkeyPatch) -> None:
     """Subscribing to heater samples should emit for each address."""
@@ -1372,7 +1451,9 @@ async def test_subscribe_heater_samples_logs_errors(
     """Subscribing should log when emit fails."""
 
     client, sio, _ = _make_client(monkeypatch)
-    monkeypatch.setattr(client, "_heater_sample_subscription_targets", lambda: [("htr", "1")])
+    monkeypatch.setattr(
+        client, "_heater_sample_subscription_targets", lambda: [("htr", "1")]
+    )
     sio.emit = AsyncMock(side_effect=RuntimeError("boom"))
     caplog.set_level(logging.DEBUG)
     await client._subscribe_heater_samples()
@@ -1399,7 +1480,9 @@ async def test_schedule_idle_restart(monkeypatch: pytest.MonkeyPatch) -> None:
     assert client._idle_restart_pending is False
 
 
-def test_schedule_idle_restart_ignored_when_closing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_schedule_idle_restart_ignored_when_closing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Scheduling should be skipped when already closing."""
 
     client, _sio, _ = _make_client(monkeypatch)
@@ -1494,16 +1577,16 @@ def test_redaction_helpers_handle_whitespace(monkeypatch: pytest.MonkeyPatch) ->
     client, _sio, _ = _make_client(monkeypatch)
     assert redact_token_fragment("   ") == ""
     assert mask_identifier("   ") == ""
-    params = client._sanitise_params(
-        {"token": "   ", "dev_id": "   ", "sid": "   "}
-    )
+    params = client._sanitise_params({"token": "   ", "dev_id": "   ", "sid": "   "})
     assert params["token"] == "{token}"
     assert params["dev_id"] == "{dev_id}"
     assert params["sid"] == "{sid}"
 
 
 @pytest.mark.asyncio
-async def test_wrap_background_task_handles_sync_callable(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_wrap_background_task_handles_sync_callable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Non-coroutine targets should be wrapped in an async task."""
 
     loop = asyncio.get_running_loop()
@@ -1598,7 +1681,9 @@ def test_handle_connection_lost_records_state(monkeypatch: pytest.MonkeyPatch) -
 
 
 @pytest.mark.asyncio
-async def test_build_engineio_target_handles_invalid_base(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_build_engineio_target_handles_invalid_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Invalid API bases should raise runtime errors."""
 
     client, _sio, _ = _make_client(monkeypatch)
@@ -1611,7 +1696,9 @@ async def test_build_engineio_target_handles_invalid_base(monkeypatch: pytest.Mo
         await client._build_engineio_target()
 
 
-def test_register_debug_catch_all_requires_debug(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_register_debug_catch_all_requires_debug(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Debug catch-all should register only when debugging is enabled."""
 
     client, sio, _ = _make_client(monkeypatch)
@@ -1683,17 +1770,21 @@ def test_apply_nodes_payload_translation(monkeypatch: pytest.MonkeyPatch) -> Non
     dispatcher.assert_called()
 
 
-def test_forward_sample_updates_invokes_handler(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_forward_sample_updates_invokes_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Forwarding sample updates should notify the energy coordinator handler."""
 
     client, _sio, _ = _make_client(monkeypatch)
     handler_called: dict[str, Any] = {}
     energy_handler = SimpleNamespace(
-        handle_ws_samples=lambda dev_id, payload, **kwargs: handler_called.update({
-            "dev_id": dev_id,
-            "payload": payload,
-            "lease": kwargs.get("lease_seconds"),
-        })
+        handle_ws_samples=lambda dev_id, payload, **kwargs: handler_called.update(
+            {
+                "dev_id": dev_id,
+                "payload": payload,
+                "lease": kwargs.get("lease_seconds"),
+            }
+        )
     )
     client.hass.data[module.DOMAIN]["entry"]["energy_coordinator"] = energy_handler
     client._forward_sample_updates({"htr": {"samples": {"1": {"temp": 20}}}})
@@ -1712,7 +1803,9 @@ def test_extract_nodes_variants(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     client._inventory = inventory
     assert client._extract_nodes({"nodes": {"htr": {}}}) == {"htr": {}}
-    converted = client._extract_nodes({"nodes": [{"type": "htr", "addr": "1", "status": {}}]})
+    converted = client._extract_nodes(
+        {"nodes": [{"type": "htr", "addr": "1", "status": {}}]}
+    )
     assert "htr" in converted
     assert client._extract_nodes("not a dict") is None
 
@@ -1726,5 +1819,11 @@ def test_resolve_update_section_variants() -> None:
         "advanced",
         "advanced_setup",
     )
-    assert module.WebSocketClient._resolve_update_section("setup") == ("settings", "setup")
-    assert module.WebSocketClient._resolve_update_section("unknown") == ("settings", "unknown")
+    assert module.WebSocketClient._resolve_update_section("setup") == (
+        "settings",
+        "setup",
+    )
+    assert module.WebSocketClient._resolve_update_section("unknown") == (
+        "settings",
+        "unknown",
+    )

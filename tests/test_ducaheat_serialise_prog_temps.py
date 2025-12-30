@@ -1,4 +1,5 @@
 """Tests for Ducaheat preset temperature serialisation."""
+
 from __future__ import annotations
 
 import pytest

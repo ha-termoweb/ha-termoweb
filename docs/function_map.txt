@@ -1,19 +1,21 @@
 # TermoWeb Function Map
 
+custom_components/termoweb/__init__.py :: _build_unknown_node_probe_requests
+    Return common REST endpoints to query for an unknown node type.
+custom_components/termoweb/__init__.py :: _async_probe_unknown_node_types
+    Log discovery probes for node types not yet supported.
 custom_components/termoweb/__init__.py :: _register_diagnostics_platform
     Ensure diagnostics helpers are registered against Home Assistant.
 custom_components/termoweb/__init__.py :: _diagnostics_component_loaded
     Return True if Home Assistant reports diagnostics as loaded.
 custom_components/termoweb/__init__.py :: _async_register_diagnostics_when_ready
     Wait for diagnostics setup and register TermoWeb helpers.
+custom_components/termoweb/__init__.py :: _async_register_diagnostics_when_ready._async_import_diagnostics_module
+    Import the diagnostics module without blocking the event loop.
 custom_components/termoweb/__init__.py :: create_rest_client
     Return a REST client configured for the selected brand.
 custom_components/termoweb/__init__.py :: async_list_devices
     Call ``list_devices`` logging auth/connection issues consistently.
-custom_components/termoweb/__init__.py :: _build_unknown_node_probe_requests
-    Return common REST endpoints to query for an unknown node type.
-custom_components/termoweb/__init__.py :: _async_probe_unknown_node_types
-    Log discovery probes for node types not yet supported.
 custom_components/termoweb/__init__.py :: _async_import_energy_history
     Delegate to the energy helper with shared rate limiting and filters.
 custom_components/termoweb/__init__.py :: async_setup_entry
@@ -26,8 +28,6 @@ custom_components/termoweb/__init__.py :: async_setup_entry._recalc_poll_interva
     Suspend REST polling when websocket trackers are healthy and fresh.
 custom_components/termoweb/__init__.py :: async_setup_entry._on_ws_status
     Recalculate polling intervals when websocket state changes.
-custom_components/termoweb/__init__.py :: async_setup_entry._on_coordinator_updated
-    Start websocket clients for newly discovered devices.
 custom_components/termoweb/__init__.py :: async_register_ws_debug_probe_service
     Register the ws_debug_probe debug helper service.
 custom_components/termoweb/__init__.py :: async_register_ws_debug_probe_service._async_ws_debug_probe
@@ -64,8 +64,6 @@ custom_components/termoweb/api.py :: RESTClient.get_node_settings
     Return settings/state for a node.
 custom_components/termoweb/api.py :: RESTClient.get_rtc_time
     Return RTC metadata for a device's manager endpoint.
-custom_components/termoweb/api.py :: RESTClient.debug_probe_get
-    Issue a GET request with verbose logging for discovery probes.
 custom_components/termoweb/api.py :: RESTClient._ensure_temperature
     Normalise a numeric temperature to a string with one decimal.
 custom_components/termoweb/api.py :: RESTClient._ensure_prog
@@ -82,28 +80,10 @@ custom_components/termoweb/api.py :: RESTClient.set_acm_extra_options
     Write default boost settings for an accumulator.
 custom_components/termoweb/api.py :: RESTClient.set_acm_boost_state
     Start or stop an accumulator boost session.
+custom_components/termoweb/api.py :: RESTClient.debug_probe_get
+    Issue a GET request with verbose logging for discovery probes.
 custom_components/termoweb/api.py :: RESTClient.get_node_samples
     Return heater samples as list of {"t", "counter"} dicts.
-scripts/auto_translate.py :: parse_args
-    Return the parsed command-line arguments.
-scripts/auto_translate.py :: load_json
-    Load JSON content from ``path``.
-scripts/auto_translate.py :: dump_json
-    Write ``data`` as UTF-8 JSON to ``path``.
-scripts/auto_translate.py :: protect_tokens
-    Replace placeholders and code spans with sentinel tokens.
-scripts/auto_translate.py :: restore_tokens
-    Restore placeholder and code span tokens to their originals.
-scripts/auto_translate.py :: create_session
-    Configure and return a reusable Requests session.
-scripts/auto_translate.py :: _translate_once
-    Translate ``text`` via the Google web API and return the result.
-scripts/auto_translate.py :: translate_text
-    Translate ``text`` while preserving placeholder tokens and newlines.
-scripts/auto_translate.py :: translate_structure
-    Translate every string inside ``data`` recursively.
-scripts/auto_translate.py :: main
-    Entrypoint for the translation script.
 custom_components/termoweb/api.py :: RESTClient._resolve_node_descriptor
     Return ``(node_type, addr)`` for the provided descriptor.
 custom_components/termoweb/api.py :: RESTClient._log_non_htr_payload
@@ -118,14 +98,6 @@ custom_components/termoweb/backend/base.py :: HttpClientProto.get_nodes
     Return the node description for the given device.
 custom_components/termoweb/backend/base.py :: HttpClientProto.get_node_settings
     Return settings for the specified node.
-custom_components/termoweb/backend/ws_client.py :: _WSCommon._bind_inventory_from_context
-    Attach the shared inventory stored on the Home Assistant entry.
-custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._ws_bucket_sizes
-    Return the current websocket state and tracker bucket sizes.
-custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._cleanup_ws_state
-    Remove cached websocket state and tracker entries for this device.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._reset_handshake_cache
-    Clear cached handshake metadata to avoid retaining payloads.
 custom_components/termoweb/backend/base.py :: HttpClientProto.set_node_settings
     Update node settings for the specified node.
 custom_components/termoweb/backend/base.py :: HttpClientProto.get_node_samples
@@ -144,12 +116,20 @@ custom_components/termoweb/backend/base.py :: Backend.create_ws_client
     Create a websocket client for the given device.
 custom_components/termoweb/backend/base.py :: Backend.fetch_hourly_samples
     Return normalised hourly samples grouped by node descriptor.
-custom_components/termoweb/backend/base.py :: Backend.get_instant_power
-    Return the instantaneous power for ``node`` in watts when available.
+custom_components/termoweb/backend/base.py :: Backend.get_energy_samples
+    Return normalised energy samples between ``start_s`` and ``end_s``.
+custom_components/termoweb/backend/base.py :: Backend._resolve_node_descriptor
+    Return canonical ``(node_type, addr)`` for ``node``.
 custom_components/termoweb/backend/base.py :: normalise_sample_records
     Return sorted sample dictionaries containing ``ts`` and ``energy_wh``.
 custom_components/termoweb/backend/base.py :: fetch_normalised_hourly_samples
     Return per-node normalised samples for ``nodes`` between ``start`` and ``end``.
+custom_components/termoweb/backend/base.py :: _coerce_timestamp_seconds
+    Return ``value`` coerced to seconds since epoch when possible.
+custom_components/termoweb/backend/base.py :: _coerce_counter_kwh
+    Return ``value`` interpreted as a kWh counter when possible.
+custom_components/termoweb/backend/base.py :: normalise_energy_samples
+    Return energy samples expressed in epoch seconds and kWh.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRequestError.__init__
     Initialise error metadata for logging and diagnostics.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._include_raw_settings
@@ -160,14 +140,12 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._log_segmen
     Emit a debug log for segmented POST calls with sanitized metadata.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.get_node_settings
     Fetch and normalise node settings for the Ducaheat API.
+custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.get_node_samples
+    Return heater samples with timestamps normalised to seconds.
+custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._execute_segmented_commands
+    Apply one or more segmented commands with a single select/release.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.set_node_settings
     Write heater settings using the segmented endpoints.
-custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend.fetch_hourly_samples
-    Return hourly samples for ``nodes`` using the segmented API.
-custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend.get_instant_power
-    Return the instantaneous power for ``node`` in watts when available.
-custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.get_node_samples
-    Return heater samples with timestamps normalised to seconds. Non-heater nodes delegate to the base implementation while detecting millisecond payloads automatically.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.normalise_ws_nodes
     Normalise websocket payloads and merge accumulator charge metadata.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_ws_settings
@@ -182,6 +160,8 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_
     Flatten the vendor payload into HA-friendly heater settings.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_thm_settings
     Return a normalised thermostat settings mapping.
+custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_thm_settings._to_float
+    Return ``value`` coerced to float when possible.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_acm_capabilities
     Merge accumulator capability dictionaries into a single mapping.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_acm_capabilities._merge
@@ -218,6 +198,8 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._safe_tempe
     Defensively format inbound temperature values.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend.create_ws_client
     Instantiate the unified websocket client for Ducaheat.
+custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend.fetch_hourly_samples
+    Return hourly samples for ``nodes`` using the segmented API.
 custom_components/termoweb/backend/ducaheat_ws.py :: _rand_t
     Return a pseudo-random token string for polling requests.
 custom_components/termoweb/backend/ducaheat_ws.py :: _encode_polling_packet
@@ -240,16 +222,12 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._keepalive
     Send Engine.IO ping frames to keep the websocket alive.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._extract_dev_data_payload
     Return the mapping payload embedded in a dev_data Socket.IO event.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._coerce_dev_data_nodes
+    Convert list-style websocket snapshots into mapping payloads.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._normalise_nodes_payload
     Normalise websocket node payloads via the REST client helper.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._build_nodes_snapshot
-    Return a snapshot structure with ``nodes`` and ``nodes_by_type`` buckets.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._ensure_type_bucket
-    Return the node bucket for ``node_type`` with default sections.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._apply_heater_addresses
-    Update entry and coordinator state with heater address data.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._update_legacy_section
-    Store legacy section updates and mirror them in raw state.
+    Store legacy section updates with defensive type checks.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._normalise_cadence_value
     Return a positive cadence hint in seconds.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._extract_cadence_candidates
@@ -261,11 +239,15 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._apply_pay
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._reset_payload_window
     Reset the payload stale window to the default.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._dispatch_nodes
-    Publish node updates with inventory-aware cache refresh.
+    Publish inventory-derived node addresses for downstream consumers.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._merge_nodes
     Deep merge ``source`` updates into ``target`` in place.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._collect_sample_updates
     Extract heater sample updates from a websocket payload.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._nodes_to_deltas
+    Convert websocket node payloads into domain delta objects.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._apply_deltas_to_store
+    Apply deltas to the domain store via the coordinator.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._translate_path_update
     Translate ``{"path": ..., "body": ...}`` websocket frames into nodes.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._resolve_update_section
@@ -294,12 +276,12 @@ custom_components/termoweb/backend/termoweb.py :: TermoWebBackend.create_ws_clie
     Instantiate the unified websocket client for TermoWeb.
 custom_components/termoweb/backend/termoweb.py :: TermoWebBackend.fetch_hourly_samples
     Return hourly samples for ``nodes`` using the REST API.
-custom_components/termoweb/backend/termoweb.py :: TermoWebBackend.get_instant_power
-    Return the instantaneous power for ``node`` in watts when available.
-custom_components/termoweb/backend/termoweb_ws.py :: HandshakeError.__init__
-    Initialise the error with the HTTP response details.
+custom_components/termoweb/backend/termoweb.py :: TermoWebBackend.get_energy_samples
+    Return energy samples normalised to epoch seconds and kWh.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient.__init__
     Initialise the websocket client container.
+custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._reset_handshake_cache
+    Clear cached handshake metadata to avoid retaining payloads.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._brand_headers
     Return baseline headers aligned with the REST client brand.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._sanitise_headers
@@ -373,7 +355,9 @@ custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._handle_upd
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._apply_nodes_payload
     Update cached nodes from the websocket payload and notify listeners.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._translate_path_update
-    Translate Ducaheat ``{"path": ..., "body": ...}`` frames into nodes.
+    Translate ``{"path": ..., "body": ...}`` frames into nodes.
+custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._translate_path_deltas
+    Translate path frames into node dictionaries and domain deltas.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._resolve_update_section
     Map a websocket path segment onto the node bucket name.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._forward_sample_updates
@@ -382,16 +366,14 @@ custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._extract_no
     Extract the nodes dictionary from a websocket payload.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._translate_nodes_list
     Convert list-based node payloads into the nested mapping schema.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._collect_update_addresses
-    Return a sorted list of ``(node_type, addr)`` pairs in ``nodes``.
+custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._nodes_to_deltas
+    Convert websocket node payloads into domain delta objects.
+custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._apply_deltas_to_store
+    Apply deltas to the domain store via the coordinator.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._dispatch_nodes
-    Publish node updates and return the address map by node type.
+    Publish node updates using the shared inventory metadata.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._dispatch_nodes._send
     Fire the dispatcher signal with the latest node payload.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._ensure_type_bucket
-    Return the node bucket for ``node_type`` with default sections.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._apply_heater_addresses
-    Update entry and coordinator state with heater address data.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._heater_sample_subscription_targets
     Return ordered ``(node_type, addr)`` heater sample subscriptions.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._heater_sample_subscription_targets._bind_inventory
@@ -444,10 +426,10 @@ custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_ev
     Process a Socket.IO 0.9 event payload.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_event._extract_type_addr
     Extract the node type and address from a websocket path.
-custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_event._normalise_addr
-    Return a normalised representation of a node address.
-custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_event._record_addr
-    Normalise ``value`` and add it to ``touched_addrs``.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_event._canonical_type
+    Return the canonical node type string.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_event._canonical_addr
+    Return the canonical address for ``node_type`` from inventory.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._update_legacy_section
     Store legacy section updates and mirror them in raw state.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._legacy_section_for_path
@@ -470,16 +452,26 @@ custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._run_heart
     Send periodic heartbeats until cancelled.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._socket_base
     Return the base URL for websocket connections.
+custom_components/termoweb/backend/ws_client.py :: ConnectionRateLimiter.__init__
+    Initialise the limiter with optional clock and sleep hooks.
+custom_components/termoweb/backend/ws_client.py :: ConnectionRateLimiter.wait_for_slot
+    Sleep if necessary before allowing the next connection attempt.
 custom_components/termoweb/backend/ws_client.py :: resolve_ws_update_section
     Map a websocket path segment onto the node section bucket.
 custom_components/termoweb/backend/ws_client.py :: forward_ws_sample_updates
     Relay websocket heater sample updates to the energy coordinator.
+custom_components/termoweb/backend/ws_client.py :: translate_path_update
+    Translate ``{"path": ..., "body": ...}`` websocket frames into nodes.
 custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._status_should_reset_health
     Return True when a status should clear healthy tracking.
+custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._ws_bucket_sizes
+    Return the current websocket state and tracker bucket sizes.
 custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._ws_state_bucket
     Return the websocket state bucket for the current device.
 custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._ws_health_tracker
     Return the :class:`WsHealthTracker` for this websocket client.
+custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._cleanup_ws_state
+    Remove cached websocket state and tracker entries for this device.
 custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._notify_ws_status
     Dispatch websocket status updates with tracker metadata.
 custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._mark_ws_payload
@@ -492,16 +484,16 @@ custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._update_status
     Publish websocket status updates to Home Assistant listeners.
 custom_components/termoweb/backend/ws_client.py :: _prepare_nodes_dispatch
     Normalise node payload data for downstream websocket dispatch.
-custom_components/termoweb/backend/ws_client.py :: _WSCommon._process_power_updates
-    Extract instantaneous power readings from websocket payloads.
-custom_components/termoweb/backend/ws_client.py :: ConnectionRateLimiter.__init__
-    Initialise the limiter with optional clock and sleep hooks.
-custom_components/termoweb/backend/ws_client.py :: ConnectionRateLimiter.wait_for_slot
-    Sleep if necessary before allowing the next connection attempt.
 custom_components/termoweb/backend/ws_client.py :: _WSCommon.__init__
     Initialise shared websocket state.
 custom_components/termoweb/backend/ws_client.py :: _WSCommon._throttle_connection_attempt
     Apply a defensive rate limit before dialing the backend.
+custom_components/termoweb/backend/ws_client.py :: _WSCommon._bind_inventory_from_context
+    Attach the shared inventory stored on the Home Assistant entry.
+custom_components/termoweb/backend/ws_client.py :: _WSCommon._ensure_type_bucket
+    Return the node bucket for ``node_type`` without cloning metadata.
+custom_components/termoweb/backend/ws_client.py :: _WSCommon._apply_heater_addresses
+    Update entry and coordinator state with heater address data.
 custom_components/termoweb/backend/ws_client.py :: __getattr__
     Lazily expose backend websocket client implementations.
 custom_components/termoweb/backend/ws_health.py :: WsHealthTracker.update_status
@@ -525,7 +517,7 @@ custom_components/termoweb/backend/ws_health.py :: WsHealthTracker.stale_deadlin
 custom_components/termoweb/backend/ws_health.py :: WsHealthTracker.snapshot
     Return a serializable snapshot of the tracker state.
 custom_components/termoweb/binary_sensor.py :: async_setup_entry
-    Set up one connectivity binary sensor per TermoWeb hub (dev_id).
+    Set up connectivity and boost binary sensors for a config entry.
 custom_components/termoweb/binary_sensor.py :: GatewayOnlineBinarySensor.__init__
     Initialise the connectivity binary sensor.
 custom_components/termoweb/binary_sensor.py :: GatewayOnlineBinarySensor.gateway_signal
@@ -546,6 +538,24 @@ custom_components/termoweb/binary_sensor.py :: HeaterBoostActiveBinarySensor.is_
     Return True when the heater boost is active.
 custom_components/termoweb/binary_sensor.py :: HeaterBoostActiveBinarySensor.extra_state_attributes
     Return boost metadata exposed alongside the binary state.
+custom_components/termoweb/binary_sensor.py :: HeaterBoostActiveBinarySensor.available
+    Return whether the heater node exists in the inventory.
+custom_components/termoweb/binary_sensor.py :: HeaterBoostActiveBinarySensor.device_info
+    Expose Home Assistant device metadata for the heater.
+custom_components/termoweb/binary_sensor.py :: HeaterBoostActiveBinarySensor.boost_state
+    Return derived boost metadata for this heater.
+custom_components/termoweb/binary_sensor.py :: HeaterBoostActiveBinarySensor.async_added_to_hass
+    Subscribe to websocket updates once the entity is added.
+custom_components/termoweb/binary_sensor.py :: HeaterBoostActiveBinarySensor.async_will_remove_from_hass
+    Detach websocket listeners before removal.
+custom_components/termoweb/binary_sensor.py :: HeaterBoostActiveBinarySensor._handle_ws_message
+    Trigger a refresh when websocket payload targets this entity.
+custom_components/termoweb/binary_sensor.py :: HeaterBoostActiveBinarySensor._payload_targets_entity
+    Return True when ``payload`` references this heater node.
+custom_components/termoweb/binary_sensor.py :: _iter_boostable_inventory_nodes
+    Yield boostable heater metadata from ``inventory``.
+custom_components/termoweb/binary_sensor.py :: _build_settings_resolver
+    Return callable resolving boost settings for a heater node.
 custom_components/termoweb/boost.py :: coerce_int
     Return ``value`` as ``int`` when possible, else ``None``.
 custom_components/termoweb/boost.py :: coerce_boost_bool
@@ -558,10 +568,20 @@ custom_components/termoweb/boost.py :: supports_boost
     Return ``True`` when ``node`` exposes boost controls.
 custom_components/termoweb/boost.py :: resolve_boost_end_from_fields
     Translate boost end ``day``/``minute`` fields into a timestamp.
+custom_components/termoweb/button.py :: AccumulatorBoostContext.from_inventory
+    Build context for ``node`` using the shared inventory.
+custom_components/termoweb/button.py :: AccumulatorBoostContext.dev_id
+    Return the gateway identifier for the accumulator node.
+custom_components/termoweb/button.py :: AccumulatorBoostContext.node_type
+    Return the canonical node type for the accumulator node.
+custom_components/termoweb/button.py :: AccumulatorBoostContext.addr
+    Return the canonical address for the accumulator node.
+custom_components/termoweb/button.py :: AccumulatorBoostContext.unique_id
+    Return the unique ID for a boost helper with ``suffix``.
+custom_components/termoweb/button.py :: _iter_accumulator_contexts
+    Yield boost contexts for accumulator nodes in ``inventory``.
 custom_components/termoweb/button.py :: async_setup_entry
     Expose hub refresh and accumulator boost helper buttons.
-custom_components/termoweb/button.py :: async_setup_entry.default_name
-    Return a placeholder name for heater nodes.
 custom_components/termoweb/button.py :: StateRefreshButton.__init__
     Initialise the force-refresh button entity.
 custom_components/termoweb/button.py :: StateRefreshButton.device_info
@@ -574,18 +594,40 @@ custom_components/termoweb/button.py :: AccumulatorBoostButtonBase.boost_context
     Return the inventory-derived context for this entity.
 custom_components/termoweb/button.py :: AccumulatorBoostButtonBase._service_minutes
     Return the minutes payload passed to the helper service.
+custom_components/termoweb/button.py :: AccumulatorBoostButtonBase.available
+    Return True when the inventory exposes this accumulator.
+custom_components/termoweb/button.py :: AccumulatorBoostButtonBase.async_added_to_hass
+    Register coordinator listener hooks once the entity is added.
+custom_components/termoweb/button.py :: AccumulatorBoostButtonBase._handle_coordinator_update
+    Refresh entity state when the coordinator updates.
+custom_components/termoweb/button.py :: AccumulatorBoostButtonBase._coordinator_settings
+    Return cached coordinator settings for this accumulator.
+custom_components/termoweb/button.py :: AccumulatorBoostButtonBase._coordinator_boost_active
+    Return True when coordinator cache reports boost activity.
+custom_components/termoweb/button.py :: AccumulatorBoostButtonBase.device_info
+    Return Home Assistant device metadata for the accumulator.
 custom_components/termoweb/button.py :: AccumulatorBoostButtonBase.async_press
     Invoke the helper service to update the accumulator boost state.
 custom_components/termoweb/button.py :: AccumulatorBoostButton.__init__
     Initialise the boost helper button that uses stored presets.
 custom_components/termoweb/button.py :: AccumulatorBoostButton.async_press
     Trigger a boost using the persisted duration and temperature.
+custom_components/termoweb/button.py :: AccumulatorBoostCancelButton.__init__
+    Initialise the boost cancellation helper button.
+custom_components/termoweb/button.py :: AccumulatorBoostCancelButton.available
+    Return True when an accumulator boost is active.
+custom_components/termoweb/button.py :: AccumulatorBoostCancelButton.async_press
+    Cancel the active accumulator boost session.
 custom_components/termoweb/button.py :: _create_boost_button_entities
     Return boost helper buttons described by shared metadata.
 custom_components/termoweb/button.py :: _build_boost_button
     Instantiate a boost helper button for ``metadata``.
+custom_components/termoweb/climate.py :: _is_cancelled_error
+    Return ``True`` when ``err`` represents a cancellation.
 custom_components/termoweb/climate.py :: async_setup_entry
     Discover heater nodes and create climate entities.
+custom_components/termoweb/climate.py :: async_setup_entry.default_name_simple
+    Return fallback name for heater nodes.
 custom_components/termoweb/climate.py :: async_setup_entry._svc_set_schedule
     Handle the set_schedule entity service.
 custom_components/termoweb/climate.py :: async_setup_entry._svc_set_preset_temperatures
@@ -598,6 +640,8 @@ custom_components/termoweb/climate.py :: async_setup_entry._svc_cancel_boost
     Handle accumulator boost cancellation service.
 custom_components/termoweb/climate.py :: HeaterClimateEntity.__init__
     Initialise the climate entity for a TermoWeb heater.
+custom_components/termoweb/climate.py :: HeaterClimateEntity.async_added_to_hass
+    Register the entity ID for cross-platform helpers.
 custom_components/termoweb/climate.py :: HeaterClimateEntity.async_will_remove_from_hass
     Clean up pending tasks when the entity is removed.
 custom_components/termoweb/climate.py :: HeaterClimateEntity._slot_label
@@ -606,6 +650,10 @@ custom_components/termoweb/climate.py :: HeaterClimateEntity._current_prog_slot
     Return the active program slot index for the heater.
 custom_components/termoweb/climate.py :: HeaterClimateEntity._settings_maps
     Return all cached settings maps referencing this node.
+custom_components/termoweb/climate.py :: HeaterClimateEntity._settings_maps._iter_node_types
+    Yield node types that may hold settings for this address.
+custom_components/termoweb/climate.py :: HeaterClimateEntity._shared_inventory
+    Return the shared immutable inventory for this coordinator.
 custom_components/termoweb/climate.py :: HeaterClimateEntity._optimistic_update
     Apply ``mutator`` to cached settings and refresh state if changed.
 custom_components/termoweb/climate.py :: HeaterClimateEntity._async_write_settings
@@ -613,15 +661,11 @@ custom_components/termoweb/climate.py :: HeaterClimateEntity._async_write_settin
 custom_components/termoweb/climate.py :: HeaterClimateEntity._async_client_call
     Call a backend helper while applying standard error handling.
 custom_components/termoweb/climate.py :: HeaterClimateEntity._async_submit_settings
-    Send settings via the heater-specific API.
+    Send settings for this heater to the backend.
 custom_components/termoweb/climate.py :: HeaterClimateEntity._handle_ws_event
     React to websocket updates for this heater.
 custom_components/termoweb/climate.py :: HeaterClimateEntity._payload_mentions_heater
     Return True when a websocket payload references this heater.
-custom_components/termoweb/climate.py :: HeaterClimateEntity._inventory_for_payload
-    Return the resolved inventory for ``payload``.
-custom_components/termoweb/climate.py :: HeaterClimateEntity._inventory_mentions_addr
-    Return True when ``inventory`` references this heater address.
 custom_components/termoweb/climate.py :: HeaterClimateEntity.hvac_mode
     Return the HA HVAC mode derived from heater settings.
 custom_components/termoweb/climate.py :: HeaterClimateEntity.hvac_action
@@ -692,6 +736,156 @@ custom_components/termoweb/climate.py :: AccumulatorClimateEntity.async_start_bo
     Start an accumulator boost session.
 custom_components/termoweb/climate.py :: AccumulatorClimateEntity.async_cancel_boost
     Cancel the active accumulator boost session.
+custom_components/termoweb/codecs/common.py :: format_temperature
+    Format numeric temperatures to a one-decimal string.
+custom_components/termoweb/codecs/common.py :: validate_units
+    Validate and normalise temperature units.
+custom_components/termoweb/codecs/ducaheat_codec.py :: decode_payload
+    Decode a Ducaheat payload (placeholder).
+custom_components/termoweb/codecs/ducaheat_codec.py :: decode_status
+    Decode a Ducaheat status payload into domain state.
+custom_components/termoweb/codecs/ducaheat_codec.py :: decode_samples
+    Decode Ducaheat samples payloads.
+custom_components/termoweb/codecs/ducaheat_codec.py :: decode_prog
+    Decode Ducaheat program payloads.
+custom_components/termoweb/codecs/ducaheat_codec.py :: decode_settings
+    Decode segmented settings payloads into the legacy mapping.
+custom_components/termoweb/codecs/ducaheat_codec.py :: _decode_status_payload
+    Normalise heater/accumulator settings payloads.
+custom_components/termoweb/codecs/ducaheat_codec.py :: _decode_thm_settings
+    Return a normalised thermostat settings mapping.
+custom_components/termoweb/codecs/ducaheat_codec.py :: _decode_thm_settings._to_float
+    Return ``value`` coerced to float when possible.
+custom_components/termoweb/codecs/ducaheat_codec.py :: _merge_boost_metadata
+    Copy boost metadata from ``source`` into ``target`` safely.
+custom_components/termoweb/codecs/ducaheat_codec.py :: _merge_boost_metadata._assign
+    Assign a metadata value while respecting preference rules.
+custom_components/termoweb/codecs/ducaheat_codec.py :: _merge_accumulator_charge_metadata
+    Copy accumulator charge metadata from ``source`` into ``target``.
+custom_components/termoweb/codecs/ducaheat_codec.py :: _normalise_acm_capabilities
+    Merge accumulator capability dictionaries into a single mapping.
+custom_components/termoweb/codecs/ducaheat_codec.py :: _normalise_acm_capabilities._merge
+    Recursively merge capability dictionaries.
+custom_components/termoweb/codecs/ducaheat_codec.py :: _normalise_prog
+    Convert vendor programme payloads into a 168-slot list.
+custom_components/termoweb/codecs/ducaheat_codec.py :: _normalise_prog._coerce_slots
+    Convert a day's slots into a 24-value list.
+custom_components/termoweb/codecs/ducaheat_codec.py :: _normalise_prog_temps
+    Convert preset temperature payloads into stringified list.
+custom_components/termoweb/codecs/ducaheat_codec.py :: _safe_temperature
+    Defensively format inbound temperature values.
+custom_components/termoweb/codecs/ducaheat_codec.py :: encode_select_payload
+    Encode a selection payload.
+custom_components/termoweb/codecs/ducaheat_codec.py :: encode_mode_command
+    Encode a SetMode command for the mode endpoint.
+custom_components/termoweb/codecs/ducaheat_codec.py :: encode_setpoint_command
+    Encode a SetSetpoint command for the status endpoint.
+custom_components/termoweb/codecs/ducaheat_codec.py :: encode_units_command
+    Encode a SetUnits command for the status endpoint.
+custom_components/termoweb/codecs/ducaheat_codec.py :: encode_preset_temps_command
+    Encode preset temperature updates for the status endpoint.
+custom_components/termoweb/codecs/ducaheat_codec.py :: encode_program_command
+    Encode a SetProgram command for the prog endpoint.
+custom_components/termoweb/codecs/ducaheat_codec.py :: encode_extra_options_command
+    Encode an extra options command for the setup endpoint.
+custom_components/termoweb/codecs/ducaheat_codec.py :: encode_boost_command
+    Encode accumulator boost commands for the boost endpoint.
+custom_components/termoweb/codecs/ducaheat_codec.py :: infer_status_endpoint
+    Return the segmented endpoint name for a status-like command.
+custom_components/termoweb/codecs/ducaheat_models.py :: _validate_prog_slots
+    Validate a daily program segment containing 24 integers.
+custom_components/termoweb/codecs/ducaheat_models.py :: _normalise_prog
+    Normalise weekly programs to a mapping keyed by day index.
+custom_components/termoweb/codecs/ducaheat_models.py :: StatusWritePayload._normalise_mode
+    Lowercase mode strings when provided.
+custom_components/termoweb/codecs/ducaheat_models.py :: StatusWritePayload._format_temps
+    Validate and format temperature strings.
+custom_components/termoweb/codecs/ducaheat_models.py :: StatusWritePayload._clean_units
+    Ensure units are uppercase when provided.
+custom_components/termoweb/codecs/ducaheat_models.py :: StatusWritePayload._validate_boost_time
+    Clamp boost_time to supported options.
+custom_components/termoweb/codecs/ducaheat_models.py :: ModeWritePayload._normalise_mode
+    Lowercase the supplied mode string.
+custom_components/termoweb/codecs/ducaheat_models.py :: ModeWritePayload._validate_boost_time
+    Validate boost duration values.
+custom_components/termoweb/codecs/ducaheat_models.py :: ProgramWritePayload._clean_prog
+    Normalise incoming program shapes.
+custom_components/termoweb/codecs/ducaheat_models.py :: ExtraOptionsPayload._validate_boost_time
+    Validate boost duration values.
+custom_components/termoweb/codecs/ducaheat_models.py :: ExtraOptionsPayload._format_boost_temp
+    Format boost temperature strings.
+custom_components/termoweb/codecs/ducaheat_models.py :: SetupPayload._require_options
+    Ensure at least one setup field is provided.
+custom_components/termoweb/codecs/ducaheat_models.py :: BoostPayload._validate_boost_time
+    Validate boost duration values.
+custom_components/termoweb/codecs/ducaheat_models.py :: BoostPayload._format_boost_temp
+    Format boost temperature values.
+custom_components/termoweb/codecs/ducaheat_models.py :: BoostPayload._validate_units
+    Ensure units are uppercase when provided.
+custom_components/termoweb/codecs/ducaheat_planner.py :: plan_command
+    Return a select→write→release plan for a single command.
+custom_components/termoweb/codecs/ducaheat_planner.py :: _build_write_call
+    Build the primary write call for the supplied command.
+custom_components/termoweb/codecs/ducaheat_planner.py :: _ensure_accumulator
+    Validate that accumulator-only commands target an accumulator.
+custom_components/termoweb/codecs/termoweb_codec.py :: decode_payload
+    Decode a TermoWeb payload.
+custom_components/termoweb/codecs/termoweb_codec.py :: encode_payload
+    Encode data for TermoWeb payloads.
+custom_components/termoweb/codecs/termoweb_codec.py :: _validate_prog
+    Validate a weekly program sequence.
+custom_components/termoweb/codecs/termoweb_codec.py :: _validate_ptemp
+    Validate preset temperatures and return formatted strings.
+custom_components/termoweb/codecs/termoweb_codec.py :: _normalise_mode
+    Lower-case and normalise heater modes.
+custom_components/termoweb/codecs/termoweb_codec.py :: build_settings_payload
+    Encode node setting commands into a TermoWeb payload.
+custom_components/termoweb/codecs/termoweb_codec.py :: build_extra_options_payload
+    Encode accumulator extra options for TermoWeb.
+custom_components/termoweb/codecs/termoweb_codec.py :: build_boost_payload
+    Encode accumulator boost commands for TermoWeb.
+custom_components/termoweb/codecs/termoweb_codec.py :: decode_devs_payload
+    Validate and normalise a device list payload.
+custom_components/termoweb/codecs/termoweb_codec.py :: decode_nodes_payload
+    Validate and normalise a nodes payload without changing semantics.
+custom_components/termoweb/codecs/termoweb_codec.py :: decode_node_settings
+    Validate and normalise node settings while preserving legacy keys.
+custom_components/termoweb/codecs/termoweb_codec.py :: decode_samples
+    Normalise heater samples payloads into {"t", "counter"} lists.
+custom_components/termoweb/codecs/termoweb_models.py :: NodeSummary._stringify_numeric
+    Convert numeric addresses to strings for consistency.
+custom_components/termoweb/codecs/termoweb_models.py :: _format_temperature
+    Return a temperature value formatted with one decimal when numeric.
+custom_components/termoweb/codecs/termoweb_models.py :: normalise_temperature
+    Format numeric temperatures into a one-decimal string when possible.
+custom_components/termoweb/codecs/termoweb_models.py :: normalise_prog
+    Coerce program values to integers when possible without raising.
+custom_components/termoweb/codecs/termoweb_models.py :: normalise_ptemp
+    Format preset temperatures while preserving the original length.
+custom_components/termoweb/codecs/termoweb_models.py :: HeaterStatusPayload._normalise_temperature
+    Format numeric temperatures to a one-decimal string.
+custom_components/termoweb/codecs/termoweb_models.py :: HeaterStatusPayload._normalise_prog
+    Coerce program values to integers when possible without raising.
+custom_components/termoweb/codecs/termoweb_models.py :: HeaterStatusPayload._normalise_ptemp
+    Format preset temperatures without altering the original length.
+custom_components/termoweb/codecs/termoweb_models.py :: HeaterSettingsPayload._normalise_temperature
+    Format numeric temperatures to a one-decimal string.
+custom_components/termoweb/codecs/termoweb_models.py :: HeaterSettingsPayload._normalise_prog
+    Coerce program values to integers when possible without raising.
+custom_components/termoweb/codecs/termoweb_models.py :: HeaterSettingsPayload._normalise_ptemp
+    Format preset temperatures without altering the original length.
+custom_components/termoweb/codecs/termoweb_models.py :: ThermostatSettingsPayload._normalise_temperature
+    Format numeric temperatures to a one-decimal string.
+custom_components/termoweb/codecs/termoweb_models.py :: ThermostatSettingsPayload._normalise_prog
+    Coerce program values to integers when possible without raising.
+custom_components/termoweb/codecs/termoweb_models.py :: ThermostatSettingsPayload._normalise_ptemp
+    Format preset temperatures without altering the original length.
+custom_components/termoweb/codecs/termoweb_models.py :: NodeSettingsWritePayload._normalise_mode
+    Lower-case mode strings when provided.
+custom_components/termoweb/codecs/termoweb_models.py :: NodeSettingsWritePayload._normalise_units
+    Upper-case temperature unit identifiers.
+custom_components/termoweb/codecs/termoweb_models.py :: AcmBoostWritePayload._normalise_units
+    Upper-case temperature units for boost writes.
 custom_components/termoweb/config_flow.py :: _get_version
     Read integration version from manifest (DRY).
 custom_components/termoweb/config_flow.py :: _login_schema
@@ -730,14 +924,10 @@ custom_components/termoweb/coordinator.py :: RaiseUpdateFailedCoordinator.async_
     Refresh data and raise ``UpdateFailed`` when polling fails.
 custom_components/termoweb/coordinator.py :: _device_display_name
     Return the trimmed device name or a fallback for ``dev_id``.
-custom_components/termoweb/coordinator.py :: _ensure_heater_section
-    Ensure ``nodes_by_type`` contains an ``htr`` section and return it.
-custom_components/termoweb/coordinator.py :: _normalize_energy_payload
-    Return canonical energy node address mapping and aliases for ``payload``.
 custom_components/termoweb/coordinator.py :: StateCoordinator.__init__
     Initialize the TermoWeb device coordinator.
-custom_components/termoweb/coordinator.py :: StateCoordinator._collect_previous_settings
-    Return normalised settings carried over from previous poll.
+custom_components/termoweb/coordinator.py :: StateCoordinator.domain_view
+    Return the read-only domain state view.
 custom_components/termoweb/coordinator.py :: StateCoordinator._include_raw_settings
     Return True when raw settings payloads should be retained.
 custom_components/termoweb/coordinator.py :: StateCoordinator._filtered_settings_payload
@@ -750,18 +940,16 @@ custom_components/termoweb/coordinator.py :: StateCoordinator._sync_instant_powe
     Publish the latest instant power snapshot to listeners.
 custom_components/termoweb/coordinator.py :: StateCoordinator._record_instant_power
     Store an instant power reading and return ``True`` when changed.
-custom_components/termoweb/coordinator.py :: StateCoordinator._ingest_instant_power_payload
-    Extract and record power metadata from a payload.
+custom_components/termoweb/coordinator.py :: StateCoordinator.handle_instant_power_update
+    Process a websocket instant power update.
+custom_components/termoweb/coordinator.py :: StateCoordinator.instant_power_entry
+    Return the cached instant power entry for ``(node_type, addr)``.
+custom_components/termoweb/coordinator.py :: StateCoordinator.instant_power_overview
+    Return a diagnostics-friendly snapshot of instant power values.
 custom_components/termoweb/coordinator.py :: StateCoordinator._should_skip_rest_power
     Return ``True`` when websocket data is fresh enough to skip REST power.
-custom_components/termoweb/coordinator.py :: StateCoordinator._async_fetch_settings_by_address
-    Fetch settings for every address and update ``settings_by_type``.
-custom_components/termoweb/coordinator.py :: StateCoordinator._clone_inventory
-    Return a fresh ``Inventory`` instance for cached payloads.
-custom_components/termoweb/coordinator.py :: StateCoordinator._normalise_settings_map
-    Return a copy of ``settings_by_type`` keyed by normalised addresses.
-custom_components/termoweb/coordinator.py :: StateCoordinator._assemble_device_record
-    Return a coordinator cache record for ``inventory`` and settings.
+custom_components/termoweb/coordinator.py :: StateCoordinator._async_fetch_settings_to_store
+    Fetch settings for every address and store them in the domain cache.
 custom_components/termoweb/coordinator.py :: StateCoordinator._normalize_mode_value
     Return a canonical string for backend HVAC modes.
 custom_components/termoweb/coordinator.py :: StateCoordinator._pending_key
@@ -784,30 +972,30 @@ custom_components/termoweb/coordinator.py :: StateCoordinator._apply_accumulator
     Store derived boost metadata on ``payload``.
 custom_components/termoweb/coordinator.py :: StateCoordinator._apply_boost_metadata_for_settings
     Apply boost metadata derivation to every settings payload.
-custom_components/termoweb/coordinator.py :: StateCoordinator.handle_instant_power_update
-    Process a websocket instant power update.
-custom_components/termoweb/coordinator.py :: StateCoordinator.instant_power_entry
-    Return the cached instant power entry for ``(node_type, addr)``.
-custom_components/termoweb/coordinator.py :: StateCoordinator.instant_power_overview
-    Return a diagnostics-friendly snapshot of instant power values.
 custom_components/termoweb/coordinator.py :: StateCoordinator._should_defer_pending_setting
     Return True when a pending write should defer payload merging.
-custom_components/termoweb/coordinator.py :: StateCoordinator._merge_nodes_by_type
-    Merge cached addresses, existing sections and payload settings.
-custom_components/termoweb/coordinator.py :: StateCoordinator._normalise_type_section
-    Return a standard mapping for a node type section.
 custom_components/termoweb/coordinator.py :: StateCoordinator.update_nodes
-    Update cached node payload and inventory.
+    Update cached inventory metadata.
 custom_components/termoweb/coordinator.py :: StateCoordinator._ensure_inventory
     Ensure cached inventory metadata is available.
+custom_components/termoweb/coordinator.py :: StateCoordinator._node_ids_from_inventory
+    Return domain node identifiers derived from ``inventory``.
+custom_components/termoweb/coordinator.py :: StateCoordinator._ensure_state_store
+    Ensure a domain state store exists when applicable.
+custom_components/termoweb/coordinator.py :: StateCoordinator._seed_state_store_from_data
+    Populate the domain store from any existing coordinator data.
+custom_components/termoweb/coordinator.py :: StateCoordinator.handle_ws_deltas
+    Merge websocket-delivered deltas into the domain state store.
+custom_components/termoweb/coordinator.py :: StateCoordinator.apply_entity_patch
+    Apply an optimistic patch through the domain store when available.
 custom_components/termoweb/coordinator.py :: StateCoordinator.async_refresh_heater
     Refresh settings for a specific node and push the update to listeners.
 custom_components/termoweb/coordinator.py :: StateCoordinator._async_update_data
     Fetch the latest settings for every known node on each poll.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.__init__
     Initialize the heater energy coordinator.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.update_addresses
-    Replace the tracked nodes using immutable inventory metadata.
+custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._resolve_inventory
+    Return the active inventory, preferring ``candidate`` when provided.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._iter_energy_targets
     Yield normalised energy node targets from ``inventory``.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._targets_by_type
@@ -816,6 +1004,8 @@ custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._prefill_ene
     Seed energy and power buckets from cached coordinator state.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._poll_recent_samples
     Fetch recent energy samples for every tracked node.
+custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.update_addresses
+    Replace the tracked nodes using immutable inventory metadata.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._process_energy_sample
     Update cached energy and derived power for ``addr``.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._async_update_data
@@ -830,28 +1020,96 @@ custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.handle_ws_sa
     Update cached heater metrics from websocket ``samples`` payloads.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.merge_samples_for_window
     Merge normalised hourly samples into the cached energy state.
-custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller.__init__
-    Initialise the poller with Home Assistant context and dependencies.
-custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller.async_setup
-    Register the HH:05 local trigger and perform optional catch-up.
-custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller.async_shutdown
-    Cancel scheduled triggers and pending polling tasks.
-custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller._on_time
-    Callback invoked by Home Assistant's time tracker in a thread-safe way.
-custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller._run_for_previous_hour
-    Fetch and merge samples for the hour preceding ``now_local``.
-custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller._poll_device
-    Fetch samples for ``dev_id`` and merge them into the coordinator.
 custom_components/termoweb/coordinator.py :: _wrap_logger
     Return a logger proxy that exposes ``isEnabledFor`` when missing.
 custom_components/termoweb/diagnostics.py :: async_get_config_entry_diagnostics
     Return a diagnostics payload for ``entry``.
+custom_components/termoweb/domain/ids.py :: normalize_node_type
+    Normalize assorted node type inputs to ``NodeType``.
+custom_components/termoweb/domain/ids.py :: NodeId.__post_init__
+    Normalise the node address to a non-empty string.
+custom_components/termoweb/domain/inventory.py :: InstallationInventory.__post_init__
+    Ensure nodes mapping is immutable.
+custom_components/termoweb/domain/legacy_view.py :: store_to_legacy_coordinator_data
+    Return a coordinator data mapping using the legacy dict schema.
+custom_components/termoweb/domain/state.py :: _copy_sequence
+    Return a shallow copy of a sequence when applicable.
+custom_components/termoweb/domain/state.py :: _copy_mapping
+    Return a shallow copy of a mapping when applicable.
+custom_components/termoweb/domain/state.py :: _deep_copy_value
+    Return a defensive shallow copy for nested payload values.
+custom_components/termoweb/domain/state.py :: _collect_extras
+    Capture non-canonical payload keys as extra metadata.
+custom_components/termoweb/domain/state.py :: HeaterState.to_legacy
+    Convert the state into the legacy coordinator payload shape.
+custom_components/termoweb/domain/state.py :: AccumulatorState.to_legacy
+    Convert the accumulator state into the legacy payload shape.
+custom_components/termoweb/domain/state.py :: PowerMonitorState.to_legacy
+    Convert the power monitor state into the legacy payload shape.
+custom_components/termoweb/domain/state.py :: NodeDelta.payload
+    Return the payload carried by the delta.
+custom_components/termoweb/domain/state.py :: NodeSettingsDelta.payload
+    Return the mapping of changed fields.
+custom_components/termoweb/domain/state.py :: NodeStatusDelta.payload
+    Return the status mapping payload.
+custom_components/termoweb/domain/state.py :: NodeSamplesDelta.payload
+    Return the samples mapping payload.
+custom_components/termoweb/domain/state.py :: _populate_heater_state
+    Populate base heater fields on ``state`` from ``payload``.
+custom_components/termoweb/domain/state.py :: _build_heater_state
+    Construct a heater state instance from ``payload``.
+custom_components/termoweb/domain/state.py :: _build_accumulator_state
+    Construct an accumulator state instance from ``payload``.
+custom_components/termoweb/domain/state.py :: _build_thermostat_state
+    Construct a thermostat state instance from ``payload``.
+custom_components/termoweb/domain/state.py :: _build_power_monitor_state
+    Construct a power monitor state instance from ``payload``.
+custom_components/termoweb/domain/state.py :: _build_state
+    Return a domain state object for ``node_type`` and ``payload``.
+custom_components/termoweb/domain/state.py :: _merge_state
+    Merge ``payload`` fields into ``state`` without altering the type.
+custom_components/termoweb/domain/state.py :: DomainStateStore.__init__
+    Initialise the store for a set of allowable nodes.
+custom_components/termoweb/domain/state.py :: DomainStateStore.reset_nodes
+    Reset the allowed node list and prune any stale state.
+custom_components/termoweb/domain/state.py :: DomainStateStore._resolve_node_id
+    Return a canonical NodeId when permitted by the inventory.
+custom_components/termoweb/domain/state.py :: DomainStateStore._apply_payload
+    Apply ``payload`` to ``node_id`` using replace semantics when requested.
+custom_components/termoweb/domain/state.py :: DomainStateStore.apply_full_snapshot
+    Store a complete settings snapshot for ``(node_type, addr)``.
+custom_components/termoweb/domain/state.py :: DomainStateStore.apply_patch
+    Merge partial updates for ``(node_type, addr)`` into the store.
+custom_components/termoweb/domain/state.py :: DomainStateStore.apply_delta
+    Apply a typed domain delta to the store.
+custom_components/termoweb/domain/state.py :: DomainStateStore.get_state
+    Return the stored state for ``(node_type, addr)`` when known.
+custom_components/termoweb/domain/state.py :: DomainStateStore.addresses_by_type
+    Return known addresses grouped by node type.
+custom_components/termoweb/domain/state.py :: DomainStateStore.known_types
+    Return the set of node types represented in the store.
+custom_components/termoweb/domain/state.py :: DomainStateStore.iter_states
+    Yield stored ``(NodeId, DomainState)`` pairs.
+custom_components/termoweb/domain/state.py :: DomainStateStore.legacy_view
+    Return a legacy settings mapping grouped by type and address.
+custom_components/termoweb/domain/state.py :: _normalize_node_type
+    Return a canonical ``NodeType`` when possible.
+custom_components/termoweb/domain/state.py :: build_state_from_payload
+    Return a domain state instance derived from a legacy payload.
+custom_components/termoweb/domain/view.py :: DomainStateView.__init__
+    Initialise the view for ``dev_id`` using ``store`` when available.
+custom_components/termoweb/domain/view.py :: DomainStateView.update_store
+    Refresh the backing domain store reference.
+custom_components/termoweb/domain/view.py :: DomainStateView._build_state
+    Return a domain state object using the store.
+custom_components/termoweb/domain/view.py :: DomainStateView.get_heater_state
+    Return the heater/thermostat/accumulator state for ``addr``.
+custom_components/termoweb/domain/view.py :: DomainStateView.get_power_monitor_state
+    Return the power monitor state for ``addr`` when present.
 custom_components/termoweb/energy.py :: _resolve_recorder_imports
     Return cached recorder helper imports.
 custom_components/termoweb/energy.py :: _resolve_statistics_helpers
     Return the recorder statistics helpers for compatibility shims.
-custom_components/termoweb/energy.py :: _normalize_heater_sources
-    Return canonical heater node address map for ``addrs``.
 custom_components/termoweb/energy.py :: _iso_date
     Convert unix timestamp to ISO date.
 custom_components/termoweb/energy.py :: _store_statistics
@@ -902,14 +1160,34 @@ custom_components/termoweb/heater.py :: HeaterPlatformDetails.addrs_by_type
     Return heater addresses grouped by node type.
 custom_components/termoweb/heater.py :: HeaterPlatformDetails.addresses_for
     Return immutable heater addresses for ``node_type``.
+custom_components/termoweb/heater.py :: HeaterPlatformDetails.resolve_name
+    Resolve the friendly name for ``(node_type, addr)``.
+custom_components/termoweb/heater.py :: HeaterPlatformDetails.iter_metadata
+    Yield heater metadata derived from the inventory.
 custom_components/termoweb/heater.py :: _boost_runtime_store
     Return the mutable boost runtime store for ``entry_data``.
+custom_components/termoweb/heater.py :: _boost_temperature_store
+    Return the mutable boost temperature store for ``entry_data``.
 custom_components/termoweb/heater.py :: get_boost_runtime_minutes
     Return the stored boost runtime for the specified node.
+custom_components/termoweb/heater.py :: get_boost_temperature
+    Return the stored boost temperature for the specified node.
 custom_components/termoweb/heater.py :: set_boost_runtime_minutes
     Persist ``minutes`` as the preferred boost runtime for ``node``.
+custom_components/termoweb/heater.py :: set_boost_temperature
+    Persist ``temperature`` as the preferred boost setpoint.
 custom_components/termoweb/heater.py :: resolve_boost_runtime_minutes
     Return the preferred boost runtime or ``default`` when unset.
+custom_components/termoweb/heater.py :: resolve_boost_temperature
+    Return the preferred boost temperature for ``node`` or ``default``.
+custom_components/termoweb/heater.py :: _climate_entity_store
+    Return the mutable climate entity ID store for ``entry_data``.
+custom_components/termoweb/heater.py :: register_climate_entity_id
+    Record the climate entity ID for ``(entry_id, node_type, addr)``.
+custom_components/termoweb/heater.py :: clear_climate_entity_id
+    Remove the recorded climate entity ID for ``(entry_id, node_type, addr)``.
+custom_components/termoweb/heater.py :: resolve_climate_entity_id
+    Return the recorded climate entity ID for ``(entry_id, node_type, addr)``.
 custom_components/termoweb/heater.py :: iter_boost_button_metadata
     Yield the metadata describing boost helper buttons.
 custom_components/termoweb/heater.py :: iter_boostable_heater_nodes
@@ -924,24 +1202,10 @@ custom_components/termoweb/heater.py :: DispatcherSubscriptionHelper.unsubscribe
     Remove the dispatcher subscription if it exists.
 custom_components/termoweb/heater.py :: DispatcherSubscriptionHelper.is_connected
     Return True when the dispatcher listener is active.
-custom_components/termoweb/heater.py :: _iter_nodes
-    Yield :class:`Node` instances from ``nodes`` when possible.
-custom_components/termoweb/heater.py :: iter_heater_nodes
-    Yield heater node metadata for supported node types.
-custom_components/termoweb/heater.py :: iter_heater_maps
-    Yield unique heater map dictionaries for ``map_key``.
 custom_components/termoweb/heater.py :: log_skipped_nodes
     Log skipped TermoWeb nodes for a given platform.
-custom_components/termoweb/heater.py :: build_heater_name_map
-    Return a mapping of heater node identifiers to friendly names.
-ustom_components/termoweb/heater.py :: _extract_inventory
-    Return the shared inventory stored alongside a config entry.
-custom_components/termoweb/heater.py :: resolve_entry_inventory
-    Return the shared inventory stored alongside a config entry.
 custom_components/termoweb/heater.py :: heater_platform_details_for_entry
     Return heater platform metadata derived from ``entry_data``.
-custom_components/termoweb/heater.py :: prepare_heater_platform_data
-    Return node metadata and name resolution helpers for a config entry.
 custom_components/termoweb/heater.py :: HeaterNodeBase.__init__
     Initialise a heater entity tied to a TermoWeb device.
 custom_components/termoweb/heater.py :: HeaterNodeBase.async_added_to_hass
@@ -959,17 +1223,19 @@ custom_components/termoweb/heater.py :: HeaterNodeBase.should_poll
 custom_components/termoweb/heater.py :: HeaterNodeBase.available
     Return whether the backing device exposes heater data.
 custom_components/termoweb/heater.py :: HeaterNodeBase._device_available
-    Return True when ``device_entry`` provides heater metadata for this node.
+    Return True when the immutable inventory exposes this node.
+custom_components/termoweb/heater.py :: HeaterNodeBase._domain_state_view
+    Return the domain state view exposed by the coordinator.
+custom_components/termoweb/heater.py :: HeaterNodeBase._heater_state_payload
+    Return the canonical heater settings payload.
 custom_components/termoweb/heater.py :: HeaterNodeBase._device_record
     Return the coordinator cache entry for this device.
+custom_components/termoweb/heater.py :: HeaterNodeBase._resolve_inventory
+    Return the cached inventory for this entity, if available.
 custom_components/termoweb/heater.py :: HeaterNodeBase._heater_section
     Return the heater-specific metadata cached for this entity.
 custom_components/termoweb/heater.py :: HeaterNodeBase.heater_settings
     Return the cached settings for this heater, if available.
-custom_components/termoweb/heater.py :: HeaterNodeBase._normalise_addresses
-    Return a list of normalised addresses from ``addresses``.
-custom_components/termoweb/heater.py :: HeaterNodeBase._extract_device_addresses
-    Return all known addresses for ``node_type`` from ``device_entry``.
 custom_components/termoweb/heater.py :: HeaterNodeBase._hass_for_runtime
     Return the best-effort Home Assistant instance for runtime access.
 custom_components/termoweb/heater.py :: HeaterNodeBase.hass
@@ -984,6 +1250,18 @@ custom_components/termoweb/heater.py :: HeaterNodeBase._units
     Return the configured temperature units for this heater.
 custom_components/termoweb/heater.py :: HeaterNodeBase.device_info
     Expose Home Assistant device metadata for the heater.
+custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller.__init__
+    Initialise the poller with Home Assistant context and dependencies.
+custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller.async_setup
+    Register the HH:05 local trigger and perform optional catch-up.
+custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller.async_shutdown
+    Cancel scheduled triggers and pending polling tasks.
+custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller._on_time
+    Callback invoked by Home Assistant's time tracker in a thread-safe way.
+custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller._run_for_previous_hour
+    Fetch and merge samples for the hour preceding ``now_local``.
+custom_components/termoweb/hourly_poller.py :: HourlySamplesPoller._poll_device
+    Fetch samples for ``dev_id`` and merge them into the coordinator.
 custom_components/termoweb/i18n.py :: async_get_translations
     Return an empty translation mapping when helpers are unavailable.
 custom_components/termoweb/i18n.py :: _tr
@@ -1004,14 +1282,14 @@ custom_components/termoweb/identifiers.py :: build_power_monitor_unique_id
     Return the canonical unique ID for a power monitor node or entity.
 custom_components/termoweb/identifiers.py :: build_power_monitor_energy_unique_id
     Return the canonical unique ID for a power monitor energy sensor.
-custom_components/termoweb/identifiers.py :: build_power_monitor_instant_power_unique_id
-    Return the canonical unique ID for a power monitor instant power sensor.
 custom_components/termoweb/identifiers.py :: build_power_monitor_power_unique_id
     Return the canonical unique ID for a power monitor power sensor.
 custom_components/termoweb/identifiers.py :: thermostat_fallback_name
     Return the fallback friendly name for a thermostat node.
 custom_components/termoweb/inventory.py :: _default_heater_name
     Return the default fallback name for a heater address.
+custom_components/termoweb/inventory.py :: InventorySnapshot.filtered_count
+    Return the number of nodes included in the snapshot.
 custom_components/termoweb/inventory.py :: Inventory.__init__
     Initialize the inventory container.
 custom_components/termoweb/inventory.py :: Inventory.dev_id
@@ -1020,6 +1298,10 @@ custom_components/termoweb/inventory.py :: Inventory.payload
     Get the raw node payload.
 custom_components/termoweb/inventory.py :: Inventory.nodes
     Get the immutable tuple of node objects.
+custom_components/termoweb/inventory.py :: Inventory.has_node
+    Return ``True`` when ``node_type``/``addr`` exists in the inventory.
+custom_components/termoweb/inventory.py :: Inventory.iter_known_entries
+    Yield ``(node_type, addr, entry)`` for payload entries in the inventory.
 custom_components/termoweb/inventory.py :: Inventory._ensure_addresses_by_type_cache
     Return cached node addresses grouped by normalised type.
 custom_components/termoweb/inventory.py :: Inventory.addresses_by_type
@@ -1034,8 +1316,16 @@ custom_components/termoweb/inventory.py :: Inventory.explicit_heater_names
     Return node type/address pairs that have explicit user-defined names.
 custom_components/termoweb/inventory.py :: Inventory.heater_address_map
     Return forward and reverse heater address mappings.
+custom_components/termoweb/inventory.py :: Inventory.iter_heater_platform_metadata
+    Yield heater metadata derived from cached inventory details.
+custom_components/termoweb/inventory.py :: Inventory.iter_nodes_metadata
+    Yield canonical node metadata for ``node_types``.
+custom_components/termoweb/inventory.py :: Inventory.snapshot
+    Return a serialisable snapshot of node metadata.
 custom_components/termoweb/inventory.py :: Inventory.power_monitor_address_map
     Return forward and reverse power monitor address mappings.
+custom_components/termoweb/inventory.py :: Inventory.resolve_heater_name
+    Return the friendly name for ``(node_type, addr)``.
 custom_components/termoweb/inventory.py :: Inventory._ensure_sample_addresses
     Return cached normalised sample addresses for the provided inputs.
 custom_components/termoweb/inventory.py :: Inventory._ensure_heater_sample_addresses
@@ -1054,14 +1344,22 @@ custom_components/termoweb/inventory.py :: Inventory.power_monitor_sample_target
     Return ordered power monitor sample subscription targets.
 custom_components/termoweb/inventory.py :: Inventory._validate_sample_targets
     Return deduplicated and sanitised sample target pairs.
+custom_components/termoweb/inventory.py :: Inventory.sample_alias_map
+    Return compatibility aliases for sample payload processing.
+custom_components/termoweb/inventory.py :: Inventory.sample_alias_map._merge_alias
+    Insert a normalised alias pair into ``alias_map``.
 custom_components/termoweb/inventory.py :: Inventory.heater_name_map
     Return cached heater name mapping for ``default_factory``.
+custom_components/termoweb/inventory.py :: Inventory.heater_name_map._node_value
+    Return attribute ``key`` for ``candidate`` regardless of type.
+custom_components/termoweb/inventory.py :: Inventory.heater_name_map._evict_stale_cache
+    Drop the oldest cached factory when exceeding the size limit.
 custom_components/termoweb/inventory.py :: Inventory._heater_factory_signature
     Return a stable cache key for ``factory`` when possible.
-custom_components/termoweb/inventory.py :: _normalize_node_iterable
-    Return filtered node tuples and raw length for ``nodes``.
-custom_components/termoweb/inventory.py :: resolve_record_inventory
-    Return the ``Inventory`` for ``record`` and describe its origin.
+custom_components/termoweb/inventory.py :: Inventory.require_from_context
+    Return the shared inventory associated with a Home Assistant entry.
+custom_components/termoweb/inventory.py :: Inventory.require_from_record
+    Return the cached inventory stored within ``record``.
 custom_components/termoweb/inventory.py :: _normalize_node_identifier
     Return ``value`` as a normalised node identifier string.
 custom_components/termoweb/inventory.py :: normalize_node_type
@@ -1072,12 +1370,12 @@ custom_components/termoweb/inventory.py :: addresses_by_node_type
     Return mapping of node type to address list, tracking unknown types.
 custom_components/termoweb/inventory.py :: build_heater_address_map
     Return mapping of heater node types to addresses and reverse lookup.
-custom_components/termoweb/inventory.py :: build_heater_inventory_details
-    Return derived heater metadata for ``nodes``.
 custom_components/termoweb/inventory.py :: heater_platform_details_from_inventory
     Return heater platform metadata derived from ``inventory``.
 custom_components/termoweb/inventory.py :: heater_platform_details_from_inventory.resolve_name
     Resolve friendly names for heater nodes.
+custom_components/termoweb/inventory.py :: boostable_accumulator_details_for_entry
+    Return boostable accumulator metadata for a config entry.
 custom_components/termoweb/inventory.py :: normalize_heater_addresses
     Return canonical heater addresses and compatibility aliases.
 custom_components/termoweb/inventory.py :: normalize_power_monitor_addresses
@@ -1122,12 +1420,6 @@ custom_components/termoweb/inventory.py :: _collect_snapshot_addresses
     Return mapping of addresses to candidate payloads from ``section``.
 custom_components/termoweb/inventory.py :: _extract_snapshot_name
     Return best candidate name extracted from ``payloads``.
-custom_components/termoweb/inventory.py :: Inventory.iter_nodes_metadata
-    Yield canonical node metadata for the requested types.
-custom_components/termoweb/inventory.py :: Inventory.snapshot
-    Return a serialisable snapshot of node metadata.
-custom_components/termoweb/inventory.py :: InventorySnapshot.filtered_count
-    Return the number of nodes included in the snapshot.
 custom_components/termoweb/inventory.py :: _iter_node_payload
     Yield node dictionaries from a payload returned by the API.
 custom_components/termoweb/inventory.py :: _resolve_node_class
@@ -1140,10 +1432,14 @@ custom_components/termoweb/number.py :: _restore_boost_value
     Restore a boost preference from cache, state, or settings.
 custom_components/termoweb/number.py :: async_setup_entry
     Set up boost configuration number entities for accumulator nodes.
+custom_components/termoweb/number.py :: async_setup_entry.default_name
+    Return the fallback name for an accumulator node.
 custom_components/termoweb/number.py :: AccumulatorBoostDurationNumber.__init__
     Initialise the boost duration slider for an accumulator.
 custom_components/termoweb/number.py :: AccumulatorBoostDurationNumber.async_added_to_hass
     Restore the preferred duration once the entity is added.
+custom_components/termoweb/number.py :: AccumulatorBoostDurationNumber.native_value
+    Return the preferred duration in hours for the UI slider.
 custom_components/termoweb/number.py :: AccumulatorBoostDurationNumber.async_set_native_value
     Handle slider updates from the user interface.
 custom_components/termoweb/number.py :: AccumulatorBoostDurationNumber.extra_state_attributes
@@ -1160,6 +1456,10 @@ custom_components/termoweb/number.py :: AccumulatorBoostTemperatureNumber.__init
     Initialise the boost temperature slider for an accumulator.
 custom_components/termoweb/number.py :: AccumulatorBoostTemperatureNumber.async_added_to_hass
     Restore the preferred temperature once the entity is added.
+custom_components/termoweb/number.py :: AccumulatorBoostTemperatureNumber.native_unit_of_measurement
+    Return the configured temperature units for the heater.
+custom_components/termoweb/number.py :: AccumulatorBoostTemperatureNumber.native_value
+    Return the preferred boost temperature.
 custom_components/termoweb/number.py :: AccumulatorBoostTemperatureNumber.async_set_native_value
     Handle slider updates that adjust the boost temperature.
 custom_components/termoweb/number.py :: AccumulatorBoostTemperatureNumber.extra_state_attributes
@@ -1172,16 +1472,14 @@ custom_components/termoweb/number.py :: AccumulatorBoostTemperatureNumber._valid
     Return a valid boost temperature within supported limits.
 custom_components/termoweb/sensor.py :: _looks_like_integer_string
     Return True if the string looks like an integer number.
-custom_components/termoweb/sensor.py :: _instant_power_entry
-    Return the instant power entry for ``(node_type, addr)`` when available.
 custom_components/termoweb/sensor.py :: _normalise_energy_value
     Try to coerce a raw energy reading into kWh.
+custom_components/termoweb/sensor.py :: _power_monitor_display_name
+    Return the display name for a power monitor address.
 custom_components/termoweb/sensor.py :: async_setup_entry
     Set up sensors for each heater node.
 custom_components/termoweb/sensor.py :: async_setup_entry.default_name
     Return a placeholder name for heater nodes.
-custom_components/termoweb/sensor.py :: _power_monitor_display_name
-    Return the display name for a power monitor address.
 custom_components/termoweb/sensor.py :: HeaterTemperatureSensor.__init__
     Initialise the heater temperature sensor entity.
 custom_components/termoweb/sensor.py :: HeaterTemperatureSensor.native_value
@@ -1190,6 +1488,8 @@ custom_components/termoweb/sensor.py :: HeaterTemperatureSensor.extra_state_attr
     Return metadata describing the heater temperature source.
 custom_components/termoweb/sensor.py :: ThermostatBatterySensor.__init__
     Initialise the thermostat battery sensor entity.
+custom_components/termoweb/sensor.py :: ThermostatBatterySensor._coerce_level
+    Return a clamped 0–5 battery level from ``value`` when possible.
 custom_components/termoweb/sensor.py :: ThermostatBatterySensor.native_value
     Return the thermostat battery percentage as 0–100.
 custom_components/termoweb/sensor.py :: ThermostatBatterySensor.extra_state_attributes
@@ -1222,20 +1522,14 @@ custom_components/termoweb/sensor.py :: HeaterEnergyBase.extra_state_attributes
     Return identifiers that locate the heater metric.
 custom_components/termoweb/sensor.py :: HeaterEnergyTotalSensor._coerce_native_value
     Normalise the raw energy metric into kWh.
-custom_components/termoweb/sensor.py :: HeaterInstantPowerSensor.__init__
-    Initialise the heater instant power sensor entity.
-custom_components/termoweb/sensor.py :: HeaterInstantPowerSensor._instant_entry
-    Return the cached instant power entry for this heater.
-custom_components/termoweb/sensor.py :: HeaterInstantPowerSensor.available
-    Return True when the coordinator tracks instant power for this heater.
-custom_components/termoweb/sensor.py :: HeaterInstantPowerSensor.native_value
-    Return the instantaneous power draw in watts.
-custom_components/termoweb/sensor.py :: HeaterInstantPowerSensor.extra_state_attributes
-    Return metadata describing the instant power source.
+custom_components/termoweb/sensor.py :: HeaterBoostMinutesRemainingSensor.__init__
+    Initialise the boost duration helper sensor.
 custom_components/termoweb/sensor.py :: HeaterBoostMinutesRemainingSensor.native_value
     Return the remaining boost duration in minutes.
 custom_components/termoweb/sensor.py :: HeaterBoostMinutesRemainingSensor.extra_state_attributes
     Return metadata about the boost session.
+custom_components/termoweb/sensor.py :: HeaterBoostEndSensor.__init__
+    Initialise the boost end timestamp sensor.
 custom_components/termoweb/sensor.py :: HeaterBoostEndSensor.native_value
     Return the boost end timestamp.
 custom_components/termoweb/sensor.py :: HeaterBoostEndSensor.state
@@ -1243,17 +1537,17 @@ custom_components/termoweb/sensor.py :: HeaterBoostEndSensor.state
 custom_components/termoweb/sensor.py :: HeaterBoostEndSensor.extra_state_attributes
     Return metadata about the boost session.
 custom_components/termoweb/sensor.py :: _create_heater_sensors
-    Create heater node sensors for the given node, skipping energy outputs for thermostats.
+    Create heater node sensors for ``addr`` including energy when available.
 custom_components/termoweb/sensor.py :: _create_boost_sensors
     Create the boost-related sensors for a heater node.
 custom_components/termoweb/sensor.py :: PowerMonitorSensorBase.__init__
     Initialise the power monitor sensor base entity.
+custom_components/termoweb/sensor.py :: PowerMonitorSensorBase._resolve_inventory
+    Return the immutable inventory backing this sensor.
 custom_components/termoweb/sensor.py :: PowerMonitorSensorBase._device_record
     Return the cached coordinator data for this device.
 custom_components/termoweb/sensor.py :: PowerMonitorSensorBase._metric_bucket
     Return the metric bucket for this power monitor.
-custom_components/termoweb/sensor.py :: PowerMonitorSensorBase._tracked_addresses
-    Return addresses tracked for this power monitor.
 custom_components/termoweb/sensor.py :: PowerMonitorSensorBase._coerce_native_value
     Convert a metric payload value to ``float`` if possible.
 custom_components/termoweb/sensor.py :: PowerMonitorSensorBase.should_poll
@@ -1268,20 +1562,6 @@ custom_components/termoweb/sensor.py :: PowerMonitorSensorBase.device_info
     Return the Home Assistant device metadata for the power monitor.
 custom_components/termoweb/sensor.py :: PowerMonitorEnergySensor._coerce_native_value
     Normalise the raw energy metric into kWh.
-custom_components/termoweb/sensor.py :: PowerMonitorInstantPowerSensor.__init__
-    Initialise the instant power monitor sensor.
-custom_components/termoweb/sensor.py :: PowerMonitorInstantPowerSensor.gateway_signal
-    Return the dispatcher signal for gateway websocket data.
-custom_components/termoweb/sensor.py :: PowerMonitorInstantPowerSensor._instant_entry
-    Return the cached instant power entry for this monitor.
-custom_components/termoweb/sensor.py :: PowerMonitorInstantPowerSensor.available
-    Return True when the coordinator tracks this power monitor.
-custom_components/termoweb/sensor.py :: PowerMonitorInstantPowerSensor.native_value
-    Return the instantaneous power draw in watts.
-custom_components/termoweb/sensor.py :: PowerMonitorInstantPowerSensor.extra_state_attributes
-    Return metadata describing the instant power source.
-custom_components/termoweb/sensor.py :: PowerMonitorInstantPowerSensor.device_info
-    Return the Home Assistant device metadata for the power monitor.
 custom_components/termoweb/sensor.py :: InstallationTotalEnergySensor.__init__
     Initialise the installation-wide energy sensor.
 custom_components/termoweb/sensor.py :: InstallationTotalEnergySensor.gateway_signal
@@ -1316,6 +1596,8 @@ custom_components/termoweb/utils.py :: async_get_integration_version
     Return the installed integration version string.
 custom_components/termoweb/utils.py :: _entry_gateway_record
     Return the mapping storing integration data for ``entry_id``.
+custom_components/termoweb/utils.py :: apply_entry_device_overrides
+    Return device info with brand and version overrides.
 custom_components/termoweb/utils.py :: build_gateway_device_info
     Return canonical ``DeviceInfo`` for the TermoWeb gateway.
 custom_components/termoweb/utils.py :: build_power_monitor_device_info

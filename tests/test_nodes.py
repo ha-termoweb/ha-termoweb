@@ -244,7 +244,9 @@ def test_extract_snapshot_name_handles_repeated_payloads() -> None:
     assert result == "Kitchen"
 
 
-def test_build_node_inventory_handles_mixed_types(caplog: pytest.LogCaptureFixture) -> None:
+def test_build_node_inventory_handles_mixed_types(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     payload = {
         "nodes": [
             {"type": "htr", "addr": 1, "name": "Heater"},
@@ -267,7 +269,9 @@ def test_build_node_inventory_handles_mixed_types(caplog: pytest.LogCaptureFixtu
     assert any("Unsupported node type" in message for message in caplog.messages)
 
 
-def test_build_node_inventory_handles_list_payload(caplog: pytest.LogCaptureFixture) -> None:
+def test_build_node_inventory_handles_list_payload(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     payload = [
         {"type": "htr", "addr": "01", "name": "Heater"},
         {"addr": "02", "name": "Missing type"},
@@ -277,7 +281,9 @@ def test_build_node_inventory_handles_list_payload(caplog: pytest.LogCaptureFixt
         nodes = build_node_inventory(payload)
 
     assert [node.addr for node in nodes] == ["01"]
-    assert any("Skipping node with missing type" in message for message in caplog.messages)
+    assert any(
+        "Skipping node with missing type" in message for message in caplog.messages
+    )
 
 
 def test_build_node_inventory_skips_none_type() -> None:
@@ -286,12 +292,6 @@ def test_build_node_inventory_skips_none_type() -> None:
     ]
 
     assert build_node_inventory(payload) == []
-
-
-
-
-
-
 
 
 def test_utils_normalization_matches_node_inventory() -> None:
@@ -322,6 +322,8 @@ def test_node_init_uses_normalization_helpers() -> None:
     )
     assert node.addr == normalize_node_addr(" 42 ")
     assert node.name == "Normalised"
+
+
 def test_heater_sample_subscription_targets_orders_types() -> None:
     targets = heater_sample_subscription_targets({"acm": ["2"], "htr": ["1", "3"]})
 

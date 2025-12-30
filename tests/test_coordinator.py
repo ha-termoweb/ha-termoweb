@@ -81,7 +81,10 @@ def test_resolve_boost_end_from_fields_variants(
     assert minutes == 1500
 
     hass = HomeAssistant()
-    inventory = inventory_builder("dev", {})
+    inventory_payload = {
+        "nodes": [{"type": "acm", "addr": "1"}, {"type": "acm", "addr": "2"}]
+    }
+    inventory = inventory_builder("dev", inventory_payload)
     coordinator = coord_module.StateCoordinator(
         hass,
         client=AsyncMock(),
@@ -131,7 +134,10 @@ async def test_async_fetch_rtc_datetime_updates_reference(
         return_value={"y": 2024, "n": 5, "d": 1, "h": 12, "m": 5, "s": 0}
     )
 
-    inventory = inventory_builder("dev", {})
+    inventory_payload = {
+        "nodes": [{"type": "acm", "addr": "1"}, {"type": "acm", "addr": "2"}]
+    }
+    inventory = inventory_builder("dev", inventory_payload)
     coordinator = coord_module.StateCoordinator(
         hass,
         client=client,
@@ -396,7 +402,10 @@ async def test_async_fetch_settings_by_address_pending_and_boost(
 
     hass = HomeAssistant()
     client = AsyncMock()
-    inventory = inventory_builder("dev", {})
+    inventory = inventory_builder(
+        "dev",
+        {"nodes": [{"type": "acm", "addr": "1"}, {"type": "acm", "addr": "2"}]},
+    )
     coord = coord_module.StateCoordinator(
         hass,
         client=client,
@@ -439,20 +448,21 @@ async def test_async_fetch_settings_by_address_pending_and_boost(
 
     addr_map = {"acm": ["1", "2"]}
     reverse = {"1": {"acm"}, "2": {"acm"}}
-    settings: dict[str, dict[str, Any]] = {}
+    store = coord._state_store or coord._ensure_state_store(inventory)
 
-    rtc_now = await coord._async_fetch_settings_by_address(
+    rtc_now = await coord._async_fetch_settings_to_store(
         "dev",
         addr_map,
         reverse,
-        settings,
+        store,
         rtc_now=None,
     )
 
     assert pending_calls == 2
-    assert "acm" in settings
-    assert "1" not in settings["acm"]
-    assert settings["acm"]["2"]["mode"] == "auto"
+    assert store.get_state("acm", "1") is None
+    state = store.get_state("acm", "2")
+    assert state is not None
+    assert state.mode == "auto"
     assert rtc_now == rtc_value
     coord._async_fetch_rtc_datetime.assert_awaited_once()
 

@@ -16,9 +16,7 @@ from custom_components.termoweb.backend.ws_client import HandshakeError
 async def test_handshake_failures_reset_after_threshold(monkeypatch, caplog) -> None:
     """Ensure repeated handshake failures trigger warnings and reset counters."""
 
-    monkeypatch.setattr(
-        TermoWebWSClient, "_install_write_hook", lambda self: None
-    )
+    monkeypatch.setattr(TermoWebWSClient, "_install_write_hook", lambda self: None)
 
     hass = SimpleNamespace(loop=asyncio.get_running_loop())
     session = SimpleNamespace()
@@ -63,6 +61,8 @@ async def test_handshake_failures_reset_after_threshold(monkeypatch, caplog) -> 
     assert client._hs_fail_count == 0
     assert client._hs_fail_start == 0.0
 
-    warnings = [record.message for record in caplog.records if record.levelno == logging.WARNING]
+    warnings = [
+        record.message for record in caplog.records if record.levelno == logging.WARNING
+    ]
     assert any("WS: handshake failed" in message for message in warnings)
     assert any("3 times" in message for message in warnings)

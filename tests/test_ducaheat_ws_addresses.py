@@ -117,7 +117,4 @@ def test_dispatch_nodes_includes_inventory_metadata() -> None:
     assert client._dispatcher.call_count == 1
     dispatched = client._dispatcher.call_args[0][2]
     assert dispatched["inventory"] is inventory
-    assert (
-        "sample_aliases" not in client.hass.data[DOMAIN][client.entry_id]
-    )
-
+    assert "sample_aliases" not in client.hass.data[DOMAIN][client.entry_id]

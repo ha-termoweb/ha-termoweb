@@ -14,7 +14,7 @@ MANIFEST_PATH = REPO_ROOT / "custom_components" / "termoweb" / "manifest.json"
 
 VERSION_PATTERN = re.compile(r"^v(\d+\.\d+\.\d+)$")
 PYPROJECT_VERSION_PATTERN = re.compile(r'^(version\s*=\s*")([^\"]+)(")', re.MULTILINE)
-MANIFEST_VERSION_PATTERN = re.compile(r'(\"version\"\s*:\s*\")([^\"]+)(\")')
+MANIFEST_VERSION_PATTERN = re.compile(r"(\"version\"\s*:\s*\")([^\"]+)(\")")
 
 
 def parse_args(argv: list[str]) -> str:
@@ -38,7 +38,9 @@ def update_file_version(path: Path, pattern: re.Pattern[str], new_value: str) ->
     if not match:
         msg = f"Unable to locate version pattern in {path}"
         raise RuntimeError(msg)
-    updated = pattern.sub(lambda m: f"{m.group(1)}{new_value}{m.group(3)}", content, count=1)
+    updated = pattern.sub(
+        lambda m: f"{m.group(1)}{new_value}{m.group(3)}", content, count=1
+    )
     path.write_text(updated, encoding="utf-8")
 
 
@@ -58,7 +60,12 @@ def main(argv: list[str] | None = None) -> int:
     update_file_version(PYPROJECT_PATH, PYPROJECT_VERSION_PATTERN, semver)
     update_file_version(MANIFEST_PATH, MANIFEST_VERSION_PATTERN, semver)
 
-    run("git", "add", str(PYPROJECT_PATH.relative_to(REPO_ROOT)), str(MANIFEST_PATH.relative_to(REPO_ROOT)))
+    run(
+        "git",
+        "add",
+        str(PYPROJECT_PATH.relative_to(REPO_ROOT)),
+        str(MANIFEST_PATH.relative_to(REPO_ROOT)),
+    )
     run("git", "commit", "-m", f"Prepare release {version}")
     run("git", "tag", version)
     run("git", "push")

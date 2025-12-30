@@ -64,4 +64,3 @@ class GatewayDispatcherEntity:
         """Handle dispatcher payloads targeting the entity."""
 
         raise NotImplementedError  # pragma: no cover - abstract contract
-

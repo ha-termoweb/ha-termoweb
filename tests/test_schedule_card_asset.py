@@ -17,7 +17,13 @@ def test_schedule_card_clears_cache_when_prog_missing() -> None:
         pytest.skip("Node.js runtime is required for schedule card tests")
 
     repo_root = Path(__file__).resolve().parents[1]
-    card_path = repo_root / "custom_components" / "termoweb" / "assets" / "termoweb_schedule_card.js"
+    card_path = (
+        repo_root
+        / "custom_components"
+        / "termoweb"
+        / "assets"
+        / "termoweb_schedule_card.js"
+    )
     card_path_str = json.dumps(str(card_path))
 
     script_lines = [
@@ -51,11 +57,11 @@ def test_schedule_card_clears_cache_when_prog_missing() -> None:
         "    this._innerHTML = '';",
         "    this._idMap = new Map();",
         "    this.options = [];",
-      "  }",
+        "  }",
         "  set innerHTML(html) {",
         "    this._innerHTML = String(html);",
         "    this._idMap.clear();",
-        "    const regex = /id=\\\"([^\\\"]+)\\\"/g;",
+        '    const regex = /id=\\"([^\\"]+)\\"/g;',
         "    let match;",
         "    while ((match = regex.exec(this._innerHTML)) !== null) {",
         "      const el = new Element();",
@@ -228,4 +234,7 @@ def test_schedule_card_clears_cache_when_prog_missing() -> None:
     assert data["afterValid"]["warnText"] == ""
     assert data["afterInvalid"]["progIsNull"] is True
     assert data["afterInvalid"]["dirtyProg"] is False
-    assert data["afterInvalid"]["warnText"] == "This entity has no valid 'prog' (expected 168 ints)."
+    assert (
+        data["afterInvalid"]["warnText"]
+        == "This entity has no valid 'prog' (expected 168 ints)."
+    )
