@@ -24,11 +24,23 @@ from custom_components.termoweb.backend.sanitize import (
     validate_boost_minutes,
 )
 from custom_components.termoweb.boost import coerce_boost_bool, coerce_int
+from custom_components.termoweb.codecs.ducaheat_codec import decode_settings
+from custom_components.termoweb.codecs.ducaheat_planner import plan_command
 from custom_components.termoweb.const import (
     BRAND_DUCAHEAT,
     NODE_SAMPLES_PATH_FMT,
     WS_NAMESPACE,
 )
+from custom_components.termoweb.domain.commands import (
+    BaseCommand,
+    SetMode,
+    SetPresetTemps,
+    SetProgram,
+    SetSetpoint,
+    SetUnits,
+    StopBoost,
+)
+from custom_components.termoweb.domain.ids import NodeId, NodeType
 from custom_components.termoweb.inventory import Inventory, NodeDescriptor
 
 _LOGGER = logging.getLogger(__name__)
@@ -64,7 +76,7 @@ class DucaheatRESTClient(RESTClient):
             checker = getattr(_LOGGER, "isEnabledFor", None)
             if callable(checker):
                 return bool(checker(logging.DEBUG))
-        except Exception:  # pragma: no cover - defensive
+        except (AttributeError, ValueError, TypeError):  # pragma: no cover - defensive
             return False
         return False
 
@@ -130,6 +142,7 @@ class DucaheatRESTClient(RESTClient):
         """Fetch and normalise node settings for the Ducaheat API."""
 
         node_type, addr = self._resolve_node_descriptor(node)
+        node_id = NodeId(NodeType(node_type), addr)
         headers = await self.authed_headers()
         if node_type == "thm":
             path = f"/api/v2/devs/{dev_id}/thm/{addr}/settings"
@@ -141,36 +154,29 @@ class DucaheatRESTClient(RESTClient):
                 stage="GET settings",
                 payload=payload,
             )
-            return self._normalise_thm_settings(
-                payload, include_raw=self._include_raw_settings()
+            return decode_settings(
+                payload,
+                node_type=node_id.node_type,
+                include_raw=self._include_raw_settings(),
             )
 
         path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}"
         payload = await self._request("GET", path, headers=headers)
 
-        if node_type in {"htr", "acm"}:
-            if node_type != "htr":
-                self._log_non_htr_payload(
-                    node_type=node_type,
-                    dev_id=dev_id,
-                    addr=addr,
-                    stage="GET settings",
-                    payload=payload,
-                )
-            return self._normalise_settings(
-                payload,
-                node_type=node_type,
-                include_raw=self._include_raw_settings(),
-            )
-
-        self._log_non_htr_payload(
-            node_type=node_type,
-            dev_id=dev_id,
-            addr=addr,
-            stage="GET settings",
-            payload=payload,
+        decoded_payload = decode_settings(
+            payload,
+            node_type=node_id.node_type,
+            include_raw=self._include_raw_settings(),
         )
-        return payload
+        if node_type != "htr":
+            self._log_non_htr_payload(
+                node_type=node_type,
+                dev_id=dev_id,
+                addr=addr,
+                stage="GET settings",
+                payload=decoded_payload,
+            )
+        return decoded_payload
 
     async def get_node_samples(
         self,
@@ -244,7 +250,71 @@ class DucaheatRESTClient(RESTClient):
 
         return self._extract_samples(data, timestamp_divisor=timestamp_divisor)
 
-    async def set_node_settings(
+    async def _execute_segmented_commands(
+        self,
+        dev_id: str,
+        node_id: NodeId,
+        commands: list[BaseCommand],
+        *,
+        units: str | None = None,
+        use_acm_endpoint: bool = False,
+    ) -> dict[str, Any]:
+        """Apply one or more segmented commands with a single select/release."""
+
+        if not commands:
+            return {}
+
+        write_calls: list[tuple[str, dict[str, Any]]] = []
+        for command in commands:
+            plan = plan_command(dev_id, node_id, command, units=units)
+            write_call = plan[1]
+            write_calls.append((write_call.path, write_call.json or {}))
+
+        headers = await self.authed_headers()
+        responses: dict[str, Any] = {}
+        selection_claimed = False
+        try:
+            await self._select_segmented_node(
+                dev_id=dev_id,
+                node_type=node_id.node_type.value,
+                addr=node_id.addr,
+                headers=headers,
+                select=True,
+            )
+            selection_claimed = True
+
+            for path, payload in write_calls:
+                if use_acm_endpoint:
+                    responses[path.rsplit("/", 1)[-1]] = await self._post_acm_endpoint(
+                        path,
+                        headers,
+                        payload,
+                        dev_id=dev_id,
+                        addr=node_id.addr,
+                    )
+                    continue
+
+                responses[path.rsplit("/", 1)[-1]] = await self._post_segmented(
+                    path,
+                    headers=headers,
+                    payload=payload,
+                    dev_id=dev_id,
+                    addr=node_id.addr,
+                    node_type=node_id.node_type.value,
+                )
+        finally:
+            if selection_claimed:
+                await self._select_segmented_node(
+                    dev_id=dev_id,
+                    node_type=node_id.node_type.value,
+                    addr=node_id.addr,
+                    headers=headers,
+                    select=False,
+                )
+
+        return responses
+
+    async def set_node_settings(  # noqa: C901
         self,
         dev_id: str,
         node: NodeDescriptor,
@@ -260,78 +330,40 @@ class DucaheatRESTClient(RESTClient):
         """Write heater settings using the segmented endpoints."""
 
         node_type, addr = self._resolve_node_descriptor(node)
-        if node_type == "htr":
-            headers = await self.authed_headers()
-            base = f"/api/v2/devs/{dev_id}/htr/{addr}"
-            responses: dict[str, Any] = {}
+        node_id = NodeId(NodeType(node_type), addr)
 
+        if node_type == "htr":
+            commands: list[BaseCommand] = []
             mode_value: str | None = None
             if mode is not None:
                 mode_value = str(mode).lower()
                 if mode_value == "heat":
                     mode_value = "manual"
 
-            selection_claimed = False
-            try:
-                await self._select_segmented_node(
-                    dev_id=dev_id,
-                    node_type=node_type,
-                    addr=addr,
-                    headers=headers,
-                    select=True,
-                )
-                selection_claimed = True
+            units_value = self._ensure_units(units)
+            if stemp is not None:
+                commands.append(SetSetpoint(stemp, mode=mode_value))
+            elif (
+                units_value is not None
+                and mode_value is None
+                and prog is None
+                and ptemp is None
+            ):
+                commands.append(SetUnits(units_value))
+            elif mode_value is not None:
+                commands.append(SetMode(mode_value))
 
-                status_payload: dict[str, Any] = {}
-                status_includes_mode = False
-                if mode_value is not None:
-                    status_payload["mode"] = mode_value
-                    status_includes_mode = True
-                if stemp is not None:
-                    try:
-                        status_payload["stemp"] = self._ensure_temperature(stemp)
-                    except ValueError as err:
-                        raise ValueError(f"Invalid stemp value: {stemp}") from err
-                    status_payload["units"] = self._ensure_units(units)
-                elif (
-                    units is not None
-                    and mode is None
-                    and prog is None
-                    and ptemp is None
-                ):
-                    status_payload["units"] = self._ensure_units(units)
+            if prog is not None:
+                commands.append(SetProgram(self._ensure_prog(prog)))
+            if ptemp is not None:
+                commands.append(SetPresetTemps(self._ensure_ptemp(ptemp)))
 
-                segment_plan: list[tuple[str, dict[str, Any]]] = []
-                if status_payload:
-                    segment_plan.append(("status", status_payload))
-                if mode_value is not None and not status_includes_mode:
-                    segment_plan.append(("mode", {"mode": mode_value}))
-                if prog is not None:
-                    segment_plan.append(("prog", self._serialise_prog(prog)))
-                if ptemp is not None:
-                    segment_plan.append(
-                        ("prog_temps", self._serialise_prog_temps(ptemp))
-                    )
-
-                for name, payload in segment_plan:
-                    responses[name] = await self._post_segmented(
-                        f"{base}/{name}",
-                        headers=headers,
-                        payload=payload,
-                        dev_id=dev_id,
-                        addr=addr,
-                        node_type=node_type,
-                    )
-            finally:
-                if selection_claimed:
-                    await self._select_segmented_node(
-                        dev_id=dev_id,
-                        node_type=node_type,
-                        addr=addr,
-                        headers=headers,
-                        select=False,
-                    )
-            return responses
+            return await self._execute_segmented_commands(
+                dev_id,
+                node_id,
+                commands,
+                units=units_value,
+            )
 
         if node_type == "thm":
             headers = await self.authed_headers()
@@ -372,17 +404,90 @@ class DucaheatRESTClient(RESTClient):
                 )
 
         if node_type == "acm":
-            return await self._set_acm_settings(
+            mode_value: str | None = None
+            if mode is not None:
+                mode_value = str(mode).lower()
+
+            units_value = self._ensure_units(units)
+            commands: list[BaseCommand] = []
+            boost_minutes: int | None = None
+            if boost_time is not None and mode_value != "boost":
+                raise ValueError("boost_time is only supported when mode is 'boost'")
+            if mode_value == "boost" and stemp is None:
+                boost_minutes = validate_boost_minutes(boost_time)
+
+            if stemp is not None:
+                formatted_stemp = self._format_temp(stemp)
+                commands.append(SetSetpoint(formatted_stemp, mode=mode_value))
+            elif (
+                units_value is not None
+                and mode_value is None
+                and prog is None
+                and ptemp is None
+            ):
+                commands.append(SetUnits(units_value))
+
+            if prog is not None:
+                commands.append(SetProgram(self._ensure_prog(prog)))
+            if ptemp is not None:
+                commands.append(SetPresetTemps(self._ensure_ptemp(ptemp)))
+            if mode_value is not None and stemp is None:
+                commands.append(SetMode(mode_value, boost_time=boost_minutes))
+
+            if cancel_boost:
+                commands.append(StopBoost(boost_time=None, stemp=None, units=None))
+
+            responses = await self._execute_segmented_commands(
                 dev_id,
-                addr,
-                mode=mode,
-                stemp=stemp,
-                prog=prog,
-                ptemp=ptemp,
-                units=units,
-                boost_time=boost_time,
-                cancel_boost=cancel_boost,
+                node_id,
+                commands,
+                units=units_value,
+                use_acm_endpoint=True,
             )
+
+            if mode_value is not None or cancel_boost:
+                minutes_param: int | None
+                if mode_value == "boost":
+                    minutes_param = boost_minutes
+                else:
+                    minutes_param = 0
+                metadata: dict[str, Any] | None = None
+                try:
+                    metadata = await self._collect_boost_metadata(
+                        dev_id,
+                        addr,
+                        boost_active=mode_value == "boost",
+                        minutes=minutes_param,
+                    )
+                except Exception as err:  # noqa: BLE001 - defensive logging
+                    _LOGGER.debug(
+                        "Boost metadata collection failed dev=%s addr=%s: %s",
+                        mask_identifier(dev_id),
+                        mask_identifier(addr),
+                        err,
+                        exc_info=err,
+                    )
+                fallback = False
+                boost_state: dict[str, Any] | None = None
+                if isinstance(metadata, dict):
+                    fallback = bool(metadata.pop("_fallback", False))
+                    boost_state = metadata
+                elif metadata is not None:
+                    responses["boost_state"] = metadata
+
+                if fallback and mode_value != "boost" and "status" not in responses:
+                    boost_flag = bool((boost_state or {}).get("boost_active"))
+                    responses["status_refresh"] = await self._post_acm_endpoint(
+                        f"/api/v2/devs/{dev_id}/{node_type}/{addr}/boost",
+                        await self.authed_headers(),
+                        {"boost": boost_flag},
+                        dev_id=dev_id,
+                        addr=addr,
+                    )
+                if boost_state is not None:
+                    responses["boost_state"] = boost_state
+
+            return responses
 
         return await super().set_node_settings(
             dev_id,
@@ -419,12 +524,17 @@ class DucaheatRESTClient(RESTClient):
                         addr_map[addr] = payload
                         continue
 
-                    if node_type == "thm":
-                        addr_map[addr] = self._normalise_thm_settings(
-                            payload, include_raw=self._include_raw_settings()
-                        )
-                    else:
-                        addr_map[addr] = self._normalise_ws_settings(payload)
+                    try:
+                        node_id = NodeId(NodeType(node_type), str(addr))
+                    except ValueError:
+                        addr_map[addr] = payload
+                        continue
+
+                    addr_map[addr] = decode_settings(
+                        payload,
+                        node_type=node_id.node_type,
+                        include_raw=self._include_raw_settings(),
+                    )
 
                 section_map[section] = addr_map
 
@@ -538,7 +648,7 @@ class DucaheatRESTClient(RESTClient):
                 continue
             target[key] = max(0, min(100, coerced))
 
-    def _normalise_settings(
+    def _normalise_settings(  # noqa: C901
         self,
         payload: Any,
         *,
@@ -866,7 +976,7 @@ class DucaheatRESTClient(RESTClient):
                 formatted.append(safe)
         return formatted
 
-    async def _set_acm_settings(
+    async def _set_acm_settings(  # noqa: C901
         self,
         dev_id: str,
         addr: str,

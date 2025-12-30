@@ -42,8 +42,8 @@ def test_encode_program_command_splits_weekly_prog() -> None:
 
     assert set(payload) == {"prog"}
     assert set(payload["prog"]) == {"0", "1", "2", "3", "4", "5", "6"}
-    assert payload["prog"]["0"] == [0, 1, 2] * 8
-    assert len(payload["prog"]["6"]) == 24
+    assert payload["prog"]["0"] == [0, 0, 1, 1, 2, 2] * 8
+    assert len(payload["prog"]["6"]) == 48
 
 
 def test_encode_extra_options_requires_values() -> None:

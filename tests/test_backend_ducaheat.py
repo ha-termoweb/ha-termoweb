@@ -142,22 +142,10 @@ async def test_ducaheat_rest_client_normalises_acm(
 
     monkeypatch.setattr(ducaheat_rest_client, "_request", fake_request)
 
-    def fake_normalise(
-        self, payload, *, node_type: str = "htr", include_raw: bool = False
-    ):
-        seen["node_type"] = node_type
-        seen["payload"] = payload
-        seen["include_raw"] = include_raw
-        return {"normalized": True}
-
-    monkeypatch.setattr(DucaheatRESTClient, "_normalise_settings", fake_normalise)
-
     result = await ducaheat_rest_client.get_node_settings("dev", ("acm", "2"))
-    assert result == {"normalized": True}
-    assert seen["node_type"] == "acm"
-    assert seen["payload"] == {"status": {"mode": "AUTO"}}
-    assert seen["method"] == "GET"
+    assert result == {"mode": "auto"}
     assert seen["path"] == "/api/v2/devs/dev/acm/2"
+    assert seen["method"] == "GET"
     assert seen["kwargs"] == {"headers": {"Authorization": "Bearer token"}}
 
 
@@ -282,24 +270,6 @@ async def test_ducaheat_rest_set_htr_full_segment_payload(
 
     monkeypatch.setattr(client, "_post_segmented", fake_post_segmented)
 
-    prog_calls: list[list[int]] = []
-
-    def fake_serialise_prog(self, prog: list[int]) -> dict[str, Any]:
-        prog_calls.append(list(prog))
-        return {"prog": {"serialised": True}}
-
-    monkeypatch.setattr(DucaheatRESTClient, "_serialise_prog", fake_serialise_prog)
-
-    ptemp_calls: list[list[float]] = []
-
-    def fake_serialise_prog_temps(self, ptemp: list[float]) -> dict[str, str]:
-        ptemp_calls.append(list(ptemp))
-        return {"cold": "10.0", "night": "15.0", "day": "20.0"}
-
-    monkeypatch.setattr(
-        DucaheatRESTClient, "_serialise_prog_temps", fake_serialise_prog_temps
-    )
-
     weekly_prog = [1] * 168
     preset_temps = [10.0, 15.0, 20.0]
 
@@ -319,14 +289,16 @@ async def test_ducaheat_rest_set_htr_full_segment_payload(
         "stemp": "21.0",
         "units": "F",
     }
-    assert responses["prog"] == {"segment": "prog", "payload": {"prog": {"serialised": True}}}
-    assert responses["prog_temps"] == {
-        "segment": "prog_temps",
-        "payload": {"cold": "10.0", "night": "15.0", "day": "20.0"},
+    prog_payload = responses["prog"]["payload"]["prog"]
+    assert set(prog_payload) == {str(idx) for idx in range(7)}
+    assert all(len(slots) == 48 for slots in prog_payload.values())
+    assert all(set(slots) == {1} for slots in prog_payload.values())
+    assert responses["prog_temps"]["payload"] == {
+        "cold": "10.0",
+        "night": "15.0",
+        "day": "20.0",
+        "units": "F",
     }
-
-    assert prog_calls == [weekly_prog]
-    assert ptemp_calls == [preset_temps]
 
     assert select_calls == [True, False]
 
@@ -369,11 +341,6 @@ async def test_ducaheat_rest_set_htr_units_only(
 
     monkeypatch.setattr(client, "_post_segmented", fake_post_segmented)
 
-    serialise_prog = AsyncMock()
-    serialise_prog_temps = AsyncMock()
-    monkeypatch.setattr(client, "_serialise_prog", serialise_prog)
-    monkeypatch.setattr(client, "_serialise_prog_temps", serialise_prog_temps)
-
     responses = await client.set_node_settings("dev", ("htr", "9"), units="F")
 
     assert responses == {"status": {"segment": "status", "payload": {"units": "F"}}}
@@ -381,9 +348,6 @@ async def test_ducaheat_rest_set_htr_units_only(
         "/api/v2/devs/dev/htr/9/status": {"units": "F"}
     }
     assert select_calls == [True, False]
-
-    serialise_prog.assert_not_called()
-    serialise_prog_temps.assert_not_called()
 
 
 @pytest.mark.asyncio
