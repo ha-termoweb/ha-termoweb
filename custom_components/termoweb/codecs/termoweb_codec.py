@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from custom_components.termoweb.backend.sanitize import validate_boost_minutes
+from custom_components.termoweb.codecs.common import format_temperature, validate_units
 from custom_components.termoweb.domain.commands import (
     AccumulatorCommand,
     BaseCommand,
@@ -49,25 +50,6 @@ def encode_payload(data: Any) -> Any:
     raise NotImplementedError
 
 
-def _format_temperature(value: Any, *, label: str) -> str:
-    """Format numeric temperatures to a one-decimal string."""
-
-    try:
-        return f"{float(value):.1f}"
-    except (TypeError, ValueError) as err:
-        raise ValueError(f"Invalid {label} value: {value!r}") from err
-
-
-def _validate_units(units: str | None, *, trim: bool = False) -> str:
-    """Validate and normalise temperature units."""
-
-    raw = "" if units is None else str(units)
-    unit_value = raw.strip().upper() if trim else raw.upper()
-    if unit_value not in {"C", "F"}:
-        raise ValueError(f"Invalid units: {units!r}")
-    return unit_value
-
-
 def _validate_prog(prog: list[int]) -> list[int]:
     """Validate a weekly program sequence."""
 
@@ -95,7 +77,7 @@ def _validate_ptemp(ptemp: list[float | str]) -> list[str]:
     formatted: list[str] = []
     for value in ptemp:
         try:
-            formatted.append(_format_temperature(value, label="temperature"))
+            formatted.append(format_temperature(value, label="temperature"))
         except ValueError as err:
             raise ValueError(f"ptemp contains non-numeric value: {value}") from err
     return formatted
@@ -126,13 +108,13 @@ def build_settings_payload(
         if isinstance(command, SetMode):
             mode = _normalise_mode(command.mode)
         elif isinstance(command, SetSetpoint):
-            stemp = _format_temperature(command.setpoint, label="stemp")
+            stemp = format_temperature(command.setpoint, label="stemp")
         elif isinstance(command, SetProgram):
             prog = _validate_prog(command.program)
         elif isinstance(command, SetPresetTemps):
             ptemp = _validate_ptemp(command.presets)
         elif isinstance(command, SetUnits):
-            units = _validate_units(command.units)
+            units = validate_units(command.units)
         else:
             raise TypeError(f"Unsupported command type: {type(command).__name__}")
 
@@ -161,7 +143,7 @@ def build_extra_options_payload(command: SetExtraOptions) -> dict[str, Any]:
         extra["boost_time"] = minutes
     if command.boost_temp is not None:
         try:
-            extra["boost_temp"] = _format_temperature(
+            extra["boost_temp"] = format_temperature(
                 command.boost_temp, label="boost_temp"
             )
         except ValueError as err:
@@ -200,11 +182,11 @@ def build_boost_payload(command: AccumulatorCommand) -> dict[str, Any]:
         payload["boost_time"] = minutes
     if stemp_value is not None:
         try:
-            payload["stemp"] = _format_temperature(stemp_value, label="stemp")
+            payload["stemp"] = format_temperature(stemp_value, label="stemp")
         except ValueError as err:
             raise ValueError(f"Invalid stemp value: {stemp_value!r}") from err
     if units_value is not None:
-        payload["units"] = _validate_units(units_value, trim=True)
+        payload["units"] = validate_units(units_value, trim=True)
 
     model = AcmBoostWritePayload.model_validate(payload)
     return model.model_dump(exclude_none=True)
