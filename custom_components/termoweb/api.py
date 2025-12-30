@@ -9,12 +9,7 @@ from typing import Any
 
 import aiohttp
 
-from .backend.sanitize import (
-    build_acm_boost_payload,
-    mask_identifier,
-    redact_text,
-    validate_boost_minutes,
-)
+from .backend.sanitize import mask_identifier, redact_text
 from .const import (
     ACCEPT_LANGUAGE,
     API_BASE,
@@ -30,10 +25,23 @@ from .const import (
     get_brand_user_agent,
 )
 from .codecs.termoweb_codec import (
+    build_boost_payload,
+    build_extra_options_payload,
+    build_settings_payload,
     decode_devs_payload,
     decode_node_settings,
     decode_nodes_payload,
     decode_samples,
+)
+from .domain.commands import (
+    SetExtraOptions,
+    SetMode,
+    SetPresetTemps,
+    SetProgram,
+    SetSetpoint,
+    SetUnits,
+    StartBoost,
+    StopBoost,
 )
 from .inventory import Node, NodeDescriptor, normalize_node_addr, normalize_node_type
 
@@ -469,35 +477,17 @@ class RESTClient:
 
         node_type, addr = self._resolve_node_descriptor(node)
 
-        # Validate units
-        unit_str: str = units.upper()
-        if unit_str not in {"C", "F"}:
-            raise ValueError(f"Invalid units: {units}")
-
-        # Always include units
-        payload: dict[str, Any] = {"units": unit_str}
-
-        # Mode
+        commands = [SetUnits(units)]
         if mode is not None:
-            mode_str = str(mode).lower()
-            if mode_str == "heat":
-                mode_str = "manual"
-            payload["mode"] = mode_str
-
-        # Manual setpoint – format as string with one decimal
+            commands.append(SetMode(mode))
         if stemp is not None:
-            try:
-                payload["stemp"] = self._ensure_temperature(stemp)
-            except ValueError as err:
-                raise ValueError(f"Invalid stemp value: {stemp}") from err
-
-        # Weekly program – validate length and values
+            commands.append(SetSetpoint(stemp))
         if prog is not None:
-            payload["prog"] = self._ensure_prog(prog)
-
-        # Preset temperatures – validate length and convert to strings
+            commands.append(SetProgram(prog))
         if ptemp is not None:
-            payload["ptemp"] = self._ensure_ptemp(ptemp)
+            commands.append(SetPresetTemps(ptemp))
+
+        payload = build_settings_payload(node_type, commands)
 
         headers = await self.authed_headers()
         path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}/settings"
@@ -525,18 +515,9 @@ class RESTClient:
     ) -> dict[str, Any]:
         """Return a validated payload for accumulator extra options."""
 
-        extra: dict[str, Any] = {}
-        minutes = validate_boost_minutes(boost_time)
-        if minutes is not None:
-            extra["boost_time"] = minutes
-        if boost_temp is not None:
-            try:
-                extra["boost_temp"] = self._ensure_temperature(boost_temp)
-            except ValueError as err:
-                raise ValueError(f"Invalid boost_temp value: {boost_temp!r}") from err
-        if not extra:
-            raise ValueError("boost_time or boost_temp must be provided")
-        return {"extra_options": extra}
+        return build_extra_options_payload(
+            SetExtraOptions(boost_time=boost_time, boost_temp=boost_temp)
+        )
 
     async def set_acm_extra_options(
         self,
@@ -583,25 +564,13 @@ class RESTClient:
         """Start or stop an accumulator boost session."""
 
         node_type, addr_str = self._resolve_node_descriptor(("acm", addr))
-        formatted_temp: str | None = None
-        if stemp is not None:
-            try:
-                formatted_temp = self._ensure_temperature(stemp)
-            except ValueError as err:
-                raise ValueError(f"Invalid stemp value: {stemp!r}") from err
+        command: StartBoost | StopBoost
+        if boost:
+            command = StartBoost(boost_time=boost_time, stemp=stemp, units=units)
+        else:
+            command = StopBoost(boost_time=boost_time, stemp=stemp, units=units)
 
-        unit_value: str | None = None
-        if units is not None:
-            unit_value = str(units).strip().upper()
-            if unit_value not in {"C", "F"}:
-                raise ValueError(f"Invalid units: {units!r}")
-
-        payload = build_acm_boost_payload(
-            boost,
-            boost_time,
-            stemp=formatted_temp,
-            units=unit_value,
-        )
+        payload = build_boost_payload(command)
 
         headers = await self.authed_headers()
         path = f"/api/v2/devs/{dev_id}/{node_type}/{addr_str}/boost"
