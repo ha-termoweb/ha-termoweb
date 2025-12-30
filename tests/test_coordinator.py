@@ -17,6 +17,7 @@ from custom_components.termoweb import (
     coordinator as coord_module,
     inventory as inventory_module,
 )
+from custom_components.termoweb.domain import NodeId, NodeSettingsDelta, NodeType
 from custom_components.termoweb.inventory import AccumulatorNode, HeaterNode
 
 
@@ -772,6 +773,51 @@ async def test_poll_skips_pending_settings_merge(
     assert client.get_node_settings.await_count == 2
     settings_second = result_second["dev"]["settings"]["htr"]["1"]
     assert settings_second == {"mode": "manual", "stemp": "21.0"}
+
+
+def test_handle_ws_deltas_updates_store(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """Websocket deltas should update the coordinator data via the store."""
+
+    hass = HomeAssistant()
+    client = AsyncMock()
+    nodes = {"nodes": [{"type": "htr", "addr": "1", "name": "Heater"}]}
+    node_list = [HeaterNode(name="Heater", addr="1")]
+    inventory = inventory_builder("dev", nodes, node_list)
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=client,
+        base_interval=30,
+        dev_id="dev",
+        device={"name": "Device"},
+        nodes=inventory.payload,
+        inventory=inventory,
+    )
+
+    deltas = [
+        NodeSettingsDelta(
+            node_id=NodeId(NodeType.HEATER, "1"),
+            changes={"mode": "auto", "status": {"online": True}},
+        )
+    ]
+    coordinator.handle_ws_deltas("dev", deltas, replace=True)
+
+    first_settings = coordinator.data["dev"]["settings"]["htr"]["1"]
+    assert first_settings["mode"] == "auto"
+    assert first_settings["status"]["online"] is True
+
+    coordinator.handle_ws_deltas(
+        "dev",
+        [NodeSettingsDelta(NodeId(NodeType.HEATER, "1"), {"stemp": "19.0"})],
+        replace=False,
+    )
+
+    merged_settings = coordinator.data["dev"]["settings"]["htr"]["1"]
+    assert merged_settings["mode"] == "auto"
+    assert merged_settings["stemp"] == "19.0"
 
 
 def test_wrap_logger_proxies_missing_helpers() -> None:

@@ -46,6 +46,11 @@ from custom_components.termoweb.const import (
     get_brand_user_agent,
     signal_ws_data,
 )
+from custom_components.termoweb.domain import (
+    NodeId as DomainNodeId,
+    NodeSettingsDelta,
+    NodeType as DomainNodeType,
+)
 from custom_components.termoweb.inventory import (
     Inventory,
     normalize_node_addr,
@@ -704,9 +709,7 @@ class WebSocketClient(_WSCommon):
             elif "handshake_keys" in state:
                 state.pop("handshake_keys")
             if _LOGGER.isEnabledFor(logging.DEBUG):
-                _LOGGER.debug(
-                    "WS: dev_handshake payload keys: %s", ", ".join(keys)
-                )
+                _LOGGER.debug("WS: dev_handshake payload keys: %s", ", ".join(keys))
             self._update_status("connected")
             return
 
@@ -723,9 +726,22 @@ class WebSocketClient(_WSCommon):
 
     def _apply_nodes_payload(self, payload: Any, *, merge: bool, event: str) -> None:
         """Update cached nodes from the websocket payload and notify listeners."""
+        inventory = self._bind_inventory_from_context()
+        if isinstance(inventory, Inventory):
+            self._inventory = inventory
+        else:
+            inventory = (
+                self._inventory if isinstance(self._inventory, Inventory) else None
+            )
+
+        deltas: list[NodeSettingsDelta] = []
+
         nodes = self._extract_nodes(payload)
         if nodes is None:
-            nodes = self._translate_path_update(payload)
+            nodes, deltas = self._translate_path_deltas(
+                payload,
+                inventory=inventory,
+            )
         if nodes is None:
             _LOGGER.debug("WS: %s without nodes", event)
             return
@@ -737,6 +753,9 @@ class WebSocketClient(_WSCommon):
                 _LOGGER.debug("WS: normalise_ws_nodes failed; using raw payload")
         if _LOGGER.isEnabledFor(logging.DEBUG) and not merge:
             _LOGGER.debug("WS: dev_data snapshot contains %d node groups", len(nodes))
+        deltas = self._nodes_to_deltas(nodes, inventory=inventory)
+        if deltas:
+            self._apply_deltas_to_store(deltas, replace=not merge)
         self._dispatch_nodes(nodes)
         inventory = self._inventory if isinstance(self._inventory, Inventory) else None
         allowed_types = (
@@ -808,6 +827,21 @@ class WebSocketClient(_WSCommon):
             resolve_section=self._resolve_update_section,
         )
 
+    def _translate_path_deltas(
+        self,
+        payload: Any,
+        *,
+        inventory: Inventory | None = None,
+    ) -> tuple[dict[str, Any] | None, list[NodeSettingsDelta]]:
+        """Translate path frames into node dictionaries and domain deltas."""
+
+        nodes = self._translate_path_update(payload)
+        if nodes is None:
+            return None, []
+
+        deltas = self._nodes_to_deltas(nodes, inventory=inventory)
+        return nodes, deltas
+
     @staticmethod
     def _resolve_update_section(section: str | None) -> tuple[str | None, str | None]:
         """Map a websocket path segment onto the node bucket name."""
@@ -876,6 +910,89 @@ class WebSocketClient(_WSCommon):
             if not added and not node_bucket:
                 translated.pop(node_type, None)
         return translated
+
+    def _nodes_to_deltas(
+        self,
+        nodes: Mapping[str, Any],
+        *,
+        inventory: Inventory | None,
+    ) -> list[NodeSettingsDelta]:
+        """Convert websocket node payloads into domain delta objects."""
+
+        resolved_inventory = inventory if isinstance(inventory, Inventory) else None
+        if resolved_inventory is None:
+            _LOGGER.warning(
+                "WS: missing inventory for node delta translation on %s",
+                self.dev_id,
+            )
+            return []
+
+        deltas: list[NodeSettingsDelta] = []
+        for raw_type, sections in nodes.items():
+            if not isinstance(raw_type, str) or not isinstance(sections, Mapping):
+                continue
+            try:
+                node_type = DomainNodeType(str(raw_type).lower())
+            except ValueError:
+                continue
+
+            per_addr: dict[str, dict[str, Any]] = {}
+            for section, section_payload in sections.items():
+                if not isinstance(section_payload, Mapping):
+                    continue
+                for raw_addr, payload in section_payload.items():
+                    addr = normalize_node_addr(
+                        raw_addr,
+                        use_default_when_falsey=True,
+                    )
+                    if not addr:
+                        continue
+                    bucket = per_addr.setdefault(addr, {})
+                    if section == "settings" and isinstance(payload, Mapping):
+                        for key, value in payload.items():
+                            bucket[key] = deepcopy(value)
+                    elif section == "status" and isinstance(payload, Mapping):
+                        bucket["status"] = dict(payload)
+                    elif section == "capabilities" and isinstance(payload, Mapping):
+                        bucket["capabilities"] = dict(payload)
+                    else:
+                        bucket[section] = deepcopy(payload)
+
+            for addr, payload in per_addr.items():
+                try:
+                    node_id = DomainNodeId(node_type, addr)
+                except ValueError:
+                    continue
+                if not resolved_inventory.has_node(
+                    node_id.node_type.value, node_id.addr
+                ):
+                    _LOGGER.warning(
+                        "WS: ignoring update for unknown node_type=%s addr=%s on %s",
+                        node_type.value,
+                        addr,
+                        self.dev_id,
+                    )
+                    continue
+                deltas.append(NodeSettingsDelta(node_id=node_id, changes=payload))
+
+        return deltas
+
+    def _apply_deltas_to_store(
+        self,
+        deltas: Iterable[NodeSettingsDelta],
+        *,
+        replace: bool,
+    ) -> None:
+        """Apply deltas to the domain store via the coordinator."""
+
+        coordinator = getattr(self, "_coordinator", None)
+        handler = getattr(coordinator, "handle_ws_deltas", None)
+        if not callable(handler):
+            return
+        try:
+            handler(self.dev_id, tuple(deltas), replace=replace)
+        except Exception:
+            _LOGGER.debug("WS: failed to apply websocket deltas", exc_info=True)
 
     def _dispatch_nodes(self, payload: Mapping[str, Any]) -> None:
         """Publish node updates using the shared inventory metadata."""

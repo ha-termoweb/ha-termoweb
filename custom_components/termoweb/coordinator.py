@@ -23,7 +23,7 @@ from .boost import coerce_int, resolve_boost_end_from_fields
 from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
 from .domain.ids import NodeId as DomainNodeId, NodeType as DomainNodeType
 from .domain.legacy_view import store_to_legacy_coordinator_data
-from .domain.state import DomainStateStore
+from .domain.state import DomainStateStore, NodeSettingsDelta
 from .inventory import Inventory, normalize_node_addr, normalize_node_type
 from .utils import float_or_none
 
@@ -112,7 +112,8 @@ class StateCoordinator(
         self._backoff = 0  # seconds
         self._dev_id = dev_id
         self._device = device or {}
-        self._is_ducaheat = bool(getattr(client, "_is_ducaheat", False))
+        is_ducaheat = getattr(client, "_is_ducaheat", False)
+        self._is_ducaheat = bool(is_ducaheat is True)
         if not isinstance(inventory, Inventory):
             msg = "EnergyStateCoordinator requires an Inventory instance"
             raise TypeError(msg)
@@ -787,6 +788,56 @@ class StateCoordinator(
                     addr,
                     self._filtered_settings_payload(payload),
                 )
+
+    def handle_ws_deltas(
+        self,
+        dev_id: str,
+        deltas: Iterable[NodeSettingsDelta],
+        *,
+        replace: bool = False,
+    ) -> None:
+        """Merge websocket-delivered deltas into the domain state store."""
+
+        if dev_id != self._dev_id or self._is_ducaheat:
+            return
+
+        inventory = self._inventory
+        if not isinstance(inventory, Inventory):
+            return
+
+        store = self._state_store or self._ensure_state_store(inventory)
+        if store is None:
+            return
+
+        self._seed_state_store_from_coordinator(store)
+        applied = False
+        for delta in deltas:
+            if not isinstance(delta, NodeSettingsDelta):
+                continue
+            if replace:
+                store.apply_full_snapshot(
+                    delta.node_id.node_type,
+                    delta.node_id.addr,
+                    delta.payload,
+                )
+            else:
+                store.apply_delta(delta)
+            applied = True
+
+        if not applied:
+            return
+
+        dev_name = _device_display_name(self._device, self._dev_id)
+        device_record = store_to_legacy_coordinator_data(
+            self._dev_id,
+            store,
+            inventory,
+            device_name=dev_name,
+            device_raw=self._device,
+        )
+        new_data = dict(self.data or {})
+        new_data.update(device_record)
+        self.async_set_updated_data(new_data)
 
     async def async_refresh_heater(self, node: str | tuple[str, str]) -> None:
         """Refresh settings for a specific node and push the update to listeners."""

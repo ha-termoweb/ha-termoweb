@@ -186,6 +186,58 @@ class PowerMonitorState:
 DomainState = HeaterState | AccumulatorState | ThermostatState | PowerMonitorState
 
 
+@dataclass(slots=True)
+class NodeDelta:
+    """Base delta object for node updates."""
+
+    node_id: NodeId
+
+    @property
+    def payload(self) -> Mapping[str, Any]:
+        """Return the payload carried by the delta."""
+
+        return {}
+
+
+@dataclass(slots=True)
+class NodeSettingsDelta(NodeDelta):
+    """Settings delta for a node."""
+
+    changes: Mapping[str, Any]
+
+    @property
+    def payload(self) -> Mapping[str, Any]:
+        """Return the mapping of changed fields."""
+
+        return self.changes
+
+
+@dataclass(slots=True)
+class NodeStatusDelta(NodeDelta):
+    """Status delta for a node."""
+
+    status: Mapping[str, Any]
+
+    @property
+    def payload(self) -> Mapping[str, Any]:
+        """Return the status mapping payload."""
+
+        return {"status": self.status}
+
+
+@dataclass(slots=True)
+class NodeSamplesDelta(NodeDelta):
+    """Samples delta placeholder for future use."""
+
+    samples: Mapping[str, Any]
+
+    @property
+    def payload(self) -> Mapping[str, Any]:
+        """Return the samples mapping payload."""
+
+        return {"samples": self.samples}
+
+
 def _populate_heater_state(
     state: HeaterState,
     payload: Mapping[str, Any],
@@ -352,6 +404,25 @@ class DomainStateStore:
             return None
         return self._allowed.get(candidate)
 
+    def _apply_payload(
+        self, node_id: NodeId, payload: Mapping[str, Any], *, replace: bool
+    ) -> None:
+        """Apply ``payload`` to ``node_id`` using replace semantics when requested."""
+
+        if not isinstance(payload, Mapping):
+            return
+
+        if replace or node_id not in self._states:
+            self._states[node_id] = _build_state(node_id.node_type, payload)
+            return
+
+        existing = self._states.get(node_id)
+        if existing is None:
+            self._states[node_id] = _build_state(node_id.node_type, payload)
+            return
+
+        self._states[node_id] = _merge_state(existing, payload)
+
     def apply_full_snapshot(
         self,
         node_type: NodeType | str,
@@ -367,7 +438,7 @@ class DomainStateStore:
         if node_id is None:
             return
 
-        self._states[node_id] = _build_state(node_id.node_type, decoded_settings)
+        self._apply_payload(node_id, decoded_settings, replace=True)
 
     def apply_patch(
         self,
@@ -384,12 +455,19 @@ class DomainStateStore:
         if node_id is None:
             return
 
-        existing = self._states.get(node_id)
-        if existing is None:
-            self._states[node_id] = _build_state(node_id.node_type, delta)
+        self._apply_payload(node_id, delta, replace=False)
+
+    def apply_delta(self, delta: NodeDelta | None) -> None:
+        """Apply a typed domain delta to the store."""
+
+        if not isinstance(delta, NodeDelta):
             return
 
-        self._states[node_id] = _merge_state(existing, delta)
+        node_id = self._allowed.get(delta.node_id)
+        if node_id is None:
+            return
+
+        self._apply_payload(node_id, delta.payload, replace=False)
 
     def get_state(self, node_type: NodeType | str, addr: Any) -> DomainState | None:
         """Return the stored state for ``(node_type, addr)`` when known."""
