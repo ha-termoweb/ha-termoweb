@@ -358,6 +358,49 @@ def test_incremental_updates_preserve_address_payload(
     assert coordinator.update_nodes.call_count == 0
 
 
+def test_nodes_to_deltas_translates_payloads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Websocket node payloads should become domain deltas."""
+
+    client = _make_client(monkeypatch)
+    inventory = _set_inventory(client, _build_inventory_payload())
+
+    nodes = {
+        "htr": {
+            "settings": {"1": {"mode": "auto"}},
+            "status": {"1": {"online": True}},
+        }
+    }
+
+    deltas = client._nodes_to_deltas(nodes, inventory=inventory)
+
+    assert len(deltas) == 1
+    delta = deltas[0]
+    assert delta.node_id.node_type.value == "htr"
+    assert delta.node_id.addr == "1"
+    assert delta.payload["mode"] == "auto"
+    assert delta.payload["status"]["online"] is True
+
+
+def test_nodes_to_deltas_validates_inventory(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Unknown nodes should be ignored with a warning."""
+
+    client = _make_client(monkeypatch)
+    inventory = _set_inventory(client, _build_inventory_payload())
+
+    with caplog.at_level(logging.WARNING):
+        deltas = client._nodes_to_deltas(
+            {"htr": {"settings": {"9": {"mode": "eco"}}}},
+            inventory=inventory,
+        )
+
+    assert deltas == []
+    assert "ignoring update for unknown" in caplog.text
+
+
 @pytest.mark.asyncio
 async def test_emit_sio_logs_subscribe(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
@@ -720,9 +763,7 @@ async def test_read_loop_updates_ws_state_on_dev_data(
 
     class DevDataWS(QueueWebSocket):
         def __init__(self, frame: str) -> None:
-            super().__init__(
-                [SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data=frame)]
-            )
+            super().__init__([SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data=frame)])
 
     frame = f"42{client._namespace},{payload}"
     client._ws = DevDataWS(frame)  # type: ignore[assignment]
@@ -753,9 +794,7 @@ async def test_read_loop_handles_stringified_dev_data(
 
     class DevDataWS(QueueWebSocket):
         def __init__(self, frame: str) -> None:
-            super().__init__(
-                [SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data=frame)]
-            )
+            super().__init__([SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data=frame)])
 
     frame = f"42{client._namespace},{payload}"
     client._ws = DevDataWS(frame)  # type: ignore[assignment]
@@ -787,14 +826,14 @@ async def test_read_loop_handles_list_snapshot(
     dispatched: list[dict[str, Any]] = []
     client._dispatcher = lambda *_args: dispatched.append(_args[2])
 
-    nodes_list = [{"type": "htr", "addr": "1", "status": {"power": 7}, "lease_seconds": 90}]
+    nodes_list = [
+        {"type": "htr", "addr": "1", "status": {"power": 7}, "lease_seconds": 90}
+    ]
     payload = json.dumps(["dev_data", {"nodes": nodes_list}], separators=(",", ":"))
 
     class DevDataWS(QueueWebSocket):
         def __init__(self, frame: str) -> None:
-            super().__init__(
-                [SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data=frame)]
-            )
+            super().__init__([SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data=frame)])
 
     frame = f"42{client._namespace},{payload}"
     client._ws = DevDataWS(frame)  # type: ignore[assignment]
@@ -926,9 +965,7 @@ async def test_read_loop_handles_errors(monkeypatch: pytest.MonkeyPatch) -> None
 
     class ErrorWS(QueueWebSocket):
         def __init__(self) -> None:
-            super().__init__(
-                [SimpleNamespace(type=aiohttp.WSMsgType.ERROR, data=None)]
-            )
+            super().__init__([SimpleNamespace(type=aiohttp.WSMsgType.ERROR, data=None)])
 
         def exception(self) -> str:
             return "boom"
@@ -947,9 +984,7 @@ async def test_read_loop_handles_close(monkeypatch: pytest.MonkeyPatch) -> None:
 
     class CloseWS(QueueWebSocket):
         def __init__(self) -> None:
-            super().__init__(
-                [SimpleNamespace(type=aiohttp.WSMsgType.CLOSE, data=None)]
-            )
+            super().__init__([SimpleNamespace(type=aiohttp.WSMsgType.CLOSE, data=None)])
 
     client._ws = CloseWS()  # type: ignore[assignment]
 
@@ -1007,6 +1042,45 @@ async def test_read_loop_processes_update_event(
     assert not forwarded
 
 
+@pytest.mark.asyncio
+async def test_read_loop_applies_deltas_to_store(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Update events should translate into domain deltas for the coordinator."""
+
+    client = _make_client(monkeypatch)
+    _set_inventory(client, _build_inventory_payload())
+    applied: list[tuple[str, tuple[Any, ...], bool]] = []
+    client._coordinator.handle_ws_deltas = (
+        lambda dev_id, deltas, *, replace=False: applied.append(
+            (dev_id, deltas, replace)
+        )
+    )
+    client._dispatcher = lambda *_args: None
+    client._forward_sample_updates = lambda updates: None
+
+    class UpdateWS(QueueWebSocket):
+        def __init__(self) -> None:
+            super().__init__(
+                [
+                    SimpleNamespace(
+                        type=aiohttp.WSMsgType.TEXT,
+                        data='442["update",{"body":{"mode":"eco"},"path":"/api/v2/devs/device/htr/1/settings"}]',
+                    )
+                ]
+            )
+
+    client._ws = UpdateWS()  # type: ignore[assignment]
+
+    await _run_read_loop(client)
+
+    assert applied
+    dev_id, deltas, replace = applied[-1]
+    assert dev_id == "device"
+    assert replace is False
+    assert deltas[0].payload["mode"] == "eco"
+
+
 def test_translate_path_update_variants(monkeypatch: pytest.MonkeyPatch) -> None:
     """Path-based websocket updates should translate into node payloads."""
 
@@ -1029,9 +1103,12 @@ def test_translate_path_update_variants(monkeypatch: pytest.MonkeyPatch) -> None
         {"path": "/api/v2/devs/device/htr/2/setup", "body": {"mode": "eco"}}
     )
     assert nested == {"htr": {"settings": {"2": {"setup": {"mode": "eco"}}}}}
-    assert client._translate_path_update(
-        {"path": "/api/v2/devs/device/htr/2/setup", "body": {"mode": "eco"}}
-    ) == nested
+    assert (
+        client._translate_path_update(
+            {"path": "/api/v2/devs/device/htr/2/setup", "body": {"mode": "eco"}}
+        )
+        == nested
+    )
 
     invalid_payloads = [
         {"path": "/", "body": {}},
@@ -1822,6 +1899,8 @@ async def test_subscribe_feeds_handles_missing_targets(
     assert count == 0
     emit_mock.assert_not_awaited()
     assert client._subscription_paths == set()
+
+
 @pytest.mark.asyncio
 async def test_subscribe_feeds_prefers_coordinator_inventory(
     monkeypatch: pytest.MonkeyPatch,

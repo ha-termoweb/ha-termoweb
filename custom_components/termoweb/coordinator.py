@@ -772,10 +772,15 @@ class StateCoordinator(
                 continue
         return node_ids
 
-    def _ensure_state_store(self, inventory: Inventory) -> DomainStateStore | None:
+    def _ensure_state_store(
+        self,
+        inventory: Inventory,
+        *,
+        allow_ducaheat: bool = False,
+    ) -> DomainStateStore | None:
         """Ensure a domain state store exists when applicable."""
 
-        if self._is_ducaheat:
+        if self._is_ducaheat and not allow_ducaheat:
             self._state_store = None
             self._domain_view.update_store(None)
             return None
@@ -823,14 +828,17 @@ class StateCoordinator(
     ) -> None:
         """Merge websocket-delivered deltas into the domain state store."""
 
-        if dev_id != self._dev_id or self._is_ducaheat:
+        if dev_id != self._dev_id:
             return
 
         inventory = self._inventory
         if not isinstance(inventory, Inventory):
             return
 
-        store = self._state_store or self._ensure_state_store(inventory)
+        store = self._state_store or self._ensure_state_store(
+            inventory,
+            allow_ducaheat=True,
+        )
         if store is None:
             return
 

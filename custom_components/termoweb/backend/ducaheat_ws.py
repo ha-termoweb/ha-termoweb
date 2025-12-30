@@ -44,6 +44,11 @@ from custom_components.termoweb.const import (
     get_brand_user_agent,
     signal_ws_data,
 )
+from custom_components.termoweb.domain import (
+    NodeId as DomainNodeId,
+    NodeSettingsDelta,
+    NodeType as DomainNodeType,
+)
 from custom_components.termoweb.inventory import (
     Inventory,
     normalize_node_addr,
@@ -563,9 +568,23 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                             if isinstance(nodes_map, Mapping):
                                 self._log_nodes_summary(nodes_map)
                                 normalised = self._normalise_nodes_payload(nodes_map)
+                                inventory = (
+                                    self._inventory
+                                    if isinstance(self._inventory, Inventory)
+                                    else self._bind_inventory_from_context()
+                                )
                                 dispatch_payload: Mapping[str, Any] | None
                                 if isinstance(normalised, Mapping):
                                     dispatch_payload = normalised
+                                    deltas = self._nodes_to_deltas(
+                                        normalised,
+                                        inventory=inventory,
+                                    )
+                                    if deltas:
+                                        self._apply_deltas_to_store(
+                                            deltas,
+                                            replace=True,
+                                        )
                                 else:
                                     dispatch_payload = nodes_map
                                 if isinstance(dispatch_payload, Mapping):
@@ -587,12 +606,27 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                     isinstance(normalised_update, dict)
                                     and normalised_update
                                 ):
-                                    self._dispatch_nodes(normalised_update)
                                     inventory = (
                                         self._inventory
                                         if isinstance(self._inventory, Inventory)
-                                        else None
+                                        else self._bind_inventory_from_context()
                                     )
+                                    deltas = self._nodes_to_deltas(
+                                        normalised_update,
+                                        inventory=inventory,
+                                    )
+                                    if deltas:
+                                        self._apply_deltas_to_store(
+                                            deltas,
+                                            replace=False,
+                                        )
+                                    self._dispatch_nodes(normalised_update)
+                                    if not isinstance(inventory, Inventory):
+                                        inventory = (
+                                            self._inventory
+                                            if isinstance(self._inventory, Inventory)
+                                            else None
+                                        )
                                     allowed_types = (
                                         inventory.energy_sample_types
                                         if isinstance(inventory, Inventory)
@@ -1127,6 +1161,92 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     lease_seconds=lease_seconds,
                 )
         return updates
+
+    def _nodes_to_deltas(
+        self,
+        nodes: Mapping[str, Any],
+        *,
+        inventory: Inventory | None,
+    ) -> list[NodeSettingsDelta]:
+        """Convert websocket node payloads into domain delta objects."""
+
+        resolved_inventory = inventory if isinstance(inventory, Inventory) else None
+        if resolved_inventory is None:
+            _LOGGER.warning(
+                "WS (ducaheat): missing inventory for node delta translation on %s",
+                self.dev_id,
+            )
+            return []
+
+        deltas: list[NodeSettingsDelta] = []
+        for raw_type, sections in nodes.items():
+            if not isinstance(raw_type, str) or not isinstance(sections, Mapping):
+                continue
+            try:
+                node_type = DomainNodeType(str(raw_type).lower())
+            except ValueError:
+                continue
+
+            per_addr: dict[str, dict[str, Any]] = {}
+            for section, section_payload in sections.items():
+                if not isinstance(section_payload, Mapping):
+                    continue
+                for raw_addr, payload in section_payload.items():
+                    addr = normalize_node_addr(
+                        raw_addr,
+                        use_default_when_falsey=True,
+                    )
+                    if not addr:
+                        continue
+                    bucket = per_addr.setdefault(addr, {})
+                    if section == "settings" and isinstance(payload, Mapping):
+                        for key, value in payload.items():
+                            bucket[key] = deepcopy(value)
+                    elif section == "status" and isinstance(payload, Mapping):
+                        bucket["status"] = dict(payload)
+                    elif section == "capabilities" and isinstance(payload, Mapping):
+                        bucket["capabilities"] = dict(payload)
+                    else:
+                        bucket[section] = deepcopy(payload)
+
+            for addr, payload in per_addr.items():
+                try:
+                    node_id = DomainNodeId(node_type, addr)
+                except ValueError:
+                    continue
+                if not resolved_inventory.has_node(
+                    node_id.node_type.value, node_id.addr
+                ):
+                    _LOGGER.warning(
+                        "WS (ducaheat): ignoring update for unknown node_type=%s addr=%s on %s",
+                        node_type.value,
+                        addr,
+                        self.dev_id,
+                    )
+                    continue
+                deltas.append(NodeSettingsDelta(node_id=node_id, changes=payload))
+
+        return deltas
+
+    def _apply_deltas_to_store(
+        self,
+        deltas: Iterable[NodeSettingsDelta],
+        *,
+        replace: bool,
+    ) -> None:
+        """Apply deltas to the domain store via the coordinator."""
+
+        coordinator = getattr(self, "_coordinator", None)
+        handler = getattr(coordinator, "handle_ws_deltas", None)
+        if not callable(handler):
+            return
+        try:
+            handler(self.dev_id, tuple(deltas), replace=replace)
+        except Exception:
+            _LOGGER.debug(
+                "WS (ducaheat): failed to apply websocket deltas",
+                exc_info=True,
+            )
 
     def _translate_path_update(self, payload: Any) -> dict[str, Any] | None:
         """Translate ``{"path": ..., "body": ...}`` websocket frames into nodes."""
