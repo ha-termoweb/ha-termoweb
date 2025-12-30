@@ -33,4 +33,13 @@ class NodeId:
     """Identifier for a node consisting of type and address."""
 
     node_type: NodeType
-    addr: int
+    addr: str
+
+    def __post_init__(self) -> None:
+        """Normalise the node address to a non-empty string."""
+
+        addr_str = str(self.addr).strip()
+        if not addr_str:
+            msg = "addr must not be empty"
+            raise ValueError(msg)
+        object.__setattr__(self, "addr", addr_str)

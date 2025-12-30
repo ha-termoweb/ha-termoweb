@@ -21,6 +21,9 @@ from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend.sanitize import mask_identifier
 from .boost import coerce_int, resolve_boost_end_from_fields
 from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
+from .domain.ids import NodeId as DomainNodeId, NodeType as DomainNodeType
+from .domain.legacy_view import store_to_legacy_coordinator_data
+from .domain.state import DomainStateStore
 from .inventory import Inventory, normalize_node_addr, normalize_node_type
 from .utils import float_or_none
 
@@ -109,11 +112,13 @@ class StateCoordinator(
         self._backoff = 0  # seconds
         self._dev_id = dev_id
         self._device = device or {}
+        self._is_ducaheat = bool(getattr(client, "_is_ducaheat", False))
         if not isinstance(inventory, Inventory):
             msg = "EnergyStateCoordinator requires an Inventory instance"
             raise TypeError(msg)
 
         self._inventory: Inventory | None = None
+        self._state_store: DomainStateStore | None = None
         self._pending_settings: dict[tuple[str, str], PendingSetting] = {}
         self._rtc_reference: datetime | None = None
         self._rtc_reference_monotonic: float | None = None
@@ -166,7 +171,7 @@ class StateCoordinator(
             checker = getattr(_LOGGER, "isEnabledFor", None)
             if callable(checker):
                 return bool(checker(logging.DEBUG))
-        except Exception:  # pragma: no cover - defensive
+        except (AttributeError, TypeError):  # pragma: no cover - defensive
             return False
         return False
 
@@ -320,6 +325,52 @@ class StateCoordinator(
         now = time.time()
         interval = self.update_interval.total_seconds()
         return now - entry.timestamp < interval
+
+    async def _async_fetch_settings_to_store(
+        self,
+        dev_id: str,
+        addr_map: Mapping[str, Iterable[str]],
+        reverse: Mapping[str, set[str]],
+        store: DomainStateStore,
+        rtc_now: datetime | None,
+    ) -> datetime | None:
+        """Fetch settings for every address and store them in the domain cache."""
+
+        current_rtc = rtc_now
+        for node_type, addrs_for_type in addr_map.items():
+            for addr in addrs_for_type:
+                addr_types = reverse.get(addr)
+                resolved_type = (
+                    node_type
+                    if node_type in (addr_types or {node_type})
+                    else next(iter(addr_types))
+                    if addr_types
+                    else node_type
+                )
+                payload = await self.client.get_node_settings(
+                    dev_id, (resolved_type, addr)
+                )
+                if not isinstance(payload, dict):
+                    continue
+                if self._should_defer_pending_setting(resolved_type, addr, payload):
+                    _LOGGER.debug(
+                        "Deferring poll merge for pending settings type=%s addr=%s",
+                        resolved_type,
+                        addr,
+                    )
+                    continue
+                if resolved_type == "acm" and isinstance(payload, MutableMapping):
+                    now_value: datetime | None = None
+                    if self._requires_boost_resolution(payload) and current_rtc is None:
+                        current_rtc = await self._async_fetch_rtc_datetime()
+                    now_value = current_rtc or self._device_now_estimate()
+                    self._apply_accumulator_boost_metadata(payload, now=now_value)
+                store.apply_full_snapshot(
+                    resolved_type,
+                    addr,
+                    self._filtered_settings_payload(payload),
+                )
+        return current_rtc
 
     async def _async_fetch_settings_by_address(
         self,
@@ -669,13 +720,73 @@ class StateCoordinator(
 
         if isinstance(inventory, Inventory):
             self._inventory = inventory
+            self._ensure_state_store(inventory)
         else:
             self._inventory = None
+            self._state_store = None
 
     def _ensure_inventory(self) -> Inventory | None:
         """Ensure cached inventory metadata is available."""
 
         return self._inventory
+
+    def _node_ids_from_inventory(self, inventory: Inventory) -> list[DomainNodeId]:
+        """Return domain node identifiers derived from ``inventory``."""
+
+        node_ids: list[DomainNodeId] = []
+        for node in inventory.nodes:
+            try:
+                node_type = DomainNodeType(str(node.type))
+            except ValueError:
+                try:
+                    node_type = DomainNodeType(str(node.type).lower())
+                except ValueError:
+                    continue
+            try:
+                node_ids.append(DomainNodeId(node_type, node.addr))
+            except ValueError:
+                continue
+        return node_ids
+
+    def _ensure_state_store(self, inventory: Inventory) -> DomainStateStore | None:
+        """Ensure a domain state store exists when applicable."""
+
+        if self._is_ducaheat:
+            self._state_store = None
+            return None
+
+        node_ids = self._node_ids_from_inventory(inventory)
+        if self._state_store is None:
+            self._state_store = DomainStateStore(node_ids)
+        else:
+            self._state_store.reset_nodes(node_ids)
+        return self._state_store
+
+    def _seed_state_store_from_coordinator(self, store: DomainStateStore) -> None:
+        """Backfill the domain store from the current coordinator data."""
+
+        current = self.data or {}
+        dev_state = current.get(self._dev_id)
+        if not isinstance(dev_state, Mapping):
+            return
+
+        settings = dev_state.get("settings")
+        if not isinstance(settings, Mapping):
+            return
+
+        for node_type, bucket in settings.items():
+            if not isinstance(bucket, Mapping):
+                continue
+            for addr, payload in bucket.items():
+                if not isinstance(addr, str):
+                    continue
+                if not isinstance(payload, Mapping):
+                    continue
+                store.apply_full_snapshot(
+                    node_type,
+                    addr,
+                    self._filtered_settings_payload(payload),
+                )
 
     async def async_refresh_heater(self, node: str | tuple[str, str]) -> None:
         """Refresh settings for a specific node and push the update to listeners."""
@@ -756,29 +867,50 @@ class StateCoordinator(
                 success = True
                 return
 
-            current = self.data or {}
-            new_data: dict[str, dict[str, Any]] = dict(current)
-            prev_dev = dict(new_data.get(dev_id) or {})
-            prev_settings = self._collect_previous_settings(
-                prev_dev, inventory, include_raw=self._include_raw_settings()
-            )
+            store = self._state_store if not self._is_ducaheat else None
+            if store is not None:
+                store.apply_full_snapshot(
+                    resolved_type,
+                    addr,
+                    self._filtered_settings_payload(payload),
+                )
+                dev_name = _device_display_name(self._device, dev_id)
+                device_record = store_to_legacy_coordinator_data(
+                    dev_id,
+                    store,
+                    inventory,
+                    device_name=dev_name,
+                    device_raw=self._device,
+                )
+                new_data = dict(self.data or {})
+                new_data.update(device_record)
+                self.async_set_updated_data(new_data)
+                success = True
+            else:
+                current = self.data or {}
+                new_data: dict[str, dict[str, Any]] = dict(current)
+                prev_dev = dict(new_data.get(dev_id) or {})
+                prev_settings = self._collect_previous_settings(
+                    prev_dev, inventory, include_raw=self._include_raw_settings()
+                )
 
-            settings_map = {
-                node_type: dict(bucket) for node_type, bucket in prev_settings.items()
-            }
-            settings_bucket = settings_map.setdefault(resolved_type, {})
-            settings_bucket[addr] = self._filtered_settings_payload(payload)
+                settings_map = {
+                    node_type: dict(bucket)
+                    for node_type, bucket in prev_settings.items()
+                }
+                settings_bucket = settings_map.setdefault(resolved_type, {})
+                settings_bucket[addr] = self._filtered_settings_payload(payload)
 
-            dev_name = _device_display_name(self._device, dev_id)
-            device_record = self._assemble_device_record(
-                inventory=inventory,
-                settings_by_type=settings_map,
-                name=dev_name,
-            )
+                dev_name = _device_display_name(self._device, dev_id)
+                device_record = self._assemble_device_record(
+                    inventory=inventory,
+                    settings_by_type=settings_map,
+                    name=dev_name,
+                )
 
-            new_data[dev_id] = device_record
-            self.async_set_updated_data(new_data)
-            success = True
+                new_data[dev_id] = device_record
+                self.async_set_updated_data(new_data)
+                success = True
 
         except TimeoutError as err:
             _LOGGER.error(
@@ -813,44 +945,67 @@ class StateCoordinator(
             _LOGGER.debug("Skipping poll because inventory metadata is unavailable")
             return {}
 
+        store = self._state_store if not self._is_ducaheat else None
+        if store is None and not self._is_ducaheat:
+            store = self._ensure_state_store(inventory)
+
         addr_map, reverse = inventory.heater_address_map
         addrs = [addr for addrs in addr_map.values() for addr in addrs]
         rtc_now: datetime | None = None
         try:
             self._prune_pending_settings()
-            prev_dev = (self.data or {}).get(dev_id, {})
-            prev_by_type = self._collect_previous_settings(
-                prev_dev, inventory, include_raw=self._include_raw_settings()
-            )
-            all_types = set(addr_map) | set(prev_by_type)
-            settings_by_type: dict[str, dict[str, Any]] = {
-                node_type: dict(prev_by_type.get(node_type, {}))
-                for node_type in all_types
-            }
-
-            if addrs:
-                rtc_now = await self._async_fetch_settings_by_address(
+            if store is not None:
+                self._seed_state_store_from_coordinator(store)
+                if addrs:
+                    rtc_now = await self._async_fetch_settings_to_store(
+                        dev_id,
+                        addr_map,
+                        reverse,
+                        store,
+                        rtc_now,
+                    )
+                dev_name = _device_display_name(self._device, dev_id)
+                result = store_to_legacy_coordinator_data(
                     dev_id,
-                    addr_map,
-                    reverse,
-                    settings_by_type,
-                    rtc_now,
+                    store,
+                    inventory,
+                    device_name=dev_name,
+                    device_raw=self._device,
+                )
+            else:
+                prev_dev = (self.data or {}).get(dev_id, {})
+                prev_by_type = self._collect_previous_settings(
+                    prev_dev, inventory, include_raw=self._include_raw_settings()
+                )
+                all_types = set(addr_map) | set(prev_by_type)
+                settings_by_type: dict[str, dict[str, Any]] = {
+                    node_type: dict(prev_by_type.get(node_type, {}))
+                    for node_type in all_types
+                }
+
+                if addrs:
+                    rtc_now = await self._async_fetch_settings_by_address(
+                        dev_id,
+                        addr_map,
+                        reverse,
+                        settings_by_type,
+                        rtc_now,
+                    )
+
+                dev_name = _device_display_name(self._device, dev_id)
+
+                acm_settings = settings_by_type.get("acm")
+                if isinstance(acm_settings, Mapping):
+                    now_value = rtc_now or self._device_now_estimate()
+                    self._apply_boost_metadata_for_settings(acm_settings, now=now_value)
+
+                device_record = self._assemble_device_record(
+                    inventory=inventory,
+                    settings_by_type=settings_by_type,
+                    name=dev_name,
                 )
 
-            dev_name = _device_display_name(self._device, dev_id)
-
-            acm_settings = settings_by_type.get("acm")
-            if isinstance(acm_settings, Mapping):
-                now_value = rtc_now or self._device_now_estimate()
-                self._apply_boost_metadata_for_settings(acm_settings, now=now_value)
-
-            device_record = self._assemble_device_record(
-                inventory=inventory,
-                settings_by_type=settings_by_type,
-                name=dev_name,
-            )
-
-            result = {dev_id: device_record}
+                result = {dev_id: device_record}
 
         except TimeoutError as err:
             raise UpdateFailed("API timeout") from err

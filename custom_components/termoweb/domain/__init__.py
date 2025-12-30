@@ -14,12 +14,20 @@ from .commands import (
 )
 from .ids import NodeId, NodeType, normalize_node_type
 from .inventory import InstallationInventory, NodeInventory
-from .state import AccumulatorState, HeaterState, PowerMonitorState, ThermostatState
+from .legacy_view import store_to_legacy_coordinator_data
+from .state import (
+    AccumulatorState,
+    DomainStateStore,
+    HeaterState,
+    PowerMonitorState,
+    ThermostatState,
+)
 
 __all__ = [
     "AccumulatorCommand",
     "AccumulatorState",
     "BaseCommand",
+    "DomainStateStore",
     "HeaterState",
     "InstallationInventory",
     "NodeId",
@@ -35,5 +43,6 @@ __all__ = [
     "StartBoost",
     "StopBoost",
     "ThermostatState",
+    "store_to_legacy_coordinator_data",
     "normalize_node_type",
 ]
