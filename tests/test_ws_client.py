@@ -14,6 +14,7 @@ import pytest
 import logging
 import sys
 
+from custom_components.termoweb.domain import NodeSettingsDelta
 from custom_components.termoweb.backend import ducaheat_ws
 from custom_components.termoweb.backend import termoweb_ws as module
 from custom_components.termoweb.backend import ws_client as base_ws
@@ -786,6 +787,69 @@ def test_prepare_nodes_dispatch_resolves_record_dev_id_and_coordinator_inventory
     assert context_numeric.inventory is inventory
     assert hass_numeric_record["inventory"] is inventory
     coordinator_numeric.update_nodes.assert_not_called()
+
+
+def test_termoweb_nodes_to_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Node payloads should translate into domain deltas."""
+
+    client = _make_termoweb_client(monkeypatch)
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
+    inventory = Inventory("device", raw_nodes, build_node_inventory(raw_nodes))
+    client._inventory = inventory
+
+    nodes_payload = {
+        "htr": {
+            "settings": {"1": {"mode": "manual"}},
+            "status": {"1": {"online": True}},
+            "prog": {"1": {"0": 1}},
+        }
+    }
+
+    deltas = client._nodes_to_deltas(nodes_payload, inventory=inventory)
+    assert len(deltas) == 1
+    delta = deltas[0]
+    assert isinstance(delta, NodeSettingsDelta)
+    assert delta.node_id.addr == "1"
+    assert delta.payload["mode"] == "manual"
+    assert delta.payload["status"]["online"] is True
+    assert delta.payload["prog"] == {"0": 1}
+
+
+def test_termoweb_nodes_to_deltas_validates_inventory(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Unknown nodes should be logged and ignored during delta translation."""
+
+    client = _make_termoweb_client(monkeypatch)
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
+    inventory = Inventory("device", raw_nodes, build_node_inventory(raw_nodes))
+    client._inventory = inventory
+
+    with caplog.at_level(logging.WARNING, module._LOGGER.name):
+        deltas = client._nodes_to_deltas(
+            {"htr": {"settings": {"2": {"mode": "auto"}}}},
+            inventory=inventory,
+        )
+
+    assert deltas == []
+    assert any("unknown node_type" in record.message for record in caplog.records)
+
+
+def test_termoweb_translate_path_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Path frames should yield node mappings and typed deltas."""
+
+    client = _make_termoweb_client(monkeypatch)
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
+    inventory = Inventory("device", raw_nodes, build_node_inventory(raw_nodes))
+    client._inventory = inventory
+
+    payload = {"path": "/devs/device/htr/1/settings", "body": {"mode": "auto"}}
+    nodes, deltas = client._translate_path_deltas(payload, inventory=inventory)
+
+    assert nodes is not None
+    assert nodes["htr"]["settings"]["1"]["mode"] == "auto"
+    assert len(deltas) == 1
+    assert deltas[0].payload["mode"] == "auto"
 
 
 def test_ws_status_tracker_applies_default_cadence_hint() -> None:

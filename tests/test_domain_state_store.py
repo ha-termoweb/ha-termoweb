@@ -6,6 +6,8 @@ from typing import Any, Callable, Mapping
 from custom_components.termoweb.domain import (
     DomainStateStore,
     NodeId,
+    NodeSettingsDelta,
+    NodeStatusDelta,
     NodeType,
     store_to_legacy_coordinator_data,
 )
@@ -43,6 +45,28 @@ def test_domain_state_store_applies_snapshots_and_patches() -> None:
     patched = store.legacy_view()
     assert patched["htr"]["1"]["stemp"] == "19.5"
     assert patched["acm"]["2"]["charge_level"] == 75
+
+
+def test_domain_state_store_applies_deltas() -> None:
+    """Typed deltas should merge into the domain state store."""
+
+    store = DomainStateStore([NodeId(NodeType.HEATER, "1")])
+    store.apply_delta(
+        NodeSettingsDelta(
+            node_id=NodeId(NodeType.HEATER, "1"),
+            changes={"mode": "auto", "stemp": "20.0"},
+        )
+    )
+    store.apply_delta(
+        NodeStatusDelta(
+            node_id=NodeId(NodeType.HEATER, "1"),
+            status={"online": True},
+        )
+    )
+    legacy = store.legacy_view()
+    assert legacy["htr"]["1"]["mode"] == "auto"
+    assert legacy["htr"]["1"]["stemp"] == "20.0"
+    assert legacy["htr"]["1"]["status"]["online"] is True
 
 
 def test_store_to_legacy_coordinator_data_matches_schema(
