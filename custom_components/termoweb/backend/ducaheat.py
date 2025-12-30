@@ -57,6 +57,17 @@ class DucaheatRequestError(Exception):
 class DucaheatRESTClient(RESTClient):
     """HTTP adapter that speaks the segmented Ducaheat API."""
 
+    def _include_raw_settings(self) -> bool:
+        """Return True when raw payloads should be retained for debugging."""
+
+        try:
+            checker = getattr(_LOGGER, "isEnabledFor", None)
+            if callable(checker):
+                return bool(checker(logging.DEBUG))
+        except Exception:  # pragma: no cover - defensive
+            return False
+        return False
+
     async def _post_segmented(
         self,
         path: str,
@@ -130,7 +141,9 @@ class DucaheatRESTClient(RESTClient):
                 stage="GET settings",
                 payload=payload,
             )
-            return self._normalise_thm_settings(payload)
+            return self._normalise_thm_settings(
+                payload, include_raw=self._include_raw_settings()
+            )
 
         path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}"
         payload = await self._request("GET", path, headers=headers)
@@ -144,7 +157,11 @@ class DucaheatRESTClient(RESTClient):
                     stage="GET settings",
                     payload=payload,
                 )
-            return self._normalise_settings(payload, node_type=node_type)
+            return self._normalise_settings(
+                payload,
+                node_type=node_type,
+                include_raw=self._include_raw_settings(),
+            )
 
         self._log_non_htr_payload(
             node_type=node_type,
@@ -403,7 +420,9 @@ class DucaheatRESTClient(RESTClient):
                         continue
 
                     if node_type == "thm":
-                        addr_map[addr] = self._normalise_thm_settings(payload)
+                        addr_map[addr] = self._normalise_thm_settings(
+                            payload, include_raw=self._include_raw_settings()
+                        )
                     else:
                         addr_map[addr] = self._normalise_ws_settings(payload)
 
@@ -520,7 +539,11 @@ class DucaheatRESTClient(RESTClient):
             target[key] = max(0, min(100, coerced))
 
     def _normalise_settings(
-        self, payload: Any, *, node_type: str = "htr"
+        self,
+        payload: Any,
+        *,
+        node_type: str = "htr",
+        include_raw: bool = False,
     ) -> dict[str, Any]:
         """Flatten the vendor payload into HA-friendly heater settings."""
         if not isinstance(payload, dict):
@@ -635,7 +658,8 @@ class DucaheatRESTClient(RESTClient):
             if key in payload:
                 flattened[key] = payload[key]
 
-        flattened["raw"] = deepcopy(payload)
+        if include_raw:
+            flattened["raw"] = deepcopy(payload)
 
         if node_type == "acm":
             capabilities = self._normalise_acm_capabilities(payload)
@@ -644,7 +668,9 @@ class DucaheatRESTClient(RESTClient):
 
         return flattened
 
-    def _normalise_thm_settings(self, payload: Any) -> dict[str, Any]:
+    def _normalise_thm_settings(
+        self, payload: Any, *, include_raw: bool = False
+    ) -> dict[str, Any]:
         """Return a normalised thermostat settings mapping."""
 
         if not isinstance(payload, dict):
@@ -688,7 +714,11 @@ class DucaheatRESTClient(RESTClient):
 
         ptemp_raw = payload.get("ptemp")
         if isinstance(ptemp_raw, Iterable) and not isinstance(ptemp_raw, (str, bytes)):
-            preset = [value for value in (_to_float(v) for v in ptemp_raw) if value is not None]
+            preset = [
+                value
+                for value in (_to_float(v) for v in ptemp_raw)
+                if value is not None
+            ]
             if preset:
                 normalised["ptemp"] = preset
 
@@ -708,7 +738,8 @@ class DucaheatRESTClient(RESTClient):
         if isinstance(sync_status, str):
             normalised["sync_status"] = sync_status
 
-        normalised["raw"] = deepcopy(payload)
+        if include_raw:
+            normalised["raw"] = deepcopy(payload)
 
         return normalised
 

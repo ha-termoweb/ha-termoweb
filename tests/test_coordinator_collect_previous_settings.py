@@ -11,7 +11,7 @@ def test_collect_previous_settings_respects_inventory_addresses(
     inventory_builder: Callable[
         [str, Mapping[str, Any] | None, Iterable[Any] | None],
         Any,
-    ]
+    ],
 ) -> None:
     """Previous settings should be carried forward using inventory metadata."""
 
@@ -68,3 +68,32 @@ def test_collect_previous_settings_handles_missing_inventory() -> None:
         "htr": {"01": {"target": 21}},
         "pmo": {"1": {"w": 900}},
     }
+
+
+def test_collect_previous_settings_strips_raw_blobs(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None],
+        Any,
+    ],
+) -> None:
+    """Previous settings copies should omit raw payloads by default."""
+
+    inventory = inventory_builder("dev-raw", {}, [HeaterNode(name="Hall", addr="01")])
+    prev_dev = {
+        "settings": {
+            "htr": {
+                "01": {
+                    "mode": "auto",
+                    "raw": {"keep": "debug"},
+                }
+            }
+        }
+    }
+
+    filtered = StateCoordinator._collect_previous_settings(prev_dev, inventory)
+    assert "raw" not in filtered["htr"]["01"]
+
+    with_raw = StateCoordinator._collect_previous_settings(
+        prev_dev, inventory, include_raw=True
+    )
+    assert with_raw["htr"]["01"]["raw"] == {"keep": "debug"}

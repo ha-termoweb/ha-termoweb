@@ -1677,7 +1677,7 @@ async def test_set_acm_boost_state_rejects_invalid_stemp() -> None:
 
 
 def test_ducaheat_get_node_settings_normalises_payload(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     async def _run() -> None:
         session = FakeSession()
@@ -1730,7 +1730,10 @@ def test_ducaheat_get_node_settings_normalises_payload(
 
         monkeypatch.setattr(client, "authed_headers", fake_headers)
 
-        data = await client.get_node_settings("dev", ("htr", "A1"))
+        with caplog.at_level(
+            logging.DEBUG, logger="custom_components.termoweb.backend.ducaheat"
+        ):
+            data = await client.get_node_settings("dev", ("htr", "A1"))
 
         assert data["mode"] == "manual"
         assert data["state"] == "heating"

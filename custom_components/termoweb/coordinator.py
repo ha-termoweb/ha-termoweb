@@ -124,21 +124,31 @@ class StateCoordinator(
     def _collect_previous_settings(
         prev_dev: Mapping[str, Any],
         inventory: Inventory | None,
+        *,
+        include_raw: bool = False,
     ) -> dict[str, dict[str, Any]]:
         """Return cached settings carried over from previous poll."""
 
         preserved: dict[str, dict[str, Any]] = {}
+
+        def _filter_payload(payload: Any) -> Any:
+            if not isinstance(payload, Mapping):
+                return payload
+            if include_raw:
+                return dict(payload)
+            return {key: value for key, value in payload.items() if key != "raw"}
 
         existing_settings = prev_dev.get("settings")
         if isinstance(existing_settings, Mapping):
             for node_type, bucket in existing_settings.items():
                 if not isinstance(bucket, Mapping):
                     continue
-                preserved[node_type] = {
-                    addr: payload
-                    for addr, payload in bucket.items()
-                    if isinstance(addr, str) and addr
-                }
+                filtered: dict[str, Any] = {}
+                for addr, payload in bucket.items():
+                    if not isinstance(addr, str) or not addr:
+                        continue
+                    filtered[addr] = _filter_payload(payload)
+                preserved[node_type] = filtered
 
         if not isinstance(inventory, Inventory):
             return preserved
@@ -149,9 +159,29 @@ class StateCoordinator(
 
         return preserved
 
-    def _instant_power_key(
-        self, node_type: str, addr: str
-    ) -> tuple[str, str] | None:
+    def _include_raw_settings(self) -> bool:
+        """Return True when raw settings payloads should be retained."""
+
+        try:
+            checker = getattr(_LOGGER, "isEnabledFor", None)
+            if callable(checker):
+                return bool(checker(logging.DEBUG))
+        except Exception:  # pragma: no cover - defensive
+            return False
+        return False
+
+    def _filtered_settings_payload(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Return a defensive copy of ``payload`` without raw blobs."""
+
+        if not isinstance(payload, Mapping):
+            return {}
+
+        if self._include_raw_settings():
+            return dict(payload)
+
+        return {key: value for key, value in payload.items() if key != "raw"}
+
+    def _instant_power_key(self, node_type: str, addr: str) -> tuple[str, str] | None:
         """Return a normalized key for instant power tracking."""
 
         normalized_type = normalize_node_type(
@@ -331,7 +361,7 @@ class StateCoordinator(
                     now_value = current_rtc or self._device_now_estimate()
                     self._apply_accumulator_boost_metadata(payload, now=now_value)
                 bucket = settings_by_type.setdefault(resolved_type, {})
-                bucket[addr] = payload
+                bucket[addr] = self._filtered_settings_payload(payload)
         return current_rtc
 
     def _assemble_device_record(
@@ -618,7 +648,8 @@ class StateCoordinator(
             return False
 
         _LOGGER.debug(
-            "Deferring merge due to pending settings type=%s addr=%s expected_mode=%s expected_stemp=%s payload_mode=%s payload_stemp=%s",
+            "Deferring merge due to pending settings type=%s addr=%s "
+            "expected_mode=%s expected_stemp=%s payload_mode=%s payload_stemp=%s",
             key[0],
             key[1],
             mode_expected,
@@ -698,7 +729,8 @@ class StateCoordinator(
 
             if not isinstance(payload, dict):
                 _LOGGER.debug(
-                    "Ignoring unexpected heater settings payload for node_type=%s addr=%s: %s",
+                    "Ignoring unexpected heater settings payload for "
+                    "node_type=%s addr=%s: %s",
                     resolved_type,
                     addr,
                     payload,
@@ -716,7 +748,8 @@ class StateCoordinator(
 
             if self._should_defer_pending_setting(resolved_type, addr, payload):
                 _LOGGER.debug(
-                    "Skipping heater refresh merge for pending settings type=%s addr=%s",
+                    "Skipping heater refresh merge for pending settings "
+                    "type=%s addr=%s",
                     resolved_type,
                     addr,
                 )
@@ -726,13 +759,15 @@ class StateCoordinator(
             current = self.data or {}
             new_data: dict[str, dict[str, Any]] = dict(current)
             prev_dev = dict(new_data.get(dev_id) or {})
-            prev_settings = self._collect_previous_settings(prev_dev, inventory)
+            prev_settings = self._collect_previous_settings(
+                prev_dev, inventory, include_raw=self._include_raw_settings()
+            )
 
             settings_map = {
                 node_type: dict(bucket) for node_type, bucket in prev_settings.items()
             }
             settings_bucket = settings_map.setdefault(resolved_type, {})
-            settings_bucket[addr] = payload
+            settings_bucket[addr] = self._filtered_settings_payload(payload)
 
             dev_name = _device_display_name(self._device, dev_id)
             device_record = self._assemble_device_record(
@@ -762,7 +797,8 @@ class StateCoordinator(
             )
         finally:
             _LOGGER.info(
-                "Finished heater settings refresh for node_type=%s addr=%s (success=%s)",
+                "Finished heater settings refresh for node_type=%s "
+                "addr=%s (success=%s)",
                 node_type or resolved_type,
                 addr,
                 success,
@@ -783,7 +819,9 @@ class StateCoordinator(
         try:
             self._prune_pending_settings()
             prev_dev = (self.data or {}).get(dev_id, {})
-            prev_by_type = self._collect_previous_settings(prev_dev, inventory)
+            prev_by_type = self._collect_previous_settings(
+                prev_dev, inventory, include_raw=self._include_raw_settings()
+            )
             all_types = set(addr_map) | set(prev_by_type)
             settings_by_type: dict[str, dict[str, Any]] = {
                 node_type: dict(prev_by_type.get(node_type, {}))
@@ -883,9 +921,7 @@ class EnergyStateCoordinator(
             raise TypeError(msg)
         return inventory
 
-    def _iter_energy_targets(
-        self, inventory: Inventory
-    ) -> Iterator[tuple[str, str]]:
+    def _iter_energy_targets(self, inventory: Inventory) -> Iterator[tuple[str, str]]:
         """Yield normalised energy node targets from ``inventory``."""
 
         for node_type, addr in chain(
@@ -1001,7 +1037,8 @@ class EnergyStateCoordinator(
                 t = float_or_none(last.get("t"))
                 if counter is None or t is None:
                     _LOGGER.debug(
-                        "Latest sample missing 't' or 'counter' for node_type=%s addr=%s",
+                        "Latest sample missing 't' or 'counter' for "
+                        "node_type=%s addr=%s",
                         node_type,
                         addr,
                     )
@@ -1030,7 +1067,9 @@ class EnergyStateCoordinator(
 
         valid_keys = set(self._iter_energy_targets(inventory))
         self._inventory = inventory
-        self._last = {key: value for key, value in self._last.items() if key in valid_keys}
+        self._last = {
+            key: value for key, value in self._last.items() if key in valid_keys
+        }
 
     def _process_energy_sample(
         self,
