@@ -189,6 +189,42 @@ class WebSocketClient(_WSCommon):
         state.setdefault("idle_restart_pending", False)
         self._bind_inventory_from_context()
 
+    def _reset_handshake_cache(self, *, clear_state: bool = False) -> None:
+        """Clear cached handshake metadata to avoid retaining payloads."""
+
+        self._handshake_payload = None
+        if not clear_state:
+            return
+
+        state = getattr(self, "_ws_state", None)
+        if isinstance(state, MutableMapping):
+            state.pop("handshake_keys", None)
+            state.pop("last_handshake_at", None)
+            return
+
+        hass_data = getattr(self.hass, "data", None)
+        if not isinstance(hass_data, MutableMapping):
+            return
+
+        domain_bucket = hass_data.get(DOMAIN)
+        if not isinstance(domain_bucket, MutableMapping):
+            return
+
+        entry_bucket = domain_bucket.get(self.entry_id)
+        if not isinstance(entry_bucket, MutableMapping):
+            return
+
+        ws_bucket = entry_bucket.get("ws_state")
+        if not isinstance(ws_bucket, MutableMapping):
+            return
+
+        state_bucket = ws_bucket.get(self.dev_id)
+        if not isinstance(state_bucket, MutableMapping):
+            return
+
+        state_bucket.pop("handshake_keys", None)
+        state_bucket.pop("last_handshake_at", None)
+
     def _brand_headers(self, *, origin: str | None = None) -> dict[str, str]:
         """Return baseline headers aligned with the REST client brand."""
 
@@ -453,6 +489,7 @@ class WebSocketClient(_WSCommon):
             except Exception:
                 _LOGGER.debug("WS: disconnect due to %s failed", reason, exc_info=True)
         self._disconnected.set()
+        self._reset_handshake_cache(clear_state=True)
         self._cleanup_ws_state()
 
     async def _build_engineio_target(self) -> tuple[str, str]:
@@ -485,6 +522,7 @@ class WebSocketClient(_WSCommon):
         self._stats.events_total = 0
         self._handshake_logged = False
         self._subscription_refresh_failed = False
+        self._reset_handshake_cache(clear_state=True)
         self._update_status("connected")
         if self._idle_monitor_task is None or self._idle_monitor_task.done():
             self._idle_monitor_task = self._loop.create_task(self._idle_monitor())
@@ -534,12 +572,14 @@ class WebSocketClient(_WSCommon):
             self._idle_monitor_task = None
         self._subscription_refresh_failed = False
         self._handshake_logged = False
+        self._reset_handshake_cache(clear_state=True)
         self._disconnected.set()
         self._cleanup_ws_state()
 
     async def _on_reconnect(self) -> None:
         """Handle socket reconnection attempts."""
         _LOGGER.debug("WS: reconnect event")
+        self._reset_handshake_cache(clear_state=True)
         await self._subscribe_heater_samples()
 
     async def _on_connect_error(self, data: Any) -> None:
@@ -650,19 +690,32 @@ class WebSocketClient(_WSCommon):
     # ------------------------------------------------------------------
     def _handle_handshake(self, data: Any) -> None:
         """Process the initial handshake payload from the server."""
-        if isinstance(data, dict):
-            self._handshake_payload = deepcopy(data)
+        if isinstance(data, Mapping):
+            now = time.time()
+            keys = tuple(sorted(str(key) for key in data))
+            self._handshake_payload = {
+                "keys": keys,
+                "received_at": now,
+            }
+            state = self._ws_state_bucket()
+            state["last_handshake_at"] = now
+            if keys:
+                state["handshake_keys"] = keys
+            elif "handshake_keys" in state:
+                state.pop("handshake_keys")
             if _LOGGER.isEnabledFor(logging.DEBUG):
                 _LOGGER.debug(
-                    "WS: dev_handshake payload keys: %s", ", ".join(sorted(data.keys()))
+                    "WS: dev_handshake payload keys: %s", ", ".join(keys)
                 )
             self._update_status("connected")
-        else:
-            _LOGGER.debug("WS: invalid handshake payload")
+            return
+
+        _LOGGER.debug("WS: invalid handshake payload")
 
     def _handle_dev_data(self, data: Any) -> None:
         """Handle the first full snapshot of nodes from the websocket."""
         self._apply_nodes_payload(data, merge=False, event="dev_data")
+        self._reset_handshake_cache()
 
     def _handle_update(self, data: Any) -> None:
         """Merge incremental node updates from the websocket feed."""

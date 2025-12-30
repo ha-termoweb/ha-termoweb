@@ -767,9 +767,57 @@ def test_handle_handshake_logging(monkeypatch: pytest.MonkeyPatch, caplog: pytes
     client, _sio, _ = _make_client(monkeypatch)
     caplog.set_level(logging.DEBUG)
     monkeypatch.setattr(module._LOGGER, "isEnabledFor", lambda level: True)
+    monkeypatch.setattr(module.time, "time", lambda: 123.0)
     client._handle_handshake({"alpha": 1, "beta": 2})
-    assert client._handshake_payload == {"alpha": 1, "beta": 2}
+    assert client._handshake_payload == {
+        "keys": ("alpha", "beta"),
+        "received_at": 123.0,
+    }
+    assert client._ws_state_bucket().get("handshake_keys") == ("alpha", "beta")
     client._handle_handshake("invalid")
+
+
+@pytest.mark.asyncio
+async def test_handshake_cache_resets_on_reconnect(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Handshake cache should not grow across reconnect cycles."""
+
+    client, _sio, _ = _make_client(monkeypatch)
+    state = client._ws_state_bucket()
+    times = iter([100.0, 200.0, 300.0, 400.0, 500.0, 600.0])
+    monkeypatch.setattr(module.time, "time", lambda: next(times))
+    monkeypatch.setattr(
+        client._loop,
+        "create_task",
+        lambda coro, **_: (
+            coro.close(),
+            SimpleNamespace(done=lambda: True, cancel=lambda: None),
+        )[1],
+    )
+    client._handle_handshake({"foo": list(range(5)), "bar": "value"})
+
+    assert client._handshake_payload == {
+        "keys": ("bar", "foo"),
+        "received_at": 100.0,
+    }
+    assert state.get("handshake_keys") == ("bar", "foo")
+    assert "last_handshake_at" in state
+
+    await client._on_disconnect()
+    assert client._handshake_payload is None
+    assert "handshake_keys" not in state
+    assert "last_handshake_at" not in state
+    baseline_len = len(client._ws_state_bucket())
+
+    await client._on_connect()
+    client._handle_handshake({"baz": "qux"})
+    assert client._handshake_payload
+    assert client._handshake_payload.get("keys") == ("baz",)
+    assert client._handshake_payload.get("received_at") >= 0
+    client._idle_monitor_task = None
+    await client._on_disconnect()
+    refreshed_state = client._ws_state_bucket()
+    assert "handshake_keys" not in refreshed_state
+    assert len(refreshed_state) == baseline_len
 
 
 def test_forward_sample_updates_invokes_handler(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1626,7 +1674,7 @@ def test_apply_nodes_payload_translation(monkeypatch: pytest.MonkeyPatch) -> Non
     )
     original_dispatch = client._dispatch_nodes
     client._dispatch_nodes = MagicMock(side_effect=original_dispatch)
-    client._handshake_payload = {"nodes": {}}
+    client._handshake_payload = {"keys": ("nodes",), "received_at": 0}
     client._handle_handshake({"nodes": {"htr": {"status": {"1": {"temp": 20}}}}})
     client._apply_nodes_payload(
         {"nodes": {"htr": {"status": {"1": {"temp": 25}}}}}, merge=True, event="update"
@@ -1680,4 +1728,3 @@ def test_resolve_update_section_variants() -> None:
     )
     assert module.WebSocketClient._resolve_update_section("setup") == ("settings", "setup")
     assert module.WebSocketClient._resolve_update_section("unknown") == ("settings", "unknown")
-
