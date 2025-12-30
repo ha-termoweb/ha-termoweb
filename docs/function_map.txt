@@ -124,6 +124,8 @@ custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._ws_bucket_siz
     Return the current websocket state and tracker bucket sizes.
 custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._cleanup_ws_state
     Remove cached websocket state and tracker entries for this device.
+custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._reset_handshake_cache
+    Clear cached handshake metadata to avoid retaining payloads.
 custom_components/termoweb/backend/base.py :: HttpClientProto.set_node_settings
     Update node settings for the specified node.
 custom_components/termoweb/backend/base.py :: HttpClientProto.get_node_samples
