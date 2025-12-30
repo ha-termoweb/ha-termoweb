@@ -11,6 +11,14 @@ class HeaterState:
 
 
 @dataclass(slots=True)
+class AccumulatorState(HeaterState):
+    """Runtime state for an accumulator node."""
+
+    charge_level: float | None = None
+    boost_active: bool = False
+
+
+@dataclass(slots=True)
 class ThermostatState:
     """Runtime state for a thermostat node."""
 

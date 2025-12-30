@@ -9,4 +9,5 @@
 - The refactor progresses via a strangler pattern: new domain/codecs coexist with legacy code until fully migrated.
 
 ## Progress log
+- **v2.0.0-pre2**: Added accumulator domain scaffolding (state + commands) building on heater model; no runtime behavior changes. Testing: targeted unit tests for domain ids/inventory/state.
 - **v2.0.0-pre1**: Added domain and codec scaffolding; no runtime behavior changes. Testing: targeted unit tests for domain ids/inventory.
