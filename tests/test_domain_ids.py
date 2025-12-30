@@ -26,9 +26,9 @@ def test_normalize_node_type_rejects_unknown() -> None:
 def test_node_id_equality_and_hash() -> None:
     """NodeId equality and hashing are based on contents."""
 
-    node_a = NodeId(NodeType.HEATER, 1)
-    node_b = NodeId(NodeType.HEATER, 1)
-    node_c = NodeId(NodeType.THERMOSTAT, 1)
+    node_a = NodeId(NodeType.HEATER, "1")
+    node_b = NodeId(NodeType.HEATER, "1")
+    node_c = NodeId(NodeType.THERMOSTAT, "1")
 
     assert node_a == node_b
     assert hash(node_a) == hash(node_b)
