@@ -1,6 +1,6 @@
 [project]
 name = "ha-termoweb"
-version = "2.0.0-pre7"
+version = "2.0.0-pre8"
 description = "TermoWeb heaters integration for Home Assistant"
 readme = "README.md"
 authors = [{ name = "ha-termoweb" }]
