@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -73,3 +74,181 @@ class NodesResponse(BaseModel):
     thm: dict[str, NodeSummary] | None = None
     acm: dict[str, NodeSummary] | None = None
     pmo: dict[str, NodeSummary] | None = None
+
+
+def _format_temperature(value: Any) -> Any:
+    """Return a temperature value formatted with one decimal when numeric."""
+
+    try:
+        return f"{float(value):.1f}"
+    except (TypeError, ValueError):
+        return value
+
+
+def normalise_temperature(value: Any) -> Any:
+    """Format numeric temperatures into a one-decimal string when possible."""
+
+    return _format_temperature(value)
+
+
+def normalise_prog(value: Any) -> Any:
+    """Coerce program values to integers when possible without raising."""
+
+    if not isinstance(value, list):
+        return value
+    normalised: list[int | float | str] = []
+    for item in value:
+        try:
+            normalised.append(int(item))
+        except (TypeError, ValueError):
+            normalised.append(item)
+    return normalised
+
+
+def normalise_ptemp(value: Any) -> Any:
+    """Format preset temperatures while preserving the original length."""
+
+    if not isinstance(value, Iterable) or isinstance(value, (str, bytes)):
+        return value
+    return [_format_temperature(item) for item in value]
+
+
+class HeaterStatusPayload(BaseModel):
+    """Settings/status fields shared by heater and accumulator nodes."""
+
+    model_config = ConfigDict(extra="allow")
+
+    mode: str | None = None
+    stemp: Any | None = None
+    mtemp: Any | None = None
+    temp: Any | None = None
+    prog: list[int | float | str] | None = None
+    ptemp: list[Any] | None = None
+    units: str | None = None
+    boost_active: bool | None = None
+    boost_time: int | float | None = None
+    boost_temp: Any | None = None
+
+    @field_validator("stemp", "mtemp", "temp", "boost_temp", mode="before")
+    @classmethod
+    def _normalise_temperature(cls, value: Any) -> Any:
+        """Format numeric temperatures to a one-decimal string."""
+
+        return normalise_temperature(value)
+
+    @field_validator("prog", mode="before")
+    @classmethod
+    def _normalise_prog(cls, value: Any) -> Any:
+        """Coerce program values to integers when possible without raising."""
+
+        return normalise_prog(value)
+
+    @field_validator("ptemp", mode="before")
+    @classmethod
+    def _normalise_ptemp(cls, value: Any) -> Any:
+        """Format preset temperatures without altering the original length."""
+
+        return normalise_ptemp(value)
+
+
+class HeaterSettingsPayload(BaseModel):
+    """Top-level heater settings payload."""
+
+    model_config = ConfigDict(extra="allow")
+
+    mode: str | None = None
+    stemp: Any | None = None
+    mtemp: Any | None = None
+    temp: Any | None = None
+    prog: list[int | float | str] | None = None
+    ptemp: list[Any] | None = None
+    units: str | None = None
+    status: HeaterStatusPayload | Mapping[str, Any] | None = None
+    capabilities: dict[str, Any] | None = None
+
+    @field_validator("stemp", "mtemp", "temp", mode="before")
+    @classmethod
+    def _normalise_temperature(cls, value: Any) -> Any:
+        """Format numeric temperatures to a one-decimal string."""
+
+        return normalise_temperature(value)
+
+    @field_validator("prog", mode="before")
+    @classmethod
+    def _normalise_prog(cls, value: Any) -> Any:
+        """Coerce program values to integers when possible without raising."""
+
+        return normalise_prog(value)
+
+    @field_validator("ptemp", mode="before")
+    @classmethod
+    def _normalise_ptemp(cls, value: Any) -> Any:
+        """Format preset temperatures without altering the original length."""
+
+        return normalise_ptemp(value)
+
+
+class ThermostatSettingsPayload(BaseModel):
+    """Thermostat settings payload."""
+
+    model_config = ConfigDict(extra="allow")
+
+    mode: str | None = None
+    stemp: Any | None = None
+    mtemp: Any | None = None
+    temp: Any | None = None
+    prog: list[int | float | str] | None = None
+    ptemp: list[Any] | None = None
+    units: str | None = None
+
+    @field_validator("stemp", "mtemp", "temp", mode="before")
+    @classmethod
+    def _normalise_temperature(cls, value: Any) -> Any:
+        """Format numeric temperatures to a one-decimal string."""
+
+        return normalise_temperature(value)
+
+    @field_validator("prog", mode="before")
+    @classmethod
+    def _normalise_prog(cls, value: Any) -> Any:
+        """Coerce program values to integers when possible without raising."""
+
+        return normalise_prog(value)
+
+    @field_validator("ptemp", mode="before")
+    @classmethod
+    def _normalise_ptemp(cls, value: Any) -> Any:
+        """Format preset temperatures without altering the original length."""
+
+        return normalise_ptemp(value)
+
+
+class PowerMonitorPayload(BaseModel):
+    """Power monitor payload wrapper used by the REST endpoint."""
+
+    model_config = ConfigDict(extra="allow")
+
+    status: Mapping[str, Any] | None = None
+    capabilities: Mapping[str, Any] | None = None
+
+
+class SampleItem(BaseModel):
+    """Flexible representation of an energy sample item."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    t: float | int | None = None
+    timestamp: float | int | None = None
+    counter: Any | None = None
+    counter_min: Any | None = None
+    counter_max: Any | None = None
+    value: Any | None = None
+    energy: Any | None = None
+
+
+class SamplesResponse(BaseModel):
+    """Samples payload returned by the REST API."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    samples: list[SampleItem] | None = None

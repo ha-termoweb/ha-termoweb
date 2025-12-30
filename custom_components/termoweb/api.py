@@ -29,7 +29,12 @@ from .const import (
     get_brand_requested_with,
     get_brand_user_agent,
 )
-from .codecs.termoweb_codec import decode_devs_payload, decode_nodes_payload
+from .codecs.termoweb_codec import (
+    decode_devs_payload,
+    decode_node_settings,
+    decode_nodes_payload,
+    decode_samples,
+)
 from .inventory import Node, NodeDescriptor, normalize_node_addr, normalize_node_type
 
 _LOGGER = logging.getLogger(__name__)
@@ -348,14 +353,15 @@ class RESTClient:
         else:
             path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}/settings"
         data = await self._request("GET", path, headers=headers)
+        decoded = decode_node_settings(node_type, data)
         self._log_non_htr_payload(
             node_type=node_type,
             dev_id=dev_id,
             addr=addr,
             stage="GET settings",
-            payload=data,
+            payload=decoded,
         )
-        return data
+        return decoded
 
     async def get_rtc_time(self, dev_id: str) -> dict[str, Any]:
         """Return RTC metadata for a device's manager endpoint."""
@@ -416,59 +422,7 @@ class RESTClient:
     ) -> list[dict[str, str | int]]:
         """Normalise heater samples payloads into {"t", "counter"} lists."""
 
-        items: list[Any] | None = None
-        if isinstance(data, dict) and isinstance(data.get("samples"), list):
-            items = data["samples"]
-        elif isinstance(data, list):
-            items = data
-
-        if items is None:
-            _LOGGER.debug(
-                "Unexpected htr samples payload (%s); returning empty list",
-                type(data).__name__,
-            )
-            return []
-
-        samples: list[dict[str, str | int]] = []
-        for item in items:
-            if not isinstance(item, dict):
-                _LOGGER.debug("Unexpected htr sample item: %r", item)
-                continue
-            timestamp = item.get("t")
-            if timestamp is None:
-                timestamp = item.get("timestamp")
-            if not isinstance(timestamp, (int, float)):
-                _LOGGER.debug("Unexpected htr sample shape: %s", item)
-                _LOGGER.debug("Unexpected htr sample timestamp: %r", timestamp)
-                continue
-            counter_value = item.get("counter")
-            counter_min = item.get("counter_min")
-            counter_max = item.get("counter_max")
-            if isinstance(counter_value, dict):
-                counter_min = counter_value.get("min", counter_min)
-                counter_max = counter_value.get("max", counter_max)
-                if "value" in counter_value:
-                    counter_value = counter_value.get("value")
-                elif "counter" in counter_value:
-                    counter_value = counter_value.get("counter")
-            if counter_value is None:
-                counter_value = item.get("value")
-            if counter_value is None:
-                counter_value = item.get("energy")
-            if counter_value is None:
-                _LOGGER.debug("Unexpected htr sample shape: %s", item)
-                _LOGGER.debug("Unexpected htr sample counter: %r", item)
-                continue
-            sample: dict[str, str | int] = {
-                "t": int(float(timestamp) / timestamp_divisor),
-                "counter": str(counter_value),
-            }
-            if counter_min is not None:
-                sample["counter_min"] = str(counter_min)
-            if counter_max is not None:
-                sample["counter_max"] = str(counter_max)
-            samples.append(sample)
-        return samples
+        return decode_samples(data, timestamp_divisor=timestamp_divisor, logger=_LOGGER)
 
     async def set_node_settings(
         self,
@@ -738,14 +692,15 @@ class RESTClient:
         )
         params = {"start": int(start), "end": int(end)}
         data = await self._request("GET", path, headers=headers, params=params)
+        decoded = decode_samples(data, logger=_LOGGER)
         self._log_non_htr_payload(
             node_type=node_type,
             dev_id=dev_id,
             addr=addr,
             stage="GET samples",
-            payload=data,
+            payload=decoded,
         )
-        return self._extract_samples(data)
+        return decoded
 
     def _resolve_node_descriptor(self, node: NodeDescriptor) -> tuple[str, str]:
         """Return ``(node_type, addr)`` for the provided descriptor."""
