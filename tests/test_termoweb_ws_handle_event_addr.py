@@ -35,8 +35,12 @@ def test_handle_event_normalises_addr_and_updates_settings(
 
     dispatcher = MagicMock()
     monkeypatch.setattr(module, "async_dispatcher_send", dispatcher)
-    monkeypatch.setattr(module.TermoWebWSClient, "_install_write_hook", lambda self: None)
-    monkeypatch.setattr(module.TermoWebWSClient, "_dispatch_nodes", lambda self, payload: {"htr": ["2"]})
+    monkeypatch.setattr(
+        module.TermoWebWSClient, "_install_write_hook", lambda self: None
+    )
+    monkeypatch.setattr(
+        module.TermoWebWSClient, "_dispatch_nodes", lambda self, payload: {"htr": ["2"]}
+    )
 
     client = module.TermoWebWSClient(
         hass,

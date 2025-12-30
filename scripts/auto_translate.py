@@ -41,13 +41,19 @@ INITIAL_DELAY = 1.0
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="DeepL auto-translate with aggressive throttling")
+    p = argparse.ArgumentParser(
+        description="DeepL auto-translate with aggressive throttling"
+    )
     p.add_argument("source", type=Path, help="Source JSON file (in source language)")
     p.add_argument("target_language", help="Target language code (e.g. FI, ET)")
     p.add_argument("output", type=Path, help="Output JSON file")
-    p.add_argument("--source-language", default="EN", help="Source language code (default EN)")
+    p.add_argument(
+        "--source-language", default="EN", help="Source language code (default EN)"
+    )
     p.add_argument("--api-key", required=True, help="DeepL API key")
-    p.add_argument("--overwrite", action="store_true", help="Overwrite output file if exists")
+    p.add_argument(
+        "--overwrite", action="store_true", help="Overwrite output file if exists"
+    )
     p.add_argument("--timeout", type=float, default=15.0, help="HTTP timeout (secs)")
     return p.parse_args()
 
@@ -66,10 +72,12 @@ def dump_json(path: Path, data: Any) -> None:
 
 def protect_tokens(text: str) -> Tuple[str, Dict[str, str]]:
     mapping: Dict[str, str] = {}
+
     def cap(pref: str, val: str) -> str:
         token = f"__{pref}_{len(mapping)}__"
         mapping[token] = val
         return token
+
     s = PLACEHOLDER_PATTERN.sub(lambda m: cap("PH", m.group(0)), text)
     s = BACKTICK_PATTERN.sub(lambda m: cap("BT", m.group(0)), s)
     return s, mapping
@@ -144,6 +152,7 @@ def get_retry_after_seconds(resp: requests.Response) -> Optional[float]:
     except ValueError:
         try:
             from email.utils import parsedate_to_datetime
+
             dt = parsedate_to_datetime(ra)
             return max(dt.timestamp() - time.time(), 0.0)
         except Exception:
@@ -161,18 +170,26 @@ def fetch_with_backoff(
     for attempt in range(MAX_RETRIES):
         try:
             if method.upper() == "GET":
-                resp = requests.get(url, headers=headers, params=params, timeout=timeout)
+                resp = requests.get(
+                    url, headers=headers, params=params, timeout=timeout
+                )
             else:
                 resp = requests.post(url, headers=headers, data=params, timeout=timeout)
             if resp.status_code == 429:
                 ra = get_retry_after_seconds(resp)
                 wait = ra if ra is not None else delay
-                print(f"[fetch_with_backoff] 429 from {url}, waiting {wait:.2f}s (attempt {attempt+1})", file=sys.stderr)
+                print(
+                    f"[fetch_with_backoff] 429 from {url}, waiting {wait:.2f}s (attempt {attempt + 1})",
+                    file=sys.stderr,
+                )
                 time.sleep(wait)
                 delay *= BACKOFF_BASE
                 continue
             if 500 <= resp.status_code < 600:
-                print(f"[fetch_with_backoff] server error {resp.status_code} at {url}, waiting {delay:.2f}s", file=sys.stderr)
+                print(
+                    f"[fetch_with_backoff] server error {resp.status_code} at {url}, waiting {delay:.2f}s",
+                    file=sys.stderr,
+                )
                 time.sleep(delay)
                 delay *= BACKOFF_BASE
                 continue
@@ -180,7 +197,10 @@ def fetch_with_backoff(
         except requests.RequestException as e:
             if attempt == MAX_RETRIES - 1:
                 raise
-            print(f"[fetch_with_backoff] request error {e}, waiting {delay:.2f}s", file=sys.stderr)
+            print(
+                f"[fetch_with_backoff] request error {e}, waiting {delay:.2f}s",
+                file=sys.stderr,
+            )
             time.sleep(delay)
             delay *= BACKOFF_BASE
     raise RuntimeError(f"{method} {url} failed after retries")
@@ -200,7 +220,10 @@ def translate_batch(
         try:
             p, mp = protect_tokens(t)
         except Exception as e:
-            print(f"[translate_batch] error protecting tokens idx {idx}: {e}", file=sys.stderr)
+            print(
+                f"[translate_batch] error protecting tokens idx {idx}: {e}",
+                file=sys.stderr,
+            )
             traceback.print_exc()
             continue
         protected.append((p, mp))
@@ -219,7 +242,9 @@ def translate_batch(
     for attempt in range(MAX_RETRIES):
         try:
             # base delay + jitter
-            jitter = random.uniform(-JITTER_FACTOR * CALL_DELAY, JITTER_FACTOR * CALL_DELAY)
+            jitter = random.uniform(
+                -JITTER_FACTOR * CALL_DELAY, JITTER_FACTOR * CALL_DELAY
+            )
             sleep_time = CALL_DELAY + jitter
             if sleep_time > 0:
                 time.sleep(sleep_time)
@@ -228,7 +253,10 @@ def translate_batch(
             if resp.status_code == 429:
                 ra = get_retry_after_seconds(resp)
                 wait = ra if ra is not None else delay
-                print(f"[translate_batch] HTTP 429 attempt {attempt+1}, waiting {wait:.2f}s", file=sys.stderr)
+                print(
+                    f"[translate_batch] HTTP 429 attempt {attempt + 1}, waiting {wait:.2f}s",
+                    file=sys.stderr,
+                )
                 time.sleep(wait)
                 delay *= BACKOFF_BASE
                 continue
@@ -239,20 +267,31 @@ def translate_batch(
             if not isinstance(translations, list):
                 raise RuntimeError(f"Bad translations value: {translations!r}")
             if len(translations) != len(protected):
-                raise RuntimeError(f"Count mismatch: protected {len(protected)}, translations {len(translations)}")
+                raise RuntimeError(
+                    f"Count mismatch: protected {len(protected)}, translations {len(translations)}"
+                )
             results: List[str] = []
             for idx2, ((p, mp), tr) in enumerate(zip(protected, translations)):
                 if not isinstance(tr, dict):
-                    print(f"[translate_batch] warn: translation item idx2={idx2} not dict: {tr!r}", file=sys.stderr)
+                    print(
+                        f"[translate_batch] warn: translation item idx2={idx2} not dict: {tr!r}",
+                        file=sys.stderr,
+                    )
                     continue
                 txt = tr.get("text")
                 if txt is None:
-                    print(f"[translate_batch] warn: missing 'text' in translation item idx2={idx2}: {tr!r}", file=sys.stderr)
+                    print(
+                        f"[translate_batch] warn: missing 'text' in translation item idx2={idx2}: {tr!r}",
+                        file=sys.stderr,
+                    )
                     continue
                 try:
                     res = restore_tokens(txt, mp)
                 except Exception as e:
-                    print(f"[translate_batch] warn restoring tokens idx2={idx2}: {e}", file=sys.stderr)
+                    print(
+                        f"[translate_batch] warn restoring tokens idx2={idx2}: {e}",
+                        file=sys.stderr,
+                    )
                     traceback.print_exc()
                     res = txt
                 results.append(res)
@@ -266,16 +305,25 @@ def translate_batch(
                     body = err.response.text
                 sys.exit(f"DeepL 400 Bad Request\nPayload: {payload}\nResponse: {body}")
             if attempt == MAX_RETRIES - 1:
-                print(f"[translate_batch] final HTTPError at attempt {attempt+1}: {err}", file=sys.stderr)
+                print(
+                    f"[translate_batch] final HTTPError at attempt {attempt + 1}: {err}",
+                    file=sys.stderr,
+                )
                 traceback.print_exc()
                 raise
-            print(f"[translate_batch] HTTPError attempt {attempt+1}: {err}, waiting {delay:.2f}s", file=sys.stderr)
+            print(
+                f"[translate_batch] HTTPError attempt {attempt + 1}: {err}, waiting {delay:.2f}s",
+                file=sys.stderr,
+            )
             time.sleep(delay)
             delay *= BACKOFF_BASE
             continue
 
         except Exception as ex:
-            print(f"[translate_batch] unexpected error attempt {attempt+1}: {ex}", file=sys.stderr)
+            print(
+                f"[translate_batch] unexpected error attempt {attempt + 1}: {ex}",
+                file=sys.stderr,
+            )
             traceback.print_exc()
             if attempt == MAX_RETRIES - 1:
                 raise
@@ -298,10 +346,15 @@ def translate_structure(
     if obj is None:
         return obj
     if isinstance(obj, dict):
-        return {k: translate_structure(v, api_key, src, tgt, timeout, cache, progress)
-                for k, v in obj.items()}
+        return {
+            k: translate_structure(v, api_key, src, tgt, timeout, cache, progress)
+            for k, v in obj.items()
+        }
     if isinstance(obj, list):
-        return [translate_structure(v, api_key, src, tgt, timeout, cache, progress) for v in obj]
+        return [
+            translate_structure(v, api_key, src, tgt, timeout, cache, progress)
+            for v in obj
+        ]
     if isinstance(obj, str):
         progress.update(1)
         if obj in cache:
@@ -309,7 +362,10 @@ def translate_structure(
         try:
             out = translate_batch([obj], api_key, src, tgt, timeout)
         except Exception as e:
-            print(f"[translate_structure] exception for text {obj!r}: {e}", file=sys.stderr)
+            print(
+                f"[translate_structure] exception for text {obj!r}: {e}",
+                file=sys.stderr,
+            )
             traceback.print_exc()
             cache[obj] = obj
             return obj
@@ -333,16 +389,25 @@ def main() -> None:
         sys.exit(f"Error: {args.output} exists; use --overwrite")
 
     # fetch supported target languages (once)
-    resp = fetch_with_backoff("GET", DEEPL_LANGUAGES_ENDPOINT,
-                              headers={"Authorization": f"DeepL-Auth-Key {args.api_key}"},
-                              params={"type": "target"},
-                              timeout=args.timeout)
+    resp = fetch_with_backoff(
+        "GET",
+        DEEPL_LANGUAGES_ENDPOINT,
+        headers={"Authorization": f"DeepL-Auth-Key {args.api_key}"},
+        params={"type": "target"},
+        timeout=args.timeout,
+    )
     try:
         resp.raise_for_status()
     except requests.HTTPError:
-        sys.exit(f"Failed fetch supported langs: HTTP {resp.status_code}, body: {resp.text}")
+        sys.exit(
+            f"Failed fetch supported langs: HTTP {resp.status_code}, body: {resp.text}"
+        )
     arr = resp.json()
-    supported_codes = {item["language"].upper() for item in arr if isinstance(item, dict) and item.get("language")}
+    supported_codes = {
+        item["language"].upper()
+        for item in arr
+        if isinstance(item, dict) and item.get("language")
+    }
     if tgt_code not in supported_codes:
         print(f"Skipping '{tgt_code}': not supported", file=sys.stderr)
         sys.exit(0)
@@ -352,9 +417,13 @@ def main() -> None:
     print(f"Total strings: {total}")
 
     try:
-        r2 = fetch_with_backoff("GET", DEEPL_USAGE_ENDPOINT,
-                                headers={"Authorization": f"DeepL-Auth-Key {args.api_key}"},
-                                params=None, timeout=args.timeout)
+        r2 = fetch_with_backoff(
+            "GET",
+            DEEPL_USAGE_ENDPOINT,
+            headers={"Authorization": f"DeepL-Auth-Key {args.api_key}"},
+            params=None,
+            timeout=args.timeout,
+        )
         r2.raise_for_status()
         print("DeepL usage:", r2.json())
     except Exception as e:
@@ -365,7 +434,9 @@ def main() -> None:
 
     cache: Dict[str, str] = {}
     with tqdm(total=total, desc=f"Translating → {tgt_code}") as prog:
-        result = translate_structure(src_data, args.api_key, src_lang, tgt_code, args.timeout, cache, prog)
+        result = translate_structure(
+            src_data, args.api_key, src_lang, tgt_code, args.timeout, cache, prog
+        )
 
     dump_json(args.output, result)
     print("Done →", args.output)

@@ -58,14 +58,18 @@ coordinators already consume.【F:custom_components/termoweb/inventory.py†L181
   resolver utilities that rebuild cached inventories for coordinators, websocket
   handlers and services.【F:custom_components/termoweb/inventory.py†L86-L340】
 - **Data coordinators** – `StateCoordinator` polls heater settings, maintains
-  node caches and stretches polling intervals when websocket health is good,
-  while `EnergyStateCoordinator` tracks address subscriptions, derives power
-  deltas from hourly counters and suppresses REST polling when fresh websocket
-  samples arrive.【F:custom_components/termoweb/coordinator.py†L93-L745】
+  node caches and stretches polling intervals when websocket health is good.
+  REST snapshots and websocket deltas are written into the shared
+  `DomainStateStore` for both vendors, and the exposed coordinator data is a
+  derived, legacy-shaped view of that store rather than an independently merged
+  dictionary. `EnergyStateCoordinator` tracks address subscriptions, derives
+  power deltas from hourly counters and suppresses REST polling when fresh
+  websocket samples arrive.【F:custom_components/termoweb/coordinator.py†L93-L745】
 - **Entity platforms** – `HeaterNodeBase` wires coordinator caches and
   dispatcher callbacks into climate and sensor entities; climate, temperature,
   energy and power entities extend this base to expose heater control and
-  telemetry. Installation-wide aggregation, gateway connectivity monitoring and
+  telemetry. Entities now read canonical values through the domain state view
+  rather than navigating legacy coordinator dictionaries. Installation-wide aggregation, gateway connectivity monitoring and
   refresh buttons round out the platform coverage.【F:custom_components/termoweb/heater.py†L374-L520】【F:custom_components/termoweb/climate.py†L134-L220】【F:custom_components/termoweb/sensor.py†L156-L337】【F:custom_components/termoweb/sensor.py†L345-L421】【F:custom_components/termoweb/binary_sensor.py†L21-L99】【F:custom_components/termoweb/button.py†L21-L67】
 - **Boost helpers** – Accumulator nodes surface a dedicated preset workflow:
   `HeaterClimateEntity` exposes `preset_modes` with a synthetic `boost` entry,

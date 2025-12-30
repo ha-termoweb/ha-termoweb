@@ -23,27 +23,37 @@ def test_build_heater_unique_id_prefixes_suffix_with_colon() -> None:
     assert unique_id == f"{DOMAIN}:dev:htr:01:status"
 
 
-def test_build_heater_entity_unique_id_defers_to_base(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_heater_entity_unique_id_defers_to_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The entity helper should delegate to the heater unique ID builder."""
 
     calls: list[tuple[object, ...]] = []
 
-    def _record(dev_id: object, node_type: object, addr: object, *, suffix: object | None = None) -> str:
+    def _record(
+        dev_id: object, node_type: object, addr: object, *, suffix: object | None = None
+    ) -> str:
         calls.append((dev_id, node_type, addr, suffix))
         return "recorded"
 
     monkeypatch.setattr(identifiers_module, "build_heater_unique_id", _record)
 
-    assert build_heater_entity_unique_id("dev", "acm", "02", suffix="energy") == "recorded"
+    assert (
+        build_heater_entity_unique_id("dev", "acm", "02", suffix="energy") == "recorded"
+    )
     assert calls == [("dev", "acm", "02", "energy")]
 
 
-def test_power_monitor_helpers_defers_to_heater_unique_id(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_power_monitor_helpers_defers_to_heater_unique_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Power-monitor helpers should pass through to the heater ID builder."""
 
     calls: list[tuple[object, ...]] = []
 
-    def _record(dev_id: object, node_type: object, addr: object, *, suffix: object | None = None) -> str:
+    def _record(
+        dev_id: object, node_type: object, addr: object, *, suffix: object | None = None
+    ) -> str:
         calls.append((dev_id, node_type, addr, suffix))
         return "uid"
 

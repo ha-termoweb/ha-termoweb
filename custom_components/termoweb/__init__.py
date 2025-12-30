@@ -444,7 +444,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         new_options = dict(entry.options)
         new_data.pop("poll_interval", None)
         new_options.pop("poll_interval", None)
-        hass.config_entries.async_update_entry(entry, data=new_data, options=new_options)
+        hass.config_entries.async_update_entry(
+            entry, data=new_data, options=new_options
+        )
     brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
 
     if SupportsDiagnostics is not None and hasattr(entry, "supports_diagnostics"):

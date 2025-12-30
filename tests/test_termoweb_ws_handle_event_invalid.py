@@ -35,7 +35,7 @@ def _make_client() -> TermoWebWSClient:
         pytest.param(None, id="non-dict"),
         pytest.param({"name": "data"}, id="missing-args"),
         pytest.param({"name": "data", "args": []}, id="empty-args"),
-        pytest.param({"name": "data", "args": [[ ]]}, id="empty-batch"),
+        pytest.param({"name": "data", "args": [[]]}, id="empty-batch"),
         pytest.param(
             {"name": "data", "args": [[{"body": {"foo": "bar"}}]]},
             id="missing-path",

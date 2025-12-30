@@ -12,7 +12,9 @@ import custom_components.termoweb.api as api
 from tests.test_api import FakeSession, MockResponse
 
 
-def test_request_text_failure_logs_placeholder(caplog: pytest.LogCaptureFixture) -> None:
+def test_request_text_failure_logs_placeholder(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """ClientResponseError should use placeholder message when text() fails."""
 
     caplog.set_level(logging.DEBUG, logger=api.__name__)

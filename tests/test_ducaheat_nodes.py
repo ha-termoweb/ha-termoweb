@@ -56,6 +56,7 @@ def test_ducaheat_rest_normalise_ws_nodes_preserve_non_settings_sections() -> No
     # Original payload must remain untouched after normalisation.
     assert len(payload["htr"]["settings"]["01"]["prog"]["prog"]["1"]) == 48
 
+
 from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
 
 
@@ -205,7 +206,9 @@ async def test_ducaheat_get_node_settings_normalises_thm() -> None:
 
     with (
         patch.object(client, "authed_headers", AsyncMock(return_value={})),
-        patch.object(client, "_request", AsyncMock(return_value=payload)) as mock_request,
+        patch.object(
+            client, "_request", AsyncMock(return_value=payload)
+        ) as mock_request,
     ):
         result = await client.get_node_settings("dev", ("thm", "01"))
 
@@ -248,7 +251,9 @@ async def test_ducaheat_set_node_settings_thm_fallback_post() -> None:
 
     with (
         patch.object(client, "authed_headers", AsyncMock(return_value={})),
-        patch.object(client, "_request", AsyncMock(side_effect=side_effect)) as mock_request,
+        patch.object(
+            client, "_request", AsyncMock(side_effect=side_effect)
+        ) as mock_request,
     ):
         result = await client.set_node_settings(
             "dev",

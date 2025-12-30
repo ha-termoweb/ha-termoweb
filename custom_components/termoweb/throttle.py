@@ -99,7 +99,5 @@ def reset_samples_rate_limit_state(
     """Reset the shared samples rate limiter to its initial state."""
 
     global _SAMPLES_RATE_LIMITER
-    limiter = default_samples_rate_limit_state(
-        time_module=time_module, sleep=sleep
-    )
+    limiter = default_samples_rate_limit_state(time_module=time_module, sleep=sleep)
     limiter.reset()

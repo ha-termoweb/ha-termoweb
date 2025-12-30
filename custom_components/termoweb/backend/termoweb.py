@@ -1,4 +1,5 @@
 """TermoWeb backend implementation."""
+
 from __future__ import annotations
 
 from asyncio import CancelledError

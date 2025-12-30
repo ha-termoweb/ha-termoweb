@@ -40,7 +40,9 @@ def _make_client() -> ducaheat_ws.DucaheatWSClient:
     )
 
 
-def test_update_payload_window_applies_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_update_payload_window_applies_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Ensure mapping cadence candidates trigger window hint updates."""
 
     client = _make_client()

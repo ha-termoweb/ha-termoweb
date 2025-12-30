@@ -1917,8 +1917,8 @@ def test_ducaheat_set_node_settings_invalid_stemp(monkeypatch) -> None:
         with pytest.raises(ValueError) as exc:
             await client.set_node_settings("dev", ("htr", "A1"), stemp="bad")
 
-        assert "Invalid stemp value" in str(exc.value)
-        assert selection_calls == [True, False]
+        assert "Invalid temperature value" in str(exc.value)
+        assert selection_calls == []
 
     asyncio.run(_run())
 
@@ -1955,7 +1955,7 @@ def test_ducaheat_set_node_settings_invalid_units(monkeypatch) -> None:
             await client.set_node_settings("dev", ("htr", "A1"), stemp=21.0, units="K")
 
         assert "Invalid units" in str(exc.value)
-        assert selection_calls == [True, False]
+        assert selection_calls == []
 
     asyncio.run(_run())
 

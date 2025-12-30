@@ -18,5 +18,9 @@ pytestmark = pytest.mark.skipif(
 def test_schedule_card_js() -> None:
     """Run the JavaScript schedule card checks under Node.js."""
 
-    script_path = pathlib.Path(__file__).resolve().parents[1] / "js" / "test_termoweb_schedule_card.mjs"
+    script_path = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "js"
+        / "test_termoweb_schedule_card.mjs"
+    )
     subprocess.run(["node", str(script_path)], check=True)

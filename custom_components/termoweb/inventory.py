@@ -532,7 +532,10 @@ class Inventory:
         *,
         cache_attr: str,
         forward_map_factory: Callable[[], tuple[dict[str, list[str]], Any]],
-        normalizer: Callable[[Mapping[Any, Iterable[Any]] | Iterable[Any] | None], tuple[dict[str, list[str]], dict[str, str]]],
+        normalizer: Callable[
+            [Mapping[Any, Iterable[Any]] | Iterable[Any] | None],
+            tuple[dict[str, list[str]], dict[str, str]],
+        ],
     ) -> tuple[dict[str, tuple[str, ...]], dict[str, str]]:
         """Return cached normalised sample addresses for the provided inputs."""
 
@@ -890,7 +893,9 @@ class Inventory:
         if factory is _default_heater_name:
             return Inventory._DEFAULT_FACTORY_CACHE_KEY
 
-        name = getattr(factory, "__qualname__", None) or getattr(factory, "__name__", None)
+        name = getattr(factory, "__qualname__", None) or getattr(
+            factory, "__name__", None
+        )
         module = getattr(factory, "__module__", None)
         if not name or name == "<lambda>":
             return None

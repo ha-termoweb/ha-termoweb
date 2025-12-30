@@ -47,7 +47,9 @@ def test_get_version_returns_unknown_when_missing(
         def __init__(self, version: str) -> None:
             self.version = version
 
-    async def fake_get_integration(_hass: HomeAssistant, _domain: str) -> DummyIntegration:
+    async def fake_get_integration(
+        _hass: HomeAssistant, _domain: str
+    ) -> DummyIntegration:
         return DummyIntegration("")
 
     monkeypatch.setattr(
@@ -85,9 +87,7 @@ def test_validate_login_uses_helper(monkeypatch: pytest.MonkeyPatch) -> None:
         )
     )
 
-    assert created == [
-        (hass, "user@example.com", "pw", config_flow.BRAND_DUCAHEAT)
-    ]
+    assert created == [(hass, "user@example.com", "pw", config_flow.BRAND_DUCAHEAT)]
     assert listed == [dummy_client]
 
 
@@ -119,9 +119,7 @@ def test_validate_login_propagates_exceptions(
 
     with pytest.raises(type(exc)):
         asyncio.run(
-            config_flow._validate_login(
-                hass, "user", "pw", config_flow.DEFAULT_BRAND
-            )
+            config_flow._validate_login(hass, "user", "pw", config_flow.DEFAULT_BRAND)
         )
 
 

@@ -42,7 +42,7 @@ from homeassistant.core import HomeAssistant
 
 @pytest.fixture
 def diagnostics_record(
-    inventory_builder: Callable[[str, dict[str, Any], list[Any]], Inventory]
+    inventory_builder: Callable[[str, dict[str, Any], list[Any]], Inventory],
 ) -> Callable[..., tuple[dict[str, Any], Inventory]]:
     """Return helper to build diagnostics records with cached inventory."""
 
@@ -148,9 +148,7 @@ def test_diagnostics_with_cached_inventory(
     assert "dev_id" not in flattened
     assert "username" not in flattened
 
-    assert (
-        "Diagnostics inventory cache for entry-one: raw=2, filtered=2" in caplog.text
-    )
+    assert "Diagnostics inventory cache for entry-one: raw=2, filtered=2" in caplog.text
     assert not any(record.levelno >= logging.ERROR for record in caplog.records)
 
 
@@ -204,8 +202,5 @@ def test_diagnostics_with_inventory_missing_version(
     assert "dev_id" not in _flatten(diagnostics)
     assert "time_zone" not in diagnostics["home_assistant"]
 
-    assert (
-        "Diagnostics inventory cache for entry-two: raw=1, filtered=1" in caplog.text
-    )
+    assert "Diagnostics inventory cache for entry-two: raw=1, filtered=1" in caplog.text
     assert not any(record.levelno >= logging.ERROR for record in caplog.records)
-

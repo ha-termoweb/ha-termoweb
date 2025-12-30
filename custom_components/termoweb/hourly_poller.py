@@ -204,9 +204,7 @@ class HourlySamplesPoller:
             for node_type, addr in nodes
         )
         node_pairs = tuple(
-            (node_type, addr)
-            for node_type, addr in node_pairs
-            if node_type and addr
+            (node_type, addr) for node_type, addr in node_pairs if node_type and addr
         )
 
         if not node_pairs:

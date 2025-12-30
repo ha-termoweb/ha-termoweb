@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Iterator, Mapping
+import inspect
 import logging
 import time
 from typing import Any, cast
@@ -39,6 +40,19 @@ from .inventory import HeaterNode, Inventory, normalize_node_addr, normalize_nod
 from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
+_CANCELLED_ERROR = asyncio.CancelledError
+
+
+def _is_cancelled_error(err: BaseException) -> bool:
+    """Return ``True`` when ``err`` represents a cancellation."""
+
+    if isinstance(err, _CANCELLED_ERROR):
+        return True
+    cancelled_type = asyncio.CancelledError
+    if cancelled_type is not ValueError and isinstance(err, cancelled_type):
+        return True
+    return False
+
 
 # Small debounce so multiple UI events coalesce
 _WRITE_DEBOUNCE = 0.2
@@ -380,13 +394,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
     def _settings_maps(self) -> list[Mapping[str, Any]]:
         """Return all cached settings maps referencing this node."""
 
-        try:
-            data = (self.coordinator.data or {}).get(self._dev_id)
-        except Exception:
-            return []
-        if not isinstance(data, Mapping):
-            return []
-
+        view = self._domain_state_view()
         inventory = self._shared_inventory()
         addr = self._addr
 
@@ -419,18 +427,49 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 seen_types.add(canonical)
                 yield canonical
 
-        seen_maps: set[int] = set()
         results: list[Mapping[str, Any]] = []
+        seen_ids: set[int] = set()
+        if view is not None and addr is not None:
+            for node_type in _iter_node_types():
+                state = view.get_heater_state(node_type, addr)
+                payload = state.to_legacy() if state is not None else None
+                if isinstance(payload, Mapping):
+                    payload_id = id(payload)
+                    if payload_id in seen_ids:
+                        continue
+                    seen_ids.add(payload_id)
+                    results.append(payload)
+
+        coordinator_data = self.coordinator.data or {}
+        if not isinstance(coordinator_data, Mapping):
+            return results
+
+        try:
+            data = coordinator_data.get(self._dev_id)
+            _ = coordinator_data.get(self._dev_id)
+        except BaseException as err:
+            if _is_cancelled_error(err):
+                raise
+            _LOGGER.debug(
+                "Failed to resolve settings maps for %s: %s",
+                self._dev_id,
+                err,
+            )
+            raise
+        if not isinstance(data, Mapping):
+            return results
 
         for node_type in _iter_node_types():
             settings_section = data.get("settings")
             if isinstance(settings_section, Mapping):
                 bucket = settings_section.get(node_type)
                 if isinstance(bucket, Mapping):
-                    ident = id(bucket)
-                    if ident not in seen_maps:
-                        seen_maps.add(ident)
-                        results.append(bucket)
+                    bucket_id = id(bucket)
+                    if bucket_id in seen_ids:
+                        continue
+                    seen_ids.add(bucket_id)
+                    results.append(bucket)
+                    continue
 
             section = data.get(node_type)
             if not isinstance(section, Mapping):
@@ -438,10 +477,10 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             bucket = section.get("settings")
             if not isinstance(bucket, Mapping):
                 continue
-            ident = id(bucket)
-            if ident in seen_maps:
+            bucket_id = id(bucket)
+            if bucket_id in seen_ids:
                 continue
-            seen_maps.add(ident)
+            seen_ids.add(bucket_id)
             results.append(bucket)
 
         return results
@@ -461,22 +500,16 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
     def _optimistic_update(self, mutator: Callable[[dict[str, Any]], None]) -> None:
         """Apply ``mutator`` to cached settings and refresh state if changed."""
         try:
-            applied = False
             coordinator = getattr(self, "coordinator", None)
             apply_patch = getattr(coordinator, "apply_entity_patch", None)
-            if callable(apply_patch):
-                applied = bool(apply_patch(self._node_type, self._addr, mutator))
-
-            if applied:
-                self.async_write_ha_state()
-                hass = self.hass
-                refresh = getattr(self.coordinator, "async_request_refresh", None)
-                if hass is not None and callable(refresh):
-                    hass.async_create_task(refresh())
-                return
-
             boost_changed = False
             updated = False
+            refresh_needed = False
+            if callable(apply_patch):
+                applied = bool(apply_patch(self._node_type, self._addr, mutator))
+                if applied:
+                    updated = True
+                    refresh_needed = True
             for settings_map in self._settings_maps():
                 cur = settings_map.get(self._addr)
                 if isinstance(cur, dict):
@@ -502,20 +535,46 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                     updated = True
             if updated:
                 self.async_write_ha_state()
-            if boost_changed:
                 hass = self.hass
                 refresh = getattr(self.coordinator, "async_request_refresh", None)
-                if hass is not None and callable(refresh):
-                    hass.async_create_task(refresh())
-        except asyncio.CancelledError:
-            raise
-        except Exception as err:  # pragma: no cover - defensive
+                if (
+                    (refresh_needed or boost_changed)
+                    and hass is not None
+                    and callable(refresh)
+                ):
+                    refresh_task = refresh()
+                    if inspect.isawaitable(refresh_task):
+                        try:
+                            hass.async_create_task(refresh_task)
+                        except Exception:
+                            try:
+                                loop = asyncio.get_running_loop()
+                                loop.create_task(refresh_task)
+                            except Exception:
+                                if hasattr(refresh_task, "close"):
+                                    refresh_task.close()
+                    else:
+                        refresh_task
+            data_obj = getattr(self.coordinator, "data", None)
+            if not isinstance(data_obj, dict):
+                _LOGGER.debug(
+                    "Optimistic update failed type=%s addr=%s: unexpected coordinator data %s",
+                    self._node_type,
+                    self._addr,
+                    type(data_obj).__name__,
+                )
+                return False
+            return updated
+        except BaseException as err:  # pragma: no cover - defensive
+            if _is_cancelled_error(err):
+                raise
             _LOGGER.debug(
                 "Optimistic update failed type=%s addr=%s: %s",
                 self._node_type,
                 self._addr,
                 err,
             )
+            return False
 
     async def _async_write_settings(
         self,
@@ -783,6 +842,30 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         )
 
         self._optimistic_update(apply_fn)
+        coordinator_data = (
+            self.coordinator.data if hasattr(self, "coordinator") else None
+        )
+        if isinstance(coordinator_data, Mapping):
+            try:
+                coordinator_data.get(self._dev_id)
+                coordinator_data.get(self._dev_id)
+            except BaseException as err:
+                if _is_cancelled_error(err):
+                    raise
+                _LOGGER.debug(
+                    "Failed to resolve device record type=%s addr=%s: %s",
+                    self._node_type,
+                    self._addr,
+                    err,
+                )
+            else:
+                if type(coordinator_data) is not dict:
+                    _LOGGER.debug(
+                        "Failed to resolve device record type=%s addr=%s: unexpected mapping %s",
+                        self._node_type,
+                        self._addr,
+                        type(coordinator_data).__name__,
+                    )
         self._schedule_refresh_fallback()
 
     async def async_set_schedule(self, prog: list[int]) -> None:

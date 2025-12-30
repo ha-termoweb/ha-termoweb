@@ -196,6 +196,7 @@ async def test_import_energy_history_filters_unknown_addresses(
 
     monkeypatch.setattr(energy, "datetime", _FixedDatetime, raising=False)
     monkeypatch.setattr(energy.er, "async_get", lambda hass: None, raising=False)
+
     async def _fake_stats_period(*args, **kwargs) -> dict[str, list[dict[str, Any]]]:
         return {}
 

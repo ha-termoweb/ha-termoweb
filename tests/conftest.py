@@ -1611,6 +1611,15 @@ _install_stubs()
 
 
 from custom_components.termoweb.const import DOMAIN  # noqa: E402
+from custom_components.termoweb.domain.ids import (  # noqa: E402
+    NodeId as DomainNodeId,
+    NodeType as DomainNodeType,
+)
+from custom_components.termoweb.domain.legacy_view import (  # noqa: E402
+    store_to_legacy_coordinator_data,
+)
+from custom_components.termoweb.domain.state import DomainStateStore  # noqa: E402
+from custom_components.termoweb.domain.view import DomainStateView  # noqa: E402
 
 
 @pytest.fixture
@@ -1768,6 +1777,37 @@ class FakeCoordinator:
             self.data = {dev_id: self.dev}
         else:
             self.data = {}
+        self._state_store: DomainStateStore | None = None
+        self.domain_view = DomainStateView(dev_id, None)
+        if self.inventory is not None:
+            node_ids: list[DomainNodeId] = []
+            for node in self.node_inventory:
+                try:
+                    node_type = DomainNodeType(str(getattr(node, "type", "")).lower())
+                except ValueError:
+                    continue
+                try:
+                    node_ids.append(DomainNodeId(node_type, getattr(node, "addr", "")))
+                except ValueError:
+                    continue
+            if node_ids:
+                self._state_store = DomainStateStore(node_ids)
+                dev_state = self.data.get(dev_id)
+                if isinstance(dev_state, Mapping):
+                    settings = dev_state.get("settings")
+                    if isinstance(settings, Mapping):
+                        for node_type, bucket in settings.items():
+                            if not isinstance(bucket, Mapping):
+                                continue
+                            for addr, payload in bucket.items():
+                                if not isinstance(payload, Mapping):
+                                    continue
+                                self._state_store.apply_full_snapshot(
+                                    node_type,
+                                    addr,
+                                    payload,
+                                )
+                self.domain_view = DomainStateView(dev_id, self._state_store)
         self.listeners: list[Callable[[], None]] = []
         self.refresh_calls = 0
         self.async_request_refresh = AsyncMock()
@@ -1798,6 +1838,46 @@ class FakeCoordinator:
         elif inventory is None:
             self.inventory = None
         self.node_inventory = list(nodes_list)
+
+    def apply_entity_patch(
+        self, node_type: str, addr: str, mutator: Callable[[dict[str, Any]], None]
+    ) -> bool:
+        """Apply an optimistic patch to the domain store when available."""
+
+        if self._state_store is None or self.inventory is None:
+            return False
+
+        target_types = {str(node_type)}
+        for known_type, addresses in self._state_store.addresses_by_type.items():
+            if addr in addresses:
+                target_types.add(known_type)
+
+        payload: dict[str, Any] | None = None
+        for target_type in target_types:
+            current_state = self._state_store.get_state(target_type, addr)
+            base = current_state.to_legacy() if current_state else {}
+            payload = dict(base)
+            try:
+                mutator(payload)
+            except Exception:
+                return False
+            self._state_store.apply_patch(target_type, addr, payload)
+
+        try:
+            device_name = (
+                self.dev.get("name") if isinstance(self.dev, Mapping) else None
+            )
+        except Exception:
+            device_name = None
+        device_record = store_to_legacy_coordinator_data(
+            self.dev_id,
+            self._state_store,
+            self.inventory,
+            device_name=device_name or self.dev_id,
+            device_raw=self.dev,
+        )
+        self.data.update(device_record)
+        return True
 
     def register_pending_setting(
         self,

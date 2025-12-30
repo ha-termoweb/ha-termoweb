@@ -26,7 +26,9 @@ class DummyREST:
 class DummyCoordinator:
     """Expose the minimal coordinator interface required by the client."""
 
-    def handle_ws_samples(self, *_: Any, **__: Any) -> None:  # pragma: no cover - helper
+    def handle_ws_samples(
+        self, *_: Any, **__: Any
+    ) -> None:  # pragma: no cover - helper
         """Ignore sample updates; tests patch the tracker directly."""
 
         return None

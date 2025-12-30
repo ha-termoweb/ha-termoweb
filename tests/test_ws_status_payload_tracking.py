@@ -147,14 +147,14 @@ def test_mark_ws_payload_dispatches_staleness_changes() -> None:
     """Ensure payload timestamps call the tracker and expose staleness flags."""
 
     hass = DummyHass()
-    tracker = StubTracker(mark_payload_result=True, next_payload_stale=True, status="ok")
+    tracker = StubTracker(
+        mark_payload_result=True, next_payload_stale=True, status="ok"
+    )
     client = TrackingStatusClient(hass, tracker)
 
     client._mark_ws_payload(timestamp=111.1, stale_after=15.0, reason="payload")
 
-    assert tracker.mark_payload_calls == [
-        {"timestamp": 111.1, "stale_after": 15.0}
-    ]
+    assert tracker.mark_payload_calls == [{"timestamp": 111.1, "stale_after": 15.0}]
     state = client._ws_state_bucket()
     assert state["last_payload_at"] == 111.1
     assert state["last_heartbeat_at"] == 111.1

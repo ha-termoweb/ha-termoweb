@@ -68,9 +68,7 @@ async def test_subscribe_htr_samples_skips_empty_target_set(
     """Confirm no frames are sent when there are no subscription targets."""
 
     client = _make_client()
-    monkeypatch.setattr(
-        client, "_heater_sample_subscription_targets", lambda: []
-    )
+    monkeypatch.setattr(client, "_heater_sample_subscription_targets", lambda: [])
     send_text = AsyncMock()
     monkeypatch.setattr(client, "_send_text", send_text)
 

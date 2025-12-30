@@ -95,7 +95,10 @@ def test_forward_ws_sample_updates_uses_alias_fallback_and_max_lease() -> None:
     assert coordinator.calls == [
         (
             "dev",
-            {"htr": {"1": {"temp": 23}}, "pmo": {"7": {"power": 180}, "8": {"power": 200}}},
+            {
+                "htr": {"1": {"temp": 23}},
+                "pmo": {"7": {"power": 180}, "8": {"power": 200}},
+            },
             120.0,
         )
     ]

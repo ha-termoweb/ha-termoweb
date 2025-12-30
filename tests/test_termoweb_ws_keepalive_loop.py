@@ -14,7 +14,9 @@ from tests.test_termoweb_ws_protocol import DummyREST
 
 
 @pytest.mark.asyncio
-async def test_rtc_keepalive_loop_retries_and_stops(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_rtc_keepalive_loop_retries_and_stops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """RTC keepalive loop should retry after errors until closing."""
 
     hass = HomeAssistant()
@@ -24,7 +26,9 @@ async def test_rtc_keepalive_loop_retries_and_stops(monkeypatch: pytest.MonkeyPa
     )
     coordinator = SimpleNamespace(data={}, update_nodes=MagicMock())
 
-    monkeypatch.setattr(module.TermoWebWSClient, "_install_write_hook", lambda self: None)
+    monkeypatch.setattr(
+        module.TermoWebWSClient, "_install_write_hook", lambda self: None
+    )
     client = module.TermoWebWSClient(
         hass,
         entry_id="entry",

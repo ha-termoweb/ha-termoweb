@@ -50,7 +50,9 @@ class _TestEntity(GatewayDispatcherEntity, _BaseEntity):
         return None
 
 
-def test_async_added_to_hass_returns_without_hass(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_async_added_to_hass_returns_without_hass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """`async_added_to_hass` should exit early when hass is not initialised."""
 
     entity = _TestEntity()

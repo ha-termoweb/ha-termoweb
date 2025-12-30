@@ -145,14 +145,18 @@ def test_termoweb_backend_sets_protocol_for_websocket_client(
 
 
 def test_termoweb_backend_resolves_direct_import() -> None:
-    backend = termoweb_backend.TermoWebBackend(brand="termoweb", client=DummyHttpClient())
+    backend = termoweb_backend.TermoWebBackend(
+        brand="termoweb", client=DummyHttpClient()
+    )
     resolved = backend._resolve_ws_client_cls()
     assert resolved is termoweb_backend.TermoWebWSClient
 
 
 def test_termoweb_backend_import_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     module = termoweb_backend
-    ws_module = importlib.import_module("custom_components.termoweb.backend.termoweb_ws")
+    ws_module = importlib.import_module(
+        "custom_components.termoweb.backend.termoweb_ws"
+    )
 
     with monkeypatch.context() as patch:
         patch.delattr(ws_module, "TermoWebWSClient")
@@ -168,7 +172,9 @@ def test_termoweb_backend_import_fallback(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_termoweb_backend_resolves_non_type(monkeypatch: pytest.MonkeyPatch) -> None:
-    backend = termoweb_backend.TermoWebBackend(brand="termoweb", client=DummyHttpClient())
+    backend = termoweb_backend.TermoWebBackend(
+        brand="termoweb", client=DummyHttpClient()
+    )
     monkeypatch.setattr(termoweb_backend, "TermoWebWSClient", object())
     resolved = backend._resolve_ws_client_cls()
     assert resolved is termoweb_backend.WebSocketClient

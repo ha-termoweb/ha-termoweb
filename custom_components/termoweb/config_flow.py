@@ -44,7 +44,9 @@ def _login_schema(
         {
             vol.Required(
                 CONF_BRAND,
-                default=default_brand if default_brand in BRAND_LABELS else DEFAULT_BRAND,
+                default=default_brand
+                if default_brand in BRAND_LABELS
+                else DEFAULT_BRAND,
             ): vol.In(BRAND_LABELS),
             vol.Required("username", default=default_user): str,
             vol.Required("password"): str,
@@ -135,7 +137,9 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         data["supports_diagnostics"] = True
         return None, data
 
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
         """Collect credentials and create the config entry."""
         ver = await _get_version(self.hass)
         _LOGGER.info("TermoWeb config flow started (v%s)", ver)
@@ -163,10 +167,14 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         title = f"{get_brand_label(brand)} ({username})"
         return self.async_create_entry(title=title, data=data)
 
-    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
         """Reconfigure username/password (no use_push)."""
         entry_id = self.context.get("entry_id")
-        entry: ConfigEntry | None = self.hass.config_entries.async_get_entry(entry_id) if entry_id else None
+        entry: ConfigEntry | None = (
+            self.hass.config_entries.async_get_entry(entry_id) if entry_id else None
+        )
         if entry is None:
             return self.async_abort(reason="no_config_entry")
 
@@ -204,7 +212,9 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         new_options = dict(entry.options)
         new_options.pop("poll_interval", None)
 
-        self.hass.config_entries.async_update_entry(entry, data=new_data, options=new_options)
+        self.hass.config_entries.async_update_entry(
+            entry, data=new_data, options=new_options
+        )
         return self.async_abort(reason="reconfigure_successful")
 
 
@@ -228,7 +238,11 @@ class TermoWebOptionsFlow(config_entries.OptionsFlow):
         )
         schema = vol.Schema({vol.Optional("debug", default=debug_default): bool})
         ver = await _get_version(self.hass)
-        return self.async_show_form(step_id="init", data_schema=schema, description_placeholders={"version": ver})
+        return self.async_show_form(
+            step_id="init",
+            data_schema=schema,
+            description_placeholders={"version": ver},
+        )
 
 
 async def async_get_options_flow(config_entry: ConfigEntry):

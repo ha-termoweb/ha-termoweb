@@ -104,4 +104,3 @@ def test_update_legacy_section_rejects_non_mapping_section_map() -> None:
     assert getattr(client, "_nodes_raw", None) is None
     coordinator._apply_accumulator_boost_metadata.assert_not_called()
     coordinator._device_now_estimate.assert_not_called()
-

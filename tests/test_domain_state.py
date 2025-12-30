@@ -13,4 +13,4 @@ def test_accumulator_inherits_heater_state() -> None:
 
     assert isinstance(state, HeaterState)
     assert state.charge_level is None
-    assert state.boost_active is False
+    assert state.boost_active is None

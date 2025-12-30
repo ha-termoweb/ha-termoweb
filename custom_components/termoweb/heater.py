@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -29,6 +30,8 @@ from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 
+
+_CANCELLED_ERROR = asyncio.CancelledError
 
 _BOOST_RUNTIME_KEY: Final = "boost_runtime"
 _BOOST_TEMPERATURE_KEY: Final = "boost_temperature"
@@ -932,10 +935,10 @@ class HeaterNodeBase(CoordinatorEntity):
     @property
     def available(self) -> bool:
         """Return whether the backing device exposes heater data."""
-        return self._device_available(self._device_record())
+        return self._device_available()
 
-    def _device_available(self, device_entry: dict[str, Any] | None) -> bool:
-        """Return True when ``device_entry`` provides heater metadata for this node."""
+    def _device_available(self) -> bool:
+        """Return True when the immutable inventory exposes this node."""
 
         try:
             inventory = self._resolve_inventory()
@@ -951,31 +954,14 @@ class HeaterNodeBase(CoordinatorEntity):
         view = getattr(self.coordinator, "domain_view", None)
         return view if isinstance(view, DomainStateView) else None
 
-    def _device_record(self) -> dict[str, Any] | None:
-        """Return the coordinator cache entry for this device."""
-        data = getattr(self.coordinator, "data", {}) or {}
-        getter = getattr(data, "get", None)
-
-        try:
-            if callable(getter):
-                record = getter(self._dev_id)
-            elif isinstance(data, dict):
-                record = dict.get(data, self._dev_id)
-            else:
-                return None
-        except Exception:  # pragma: no cover - defensive  # noqa: BLE001
-            _LOGGER.debug(
-                "Failed to resolve device record for %s", self._dev_id, exc_info=True
-            )
-            return None
-
-        return record if isinstance(record, dict) else None
-
     def _heater_state_payload(self) -> Mapping[str, Any] | None:
         """Return the canonical heater settings payload."""
 
         view = self._domain_state_view()
         if view is not None:
+            seed = getattr(self.coordinator, "_seed_state_store_from_data", None)
+            if callable(seed):
+                seed()
             state = view.get_heater_state(self._node_type, self._addr)
             if state is not None:
                 return state.to_legacy()
@@ -983,14 +969,6 @@ class HeaterNodeBase(CoordinatorEntity):
         record = self._device_record()
         if not isinstance(record, Mapping):
             return None
-
-        settings_by_type = record.get("settings")
-        if isinstance(settings_by_type, Mapping):
-            per_type = settings_by_type.get(self._node_type)
-            if isinstance(per_type, Mapping):
-                payload = per_type.get(self._addr)
-                if isinstance(payload, Mapping):
-                    return payload
 
         node_section = record.get(self._node_type)
         if isinstance(node_section, Mapping):
@@ -1000,6 +978,35 @@ class HeaterNodeBase(CoordinatorEntity):
                 if isinstance(payload, Mapping):
                     return payload
 
+        settings_by_type = record.get("settings")
+        if isinstance(settings_by_type, Mapping):
+            per_type = settings_by_type.get(self._node_type)
+            if isinstance(per_type, Mapping):
+                payload = per_type.get(self._addr)
+                if isinstance(payload, Mapping):
+                    return payload
+
+        return None
+
+    def _device_record(self) -> Mapping[str, Any] | None:
+        """Return the coordinator cache entry for this device."""
+
+        data = getattr(self.coordinator, "data", {}) or {}
+        if isinstance(data, Mapping):
+            try:
+                record = data.get(self._dev_id)
+                # Defensive second lookup to surface mapping errors.
+                _ = data.get(self._dev_id)
+            except _CANCELLED_ERROR:
+                raise
+            except Exception as err:  # pragma: no cover - defensive
+                _LOGGER.debug(
+                    "Failed to resolve device record for %s: %s",
+                    self._dev_id,
+                    err,
+                )
+                return None
+            return record if isinstance(record, Mapping) else None
         return None
 
     def _resolve_inventory(self) -> Inventory:
