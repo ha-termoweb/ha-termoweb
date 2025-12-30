@@ -152,6 +152,8 @@ custom_components/termoweb/backend/base.py :: fetch_normalised_hourly_samples
     Return per-node normalised samples for ``nodes`` between ``start`` and ``end``.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRequestError.__init__
     Initialise error metadata for logging and diagnostics.
+custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._include_raw_settings
+    Return True when raw payloads should be retained for debugging.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._post_segmented
     Log segmented POST requests before delegating to ``_request``.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._log_segmented_post
@@ -736,6 +738,10 @@ custom_components/termoweb/coordinator.py :: StateCoordinator.__init__
     Initialize the TermoWeb device coordinator.
 custom_components/termoweb/coordinator.py :: StateCoordinator._collect_previous_settings
     Return normalised settings carried over from previous poll.
+custom_components/termoweb/coordinator.py :: StateCoordinator._include_raw_settings
+    Return True when raw settings payloads should be retained.
+custom_components/termoweb/coordinator.py :: StateCoordinator._filtered_settings_payload
+    Return a defensive copy of ``payload`` without raw blobs.
 custom_components/termoweb/coordinator.py :: StateCoordinator._instant_power_key
     Return a normalized key for instant power tracking.
 custom_components/termoweb/coordinator.py :: StateCoordinator._instant_power_snapshot

@@ -142,9 +142,12 @@ async def test_ducaheat_rest_client_normalises_acm(
 
     monkeypatch.setattr(ducaheat_rest_client, "_request", fake_request)
 
-    def fake_normalise(self, payload, *, node_type: str = "htr"):
+    def fake_normalise(
+        self, payload, *, node_type: str = "htr", include_raw: bool = False
+    ):
         seen["node_type"] = node_type
         seen["payload"] = payload
+        seen["include_raw"] = include_raw
         return {"normalized": True}
 
     monkeypatch.setattr(DucaheatRESTClient, "_normalise_settings", fake_normalise)
