@@ -6,7 +6,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from dataclasses import dataclass
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from .const import DOMAIN
 
@@ -108,6 +108,9 @@ class InventorySnapshot:
 class Inventory:
     """Represent immutable node inventory details."""
 
+    _HEATER_NAME_MAP_CACHE_LIMIT: ClassVar[int] = 3
+    _DEFAULT_FACTORY_CACHE_KEY: ClassVar[str] = "default_factory"
+
     _dev_id: str
     _payload: RawNodePayload
     _nodes: tuple[PrebuiltNode, ...]
@@ -130,8 +133,8 @@ class Inventory:
         tuple[dict[str, tuple[str, ...]], dict[str, str]] | None
     )
     _power_monitor_sample_targets_cache: tuple[tuple[str, str], ...] | None
-    _heater_name_map_cache: dict[int, dict[Any, Any]]
-    _heater_name_map_factories: dict[int, Callable[[str], str]]
+    _heater_name_map_cache: dict[str, dict[Any, Any]]
+    _heater_name_map_factories: dict[str, Callable[[str], str]]
 
     def __init__(
         self,
@@ -774,10 +777,16 @@ class Inventory:
         """Return cached heater name mapping for ``default_factory``."""
 
         factory = default_factory or _default_heater_name
-        key = id(factory)
-        cached = self._heater_name_map_cache.get(key)
-        if cached is not None and self._heater_name_map_factories.get(key) is factory:
-            return cached
+        signature = self._heater_factory_signature(factory)
+
+        if signature:
+            cached = self._heater_name_map_cache.get(signature)
+            cached_factory = self._heater_name_map_factories.get(signature)
+            if cached is not None and (
+                cached_factory is factory
+                or self._heater_factory_signature(cached_factory) == signature
+            ):
+                return cached
 
         nodes: tuple[PrebuiltNode, ...] = self._nodes
         sanitized_nodes: tuple[Any, ...]
@@ -841,9 +850,58 @@ class Inventory:
             mapping["by_type"] = {k: dict(v) for k, v in by_type.items()}
         mapping.update(by_node)
 
-        self._heater_name_map_cache[key] = mapping
-        self._heater_name_map_factories[key] = factory
+        if not signature:
+            return mapping
+
+        def _evict_stale_cache(new_key: str) -> None:
+            """Drop the oldest cached factory when exceeding the size limit."""
+
+            cache_size = len(self._heater_name_map_cache)
+            if new_key in self._heater_name_map_cache:
+                return
+            if cache_size < self._HEATER_NAME_MAP_CACHE_LIMIT:
+                return
+
+            candidates = [
+                key
+                for key in self._heater_name_map_cache
+                if key != self._DEFAULT_FACTORY_CACHE_KEY
+            ]
+            if not candidates:
+                candidates = list(self._heater_name_map_cache)
+
+            if candidates:
+                evicted = candidates[0]
+                self._heater_name_map_cache.pop(evicted, None)
+                self._heater_name_map_factories.pop(evicted, None)
+
+        _evict_stale_cache(signature)
+
+        self._heater_name_map_cache[signature] = mapping
+        self._heater_name_map_factories[signature] = factory
         return mapping
+
+    @staticmethod
+    def _heater_factory_signature(factory: Callable[[str], str] | None) -> str | None:
+        """Return a stable cache key for ``factory`` when possible."""
+
+        if factory is None:
+            return None
+        if factory is _default_heater_name:
+            return Inventory._DEFAULT_FACTORY_CACHE_KEY
+
+        name = getattr(factory, "__qualname__", None) or getattr(factory, "__name__", None)
+        module = getattr(factory, "__module__", None)
+        if not name or name == "<lambda>":
+            return None
+
+        code = getattr(factory, "__code__", None)
+        code_hint: str | None = None
+        if code is not None:
+            code_hint = f"{getattr(code, 'co_filename', '')}:{getattr(code, 'co_firstlineno', '')}"
+
+        signature_parts = [part for part in (module or "", name, code_hint) if part]
+        return "|".join(signature_parts)
 
     @staticmethod
     def require_from_context(
