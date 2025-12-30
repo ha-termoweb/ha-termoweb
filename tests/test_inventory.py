@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
-from typing import Any, Iterable, List, Mapping
+from typing import Any, Callable, Iterable, List, Mapping
 
 import pytest
 
@@ -368,6 +368,72 @@ def test_inventory_heater_name_map_caches_by_factory(
     assert third is fourth
     assert third is not first
     assert third[("htr", "2")] == "Alternate 2"
+
+
+def test_inventory_heater_name_map_reuses_equivalent_factories(
+    heater_inventory: Inventory,
+) -> None:
+    """Equivalent factories should share cached name maps."""
+
+    def build_factory(prefix: str) -> Callable[[str], str]:
+        def _factory(addr: str) -> str:
+            return f"{prefix} {addr}"
+
+        return _factory
+
+    first_factory = build_factory("Shared")
+    second_factory = build_factory("Shared")
+
+    first = heater_inventory.heater_name_map(first_factory)
+    second = heater_inventory.heater_name_map(second_factory)
+
+    signature = heater_inventory._heater_factory_signature(first_factory)
+    assert signature is not None
+    assert first is second
+    assert heater_inventory._heater_name_map_cache[signature] is first
+
+
+def test_inventory_heater_name_map_cache_boundaries(
+    heater_inventory: Inventory,
+) -> None:
+    """Cache should evict stale factory entries when exceeding limit."""
+
+    def factory_one(addr: str) -> str:
+        return f"One {addr}"
+
+    def factory_two(addr: str) -> str:
+        return f"Two {addr}"
+
+    def factory_three(addr: str) -> str:
+        return f"Three {addr}"
+
+    def factory_four(addr: str) -> str:
+        return f"Four {addr}"
+
+    def factory_five(addr: str) -> str:
+        return f"Five {addr}"
+
+    factories = [
+        factory_one,
+        factory_two,
+        factory_three,
+        factory_four,
+        factory_five,
+    ]
+
+    for factory in factories:
+        heater_inventory.heater_name_map(factory)
+
+    cache = heater_inventory._heater_name_map_cache
+    assert len(cache) == Inventory._HEATER_NAME_MAP_CACHE_LIMIT
+
+    signature_three = heater_inventory._heater_factory_signature(factory_three)
+    signature_four = heater_inventory._heater_factory_signature(factory_four)
+    signature_five = heater_inventory._heater_factory_signature(factory_five)
+
+    assert signature_three in cache
+    assert signature_four in cache
+    assert signature_five in cache
 
 
 def test_inventory_heater_name_map_supports_default_factory_optional(

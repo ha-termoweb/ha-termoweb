@@ -1050,6 +1050,8 @@ custom_components/termoweb/inventory.py :: Inventory._validate_sample_targets
     Return deduplicated and sanitised sample target pairs.
 custom_components/termoweb/inventory.py :: Inventory.heater_name_map
     Return cached heater name mapping for ``default_factory``.
+custom_components/termoweb/inventory.py :: Inventory._heater_factory_signature
+    Return a stable cache key for ``factory`` when possible.
 custom_components/termoweb/inventory.py :: _normalize_node_iterable
     Return filtered node tuples and raw length for ``nodes``.
 custom_components/termoweb/inventory.py :: resolve_record_inventory
