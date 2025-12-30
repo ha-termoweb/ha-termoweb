@@ -15,6 +15,7 @@ class SetMode(BaseCommand):
     """Change the operating mode for a node."""
 
     mode: str
+    boost_time: int | None = None
 
 
 @dataclass(slots=True)
@@ -22,6 +23,8 @@ class SetSetpoint(BaseCommand):
     """Update the target setpoint for manual mode."""
 
     setpoint: float | str
+    mode: str | None = None
+    boost_time: int | None = None
 
 
 @dataclass(slots=True)

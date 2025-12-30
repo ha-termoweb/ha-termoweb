@@ -29,6 +29,7 @@ from .ducaheat_codec import (
     encode_setpoint_command,
     encode_units_command,
 )
+from .ducaheat_models import StatusWritePayload
 
 
 @dataclass(slots=True)
@@ -76,17 +77,28 @@ def _build_write_call(
     """Build the primary write call for the supplied command."""
 
     if isinstance(command, SetMode):
-        payload = encode_mode_command(command)
-        path = f"{base_path}/mode"
+        if node_id.node_type is NodeType.HEATER:
+            payload = StatusWritePayload.model_validate(
+                {"mode": command.mode, "boost_time": command.boost_time}
+            ).model_dump(exclude_none=True)
+            path = f"{base_path}/status"
+        else:
+            payload = encode_mode_command(command)
+            path = f"{base_path}/mode"
     elif isinstance(command, SetSetpoint):
-        payload = encode_setpoint_command(command, units=units)
+        payload = encode_setpoint_command(
+            command,
+            units=units,
+            mode=command.mode,
+            boost_time=command.boost_time,
+        )
         path = f"{base_path}/status"
     elif isinstance(command, SetUnits):
         payload = encode_units_command(command)
         path = f"{base_path}/status"
     elif isinstance(command, SetPresetTemps):
         payload = encode_preset_temps_command(command, units=units)
-        path = f"{base_path}/status"
+        path = f"{base_path}/prog_temps"
     elif isinstance(command, SetProgram):
         payload = encode_program_command(command)
         path = f"{base_path}/prog"

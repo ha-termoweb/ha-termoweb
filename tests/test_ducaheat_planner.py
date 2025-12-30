@@ -19,7 +19,7 @@ def test_plan_command_wraps_write_with_selection() -> None:
     assert [call.method for call in plan] == ["POST", "POST", "POST"]
     assert plan[0].path.endswith("/htr/01/select")
     assert plan[0].json == {"select": True}
-    assert plan[1].path.endswith("/htr/01/mode")
+    assert plan[1].path.endswith("/htr/01/status")
     assert plan[1].json == {"mode": "auto"}
     assert plan[2].json == {"select": False}
 

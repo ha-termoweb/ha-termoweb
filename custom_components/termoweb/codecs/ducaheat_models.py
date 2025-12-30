@@ -125,6 +125,7 @@ class ModeWritePayload(DucaheatModel):
     """Mode-only write payload."""
 
     mode: str
+    boost_time: int | None = None
 
     @field_validator("mode")
     @classmethod
@@ -132,6 +133,13 @@ class ModeWritePayload(DucaheatModel):
         """Lowercase the supplied mode string."""
 
         return str(value).lower()
+
+    @field_validator("boost_time")
+    @classmethod
+    def _validate_boost_time(cls, value: int | None) -> int | None:
+        """Validate boost duration values."""
+
+        return validate_boost_minutes(value)
 
 
 class ProgramWritePayload(DucaheatModel):
