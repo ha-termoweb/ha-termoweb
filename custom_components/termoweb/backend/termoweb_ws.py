@@ -1643,6 +1643,11 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         async for data in self._ws_payload_stream(ws, context="websocket"):
             if data.startswith("2::"):
                 self._record_heartbeat(source="socketio09")
+                try:
+                    await self._send_text("2::")
+                except Exception:
+                    _LOGGER.debug("WS: failed to send heartbeat ack", exc_info=True)
+                    raise
                 continue
             if data.startswith(f"1::{self._namespace}"):
                 continue
@@ -1663,307 +1668,38 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             return
         name = evt.get("name")
         args = evt.get("args")
-        if name != "data" or not isinstance(args, list) or not args:
+        payload = args[0] if isinstance(args, list) and args else None
+        if name == "dev_handshake":
+            self._handle_handshake(payload)
+            self._mark_event(paths=None, count_event=True)
             return
-        batch = args[0] if isinstance(args[0], list) else None
-        if not isinstance(batch, list):
+        if name == "dev_data":
+            self._handle_dev_data(payload)
             return
-        paths: list[str] = []
-        updated_nodes = False
-        updated_addrs: set[tuple[str, str]] = set()
-        sample_addrs: set[tuple[str, str]] = set()
-        updated_types: set[str] = set()
+        if name == "update":
+            self._handle_update(payload)
+            return
+        if name == "data":
+            self._handle_legacy_data_batch(payload)
+            return
 
-        def _extract_type_addr(path: str) -> tuple[str | None, str | None]:
-            """Extract the node type and address from a websocket path."""
+    def _handle_legacy_data_batch(self, payload: Any) -> None:
+        """Route legacy Socket.IO ``data`` batches to domain handlers."""
 
-            if not path:
-                return None, None
-            parts = [segment for segment in path.split("/") if segment]
-            for idx in range(len(parts) - 2):
-                node_type = parts[idx]
-                addr = parts[idx + 1]
-                leaf = parts[idx + 2]
-                if leaf in {"settings", "samples", "advanced_setup"}:
-                    return node_type, addr
-            return None, None
-
-        def _canonical_type(value: Any) -> str | None:
-            """Return the canonical node type string."""
-
-            if not isinstance(value, str):
-                return None
-            canonical = normalize_node_type(value, use_default_when_falsey=True)
-            if canonical:
-                return canonical
-            stripped = value.strip()
-            return stripped or None
-
-        def _canonical_addr(node_type: str, value: Any) -> str | None:
-            """Return the canonical address for ``node_type`` from inventory."""
-
-            candidate = normalize_node_addr(value, use_default_when_falsey=True)
-            if not candidate and isinstance(value, str):
-                stripped = value.strip()
-                candidate = stripped or None
-            if not candidate and value is not None and not isinstance(value, str):
-                candidate = str(value).strip() or None
-
-            inventory = (
-                self._inventory if isinstance(self._inventory, Inventory) else None
-            )
-            if candidate and inventory is not None:
-                try:
-                    addresses_map = inventory.addresses_by_type
-                except Exception:  # pragma: no cover - defensive cache guard
-                    addresses_map = {}
-                canonical_type = _canonical_type(node_type) or node_type
-                known = addresses_map.get(canonical_type)
-                if isinstance(known, list) and candidate in known:
-                    return candidate
-                try:
-                    _, reverse_map = inventory.heater_address_map
-                except Exception:  # pragma: no cover - defensive cache guard
-                    reverse_map = {}
-                else:
-                    alias_types = reverse_map.get(candidate)
-                    if alias_types and canonical_type in alias_types:
-                        return candidate
-            return candidate
-
-        for item in batch:
+        if not isinstance(payload, list):
+            return
+        for item in payload:
             if not isinstance(item, Mapping):
                 continue
             path = item.get("path")
             body = item.get("body")
             if not isinstance(path, str):
                 continue
-            paths.append(path)
-            dev_map: dict[str, Any] = (self._coordinator.data or {}).get(
-                self.dev_id
-            ) or {}
-            if not dev_map:
-                dev_map = {
-                    "dev_id": self.dev_id,
-                    "name": f"Device {self.dev_id}",
-                    "raw": {},
-                    "connected": True,
-                }
-                cur = dict(self._coordinator.data or {})
-                cur[self.dev_id] = dev_map
-                self._coordinator.data = cur  # type: ignore[attr-defined]
-            dev_map.setdefault("settings", {})
-            if path.endswith("/mgr/nodes"):
+            if path.rstrip("/").endswith("/mgr/nodes"):
                 if isinstance(body, Mapping):
-                    type_to_addrs = self._dispatch_nodes(body)
-                    if isinstance(type_to_addrs, Mapping):
-                        for node_type in type_to_addrs:
-                            canonical_type = _canonical_type(node_type)
-                            if canonical_type:
-                                updated_types.add(canonical_type)
-                    updated_nodes = True
+                    self._handle_dev_data({"nodes": body})
                 continue
-            node_type, addr = _extract_type_addr(path)
-            canonical_type = _canonical_type(node_type)
-            if canonical_type and addr and canonical_type != "mgr":
-                section = self._legacy_section_for_path(path)
-                if section:
-                    if section in {"settings", "advanced"} and not isinstance(
-                        body, Mapping
-                    ):
-                        continue
-                    if self._update_legacy_section(
-                        node_type=node_type,
-                        addr=addr,
-                        section=section,
-                        body=body,
-                        dev_map=dev_map,
-                    ):
-                        updated_types.add(canonical_type)
-                        payload_addr = _canonical_addr(canonical_type, addr)
-                        if not payload_addr and isinstance(addr, str):
-                            stripped = addr.strip()
-                            payload_addr = stripped or None
-                        elif not payload_addr and addr is not None:
-                            candidate = str(addr).strip()
-                            payload_addr = candidate or None
-                        if payload_addr and section == "samples":
-                            sample_addrs.add((canonical_type, payload_addr))
-                        elif payload_addr and section == "settings":
-                            updated_addrs.add((canonical_type, payload_addr))
-                        updated_nodes = True
-                    continue
-            raw = dev_map.setdefault("raw", {})
-            key = path.strip("/").replace("/", "_")
-            raw[key] = body
-
-        self._mark_event(paths=paths)
-        payload_ts = self._stats.last_event_ts or time.time()
-        self._mark_ws_payload(
-            timestamp=payload_ts,
-            stale_after=self._payload_idle_window,
-        )
-        inventory = self._inventory if isinstance(self._inventory, Inventory) else None
-
-        payload_base = {
-            "dev_id": self.dev_id,
-            "ts": self._stats.last_event_ts,
-            "node_type": None,
-        }
-        if updated_nodes:
-            nodes_payload: dict[str, Any] = {
-                **payload_base,
-                "addr": None,
-                "kind": "nodes",
-            }
-            if inventory is not None:
-                nodes_payload["inventory"] = inventory
-            async_dispatcher_send(
-                self.hass,
-                signal_ws_data(self.entry_id),
-                nodes_payload,
-            )
-        for node_type, addr in sorted(updated_addrs):
-            settings_payload: dict[str, Any] = {
-                **payload_base,
-                "addr": addr,
-                "kind": f"{node_type}_settings",
-                "node_type": node_type,
-            }
-            if inventory is not None:
-                settings_payload["inventory"] = inventory
-            async_dispatcher_send(
-                self.hass,
-                signal_ws_data(self.entry_id),
-                settings_payload,
-            )
-        for node_type, addr in sorted(sample_addrs):
-            samples_payload: dict[str, Any] = {
-                **payload_base,
-                "addr": addr,
-                "kind": f"{node_type}_samples",
-                "node_type": node_type,
-            }
-            if inventory is not None:
-                samples_payload["inventory"] = inventory
-            async_dispatcher_send(
-                self.hass,
-                signal_ws_data(self.entry_id),
-                samples_payload,
-            )
-        self._log_legacy_update(
-            updated_nodes=updated_nodes,
-            updated_addrs=updated_addrs,
-            sample_addrs=sample_addrs,
-        )
-
-    def _update_legacy_section(
-        self,
-        *,
-        node_type: str,
-        addr: str,
-        section: str,
-        body: Any,
-        dev_map: dict[str, Any],
-    ) -> bool:
-        """Store legacy section updates and mirror them in raw state."""
-
-        value: Any = dict(body) if isinstance(body, Mapping) else body
-        if (
-            section == "settings"
-            and normalize_node_type(node_type) == "acm"
-            and isinstance(value, MutableMapping)
-        ):
-            coordinator = getattr(self, "_coordinator", None)
-            apply_helper = getattr(
-                coordinator, "_apply_accumulator_boost_metadata", None
-            )
-            if callable(apply_helper):
-                now = None
-                estimate = getattr(coordinator, "_device_now_estimate", None)
-                if callable(estimate):
-                    now = estimate()
-                try:
-                    apply_helper(value, now=now)
-                except Exception as err:  # pragma: no cover - defensive
-                    _LOGGER.debug(
-                        "WS boost metadata derivation failed for %s/%s: %s",
-                        node_type,
-                        addr,
-                        err,
-                        exc_info=err,
-                    )
-        if section == "settings":
-            canonical_type = (
-                normalize_node_type(node_type, use_default_when_falsey=True)
-                or node_type
-            )
-            if canonical_type:
-                settings_map: MutableMapping[str, Any] = dev_map.setdefault(
-                    "settings", {}
-                )
-                existing_bucket = settings_map.get(canonical_type)
-                if isinstance(existing_bucket, MutableMapping):
-                    settings_bucket = existing_bucket
-                elif isinstance(existing_bucket, Mapping):
-                    settings_bucket = dict(existing_bucket)
-                    settings_map[canonical_type] = settings_bucket
-                else:
-                    settings_bucket = {}
-                    settings_map[canonical_type] = settings_bucket
-                normalised_addr = normalize_node_addr(
-                    addr,
-                    use_default_when_falsey=True,
-                )
-                if not normalised_addr and isinstance(addr, str):
-                    stripped = addr.strip()
-                    normalised_addr = stripped or None
-                if (
-                    not normalised_addr
-                    and addr is not None
-                    and not isinstance(addr, str)
-                ):
-                    candidate = str(addr).strip()
-                    normalised_addr = candidate or None
-                if normalised_addr:
-                    existing_payload = settings_bucket.get(normalised_addr)
-                    if isinstance(existing_payload, MutableMapping) and isinstance(
-                        value, Mapping
-                    ):
-                        existing_payload.update(deepcopy(value))
-                    else:
-                        settings_bucket[normalised_addr] = deepcopy(value)
-        return True
-
-    @staticmethod
-    def _legacy_section_for_path(path: str) -> str | None:
-        """Return the legacy section identifier for ``path`` if supported."""
-
-        if path.endswith("/settings"):
-            return "settings"
-        if path.endswith("/advanced_setup"):
-            return "advanced"
-        if path.endswith("/samples"):
-            return "samples"
-        return None
-
-    def _log_legacy_update(
-        self,
-        *,
-        updated_nodes: bool,
-        updated_addrs: Iterable[tuple[str, str]],
-        sample_addrs: Iterable[tuple[str, str]],
-    ) -> None:
-        """Emit debug logging for the legacy websocket update batch."""
-
-        if not _LOGGER.isEnabledFor(logging.DEBUG):
-            return
-        addr_pairs = {f"{node_type}/{addr}" for node_type, addr in updated_addrs}
-        addr_pairs.update(f"{node_type}/{addr}" for node_type, addr in sample_addrs)
-        if addr_pairs:
-            _LOGGER.debug("WS: legacy update for %s", ", ".join(sorted(addr_pairs)))
-        elif updated_nodes:
-            _LOGGER.debug("WS: legacy nodes refresh")
+            self._handle_update(item)
 
     async def _refresh_subscription(self, *, reason: str) -> None:
         """Replay subscription calls to keep the legacy websocket active."""
@@ -2033,6 +1769,26 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 raise RuntimeError(f"{context} error: {ws.exception()}")
             elif msg.type in {aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED}:
                 raise RuntimeError(f"{context} closed")
+        code = getattr(ws, "close_code", None)
+        reason: str | None = None
+        raw_reason = getattr(ws, "close_reason", None) or getattr(
+            ws, "close_message", None
+        )
+        if isinstance(raw_reason, bytes):
+            try:
+                reason = raw_reason.decode("utf-8", errors="ignore")
+            except Exception:
+                reason = repr(raw_reason)
+        elif raw_reason is not None:
+            reason = str(raw_reason)
+        if _LOGGER.isEnabledFor(logging.INFO):
+            _LOGGER.info(
+                "WS: %s payload stream ended code=%s reason=%s",
+                context,
+                code,
+                reason,
+            )
+        raise RuntimeError(f"{context} closed")
 
     def _record_heartbeat(self, *, source: str) -> None:
         """Record receipt of a heartbeat frame."""

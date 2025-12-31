@@ -226,8 +226,6 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._coerce_de
     Convert list-style websocket snapshots into mapping payloads.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._normalise_nodes_payload
     Normalise websocket node payloads via the REST client helper.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._update_legacy_section
-    Store legacy section updates with defensive type checks.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._normalise_cadence_value
     Return a positive cadence hint in seconds.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._extract_cadence_candidates
@@ -424,18 +422,8 @@ custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._read_loop
     Consume websocket frames and route events for the legacy protocol.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_event
     Process a Socket.IO 0.9 event payload.
-custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_event._extract_type_addr
-    Extract the node type and address from a websocket path.
-custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_event._canonical_type
-    Return the canonical node type string.
-custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_event._canonical_addr
-    Return the canonical address for ``node_type`` from inventory.
-custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._update_legacy_section
-    Store legacy section updates and mirror them in raw state.
-custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._legacy_section_for_path
-    Return the legacy section identifier for ``path`` if supported.
-custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._log_legacy_update
-    Emit debug logging for the legacy websocket update batch.
+custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._handle_legacy_data_batch
+    Route legacy Socket.IO ``data`` batches to domain handlers.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._refresh_subscription
     Replay subscription calls to keep the legacy websocket active.
 custom_components/termoweb/backend/termoweb_ws.py :: TermoWebWSClient._send_text
@@ -1206,6 +1194,8 @@ custom_components/termoweb/heater.py :: log_skipped_nodes
     Log skipped TermoWeb nodes for a given platform.
 custom_components/termoweb/heater.py :: heater_platform_details_for_entry
     Return heater platform metadata derived from ``entry_data``.
+custom_components/termoweb/heater.py :: heater_platform_details_for_entry._coerce_inventory
+    Return ``candidate`` when it behaves like an inventory.
 custom_components/termoweb/heater.py :: HeaterNodeBase.__init__
     Initialise a heater entity tied to a TermoWeb device.
 custom_components/termoweb/heater.py :: HeaterNodeBase.async_added_to_hass
