@@ -567,9 +567,15 @@ class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
             inventory=inventory,
         )
 
-    def _device_available(self, device_entry: dict[str, Any] | None) -> bool:
-        """Return True when the heater has a device entry."""
-        return isinstance(device_entry, dict)
+    def _device_available(self) -> bool:
+        """Return True when inventory and coordinator expose this heater node."""
+
+        if not super()._device_available():
+            return False
+
+        coordinator = getattr(self, "coordinator", None)
+        coordinator_available = getattr(coordinator, "last_update_success", True)
+        return bool(coordinator_available)
 
     def _metric_section(self) -> dict[str, Any]:
         """Return the dictionary with the requested metric values."""
