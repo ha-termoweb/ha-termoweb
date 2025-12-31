@@ -71,19 +71,56 @@ class InstantPowerEntry:
     source: str
 
 
-def _device_display_name(device: Mapping[str, Any] | None, dev_id: str) -> str:
+@dataclass(frozen=True, slots=True)
+class DeviceMetadata:
+    """Represent immutable device metadata."""
+
+    dev_id: str
+    name: str
+    model: str | None
+
+
+def _normalise_device_name(raw_name: Any, dev_id: str) -> str:
+    """Return a trimmed device name or a fallback derived from ``dev_id``."""
+
+    candidate = raw_name if isinstance(raw_name, str) else str(raw_name or "")
+    trimmed = candidate.strip()
+    return trimmed or f"Device {dev_id}"
+
+
+def _normalise_device_model(raw_model: Any) -> str | None:
+    """Return a trimmed model string when present."""
+
+    if raw_model in (None, ""):
+        return None
+    candidate = raw_model if isinstance(raw_model, str) else str(raw_model)
+    trimmed = candidate.strip()
+    return trimmed or None
+
+
+def build_device_metadata(
+    dev_id: str, device: Mapping[str, Any] | None
+) -> DeviceMetadata:
+    """Return immutable metadata derived from a device payload."""
+
+    name = (
+        _normalise_device_name(device.get("name"), dev_id)
+        if isinstance(device, Mapping)
+        else f"Device {dev_id}"
+    )
+    model = (
+        _normalise_device_model(device.get("model"))
+        if isinstance(device, Mapping)
+        else None
+    )
+    return DeviceMetadata(dev_id=dev_id, name=name, model=model)
+
+
+def _device_display_name(device: DeviceMetadata | None, dev_id: str) -> str:
     """Return the trimmed device name or a fallback for ``dev_id``."""
 
-    raw_name: Any | None = None
-    if isinstance(device, Mapping):
-        raw_name = device.get("name")
-
-    if raw_name is not None:
-        candidate = raw_name if isinstance(raw_name, str) else str(raw_name)
-        trimmed = candidate.strip()
-        if trimmed:
-            return trimmed
-
+    if isinstance(device, DeviceMetadata):
+        return device.name.strip() or f"Device {dev_id}"
     return f"Device {dev_id}"
 
 
@@ -98,7 +135,7 @@ class StateCoordinator(
         client: RESTClient,
         base_interval: int,
         dev_id: str,
-        device: dict[str, Any],
+        device: DeviceMetadata | Mapping[str, Any] | None,
         nodes: Mapping[str, Any] | None,
         inventory: Inventory | None = None,
     ) -> None:
@@ -113,7 +150,14 @@ class StateCoordinator(
         self._base_interval = max(base_interval, MIN_POLL_INTERVAL)
         self._backoff = 0  # seconds
         self._dev_id = dev_id
-        self._device = device or {}
+        if isinstance(device, DeviceMetadata):
+            metadata = device
+        elif isinstance(device, Mapping) or device is None:
+            metadata = build_device_metadata(dev_id, device)
+        else:  # pragma: no cover - defensive
+            msg = "StateCoordinator requires DeviceMetadata or a mapping payload"
+            raise TypeError(msg)
+        self._device_metadata = metadata
         is_ducaheat = getattr(client, "_is_ducaheat", False)
         self._is_ducaheat = bool(is_ducaheat is True)
         if not isinstance(inventory, Inventory):
@@ -141,14 +185,12 @@ class StateCoordinator(
         model: str | None = None
         backend = "ducaheat" if self._is_ducaheat else "termoweb"
 
-        if isinstance(self._device, Mapping):
-            model_value = self._device.get("model")
-            if model_value not in (None, ""):
-                model = str(model_value)
+        if isinstance(self._device_metadata, DeviceMetadata):
+            model = self._device_metadata.model
 
         record = {
             "dev_id": self._dev_id,
-            "name": _device_display_name(self._device, self._dev_id),
+            "name": _device_display_name(self._device_metadata, self._dev_id),
             "model": model,
             "connected": True,
             "backend": backend,

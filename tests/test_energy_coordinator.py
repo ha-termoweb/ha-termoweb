@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from conftest import _install_stubs
+from conftest import build_device_metadata_payload
 
 _install_stubs()
 
@@ -57,18 +58,19 @@ def _state_coordinator_from_nodes(
     client: Any,
     base_interval: int,
     dev_id: str,
-    device: Mapping[str, Any],
+    device: coord_module.DeviceMetadata | None,
     nodes: Mapping[str, Any],
 ) -> StateCoordinator:
     """Build a ``StateCoordinator`` with inventory derived from ``nodes``."""
 
     inventory = _inventory_from_nodes(dev_id, nodes)
+    metadata = device or build_device_metadata_payload(dev_id)
     return StateCoordinator(
         hass,
         client,
         base_interval,
         dev_id,
-        device,
+        metadata,
         nodes,
         inventory=inventory,
     )
@@ -92,7 +94,7 @@ def test_update_nodes_accepts_inventory_container(
         client,
         30,
         "dev",
-        {"name": "Device"},
+        build_device_metadata_payload("dev", name="Device"),
         nodes=None,
         inventory=container,
     )
@@ -163,7 +165,7 @@ def test_coordinator_success_resets_backoff() -> None:
             client,
             30,
             "dev",
-            {"name": "Device"},
+            build_device_metadata_payload("dev", name="Device"),
             nodes=None,
             inventory=inventory,
         )
@@ -219,7 +221,7 @@ def test_state_coordinator_round_robin_mixed_types() -> None:
             client,
             30,
             "dev",
-            {"name": "Device"},
+            build_device_metadata_payload("dev", name="Device"),
             nodes,
             inventory=inventory,
         )
@@ -273,7 +275,7 @@ def test_state_coordinator_ignores_non_dict_payloads() -> None:
             client,
             30,
             "dev",
-            {"name": "Device"},
+            build_device_metadata_payload("dev", name="Device"),
             nodes,
             inventory=inventory,
         )
@@ -312,7 +314,7 @@ def test_refresh_heater_skips_invalid_inputs() -> None:
             client,
             30,
             "dev",
-            {"name": " Device "},
+            build_device_metadata_payload("dev", name=" Device "),
             nodes,
             inventory=inventory,
         )
@@ -362,7 +364,7 @@ def test_register_pending_setting_normalizes_values(
         client,
         30,
         "dev",
-        {"name": "Device"},
+        build_device_metadata_payload("dev", name="Device"),
         nodes,
     )
 
@@ -389,7 +391,7 @@ def test_should_defer_pending_setting_handles_expiry(
         client,
         30,
         "dev",
-        {"name": "Device"},
+        build_device_metadata_payload("dev", name="Device"),
         nodes,
     )
 
@@ -412,7 +414,7 @@ def test_should_defer_pending_setting_defers_missing_payload(
         client,
         30,
         "dev",
-        {"name": "Device"},
+        build_device_metadata_payload("dev", name="Device"),
         nodes,
     )
 
@@ -435,7 +437,7 @@ def test_should_defer_pending_setting_satisfied_payload(
         client,
         30,
         "dev",
-        {"name": "Device"},
+        build_device_metadata_payload("dev", name="Device"),
         nodes,
     )
 
@@ -459,7 +461,7 @@ def test_should_defer_pending_setting_mismatch_defers(
         client,
         30,
         "dev",
-        {"name": "Device"},
+        build_device_metadata_payload("dev", name="Device"),
         nodes,
     )
 
@@ -493,7 +495,7 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
             client,
             15,
             "dev",
-            {"name": " Device "},
+            build_device_metadata_payload("dev", name=" Device "),
             nodes,
         )
 
@@ -556,7 +558,7 @@ def test_refresh_heater_handles_tuple_and_acm() -> None:
             client,
             30,
             "dev",
-            {"name": "Device"},
+            build_device_metadata_payload("dev", name="Device"),
             nodes=None,
             inventory=inventory_container,
         )
@@ -612,7 +614,7 @@ def test_async_refresh_heater_adds_missing_type() -> None:
             client,
             30,
             "dev",
-            {"name": "Device"},
+            build_device_metadata_payload("dev", name="Device"),
             nodes=None,
             inventory=inventory,
         )
@@ -707,7 +709,7 @@ def test_refresh_heater_handles_errors(caplog: pytest.LogCaptureFixture) -> None
             client,
             30,
             "dev",
-            {"name": "Device"},
+            build_device_metadata_payload("dev", name="Device"),
             nodes,
         )
         inventory = coord._ensure_inventory()
@@ -766,7 +768,7 @@ def test_state_coordinator_async_update_data_reuses_previous() -> None:
             client,
             30,
             "dev",
-            {"name": " Device "},
+            build_device_metadata_payload("dev", name=" Device "),
             nodes=None,
             inventory=inventory,
         )
@@ -837,7 +839,7 @@ def test_async_update_data_skips_non_dict_sections() -> None:
             client,
             30,
             "dev",
-            {"name": "Device"},
+            build_device_metadata_payload("dev", name="Device"),
             nodes,
         )
 
@@ -1387,7 +1389,7 @@ def test_state_coordinator_update_nodes_uses_provided_inventory(
         client,
         30,
         "dev",
-        {"name": "Device"},
+        build_device_metadata_payload("dev", name="Device"),
         nodes=None,
         inventory=inventory,
     )

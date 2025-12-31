@@ -6,6 +6,7 @@ import pytest
 
 from homeassistant.core import HomeAssistant
 
+from conftest import build_device_metadata_payload
 from custom_components.termoweb import coordinator as coord_module
 
 
@@ -22,7 +23,7 @@ async def test_handle_instant_power_update_records_ws(
         client=AsyncMock(),
         base_interval=30,
         dev_id="dev",
-        device={},
+        device=build_device_metadata_payload("dev"),
         nodes=None,
         inventory=inventory,
     )
@@ -58,7 +59,7 @@ async def test_handle_instant_power_update_rejects_invalid(
         client=AsyncMock(),
         base_interval=30,
         dev_id="dev",
-        device={},
+        device=build_device_metadata_payload("dev"),
         nodes=None,
         inventory=inventory,
     )
@@ -83,7 +84,7 @@ async def test_rest_updates_respect_ws_priority(
         client=AsyncMock(),
         base_interval=30,
         dev_id="dev",
-        device={},
+        device=build_device_metadata_payload("dev"),
         nodes=None,
         inventory=inventory,
     )
@@ -133,7 +134,7 @@ async def test_should_skip_rest_power(monkeypatch, inventory_builder) -> None:
         client=AsyncMock(),
         base_interval=30,
         dev_id="dev",
-        device={},
+        device=build_device_metadata_payload("dev"),
         nodes=None,
         inventory=inventory,
     )

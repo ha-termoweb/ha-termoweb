@@ -230,6 +230,26 @@ def build_coordinator_device_state(
     return record
 
 
+def build_device_metadata_payload(
+    dev_id: str = "dev",
+    *,
+    name: Any | None = None,
+    model: Any | None = None,
+) -> "DeviceMetadata":
+    """Return ``DeviceMetadata`` instances for tests."""
+
+    from custom_components.termoweb.coordinator import build_device_metadata
+
+    payload: dict[str, Any] | None = None
+    if name is not None or model is not None:
+        payload = {}
+        if name is not None:
+            payload["name"] = name
+        if model is not None:
+            payload["model"] = model
+    return build_device_metadata(dev_id, payload)
+
+
 def _setup_frame_for_hass(hass: Any) -> None:
     """Ensure frame helpers are initialised for a HomeAssistant instance."""
 
@@ -1749,7 +1769,7 @@ class FakeCoordinator:
         client: Any | None = None,
         base_interval: int = 0,
         dev_id: str = "dev",
-        dev: dict[str, Any] | None = None,
+        dev: Any | None = None,
         nodes: dict[str, Any] | None = None,
         inventory: "Inventory" | None = None,
         *,
@@ -1759,7 +1779,23 @@ class FakeCoordinator:
         self.client = client
         self.base_interval = base_interval
         self.dev_id = dev_id
-        self.dev = self._normalise_device_record(dev)
+        from custom_components.termoweb.coordinator import (
+            DeviceMetadata,
+            build_device_metadata,
+        )
+
+        if isinstance(dev, DeviceMetadata):
+            normalised_dev: Mapping[str, Any] | None = {
+                "name": dev.name,
+                "model": dev.model,
+            }
+            metadata = dev
+        else:
+            normalised_dev = dev if isinstance(dev, Mapping) else None
+            metadata = build_device_metadata(dev_id, normalised_dev)
+
+        self.dev_metadata = metadata
+        self.dev = self._normalise_device_record(normalised_dev)
         self.nodes = nodes or {}
         inventory_obj, nodes_list = _coerce_inventory(inventory)
         self.inventory: "Inventory" | None = inventory_obj

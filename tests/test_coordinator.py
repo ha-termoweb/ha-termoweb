@@ -3,13 +3,13 @@ from __future__ import annotations
 import datetime as dt
 
 from aiohttp import ClientError
-from types import MappingProxyType
 import logging
 from typing import Any, Callable, Iterable, Mapping
 from unittest.mock import AsyncMock
 
 import pytest
 
+from conftest import build_device_metadata_payload
 from homeassistant.core import HomeAssistant
 
 from custom_components.termoweb import (
@@ -102,7 +102,7 @@ def test_resolve_boost_end_from_fields_variants(
         client=AsyncMock(),
         base_interval=30,
         dev_id="dev",
-        device={},
+        device=build_device_metadata_payload("dev"),
         nodes=None,
         inventory=inventory,
     )
@@ -155,7 +155,7 @@ async def test_async_fetch_rtc_datetime_updates_reference(
         client=client,
         base_interval=30,
         dev_id="dev",
-        device={},
+        device=build_device_metadata_payload("dev"),
         nodes=None,
         inventory=inventory,
     )
@@ -187,7 +187,7 @@ async def test_async_fetch_rtc_datetime_handles_error(
         client=client,
         base_interval=30,
         dev_id="dev",
-        device={},
+        device=build_device_metadata_payload("dev"),
         nodes=None,
         inventory=inventory,
     )
@@ -211,7 +211,7 @@ def test_boost_helpers_guard_against_invalid_sections(
         client=AsyncMock(),
         base_interval=30,
         dev_id="dev",
-        device={},
+        device=build_device_metadata_payload("dev"),
         nodes=None,
         inventory=inventory,
     )
@@ -243,7 +243,7 @@ def test_apply_accumulator_boost_metadata_updates_payload(
         client=AsyncMock(),
         base_interval=30,
         dev_id="dev",
-        device={},
+        device=build_device_metadata_payload("dev"),
         nodes=None,
         inventory=inventory,
     )
@@ -286,7 +286,7 @@ async def test_async_update_data_adds_boost_metadata(
         client=client,
         base_interval=30,
         dev_id="dev",
-        device={},
+        device=build_device_metadata_payload("dev"),
         nodes=nodes_payload,
         inventory=inventory,
     )
@@ -325,7 +325,7 @@ async def test_async_update_data_skips_without_inventory(
         client=client,
         base_interval=30,
         dev_id="dev",
-        device={},
+        device=build_device_metadata_payload("dev"),
         nodes=None,
         inventory=inventory,
     )
@@ -354,7 +354,7 @@ async def test_async_update_data_requires_inventory(
         client=client,
         base_interval=30,
         dev_id="dev",
-        device={},
+        device=build_device_metadata_payload("dev"),
         nodes=None,
         inventory=inventory,
     )
@@ -386,7 +386,7 @@ async def test_async_update_data_omits_raw_nodes(
         client=client,
         base_interval=30,
         dev_id="dev",
-        device={},
+        device=build_device_metadata_payload("dev"),
         nodes=nodes_payload,
         inventory=inventory,
     )
@@ -423,7 +423,7 @@ async def test_async_fetch_settings_by_address_pending_and_boost(
         client=client,
         base_interval=30,
         dev_id="dev",
-        device={},
+        device=build_device_metadata_payload("dev"),
         nodes=None,
         inventory=inventory,
     )
@@ -496,7 +496,7 @@ async def test_async_refresh_heater_errors_without_inventory(
         client=client,
         base_interval=30,
         dev_id="dev",
-        device={},
+        device=build_device_metadata_payload("dev"),
         nodes=None,
         inventory=inventory,
     )
@@ -533,7 +533,7 @@ async def test_async_refresh_heater_fetches_rtc(
         client=client,
         base_interval=30,
         dev_id="dev",
-        device={},
+        device=build_device_metadata_payload("dev"),
         nodes=None,
         inventory=inventory,
     )
@@ -552,13 +552,53 @@ async def test_async_refresh_heater_fetches_rtc(
 def test_device_display_name_helper() -> None:
     """Helpers should trim names and fall back to the device id."""
 
-    assert coord_module._device_display_name({"name": " Device "}, "dev") == "Device"
-    assert coord_module._device_display_name({"name": ""}, "dev") == "Device dev"
-    assert coord_module._device_display_name({}, "dev") == "Device dev"
-    assert coord_module._device_display_name({"name": 1234}, "dev") == "1234"
+    metadata = build_device_metadata_payload("dev", name=" Device ")
+    assert coord_module._device_display_name(metadata, "dev") == "Device"
+    assert (
+        coord_module._device_display_name(
+            build_device_metadata_payload("dev", name=""), "dev"
+        )
+        == "Device dev"
+    )
+    assert coord_module._device_display_name(None, "dev") == "Device dev"
+    assert (
+        coord_module._device_display_name(
+            build_device_metadata_payload("dev", name=1234),
+            "dev",
+        )
+        == "1234"
+    )
 
-    proxy_device: MappingProxyType[str, str] = MappingProxyType({"name": " Proxy "})
-    assert coord_module._device_display_name(proxy_device, "dev") == "Proxy"
+
+def test_state_coordinator_omits_raw_device_payload(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """Coordinator should store typed metadata instead of raw device payloads."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload(
+            "dev",
+            name=" Typed Device ",
+            model=" Model X ",
+        ),
+        nodes=None,
+        inventory=inventory,
+    )
+
+    assert not hasattr(coordinator, "_device")
+    assert not isinstance(getattr(coordinator, "_device_metadata"), Mapping)
+
+    device_record = coordinator._device_record()["dev"]
+    assert device_record["name"] == "Typed Device"
+    assert device_record["model"] == "Model X"
 
 
 def test_mode_and_pending_key_helpers(
@@ -579,7 +619,7 @@ def test_mode_and_pending_key_helpers(
         client=AsyncMock(),
         base_interval=30,
         dev_id="dev",
-        device={"name": "Device"},
+        device=build_device_metadata_payload("dev", name="Device"),
         nodes=None,
         inventory=inventory,
     )
@@ -603,7 +643,7 @@ def test_prune_and_register_pending_settings(
         client=AsyncMock(),
         base_interval=30,
         dev_id="dev",
-        device={"name": "Device"},
+        device=build_device_metadata_payload("dev", name="Device"),
         nodes=None,
         inventory=inventory,
     )
@@ -644,7 +684,7 @@ def test_should_defer_pending_setting_branches(
         client=AsyncMock(),
         base_interval=30,
         dev_id="dev",
-        device={"name": "Device"},
+        device=build_device_metadata_payload("dev", name="Device"),
         nodes=None,
         inventory=inventory,
     )
@@ -705,7 +745,7 @@ async def test_refresh_skips_pending_settings_merge(
         client=client,
         base_interval=30,
         dev_id="dev",
-        device={"name": "Device"},
+        device=build_device_metadata_payload("dev", name="Device"),
         nodes=None,
         inventory=inventory,
     )
@@ -752,7 +792,7 @@ async def test_poll_skips_pending_settings_merge(
         client=client,
         base_interval=30,
         dev_id="dev",
-        device={"name": "Device"},
+        device=build_device_metadata_payload("dev", name="Device"),
         nodes=None,
         inventory=inventory,
     )
@@ -799,7 +839,7 @@ def test_handle_ws_deltas_updates_store(
         client=client,
         base_interval=30,
         dev_id="dev",
-        device={"name": "Device"},
+        device=build_device_metadata_payload("dev", name="Device"),
         nodes=None,
         inventory=inventory,
     )

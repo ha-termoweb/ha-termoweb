@@ -906,12 +906,22 @@ custom_components/termoweb/const.py :: signal_ws_status
     Signal name for WS status/health updates.
 custom_components/termoweb/coordinator.py :: RaiseUpdateFailedCoordinator.async_refresh
     Refresh data and raise ``UpdateFailed`` when polling fails.
+custom_components/termoweb/coordinator.py :: _normalise_device_name
+    Return a trimmed device name or a fallback derived from ``dev_id``.
+custom_components/termoweb/coordinator.py :: _normalise_device_model
+    Return a trimmed model string when present.
+custom_components/termoweb/coordinator.py :: build_device_metadata
+    Return immutable metadata derived from a device payload.
 custom_components/termoweb/coordinator.py :: _device_display_name
     Return the trimmed device name or a fallback for ``dev_id``.
 custom_components/termoweb/coordinator.py :: StateCoordinator.__init__
     Initialize the TermoWeb device coordinator.
 custom_components/termoweb/coordinator.py :: StateCoordinator.domain_view
     Return the read-only domain state view.
+custom_components/termoweb/coordinator.py :: StateCoordinator._device_record
+    Return a minimal coordinator payload for this device.
+custom_components/termoweb/coordinator.py :: StateCoordinator._publish_device_record
+    Push the latest device snapshot to coordinator listeners.
 custom_components/termoweb/coordinator.py :: StateCoordinator._filtered_settings_payload
     Return a defensive copy of ``payload`` without raw blobs.
 custom_components/termoweb/coordinator.py :: StateCoordinator._instant_power_key
@@ -930,10 +940,6 @@ custom_components/termoweb/coordinator.py :: StateCoordinator.instant_power_over
     Return a diagnostics-friendly snapshot of instant power values.
 custom_components/termoweb/coordinator.py :: StateCoordinator._should_skip_rest_power
     Return ``True`` when websocket data is fresh enough to skip REST power.
-custom_components/termoweb/coordinator.py :: StateCoordinator._device_record
-    Return a minimal coordinator payload for this device.
-custom_components/termoweb/coordinator.py :: StateCoordinator._publish_device_record
-    Push the latest device snapshot to coordinator listeners.
 custom_components/termoweb/coordinator.py :: StateCoordinator._async_fetch_settings_to_store
     Fetch settings for every address and store them in the domain cache.
 custom_components/termoweb/coordinator.py :: StateCoordinator._normalize_mode_value
@@ -1020,10 +1026,8 @@ custom_components/termoweb/domain/state.py :: _copy_sequence
     Return a shallow copy of a sequence when applicable.
 custom_components/termoweb/domain/state.py :: _copy_mapping
     Return a shallow copy of a mapping when applicable.
-custom_components/termoweb/domain/state.py :: _deep_copy_value
-    Return a defensive shallow copy for nested payload values.
-custom_components/termoweb/domain/state.py :: _collect_extras
-    Capture non-canonical payload keys as extra metadata.
+custom_components/termoweb/domain/state.py :: _coerce_number
+    Return ``value`` as a number when possible.
 custom_components/termoweb/domain/state.py :: HeaterState.to_legacy
     Convert the state into the legacy coordinator payload shape.
 custom_components/termoweb/domain/state.py :: AccumulatorState.to_legacy
@@ -1038,8 +1042,6 @@ custom_components/termoweb/domain/state.py :: NodeStatusDelta.payload
     Return the status mapping payload.
 custom_components/termoweb/domain/state.py :: NodeSamplesDelta.payload
     Return the samples mapping payload.
-custom_components/termoweb/domain/state.py :: _coerce_number
-    Return ``value`` as a number when possible.
 custom_components/termoweb/domain/state.py :: _populate_heater_state
     Populate base heater fields on ``state`` from ``payload``.
 custom_components/termoweb/domain/state.py :: _build_heater_state
@@ -1216,8 +1218,6 @@ custom_components/termoweb/heater.py :: HeaterNodeBase._domain_state_view
     Return the domain state view exposed by the coordinator.
 custom_components/termoweb/heater.py :: HeaterNodeBase._heater_state_payload
     Return the canonical heater settings payload.
-custom_components/termoweb/heater.py :: HeaterNodeBase._device_record
-    Return the coordinator cache entry for this device.
 custom_components/termoweb/heater.py :: HeaterNodeBase._resolve_inventory
     Return the cached inventory for this entity, if available.
 custom_components/termoweb/heater.py :: HeaterNodeBase._heater_section
@@ -1282,8 +1282,6 @@ custom_components/termoweb/inventory.py :: Inventory.__init__
     Initialize the inventory container.
 custom_components/termoweb/inventory.py :: Inventory.dev_id
     Get the device identifier.
-custom_components/termoweb/inventory.py :: Inventory.payload
-    Get the raw node payload.
 custom_components/termoweb/inventory.py :: Inventory.nodes
     Get the immutable tuple of node objects.
 custom_components/termoweb/inventory.py :: Inventory.has_node
