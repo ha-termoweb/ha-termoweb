@@ -17,7 +17,12 @@ from custom_components.termoweb import (
     coordinator as coord_module,
     inventory as inventory_module,
 )
-from custom_components.termoweb.domain import NodeId, NodeSettingsDelta, NodeType
+from custom_components.termoweb.domain import (
+    NodeId,
+    NodeSettingsDelta,
+    NodeType,
+    state_to_dict,
+)
 from custom_components.termoweb.inventory import AccumulatorNode, HeaterNode
 
 
@@ -37,7 +42,7 @@ def _state_payload(
     if view is None:
         return None
     state = view.get_heater_state(node_type, addr)
-    return state.to_legacy() if state is not None else None
+    return state_to_dict(state) if state is not None else None
 
 
 def test_coerce_int_variants() -> None:

@@ -14,6 +14,7 @@ import pytest
 from conftest import FakeCoordinator, _install_stubs, build_coordinator_device_state
 
 import custom_components.termoweb.inventory as inventory_module
+from custom_components.termoweb.domain import state_to_dict
 from custom_components.termoweb.inventory import Inventory
 
 _install_stubs()
@@ -2099,7 +2100,7 @@ def test_heater_write_paths_and_errors(
         def _state() -> dict[str, Any]:
             view = getattr(coordinator, "domain_view", None)
             state = view.get_heater_state("htr", addr) if view else None
-            return state.to_legacy() if state is not None else {}
+            return state_to_dict(state) if state is not None else {}
 
         fallback_waiters: Deque[asyncio.Future[None]] = deque()
         write_waiters: Deque[asyncio.Future[None]] = deque()

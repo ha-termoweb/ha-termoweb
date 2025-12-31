@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass, fields
+from dataclasses import asdict, dataclass, fields
 from typing import Any
 
 from .ids import NodeId, NodeType
@@ -55,32 +55,6 @@ class HeaterState:
     max_power: float | int | None = None
     batt_level: int | None = None
 
-    def to_legacy(self) -> dict[str, Any]:
-        """Convert the state into the legacy coordinator payload shape."""
-
-        payload: dict[str, Any] = {}
-        if self.mode is not None:
-            payload["mode"] = self.mode
-        if self.stemp is not None:
-            payload["stemp"] = self.stemp
-        if self.mtemp is not None:
-            payload["mtemp"] = self.mtemp
-        if self.temp is not None:
-            payload["temp"] = self.temp
-        if self.prog is not None:
-            payload["prog"] = list(self.prog)
-        if self.ptemp is not None:
-            payload["ptemp"] = list(self.ptemp)
-        if self.units is not None:
-            payload["units"] = self.units
-        if self.state is not None:
-            payload["state"] = self.state
-        if self.max_power is not None:
-            payload["max_power"] = self.max_power
-        if self.batt_level is not None:
-            payload["batt_level"] = self.batt_level
-        return payload
-
 
 @dataclass(slots=True)
 class AccumulatorState(HeaterState):
@@ -101,40 +75,6 @@ class AccumulatorState(HeaterState):
     boost_end_datetime: Any | None = None
     boost_minutes_delta: int | None = None
 
-    def to_legacy(self) -> dict[str, Any]:
-        """Convert the accumulator state into the legacy payload shape."""
-
-        payload = HeaterState.to_legacy(self)
-        if self.charge_level is not None:
-            payload["charge_level"] = self.charge_level
-        if self.boost is not None:
-            payload["boost"] = self.boost
-        if self.charging is not None:
-            payload["charging"] = self.charging
-        if self.current_charge_per is not None:
-            payload["current_charge_per"] = self.current_charge_per
-        if self.target_charge_per is not None:
-            payload["target_charge_per"] = self.target_charge_per
-        if self.boost_active is not None:
-            payload["boost_active"] = self.boost_active
-        if self.boost_end is not None:
-            payload["boost_end"] = _copy_mapping(self.boost_end) or self.boost_end
-        if self.boost_remaining is not None:
-            payload["boost_remaining"] = self.boost_remaining
-        if self.boost_time is not None:
-            payload["boost_time"] = self.boost_time
-        if self.boost_temp is not None:
-            payload["boost_temp"] = self.boost_temp
-        if self.boost_end_day is not None:
-            payload["boost_end_day"] = self.boost_end_day
-        if self.boost_end_min is not None:
-            payload["boost_end_min"] = self.boost_end_min
-        if self.boost_end_datetime is not None:
-            payload["boost_end_datetime"] = self.boost_end_datetime
-        if self.boost_minutes_delta is not None:
-            payload["boost_minutes_delta"] = self.boost_minutes_delta
-        return payload
-
 
 @dataclass(slots=True)
 class ThermostatState(HeaterState):
@@ -149,20 +89,6 @@ class PowerMonitorState:
     voltage: float | int | None = None
     current: float | int | None = None
     energy: float | int | None = None
-
-    def to_legacy(self) -> dict[str, Any]:
-        """Convert the power monitor state into the legacy payload shape."""
-
-        payload: dict[str, Any] = {}
-        if self.power is not None:
-            payload["power"] = self.power
-        if self.voltage is not None:
-            payload["voltage"] = self.voltage
-        if self.current is not None:
-            payload["current"] = self.current
-        if self.energy is not None:
-            payload["energy"] = self.energy
-        return payload
 
 
 DomainState = HeaterState | AccumulatorState | ThermostatState | PowerMonitorState
@@ -307,10 +233,12 @@ def _build_heater_state(payload: Mapping[str, Any]) -> HeaterState:
     return _populate_heater_state(HeaterState(), payload)
 
 
-def _build_accumulator_state(payload: Mapping[str, Any]) -> AccumulatorState:
-    """Construct an accumulator state instance from ``payload``."""
+def _populate_accumulator_fields(
+    state: AccumulatorState, payload: Mapping[str, Any]
+) -> AccumulatorState:
+    """Populate accumulator-specific fields on ``state``."""
 
-    state = _populate_heater_state(AccumulatorState(), payload)
+    _populate_heater_state(state, payload)
     if "charge_level" in payload:
         state.charge_level = _coerce_number(payload.get("charge_level"))
     if "boost" in payload:
@@ -355,6 +283,13 @@ def _build_accumulator_state(payload: Mapping[str, Any]) -> AccumulatorState:
     return state
 
 
+def _build_accumulator_state(payload: Mapping[str, Any]) -> AccumulatorState:
+    """Construct an accumulator state instance from ``payload``."""
+
+    state = _populate_heater_state(AccumulatorState(), payload)
+    return _populate_accumulator_fields(state, payload)
+
+
 def _build_thermostat_state(payload: Mapping[str, Any]) -> ThermostatState:
     """Construct a thermostat state instance from ``payload``."""
 
@@ -365,6 +300,14 @@ def _build_power_monitor_state(payload: Mapping[str, Any]) -> PowerMonitorState:
     """Construct a power monitor state instance from ``payload``."""
 
     state = PowerMonitorState()
+    return _populate_power_monitor_state(state, payload)
+
+
+def _populate_power_monitor_state(
+    state: PowerMonitorState, payload: Mapping[str, Any]
+) -> PowerMonitorState:
+    """Populate power monitor fields on ``state``."""
+
     if "power" in payload:
         state.power = _coerce_number(payload.get("power"))
     if "voltage" in payload:
@@ -402,12 +345,12 @@ def _merge_state(state: DomainState, payload: Mapping[str, Any]) -> DomainState:
     """Merge ``payload`` fields into ``state`` without altering the type."""
 
     if isinstance(state, AccumulatorState):
-        return _build_accumulator_state({**state.to_legacy(), **payload})
+        return _populate_accumulator_fields(state, payload)
     if isinstance(state, ThermostatState):
-        return _build_thermostat_state({**state.to_legacy(), **payload})
+        return _populate_heater_state(state, payload)
     if isinstance(state, PowerMonitorState):
-        return _build_power_monitor_state({**state.to_legacy(), **payload})
-    return _build_heater_state({**state.to_legacy(), **payload})
+        return _populate_power_monitor_state(state, payload)
+    return _populate_heater_state(state, payload)
 
 
 class DomainStateStore:
@@ -554,23 +497,6 @@ class DomainStateStore:
 
         yield from self._states.items()
 
-    def legacy_view(self) -> dict[str, dict[str, Any]]:
-        """Return a legacy settings mapping grouped by type and address."""
-
-        legacy: dict[str, dict[str, Any]] = {}
-        for node_type, addrs in self._addresses_by_type.items():
-            bucket = legacy.setdefault(node_type.value, {})
-            for addr in sorted(addrs):
-                try:
-                    node_id = NodeId(node_type, addr)
-                except ValueError:
-                    continue
-                state = self._states.get(node_id)
-                if state is None:
-                    continue
-                bucket[addr] = state.to_legacy()
-        return legacy
-
 
 def _normalize_node_type(node_type: NodeType | str) -> NodeType | None:
     """Return a canonical ``NodeType`` when possible."""
@@ -601,3 +527,59 @@ def build_state_from_payload(
     if not canonical:
         return None
     return _build_state(normalized_type, canonical)
+
+
+def state_to_dict(
+    state: DomainState | None, *, include_none: bool = False
+) -> dict[str, Any]:
+    """Return a defensive mapping representation of ``state``."""
+
+    if state is None:
+        return {}
+
+    payload = asdict(state)
+    filtered: dict[str, Any] = {}
+    for key, value in payload.items():
+        if value is None and not include_none:
+            continue
+        if isinstance(value, Mapping):
+            filtered[key] = dict(value)
+        elif isinstance(value, list):
+            filtered[key] = list(value)
+        else:
+            filtered[key] = value
+    return filtered
+
+
+def clone_state(state: DomainState | None) -> DomainState | None:
+    """Return a detached copy of ``state`` when available."""
+
+    if state is None:
+        return None
+
+    payload = state_to_dict(state)
+    if isinstance(state, AccumulatorState):
+        return _build_accumulator_state(payload)
+    if isinstance(state, ThermostatState):
+        return _build_thermostat_state(payload)
+    if isinstance(state, PowerMonitorState):
+        return _build_power_monitor_state(payload)
+    return _build_heater_state(payload)
+
+
+def apply_payload_to_state(
+    state: DomainState | None, payload: Mapping[str, Any] | None
+) -> DomainState | None:
+    """Apply a mapping payload onto ``state`` when possible."""
+
+    if state is None or not isinstance(payload, Mapping):
+        return state
+
+    canonical = canonicalize_settings_payload(payload)
+    if isinstance(state, AccumulatorState):
+        return _populate_accumulator_fields(state, canonical)
+    if isinstance(state, ThermostatState):
+        return _populate_heater_state(state, canonical)
+    if isinstance(state, PowerMonitorState):
+        return _populate_power_monitor_state(state, canonical)
+    return _populate_heater_state(state, canonical)

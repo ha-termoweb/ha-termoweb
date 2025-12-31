@@ -18,6 +18,7 @@ from .boost import supports_boost
 from .const import DOMAIN, signal_ws_data, signal_ws_status
 from .coordinator import StateCoordinator
 from .domain import DomainStateView
+from .domain.state import state_to_dict
 from .entity import GatewayDispatcherEntity
 from .heater import (
     BoostState,
@@ -337,7 +338,7 @@ def _build_settings_resolver(
         if isinstance(view, DomainStateView):
             state = view.get_heater_state(node_type, addr)
             if state is not None:
-                payload = state.to_legacy()
+                payload = state_to_dict(state)
                 return payload if isinstance(payload, Mapping) else None
         return None
 

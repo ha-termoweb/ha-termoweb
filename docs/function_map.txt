@@ -1,5 +1,6 @@
-Wrote 809 functions to /workspace/ha-termoweb/docs/function_map.txt
-build_unknown_node_probe_requests
+# TermoWeb Function Map
+
+custom_components/termoweb/__init__.py :: _build_unknown_node_probe_requests
     Return common REST endpoints to query for an unknown node type.
 custom_components/termoweb/__init__.py :: _async_probe_unknown_node_types
     Log discovery probes for node types not yet supported.
@@ -1019,20 +1020,12 @@ custom_components/termoweb/domain/ids.py :: NodeId.__post_init__
     Normalise the node address to a non-empty string.
 custom_components/termoweb/domain/inventory.py :: InstallationInventory.__post_init__
     Ensure nodes mapping is immutable.
-custom_components/termoweb/domain/legacy_view.py :: store_to_legacy_coordinator_data
-    Return a coordinator data mapping using the legacy dict schema.
 custom_components/termoweb/domain/state.py :: _copy_sequence
     Return a shallow copy of a sequence when applicable.
 custom_components/termoweb/domain/state.py :: _copy_mapping
     Return a shallow copy of a mapping when applicable.
 custom_components/termoweb/domain/state.py :: _coerce_number
     Return ``value`` as a number when possible.
-custom_components/termoweb/domain/state.py :: HeaterState.to_legacy
-    Convert the state into the legacy coordinator payload shape.
-custom_components/termoweb/domain/state.py :: AccumulatorState.to_legacy
-    Convert the accumulator state into the legacy payload shape.
-custom_components/termoweb/domain/state.py :: PowerMonitorState.to_legacy
-    Convert the power monitor state into the legacy payload shape.
 custom_components/termoweb/domain/state.py :: canonicalize_settings_payload
     Return canonical setting fields derived from ``payload``.
 custom_components/termoweb/domain/state.py :: NodeDelta.payload
@@ -1047,12 +1040,16 @@ custom_components/termoweb/domain/state.py :: _populate_heater_state
     Populate base heater fields on ``state`` from ``payload``.
 custom_components/termoweb/domain/state.py :: _build_heater_state
     Construct a heater state instance from ``payload``.
+custom_components/termoweb/domain/state.py :: _populate_accumulator_fields
+    Populate accumulator-specific fields on ``state``.
 custom_components/termoweb/domain/state.py :: _build_accumulator_state
     Construct an accumulator state instance from ``payload``.
 custom_components/termoweb/domain/state.py :: _build_thermostat_state
     Construct a thermostat state instance from ``payload``.
 custom_components/termoweb/domain/state.py :: _build_power_monitor_state
     Construct a power monitor state instance from ``payload``.
+custom_components/termoweb/domain/state.py :: _populate_power_monitor_state
+    Populate power monitor fields on ``state``.
 custom_components/termoweb/domain/state.py :: _build_state
     Return a domain state object for ``node_type`` and ``payload``.
 custom_components/termoweb/domain/state.py :: _merge_state
@@ -1079,12 +1076,16 @@ custom_components/termoweb/domain/state.py :: DomainStateStore.known_types
     Return the set of node types represented in the store.
 custom_components/termoweb/domain/state.py :: DomainStateStore.iter_states
     Yield stored ``(NodeId, DomainState)`` pairs.
-custom_components/termoweb/domain/state.py :: DomainStateStore.legacy_view
-    Return a legacy settings mapping grouped by type and address.
 custom_components/termoweb/domain/state.py :: _normalize_node_type
     Return a canonical ``NodeType`` when possible.
 custom_components/termoweb/domain/state.py :: build_state_from_payload
     Return a domain state instance derived from a legacy payload.
+custom_components/termoweb/domain/state.py :: state_to_dict
+    Return a defensive mapping representation of ``state``.
+custom_components/termoweb/domain/state.py :: clone_state
+    Return a detached copy of ``state`` when available.
+custom_components/termoweb/domain/state.py :: apply_payload_to_state
+    Apply a mapping payload onto ``state`` when possible.
 custom_components/termoweb/domain/view.py :: DomainStateView.__init__
     Initialise the view for ``dev_id`` using ``store`` when available.
 custom_components/termoweb/domain/view.py :: DomainStateView.update_store
@@ -1217,6 +1218,8 @@ custom_components/termoweb/heater.py :: HeaterNodeBase._device_available
     Return True when the immutable inventory exposes this node.
 custom_components/termoweb/heater.py :: HeaterNodeBase._domain_state_view
     Return the domain state view exposed by the coordinator.
+custom_components/termoweb/heater.py :: HeaterNodeBase._heater_state
+    Return the current cached domain state.
 custom_components/termoweb/heater.py :: HeaterNodeBase._heater_state_payload
     Return the canonical heater settings payload.
 custom_components/termoweb/heater.py :: HeaterNodeBase._resolve_inventory

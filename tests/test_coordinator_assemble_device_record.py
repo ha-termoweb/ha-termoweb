@@ -1,32 +1,11 @@
 """Tests for ``StateCoordinator._assemble_device_record``."""
 
-from collections.abc import Callable, Iterable, Mapping
-from typing import Any
-
 from custom_components.termoweb.domain.ids import NodeId, NodeType
-from custom_components.termoweb.domain.legacy_view import (
-    store_to_legacy_coordinator_data,
-)
-from custom_components.termoweb.domain.state import DomainStateStore
-from custom_components.termoweb.inventory import AccumulatorNode, HeaterNode
+from custom_components.termoweb.domain.state import DomainStateStore, state_to_dict
 
 
-def test_assemble_device_record_uses_inventory_maps(
-    inventory_builder: Callable[
-        [str, Mapping[str, Any] | None, Iterable[Any] | None],
-        Any,
-    ],
-) -> None:
-    """Device records should expose inventory-derived metadata."""
-
-    inventory = inventory_builder(
-        "dev",
-        {},
-        [
-            HeaterNode(name="Hall", addr="01"),
-            AccumulatorNode(name="Store", addr="07"),
-        ],
-    )
+def test_domain_store_snapshots_match_expected_payload() -> None:
+    """Domain state store should expose typed settings snapshots."""
 
     settings = {
         "htr": {"01": {"stemp": 21}},
@@ -37,22 +16,14 @@ def test_assemble_device_record_uses_inventory_maps(
         [NodeId(NodeType.HEATER, "01"), NodeId(NodeType.ACCUMULATOR, "07")]
     )
     for node_type, bucket in settings.items():
-        if not isinstance(bucket, Mapping):
+        if not isinstance(bucket, dict):
             continue
         for addr, payload in bucket.items():
             store.apply_full_snapshot(node_type, addr, payload)
 
-    record = store_to_legacy_coordinator_data(
-        "dev",
-        store,
-        inventory,
-        device_name="Device dev",
-        device_details={"name": "Device dev"},
-    )
-
-    device = record["dev"]
-    assert device["inventory"] is inventory
-    assert "addresses_by_type" not in device
-    assert "heater_address_map" not in device
-    assert "power_monitor_address_map" not in device
-    assert device["settings"] == settings
+    record = {
+        (node_id.node_type.value, node_id.addr): state_to_dict(state)
+        for node_id, state in store.iter_states()
+    }
+    assert record[("htr", "01")] == {"stemp": 21}
+    assert record[("acm", "07")] == {"mode": "auto"}

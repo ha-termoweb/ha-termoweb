@@ -23,7 +23,18 @@ from .backend.sanitize import mask_identifier
 from .boost import coerce_int, resolve_boost_end_from_fields
 from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
 from .domain.ids import NodeId as DomainNodeId, NodeType as DomainNodeType
-from .domain.state import DomainStateStore, NodeSettingsDelta
+from .domain.state import (
+    AccumulatorState,
+    DomainState,
+    DomainStateStore,
+    HeaterState,
+    NodeSettingsDelta,
+    PowerMonitorState,
+    ThermostatState,
+    apply_payload_to_state,
+    clone_state,
+    state_to_dict,
+)
 from .domain.view import DomainStateView
 from .inventory import Inventory, normalize_node_addr, normalize_node_type
 from .utils import float_or_none
@@ -770,7 +781,7 @@ class StateCoordinator(
         self._publish_device_record()
 
     def apply_entity_patch(
-        self, node_type: str, addr: str, mutator: Callable[[dict[str, Any]], None]
+        self, node_type: str, addr: str, mutator: Callable[[DomainState], None]
     ) -> bool:
         """Apply an optimistic patch through the domain store when available."""
 
@@ -779,27 +790,52 @@ class StateCoordinator(
         if store is None or not isinstance(inventory, Inventory):
             return False
 
+        normalized_type = normalize_node_type(
+            node_type,
+            use_default_when_falsey=True,
+        )
+        if not normalized_type:
+            return False
+
         try:
-            current_state = store.get_state(node_type, addr)
-            base = current_state.to_legacy() if current_state else {}
-            payload = dict(base)
+            current_state = store.get_state(normalized_type, addr)
+            working_state = clone_state(current_state)
+            if working_state is None:
+                if normalized_type == DomainNodeType.ACCUMULATOR.value:
+                    working_state = AccumulatorState()
+                elif normalized_type == DomainNodeType.THERMOSTAT.value:
+                    working_state = ThermostatState()
+                elif normalized_type == DomainNodeType.POWER_MONITOR.value:
+                    working_state = PowerMonitorState()
+                else:
+                    working_state = HeaterState()
+
             before_boost = (
-                payload.get("boost"),
-                payload.get("boost_active"),
-                payload.get("boost_end_day"),
-                payload.get("boost_end_min"),
+                getattr(working_state, "boost", None),
+                getattr(working_state, "boost_active", None),
+                getattr(working_state, "boost_end_day", None),
+                getattr(working_state, "boost_end_min", None),
             )
-            mutator(payload)
+            try:
+                mutator(working_state)
+            except (AttributeError, TypeError):
+                payload = state_to_dict(working_state, include_none=True)
+                mutator(payload)  # type: ignore[arg-type]
+                apply_payload_to_state(working_state, payload)
             after_boost = (
-                payload.get("boost"),
-                payload.get("boost_active"),
-                payload.get("boost_end_day"),
-                payload.get("boost_end_min"),
+                getattr(working_state, "boost", None),
+                getattr(working_state, "boost_active", None),
+                getattr(working_state, "boost_end_day", None),
+                getattr(working_state, "boost_end_min", None),
             )
-            if before_boost != after_boost:
-                payload["boost_end_datetime"] = None
-                payload["boost_minutes_delta"] = None
-            store.apply_patch(node_type, addr, payload)
+            if before_boost != after_boost and isinstance(
+                working_state, AccumulatorState
+            ):
+                working_state.boost_end_datetime = None
+                working_state.boost_minutes_delta = None
+
+            payload = state_to_dict(working_state, include_none=True)
+            store.apply_patch(normalized_type, addr, payload)
         except _CANCELLED_ERROR:
             raise
         except Exception as err:  # pragma: no cover - defensive  # noqa: BLE001

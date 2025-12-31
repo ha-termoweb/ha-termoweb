@@ -26,6 +26,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .domain import DomainStateView
+from .domain.state import state_to_dict
 from .heater import (
     BOOST_BUTTON_METADATA,
     DEFAULT_BOOST_TEMPERATURE,
@@ -243,7 +244,7 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
             self.boost_context.node_type,
             self.boost_context.addr,
         )
-        payload = state.to_legacy() if state is not None else None
+        payload = state_to_dict(state) if state is not None else None
         return payload if isinstance(payload, Mapping) else None
 
     def _coordinator_boost_active(self) -> bool:

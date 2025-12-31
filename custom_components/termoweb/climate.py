@@ -24,6 +24,7 @@ import voluptuous as vol
 from .backend.ducaheat import DucaheatRESTClient
 from .boost import coerce_boost_minutes, supports_boost
 from .const import BRAND_DUCAHEAT, DOMAIN
+from .domain import apply_payload_to_state, state_to_dict
 from .heater import (
     DEFAULT_BOOST_DURATION,
     HeaterNodeBase,
@@ -405,13 +406,18 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
     def _optimistic_update(self, mutator: Callable[[dict[str, Any]], None]) -> None:
         """Apply ``mutator`` to cached settings and refresh state if changed."""
+
+        def _state_mutator(state: Any) -> None:
+            payload = state_to_dict(state)
+            mutator(payload)
+            apply_payload_to_state(state, payload)
         try:
             coordinator = getattr(self, "coordinator", None)
             apply_patch = getattr(coordinator, "apply_entity_patch", None)
             updated = False
             refresh_needed = False
             if callable(apply_patch):
-                applied = bool(apply_patch(self._node_type, self._addr, mutator))
+                applied = bool(apply_patch(self._node_type, self._addr, _state_mutator))
                 if applied:
                     updated = True
                     refresh_needed = True

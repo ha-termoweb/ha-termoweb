@@ -14,9 +14,10 @@ from .commands import (
 )
 from .ids import NodeId, NodeType, normalize_node_type
 from .inventory import InstallationInventory, NodeInventory
-from .legacy_view import store_to_legacy_coordinator_data
 from .state import (
     AccumulatorState,
+    apply_payload_to_state,
+    clone_state,
     DomainStateStore,
     HeaterState,
     NodeDelta,
@@ -27,6 +28,7 @@ from .state import (
     ThermostatState,
     build_state_from_payload,
     canonicalize_settings_payload,
+    state_to_dict,
 )
 from .view import DomainStateView
 
@@ -34,6 +36,8 @@ __all__ = [
     "AccumulatorCommand",
     "AccumulatorState",
     "BaseCommand",
+    "apply_payload_to_state",
+    "clone_state",
     "DomainStateStore",
     "DomainStateView",
     "HeaterState",
@@ -58,5 +62,5 @@ __all__ = [
     "build_state_from_payload",
     "canonicalize_settings_payload",
     "normalize_node_type",
-    "store_to_legacy_coordinator_data",
+    "state_to_dict",
 ]

@@ -17,6 +17,7 @@ from homeassistant.util import dt as dt_util
 from .boost import coerce_boost_bool, coerce_boost_minutes, supports_boost
 from .const import DOMAIN, signal_ws_data
 from .domain import DomainStateView
+from .domain.state import DomainState, state_to_dict
 from .i18n import COORDINATOR_FALLBACK_ATTR, format_fallback
 from .inventory import (
     HEATER_NODE_TYPES,
@@ -1000,16 +1001,19 @@ class HeaterNodeBase(CoordinatorEntity):
         view = getattr(self.coordinator, "domain_view", None)
         return view if isinstance(view, DomainStateView) else None
 
+    def _heater_state(self) -> DomainState | None:
+        """Return the current cached domain state."""
+
+        view = self._domain_state_view()
+        if view is None:
+            return None
+        return view.get_heater_state(self._node_type, self._addr)
+
     def _heater_state_payload(self) -> Mapping[str, Any] | None:
         """Return the canonical heater settings payload."""
 
-        view = self._domain_state_view()
-        if view is not None:
-            state = view.get_heater_state(self._node_type, self._addr)
-            if state is not None:
-                return state.to_legacy()
-
-        return None
+        state = self._heater_state()
+        return state_to_dict(state) if state is not None else None
 
     def _resolve_inventory(self) -> Inventory:
         """Return the cached inventory for this entity, if available."""
