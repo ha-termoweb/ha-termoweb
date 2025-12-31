@@ -506,7 +506,7 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
         dev = first["dev"]
         assert dev["dev_id"] == "dev"
         assert dev["name"] == "Device"
-        assert dev["raw"] == {"name": " Device "}
+        assert dev["model"] is None
         assert "nodes" not in dev
         assert dev["connected"] is True
         assert dev["settings"]["htr"]["A"] == {"mode": "auto"}
@@ -676,7 +676,7 @@ def test_refresh_heater_populates_missing_metadata() -> None:
         result = updates[-1]["dev"]
         client.get_node_settings.assert_called_once_with("dev", ("htr", "A"))
         assert result["name"] == "Device"
-        assert result["raw"] == {"name": " Device "}
+        assert result["model"] is None
         assert "nodes" not in result
         assert result["connected"] is True
         assert result["settings"]["htr"]["A"] == {"mode": "heat"}

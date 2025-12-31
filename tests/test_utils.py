@@ -158,7 +158,7 @@ def test_build_gateway_device_info_respects_include_version_flag() -> None:
                     "brand": "Ducaheat",
                     "version": "9.1",
                     "coordinator": types.SimpleNamespace(
-                        data={"dev": {"raw": {"model": "Controller"}}}
+                        data={"dev": {"model": "Controller"}}
                     ),
                 }
             }
@@ -178,7 +178,7 @@ def test_build_gateway_device_info_uses_gateway_model_from_coordinator() -> None
             DOMAIN: {
                 "entry": {
                     "coordinator": types.SimpleNamespace(
-                        data={"dev": {"raw": {"model": "Controller"}}}
+                        data={"dev": {"model": "Controller"}}
                     )
                 }
             }

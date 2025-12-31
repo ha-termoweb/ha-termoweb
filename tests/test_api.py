@@ -1745,7 +1745,7 @@ def test_ducaheat_get_node_settings_normalises_payload(
         assert "boost_temp" not in data
         assert len(data["prog"]) == 168
         assert data["ptemp"] == ["7.0", "18.0", "21.0"]
-        assert data["raw"]["status"]["mode"] == "Manual"
+        assert "raw" not in data
 
     asyncio.run(_run())
 

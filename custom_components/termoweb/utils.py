@@ -111,11 +111,9 @@ def build_gateway_device_info(
     if data:
         gateway_data = data.get(str(dev_id))
         if isinstance(gateway_data, Mapping):
-            raw = gateway_data.get("raw")
-            if isinstance(raw, Mapping):
-                model = raw.get("model")
-                if model not in (None, ""):
-                    info["model"] = str(model)
+            model = gateway_data.get("model")
+            if model not in (None, ""):
+                info["model"] = str(model)
 
     return info
 

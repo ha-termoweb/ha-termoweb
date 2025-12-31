@@ -25,7 +25,7 @@ def test_device_record_reuses_inventory_instance() -> None:
         store,
         inventory,
         device_name="Device",
-        device_raw={},
+        device_details={},
     )
 
     device = record["dev-123"]

@@ -62,7 +62,10 @@ coordinators already consume.【F:custom_components/termoweb/inventory.py†L181
   REST snapshots and websocket deltas are written into the shared
   `DomainStateStore` for both vendors, and the exposed coordinator data is a
   derived, legacy-shaped view of that store rather than an independently merged
-  dictionary. `EnergyStateCoordinator` tracks address subscriptions, derives
+  dictionary. The store retains only explicit, bounded fields (modes,
+  temperatures, charge metadata, battery levels, capabilities) and discards
+  unknown vendor keys or raw payload blobs to keep memory usage predictable.
+  `EnergyStateCoordinator` tracks address subscriptions, derives
   power deltas from hourly counters and suppresses REST polling when fresh
   websocket samples arrive.【F:custom_components/termoweb/coordinator.py†L93-L745】
 - **Entity platforms** – `HeaterNodeBase` wires coordinator caches and

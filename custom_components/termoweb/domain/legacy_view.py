@@ -16,16 +16,22 @@ def store_to_legacy_coordinator_data(
     inventory: Inventory,
     *,
     device_name: str,
-    device_raw: Mapping[str, Any] | None,
+    device_details: Mapping[str, Any] | None = None,
     include_nodes_by_type: bool = True,
 ) -> dict[str, dict[str, Any]]:
     """Return a coordinator data mapping using the legacy dict schema."""
+
+    model: str | None = None
+    if isinstance(device_details, Mapping):
+        model_value = device_details.get("model")
+        if model_value not in (None, ""):
+            model = str(model_value)
 
     settings = store.legacy_view()
     device_record: dict[str, Any] = {
         "dev_id": dev_id,
         "name": device_name,
-        "raw": device_raw or {},
+        "model": model,
         "connected": True,
         "inventory": inventory,
         "settings": settings,

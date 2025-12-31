@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from .ids import NodeId, NodeType
@@ -27,53 +27,17 @@ def _copy_mapping(value: Any) -> dict[str, Any] | None:
     return None
 
 
-def _deep_copy_value(value: Any) -> Any:
-    """Return a defensive shallow copy for nested payload values."""
+def _coerce_number(value: Any) -> float | int | None:
+    """Return ``value`` as a number when possible."""
 
-    if isinstance(value, Mapping):
-        return {k: _deep_copy_value(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_deep_copy_value(item) for item in value]
-    if isinstance(value, tuple):
-        return [_deep_copy_value(item) for item in value]
-    return value
-
-
-def _collect_extras(payload: Mapping[str, Any], consumed: set[str]) -> dict[str, Any]:
-    """Capture non-canonical payload keys as extra metadata."""
-
-    extras: dict[str, Any] = {}
-    for key, value in payload.items():
-        if key in consumed:
-            continue
-        extras[key] = _deep_copy_value(value)
-    return extras
-
-
-_HEATER_CONSUMED_KEYS: set[str] = {
-    "mode",
-    "stemp",
-    "mtemp",
-    "temp",
-    "prog",
-    "ptemp",
-    "units",
-    "status",
-    "capabilities",
-}
-
-_ACCUMULATOR_CONSUMED_KEYS: set[str] = _HEATER_CONSUMED_KEYS
-_ACCUMULATOR_CONSUMED_KEYS = _ACCUMULATOR_CONSUMED_KEYS | {
-    "charge_level",
-    "boost_active",
-    "boost_time",
-    "boost_temp",
-    "boost_end_day",
-    "boost_end_min",
-    "boost_end_datetime",
-    "boost_minutes_delta",
-    "state",
-}
+    if isinstance(value, (int, float)):
+        return value
+    if value is None:
+        return None
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
 
 
 @dataclass(slots=True)
@@ -87,9 +51,11 @@ class HeaterState:
     prog: list[Any] | None = None
     ptemp: list[Any] | None = None
     units: str | None = None
+    state: str | None = None
+    max_power: float | int | None = None
+    batt_level: int | None = None
     status: dict[str, Any] | None = None
     capabilities: dict[str, Any] | None = None
-    extra: dict[str, Any] = field(default_factory=dict)
 
     def to_legacy(self) -> dict[str, Any]:
         """Convert the state into the legacy coordinator payload shape."""
@@ -109,12 +75,16 @@ class HeaterState:
             payload["ptemp"] = list(self.ptemp)
         if self.units is not None:
             payload["units"] = self.units
+        if self.state is not None:
+            payload["state"] = self.state
+        if self.max_power is not None:
+            payload["max_power"] = self.max_power
+        if self.batt_level is not None:
+            payload["batt_level"] = self.batt_level
         if self.status is not None:
             payload["status"] = dict(self.status)
         if self.capabilities is not None:
             payload["capabilities"] = dict(self.capabilities)
-        for key, value in self.extra.items():
-            payload.setdefault(key, _deep_copy_value(value))
         return payload
 
 
@@ -123,14 +93,19 @@ class AccumulatorState(HeaterState):
     """Runtime state for an accumulator node."""
 
     charge_level: float | int | None = None
+    boost: bool | None = None
+    charging: bool | None = None
+    current_charge_per: int | float | None = None
+    target_charge_per: int | float | None = None
     boost_active: bool | None = None
+    boost_end: Any | None = None
+    boost_remaining: float | int | None = None
     boost_time: int | float | None = None
     boost_temp: Any | None = None
     boost_end_day: int | None = None
     boost_end_min: int | None = None
     boost_end_datetime: Any | None = None
     boost_minutes_delta: int | None = None
-    state: str | None = None
 
     def to_legacy(self) -> dict[str, Any]:
         """Convert the accumulator state into the legacy payload shape."""
@@ -138,8 +113,20 @@ class AccumulatorState(HeaterState):
         payload = HeaterState.to_legacy(self)
         if self.charge_level is not None:
             payload["charge_level"] = self.charge_level
+        if self.boost is not None:
+            payload["boost"] = self.boost
+        if self.charging is not None:
+            payload["charging"] = self.charging
+        if self.current_charge_per is not None:
+            payload["current_charge_per"] = self.current_charge_per
+        if self.target_charge_per is not None:
+            payload["target_charge_per"] = self.target_charge_per
         if self.boost_active is not None:
             payload["boost_active"] = self.boost_active
+        if self.boost_end is not None:
+            payload["boost_end"] = _copy_mapping(self.boost_end) or self.boost_end
+        if self.boost_remaining is not None:
+            payload["boost_remaining"] = self.boost_remaining
         if self.boost_time is not None:
             payload["boost_time"] = self.boost_time
         if self.boost_temp is not None:
@@ -152,8 +139,6 @@ class AccumulatorState(HeaterState):
             payload["boost_end_datetime"] = self.boost_end_datetime
         if self.boost_minutes_delta is not None:
             payload["boost_minutes_delta"] = self.boost_minutes_delta
-        if self.state is not None:
-            payload["state"] = self.state
         return payload
 
 
@@ -168,7 +153,6 @@ class PowerMonitorState:
 
     status: dict[str, Any] | None = None
     capabilities: dict[str, Any] | None = None
-    extra: dict[str, Any] = field(default_factory=dict)
 
     def to_legacy(self) -> dict[str, Any]:
         """Convert the power monitor state into the legacy payload shape."""
@@ -178,8 +162,6 @@ class PowerMonitorState:
             payload["status"] = dict(self.status)
         if self.capabilities is not None:
             payload["capabilities"] = dict(self.capabilities)
-        for key, value in self.extra.items():
-            payload.setdefault(key, _deep_copy_value(value))
         return payload
 
 
@@ -241,13 +223,17 @@ class NodeSamplesDelta(NodeDelta):
 def _populate_heater_state(
     state: HeaterState,
     payload: Mapping[str, Any],
-    *,
-    consumed: set[str] | None = None,
 ) -> HeaterState:
     """Populate base heater fields on ``state`` from ``payload``."""
 
     if "mode" in payload:
-        state.mode = payload.get("mode")
+        raw_mode = payload.get("mode")
+        if raw_mode is None:
+            state.mode = None
+        elif isinstance(raw_mode, str):
+            state.mode = raw_mode
+        else:
+            state.mode = str(raw_mode)
     if "stemp" in payload:
         state.stemp = payload.get("stemp")
     if "mtemp" in payload:
@@ -259,35 +245,74 @@ def _populate_heater_state(
     if "ptemp" in payload:
         state.ptemp = _copy_sequence(payload.get("ptemp"))
     if "units" in payload:
-        state.units = payload.get("units")
+        raw_units = payload.get("units")
+        if raw_units is None:
+            state.units = None
+        elif isinstance(raw_units, str):
+            state.units = raw_units
+        else:
+            state.units = str(raw_units)
+    if "state" in payload:
+        raw_state = payload.get("state")
+        if raw_state is None:
+            state.state = None
+        elif isinstance(raw_state, str):
+            state.state = raw_state
+        else:
+            state.state = str(raw_state)
+    if "max_power" in payload:
+        state.max_power = _coerce_number(payload.get("max_power"))
+    if "batt_level" in payload:
+        try:
+            state.batt_level = int(payload.get("batt_level"))
+        except (TypeError, ValueError):
+            state.batt_level = None
     if "status" in payload:
         state.status = _copy_mapping(payload.get("status"))
     if "capabilities" in payload:
         state.capabilities = _copy_mapping(payload.get("capabilities"))
-    state.extra.update(_collect_extras(payload, set(consumed or _HEATER_CONSUMED_KEYS)))
     return state
 
 
 def _build_heater_state(payload: Mapping[str, Any]) -> HeaterState:
     """Construct a heater state instance from ``payload``."""
 
-    return _populate_heater_state(
-        HeaterState(), payload, consumed=_HEATER_CONSUMED_KEYS
-    )
+    return _populate_heater_state(HeaterState(), payload)
 
 
 def _build_accumulator_state(payload: Mapping[str, Any]) -> AccumulatorState:
     """Construct an accumulator state instance from ``payload``."""
 
-    state = _populate_heater_state(
-        AccumulatorState(),
-        payload,
-        consumed=_ACCUMULATOR_CONSUMED_KEYS,
-    )
+    state = _populate_heater_state(AccumulatorState(), payload)
     if "charge_level" in payload:
-        state.charge_level = payload.get("charge_level")
+        state.charge_level = _coerce_number(payload.get("charge_level"))
+    if "boost" in payload:
+        boost_value = payload.get("boost")
+        if isinstance(boost_value, bool):
+            state.boost = boost_value
+        elif isinstance(boost_value, (int, float)):
+            state.boost = bool(boost_value)
+        else:
+            state.boost = None
+    if "charging" in payload:
+        charging_value = payload.get("charging")
+        if isinstance(charging_value, bool):
+            state.charging = charging_value
+        elif isinstance(charging_value, (int, float)):
+            state.charging = bool(charging_value)
+        else:
+            state.charging = None
+    if "current_charge_per" in payload:
+        state.current_charge_per = _coerce_number(payload.get("current_charge_per"))
+    if "target_charge_per" in payload:
+        state.target_charge_per = _coerce_number(payload.get("target_charge_per"))
     if "boost_active" in payload:
         state.boost_active = payload.get("boost_active")
+    if "boost_end" in payload:
+        end_payload = payload.get("boost_end")
+        state.boost_end = _copy_mapping(end_payload) or end_payload
+    if "boost_remaining" in payload:
+        state.boost_remaining = _coerce_number(payload.get("boost_remaining"))
     if "boost_time" in payload:
         state.boost_time = payload.get("boost_time")
     if "boost_temp" in payload:
@@ -300,32 +325,22 @@ def _build_accumulator_state(payload: Mapping[str, Any]) -> AccumulatorState:
         state.boost_end_datetime = payload.get("boost_end_datetime")
     if "boost_minutes_delta" in payload:
         state.boost_minutes_delta = payload.get("boost_minutes_delta")
-    if "state" in payload:
-        state.state = payload.get("state")
-    state.extra.update(_collect_extras(payload, set(_ACCUMULATOR_CONSUMED_KEYS)))
     return state
 
 
 def _build_thermostat_state(payload: Mapping[str, Any]) -> ThermostatState:
     """Construct a thermostat state instance from ``payload``."""
 
-    return _populate_heater_state(
-        ThermostatState(),
-        payload,
-        consumed=_HEATER_CONSUMED_KEYS,
-    )
+    return _populate_heater_state(ThermostatState(), payload)
 
 
 def _build_power_monitor_state(payload: Mapping[str, Any]) -> PowerMonitorState:
     """Construct a power monitor state instance from ``payload``."""
 
-    consumed = {"status", "capabilities"}
-    state = PowerMonitorState(
+    return PowerMonitorState(
         status=_copy_mapping(payload.get("status")),
         capabilities=_copy_mapping(payload.get("capabilities")),
     )
-    state.extra.update(_collect_extras(payload, consumed))
-    return state
 
 
 def _build_state(node_type: NodeType, payload: Mapping[str, Any]) -> DomainState:

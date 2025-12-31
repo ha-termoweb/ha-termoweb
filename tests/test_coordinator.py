@@ -701,7 +701,7 @@ async def test_refresh_skips_pending_settings_merge(
         "dev": {
             "dev_id": "dev",
             "name": "Device",
-            "raw": {"name": "Device"},
+            "model": None,
             "connected": True,
             "inventory": inventory,
             "settings": {"htr": {"1": {"mode": "manual", "stemp": "21.0"}}},
@@ -755,7 +755,7 @@ async def test_poll_skips_pending_settings_merge(
         "dev": {
             "dev_id": "dev",
             "name": "Device",
-            "raw": {"name": "Device"},
+            "model": None,
             "connected": True,
             "inventory": inventory,
             "settings": {"htr": {"1": {"mode": "manual", "stemp": "21.0"}}},

@@ -1874,7 +1874,7 @@ class FakeCoordinator:
             self._state_store,
             self.inventory,
             device_name=device_name or self.dev_id,
-            device_raw=self.dev,
+            device_details=self.dev,
         )
         self.data.update(device_record)
         return True

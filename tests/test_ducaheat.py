@@ -28,10 +28,10 @@ def test_normalise_settings_omits_raw_by_default() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_node_settings_includes_raw_when_debug(
+async def test_get_node_settings_excludes_raw_payloads(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Raw payloads should be retained when debug logging is enabled."""
+    """Raw payloads should never be retained in normalised settings."""
 
     client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
     payload = {"status": {"mode": "Manual"}}
@@ -46,4 +46,4 @@ async def test_get_node_settings_includes_raw_when_debug(
         result = await client.get_node_settings("dev", ("htr", "01"))
 
     assert result["mode"] == "manual"
-    assert result["raw"] == payload
+    assert "raw" not in result
