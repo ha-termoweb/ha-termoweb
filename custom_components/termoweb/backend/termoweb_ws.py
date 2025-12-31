@@ -46,6 +46,7 @@ from custom_components.termoweb.const import (
     signal_ws_data,
 )
 from custom_components.termoweb.domain import (
+    canonicalize_settings_payload,
     NodeId as DomainNodeId,
     NodeSettingsDelta,
     NodeType as DomainNodeType,
@@ -951,16 +952,17 @@ class WebSocketClient(_WSCommon):
                     if not addr:
                         continue
                     bucket = per_addr.setdefault(addr, {})
+                    settings_delta: Mapping[str, Any] = {}
                     if section == "status" and isinstance(payload, Mapping):
-                        bucket["status"] = dict(payload)
+                        settings_delta = canonicalize_settings_payload(
+                            {"status": payload}
+                        )
+                    elif section == "capabilities":
                         continue
-                    if section == "capabilities" and isinstance(payload, Mapping):
-                        bucket["capabilities"] = dict(payload)
-                        continue
-                    settings_delta = build_settings_delta(section, payload)
-                    if not settings_delta:
-                        continue
-                    bucket.update(settings_delta)
+                    else:
+                        settings_delta = build_settings_delta(section, payload)
+                    if settings_delta:
+                        bucket.update(settings_delta)
 
             for addr, payload in per_addr.items():
                 try:

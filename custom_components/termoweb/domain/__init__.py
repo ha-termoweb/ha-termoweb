@@ -26,6 +26,7 @@ from .state import (
     PowerMonitorState,
     ThermostatState,
     build_state_from_payload,
+    canonicalize_settings_payload,
 )
 from .view import DomainStateView
 
@@ -55,6 +56,7 @@ __all__ = [
     "StopBoost",
     "ThermostatState",
     "build_state_from_payload",
+    "canonicalize_settings_payload",
     "normalize_node_type",
     "store_to_legacy_coordinator_data",
 ]

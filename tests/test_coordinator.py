@@ -847,7 +847,7 @@ def test_handle_ws_deltas_updates_store(
     deltas = [
         NodeSettingsDelta(
             node_id=NodeId(NodeType.HEATER, "1"),
-            changes={"mode": "auto", "status": {"online": True}},
+            changes={"mode": "auto", "status": {"stemp": "21.0"}},
         )
     ]
     coordinator.handle_ws_deltas("dev", deltas, replace=True)
@@ -857,7 +857,8 @@ def test_handle_ws_deltas_updates_store(
     first_settings = _state_payload(coordinator, "htr", "1")
     assert first_settings is not None
     assert first_settings["mode"] == "auto"
-    assert first_settings["status"]["online"] is True
+    assert first_settings["stemp"] == "21.0"
+    assert "status" not in first_settings
 
     coordinator.handle_ws_deltas(
         "dev",

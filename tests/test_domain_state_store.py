@@ -88,13 +88,13 @@ def test_domain_state_store_applies_deltas() -> None:
     store.apply_delta(
         NodeStatusDelta(
             node_id=NodeId(NodeType.HEATER, "1"),
-            status={"online": True},
+            status={"stemp": "20.5", "online": True},
         )
     )
     legacy = store.legacy_view()
     assert legacy["htr"]["1"]["mode"] == "auto"
-    assert legacy["htr"]["1"]["stemp"] == "20.0"
-    assert legacy["htr"]["1"]["status"]["online"] is True
+    assert legacy["htr"]["1"]["stemp"] == "20.5"
+    assert "status" not in legacy["htr"]["1"]
 
 
 def test_build_state_from_payload_ignores_unknown_fields() -> None:
@@ -106,7 +106,6 @@ def test_build_state_from_payload_ignores_unknown_fields() -> None:
             "mode": "auto",
             "state": "idle",
             "batt_level": "5",
-            "capabilities": {"supports": ["battery"]},
             "mystery": {"raw": "payload"},
         },
     )
@@ -115,8 +114,33 @@ def test_build_state_from_payload_ignores_unknown_fields() -> None:
     assert legacy["mode"] == "auto"
     assert legacy["state"] == "idle"
     assert legacy["batt_level"] == 5
-    assert legacy["capabilities"] == {"supports": ["battery"]}
+    assert "capabilities" not in legacy
     assert "mystery" not in legacy
+    assert not hasattr(state, "status")
+
+
+def test_domain_state_store_strips_raw_status_and_capabilities() -> None:
+    """Status payloads should be canonicalised without retaining raw blobs."""
+
+    store = DomainStateStore([NodeId(NodeType.HEATER, "1")])
+    store.apply_full_snapshot(
+        "htr",
+        "1",
+        {
+            "status": {
+                "mode": "auto",
+                "stemp": "19.5",
+                "capabilities": {"nested": True},
+                "mystery": {"raw": "data"},
+            },
+            "capabilities": {"ignored": True},
+        },
+    )
+    legacy = store.legacy_view()
+    snapshot = legacy["htr"]["1"]
+    assert snapshot == {"mode": "auto", "stemp": "19.5"}
+    assert "status" not in snapshot
+    assert "capabilities" not in snapshot
 
 
 def test_store_to_legacy_coordinator_data_matches_schema(
