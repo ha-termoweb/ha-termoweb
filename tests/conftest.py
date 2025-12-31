@@ -1631,10 +1631,16 @@ from custom_components.termoweb.domain.ids import (  # noqa: E402
     NodeId as DomainNodeId,
     NodeType as DomainNodeType,
 )
-from custom_components.termoweb.domain.legacy_view import (  # noqa: E402
-    store_to_legacy_coordinator_data,
+from custom_components.termoweb.domain.state import (  # noqa: E402
+    AccumulatorState,
+    apply_payload_to_state,
+    DomainStateStore,
+    HeaterState,
+    PowerMonitorState,
+    ThermostatState,
+    clone_state,
+    state_to_dict,
 )
-from custom_components.termoweb.domain.state import DomainStateStore  # noqa: E402
 from custom_components.termoweb.domain.view import DomainStateView  # noqa: E402
 
 
@@ -1902,7 +1908,7 @@ class FakeCoordinator:
         self.node_inventory = list(nodes_list)
 
     def apply_entity_patch(
-        self, node_type: str, addr: str, mutator: Callable[[dict[str, Any]], None]
+        self, node_type: str, addr: str, mutator: Callable[[Any], None]
     ) -> bool:
         """Apply an optimistic patch to the domain store when available."""
 
@@ -1914,16 +1920,29 @@ class FakeCoordinator:
             if addr in addresses:
                 target_types.add(known_type)
 
-        payload: dict[str, Any] | None = None
         for target_type in target_types:
             current_state = self._state_store.get_state(target_type, addr)
-            base = current_state.to_legacy() if current_state else {}
-            payload = dict(base)
+            working_state = clone_state(current_state)
+            if working_state is None:
+                if target_type == DomainNodeType.ACCUMULATOR.value:
+                    working_state = AccumulatorState()
+                elif target_type == DomainNodeType.THERMOSTAT.value:
+                    working_state = ThermostatState()
+                elif target_type == DomainNodeType.POWER_MONITOR.value:
+                    working_state = PowerMonitorState()
+                else:
+                    working_state = HeaterState()
             try:
+                mutator(working_state)
+            except (AttributeError, TypeError):
+                payload = state_to_dict(working_state, include_none=True)
                 mutator(payload)
+                apply_payload_to_state(working_state, payload)
             except BaseException:
                 raise
-            self._state_store.apply_patch(target_type, addr, payload)
+            self._state_store.apply_patch(
+                target_type, addr, state_to_dict(working_state, include_none=True)
+            )
 
         try:
             device_name = (
@@ -1931,13 +1950,34 @@ class FakeCoordinator:
             )
         except Exception:
             device_name = None
-        device_record = store_to_legacy_coordinator_data(
-            self.dev_id,
-            self._state_store,
-            self.inventory,
-            device_name=device_name or self.dev_id,
-            device_details=self.dev,
-        )
+        settings = {
+            node_id.node_type.value: {node_id.addr: state_to_dict(state)}
+            for node_id, state in self._state_store.iter_states()
+        }
+        model = getattr(self.dev_metadata, "model", None)
+        node_sections: dict[str, Any] = {}
+        nodes_by_type: dict[str, Any] = {}
+        for node_type, bucket in settings.items():
+            node_sections[node_type] = {"settings": dict(bucket)}
+            nodes_by_type[node_type] = {
+                "settings": dict(bucket),
+                "addrs": list(bucket),
+            }
+
+        device_record = {
+            self.dev_id: {
+                "dev_id": self.dev_id,
+                "name": device_name or self.dev_id,
+                "model": model if isinstance(model, str) else None,
+                "inventory": self.inventory,
+                "settings": settings,
+                "connected": True,
+                "domain_view": self.domain_view,
+                "state_store": self._state_store,
+                "nodes_by_type": nodes_by_type,
+                **node_sections,
+            },
+        }
         self.data.update(device_record)
         return True
 

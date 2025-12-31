@@ -20,6 +20,7 @@ from custom_components.termoweb.const import (
     HTR_ENERGY_UPDATE_INTERVAL,
     signal_ws_data,
 )
+from custom_components.termoweb.domain import state_to_dict
 from custom_components.termoweb.inventory import (
     AccumulatorNode,
     HeaterNode,
@@ -44,7 +45,7 @@ def _state_payload(coord: coord_module.StateCoordinator, node_type: str, addr: s
     if view is None:
         return None
     state = view.get_heater_state(node_type, addr)
-    return state.to_legacy() if state is not None else None
+    return state_to_dict(state) if state is not None else None
 
 
 def _inventory_from_nodes(dev_id: str, payload: Mapping[str, Any]) -> Inventory:
