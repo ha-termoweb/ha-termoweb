@@ -23,6 +23,7 @@ from .inventory import (
     HEATER_NODE_TYPES,
     Inventory,
     Node,
+    build_node_inventory,
     normalize_node_addr,
     normalize_node_type,
 )
@@ -791,22 +792,74 @@ def heater_platform_details_for_entry(
     entry_data: Mapping[str, Any] | None,
     *,
     default_name_simple: Callable[[str], str],
+    hass: HomeAssistant | None = None,
+    entry_id: str | None = None,
+    coordinator: Any | None = None,
 ) -> HeaterPlatformDetails:
     """Return heater platform metadata derived from ``entry_data``."""
 
+    def _coerce_inventory(candidate: Any) -> Inventory | None:
+        """Return ``candidate`` when it behaves like an inventory."""
+
+        if isinstance(candidate, Inventory):
+            return candidate
+        if hasattr(candidate, "has_node"):
+            return candidate  # type: ignore[return-value]
+        return None
+
+    inventory: Inventory | None = None
     try:
-        inventory = Inventory.require_from_context(container=entry_data)
-    except LookupError as err:
-        dev_id: str | None = None
-        if isinstance(entry_data, Mapping):
-            dev_id = entry_data.get("dev_id")  # type: ignore[assignment]
-        _LOGGER.error(
-            "TermoWeb heater setup missing inventory for device %s",
-            (dev_id or "<unknown>")
-            if isinstance(dev_id, str) and dev_id
-            else "<unknown>",
+        inventory = Inventory.require_from_context(
+            container=entry_data,
+            hass=hass,
+            entry_id=entry_id,
+            coordinator=coordinator,
         )
-        raise ValueError("TermoWeb inventory unavailable for heater platform") from err
+    except LookupError as err:
+        if isinstance(entry_data, Mapping):
+            candidate = _coerce_inventory(entry_data.get("inventory"))
+            if candidate is not None:
+                inventory = candidate
+            else:
+                for key in ("energy_coordinator", "coordinator"):
+                    candidate_obj = entry_data.get(key)
+                    candidate_inv = _coerce_inventory(
+                        getattr(candidate_obj, "inventory", None)
+                    )
+                    if candidate_inv is not None:
+                        inventory = candidate_inv
+                        break
+            if inventory is None:
+                nodes_payload: Mapping[str, Any] | None = None
+                if isinstance(entry_data, Mapping):
+                    nodes_payload = entry_data.get("nodes")
+                if nodes_payload is None and coordinator is not None:
+                    nodes_payload = getattr(coordinator, "nodes", None)
+                dev_id = entry_data.get("dev_id") if isinstance(entry_data, Mapping) else None
+                if isinstance(nodes_payload, Mapping) and isinstance(dev_id, str):
+                    try:
+                        inventory = Inventory(
+                            dev_id,
+                            nodes_payload,
+                            build_node_inventory(nodes_payload),
+                        )
+                        if isinstance(entry_data, MutableMapping):
+                            entry_data["inventory"] = inventory
+                    except Exception:  # pragma: no cover - defensive reconstruction
+                        inventory = None
+        if inventory is None:
+            dev_id: str | None = None
+            if isinstance(entry_data, Mapping):
+                dev_id = entry_data.get("dev_id")  # type: ignore[assignment]
+            _LOGGER.error(
+                "TermoWeb heater setup missing inventory for device %s",
+                (dev_id or "<unknown>")
+                if isinstance(dev_id, str) and dev_id
+                else "<unknown>",
+            )
+            raise ValueError(
+                "TermoWeb inventory unavailable for heater platform"
+            ) from err
 
     return HeaterPlatformDetails(
         inventory=inventory,
@@ -1013,13 +1066,15 @@ class HeaterNodeBase(CoordinatorEntity):
         """Return the cached inventory for this entity, if available."""
 
         inventory = getattr(self, "_inventory", None)
-        if isinstance(inventory, Inventory):
-            return inventory
+        if isinstance(inventory, Inventory) or hasattr(inventory, "has_node"):
+            return inventory  # type: ignore[return-value]
 
         coordinator_inventory = getattr(self.coordinator, "inventory", None)
-        if isinstance(coordinator_inventory, Inventory):
+        if isinstance(coordinator_inventory, Inventory) or hasattr(
+            coordinator_inventory, "has_node"
+        ):
             self._inventory = coordinator_inventory
-            return coordinator_inventory
+            return coordinator_inventory  # type: ignore[return-value]
 
         unique_id = getattr(self, "_attr_unique_id", None) or self._dev_id
         _LOGGER.error("TermoWeb heater %s missing immutable inventory cache", unique_id)

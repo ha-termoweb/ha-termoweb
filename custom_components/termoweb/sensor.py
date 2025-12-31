@@ -170,9 +170,17 @@ async def async_setup_entry(hass, entry, async_add_entities):
             addr=addr,
         )
 
+    if not isinstance(data.get("inventory"), Inventory):
+        coordinator_inventory = getattr(coordinator, "inventory", None)
+        if isinstance(coordinator_inventory, Inventory):
+            data["inventory"] = coordinator_inventory
+
     heater_details = heater_platform_details_for_entry(
         data,
         default_name_simple=default_name,
+        hass=hass,
+        entry_id=entry.entry_id,
+        coordinator=coordinator,
     )
     inventory = heater_details.inventory
 
