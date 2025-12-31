@@ -218,7 +218,7 @@ async def test_ws_state_cleanup_and_reuse() -> None:
         loop=loop, data={base_ws.DOMAIN: {"entry": {"dev_id": "device"}}}
     )
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
-    inventory = Inventory("device", raw_nodes, build_node_inventory(raw_nodes))
+    inventory = Inventory("device", build_node_inventory(raw_nodes))
     hass.data[base_ws.DOMAIN]["entry"]["inventory"] = inventory
 
     client = module.WebSocketClient(
@@ -259,7 +259,7 @@ async def test_ducaheat_ws_cleanup_and_buckets(monkeypatch: pytest.MonkeyPatch) 
         loop=loop, data={base_ws.DOMAIN: {"entry": {"dev_id": "device"}}}
     )
     raw_nodes = {"nodes": [{"type": "pmo", "addr": "7"}]}
-    inventory = Inventory("device", raw_nodes, build_node_inventory(raw_nodes))
+    inventory = Inventory("device", build_node_inventory(raw_nodes))
     hass.data[base_ws.DOMAIN]["entry"]["inventory"] = inventory
 
     rest_client = DummyREST(is_ducaheat=True)
@@ -304,7 +304,7 @@ def _ensure_inventory_record(
                 {"type": "pmo", "addr": "7"},
             ]
         }
-        inventory = Inventory(dev_id, payload, build_node_inventory(payload))
+        inventory = Inventory(dev_id, build_node_inventory(payload))
     hass.data.setdefault(base_ws.DOMAIN, {}).setdefault(entry_id, {})
     hass.data[base_ws.DOMAIN][entry_id].setdefault("inventory", inventory)
     hass.data[base_ws.DOMAIN][entry_id].setdefault("dev_id", dev_id)
@@ -368,7 +368,7 @@ def test_forward_ws_sample_updates_handles_power_monitors(
 
     hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
     raw_nodes = {"nodes": [{"type": "pmo", "addr": "7", "name": "PM"}]}
-    inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+    inventory = Inventory("dev", build_node_inventory(raw_nodes))
     handler = MagicMock()
     hass.data[base_ws.DOMAIN]["entry"] = {
         "energy_coordinator": SimpleNamespace(handle_ws_samples=handler),
@@ -400,7 +400,7 @@ def test_forward_ws_sample_updates_skips_thermostats() -> None:
 
     hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
     raw_nodes = {"nodes": [{"type": "thm", "addr": "1"}]}
-    inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+    inventory = Inventory("dev", build_node_inventory(raw_nodes))
     handler = MagicMock()
     hass.data[base_ws.DOMAIN]["entry"] = {
         "energy_coordinator": SimpleNamespace(handle_ws_samples=handler),
@@ -425,7 +425,7 @@ def test_forward_ws_sample_updates_respect_inventory_types(
 
     hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
     raw_nodes = {"nodes": [{"type": "htr", "addr": "5"}]}
-    inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+    inventory = Inventory("dev", build_node_inventory(raw_nodes))
     object.__setattr__(inventory, "_energy_sample_types_cache", frozenset({"pmo"}))
     handler = MagicMock()
     hass.data[base_ws.DOMAIN]["entry"] = {
@@ -451,7 +451,7 @@ def test_forward_ws_sample_updates_uses_coordinator_inventory(
     """Coordinator inventory aliases and logging should be applied."""
 
     raw_nodes = {"nodes": [{"type": "htr", "addr": "5"}]}
-    inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+    inventory = Inventory("dev", build_node_inventory(raw_nodes))
 
     monkeypatch.setattr(
         Inventory,
@@ -518,7 +518,7 @@ def test_forward_ws_sample_updates_skips_invalid_sections(
             base_ws.DOMAIN: {
                 "entry": {
                     "energy_coordinator": SimpleNamespace(handle_ws_samples=handler),
-                    "inventory": Inventory("dev", {}, []),
+                    "inventory": Inventory("dev", []),
                 }
             }
         }
@@ -543,7 +543,7 @@ def test_forward_ws_sample_updates_skips_non_mapping_samples() -> None:
             base_ws.DOMAIN: {
                 "entry": {
                     "energy_coordinator": SimpleNamespace(handle_ws_samples=handler),
-                    "inventory": Inventory("dev", {}, []),
+                    "inventory": Inventory("dev", []),
                 }
             }
         }
@@ -576,7 +576,7 @@ def test_forward_ws_sample_updates_inventory_validation(
     """Inventory-derived alias data should tolerate malformed updates."""
 
     raw_nodes = {"nodes": [{"type": "pmo", "addr": "3"}]}
-    inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+    inventory = Inventory("dev", build_node_inventory(raw_nodes))
 
     monkeypatch.setattr(
         Inventory,
@@ -700,7 +700,7 @@ def test_dispatch_nodes_reuses_record_inventory(
 
     payload = {"nodes": [{"addr": "1", "type": "htr"}]}
     node_inventory = build_node_inventory(payload["nodes"])
-    inventory = Inventory("device", payload["nodes"], node_inventory)
+    inventory = Inventory("device", node_inventory)
 
     hass_record: dict[str, Any] = {"dev_id": "device", "inventory": inventory}
     hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": hass_record}})
@@ -737,7 +737,8 @@ def test_prepare_nodes_dispatch_uses_inventory(monkeypatch: pytest.MonkeyPatch) 
     coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
     node_inventory = build_node_inventory([{"type": "htr", "addr": "4"}])
     inventory = Inventory(
-        "dev", {"nodes": [{"type": "htr", "addr": "4"}]}, node_inventory
+        "dev",
+        node_inventory,
     )
     context = base_ws._prepare_nodes_dispatch(
         hass,
@@ -757,7 +758,7 @@ def test_prepare_nodes_dispatch_resolves_record_dev_id_and_coordinator_inventory
 ) -> None:
     """Record dev IDs and coordinator inventory should be applied."""
 
-    inventory = Inventory("dev", {}, [])
+    inventory = Inventory("dev", [])
     hass_record: dict[str, Any] = {"dev_id": "raw", "inventory": inventory}
     hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": hass_record}})
     coordinator = SimpleNamespace(update_nodes=MagicMock())
@@ -794,7 +795,7 @@ def test_termoweb_nodes_to_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
 
     client = _make_termoweb_client(monkeypatch)
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
-    inventory = Inventory("device", raw_nodes, build_node_inventory(raw_nodes))
+    inventory = Inventory("device", build_node_inventory(raw_nodes))
     client._inventory = inventory
 
     nodes_payload = {
@@ -826,7 +827,7 @@ def test_termoweb_nodes_to_deltas_validates_inventory(
 
     client = _make_termoweb_client(monkeypatch)
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
-    inventory = Inventory("device", raw_nodes, build_node_inventory(raw_nodes))
+    inventory = Inventory("device", build_node_inventory(raw_nodes))
     client._inventory = inventory
 
     with caplog.at_level(logging.WARNING, module._LOGGER.name):
@@ -844,7 +845,7 @@ def test_termoweb_translate_path_deltas(monkeypatch: pytest.MonkeyPatch) -> None
 
     client = _make_termoweb_client(monkeypatch)
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
-    inventory = Inventory("device", raw_nodes, build_node_inventory(raw_nodes))
+    inventory = Inventory("device", build_node_inventory(raw_nodes))
     client._inventory = inventory
 
     payload = {"path": "/devs/device/htr/1/settings", "body": {"mode": "auto"}}
@@ -936,7 +937,7 @@ def test_ws_common_ensure_type_bucket_uses_inventory_without_clones(
             {"type": "acm", "addr": "2"},
         ]
     }
-    inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+    inventory = Inventory("dev", build_node_inventory(raw_nodes))
     hass_record: dict[str, Any] = {"inventory": inventory}
     dummy.hass.data[base_ws.DOMAIN]["entry"] = hass_record
 
@@ -990,7 +991,7 @@ def test_ws_common_apply_heater_addresses_uses_inventory(
             {"type": "pmo", "addr": "7"},
         ]
     }
-    inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+    inventory = Inventory("dev", build_node_inventory(raw_nodes))
     hass_record: dict[str, Any] = {
         "energy_coordinator": energy_coordinator,
         "inventory": inventory,
@@ -1695,7 +1696,7 @@ def test_ws_common_dispatch_nodes(
 
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
     inventory_nodes = build_node_inventory(raw_nodes)
-    inventory_obj = Inventory("dev", raw_nodes, inventory_nodes)
+    inventory_obj = Inventory("dev", inventory_nodes)
 
     hass = SimpleNamespace(
         data={base_ws.DOMAIN: {"entry": {"inventory": inventory_obj}}}

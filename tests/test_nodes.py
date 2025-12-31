@@ -82,7 +82,7 @@ def _make_state_coordinator(
         30,
         "dev",
         {"name": "Device"},
-        inventory.payload,
+        nodes=None,
         inventory=inventory,
     )
 

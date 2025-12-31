@@ -51,21 +51,17 @@ def inventory_builder() -> Callable[
     """Return helper to construct Inventory containers for tests."""
 
     from custom_components.termoweb.inventory import Inventory
+    from custom_components.termoweb.inventory import build_node_inventory
 
     def _factory(
         dev_id: str,
         payload: Mapping[str, Any] | None = None,
         nodes: Iterable[Any] | None = None,
     ) -> "Inventory":
-        payload_value: Any
-        if payload is None:
-            payload_value = {}
-        elif isinstance(payload, Mapping):
-            payload_value = dict(payload)
-        else:
-            payload_value = payload
         node_list = list(nodes or [])
-        return Inventory(dev_id, payload_value, node_list)
+        if not node_list and payload is not None:
+            node_list = list(build_node_inventory(payload))
+        return Inventory(dev_id, node_list)
 
     return _factory
 

@@ -188,7 +188,6 @@ def _make_client(monkeypatch: pytest.MonkeyPatch) -> ducaheat_ws.DucaheatWSClien
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
     inventory = Inventory(
         "device",
-        raw_nodes,
         build_node_inventory(raw_nodes),
     )
     hass.data[ducaheat_ws.DOMAIN]["entry"]["inventory"] = inventory
@@ -273,11 +272,7 @@ def _set_inventory(
 ) -> Inventory:
     """Bind a fresh inventory container to the client and hass record."""
 
-    inventory = Inventory(
-        client.dev_id,
-        payload,
-        build_node_inventory(payload),
-    )
+    inventory = Inventory(client.dev_id, build_node_inventory(payload))
     hass_record = client.hass.data[ducaheat_ws.DOMAIN][client.entry_id]
     hass_record["inventory"] = inventory
     client._inventory = inventory
@@ -576,7 +571,6 @@ def test_extract_dev_data_payload_variants(monkeypatch: pytest.MonkeyPatch) -> N
     client = _make_client(monkeypatch)
     client._inventory = Inventory(
         client.dev_id,
-        {"nodes": [{"type": "htr", "addr": "1"}]},
         build_node_inventory([{"type": "htr", "addr": "1"}]),
     )
     nodes = {"nodes": {"htr": {}}}
@@ -822,7 +816,6 @@ async def test_read_loop_handles_list_snapshot(
     client = _make_client(monkeypatch)
     client._inventory = Inventory(
         client.dev_id,
-        {"nodes": [{"type": "htr", "addr": "1"}]},
         build_node_inventory([{"type": "htr", "addr": "1"}]),
     )
     monkeypatch.setattr(client, "_subscribe_feeds", AsyncMock(return_value=2))
@@ -1781,7 +1774,6 @@ async def test_subscribe_feeds_stores_inventory_only(
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
     inventory = Inventory(
         client.dev_id,
-        raw_nodes,
         build_node_inventory(raw_nodes),
     )
     client._inventory = inventory
@@ -1813,7 +1805,6 @@ async def test_subscribe_feeds_uses_inventory_cache(
     node_inventory = build_node_inventory([{"type": "htr", "addr": "7"}])
     inventory = Inventory(
         client.dev_id,
-        {"nodes": [{"type": "htr", "addr": "7"}]},
         node_inventory,
     )
     client._inventory = inventory
@@ -1852,7 +1843,6 @@ async def test_subscribe_feeds_uses_record_inventory_cache(
     node_inventory = build_node_inventory([{"type": "htr", "addr": "9"}])
     record["inventory"] = Inventory(
         client.dev_id,
-        {"nodes": [{"type": "htr", "addr": "9"}]},
         node_inventory,
     )
 
@@ -1880,7 +1870,6 @@ async def test_subscribe_feeds_handles_missing_targets(
     payload = {"nodes": []}
     client.hass.data[ducaheat_ws.DOMAIN]["entry"]["inventory"] = Inventory(
         "device",
-        payload,
         build_node_inventory(payload),
     )
     emit_mock = AsyncMock()
@@ -1905,7 +1894,6 @@ async def test_subscribe_feeds_prefers_coordinator_inventory(
     inventory_nodes = build_node_inventory([{"type": "htr", "addr": "3"}])
     coordinator_inventory = Inventory(
         client.dev_id,
-        {"nodes": [{"type": "htr", "addr": "3"}]},
         inventory_nodes,
     )
     client._coordinator._inventory = coordinator_inventory
@@ -1934,7 +1922,6 @@ async def test_subscribe_feeds_handles_mapping_record(
     raw_nodes = {"nodes": [{"addr": "8", "type": "htr"}]}
     inventory = Inventory(
         client.dev_id,
-        raw_nodes,
         build_node_inventory(raw_nodes),
     )
     mapping_record = MappingProxyType({"inventory": inventory})
@@ -1969,7 +1956,6 @@ async def test_subscribe_feeds_handles_missing_record(
     raw_nodes = {"nodes": [{"addr": "6", "type": "htr"}]}
     inventory = Inventory(
         client.dev_id,
-        raw_nodes,
         build_node_inventory(raw_nodes),
     )
     client._inventory = inventory

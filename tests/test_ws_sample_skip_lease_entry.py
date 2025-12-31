@@ -42,7 +42,6 @@ def test_forward_ws_sample_updates_omits_inner_lease_entry() -> None:
                     "energy_coordinator": coordinator,
                     "inventory": Inventory(
                         "dev",
-                        {"nodes": [{"type": "htr", "addr": "1"}]},
                         build_node_inventory({"nodes": [{"type": "htr", "addr": "1"}]}),
                     ),
                 }

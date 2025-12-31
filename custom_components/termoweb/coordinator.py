@@ -654,21 +654,7 @@ class StateCoordinator(
         """Return domain node identifiers derived from ``inventory``."""
 
         node_ids: list[DomainNodeId] = []
-        raw_nodes: Iterable[Any] | None = inventory.nodes
-        nodes_iterable: Iterable[Any] = raw_nodes or ()
-        if not nodes_iterable:
-            payload = (
-                inventory.payload if isinstance(inventory.payload, Mapping) else {}
-            )
-            nodes_section = payload.get("nodes") if isinstance(payload, Mapping) else []
-            if isinstance(nodes_section, Iterable) and not isinstance(
-                nodes_section, (str, bytes)
-            ):
-                nodes_iterable = nodes_section
-            else:
-                nodes_iterable = ()
-
-        for node in nodes_iterable:
+        for node in inventory.nodes:
             node_type_value: Any
             addr_value: Any
             if isinstance(node, Mapping):

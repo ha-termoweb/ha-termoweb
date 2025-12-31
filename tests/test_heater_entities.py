@@ -182,7 +182,7 @@ def test_heater_section_includes_inventory_details() -> None:
     """Heater metadata should expose inventory-backed name and availability."""
 
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1", "name": "Living"}]}
-    inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+    inventory = Inventory("dev", build_node_inventory(raw_nodes))
     coordinator = SimpleNamespace(
         data={"dev": {"settings": {"htr": {"1": {"mode": "auto"}}}}},
         inventory=inventory,
@@ -483,7 +483,7 @@ def test_boost_entities_expose_state(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     raw_nodes = [{"type": "acm", "addr": "1", "name": "Accumulator"}]
-    inventory = Inventory("dev", {"nodes": raw_nodes}, build_node_inventory(raw_nodes))
+    inventory = Inventory("dev", build_node_inventory(raw_nodes))
     settings_map = {"acm": {"1": settings}}
 
     coordinator = SimpleNamespace(
@@ -552,7 +552,7 @@ def test_boost_entities_handle_missing_data() -> None:
     """Boost entities should gracefully handle missing settings."""
 
     raw_nodes = [{"type": "acm", "addr": "1", "name": "Accumulator"}]
-    inventory = Inventory("dev", {"nodes": raw_nodes}, build_node_inventory(raw_nodes))
+    inventory = Inventory("dev", build_node_inventory(raw_nodes))
     settings_map = {"acm": {"1": {}}}
 
     coordinator = SimpleNamespace(data={"dev": {"settings": settings_map}})
@@ -617,7 +617,7 @@ def test_boost_end_sensor_returns_base_state_when_available() -> None:
     )
 
     payload: dict[str, Any] = {"nodes": []}
-    inventory = Inventory("dev", payload, build_node_inventory(payload))
+    inventory = Inventory("dev", build_node_inventory(payload))
 
     sensor = HeaterBoostEndSensor(
         coordinator,
@@ -654,7 +654,7 @@ def test_boost_end_sensor_handles_isoformat_error() -> None:
     )
 
     payload: dict[str, Any] = {"nodes": []}
-    inventory = Inventory("dev", payload, build_node_inventory(payload))
+    inventory = Inventory("dev", build_node_inventory(payload))
 
     sensor = HeaterBoostEndSensor(
         coordinator,
@@ -746,7 +746,7 @@ def test_iter_nodes_metadata_uses_inventory() -> None:
             {"type": "pmo", "addr": "99"},
         ]
     }
-    inventory = Inventory("dev", raw_nodes, build_node_inventory(raw_nodes))
+    inventory = Inventory("dev", build_node_inventory(raw_nodes))
 
     results = list(
         inventory.iter_nodes_metadata(
@@ -776,7 +776,7 @@ def test_iter_nodes_metadata_uses_inventory_method(
 ) -> None:
     """Generator should source node data from inventory iterator."""
 
-    inventory = Inventory("dev", {}, [])
+    inventory = Inventory("dev", [])
     default_factory = lambda addr: f"Heater {addr}"
 
     metadata = InventoryNodeMetadata(

@@ -28,13 +28,6 @@ class DummyNode:
 
 
 @pytest.fixture
-def sample_payload() -> dict[str, Any]:
-    """Return a representative payload mapping."""
-
-    return {"nodes": [{"addr": 1}, {"addr": 2}]}
-
-
-@pytest.fixture
 def sample_nodes() -> List[DummyNode]:
     """Return a list of dummy node instances."""
 
@@ -43,15 +36,15 @@ def sample_nodes() -> List[DummyNode]:
 
 @pytest.fixture
 def inventory(
-    sample_payload: dict[str, Any], sample_nodes: List[DummyNode]
+    sample_nodes: List[DummyNode]
 ) -> Inventory:
     """Build an inventory instance for tests."""
 
-    return Inventory("abc123", sample_payload, sample_nodes)
+    return Inventory("abc123", sample_nodes)
 
 
 @pytest.fixture
-def heater_inventory(sample_payload: dict[str, Any]) -> Inventory:
+def heater_inventory() -> Inventory:
     """Return an inventory containing heater and ancillary nodes."""
 
     nodes = [
@@ -64,18 +57,18 @@ def heater_inventory(sample_payload: dict[str, Any]) -> Inventory:
         PowerMonitorNode(name="Monitor", addr="3"),
         Node(name="Alias Monitor", addr="4", node_type="power_monitor"),
     ]
-    return Inventory("abc123", sample_payload, nodes)
+    return Inventory("abc123", nodes)
 
 
 def test_inventory_properties(
-    inventory: Inventory, sample_payload: dict[str, Any], sample_nodes: List[DummyNode]
+    inventory: Inventory, sample_nodes: List[DummyNode]
 ) -> None:
     """Validate accessor properties and tuple conversion."""
 
     assert inventory.dev_id == "abc123"
-    assert inventory.payload is sample_payload
     assert inventory.nodes == tuple(sample_nodes)
     assert isinstance(inventory.nodes, tuple)
+    assert not hasattr(inventory, "payload")
 
 
 def test_inventory_rejects_mutation(inventory: Inventory) -> None:
@@ -87,12 +80,10 @@ def test_inventory_rejects_mutation(inventory: Inventory) -> None:
         inventory.nodes[0] = DummyNode("gamma")
 
 
-def test_inventory_nodes_are_independent(
-    sample_payload: dict[str, Any], sample_nodes: List[DummyNode]
-) -> None:
+def test_inventory_nodes_are_independent(sample_nodes: List[DummyNode]) -> None:
     """Confirm node collections are copied into the tuple."""
 
-    inventory = Inventory("abc123", sample_payload, sample_nodes)
+    inventory = Inventory("abc123", sample_nodes)
     sample_nodes.append(DummyNode("gamma"))
     assert len(inventory.nodes) == 2
 
@@ -298,7 +289,6 @@ def test_inventory_power_monitor_targets_filter_invalid(
     )
     inventory = Inventory(
         "dev",
-        {"nodes": []},
         [
             PowerMonitorNode(name="One", addr="3"),
             PowerMonitorNode(name="Two", addr="4"),
@@ -324,7 +314,6 @@ def test_inventory_power_monitor_targets_deduplicate_and_strip(
     )
     inventory = Inventory(
         "dev",
-        {"nodes": []},
         [
             PowerMonitorNode(name="One", addr="3"),
             PowerMonitorNode(name="Two", addr="4"),
@@ -450,16 +439,14 @@ def test_inventory_heater_name_map_cache_boundaries(
     assert signature_five in cache
 
 
-def test_inventory_heater_name_map_supports_default_factory_optional(
-    sample_payload: dict[str, Any],
-) -> None:
+def test_inventory_heater_name_map_supports_default_factory_optional() -> None:
     """Calling without a factory should use the built-in heater fallback names."""
 
     nodes = [
         Node(name=None, addr="1", node_type="HTR"),
         Node(name="Storage", addr="2", node_type="acm"),
     ]
-    inventory = Inventory("dev", sample_payload, nodes)
+    inventory = Inventory("dev", nodes)
 
     first = inventory.heater_name_map()
     second = inventory.heater_name_map()
@@ -532,7 +519,6 @@ def test_heater_platform_details_default_name(
     }
     inventory = Inventory(
         "dev-name",
-        raw_nodes,
         inventory_module.build_node_inventory(raw_nodes),
     )
 

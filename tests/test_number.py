@@ -428,7 +428,7 @@ async def test_async_setup_entry_creates_number_entities(
     payload = {"nodes": raw_nodes}
     node_inventory = build_node_inventory(raw_nodes)
     InventoryType = heater_module.Inventory
-    inventory = InventoryType(dev_id, payload, node_inventory)
+    inventory = InventoryType(dev_id, node_inventory)
     coordinator = FakeCoordinator(hass, dev_id=dev_id)
 
     heater_details = heater_module.HeaterPlatformDetails(
