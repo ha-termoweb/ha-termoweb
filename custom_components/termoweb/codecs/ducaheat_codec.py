@@ -54,22 +54,18 @@ def decode_prog(payload: Any) -> Any:
     raise NotImplementedError
 
 
-def decode_settings(
-    payload: Any, *, node_type: NodeType, include_raw: bool = False
-) -> dict[str, Any]:
+def decode_settings(payload: Any, *, node_type: NodeType) -> dict[str, Any]:
     """Decode segmented settings payloads into the legacy mapping."""
 
     if node_type is NodeType.THERMOSTAT:
-        return _decode_thm_settings(payload, include_raw=include_raw)
+        return _decode_thm_settings(payload)
     if node_type in {NodeType.HEATER, NodeType.ACCUMULATOR}:
-        return _decode_status_payload(
-            payload, node_type=node_type, include_raw=include_raw
-        )
+        return _decode_status_payload(payload, node_type=node_type)
     return payload if isinstance(payload, dict) else {}
 
 
 def _decode_status_payload(  # noqa: C901
-    payload: Any, *, node_type: NodeType, include_raw: bool
+    payload: Any, *, node_type: NodeType
 ) -> dict[str, Any]:
     """Normalise heater/accumulator settings payloads."""
 
@@ -181,9 +177,6 @@ def _decode_status_payload(  # noqa: C901
         if key in payload:
             flattened[key] = payload[key]
 
-    if include_raw:
-        flattened["raw"] = payload
-
     if node_type is NodeType.ACCUMULATOR:
         capabilities = _normalise_acm_capabilities(payload)
         if capabilities:
@@ -192,7 +185,7 @@ def _decode_status_payload(  # noqa: C901
     return flattened
 
 
-def _decode_thm_settings(payload: Any, *, include_raw: bool) -> dict[str, Any]:
+def _decode_thm_settings(payload: Any) -> dict[str, Any]:
     """Return a normalised thermostat settings mapping."""
 
     if not isinstance(payload, dict):
@@ -264,9 +257,6 @@ def _decode_thm_settings(payload: Any, *, include_raw: bool) -> dict[str, Any]:
     sync_status = payload.get("sync_status")
     if isinstance(sync_status, str):
         normalised["sync_status"] = sync_status
-
-    if include_raw:
-        normalised["raw"] = payload
 
     return normalised
 

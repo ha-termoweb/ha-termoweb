@@ -136,25 +136,11 @@ class StateCoordinator(
 
         return self._domain_view
 
-    def _include_raw_settings(self) -> bool:
-        """Return True when raw settings payloads should be retained."""
-
-        try:
-            checker = getattr(_LOGGER, "isEnabledFor", None)
-            if callable(checker):
-                return bool(checker(logging.DEBUG))
-        except (AttributeError, TypeError):  # pragma: no cover - defensive
-            return False
-        return False
-
     def _filtered_settings_payload(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         """Return a defensive copy of ``payload`` without raw blobs."""
 
         if not isinstance(payload, Mapping):
             return {}
-
-        if self._include_raw_settings():
-            return dict(payload)
 
         return {key: value for key, value in payload.items() if key != "raw"}
 
@@ -762,7 +748,7 @@ class StateCoordinator(
             store,
             inventory,
             device_name=dev_name,
-            device_raw=self._device,
+            device_details=self._device,
         )
         new_data = dict(self.data or {})
         new_data.update(device_record)
@@ -804,7 +790,7 @@ class StateCoordinator(
             store,
             inventory,
             device_name=dev_name,
-            device_raw=self._device,
+            device_details=self._device,
         )
         new_data = dict(self.data or {})
         new_data.update(device_record)
@@ -909,7 +895,7 @@ class StateCoordinator(
                 store,
                 inventory,
                 device_name=dev_name,
-                device_raw=self._device,
+                device_details=self._device,
             )
             new_data = dict(self.data or {})
             new_data.update(device_record)
@@ -974,7 +960,7 @@ class StateCoordinator(
                 store,
                 inventory,
                 device_name=dev_name,
-                device_raw=self._device,
+                device_details=self._device,
                 include_nodes_by_type=False,
             )
 

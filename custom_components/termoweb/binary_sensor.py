@@ -146,10 +146,10 @@ class GatewayOnlineBinarySensor(
             "dev_id": self._dev_id,
             "name": data.get("name"),
             "connected": data.get("connected"),
+            "model": data.get("model"),
             "ws_status": ws.get("status"),
             "ws_last_event_at": ws.get("last_event_at"),
             "ws_healthy_minutes": ws.get("healthy_minutes"),
-            "raw": data.get("raw") or {},
         }
 
     @callback

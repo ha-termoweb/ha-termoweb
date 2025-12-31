@@ -69,17 +69,6 @@ class DucaheatRequestError(Exception):
 class DucaheatRESTClient(RESTClient):
     """HTTP adapter that speaks the segmented Ducaheat API."""
 
-    def _include_raw_settings(self) -> bool:
-        """Return True when raw payloads should be retained for debugging."""
-
-        try:
-            checker = getattr(_LOGGER, "isEnabledFor", None)
-            if callable(checker):
-                return bool(checker(logging.DEBUG))
-        except (AttributeError, ValueError, TypeError):  # pragma: no cover - defensive
-            return False
-        return False
-
     async def _post_segmented(
         self,
         path: str,
@@ -157,7 +146,6 @@ class DucaheatRESTClient(RESTClient):
             return decode_settings(
                 payload,
                 node_type=node_id.node_type,
-                include_raw=self._include_raw_settings(),
             )
 
         path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}"
@@ -166,7 +154,6 @@ class DucaheatRESTClient(RESTClient):
         decoded_payload = decode_settings(
             payload,
             node_type=node_id.node_type,
-            include_raw=self._include_raw_settings(),
         )
         if node_type != "htr":
             self._log_non_htr_payload(
@@ -533,7 +520,6 @@ class DucaheatRESTClient(RESTClient):
                     addr_map[addr] = decode_settings(
                         payload,
                         node_type=node_id.node_type,
-                        include_raw=self._include_raw_settings(),
                     )
 
                 section_map[section] = addr_map
@@ -653,7 +639,6 @@ class DucaheatRESTClient(RESTClient):
         payload: Any,
         *,
         node_type: str = "htr",
-        include_raw: bool = False,
     ) -> dict[str, Any]:
         """Flatten the vendor payload into HA-friendly heater settings."""
         if not isinstance(payload, dict):
@@ -768,9 +753,6 @@ class DucaheatRESTClient(RESTClient):
             if key in payload:
                 flattened[key] = payload[key]
 
-        if include_raw:
-            flattened["raw"] = deepcopy(payload)
-
         if node_type == "acm":
             capabilities = self._normalise_acm_capabilities(payload)
             if capabilities:
@@ -778,9 +760,7 @@ class DucaheatRESTClient(RESTClient):
 
         return flattened
 
-    def _normalise_thm_settings(
-        self, payload: Any, *, include_raw: bool = False
-    ) -> dict[str, Any]:
+    def _normalise_thm_settings(self, payload: Any) -> dict[str, Any]:
         """Return a normalised thermostat settings mapping."""
 
         if not isinstance(payload, dict):
@@ -847,9 +827,6 @@ class DucaheatRESTClient(RESTClient):
         sync_status = payload.get("sync_status")
         if isinstance(sync_status, str):
             normalised["sync_status"] = sync_status
-
-        if include_raw:
-            normalised["raw"] = deepcopy(payload)
 
         return normalised
 

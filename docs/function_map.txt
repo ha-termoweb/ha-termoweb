@@ -132,8 +132,6 @@ custom_components/termoweb/backend/base.py :: normalise_energy_samples
     Return energy samples expressed in epoch seconds and kWh.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRequestError.__init__
     Initialise error metadata for logging and diagnostics.
-custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._include_raw_settings
-    Return True when raw payloads should be retained for debugging.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._post_segmented
     Log segmented POST requests before delegating to ``_request``.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._log_segmented_post
@@ -916,8 +914,6 @@ custom_components/termoweb/coordinator.py :: StateCoordinator.__init__
     Initialize the TermoWeb device coordinator.
 custom_components/termoweb/coordinator.py :: StateCoordinator.domain_view
     Return the read-only domain state view.
-custom_components/termoweb/coordinator.py :: StateCoordinator._include_raw_settings
-    Return True when raw settings payloads should be retained.
 custom_components/termoweb/coordinator.py :: StateCoordinator._filtered_settings_payload
     Return a defensive copy of ``payload`` without raw blobs.
 custom_components/termoweb/coordinator.py :: StateCoordinator._instant_power_key
@@ -1042,6 +1038,8 @@ custom_components/termoweb/domain/state.py :: NodeStatusDelta.payload
     Return the status mapping payload.
 custom_components/termoweb/domain/state.py :: NodeSamplesDelta.payload
     Return the samples mapping payload.
+custom_components/termoweb/domain/state.py :: _coerce_number
+    Return ``value`` as a number when possible.
 custom_components/termoweb/domain/state.py :: _populate_heater_state
     Populate base heater fields on ``state`` from ``payload``.
 custom_components/termoweb/domain/state.py :: _build_heater_state

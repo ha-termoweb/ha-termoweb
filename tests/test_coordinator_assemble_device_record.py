@@ -29,7 +29,7 @@ def test_assemble_device_record_uses_inventory_maps(
     )
 
     settings = {
-        "htr": {"01": {"target": 21}},
+        "htr": {"01": {"stemp": 21}},
         "acm": {"07": {"mode": "auto"}},
     }
 
@@ -47,7 +47,7 @@ def test_assemble_device_record_uses_inventory_maps(
         store,
         inventory,
         device_name="Device dev",
-        device_raw={"name": "Device dev"},
+        device_details={"name": "Device dev"},
     )
 
     device = record["dev"]

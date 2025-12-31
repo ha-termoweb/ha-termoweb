@@ -55,7 +55,7 @@ def test_binary_sensor_setup_and_dispatch(
                 dev_id: {
                     "name": "Living Room",  # attributes
                     "connected": True,
-                    "raw": {"model": "TW-GW"},
+                    "model": "TW-GW",
                 }
             },
         )
@@ -124,10 +124,10 @@ def test_binary_sensor_setup_and_dispatch(
             "dev_id": dev_id,
             "name": "Living Room",
             "connected": True,
+            "model": "TW-GW",
             "ws_status": "healthy",
             "ws_last_event_at": "2024-05-01T12:00:00Z",
             "ws_healthy_minutes": 42,
-            "raw": {"model": "TW-GW"},
         }
 
         entity.schedule_update_ha_state = MagicMock()
