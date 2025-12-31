@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from conftest import FakeCoordinator, build_coordinator_device_state
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.coordinator import EnergyStateCoordinator
 from custom_components.termoweb.inventory import (
@@ -221,3 +222,79 @@ def test_power_monitor_available_uses_inventory_has_node(
     result = sensor.available
     assert calls == [("pmo", "01")]
     assert result is True
+
+
+@pytest.mark.asyncio
+async def test_heater_energy_sensor_availability() -> None:
+    """Energy sensors should rely on inventory presence and coordinator health."""
+
+    module = importlib.import_module("custom_components.termoweb.sensor")
+    hass = HomeAssistant()
+    hass.data = {DOMAIN: {}}
+    dev_id = "dev-energy"
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "01", "name": "Heater"}]}
+    node_inventory = list(build_node_inventory(raw_nodes))
+    inventory = Inventory(dev_id, raw_nodes, node_inventory)
+    device_state = build_coordinator_device_state(
+        nodes=raw_nodes,
+        settings={"htr": {"01": {}}},
+    )
+
+    class _EnergyCoordinator(FakeCoordinator):
+        """Coordinator stub exposing inventory updates for energy polling."""
+
+        def update_addresses(self, updated_inventory: Inventory) -> None:
+            """Store the latest immutable inventory reference."""
+
+            self.inventory = updated_inventory
+
+    energy_coordinator = _EnergyCoordinator(
+        hass,
+        dev_id=dev_id,
+        dev=device_state,
+        nodes=raw_nodes,
+        inventory=inventory,
+        data={dev_id: device_state},
+    )
+    energy_coordinator.last_update_success = True
+    coordinator = FakeCoordinator(
+        hass,
+        dev_id=dev_id,
+        dev=device_state,
+        nodes=raw_nodes,
+        inventory=inventory,
+        data={dev_id: device_state},
+    )
+    entry_id = "entry-energy"
+    entry = SimpleNamespace(entry_id=entry_id)
+    hass.data[DOMAIN][entry.entry_id] = {
+        "coordinator": coordinator,
+        "dev_id": dev_id,
+        "client": object(),
+        "inventory": inventory,
+        "energy_coordinator": energy_coordinator,
+    }
+
+    added_entities: list[Any] = []
+
+    def _async_add_entities(entities: list[Any]) -> None:
+        added_entities.extend(entities)
+
+    await module.async_setup_entry(hass, entry, _async_add_entities)
+
+    energy_entities = [
+        entity
+        for entity in added_entities
+        if isinstance(entity, module.HeaterEnergyTotalSensor)
+    ]
+    assert energy_entities
+
+    energy_sensor = energy_entities[0]
+    energy_sensor.hass = hass
+    await energy_sensor.async_added_to_hass()
+
+    energy_coordinator.data = {}
+    assert energy_sensor.available is True
+
+    energy_coordinator.last_update_success = False
+    assert energy_sensor.available is False

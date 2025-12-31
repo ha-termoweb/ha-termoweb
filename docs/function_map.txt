@@ -1509,7 +1509,7 @@ custom_components/termoweb/sensor.py :: AccumulatorChargePercentageSensor._coerc
 custom_components/termoweb/sensor.py :: HeaterEnergyBase.__init__
     Initialise a heater energy-derived sensor entity.
 custom_components/termoweb/sensor.py :: HeaterEnergyBase._device_available
-    Return True when the heater has a device entry.
+    Return True when inventory and coordinator expose this heater node.
 custom_components/termoweb/sensor.py :: HeaterEnergyBase._metric_section
     Return the dictionary with the requested metric values.
 custom_components/termoweb/sensor.py :: HeaterEnergyBase._raw_native_value
