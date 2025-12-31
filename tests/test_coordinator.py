@@ -28,6 +28,18 @@ class ExplodingStr:
         raise RuntimeError("boom")
 
 
+def _state_payload(
+    coordinator: coord_module.StateCoordinator, node_type: str, addr: str
+) -> dict[str, Any] | None:
+    """Return the stored state payload for ``(node_type, addr)``."""
+
+    view = getattr(coordinator, "domain_view", None)
+    if view is None:
+        return None
+    state = view.get_heater_state(node_type, addr)
+    return state.to_legacy() if state is not None else None
+
+
 def test_coerce_int_variants() -> None:
     """``coerce_int`` should normalise primitives and guard against errors."""
 
@@ -286,9 +298,8 @@ async def test_async_update_data_adds_boost_metadata(
         return_value={"y": 2024, "n": 1, "d": 1, "h": 0, "m": 0, "s": 0}
     )
 
-    result = await coordinator._async_update_data()
-    record = result["dev"]
-    settings = record["settings"]["acm"]["1"]
+    await coordinator._async_update_data()
+    settings = _state_payload(coordinator, "acm", "1") or {}
     derived_dt = settings.get("boost_end_datetime")
     derived_minutes = settings.get("boost_minutes_delta")
 
@@ -363,7 +374,7 @@ async def test_async_update_data_omits_raw_nodes(
         [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
     ],
 ) -> None:
-    """Coordinator data should expose settings metadata but not raw node payloads."""
+    """Coordinator snapshots should omit raw node payloads and settings maps."""
 
     hass = HomeAssistant()
     client = AsyncMock()
@@ -386,9 +397,10 @@ async def test_async_update_data_omits_raw_nodes(
 
     record = result["dev"]
     assert "nodes" not in record
+    assert "settings" not in record
     assert record["inventory"] is inventory
     assert record["inventory"].addresses_by_type["htr"] == ["1"]
-    assert record["settings"]["htr"]["1"] == {}
+    assert _state_payload(coord, "htr", "1") == {}
 
 
 @pytest.mark.asyncio
@@ -697,17 +709,10 @@ async def test_refresh_skips_pending_settings_merge(
         nodes=inventory.payload,
         inventory=inventory,
     )
-    initial = {
-        "dev": {
-            "dev_id": "dev",
-            "name": "Device",
-            "model": None,
-            "connected": True,
-            "inventory": inventory,
-            "settings": {"htr": {"1": {"mode": "manual", "stemp": "21.0"}}},
-        }
-    }
-    coordinator.data = initial
+
+    store = coordinator._state_store or coordinator._ensure_state_store(inventory)
+    assert store is not None
+    store.apply_full_snapshot("htr", "1", {"mode": "manual", "stemp": "21.0"})
 
     client.get_node_settings = AsyncMock(return_value={"mode": "auto", "stemp": "20.0"})
     coordinator.register_pending_setting(
@@ -716,7 +721,7 @@ async def test_refresh_skips_pending_settings_merge(
 
     await coordinator.async_refresh_heater(("htr", "1"))
 
-    settings = coordinator.data["dev"]["settings"]["htr"]["1"]
+    settings = _state_payload(coordinator, "htr", "1")
     assert settings == {"mode": "manual", "stemp": "21.0"}
     assert ("htr", "1") in coordinator._pending_settings
 
@@ -751,37 +756,29 @@ async def test_poll_skips_pending_settings_merge(
         nodes=inventory.payload,
         inventory=inventory,
     )
-    initial = {
-        "dev": {
-            "dev_id": "dev",
-            "name": "Device",
-            "model": None,
-            "connected": True,
-            "inventory": inventory,
-            "settings": {"htr": {"1": {"mode": "manual", "stemp": "21.0"}}},
-        }
-    }
-    coordinator.data = initial
+
+    store = coordinator._state_store or coordinator._ensure_state_store(inventory)
+    assert store is not None
+    store.apply_full_snapshot("htr", "1", {"mode": "manual", "stemp": "21.0"})
 
     client.get_node_settings = AsyncMock(return_value={"mode": "auto", "stemp": "20.0"})
     coordinator.register_pending_setting(
         "htr", "1", mode="manual", stemp=21.0, ttl=60.0
     )
 
-    result = await coordinator._async_update_data()
+    await coordinator._async_update_data()
 
-    settings = result["dev"]["settings"]["htr"]["1"]
+    settings = _state_payload(coordinator, "htr", "1")
     assert settings == {"mode": "manual", "stemp": "21.0"}
     assert ("htr", "1") in coordinator._pending_settings
 
-    coordinator.data = result
     client.get_node_settings.return_value = {"mode": "manual", "stemp": "21.0"}
 
-    result_second = await coordinator._async_update_data()
+    await coordinator._async_update_data()
 
     assert ("htr", "1") not in coordinator._pending_settings
     assert client.get_node_settings.await_count == 2
-    settings_second = result_second["dev"]["settings"]["htr"]["1"]
+    settings_second = _state_payload(coordinator, "htr", "1")
     assert settings_second == {"mode": "manual", "stemp": "21.0"}
 
 
@@ -815,7 +812,10 @@ def test_handle_ws_deltas_updates_store(
     ]
     coordinator.handle_ws_deltas("dev", deltas, replace=True)
 
-    first_settings = coordinator.data["dev"]["settings"]["htr"]["1"]
+    device_record = coordinator.data["dev"]
+    assert "settings" not in device_record
+    first_settings = _state_payload(coordinator, "htr", "1")
+    assert first_settings is not None
     assert first_settings["mode"] == "auto"
     assert first_settings["status"]["online"] is True
 
@@ -825,7 +825,8 @@ def test_handle_ws_deltas_updates_store(
         replace=False,
     )
 
-    merged_settings = coordinator.data["dev"]["settings"]["htr"]["1"]
+    merged_settings = _state_payload(coordinator, "htr", "1")
+    assert merged_settings is not None
     assert merged_settings["mode"] == "auto"
     assert merged_settings["stemp"] == "19.0"
 

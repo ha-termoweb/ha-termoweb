@@ -23,7 +23,6 @@ from .backend.sanitize import mask_identifier
 from .boost import coerce_int, resolve_boost_end_from_fields
 from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
 from .domain.ids import NodeId as DomainNodeId, NodeType as DomainNodeType
-from .domain.legacy_view import store_to_legacy_coordinator_data
 from .domain.state import DomainStateStore, NodeSettingsDelta
 from .domain.view import DomainStateView
 from .inventory import Inventory, normalize_node_addr, normalize_node_type
@@ -135,6 +134,35 @@ class StateCoordinator(
         """Return the read-only domain state view."""
 
         return self._domain_view
+
+    def _device_record(self) -> dict[str, dict[str, Any]]:
+        """Return a minimal coordinator payload for this device."""
+
+        model: str | None = None
+        backend = "ducaheat" if self._is_ducaheat else "termoweb"
+
+        if isinstance(self._device, Mapping):
+            model_value = self._device.get("model")
+            if model_value not in (None, ""):
+                model = str(model_value)
+
+        record = {
+            "dev_id": self._dev_id,
+            "name": _device_display_name(self._device, self._dev_id),
+            "model": model,
+            "connected": True,
+            "backend": backend,
+            "inventory": self._inventory,
+            "domain_view": self._domain_view,
+            "state_store": self._state_store,
+        }
+
+        return {self._dev_id: record}
+
+    def _publish_device_record(self) -> None:
+        """Push the latest device snapshot to coordinator listeners."""
+
+        self.async_set_updated_data(self._device_record())
 
     def _filtered_settings_payload(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         """Return a defensive copy of ``payload`` without raw blobs."""
@@ -672,37 +700,7 @@ class StateCoordinator(
         else:
             self._state_store.reset_nodes(node_ids)
         self._domain_view.update_store(self._state_store)
-        self._seed_state_store_from_data()
         return self._state_store
-
-    def _seed_state_store_from_data(self) -> None:
-        """Populate the domain store from any existing coordinator data."""
-
-        store = self._state_store
-        if store is None:
-            return
-
-        data = self.data if isinstance(self.data, Mapping) else None
-        if not isinstance(data, Mapping):
-            return
-
-        dev_state = data.get(self._dev_id)
-        _ = data.get(self._dev_id)
-        settings = dev_state.get("settings") if isinstance(dev_state, Mapping) else None
-        if not isinstance(settings, Mapping):
-            return
-
-        for node_type, bucket in settings.items():
-            if not isinstance(bucket, Mapping):
-                continue
-            for addr, payload in bucket.items():
-                if not isinstance(addr, str) or not isinstance(payload, Mapping):
-                    continue
-                store.apply_full_snapshot(
-                    node_type,
-                    addr,
-                    self._filtered_settings_payload(payload),
-                )
 
     def handle_ws_deltas(
         self,
@@ -724,7 +722,6 @@ class StateCoordinator(
         if store is None:
             return
 
-        self._seed_state_store_from_data()
         applied = False
         for delta in deltas:
             if not isinstance(delta, NodeSettingsDelta):
@@ -742,17 +739,7 @@ class StateCoordinator(
         if not applied:
             return
 
-        dev_name = _device_display_name(self._device, self._dev_id)
-        device_record = store_to_legacy_coordinator_data(
-            self._dev_id,
-            store,
-            inventory,
-            device_name=dev_name,
-            device_details=self._device,
-        )
-        new_data = dict(self.data or {})
-        new_data.update(device_record)
-        self.async_set_updated_data(new_data)
+        self._publish_device_record()
 
     def apply_entity_patch(
         self, node_type: str, addr: str, mutator: Callable[[dict[str, Any]], None]
@@ -765,13 +752,25 @@ class StateCoordinator(
             return False
 
         try:
-            data = self.data if isinstance(self.data, Mapping) else {}
-            if isinstance(data, Mapping):
-                _ = data.get(self._dev_id)
             current_state = store.get_state(node_type, addr)
             base = current_state.to_legacy() if current_state else {}
             payload = dict(base)
+            before_boost = (
+                payload.get("boost"),
+                payload.get("boost_active"),
+                payload.get("boost_end_day"),
+                payload.get("boost_end_min"),
+            )
             mutator(payload)
+            after_boost = (
+                payload.get("boost"),
+                payload.get("boost_active"),
+                payload.get("boost_end_day"),
+                payload.get("boost_end_min"),
+            )
+            if before_boost != after_boost:
+                payload["boost_end_datetime"] = None
+                payload["boost_minutes_delta"] = None
             store.apply_patch(node_type, addr, payload)
         except _CANCELLED_ERROR:
             raise
@@ -784,17 +783,7 @@ class StateCoordinator(
             )
             return False
 
-        dev_name = _device_display_name(self._device, self._dev_id)
-        device_record = store_to_legacy_coordinator_data(
-            self._dev_id,
-            store,
-            inventory,
-            device_name=dev_name,
-            device_details=self._device,
-        )
-        new_data = dict(self.data or {})
-        new_data.update(device_record)
-        self.async_set_updated_data(new_data)
+        self._publish_device_record()
         return True
 
     async def async_refresh_heater(self, node: str | tuple[str, str]) -> None:
@@ -883,23 +872,12 @@ class StateCoordinator(
                 )
                 return
 
-            self._seed_state_store_from_data()
             store.apply_full_snapshot(
                 resolved_type,
                 addr,
                 self._filtered_settings_payload(payload),
             )
-            dev_name = _device_display_name(self._device, dev_id)
-            device_record = store_to_legacy_coordinator_data(
-                dev_id,
-                store,
-                inventory,
-                device_name=dev_name,
-                device_details=self._device,
-            )
-            new_data = dict(self.data or {})
-            new_data.update(device_record)
-            self.async_set_updated_data(new_data)
+            self._publish_device_record()
             success = True
 
         except TimeoutError as err:
@@ -945,7 +923,6 @@ class StateCoordinator(
             if store is None:
                 return {}
 
-            self._seed_state_store_from_data()
             if addrs:
                 rtc_now = await self._async_fetch_settings_to_store(
                     dev_id,
@@ -954,15 +931,7 @@ class StateCoordinator(
                     store,
                     rtc_now,
                 )
-            dev_name = _device_display_name(self._device, dev_id)
-            result = store_to_legacy_coordinator_data(
-                dev_id,
-                store,
-                inventory,
-                device_name=dev_name,
-                device_details=self._device,
-                include_nodes_by_type=False,
-            )
+            result = self._device_record()
 
         except TimeoutError as err:
             raise UpdateFailed("API timeout") from err

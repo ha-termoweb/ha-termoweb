@@ -1808,6 +1808,36 @@ class FakeCoordinator:
                                     payload,
                                 )
                 self.domain_view = DomainStateView(dev_id, self._state_store)
+        if self._state_store is None:
+            dev_state = self.data.get(dev_id)
+            if isinstance(dev_state, Mapping):
+                settings = dev_state.get("settings")
+                if isinstance(settings, Mapping):
+                    node_ids: list[DomainNodeId] = []
+                    for node_type, bucket in settings.items():
+                        if not isinstance(bucket, Mapping):
+                            continue
+                        for addr in bucket:
+                            try:
+                                node_ids.append(
+                                    DomainNodeId(DomainNodeType(str(node_type)), addr)
+                                )
+                            except ValueError:
+                                continue
+                    if node_ids:
+                        self._state_store = DomainStateStore(node_ids)
+                        for node_type, bucket in settings.items():
+                            if not isinstance(bucket, Mapping):
+                                continue
+                            for addr, payload in bucket.items():
+                                if not isinstance(payload, Mapping):
+                                    continue
+                                self._state_store.apply_full_snapshot(
+                                    node_type,
+                                    addr,
+                                    payload,
+                                )
+                        self.domain_view = DomainStateView(dev_id, self._state_store)
         self.listeners: list[Callable[[], None]] = []
         self.refresh_calls = 0
         self.async_request_refresh = AsyncMock()
@@ -1859,8 +1889,8 @@ class FakeCoordinator:
             payload = dict(base)
             try:
                 mutator(payload)
-            except Exception:
-                return False
+            except BaseException:
+                raise
             self._state_store.apply_patch(target_type, addr, payload)
 
         try:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Iterator, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 import inspect
 import logging
 import time
@@ -391,100 +391,6 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         except Exception:
             return None
 
-    def _settings_maps(self) -> list[Mapping[str, Any]]:
-        """Return all cached settings maps referencing this node."""
-
-        view = self._domain_state_view()
-        inventory = self._shared_inventory()
-        addr = self._addr
-
-        def _iter_node_types() -> Iterator[str]:
-            """Yield node types that may hold settings for this address."""
-
-            seen_types: set[str] = set()
-            primary = normalize_node_type(
-                self._node_type,
-                use_default_when_falsey=True,
-            )
-            if primary:
-                seen_types.add(primary)
-                yield primary
-            if inventory is None or not addr:
-                return
-            try:
-                _, reverse_map = inventory.heater_address_map
-            except Exception:
-                reverse_map = {}
-            for alias in reverse_map.get(addr, ()):  # type: ignore[arg-type]
-                canonical = normalize_node_type(
-                    alias,
-                    use_default_when_falsey=True,
-                )
-                if not canonical or canonical in seen_types:
-                    continue
-                if not inventory.has_node(canonical, addr):
-                    continue
-                seen_types.add(canonical)
-                yield canonical
-
-        results: list[Mapping[str, Any]] = []
-        seen_ids: set[int] = set()
-        if view is not None and addr is not None:
-            for node_type in _iter_node_types():
-                state = view.get_heater_state(node_type, addr)
-                payload = state.to_legacy() if state is not None else None
-                if isinstance(payload, Mapping):
-                    payload_id = id(payload)
-                    if payload_id in seen_ids:
-                        continue
-                    seen_ids.add(payload_id)
-                    results.append(payload)
-
-        coordinator_data = self.coordinator.data or {}
-        if not isinstance(coordinator_data, Mapping):
-            return results
-
-        try:
-            data = coordinator_data.get(self._dev_id)
-            _ = coordinator_data.get(self._dev_id)
-        except BaseException as err:
-            if _is_cancelled_error(err):
-                raise
-            _LOGGER.debug(
-                "Failed to resolve settings maps for %s: %s",
-                self._dev_id,
-                err,
-            )
-            raise
-        if not isinstance(data, Mapping):
-            return results
-
-        for node_type in _iter_node_types():
-            settings_section = data.get("settings")
-            if isinstance(settings_section, Mapping):
-                bucket = settings_section.get(node_type)
-                if isinstance(bucket, Mapping):
-                    bucket_id = id(bucket)
-                    if bucket_id in seen_ids:
-                        continue
-                    seen_ids.add(bucket_id)
-                    results.append(bucket)
-                    continue
-
-            section = data.get(node_type)
-            if not isinstance(section, Mapping):
-                continue
-            bucket = section.get("settings")
-            if not isinstance(bucket, Mapping):
-                continue
-            bucket_id = id(bucket)
-            if bucket_id in seen_ids:
-                continue
-            seen_ids.add(bucket_id)
-            results.append(bucket)
-
-        return results
-
     def _shared_inventory(self) -> Inventory | None:
         """Return the shared immutable inventory for this coordinator."""
 
@@ -502,7 +408,6 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         try:
             coordinator = getattr(self, "coordinator", None)
             apply_patch = getattr(coordinator, "apply_entity_patch", None)
-            boost_changed = False
             updated = False
             refresh_needed = False
             if callable(apply_patch):
@@ -510,38 +415,11 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 if applied:
                     updated = True
                     refresh_needed = True
-            for settings_map in self._settings_maps():
-                cur = settings_map.get(self._addr)
-                if isinstance(cur, dict):
-                    before = (
-                        cur.get("boost_active"),
-                        cur.get("boost_remaining"),
-                        cur.get("boost_end"),
-                        cur.get("boost_end_day"),
-                        cur.get("boost_end_min"),
-                    )
-                    mutator(cur)
-                    after = (
-                        cur.get("boost_active"),
-                        cur.get("boost_remaining"),
-                        cur.get("boost_end"),
-                        cur.get("boost_end_day"),
-                        cur.get("boost_end_min"),
-                    )
-                    if before != after:
-                        boost_changed = True
-                        cur.pop("boost_end_datetime", None)
-                        cur.pop("boost_minutes_delta", None)
-                    updated = True
             if updated:
                 self.async_write_ha_state()
                 hass = self.hass
                 refresh = getattr(self.coordinator, "async_request_refresh", None)
-                if (
-                    (refresh_needed or boost_changed)
-                    and hass is not None
-                    and callable(refresh)
-                ):
+                if refresh_needed and hass is not None and callable(refresh):
                     refresh_task = refresh()
                     if inspect.isawaitable(refresh_task):
                         try:
@@ -549,12 +427,12 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                         except Exception:
                             try:
                                 loop = asyncio.get_running_loop()
-                                loop.create_task(refresh_task)
+                                self._last_refresh_task = loop.create_task(
+                                    refresh_task
+                                )
                             except Exception:
                                 if hasattr(refresh_task, "close"):
                                     refresh_task.close()
-                    else:
-                        refresh_task
             data_obj = getattr(self.coordinator, "data", None)
             if not isinstance(data_obj, dict):
                 _LOGGER.debug(
@@ -564,7 +442,6 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                     type(data_obj).__name__,
                 )
                 return False
-            return updated
         except BaseException as err:  # pragma: no cover - defensive
             if _is_cancelled_error(err):
                 raise
@@ -575,6 +452,8 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 err,
             )
             return False
+        else:
+            return updated
 
     async def _async_write_settings(
         self,
