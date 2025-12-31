@@ -364,7 +364,7 @@ def test_nodes_to_deltas_translates_payloads(
     nodes = {
         "htr": {
             "settings": {"1": {"mode": "auto", "ignored": "value"}},
-            "status": {"1": {"online": True, "extra": "keep"}},
+            "status": {"1": {"stemp": "21.5", "online": True}},
             "samples": {"1": {"temp": 25}},
         }
     }
@@ -376,7 +376,8 @@ def test_nodes_to_deltas_translates_payloads(
     assert delta.node_id.node_type.value == "htr"
     assert delta.node_id.addr == "1"
     assert delta.payload["mode"] == "auto"
-    assert delta.payload["status"]["online"] is True
+    assert delta.payload["stemp"] == "21.5"
+    assert "status" not in delta.payload
     assert "ignored" not in delta.payload
     assert "samples" not in delta.payload
 

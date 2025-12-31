@@ -1,6 +1,5 @@
-# TermoWeb Function Map
-
-custom_components/termoweb/__init__.py :: _build_unknown_node_probe_requests
+Wrote 809 functions to /workspace/ha-termoweb/docs/function_map.txt
+build_unknown_node_probe_requests
     Return common REST endpoints to query for an unknown node type.
 custom_components/termoweb/__init__.py :: _async_probe_unknown_node_types
     Log discovery probes for node types not yet supported.
@@ -1034,6 +1033,8 @@ custom_components/termoweb/domain/state.py :: AccumulatorState.to_legacy
     Convert the accumulator state into the legacy payload shape.
 custom_components/termoweb/domain/state.py :: PowerMonitorState.to_legacy
     Convert the power monitor state into the legacy payload shape.
+custom_components/termoweb/domain/state.py :: canonicalize_settings_payload
+    Return canonical setting fields derived from ``payload``.
 custom_components/termoweb/domain/state.py :: NodeDelta.payload
     Return the payload carried by the delta.
 custom_components/termoweb/domain/state.py :: NodeSettingsDelta.payload

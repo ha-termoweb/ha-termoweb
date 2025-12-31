@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Any
 
 from .ids import NodeId, NodeType
@@ -54,8 +54,6 @@ class HeaterState:
     state: str | None = None
     max_power: float | int | None = None
     batt_level: int | None = None
-    status: dict[str, Any] | None = None
-    capabilities: dict[str, Any] | None = None
 
     def to_legacy(self) -> dict[str, Any]:
         """Convert the state into the legacy coordinator payload shape."""
@@ -81,10 +79,6 @@ class HeaterState:
             payload["max_power"] = self.max_power
         if self.batt_level is not None:
             payload["batt_level"] = self.batt_level
-        if self.status is not None:
-            payload["status"] = dict(self.status)
-        if self.capabilities is not None:
-            payload["capabilities"] = dict(self.capabilities)
         return payload
 
 
@@ -151,21 +145,58 @@ class ThermostatState(HeaterState):
 class PowerMonitorState:
     """Runtime state for a power monitor node."""
 
-    status: dict[str, Any] | None = None
-    capabilities: dict[str, Any] | None = None
+    power: float | int | None = None
+    voltage: float | int | None = None
+    current: float | int | None = None
+    energy: float | int | None = None
 
     def to_legacy(self) -> dict[str, Any]:
         """Convert the power monitor state into the legacy payload shape."""
 
         payload: dict[str, Any] = {}
-        if self.status is not None:
-            payload["status"] = dict(self.status)
-        if self.capabilities is not None:
-            payload["capabilities"] = dict(self.capabilities)
+        if self.power is not None:
+            payload["power"] = self.power
+        if self.voltage is not None:
+            payload["voltage"] = self.voltage
+        if self.current is not None:
+            payload["current"] = self.current
+        if self.energy is not None:
+            payload["energy"] = self.energy
         return payload
 
 
 DomainState = HeaterState | AccumulatorState | ThermostatState | PowerMonitorState
+
+
+_SETTING_FIELD_NAMES: frozenset[str] = frozenset(
+    field.name
+    for cls in (HeaterState, AccumulatorState, ThermostatState, PowerMonitorState)
+    for field in fields(cls)
+)
+
+
+def canonicalize_settings_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Return canonical setting fields derived from ``payload``."""
+
+    if not isinstance(payload, Mapping):
+        return {}
+
+    canonical: dict[str, Any] = {}
+
+    def _merge(source: Mapping[str, Any]) -> None:
+        for key, value in source.items():
+            if key not in _SETTING_FIELD_NAMES:
+                continue
+            cloned = _copy_mapping(value)
+            if cloned is None:
+                cloned = _copy_sequence(value) or value
+            canonical.setdefault(key, cloned)
+
+    _merge(payload)
+    status = payload.get("status")
+    if isinstance(status, Mapping):
+        _merge(status)
+    return canonical
 
 
 @dataclass(slots=True)
@@ -204,7 +235,7 @@ class NodeStatusDelta(NodeDelta):
     def payload(self) -> Mapping[str, Any]:
         """Return the status mapping payload."""
 
-        return {"status": self.status}
+        return canonicalize_settings_payload({"status": self.status})
 
 
 @dataclass(slots=True)
@@ -267,10 +298,6 @@ def _populate_heater_state(
             state.batt_level = int(payload.get("batt_level"))
         except (TypeError, ValueError):
             state.batt_level = None
-    if "status" in payload:
-        state.status = _copy_mapping(payload.get("status"))
-    if "capabilities" in payload:
-        state.capabilities = _copy_mapping(payload.get("capabilities"))
     return state
 
 
@@ -337,10 +364,26 @@ def _build_thermostat_state(payload: Mapping[str, Any]) -> ThermostatState:
 def _build_power_monitor_state(payload: Mapping[str, Any]) -> PowerMonitorState:
     """Construct a power monitor state instance from ``payload``."""
 
-    return PowerMonitorState(
-        status=_copy_mapping(payload.get("status")),
-        capabilities=_copy_mapping(payload.get("capabilities")),
-    )
+    state = PowerMonitorState()
+    if "power" in payload:
+        state.power = _coerce_number(payload.get("power"))
+    if "voltage" in payload:
+        state.voltage = _coerce_number(payload.get("voltage"))
+    if "current" in payload:
+        state.current = _coerce_number(payload.get("current"))
+    if "energy" in payload:
+        state.energy = _coerce_number(payload.get("energy"))
+    status = payload.get("status")
+    if isinstance(status, Mapping):
+        if state.power is None and "power" in status:
+            state.power = _coerce_number(status.get("power"))
+        if state.voltage is None and "voltage" in status:
+            state.voltage = _coerce_number(status.get("voltage"))
+        if state.current is None and "current" in status:
+            state.current = _coerce_number(status.get("current"))
+        if state.energy is None and "energy" in status:
+            state.energy = _coerce_number(status.get("energy"))
+    return state
 
 
 def _build_state(node_type: NodeType, payload: Mapping[str, Any]) -> DomainState:
@@ -419,16 +462,23 @@ class DomainStateStore:
         if not isinstance(payload, Mapping):
             return
 
+        normalized = canonicalize_settings_payload(payload)
+        if not normalized:
+            if replace:
+                normalized = {}
+            else:
+                return
+
         if replace or node_id not in self._states:
-            self._states[node_id] = _build_state(node_id.node_type, payload)
+            self._states[node_id] = _build_state(node_id.node_type, normalized)
             return
 
         existing = self._states.get(node_id)
         if existing is None:
-            self._states[node_id] = _build_state(node_id.node_type, payload)
+            self._states[node_id] = _build_state(node_id.node_type, normalized)
             return
 
-        self._states[node_id] = _merge_state(existing, payload)
+        self._states[node_id] = _merge_state(existing, normalized)
 
     def apply_full_snapshot(
         self,
@@ -547,4 +597,7 @@ def build_state_from_payload(
         return None
     if not isinstance(payload, Mapping):
         return None
-    return _build_state(normalized_type, payload)
+    canonical = canonicalize_settings_payload(payload)
+    if not canonical:
+        return None
+    return _build_state(normalized_type, canonical)
