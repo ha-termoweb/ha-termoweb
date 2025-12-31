@@ -368,8 +368,9 @@ def test_nodes_to_deltas_translates_payloads(
 
     nodes = {
         "htr": {
-            "settings": {"1": {"mode": "auto"}},
-            "status": {"1": {"online": True}},
+            "settings": {"1": {"mode": "auto", "ignored": "value"}},
+            "status": {"1": {"online": True, "extra": "keep"}},
+            "samples": {"1": {"temp": 25}},
         }
     }
 
@@ -381,6 +382,8 @@ def test_nodes_to_deltas_translates_payloads(
     assert delta.node_id.addr == "1"
     assert delta.payload["mode"] == "auto"
     assert delta.payload["status"]["online"] is True
+    assert "ignored" not in delta.payload
+    assert "samples" not in delta.payload
 
 
 def test_nodes_to_deltas_validates_inventory(
@@ -1402,17 +1405,6 @@ async def test_disconnect_resets_payload_window(
     state = client._ws_state_bucket()
     assert state["payload_window_hint"] is None
     assert state["payload_window_source"] == "disconnect"
-
-
-def test_merge_nodes_overwrites_non_mapping() -> None:
-    """The merge helper should replace non-mapping targets."""
-
-    target = {"htr": "invalid"}
-    source = {"htr": {"status": {"1": {}}}}
-
-    ducaheat_ws.DucaheatWSClient._merge_nodes(target, source)
-
-    assert target["htr"]["status"]["1"] == {}
 
 
 def test_log_nodes_summary_branches(

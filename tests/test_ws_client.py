@@ -799,9 +799,11 @@ def test_termoweb_nodes_to_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
 
     nodes_payload = {
         "htr": {
-            "settings": {"1": {"mode": "manual"}},
+            "settings": {"1": {"mode": "manual", "unknown": "drop"}},
             "status": {"1": {"online": True}},
             "prog": {"1": {"0": 1}},
+            "samples": {"1": {"temp": 12}},
+            "advanced": {"1": {"misc": "skip"}},
         }
     }
 
@@ -813,6 +815,8 @@ def test_termoweb_nodes_to_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
     assert delta.payload["mode"] == "manual"
     assert delta.payload["status"]["online"] is True
     assert delta.payload["prog"] == {"0": 1}
+    assert "unknown" not in delta.payload
+    assert "samples" not in delta.payload
 
 
 def test_termoweb_nodes_to_deltas_validates_inventory(
