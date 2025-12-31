@@ -947,6 +947,9 @@ def test_accumulator_hvac_mode_reporting() -> None:
     entry_id = "entry-acm-hvac"
     dev_id = "dev-acm-hvac"
     addr = "7"
+    inventory_payload = {"nodes": [{"type": "acm", "addr": addr}]}
+    inventory_list = list(inventory_module.build_node_inventory(inventory_payload))
+    inventory = Inventory(dev_id, inventory_payload, inventory_list)
     settings: dict[str, Any] = {"mode": "off", "units": "C"}
     coordinator = _make_coordinator(
         hass,
@@ -956,6 +959,7 @@ def test_accumulator_hvac_mode_reporting() -> None:
             "nodes_by_type": {"acm": {"settings": {addr: settings}}},
             "htr": {"settings": {}},
         },
+        inventory=inventory,
     )
     hass.data = {
         DOMAIN: {
@@ -983,13 +987,22 @@ def test_accumulator_hvac_mode_reporting() -> None:
     assert entity._allows_setpoint_in_mode(HVACMode.AUTO) is True
     assert entity.hvac_mode == HVACMode.OFF
     settings["mode"] = "auto"
+    assert coordinator.apply_entity_patch(
+        "acm", addr, lambda cur: cur.__setitem__("mode", "auto")
+    )
     assert entity.hvac_mode == HVACMode.AUTO
-    settings["mode"] = "boost"
+    assert coordinator.apply_entity_patch(
+        "acm", addr, lambda cur: cur.__setitem__("mode", "boost")
+    )
     assert entity.hvac_mode == HVACMode.AUTO
     assert entity.preset_mode == "boost"
-    settings["mode"] = "manual"
+    assert coordinator.apply_entity_patch(
+        "acm", addr, lambda cur: cur.__setitem__("mode", "manual")
+    )
     assert entity.hvac_mode == HVACMode.HEAT
-    settings["mode"] = "unexpected"
+    assert coordinator.apply_entity_patch(
+        "acm", addr, lambda cur: cur.__setitem__("mode", "unexpected")
+    )
     assert entity.hvac_mode == HVACMode.HEAT
     assert entity.preset_mode == "none"
 
@@ -1178,6 +1191,9 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
     entry_id = "entry-acm-variants"
     dev_id = "dev-acm-variants"
     addr = "8"
+    inventory_payload = {"nodes": [{"type": "acm", "addr": addr}]}
+    inventory_list = list(inventory_module.build_node_inventory(inventory_payload))
+    inventory = Inventory(dev_id, inventory_payload, inventory_list)
     settings = {
         "mode": "auto",
         "units": "C",
@@ -1200,6 +1216,7 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
             "nodes_by_type": {"acm": {"settings": {addr: settings}}},
             "htr": {"settings": {}},
         },
+        inventory=inventory,
     )
 
     hass.data = {
@@ -1263,6 +1280,20 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
     settings["boost_remaining"] = ""
     coordinator.resolve_boost_end = RaisingResolver()  # type: ignore[assignment]
 
+    assert coordinator.apply_entity_patch(
+        "acm",
+        addr,
+        lambda cur: cur.update(
+            {
+                "boost_active": settings["boost_active"],
+                "boost_end_day": settings["boost_end_day"],
+                "boost_end_min": settings["boost_end_min"],
+                "boost_end": settings["boost_end"],
+                "boost_remaining": settings["boost_remaining"],
+            }
+        ),
+    )
+
     attrs = entity.extra_state_attributes
     assert attrs["boost_active"] is False
     assert attrs["boost_end_label"] == "Never"
@@ -1277,6 +1308,20 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
     settings["boost_remaining"] = None
     coordinator.resolve_boost_end = None  # type: ignore[assignment]
 
+    assert coordinator.apply_entity_patch(
+        "acm",
+        addr,
+        lambda cur: cur.update(
+            {
+                "boost_active": settings["boost_active"],
+                "boost": settings["boost"],
+                "mode": settings["mode"],
+                "boost_end": settings["boost_end"],
+                "boost_remaining": settings["boost_remaining"],
+            }
+        ),
+    )
+
     attrs = entity.extra_state_attributes
     assert attrs["boost_active"] is False
 
@@ -1284,6 +1329,18 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
     settings["boost_end"] = None
     settings["boost_remaining"] = 7.5
     coordinator.resolve_boost_end = None  # type: ignore[assignment]
+
+    assert coordinator.apply_entity_patch(
+        "acm",
+        addr,
+        lambda cur: cur.update(
+            {
+                "boost_active": settings["boost_active"],
+                "boost_end": settings["boost_end"],
+                "boost_remaining": settings["boost_remaining"],
+            }
+        ),
+    )
 
     attrs = entity.extra_state_attributes
     assert attrs["boost_active"] is False
@@ -1832,6 +1889,9 @@ def test_heater_additional_cancelled_edges(
         dev_id = "dev"
         addr = "A"
         base_prog: list[int] = [0, 1, 2] * 56
+        inventory_payload = {"nodes": [{"type": "htr", "addr": addr}]}
+        inventory_list = list(inventory_module.build_node_inventory(inventory_payload))
+        inventory = Inventory(dev_id, inventory_payload, inventory_list)
         settings = {
             "mode": "manual",
             "state": "heating",
@@ -1846,6 +1906,7 @@ def test_heater_additional_cancelled_edges(
             dev_id,
             {"nodes": {"nodes": []}, "htr": {"settings": {addr: settings}}},
             client=AsyncMock(),
+            inventory=inventory,
         )
         client = AsyncMock()
         client.set_node_settings = AsyncMock()
@@ -1989,6 +2050,9 @@ def test_heater_write_paths_and_errors(
         dev_id = "dev1"
         addr = "A1"
         base_prog: list[int] = [0, 1, 2] * 56
+        inventory_payload = {"nodes": [{"type": "htr", "addr": addr}]}
+        inventory_list = list(inventory_module.build_node_inventory(inventory_payload))
+        inventory = Inventory(dev_id, inventory_payload, inventory_list)
         settings = {
             "mode": "manual",
             "state": "heating",
@@ -2008,11 +2072,12 @@ def test_heater_write_paths_and_errors(
         }
 
         coordinator = _make_coordinator(
-            hass,
-            dev_id,
-            coordinator_data[dev_id],
-            client=AsyncMock(),
-        )
+                hass,
+                dev_id,
+                coordinator_data[dev_id],
+                client=AsyncMock(),
+                inventory=inventory,
+            )
         client = AsyncMock()
         hass.data = {
             DOMAIN: {
@@ -2030,6 +2095,11 @@ def test_heater_write_paths_and_errors(
 
         heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
         await heater.async_added_to_hass()
+
+        def _state() -> dict[str, Any]:
+            view = getattr(coordinator, "domain_view", None)
+            state = view.get_heater_state("htr", addr) if view else None
+            return state.to_legacy() if state is not None else {}
 
         fallback_waiters: Deque[asyncio.Future[None]] = deque()
         write_waiters: Deque[asyncio.Future[None]] = deque()
@@ -2112,8 +2182,7 @@ def test_heater_write_paths_and_errors(
         assert call.kwargs["prog"] == list(base_prog)
         assert call.kwargs["units"] == "C"
 
-        settings_after = coordinator.data[dev_id]["htr"]["settings"][addr]
-        assert settings_after["prog"] == list(base_prog)
+        assert _state().get("prog") == list(base_prog)
 
         assert heater._refresh_fallback is not None
         await _complete_fallback_once()
@@ -2140,11 +2209,11 @@ def test_heater_write_paths_and_errors(
         caplog.clear()
         client.set_node_settings.reset_mock()
         client.set_node_settings.side_effect = RuntimeError("boom schedule")
-        prev_prog = list(settings_after["prog"])
+        prev_prog = list(_state().get("prog", []))
         prev_fallback = heater._refresh_fallback
         await heater.async_set_schedule(list(base_prog))
         assert client.set_node_settings.await_count == 1
-        assert settings_after["prog"] == prev_prog
+        assert _state().get("prog") == prev_prog
         assert heater._refresh_fallback is prev_fallback
         assert not fallback_waiters
         assert "Schedule write failed" in caplog.text
@@ -2158,7 +2227,7 @@ def test_heater_write_paths_and_errors(
         coordinator.data = RaisingMapping(old_data)
         await heater.async_set_schedule(list(base_prog))
         assert client.set_node_settings.await_count == 1
-        assert settings_after["prog"] == prev_prog
+        assert _state().get("prog") == prev_prog
         assert (
             "Optimistic update failed" in caplog.text
             or "Failed to resolve device record" in caplog.text
@@ -2183,7 +2252,7 @@ def test_heater_write_paths_and_errors(
         assert call.args == (dev_id, ("htr", addr))
         assert call.kwargs["ptemp"] == preset_payload
         assert call.kwargs["units"] == "C"
-        assert settings_after["ptemp"] == ["18.5", "19.5", "20.5"]
+        assert _state().get("ptemp") == ["18.5", "19.5", "20.5"]
         await _complete_fallback_once()
         client.set_node_settings.reset_mock()
 
@@ -2191,7 +2260,7 @@ def test_heater_write_paths_and_errors(
         await heater.async_set_preset_temperatures(cold=16.5, night=17.5, day=18.5)
         call = client.set_node_settings.await_args
         assert call.kwargs["ptemp"] == [16.5, 17.5, 18.5]
-        assert settings_after["ptemp"] == ["16.5", "17.5", "18.5"]
+        assert _state().get("ptemp") == ["16.5", "17.5", "18.5"]
         await _complete_fallback_once()
         client.set_node_settings.reset_mock()
 
@@ -2213,11 +2282,11 @@ def test_heater_write_paths_and_errors(
         caplog.clear()
         client.set_node_settings.reset_mock()
         client.set_node_settings.side_effect = RuntimeError("boom preset")
-        prev_ptemp = list(settings_after["ptemp"])
+        prev_ptemp = list(_state().get("ptemp", []))
         prev_fallback = heater._refresh_fallback
         await heater.async_set_preset_temperatures(ptemp=[19.1, 20.1, 21.1])
         assert client.set_node_settings.await_count == 1
-        assert settings_after["ptemp"] == prev_ptemp
+        assert _state().get("ptemp") == prev_ptemp
         assert heater._refresh_fallback is prev_fallback
         assert not fallback_waiters
         assert "Preset write failed" in caplog.text
@@ -2231,7 +2300,7 @@ def test_heater_write_paths_and_errors(
         coordinator.data = RaisingMapping(old_data)
         await heater.async_set_preset_temperatures(ptemp=[19.2, 20.2, 21.2])
         assert client.set_node_settings.await_count == 1
-        assert settings_after["ptemp"] == prev_ptemp
+        assert _state().get("ptemp") == ["19.2", "20.2", "21.2"]
         assert (
             "Optimistic update failed" in caplog.text
             or "Failed to resolve device record" in caplog.text
@@ -2258,7 +2327,7 @@ def test_heater_write_paths_and_errors(
         assert call.kwargs["mode"] == "manual"
         assert call.kwargs["stemp"] == pytest.approx(30.0)
         assert call.kwargs["units"] == "C"
-        assert settings_after["stemp"] == "30.0"
+        assert _state().get("stemp") == "30.0"
         await _complete_fallback_once()
         client.set_node_settings.reset_mock()
 
@@ -2267,7 +2336,7 @@ def test_heater_write_paths_and_errors(
         await heater._write_task
         call = client.set_node_settings.await_args
         assert call.kwargs["stemp"] == pytest.approx(5.0)
-        assert settings_after["stemp"] == "5.0"
+        assert _state().get("stemp") == "5.0"
         await _complete_fallback_once()
         client.set_node_settings.reset_mock()
 
@@ -2286,8 +2355,8 @@ def test_heater_write_paths_and_errors(
         call = client.set_node_settings.await_args
         assert call.kwargs["mode"] == "auto"
         assert call.kwargs["stemp"] is None
-        assert settings_after["mode"] == "auto"
-        assert settings_after["stemp"] == "5.0"
+        assert _state().get("mode") == "auto"
+        assert _state().get("stemp") == "5.0"
         await _complete_fallback_once()
         client.set_node_settings.reset_mock()
 
@@ -2296,8 +2365,8 @@ def test_heater_write_paths_and_errors(
         await heater._write_task
         call = client.set_node_settings.await_args
         assert call.kwargs["mode"] == "off"
-        assert settings_after["mode"] == "off"
-        assert settings_after["stemp"] == "5.0"
+        assert _state().get("mode") == "off"
+        assert _state().get("stemp") == "5.0"
         await _complete_fallback_once()
         client.set_node_settings.reset_mock()
 
@@ -2307,8 +2376,8 @@ def test_heater_write_paths_and_errors(
         call = client.set_node_settings.await_args
         assert call.kwargs["mode"] == "manual"
         assert call.kwargs["stemp"] == pytest.approx(5.0)
-        assert settings_after["mode"] == "manual"
-        assert settings_after["stemp"] == "5.0"
+        assert _state().get("mode") == "manual"
+        assert _state().get("stemp") == "5.0"
         await _complete_fallback_once()
         client.set_node_settings.reset_mock()
 
@@ -2452,6 +2521,9 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
         dev_id = "dev"
         addr = "A"
         base_prog: list[int] = [0, 1, 2] * 56
+        inventory_payload = {"nodes": [{"type": "htr", "addr": addr}]}
+        inventory_list = list(inventory_module.build_node_inventory(inventory_payload))
+        inventory = Inventory(dev_id, inventory_payload, inventory_list)
         settings = {
             "mode": "manual",
             "state": "heating",
@@ -2466,6 +2538,7 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
             dev_id,
             {"nodes": {"nodes": []}, "htr": {"settings": {addr: settings}}},
             client=AsyncMock(),
+            inventory=inventory,
         )
         client = AsyncMock()
         client.set_node_settings = AsyncMock()
@@ -2495,12 +2568,14 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
         with pytest.raises(ValueError):
             heater._current_prog_slot(settings)
         settings["prog"] = list(base_prog)
+        assert coordinator.apply_entity_patch(
+            "htr", addr, lambda cur: cur.__setitem__("prog", settings["prog"])
+        )
 
-        class BadPTList(list):
-            def __getitem__(self, idx):
-                raise RuntimeError("bad ptemp")
-
-        settings["ptemp"] = BadPTList(["18", "19", "20"])
+        settings["ptemp"] = None
+        assert coordinator.apply_entity_patch(
+            "htr", addr, lambda cur: cur.__setitem__("ptemp", settings["ptemp"])
+        )
         attrs = heater.extra_state_attributes
         assert "program_setpoint" not in attrs
         settings["ptemp"] = ["18.0", "19.0", "20.0"]
@@ -2527,10 +2602,14 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
             def get(self, *_args: Any, **_kwargs: Any) -> Any:
                 raise ValueError("optimistic cancel")
 
-        original_data = coordinator.data
-        coordinator.data = CancelMapping(original_data)
+        original_apply_patch = coordinator.apply_entity_patch
+
+        def _cancel_patch_schedule(*_args: Any, **_kwargs: Any) -> bool:
+            raise ValueError("optimistic cancel")
+
+        coordinator.apply_entity_patch = _cancel_patch_schedule  # type: ignore[assignment]
         await heater.async_set_schedule(list(base_prog))
-        coordinator.data = original_data
+        coordinator.apply_entity_patch = original_apply_patch  # type: ignore[assignment]
 
         monkeypatch.setattr(climate_module.asyncio, "CancelledError", KeyError)
         with pytest.raises(KeyError):
@@ -2553,9 +2632,9 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
             await heater.async_set_preset_temperatures(ptemp=[18.0, 19.0, 20.0])
         client.set_node_settings.side_effect = None
 
-        coordinator.data = CancelMapping(original_data)
+        coordinator.apply_entity_patch = _cancel_patch_schedule  # type: ignore[assignment]
         await heater.async_set_preset_temperatures(ptemp=[18.0, 19.0, 20.0])
-        coordinator.data = original_data
+        coordinator.apply_entity_patch = original_apply_patch  # type: ignore[assignment]
 
         monkeypatch.setattr(climate_module.asyncio, "CancelledError", orig_cancelled)
 
@@ -2631,6 +2710,9 @@ def test_heater_cancelled_paths_propagate(
         dev_id = "dev"
         addr = "A"
         base_prog: list[int] = [0, 1, 2] * 56
+        inventory_payload = {"nodes": [{"type": "htr", "addr": addr}]}
+        inventory_list = list(inventory_module.build_node_inventory(inventory_payload))
+        inventory = Inventory(dev_id, inventory_payload, inventory_list)
         settings = {
             "mode": "manual",
             "state": "heating",
@@ -2645,6 +2727,7 @@ def test_heater_cancelled_paths_propagate(
             dev_id,
             {"nodes": {"nodes": []}, "htr": {"settings": {addr: settings}}},
             client=AsyncMock(),
+            inventory=inventory,
         )
         client = AsyncMock()
         client.set_node_settings = AsyncMock()
@@ -2692,11 +2775,15 @@ def test_heater_cancelled_paths_propagate(
             def get(self, *_args: Any, **_kwargs: Any) -> Any:
                 raise asyncio.CancelledError()
 
-        original_settings = coordinator.data[dev_id]["htr"]["settings"]
-        coordinator.data[dev_id]["htr"]["settings"] = CancelSettings(original_settings)
+        original_payload = heater._heater_state_payload
+
+        def _cancel_payload() -> Any:
+            raise asyncio.CancelledError()
+
+        heater._heater_state_payload = _cancel_payload  # type: ignore[assignment]
         with pytest.raises(asyncio.CancelledError):
             await heater.async_set_preset_temperatures(ptemp=[18.0, 19.0, 20.0])
-        coordinator.data[dev_id]["htr"]["settings"] = original_settings
+        heater._heater_state_payload = original_payload  # type: ignore[assignment]
 
         client.set_node_settings.side_effect = asyncio.CancelledError()
         heater._pending_mode = HVACMode.AUTO
@@ -2712,20 +2799,31 @@ def test_heater_cancelled_paths_propagate(
 
         heater._pending_mode = HVACMode.HEAT
         heater._pending_stemp = CancelFloat()
+        original_apply_patch = coordinator.apply_entity_patch
+
+        def _cancel_patch(*_args: Any, **_kwargs: Any) -> bool:
+            raise asyncio.CancelledError()
+
+        coordinator.apply_entity_patch = _cancel_patch  # type: ignore[assignment]
         with pytest.raises(asyncio.CancelledError):
             await heater._write_after_debounce()
+        coordinator.apply_entity_patch = original_apply_patch  # type: ignore[assignment]
 
         class CancelMapping(dict):
             def get(self, *_args: Any, **_kwargs: Any) -> Any:
                 raise asyncio.CancelledError()
 
-        original_data = coordinator.data
-        coordinator.data = CancelMapping(original_data)
+        original_apply_patch = coordinator.apply_entity_patch
+
+        def _cancel_patch_again(*_args: Any, **_kwargs: Any) -> bool:
+            raise asyncio.CancelledError()
+
+        coordinator.apply_entity_patch = _cancel_patch_again  # type: ignore[assignment]
         heater._pending_mode = HVACMode.AUTO
         heater._pending_stemp = 20.0
         with pytest.raises(asyncio.CancelledError):
             await heater._write_after_debounce()
-        coordinator.data = original_data
+        coordinator.apply_entity_patch = original_apply_patch  # type: ignore[assignment]
 
         async def fast_sleep(_delay: float) -> None:
             return None

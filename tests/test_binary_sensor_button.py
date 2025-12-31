@@ -323,21 +323,17 @@ def test_accumulator_boost_cancel_button_tracks_availability() -> None:
         dev_id = "device-cancel"
         addr = "5"
 
+        context = _make_boost_context(entry_id, dev_id, addr=addr, name="Hallway")
         coordinator = FakeCoordinator(
             hass,
             dev_id=dev_id,
             data={
                 dev_id: {
-                    "settings": {
-                        "acm": {
-                            addr: {"boost_active": True},
-                        }
-                    }
+                    "settings": {"acm": {addr: {"boost_active": True}}},
                 }
             },
+            inventory=context.inventory,
         )
-
-        context = _make_boost_context(entry_id, dev_id, addr=addr, name="Hallway")
         button = AccumulatorBoostCancelButton(
             coordinator,
             context,
@@ -350,7 +346,9 @@ def test_accumulator_boost_cancel_button_tracks_availability() -> None:
 
         assert button.available is True
 
-        coordinator.data[dev_id]["settings"]["acm"][addr]["boost_active"] = False
+        assert coordinator.apply_entity_patch(
+            "acm", addr, lambda cur: cur.__setitem__("boost_active", False)
+        )
         for listener in list(getattr(coordinator, "listeners", [])):
             listener()
 

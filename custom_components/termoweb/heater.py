@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -31,8 +30,6 @@ from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 
-
-_CANCELLED_ERROR = asyncio.CancelledError
 
 _BOOST_RUNTIME_KEY: Final = "boost_runtime"
 _BOOST_TEMPERATURE_KEY: Final = "boost_temperature"
@@ -845,7 +842,7 @@ def heater_platform_details_for_entry(
                         )
                         if isinstance(entry_data, MutableMapping):
                             entry_data["inventory"] = inventory
-                    except Exception:  # pragma: no cover - defensive reconstruction
+                    except (TypeError, ValueError):  # pragma: no cover - defensive reconstruction
                         inventory = None
         if inventory is None:
             dev_id: str | None = None
@@ -1012,54 +1009,10 @@ class HeaterNodeBase(CoordinatorEntity):
 
         view = self._domain_state_view()
         if view is not None:
-            seed = getattr(self.coordinator, "_seed_state_store_from_data", None)
-            if callable(seed):
-                seed()
             state = view.get_heater_state(self._node_type, self._addr)
             if state is not None:
                 return state.to_legacy()
 
-        record = self._device_record()
-        if not isinstance(record, Mapping):
-            return None
-
-        node_section = record.get(self._node_type)
-        if isinstance(node_section, Mapping):
-            per_type_settings = node_section.get("settings")
-            if isinstance(per_type_settings, Mapping):
-                payload = per_type_settings.get(self._addr)
-                if isinstance(payload, Mapping):
-                    return payload
-
-        settings_by_type = record.get("settings")
-        if isinstance(settings_by_type, Mapping):
-            per_type = settings_by_type.get(self._node_type)
-            if isinstance(per_type, Mapping):
-                payload = per_type.get(self._addr)
-                if isinstance(payload, Mapping):
-                    return payload
-
-        return None
-
-    def _device_record(self) -> Mapping[str, Any] | None:
-        """Return the coordinator cache entry for this device."""
-
-        data = getattr(self.coordinator, "data", {}) or {}
-        if isinstance(data, Mapping):
-            try:
-                record = data.get(self._dev_id)
-                # Defensive second lookup to surface mapping errors.
-                _ = data.get(self._dev_id)
-            except _CANCELLED_ERROR:
-                raise
-            except Exception as err:  # pragma: no cover - defensive
-                _LOGGER.debug(
-                    "Failed to resolve device record for %s: %s",
-                    self._dev_id,
-                    err,
-                )
-                return None
-            return record if isinstance(record, Mapping) else None
         return None
 
     def _resolve_inventory(self) -> Inventory:

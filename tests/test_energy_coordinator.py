@@ -36,6 +36,16 @@ EnergyStateCoordinator = coord_module.EnergyStateCoordinator
 StateCoordinator = coord_module.StateCoordinator
 
 
+def _state_payload(coord: coord_module.StateCoordinator, node_type: str, addr: str) -> dict[str, Any] | None:
+    """Return the legacy payload stored in the domain state view."""
+
+    view = getattr(coord, "domain_view", None)
+    if view is None:
+        return None
+    state = view.get_heater_state(node_type, addr)
+    return state.to_legacy() if state is not None else None
+
+
 def _inventory_from_nodes(dev_id: str, payload: Mapping[str, Any]) -> Inventory:
     """Return an Inventory built from ``payload``."""
 
@@ -171,8 +181,8 @@ def test_coordinator_success_resets_backoff() -> None:
             "dev",
             ("acm", "B"),
         )
-        assert dev["settings"]["htr"]["A"] == {"mode": "auto"}
-        assert dev["settings"]["acm"]["B"] == {"mode": "auto"}
+        assert _state_payload(coord, "htr", "A") == {"mode": "auto"}
+        assert _state_payload(coord, "acm", "B") == {"mode": "auto"}
         assert dev["inventory"] is inventory
         assert dev["inventory"].addresses_by_type["htr"] == ["A"]
         assert dev["inventory"].addresses_by_type["acm"] == ["B"]
@@ -229,9 +239,9 @@ def test_state_coordinator_round_robin_mixed_types() -> None:
             "dev",
             ("acm", "B"),
         )
-        assert dev["settings"]["htr"]["A"] == {"mode": "auto"}
-        assert dev["settings"]["htr"]["C"] == {"mode": "eco"}
-        assert dev["settings"]["acm"]["B"] == {"mode": "charge"}
+        assert _state_payload(coord, "htr", "A") == {"mode": "auto"}
+        assert _state_payload(coord, "htr", "C") == {"mode": "eco"}
+        assert _state_payload(coord, "acm", "B") == {"mode": "charge"}
         assert dev["inventory"] is inventory
         assert dev["inventory"].addresses_by_type["htr"] == ["A", "C"]
         assert dev["inventory"].addresses_by_type["acm"] == ["B"]
@@ -279,7 +289,7 @@ def test_state_coordinator_ignores_non_dict_payloads() -> None:
             "dev",
             ("htr", "B"),
         )
-        assert dev["settings"]["htr"] == {"B": {"mode": "auto"}}
+        assert _state_payload(coord, "htr", "B") == {"mode": "auto"}
 
     asyncio.run(_run())
 
@@ -509,7 +519,7 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
         assert dev["model"] is None
         assert "nodes" not in dev
         assert dev["connected"] is True
-        assert dev["settings"]["htr"]["A"] == {"mode": "auto"}
+        assert _state_payload(coord, "htr", "A") == {"mode": "auto"}
         assert isinstance(dev.get("inventory"), coord_module.Inventory)
         assert dev["inventory"].addresses_by_type["htr"] == ["A", "B"]
 
@@ -519,13 +529,13 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
             ("htr", "B"),
         )
         assert len(updates) == 2
-        second = updates[-1]
-        assert second["dev"]["settings"]["htr"]["A"] == {"mode": "auto"}
-        assert second["dev"]["settings"]["htr"]["B"] == {"mode": "eco"}
-        assert isinstance(second["dev"].get("inventory"), coord_module.Inventory)
-        assert second["dev"]["inventory"].addresses_by_type["htr"] == ["A", "B"]
-        assert second["dev"]["inventory"].addresses_by_type["acm"] == ["C"]
-        assert second["dev"]["settings"].get("acm", {}) == {}
+        second = updates[-1]["dev"]
+        assert _state_payload(coord, "htr", "A") == {"mode": "auto"}
+        assert _state_payload(coord, "htr", "B") == {"mode": "eco"}
+        assert isinstance(second.get("inventory"), coord_module.Inventory)
+        assert second["inventory"].addresses_by_type["htr"] == ["A", "B"]
+        assert second["inventory"].addresses_by_type["acm"] == ["C"]
+        assert _state_payload(coord, "acm", "C") is None
 
     asyncio.run(_run())
 
@@ -551,12 +561,9 @@ def test_refresh_heater_handles_tuple_and_acm() -> None:
             nodes_payload,
             inventory=inventory_container,
         )
-        coord.data = {
-            "dev": {
-                "inventory": inventory_container,
-                "settings": {"acm": {"3": {"prev": True}}},
-            }
-        }
+        store = coord._state_store or coord._ensure_state_store(inventory_container)
+        assert store is not None
+        store.apply_full_snapshot("acm", "3", {"prev": True})
 
         updates: list[dict[str, dict[str, Any]]] = []
 
@@ -577,7 +584,7 @@ def test_refresh_heater_handles_tuple_and_acm() -> None:
         assert latest["inventory"] is inventory_container
         addrs = latest["inventory"].addresses_by_type["acm"]
         assert addrs == ["3"]
-        assert latest["settings"]["acm"]["3"] == {"mode": "auto"}
+        assert _state_payload(coord, "acm", "3") == {"mode": "auto"}
 
     asyncio.run(_run())
 
@@ -612,19 +619,16 @@ def test_async_refresh_heater_adds_missing_type() -> None:
             inventory=inventory,
         )
 
-        coord.data = {
-            "dev": {
-                "settings": {"htr": {"A": {"mode": "manual"}}},
-                "inventory": inventory,
-            }
-        }
+        store = coord._state_store or coord._ensure_state_store(inventory)
+        assert store is not None
+        store.apply_full_snapshot("htr", "A", {"mode": "manual"})
 
         await coord.async_refresh_heater(("acm", "B"))
 
         dev_data = coord.data["dev"]
         assert dev_data["inventory"] is inventory
         assert "B" in dev_data["inventory"].addresses_by_type["acm"]
-        assert dev_data["settings"]["acm"]["B"] == {"mode": "eco"}
+        assert _state_payload(coord, "acm", "B") == {"mode": "eco"}
 
     asyncio.run(_run())
 
@@ -662,13 +666,9 @@ def test_refresh_heater_populates_missing_metadata() -> None:
             coord,
         )
 
-        coord.data = {
-            "dev": {
-                "settings": {"htr": {}},
-                "inventory": inventory,
-                "connected": False,
-            }
-        }
+        store = coord._state_store or coord._ensure_state_store(inventory)
+        assert store is not None
+        coord.data = coord._device_record()  # type: ignore[attr-defined]
 
         await coord.async_refresh_heater("A")
 
@@ -679,7 +679,7 @@ def test_refresh_heater_populates_missing_metadata() -> None:
         assert result["model"] is None
         assert "nodes" not in result
         assert result["connected"] is True
-        assert result["settings"]["htr"]["A"] == {"mode": "heat"}
+        assert _state_payload(coord, "htr", "A") == {"mode": "heat"}
         assert result["inventory"] is inventory
         assert result["inventory"].addresses_by_type["acm"] == ["B"]
 
@@ -776,20 +776,20 @@ def test_state_coordinator_async_update_data_reuses_previous() -> None:
         coord.update_nodes(nodes, inventory=inventory)
         coord.data = {
             "dev": {
-                "settings": {
-                    "acm": {"7": {"prev": True}},
-                    "htr": {"legacy": {"mode": "auto"}},
-                },
                 "inventory": inventory,
             }
         }
+        store = coord._state_store or coord._ensure_state_store(inventory)
+        assert store is not None
+        store.apply_full_snapshot("acm", "7", {"prev": True})
+        store.apply_full_snapshot("htr", "legacy", {"mode": "auto"})
 
         result = await coord._async_update_data()
 
         assert client.get_node_settings.await_count == 2
         dev_data = result["dev"]
-        assert dev_data["settings"]["acm"]["7"] == {"mode": "eco"}
-        assert dev_data["settings"]["htr"]["legacy"] == {"mode": "eco"}
+        assert _state_payload(coord, "acm", "7") == {"mode": "eco"}
+        assert _state_payload(coord, "htr", "legacy") == {"mode": "eco"}
         assert dev_data["inventory"] is inventory
         assert dev_data["inventory"].addresses_by_type.get("htr") == ["legacy"]
 
@@ -820,7 +820,7 @@ def test_async_refresh_heater_updates_cache() -> None:
         await coord.async_refresh_heater("A")
 
         dev_data = coord.data["dev"]
-        assert dev_data["settings"]["htr"]["A"] == {"mode": "heat"}
+        assert _state_payload(coord, "htr", "A") == {"mode": "heat"}
         assert dev_data["inventory"] is inventory
         assert dev_data["inventory"].addresses_by_type["htr"] == ["A"]
 
@@ -843,18 +843,16 @@ def test_async_update_data_skips_non_dict_sections() -> None:
             nodes,
         )
 
-        coord.data = {
-            "dev": {
-                "settings": {"acm": {"B": {"mode": "auto"}}},
-                "inventory": coord._ensure_inventory(),
-                "misc": "invalid",
-            }
-        }
+        inventory = coord._ensure_inventory()
+        store = coord._state_store or coord._ensure_state_store(inventory)
+        assert store is not None
+        store.apply_full_snapshot("acm", "B", {"mode": "auto"})
+        coord.data = coord._device_record()  # type: ignore[attr-defined]
 
         result = await coord._async_update_data()
 
         dev_data = result["dev"]
-        assert dev_data["settings"]["acm"]["B"] == {"mode": "heat"}
+        assert _state_payload(coord, "acm", "B") == {"mode": "heat"}
         assert isinstance(dev_data.get("inventory"), coord_module.Inventory)
         assert dev_data["inventory"].addresses_by_type["acm"] == ["B"]
         assert client.get_node_settings.await_count == 1

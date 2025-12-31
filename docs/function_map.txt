@@ -634,10 +634,6 @@ custom_components/termoweb/climate.py :: HeaterClimateEntity._slot_label
     Translate a program slot integer into a label.
 custom_components/termoweb/climate.py :: HeaterClimateEntity._current_prog_slot
     Return the active program slot index for the heater.
-custom_components/termoweb/climate.py :: HeaterClimateEntity._settings_maps
-    Return all cached settings maps referencing this node.
-custom_components/termoweb/climate.py :: HeaterClimateEntity._settings_maps._iter_node_types
-    Yield node types that may hold settings for this address.
 custom_components/termoweb/climate.py :: HeaterClimateEntity._shared_inventory
     Return the shared immutable inventory for this coordinator.
 custom_components/termoweb/climate.py :: HeaterClimateEntity._optimistic_update
@@ -932,6 +928,10 @@ custom_components/termoweb/coordinator.py :: StateCoordinator.instant_power_over
     Return a diagnostics-friendly snapshot of instant power values.
 custom_components/termoweb/coordinator.py :: StateCoordinator._should_skip_rest_power
     Return ``True`` when websocket data is fresh enough to skip REST power.
+custom_components/termoweb/coordinator.py :: StateCoordinator._device_record
+    Return a minimal coordinator payload for this device.
+custom_components/termoweb/coordinator.py :: StateCoordinator._publish_device_record
+    Push the latest device snapshot to coordinator listeners.
 custom_components/termoweb/coordinator.py :: StateCoordinator._async_fetch_settings_to_store
     Fetch settings for every address and store them in the domain cache.
 custom_components/termoweb/coordinator.py :: StateCoordinator._normalize_mode_value
@@ -966,8 +966,6 @@ custom_components/termoweb/coordinator.py :: StateCoordinator._node_ids_from_inv
     Return domain node identifiers derived from ``inventory``.
 custom_components/termoweb/coordinator.py :: StateCoordinator._ensure_state_store
     Ensure a domain state store exists when applicable.
-custom_components/termoweb/coordinator.py :: StateCoordinator._seed_state_store_from_data
-    Populate the domain store from any existing coordinator data.
 custom_components/termoweb/coordinator.py :: StateCoordinator.handle_ws_deltas
     Merge websocket-delivered deltas into the domain state store.
 custom_components/termoweb/coordinator.py :: StateCoordinator.apply_entity_patch

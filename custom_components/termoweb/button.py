@@ -25,6 +25,7 @@ from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
+from .domain import DomainStateView
 from .heater import (
     BOOST_BUTTON_METADATA,
     DEFAULT_BOOST_TEMPERATURE,
@@ -34,7 +35,7 @@ from .heater import (
     resolve_boost_runtime_minutes,
     resolve_boost_temperature,
 )
-from .i18n import attach_fallbacks, async_get_fallback_translations
+from .i18n import async_get_fallback_translations, attach_fallbacks
 from .identifiers import build_heater_entity_unique_id
 from .inventory import AccumulatorNode, Inventory
 from .utils import build_gateway_device_info
@@ -234,23 +235,16 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
         """Return cached coordinator settings for this accumulator."""
 
         coordinator = getattr(self, "coordinator", None)
-        data = getattr(coordinator, "data", None)
-        if not isinstance(data, Mapping):
+        view = getattr(coordinator, "domain_view", None)
+        if not isinstance(view, DomainStateView):
             return None
 
-        record = data.get(self.boost_context.dev_id)
-        if not isinstance(record, Mapping):
-            return None
-
-        settings_by_type = record.get("settings")
-        if isinstance(settings_by_type, Mapping):
-            type_settings = settings_by_type.get(self.boost_context.node_type)
-            if isinstance(type_settings, Mapping):
-                settings = type_settings.get(self.boost_context.addr)
-                if isinstance(settings, Mapping):
-                    return dict(settings)
-
-        return None
+        state = view.get_heater_state(
+            self.boost_context.node_type,
+            self.boost_context.addr,
+        )
+        payload = state.to_legacy() if state is not None else None
+        return payload if isinstance(payload, Mapping) else None
 
     def _coordinator_boost_active(self) -> bool:
         """Return True when coordinator cache reports boost activity."""

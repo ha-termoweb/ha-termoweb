@@ -13,6 +13,11 @@ from conftest import _install_stubs, make_ws_payload
 _install_stubs()
 
 from custom_components.termoweb import boost as boost_module, heater as heater_module
+from custom_components.termoweb.domain import (
+    DomainStateStore,
+    NodeId as DomainNodeId,
+    NodeType as DomainNodeType,
+)
 from custom_components.termoweb.inventory import (
     Inventory,
     InventoryNodeMetadata,
@@ -159,8 +164,11 @@ def test_heater_section_requires_inventory_for_name() -> None:
     """Heater metadata should not fabricate inventory-backed details."""
 
     coordinator = SimpleNamespace(
-        data={"dev": {"settings": {"htr": {"1": {"mode": "auto"}}}}}
+        data={"dev": {"settings": {"htr": {"1": {"mode": "auto"}}}}},
     )
+    store = DomainStateStore([DomainNodeId(DomainNodeType.HEATER, "1")])
+    store.apply_full_snapshot("htr", "1", {"mode": "auto"})
+    coordinator.domain_view = heater_module.DomainStateView("dev", store)
     heater = HeaterNodeBase(coordinator, "entry", "dev", "1", "Heater 1")
 
     section = heater._heater_section()
@@ -179,6 +187,9 @@ def test_heater_section_includes_inventory_details() -> None:
         data={"dev": {"settings": {"htr": {"1": {"mode": "auto"}}}}},
         inventory=inventory,
     )
+    store = DomainStateStore([DomainNodeId(DomainNodeType.HEATER, "1")])
+    store.apply_full_snapshot("htr", "1", {"mode": "auto"})
+    coordinator.domain_view = heater_module.DomainStateView("dev", store)
     heater = HeaterNodeBase(coordinator, "entry", "dev", "1", None)
 
     section = heater._heater_section()
@@ -479,6 +490,9 @@ def test_boost_entities_expose_state(monkeypatch: pytest.MonkeyPatch) -> None:
         data={"dev": {"settings": settings_map}},
         resolve_boost_end=_resolver,
     )
+    store = DomainStateStore([DomainNodeId(DomainNodeType.ACCUMULATOR, "1")])
+    store.apply_full_snapshot("acm", "1", settings)
+    coordinator.domain_view = heater_module.DomainStateView("dev", store)
 
     def _settings_resolver() -> dict[str, Any] | None:
         return settings_map["acm"].get("1")
