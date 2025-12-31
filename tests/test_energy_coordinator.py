@@ -49,7 +49,7 @@ def _state_payload(coord: coord_module.StateCoordinator, node_type: str, addr: s
 def _inventory_from_nodes(dev_id: str, payload: Mapping[str, Any]) -> Inventory:
     """Return an Inventory built from ``payload``."""
 
-    return Inventory(dev_id, payload, list(build_node_inventory(payload)))
+    return Inventory(dev_id, list(build_node_inventory(payload)))
 
 
 def _state_coordinator_from_nodes(
@@ -93,12 +93,12 @@ def test_update_nodes_accepts_inventory_container(
         30,
         "dev",
         {"name": "Device"},
-        container.payload,
+        nodes=None,
         inventory=container,
     )
 
     assert coord._inventory is container
-    assert coord._inventory.payload == payload
+    assert coord._inventory.nodes == tuple(nodes_list)
 
     coord.update_nodes(inventory=container)
     assert coord._inventory is container
@@ -157,14 +157,14 @@ def test_coordinator_success_resets_backoff() -> None:
             ]
         }
         node_list = list(build_node_inventory(nodes))
-        inventory = Inventory("dev", nodes, node_list)
+        inventory = Inventory("dev", node_list)
         coord = StateCoordinator(
             hass,
             client,
             30,
             "dev",
             {"name": "Device"},
-            nodes,
+            nodes=None,
             inventory=inventory,
         )
         coord._backoff = 120
@@ -549,7 +549,6 @@ def test_refresh_heater_handles_tuple_and_acm() -> None:
         nodes_payload = {"nodes": [{"addr": "3", "type": "acm"}]}
         inventory_container = coord_module.Inventory(
             "dev",
-            nodes_payload,
             [AccumulatorNode(name="Acc", addr="3")],
         )
         coord = StateCoordinator(
@@ -558,7 +557,7 @@ def test_refresh_heater_handles_tuple_and_acm() -> None:
             30,
             "dev",
             {"name": "Device"},
-            nodes_payload,
+            nodes=None,
             inventory=inventory_container,
         )
         store = coord._state_store or coord._ensure_state_store(inventory_container)
@@ -603,7 +602,6 @@ def test_async_refresh_heater_adds_missing_type() -> None:
         }
         inventory = coord_module.Inventory(
             "dev",
-            nodes,
             [
                 HeaterNode(name="Heater", addr="A"),
                 AccumulatorNode(name="Accumulator", addr="B"),
@@ -615,7 +613,7 @@ def test_async_refresh_heater_adds_missing_type() -> None:
             30,
             "dev",
             {"name": "Device"},
-            nodes,  # type: ignore[arg-type]
+            nodes=None,
             inventory=inventory,
         )
 
@@ -762,14 +760,14 @@ def test_state_coordinator_async_update_data_reuses_previous() -> None:
             "nodes": [{"type": "acm", "addr": "7"}, {"type": "htr", "addr": "legacy"}]
         }
         inventory_nodes = list(build_node_inventory(nodes))
-        inventory = Inventory("dev", nodes, inventory_nodes)
+        inventory = Inventory("dev", inventory_nodes)
         coord = StateCoordinator(
             hass,
             client,
             30,
             "dev",
             {"name": " Device "},
-            inventory.payload,
+            nodes=None,
             inventory=inventory,
         )
 
@@ -804,14 +802,14 @@ def test_async_refresh_heater_updates_cache() -> None:
         hass = HomeAssistant()
         nodes = {"nodes": [{"type": "htr", "addr": "A"}]}
         inventory_nodes = list(build_node_inventory(nodes))
-        inventory = Inventory("dev", nodes, inventory_nodes)
+        inventory = Inventory("dev", inventory_nodes)
         coord = StateCoordinator(
             hass,
             client,
             30,
             "dev",
             {"name": " Device "},
-            inventory.payload,
+            nodes=None,
             inventory=inventory,
         )
 
@@ -1381,7 +1379,7 @@ def test_state_coordinator_update_nodes_uses_provided_inventory(
     client = types.SimpleNamespace()
     nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
     provided_nodes = [Node(name="Heater", addr="A", node_type="htr")]
-    provided_inventory = coord_module.Inventory("dev", nodes, provided_nodes)
+    provided_inventory = coord_module.Inventory("dev", provided_nodes)
 
     inventory = inventory_builder("dev", {})
     coord = StateCoordinator(
@@ -1390,7 +1388,7 @@ def test_state_coordinator_update_nodes_uses_provided_inventory(
         30,
         "dev",
         {"name": "Device"},
-        inventory.payload,
+        nodes=None,
         inventory=inventory,
     )
 
@@ -1398,7 +1396,6 @@ def test_state_coordinator_update_nodes_uses_provided_inventory(
 
     inventory = coord._inventory
     assert inventory is provided_inventory
-    assert inventory.payload == nodes
     assert inventory.nodes[0] is provided_nodes[0]
 
 

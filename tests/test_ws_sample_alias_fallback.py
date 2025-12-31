@@ -52,7 +52,7 @@ def test_forward_ws_sample_updates_uses_alias_fallback_and_max_lease() -> None:
 
     entry_id = "entry"
     hass = SimpleNamespace(data={DOMAIN: {entry_id: {}}})
-    inventory = Inventory("dev", {}, [])
+    inventory = Inventory("dev", [])
 
     object.__setattr__(
         inventory,

@@ -49,7 +49,6 @@ def test_handle_event_routes_updates_to_deltas(
     inventory_payload = {"nodes": [{"type": "htr", "addr": "2"}]}
     client._inventory = module.Inventory(
         client.dev_id,
-        inventory_payload,
         build_node_inventory(inventory_payload),
     )
     hass.data[module.DOMAIN]["entry"]["inventory"] = client._inventory

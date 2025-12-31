@@ -42,7 +42,6 @@ def test_forward_ws_sample_updates_ignores_non_mapping_sections() -> None:
                     "energy_coordinator": coordinator,
                     "inventory": Inventory(
                         "dev",
-                        {"nodes": [{"type": "htr", "addr": "1"}]},
                         build_node_inventory({"nodes": [{"type": "htr", "addr": "1"}]}),
                     ),
                 }

@@ -45,7 +45,7 @@ def test_binary_sensor_setup_and_dispatch(
         entry = types.SimpleNamespace(entry_id="entry-1")
         dev_id = "device-123"
 
-        inventory = Inventory(dev_id, {"nodes": []}, [])
+        inventory = Inventory(dev_id, [])
 
         coordinator = FakeCoordinator(
             hass,
@@ -169,7 +169,7 @@ def test_binary_sensor_setup_requires_inventory(heater_hass_data) -> None:
 def test_iter_boostable_inventory_nodes_uses_inventory_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    inventory = Inventory("dev", {"nodes": []}, [])
+    inventory = Inventory("dev", [])
 
     metadata = [
         InventoryNodeMetadata(
@@ -218,7 +218,7 @@ def test_refresh_button_device_info_and_press(heater_hass_data) -> None:
             async_request_refresh=AsyncMock(),
         )
 
-        inventory = Inventory(dev_id, {"nodes": []}, [])
+        inventory = Inventory(dev_id, [])
 
         heater_hass_data(
             hass,
@@ -501,9 +501,7 @@ def test_iter_accumulator_contexts_uses_inventory_metadata(
     entry_id = "entry-meta"
     dev_id = "device-meta"
     canonical = AccumulatorNode(name="Accumulator A", addr="1")
-    inventory = Inventory(
-        dev_id, {"nodes": []}, [canonical, HeaterNode(name="Heater", addr="2")]
-    )
+    inventory = Inventory(dev_id, [canonical, HeaterNode(name="Heater", addr="2")])
 
     metadata = [
         InventoryNodeMetadata(
@@ -553,9 +551,7 @@ def _make_boost_context(
     addr: str = "2",
     name: str = "Living Room",
 ) -> AccumulatorBoostContext:
-    inventory = Inventory(
-        dev_id, {"nodes": []}, [AccumulatorNode(name=name, addr=addr)]
-    )
+    inventory = Inventory(dev_id, [AccumulatorNode(name=name, addr=addr)])
     nodes = inventory.nodes_by_type.get("acm", ())
     assert nodes, "inventory must expose at least one accumulator"
     node = nodes[0]

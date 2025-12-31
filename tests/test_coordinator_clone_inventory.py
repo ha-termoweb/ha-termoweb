@@ -13,9 +13,8 @@ from custom_components.termoweb.inventory import Inventory, Node
 def test_device_record_reuses_inventory_instance() -> None:
     """Ensure the coordinator stores the provided inventory without cloning."""
 
-    payload = {"nodes": [{"addr": "1", "type": "htr"}]}
     nodes = [Node(name="Heater", addr="1", node_type="htr")]
-    inventory = Inventory("dev-123", payload, nodes)
+    inventory = Inventory("dev-123", nodes)
 
     store = DomainStateStore([NodeId(NodeType.HEATER, "2")])
     store.apply_full_snapshot("htr", "2", {"mode": "auto"})
@@ -35,3 +34,5 @@ def test_device_record_reuses_inventory_instance() -> None:
     assert "power_monitor_address_map" not in device
 
     assert device["settings"] == {"htr": {"2": {"mode": "auto"}}}
+    assert "nodes" not in device
+    assert "inventory_payload" not in device

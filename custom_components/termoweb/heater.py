@@ -835,11 +835,7 @@ def heater_platform_details_for_entry(
                 dev_id = entry_data.get("dev_id") if isinstance(entry_data, Mapping) else None
                 if isinstance(nodes_payload, Mapping) and isinstance(dev_id, str):
                     try:
-                        inventory = Inventory(
-                            dev_id,
-                            nodes_payload,
-                            build_node_inventory(nodes_payload),
-                        )
+                        inventory = Inventory(dev_id, build_node_inventory(nodes_payload))
                         if isinstance(entry_data, MutableMapping):
                             entry_data["inventory"] = inventory
                     except (TypeError, ValueError):  # pragma: no cover - defensive reconstruction

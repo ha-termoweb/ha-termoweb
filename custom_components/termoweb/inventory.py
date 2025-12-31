@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from .const import DOMAIN
 
-RawNodePayload = Any
 PrebuiltNode = Any
 
 _NODE_SECTION_IGNORE_KEYS = frozenset(
@@ -61,7 +60,6 @@ __all__ = [
     "build_node_inventory",
     "heater_platform_details_from_inventory",
     "heater_sample_subscription_targets",
-    "energy_sample_types",
     "normalize_heater_addresses",
     "normalize_node_addr",
     "normalize_node_type",
@@ -112,7 +110,6 @@ class Inventory:
     _DEFAULT_FACTORY_CACHE_KEY: ClassVar[str] = "default_factory"
 
     _dev_id: str
-    _payload: RawNodePayload
     _nodes: tuple[PrebuiltNode, ...]
     _addresses_by_type_cache: dict[str, tuple[str, ...]] | None
     _nodes_by_type_cache: dict[str, tuple[PrebuiltNode, ...]] | None
@@ -139,13 +136,11 @@ class Inventory:
     def __init__(
         self,
         dev_id: str,
-        payload: RawNodePayload,
         nodes: Iterable[PrebuiltNode],
     ) -> None:
         """Initialize the inventory container."""
 
         object.__setattr__(self, "_dev_id", dev_id)
-        object.__setattr__(self, "_payload", payload)
         object.__setattr__(self, "_nodes", tuple(nodes))
         object.__setattr__(self, "_addresses_by_type_cache", None)
         object.__setattr__(self, "_nodes_by_type_cache", None)
@@ -166,12 +161,6 @@ class Inventory:
         """Get the device identifier."""
 
         return self._dev_id
-
-    @property
-    def payload(self) -> RawNodePayload:
-        """Get the raw node payload."""
-
-        return self._payload
 
     @property
     def nodes(self) -> tuple[PrebuiltNode, ...]:
@@ -974,12 +963,12 @@ class Inventory:
         """Return the cached inventory stored within ``record``."""
 
         if not isinstance(record, Mapping):
-            raise LookupError(
+            raise LookupError(  # noqa: TRY004
                 f"{context or 'inventory'} record is unavailable; integration state missing"
             )
         candidate = record.get(attr)
         if not isinstance(candidate, Inventory):
-            raise LookupError(
+            raise LookupError(  # noqa: TRY004
                 f"{context or 'inventory'} record is unavailable; cached inventory missing"
             )
         return candidate
@@ -1168,7 +1157,7 @@ def boostable_accumulator_details_for_entry(
 ) -> tuple[HeaterPlatformDetails, list[tuple[str, str, str]]]:
     """Return boostable accumulator metadata for a config entry."""
 
-    from .heater import (
+    from .heater import (  # noqa: PLC0415
         heater_platform_details_for_entry,
         iter_boostable_heater_nodes,
         log_skipped_nodes,

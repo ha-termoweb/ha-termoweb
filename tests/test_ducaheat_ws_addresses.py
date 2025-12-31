@@ -76,7 +76,7 @@ def test_apply_heater_addresses_updates_state() -> None:
             {"type": "pmo", "addr": "A1"},
         ]
     }
-    inventory = Inventory("device", raw_nodes, build_node_inventory(raw_nodes))
+    inventory = Inventory("device", build_node_inventory(raw_nodes))
 
     normalized_map: Mapping[Any, Iterable[Any]] = {
         "htr": [" 1 ", "01"],
@@ -104,7 +104,6 @@ def test_dispatch_nodes_includes_inventory_metadata() -> None:
     inventory_payload = _build_inventory_payload()
     inventory = Inventory(
         "device",
-        inventory_payload,
         build_node_inventory(inventory_payload),
     )
 

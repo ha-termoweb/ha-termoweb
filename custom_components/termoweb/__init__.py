@@ -515,7 +515,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     node_inventory = build_node_inventory(nodes)
     # Inventory-centric design: build and freeze the gateway/node topology once
     # during setup so every runtime component can trust the shared metadata.
-    inventory = Inventory(dev_id, nodes, node_inventory)
+    inventory = Inventory(dev_id, node_inventory)
     await _async_probe_unknown_node_types(backend, dev_id, inventory)
     if inventory.nodes:
         type_counts = Counter(node.type for node in inventory.nodes)

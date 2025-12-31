@@ -35,7 +35,7 @@ def test_forward_ws_sample_updates_merges_inventory_aliases() -> None:
 
     entry_id = "entry"
     hass = SimpleNamespace(data={DOMAIN: {entry_id: {}}})
-    inventory = Inventory("dev", {}, [])
+    inventory = Inventory("dev", [])
 
     object.__setattr__(
         inventory,

@@ -103,7 +103,7 @@ def test_resolve_boost_end_from_fields_variants(
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes=inventory.payload,
+        nodes=None,
         inventory=inventory,
     )
 
@@ -156,7 +156,7 @@ async def test_async_fetch_rtc_datetime_updates_reference(
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes=inventory.payload,
+        nodes=None,
         inventory=inventory,
     )
 
@@ -188,7 +188,7 @@ async def test_async_fetch_rtc_datetime_handles_error(
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes=inventory.payload,
+        nodes=None,
         inventory=inventory,
     )
 
@@ -212,7 +212,7 @@ def test_boost_helpers_guard_against_invalid_sections(
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes=inventory.payload,
+        nodes=None,
         inventory=inventory,
     )
 
@@ -244,7 +244,7 @@ def test_apply_accumulator_boost_metadata_updates_payload(
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes=inventory.payload,
+        nodes=None,
         inventory=inventory,
     )
 
@@ -326,7 +326,7 @@ async def test_async_update_data_skips_without_inventory(
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes=inventory.payload,
+        nodes=None,
         inventory=inventory,
     )
 
@@ -355,7 +355,7 @@ async def test_async_update_data_requires_inventory(
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes=inventory.payload,
+        nodes=None,
         inventory=inventory,
     )
 
@@ -424,7 +424,7 @@ async def test_async_fetch_settings_by_address_pending_and_boost(
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes=inventory.payload,
+        nodes=None,
         inventory=inventory,
     )
 
@@ -497,7 +497,7 @@ async def test_async_refresh_heater_errors_without_inventory(
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes=inventory.payload,
+        nodes=None,
         inventory=inventory,
     )
 
@@ -534,7 +534,7 @@ async def test_async_refresh_heater_fetches_rtc(
         base_interval=30,
         dev_id="dev",
         device={},
-        nodes=inventory.payload,
+        nodes=None,
         inventory=inventory,
     )
 
@@ -580,7 +580,7 @@ def test_mode_and_pending_key_helpers(
         base_interval=30,
         dev_id="dev",
         device={"name": "Device"},
-        nodes=inventory.payload,
+        nodes=None,
         inventory=inventory,
     )
 
@@ -604,7 +604,7 @@ def test_prune_and_register_pending_settings(
         base_interval=30,
         dev_id="dev",
         device={"name": "Device"},
-        nodes=inventory.payload,
+        nodes=None,
         inventory=inventory,
     )
 
@@ -645,7 +645,7 @@ def test_should_defer_pending_setting_branches(
         base_interval=30,
         dev_id="dev",
         device={"name": "Device"},
-        nodes=inventory.payload,
+        nodes=None,
         inventory=inventory,
     )
 
@@ -706,7 +706,7 @@ async def test_refresh_skips_pending_settings_merge(
         base_interval=30,
         dev_id="dev",
         device={"name": "Device"},
-        nodes=inventory.payload,
+        nodes=None,
         inventory=inventory,
     )
 
@@ -753,7 +753,7 @@ async def test_poll_skips_pending_settings_merge(
         base_interval=30,
         dev_id="dev",
         device={"name": "Device"},
-        nodes=inventory.payload,
+        nodes=None,
         inventory=inventory,
     )
 
@@ -800,7 +800,7 @@ def test_handle_ws_deltas_updates_store(
         base_interval=30,
         dev_id="dev",
         device={"name": "Device"},
-        nodes=inventory.payload,
+        nodes=None,
         inventory=inventory,
     )
 

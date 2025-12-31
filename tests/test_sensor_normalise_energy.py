@@ -97,7 +97,7 @@ async def test_async_setup_entry_handles_missing_power_monitors(
     entry = SimpleNamespace(entry_id="entry-1")
     raw_nodes = [{"type": "htr", "addr": "1", "name": "Heater"}]
     node_inventory = build_node_inventory({"nodes": raw_nodes})
-    inventory = Inventory("dev-1", {"nodes": raw_nodes}, node_inventory)
+    inventory = Inventory("dev-1", node_inventory)
     iter_calls: list[tuple[Any, Any]] = []
 
     def _iter_nodes_metadata_stub(
@@ -191,7 +191,6 @@ def test_power_monitor_available_uses_inventory_has_node(
     )
     inventory = Inventory(
         "dev-1",
-        {"nodes": []},
         [PowerMonitorNode(name="Monitor", addr="01")],
     )
 
@@ -234,7 +233,7 @@ async def test_heater_energy_sensor_availability() -> None:
     dev_id = "dev-energy"
     raw_nodes = {"nodes": [{"type": "htr", "addr": "01", "name": "Heater"}]}
     node_inventory = list(build_node_inventory(raw_nodes))
-    inventory = Inventory(dev_id, raw_nodes, node_inventory)
+    inventory = Inventory(dev_id, node_inventory)
     device_state = build_coordinator_device_state(
         nodes=raw_nodes,
         settings={"htr": {"01": {}}},

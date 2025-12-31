@@ -161,7 +161,6 @@ def _make_client(
     inventory_payload = {"nodes": [{"type": "htr", "addr": "1"}]}
     default_inventory = Inventory(
         "device",
-        inventory_payload,
         build_node_inventory(inventory_payload),
     )
     hass.data.setdefault(module.DOMAIN, {})["entry"] = {
@@ -1003,7 +1002,7 @@ def test_dispatch_nodes_with_inventory(
 
     client, _sio, dispatcher = _make_client(monkeypatch)
     record = client.hass.data[module.DOMAIN]["entry"]
-    record["inventory"] = Inventory(client.dev_id, {"nodes": {}}, ())
+    record["inventory"] = Inventory(client.dev_id, ())
     energy = SimpleNamespace(
         update_addresses=MagicMock(), handle_ws_samples=MagicMock()
     )
@@ -1015,7 +1014,6 @@ def test_dispatch_nodes_with_inventory(
     nodes_payload = {"nodes": [{"type": "htr", "addr": "1"}]}
     client._inventory = Inventory(
         client.dev_id,
-        nodes_payload,
         build_node_inventory(nodes_payload),
     )
     caplog.set_level(logging.DEBUG)
@@ -1041,7 +1039,6 @@ def test_dispatch_nodes_handles_unknown_types(monkeypatch: pytest.MonkeyPatch) -
 
     client._inventory = Inventory(
         client.dev_id,
-        {"nodes": [{"type": "foo", "addr": "9"}]},
         build_node_inventory([{"type": "foo", "addr": "9"}]),
     )
     client._dispatch_nodes({"nodes": {}})
@@ -1066,7 +1063,6 @@ def test_dispatch_nodes_uses_inventory_payload(monkeypatch: pytest.MonkeyPatch) 
         def __init__(self) -> None:
             super().__init__(
                 client.dev_id,
-                {"nodes": {"htr": {"settings": {"2": {"temp": 21}}}}},
                 node_inventory,
             )
             object.__setattr__(self, "payload_calls", 0)
@@ -1105,7 +1101,6 @@ def test_apply_heater_addresses_normalises_from_inventory(
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}, {"type": "acm", "addr": "2"}]}
     inventory = Inventory(
         client.dev_id,
-        raw_nodes,
         build_node_inventory(raw_nodes),
     )
     client._apply_heater_addresses({"htr": ["1"], "acm": ["2"]}, inventory=inventory)
@@ -1132,7 +1127,6 @@ def test_apply_heater_addresses_includes_power_monitors(
     }
     inventory = Inventory(
         client.dev_id,
-        nodes_payload,
         build_node_inventory(nodes_payload),
     )
 
@@ -1164,7 +1158,6 @@ def test_apply_heater_addresses_updates_inventory(
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
     inventory = Inventory(
         client.dev_id,
-        raw_nodes,
         build_node_inventory(raw_nodes),
     )
     client._apply_heater_addresses(
@@ -1181,7 +1174,6 @@ def test_heater_sample_subscription_targets(monkeypatch: pytest.MonkeyPatch) -> 
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}, {"type": "acm", "addr": "2"}]}
     inventory = Inventory(
         client.dev_id,
-        raw_nodes,
         build_node_inventory(raw_nodes),
     )
     client._inventory = inventory
@@ -1200,7 +1192,6 @@ def test_heater_sample_subscription_targets_use_coordinator_inventory(
     raw_nodes = {"nodes": [{"type": "htr", "addr": "3"}]}
     inventory = Inventory(
         client.dev_id,
-        raw_nodes,
         build_node_inventory(raw_nodes),
     )
     client._inventory = None
@@ -1259,7 +1250,6 @@ def test_apply_heater_addresses_filters_non_heaters(
     nodes_payload = {"nodes": [{"type": "htr", "addr": "6"}]}
     inventory_container = Inventory(
         "device",
-        nodes_payload,
         build_node_inventory(nodes_payload),
     )
 
@@ -1283,7 +1273,6 @@ def test_apply_heater_addresses_logs_invalid_inventory(
     raw_nodes = {"nodes": [{"type": "htr", "addr": "4"}]}
     inventory = Inventory(
         client.dev_id,
-        raw_nodes,
         build_node_inventory(raw_nodes),
     )
     client._inventory = inventory
@@ -1625,7 +1614,6 @@ def test_apply_nodes_payload_translation(monkeypatch: pytest.MonkeyPatch) -> Non
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
     client._inventory = Inventory(
         client.dev_id,
-        raw_nodes,
         build_node_inventory(raw_nodes),
     )
     original_dispatch = client._dispatch_nodes
@@ -1667,7 +1655,6 @@ def test_extract_nodes_variants(monkeypatch: pytest.MonkeyPatch) -> None:
     client, _sio, _ = _make_client(monkeypatch)
     inventory = Inventory(
         "device",
-        {"nodes": [{"type": "htr", "addr": "1"}]},
         build_node_inventory([{"type": "htr", "addr": "1"}]),
     )
     client._inventory = inventory

@@ -173,14 +173,14 @@ def _make_coordinator(
     effective_inventory = inventory
     if not isinstance(effective_inventory, Inventory) and nodes_payload is not None:
         node_list = list(build_node_inventory(nodes_payload))
-        effective_inventory = Inventory(dev_id, nodes_payload, node_list)
+        effective_inventory = Inventory(dev_id, node_list)
 
     return FakeCoordinator(
         hass,
         client=client,
         dev_id=dev_id,
         dev=normalised,
-        nodes=normalised.get("inventory_payload", {}),
+        nodes=None,
         inventory=effective_inventory,
         data={dev_id: normalised},
     )
@@ -949,7 +949,7 @@ def test_accumulator_hvac_mode_reporting() -> None:
     addr = "7"
     inventory_payload = {"nodes": [{"type": "acm", "addr": addr}]}
     inventory_list = list(inventory_module.build_node_inventory(inventory_payload))
-    inventory = Inventory(dev_id, inventory_payload, inventory_list)
+    inventory = Inventory(dev_id, inventory_list)
     settings: dict[str, Any] = {"mode": "off", "units": "C"}
     coordinator = _make_coordinator(
         hass,
@@ -1193,7 +1193,7 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
     addr = "8"
     inventory_payload = {"nodes": [{"type": "acm", "addr": addr}]}
     inventory_list = list(inventory_module.build_node_inventory(inventory_payload))
-    inventory = Inventory(dev_id, inventory_payload, inventory_list)
+    inventory = Inventory(dev_id, inventory_list)
     settings = {
         "mode": "auto",
         "units": "C",
@@ -1891,7 +1891,7 @@ def test_heater_additional_cancelled_edges(
         base_prog: list[int] = [0, 1, 2] * 56
         inventory_payload = {"nodes": [{"type": "htr", "addr": addr}]}
         inventory_list = list(inventory_module.build_node_inventory(inventory_payload))
-        inventory = Inventory(dev_id, inventory_payload, inventory_list)
+        inventory = Inventory(dev_id, inventory_list)
         settings = {
             "mode": "manual",
             "state": "heating",
@@ -2052,7 +2052,7 @@ def test_heater_write_paths_and_errors(
         base_prog: list[int] = [0, 1, 2] * 56
         inventory_payload = {"nodes": [{"type": "htr", "addr": addr}]}
         inventory_list = list(inventory_module.build_node_inventory(inventory_payload))
-        inventory = Inventory(dev_id, inventory_payload, inventory_list)
+        inventory = Inventory(dev_id, inventory_list)
         settings = {
             "mode": "manual",
             "state": "heating",
@@ -2523,7 +2523,7 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
         base_prog: list[int] = [0, 1, 2] * 56
         inventory_payload = {"nodes": [{"type": "htr", "addr": addr}]}
         inventory_list = list(inventory_module.build_node_inventory(inventory_payload))
-        inventory = Inventory(dev_id, inventory_payload, inventory_list)
+        inventory = Inventory(dev_id, inventory_list)
         settings = {
             "mode": "manual",
             "state": "heating",
@@ -2712,7 +2712,7 @@ def test_heater_cancelled_paths_propagate(
         base_prog: list[int] = [0, 1, 2] * 56
         inventory_payload = {"nodes": [{"type": "htr", "addr": addr}]}
         inventory_list = list(inventory_module.build_node_inventory(inventory_payload))
-        inventory = Inventory(dev_id, inventory_payload, inventory_list)
+        inventory = Inventory(dev_id, inventory_list)
         settings = {
             "mode": "manual",
             "state": "heating",
