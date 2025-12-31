@@ -14,6 +14,7 @@ from conftest import _install_stubs
 
 _install_stubs()
 
+from conftest import build_device_metadata_payload
 import custom_components.termoweb.coordinator as coordinator_module
 import custom_components.termoweb.inventory as inventory_module
 from custom_components.termoweb.inventory import (
@@ -81,7 +82,7 @@ def _make_state_coordinator(
         client,
         30,
         "dev",
-        {"name": "Device"},
+        build_device_metadata_payload("dev", name="Device"),
         nodes=None,
         inventory=inventory,
     )

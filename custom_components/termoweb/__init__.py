@@ -54,7 +54,7 @@ from .const import (
     get_brand_basic_auth,
     signal_ws_status,
 )
-from .coordinator import EnergyStateCoordinator, StateCoordinator
+from .coordinator import EnergyStateCoordinator, StateCoordinator, build_device_metadata
 from .energy import (
     async_import_energy_history as _async_import_energy_history_impl,
     async_register_import_energy_history_service,
@@ -510,7 +510,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         _LOGGER.info("list_devices returned no usable devices")
         raise ConfigEntryNotReady
 
-    dev = dev or {}
+    device_metadata = build_device_metadata(dev_id, dev)
     nodes = await client.get_nodes(dev_id)
     node_inventory = build_node_inventory(nodes)
     # Inventory-centric design: build and freeze the gateway/node topology once
@@ -531,7 +531,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         client,
         base_interval,
         dev_id,
-        dev,
+        device_metadata,
         None,
         inventory,
     )
