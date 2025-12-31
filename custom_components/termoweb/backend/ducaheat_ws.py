@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from collections.abc import Collection, Iterable, Mapping, MutableMapping
-from copy import deepcopy
 import gzip
 import json
 import logging
@@ -28,6 +27,8 @@ from custom_components.termoweb.backend.ws_client import (
     _prepare_nodes_dispatch,
     _WSCommon,
     _WsLeaseMixin,
+    build_settings_delta,
+    clone_payload_value,
     forward_ws_sample_updates,
     resolve_ws_update_section,
     translate_path_update,
@@ -814,7 +815,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         """Normalise websocket node payloads via the REST client helper."""
 
         normaliser = getattr(self._client, "normalise_ws_nodes", None)
-        snapshot: Any = deepcopy(nodes) if isinstance(nodes, Mapping) else nodes
+        snapshot: Any = clone_payload_value(nodes)
         if isinstance(snapshot, Mapping) and not isinstance(snapshot, dict):
             snapshot = dict(snapshot)
         if callable(normaliser):
@@ -1042,20 +1043,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         )
         self._dispatcher(self.hass, signal_ws_data(self.entry_id), payload_copy)
 
-    @staticmethod
-    def _merge_nodes(target: dict[str, Any], source: Mapping[str, Any]) -> None:
-        """Deep merge ``source`` updates into ``target`` in place."""
-
-        for key, value in source.items():
-            if isinstance(value, Mapping):
-                existing = target.get(key)
-                if isinstance(existing, dict):
-                    DucaheatWSClient._merge_nodes(existing, value)
-                else:
-                    target[key] = deepcopy(value)
-            else:
-                target[key] = deepcopy(value)
-
     def _collect_sample_updates(
         self,
         nodes: Mapping[str, Any],
@@ -1147,7 +1134,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
 
             per_addr: dict[str, dict[str, Any]] = {}
             for section, section_payload in sections.items():
-                if not isinstance(section_payload, Mapping):
+                if not isinstance(section, str):
+                    continue
+                if section == "samples" or not isinstance(section_payload, Mapping):
                     continue
                 for raw_addr, payload in section_payload.items():
                     addr = normalize_node_addr(
@@ -1157,15 +1146,16 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     if not addr:
                         continue
                     bucket = per_addr.setdefault(addr, {})
-                    if section == "settings" and isinstance(payload, Mapping):
-                        for key, value in payload.items():
-                            bucket[key] = deepcopy(value)
-                    elif section == "status" and isinstance(payload, Mapping):
+                    if section == "status" and isinstance(payload, Mapping):
                         bucket["status"] = dict(payload)
-                    elif section == "capabilities" and isinstance(payload, Mapping):
+                        continue
+                    if section == "capabilities" and isinstance(payload, Mapping):
                         bucket["capabilities"] = dict(payload)
-                    else:
-                        bucket[section] = deepcopy(payload)
+                        continue
+                    settings_delta = build_settings_delta(section, payload)
+                    if not settings_delta:
+                        continue
+                    bucket.update(settings_delta)
 
             for addr, payload in per_addr.items():
                 try:

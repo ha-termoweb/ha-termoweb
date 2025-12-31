@@ -13,7 +13,6 @@ from collections.abc import (
     MutableMapping,
 )
 from contextlib import suppress
-from copy import deepcopy
 from functools import partial, wraps
 import json
 import logging
@@ -58,10 +57,12 @@ from custom_components.termoweb.inventory import (
 )
 
 from .ws_client import (
+    build_settings_delta,
     HandshakeError,
     WSStats,
     _prepare_nodes_dispatch,
     _WSCommon,
+    clone_payload_value,
     forward_ws_sample_updates,
     resolve_ws_update_section,
     translate_path_update,
@@ -902,10 +903,10 @@ class WebSocketClient(_WSCommon):
                 if nested_key:
                     existing = section_bucket.get(addr)
                     merged = dict(existing) if isinstance(existing, Mapping) else {}
-                    merged[nested_key] = deepcopy(value)
+                    merged[nested_key] = clone_payload_value(value)
                     section_bucket[addr] = merged
                 else:
-                    section_bucket[addr] = deepcopy(value)
+                    section_bucket[addr] = clone_payload_value(value)
                 added = True
             if not added and not node_bucket:
                 translated.pop(node_type, None)
@@ -938,7 +939,9 @@ class WebSocketClient(_WSCommon):
 
             per_addr: dict[str, dict[str, Any]] = {}
             for section, section_payload in sections.items():
-                if not isinstance(section_payload, Mapping):
+                if not isinstance(section, str):
+                    continue
+                if section == "samples" or not isinstance(section_payload, Mapping):
                     continue
                 for raw_addr, payload in section_payload.items():
                     addr = normalize_node_addr(
@@ -948,15 +951,16 @@ class WebSocketClient(_WSCommon):
                     if not addr:
                         continue
                     bucket = per_addr.setdefault(addr, {})
-                    if section == "settings" and isinstance(payload, Mapping):
-                        for key, value in payload.items():
-                            bucket[key] = deepcopy(value)
-                    elif section == "status" and isinstance(payload, Mapping):
+                    if section == "status" and isinstance(payload, Mapping):
                         bucket["status"] = dict(payload)
-                    elif section == "capabilities" and isinstance(payload, Mapping):
+                        continue
+                    if section == "capabilities" and isinstance(payload, Mapping):
                         bucket["capabilities"] = dict(payload)
-                    else:
-                        bucket[section] = deepcopy(payload)
+                        continue
+                    settings_delta = build_settings_delta(section, payload)
+                    if not settings_delta:
+                        continue
+                    bucket.update(settings_delta)
 
             for addr, payload in per_addr.items():
                 try:

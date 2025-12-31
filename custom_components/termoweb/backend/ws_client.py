@@ -33,6 +33,33 @@ from .ws_health import WsHealthTracker
 
 _LOGGER = logging.getLogger(__name__)
 
+CANONICAL_SETTING_KEYS: tuple[str, ...] = (
+    "mode",
+    "stemp",
+    "mtemp",
+    "temp",
+    "prog",
+    "ptemp",
+    "units",
+    "state",
+    "max_power",
+    "batt_level",
+    "charge_level",
+    "boost",
+    "charging",
+    "current_charge_per",
+    "target_charge_per",
+    "boost_active",
+    "boost_end",
+    "boost_remaining",
+    "boost_time",
+    "boost_temp",
+    "boost_end_day",
+    "boost_end_min",
+    "boost_end_datetime",
+    "boost_minutes_delta",
+)
+
 
 class ConnectionRateLimiter:
     """Throttle websocket connection attempts within a fixed window."""
@@ -79,6 +106,36 @@ class ConnectionRateLimiter:
         if delay > 0:
             await self._sleep(delay)
         return delay
+
+
+def clone_payload_value(value: Any) -> Any:
+    """Return a shallow copy of mapping or sequence payload values."""
+
+    if isinstance(value, Mapping):
+        return dict(value)
+    if isinstance(value, list):
+        return list(value)
+    if isinstance(value, tuple):
+        return list(value)
+    return value
+
+
+def build_settings_delta(section: str, payload: Any) -> dict[str, Any]:
+    """Extract canonical settings keys from a websocket section payload."""
+
+    if section in {"samples", "status", "capabilities"}:
+        return {}
+    if section == "prog":
+        return {"prog": clone_payload_value(payload)} if payload is not None else {}
+    if section == "prog_temps":
+        return {"ptemp": clone_payload_value(payload)} if payload is not None else {}
+    if not isinstance(payload, Mapping):
+        return {}
+    return {
+        key: clone_payload_value(payload[key])
+        for key in CANONICAL_SETTING_KEYS
+        if key in payload
+    }
 
 
 def resolve_ws_update_section(section: str | None) -> tuple[str | None, str | None]:
@@ -958,12 +1015,15 @@ class WebSocketClient(_WsLeaseMixin, _WSStatusMixin):
 
 
 __all__ = [
-    "DUCAHEAT_NAMESPACE",
+    "CANONICAL_SETTING_KEYS",
     "ConnectionRateLimiter",
+    "DUCAHEAT_NAMESPACE",
     "HandshakeError",
     "WSStats",
     "WebSocketClient",
     "WsHealthTracker",
+    "build_settings_delta",
+    "clone_payload_value",
     "forward_ws_sample_updates",
     "resolve_ws_update_section",
     "translate_path_update",

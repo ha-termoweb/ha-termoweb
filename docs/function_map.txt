@@ -236,8 +236,6 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._reset_pay
     Reset the payload stale window to the default.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._dispatch_nodes
     Publish inventory-derived node addresses for downstream consumers.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._merge_nodes
-    Deep merge ``source`` updates into ``target`` in place.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._collect_sample_updates
     Extract heater sample updates from a websocket payload.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._nodes_to_deltas
@@ -442,6 +440,10 @@ custom_components/termoweb/backend/ws_client.py :: ConnectionRateLimiter.__init_
     Initialise the limiter with optional clock and sleep hooks.
 custom_components/termoweb/backend/ws_client.py :: ConnectionRateLimiter.wait_for_slot
     Sleep if necessary before allowing the next connection attempt.
+custom_components/termoweb/backend/ws_client.py :: clone_payload_value
+    Return a shallow copy of mapping or sequence payload values.
+custom_components/termoweb/backend/ws_client.py :: build_settings_delta
+    Extract canonical settings keys from a websocket section payload.
 custom_components/termoweb/backend/ws_client.py :: resolve_ws_update_section
     Map a websocket path segment onto the node section bucket.
 custom_components/termoweb/backend/ws_client.py :: forward_ws_sample_updates
