@@ -1200,6 +1200,8 @@ custom_components/termoweb/heater.py :: iter_boostable_heater_nodes
     Yield heater nodes that expose boost functionality.
 custom_components/termoweb/heater.py :: derive_boost_state
     Return derived boost metadata for ``settings`` using ``coordinator``.
+custom_components/termoweb/heater.py :: derive_boost_state_from_domain
+    Return derived boost metadata for typed ``state``.
 custom_components/termoweb/heater.py :: DispatcherSubscriptionHelper.__init__
     Initialise the helper for the provided entity.
 custom_components/termoweb/heater.py :: DispatcherSubscriptionHelper.subscribe
@@ -1236,14 +1238,18 @@ custom_components/termoweb/heater.py :: HeaterNodeBase._domain_state_view
     Return the domain state view exposed by the coordinator.
 custom_components/termoweb/heater.py :: HeaterNodeBase._heater_state
     Return the current cached domain state.
-custom_components/termoweb/heater.py :: HeaterNodeBase._heater_state_payload
-    Return the canonical heater settings payload.
+custom_components/termoweb/heater.py :: HeaterNodeBase.heater_state
+    Return the typed heater state for this entity.
+custom_components/termoweb/heater.py :: HeaterNodeBase.accumulator_state
+    Return the accumulator state when present.
+custom_components/termoweb/heater.py :: HeaterNodeBase.thermostat_state
+    Return the thermostat state when present.
+custom_components/termoweb/heater.py :: HeaterNodeBase.power_monitor_state
+    Return the power monitor state when present.
 custom_components/termoweb/heater.py :: HeaterNodeBase._resolve_inventory
     Return the cached inventory for this entity, if available.
 custom_components/termoweb/heater.py :: HeaterNodeBase._heater_section
     Return the heater-specific metadata cached for this entity.
-custom_components/termoweb/heater.py :: HeaterNodeBase.heater_settings
-    Return the cached settings for this heater, if available.
 custom_components/termoweb/heater.py :: HeaterNodeBase._hass_for_runtime
     Return the best-effort Home Assistant instance for runtime access.
 custom_components/termoweb/heater.py :: HeaterNodeBase.hass

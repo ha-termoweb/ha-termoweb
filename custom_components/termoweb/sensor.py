@@ -374,17 +374,17 @@ class HeaterTemperatureSensor(HeaterNodeBase, SensorEntity):
     @property
     def native_value(self) -> float | None:
         """Return the latest temperature reported by the heater."""
-        s = self.heater_settings() or {}
-        return float_or_none(s.get("mtemp"))
+        state = self.heater_state()
+        return float_or_none(getattr(state, "mtemp", None))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return metadata describing the heater temperature source."""
-        s = self.heater_settings() or {}
+        state = self.heater_state()
         return {
             "dev_id": self._dev_id,
             "addr": self._addr,
-            "units": s.get("units"),
+            "units": getattr(state, "units", None),
         }
 
 
@@ -448,8 +448,8 @@ class ThermostatBatterySensor(HeaterNodeBase, SensorEntity):
     def native_value(self) -> int | None:
         """Return the thermostat battery percentage as 0–100."""
 
-        settings = self.heater_settings() or {}
-        raw_level = settings.get("batt_level")
+        state = self.heater_state()
+        raw_level = getattr(state, "batt_level", None)
         level = self._coerce_level(raw_level)
         if level is None:
             return None
@@ -459,8 +459,8 @@ class ThermostatBatterySensor(HeaterNodeBase, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional thermostat battery metadata."""
 
-        settings = self.heater_settings() or {}
-        level = self._coerce_level(settings.get("batt_level"))
+        state = self.heater_state()
+        level = self._coerce_level(getattr(state, "batt_level", None))
         return {
             "dev_id": self._dev_id,
             "addr": self._addr,
@@ -476,8 +476,8 @@ class AccumulatorChargeSensorBase(HeaterNodeBase, SensorEntity):
     def _raw_value(self) -> Any:
         """Return the raw setting backing this accumulator charge sensor."""
 
-        settings = self.heater_settings() or {}
-        return settings.get(self._metric_key)
+        state = self.accumulator_state()
+        return getattr(state, self._metric_key, None) if state is not None else None
 
     def _coerce_value(self, raw: Any) -> StateType:
         """Convert a raw accumulator charge setting into a Home Assistant state."""

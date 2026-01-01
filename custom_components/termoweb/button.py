@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from dataclasses import dataclass
 import logging
 from typing import Any
@@ -26,12 +26,12 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .domain import DomainStateView
-from .domain.state import state_to_dict
+from .domain.state import DomainState
 from .heater import (
     BOOST_BUTTON_METADATA,
     DEFAULT_BOOST_TEMPERATURE,
     BoostButtonMetadata,
-    derive_boost_state,
+    derive_boost_state_from_domain,
     log_skipped_nodes,
     resolve_boost_runtime_minutes,
     resolve_boost_temperature,
@@ -232,27 +232,25 @@ class AccumulatorBoostButtonBase(CoordinatorEntity, ButtonEntity):
 
         self.async_write_ha_state()
 
-    def _coordinator_settings(self) -> Mapping[str, Any] | None:
-        """Return cached coordinator settings for this accumulator."""
+    def _coordinator_state(self) -> DomainState | None:
+        """Return cached coordinator state for this accumulator."""
 
         coordinator = getattr(self, "coordinator", None)
         view = getattr(coordinator, "domain_view", None)
         if not isinstance(view, DomainStateView):
             return None
 
-        state = view.get_heater_state(
+        return view.get_heater_state(
             self.boost_context.node_type,
             self.boost_context.addr,
         )
-        payload = state_to_dict(state) if state is not None else None
-        return payload if isinstance(payload, Mapping) else None
 
     def _coordinator_boost_active(self) -> bool:
         """Return True when coordinator cache reports boost activity."""
 
-        settings = self._coordinator_settings() or {}
-        coordinator = getattr(self, "coordinator", None)
-        state = derive_boost_state(settings, coordinator)
+        state = derive_boost_state_from_domain(
+            self._coordinator_state(), getattr(self, "coordinator", None)
+        )
         return bool(state.active)
 
     @property

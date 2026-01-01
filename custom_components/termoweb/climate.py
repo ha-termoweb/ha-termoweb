@@ -24,13 +24,13 @@ import voluptuous as vol
 from .backend.ducaheat import DucaheatRESTClient
 from .boost import coerce_boost_minutes, supports_boost
 from .const import BRAND_DUCAHEAT, DOMAIN
-from .domain import apply_payload_to_state, state_to_dict
+from .domain import AccumulatorState, DomainState, HeaterState
 from .heater import (
     DEFAULT_BOOST_DURATION,
     HeaterNodeBase,
     HeaterPlatformDetails,
     clear_climate_entity_id,
-    derive_boost_state,
+    derive_boost_state_from_domain,
     log_skipped_nodes,
     register_climate_entity_id,
     resolve_boost_runtime_minutes,
@@ -378,9 +378,12 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         """Translate a program slot integer into a label."""
         return {0: "cold", 1: "night", 2: "day"}.get(v)
 
-    def _current_prog_slot(self, s: dict[str, Any]) -> int | None:
+    def _current_prog_slot(
+        self, state: HeaterState | DomainState | None
+    ) -> int | None:
         """Return the active program slot index for the heater."""
-        prog = s.get("prog")
+
+        prog = getattr(state, "prog", None)
         if not isinstance(prog, list) or len(prog) < 168:
             return None
         now = dt_util.now()
@@ -404,20 +407,16 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 return candidate
         return None
 
-    def _optimistic_update(self, mutator: Callable[[dict[str, Any]], None]) -> None:
-        """Apply ``mutator`` to cached settings and refresh state if changed."""
+    def _optimistic_update(self, mutator: Callable[[DomainState], None]) -> bool:
+        """Apply ``mutator`` to cached state and refresh state if changed."""
 
-        def _state_mutator(state: Any) -> None:
-            payload = state_to_dict(state)
-            mutator(payload)
-            apply_payload_to_state(state, payload)
         try:
             coordinator = getattr(self, "coordinator", None)
             apply_patch = getattr(coordinator, "apply_entity_patch", None)
             updated = False
             refresh_needed = False
             if callable(apply_patch):
-                applied = bool(apply_patch(self._node_type, self._addr, _state_mutator))
+                applied = bool(apply_patch(self._node_type, self._addr, mutator))
                 if applied:
                     updated = True
                     refresh_needed = True
@@ -613,8 +612,9 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
     @property
     def hvac_mode(self) -> HVACMode:
         """Return the HA HVAC mode derived from heater settings."""
-        s = self.heater_settings() or {}
-        mode = (s.get("mode") or "").lower()
+
+        state = self.heater_state()
+        mode = (getattr(state, "mode", None) or "").lower()
         if mode == "off":
             return HVACMode.OFF
         if mode == "auto":
@@ -626,25 +626,28 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
     @property
     def hvac_action(self) -> HVACAction | None:
         """Return the current HVAC action reported by the heater."""
-        s = self.heater_settings() or {}
-        state = (s.get("state") or "").lower()
-        if not state:
+
+        state = self.heater_state()
+        heater_state = (getattr(state, "state", None) or "").lower()
+        if not heater_state:
             return None
-        if state in ("off", "idle", "standby"):
+        if heater_state in ("off", "idle", "standby"):
             return HVACAction.IDLE if self.hvac_mode != HVACMode.OFF else HVACAction.OFF
         return HVACAction.HEATING
 
     @property
     def current_temperature(self) -> float | None:
         """Return the measured ambient temperature."""
-        s = self.heater_settings() or {}
-        return float_or_none(s.get("mtemp"))
+
+        state = self.heater_state()
+        return float_or_none(getattr(state, "mtemp", None))
 
     @property
     def target_temperature(self) -> float | None:
         """Return the target temperature set on the heater."""
-        s = self.heater_settings() or {}
-        return float_or_none(s.get("stemp"))
+
+        state = self.heater_state()
+        return float_or_none(getattr(state, "stemp", None))
 
     @property
     def min_temp(self) -> float:
@@ -670,21 +673,21 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional metadata about the heater."""
-        s = self.heater_settings() or {}
+        state = self.heater_state()
         attrs: dict[str, Any] = {
             "dev_id": self._dev_id,
             "addr": self._addr,
-            "units": s.get("units"),
-            "max_power": s.get("max_power"),
-            "ptemp": s.get("ptemp"),
-            "prog": s.get("prog"),  # full weekly program (168 ints)
+            "units": getattr(state, "units", None),
+            "max_power": getattr(state, "max_power", None),
+            "ptemp": getattr(state, "ptemp", None),
+            "prog": getattr(state, "prog", None),  # full weekly program (168 ints)
         }
 
-        slot = self._current_prog_slot(s)
+        slot = self._current_prog_slot(state)
         if slot is not None:
             label = self._slot_label(slot)
             attrs["program_slot"] = label
-            ptemp = s.get("ptemp")
+            ptemp = getattr(state, "ptemp", None)
             try:
                 if isinstance(ptemp, (list, tuple)) and 0 <= slot < len(ptemp):
                     attrs["program_setpoint"] = float_or_none(ptemp[slot])
@@ -701,7 +704,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         *,
         log_context: str,
         write_kwargs: Mapping[str, Any],
-        apply_fn: Callable[[dict[str, Any]], None],
+        apply_fn: Callable[[DomainState], None],
         success_details: Mapping[str, Any] | None = None,
     ) -> None:
         """Submit a heater write, update cached state, and schedule fallback."""
@@ -778,8 +781,9 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             )
             return
 
-        def _apply(cur: dict[str, Any]) -> None:
-            cur["prog"] = list(prog2)
+        def _apply(cur: DomainState) -> None:
+            if hasattr(cur, "prog"):
+                cur.prog = list(prog2)
 
         await self._commit_write(
             log_context="Schedule write",
@@ -823,8 +827,9 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             )
             return
 
-        def _apply(cur: dict[str, Any]) -> None:
-            cur["ptemp"] = [f"{t:.1f}" if isinstance(t, float) else t for t in p2]
+        def _apply(cur: DomainState) -> None:
+            if hasattr(cur, "ptemp"):
+                cur.ptemp = [f"{t:.1f}" if isinstance(t, float) else t for t in p2]
 
         await self._commit_write(
             log_context="Preset write",
@@ -1178,8 +1183,8 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
     def hvac_mode(self) -> HVACMode | None:
         """Return the current accumulator HVAC mode."""
 
-        s = self.heater_settings() or {}
-        mode = (s.get("mode") or "").lower()
+        state = self.accumulator_state()
+        mode = (getattr(state, "mode", None) or "").lower()
         if mode == "off":
             return HVACMode.OFF
         if mode == "auto":
@@ -1211,8 +1216,8 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
     def preset_mode(self) -> str:
         """Return the active preset mode."""
 
-        s = self.heater_settings() or {}
-        if (s.get("mode") or "").lower() == "boost":
+        state = self.accumulator_state()
+        if (getattr(state, "mode", None) or "").lower() == "boost":
             return "boost"
         return "none"
 
@@ -1244,8 +1249,8 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
 
         base_attrs = super().extra_state_attributes
         attrs: dict[str, Any] = dict(base_attrs) if base_attrs is not None else {}
-        settings = self.heater_settings() or {}
-        boost_state = derive_boost_state(settings, self.coordinator)
+        state = self.accumulator_state()
+        boost_state = derive_boost_state_from_domain(state, self.coordinator)
 
         attrs["boost_active"] = boost_state.active
         attrs["boost_minutes_remaining"] = boost_state.minutes_remaining
@@ -1253,14 +1258,14 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         attrs["boost_end_label"] = boost_state.end_label
         attrs["preferred_boost_minutes"] = self._preferred_boost_minutes()
 
-        charging = settings.get("charging")
+        charging = getattr(state, "charging", None)
         if isinstance(charging, bool):
             attrs["charging"] = charging
         elif charging is not None:
             attrs["charging"] = bool(charging)
 
         for key in ("current_charge_per", "target_charge_per"):
-            value = settings.get(key)
+            value = getattr(state, key, None) if state is not None else None
             if isinstance(value, (int, float)):
                 attrs[key] = int(value)
 
@@ -1336,11 +1341,11 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         if not success:
             return
 
-        def _apply(cur: dict[str, Any]) -> None:
-            if validated_minutes is not None:
-                cur["boost_time"] = validated_minutes
-            if temp_value is not None:
-                cur["boost_temp"] = f"{float(temp_value):.1f}"
+        def _apply(cur: DomainState) -> None:
+            if validated_minutes is not None and hasattr(cur, "boost_time"):
+                cur.boost_time = validated_minutes
+            if temp_value is not None and hasattr(cur, "boost_temp"):
+                cur.boost_temp = f"{float(temp_value):.1f}"
 
         self._optimistic_update(_apply)
         detail_parts = []
@@ -1366,10 +1371,10 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         if validated_minutes is None:
             validated_minutes = self._preferred_boost_minutes()
 
-        settings = self.heater_settings() or {}
-        boost_temp = float_or_none(settings.get("boost_temp"))
+        state = self.accumulator_state()
+        boost_temp = float_or_none(getattr(state, "boost_temp", None))
         if boost_temp is None:
-            boost_temp = float_or_none(settings.get("stemp"))
+            boost_temp = float_or_none(getattr(state, "stemp", None))
         if boost_temp is None:
             _LOGGER.error(
                 "Boost start requires a setpoint for type=%s addr=%s",
@@ -1397,10 +1402,13 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         if not success:
             return
 
-        def _apply(cur: dict[str, Any]) -> None:
-            cur["boost_active"] = True
-            cur["boost_remaining"] = validated_minutes
-            cur["mode"] = "boost"
+        def _apply(cur: DomainState) -> None:
+            if hasattr(cur, "boost_active"):
+                cur.boost_active = True
+            if hasattr(cur, "boost_remaining"):
+                cur.boost_remaining = validated_minutes
+            if hasattr(cur, "mode"):
+                cur.mode = "boost"
 
         self._optimistic_update(_apply)
         _LOGGER.debug(
@@ -1428,14 +1436,19 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         if not success:
             return
 
-        def _apply(cur: dict[str, Any]) -> None:
-            cur["boost_active"] = False
-            cur.pop("boost_remaining", None)
-            cur.pop("boost_end_day", None)
-            cur.pop("boost_end_min", None)
-            cur["boost_end"] = None
-            if cur.get("mode") == "boost":
-                cur["mode"] = "auto"
+        def _apply(cur: DomainState) -> None:
+            if hasattr(cur, "boost_active"):
+                cur.boost_active = False
+            if hasattr(cur, "boost_remaining"):
+                cur.boost_remaining = None
+            if hasattr(cur, "boost_end_day"):
+                cur.boost_end_day = None
+            if hasattr(cur, "boost_end_min"):
+                cur.boost_end_min = None
+            if hasattr(cur, "boost_end"):
+                cur.boost_end = None
+            if getattr(cur, "mode", None) == "boost":
+                cur.mode = "auto"
 
         self._optimistic_update(_apply)
         _LOGGER.debug(
@@ -1475,20 +1488,20 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
                     self._addr,
                     err,
                     exc_info=err,
-                )
+            )
             if boost_state is not None and boost_state.active is not None:
                 cancel_boost = bool(boost_state.active)
             else:
-                settings = self.heater_settings() or {}
-                boost_flag = settings.get("boost_active")
+                state = self.accumulator_state()
+                boost_flag = getattr(state, "boost_active", None)
                 if isinstance(boost_flag, bool):
                     cancel_boost = boost_flag
-                else:
-                    legacy_flag = settings.get("boost")
+                elif state is not None:
+                    legacy_flag = getattr(state, "boost", None)
                     if isinstance(legacy_flag, bool):
                         cancel_boost = legacy_flag
                     else:
-                        mode_value = settings.get("mode")
+                        mode_value = getattr(state, "mode", None)
                         if isinstance(mode_value, str):
                             cancel_boost = mode_value.strip().lower() == "boost"
 

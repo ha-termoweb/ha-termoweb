@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -152,7 +153,9 @@ async def test_duration_async_added_to_hass_uses_settings_when_state_missing(
 
     entity = _make_duration_entity()
     entity.async_write_ha_state = MagicMock()
-    entity.heater_settings = MagicMock(return_value={"boost_time": 240})
+    entity.accumulator_state = MagicMock(
+        return_value=SimpleNamespace(boost_time=240)
+    )
 
     monkeypatch.setattr(
         number_module, "get_boost_runtime_minutes", MagicMock(return_value=None)
@@ -329,7 +332,9 @@ async def test_temperature_async_added_to_hass_uses_settings_when_state_missing(
 
     entity = _make_temperature_entity()
     entity.async_write_ha_state = MagicMock()
-    entity.heater_settings = MagicMock(return_value={"boost_temp": 24.4})
+    entity.accumulator_state = MagicMock(
+        return_value=SimpleNamespace(boost_temp=24.4)
+    )
 
     monkeypatch.setattr(
         number_module, "get_boost_temperature", MagicMock(return_value=None)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 import logging
 from typing import Any, Final, cast
@@ -17,7 +17,13 @@ from homeassistant.util import dt as dt_util
 from .boost import coerce_boost_bool, coerce_boost_minutes, supports_boost
 from .const import DOMAIN, signal_ws_data
 from .domain import DomainStateView
-from .domain.state import DomainState, state_to_dict
+from .domain.state import (
+    AccumulatorState,
+    DomainState,
+    HeaterState,
+    PowerMonitorState,
+    ThermostatState,
+)
 from .i18n import COORDINATOR_FALLBACK_ATTR, format_fallback
 from .inventory import (
     HEATER_NODE_TYPES,
@@ -553,29 +559,34 @@ class BoostState:
 
 
 # ruff: noqa: C901
-def derive_boost_state(
-    settings: Mapping[str, Any] | None, coordinator: Any
+def _derive_boost_state(
+    source: Any,
+    coordinator: Any,
 ) -> BoostState:
-    """Return derived boost metadata for ``settings`` using ``coordinator``."""
+    """Return derived boost metadata for ``source`` using ``coordinator``."""
 
-    source = settings if isinstance(settings, Mapping) else {}
+    def _get_field(field: str) -> Any:
+        if isinstance(source, Mapping):
+            return source.get(field)
+        return getattr(source, field, None)
+
     fallback_source = getattr(coordinator, COORDINATOR_FALLBACK_ATTR, None)
     fallbacks: Mapping[str, str] | None
     fallbacks = fallback_source if isinstance(fallback_source, Mapping) else None
 
-    boost_active = coerce_boost_bool(source.get("boost_active"))
+    boost_active = coerce_boost_bool(_get_field("boost_active"))
     if boost_active is None:
-        boost_active = coerce_boost_bool(source.get("boost"))
+        boost_active = coerce_boost_bool(_get_field("boost"))
     if boost_active is None:
-        mode = source.get("mode")
+        mode = _get_field("mode")
         if isinstance(mode, str):
             boost_active = mode.strip().lower() == "boost"
         else:
             boost_active = False
 
-    boost_day: Any = source.get("boost_end_day")
-    boost_minute: Any = source.get("boost_end_min")
-    raw_end = source.get("boost_end")
+    boost_day: Any = _get_field("boost_end_day")
+    boost_minute: Any = _get_field("boost_end_min")
+    raw_end = _get_field("boost_end")
     if isinstance(raw_end, Mapping):
         if boost_day is None:
             boost_day = raw_end.get("day")
@@ -583,11 +594,11 @@ def derive_boost_state(
             boost_minute = raw_end.get("minute")
 
     boost_end_dt: datetime | None = None
-    derived_dt = source.get("boost_end_datetime")
+    derived_dt = _get_field("boost_end_datetime")
     if isinstance(derived_dt, datetime):
         boost_end_dt = derived_dt
 
-    boost_minutes: int | None = coerce_boost_minutes(source.get("boost_minutes_delta"))
+    boost_minutes: int | None = coerce_boost_minutes(_get_field("boost_minutes_delta"))
     resolver = getattr(coordinator, "resolve_boost_end", None)
     if (
         callable(resolver)
@@ -606,7 +617,7 @@ def derive_boost_state(
             boost_minutes = resolved_minutes
 
     if boost_minutes is None:
-        boost_minutes = coerce_boost_minutes(source.get("boost_remaining"))
+        boost_minutes = coerce_boost_minutes(_get_field("boost_remaining"))
 
     if boost_minutes is None and boost_end_dt is not None:
         delta_seconds = (boost_end_dt - dt_util.now()).total_seconds()
@@ -682,6 +693,23 @@ def derive_boost_state(
         end_iso=boost_end_iso,
         end_label=end_label,
     )
+
+
+def derive_boost_state(
+    settings: Mapping[str, Any] | None, coordinator: Any
+) -> BoostState:
+    """Return derived boost metadata for mapping ``settings``."""
+
+    source = settings if isinstance(settings, Mapping) else {}
+    return _derive_boost_state(source, coordinator)
+
+
+def derive_boost_state_from_domain(
+    state: DomainState | None, coordinator: Any
+) -> BoostState:
+    """Return derived boost metadata for typed ``state``."""
+
+    return _derive_boost_state(state or {}, coordinator)
 
 
 # ruff: enable=C901
@@ -1009,11 +1037,31 @@ class HeaterNodeBase(CoordinatorEntity):
             return None
         return view.get_heater_state(self._node_type, self._addr)
 
-    def _heater_state_payload(self) -> Mapping[str, Any] | None:
-        """Return the canonical heater settings payload."""
+    def heater_state(self) -> HeaterState | AccumulatorState | ThermostatState | None:
+        """Return the typed heater state for this entity."""
 
         state = self._heater_state()
-        return state_to_dict(state) if state is not None else None
+        if isinstance(state, (HeaterState, AccumulatorState, ThermostatState)):
+            return state
+        return None
+
+    def accumulator_state(self) -> AccumulatorState | None:
+        """Return the accumulator state when present."""
+
+        state = self.heater_state()
+        return state if isinstance(state, AccumulatorState) else None
+
+    def thermostat_state(self) -> ThermostatState | None:
+        """Return the thermostat state when present."""
+
+        state = self.heater_state()
+        return state if isinstance(state, ThermostatState) else None
+
+    def power_monitor_state(self) -> PowerMonitorState | None:
+        """Return the power monitor state when present."""
+
+        view = self._domain_state_view()
+        return view.get_power_monitor_state(self._addr) if view is not None else None
 
     def _resolve_inventory(self) -> Inventory:
         """Return the cached inventory for this entity, if available."""
@@ -1043,9 +1091,14 @@ class HeaterNodeBase(CoordinatorEntity):
             inventory = None
 
         settings: dict[str, Any] = {}
-        payload = self._heater_state_payload()
-        if isinstance(payload, Mapping):
-            settings = {self._addr: dict(payload)}
+        state = self.heater_state()
+        if state is not None:
+            state_payload = {
+                key: value
+                for key, value in asdict(state).items()
+                if value is not None
+            }
+            settings = {self._addr: state_payload}
 
         section: dict[str, Any] = {"settings": settings}
 
@@ -1069,11 +1122,6 @@ class HeaterNodeBase(CoordinatorEntity):
             )
 
         return section
-
-    def heater_settings(self) -> dict[str, Any] | None:
-        """Return the cached settings for this heater, if available."""
-        payload = self._heater_state_payload()
-        return dict(payload) if isinstance(payload, Mapping) else None
 
     def _hass_for_runtime(self) -> HomeAssistant | None:
         """Return the best-effort Home Assistant instance for runtime access."""
@@ -1106,8 +1154,7 @@ class HeaterNodeBase(CoordinatorEntity):
     def boost_state(self) -> BoostState:
         """Return derived boost metadata for this heater."""
 
-        settings = self.heater_settings() or {}
-        return derive_boost_state(settings, self.coordinator)
+        return derive_boost_state_from_domain(self.heater_state(), self.coordinator)
 
     def _client(self) -> Any:
         """Return the REST client used for write operations."""
@@ -1127,8 +1174,9 @@ class HeaterNodeBase(CoordinatorEntity):
 
     def _units(self) -> str:
         """Return the configured temperature units for this heater."""
-        settings = self.heater_settings() or {}
-        units = (settings.get("units") or "C").upper()
+        state = self.heater_state()
+        units_value = getattr(state, "units", None) if state is not None else None
+        units = (units_value or "C").upper()
         return "C" if units not in {"C", "F"} else units
 
     @property
