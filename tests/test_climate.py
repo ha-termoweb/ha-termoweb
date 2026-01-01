@@ -1119,7 +1119,7 @@ def test_accumulator_extra_state_attributes_handles_resolver_fallbacks() -> None
         "boost": RaiseOnStr(),
         "boost_end_day": 12,
         "boost_end_min": 90,
-        "boost_end": {"day": 14, "minute": 150},
+        "boost_end_datetime": dt.datetime(2024, 1, 1, 3, 0, tzinfo=dt.timezone.utc),
         "boost_remaining": True,
     }
 
@@ -1179,7 +1179,7 @@ def test_accumulator_extra_state_attributes_handles_resolver_fallbacks() -> None
         dt_util.NOW = original_now
 
     assert attrs["boost_active"] is True
-    assert attrs["boost_minutes_remaining"] is None
+    assert attrs["boost_minutes_remaining"] == 180
     assert attrs["boost_end"] == "2024-01-01T03:00:00+00:00"
     assert attrs["boost_end_label"] is None
 
@@ -1202,7 +1202,6 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
         "boost_active": 1,
         "boost_end_day": 2,
         "boost_end_min": 60,
-        "boost_end": None,
         "boost_remaining": None,
         "charging": False,
         "current_charge_per": 67,
@@ -1277,7 +1276,6 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
     settings["boost_active"] = " OFF "
     settings["boost_end_day"] = None
     settings["boost_end_min"] = None
-    settings["boost_end"] = {"day": 10, "minute": 15}
     settings["boost_remaining"] = ""
     coordinator.resolve_boost_end = RaisingResolver()  # type: ignore[assignment]
 
@@ -1285,7 +1283,6 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
         cur.boost_active = settings["boost_active"]
         cur.boost_end_day = settings["boost_end_day"]
         cur.boost_end_min = settings["boost_end_min"]
-        cur.boost_end = settings["boost_end"]
         cur.boost_remaining = settings["boost_remaining"]
 
     assert coordinator.apply_entity_patch(
@@ -1304,7 +1301,6 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
     settings["boost_active"] = " maybe "
     settings["boost"] = None
     settings["mode"] = "auto"
-    settings["boost_end"] = None
     settings["boost_remaining"] = None
     coordinator.resolve_boost_end = None  # type: ignore[assignment]
 
@@ -1312,7 +1308,6 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
         cur.boost_active = settings["boost_active"]
         cur.boost = settings["boost"]
         cur.mode = settings["mode"]
-        cur.boost_end = settings["boost_end"]
         cur.boost_remaining = settings["boost_remaining"]
 
     assert coordinator.apply_entity_patch(
@@ -1325,13 +1320,11 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
     assert attrs["boost_active"] is False
 
     settings["boost_active"] = 0
-    settings["boost_end"] = None
     settings["boost_remaining"] = 7.5
     coordinator.resolve_boost_end = None  # type: ignore[assignment]
 
     def _apply_third(cur: Any) -> None:
         cur.boost_active = settings["boost_active"]
-        cur.boost_end = settings["boost_end"]
         cur.boost_remaining = settings["boost_remaining"]
 
     assert coordinator.apply_entity_patch(

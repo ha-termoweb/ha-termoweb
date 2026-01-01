@@ -357,7 +357,7 @@ def test_derive_boost_state_parses_iso_without_parser(
     monkeypatch.setattr(dt_util, "parse_datetime", lambda value: None)
     settings = {
         "boost_active": True,
-        "boost_end": "2024-01-01T00:30:00+00:00",
+        "boost_end_datetime": "2024-01-01T00:30:00+00:00",
     }
 
     state = heater_module.derive_boost_state(settings, SimpleNamespace())
@@ -375,7 +375,7 @@ def test_derive_boost_state_ignores_placeholder_iso(
     settings = {
         "mode": "auto",
         "boost": False,
-        "boost_end": "1970-01-02T00:00:00UTC",
+        "boost_end_datetime": "1970-01-02T00:00:00UTC",
     }
 
     state = heater_module.derive_boost_state(settings, SimpleNamespace())
@@ -392,11 +392,11 @@ def test_derive_boost_state_parses_string_end(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(dt_util, "now", lambda: base_now)
 
     iso = "2024-01-01T00:30:00+00:00"
-    settings = {"boost_active": True, "boost_end": iso}
+    settings = {"boost_active": True, "boost_end_datetime": iso}
     state = heater_module.derive_boost_state(settings, SimpleNamespace())
 
     assert state.active is True
-    assert state.minutes_remaining is None
+    assert state.minutes_remaining == 30
     assert state.end_iso == iso
     assert state.end_datetime == datetime(2024, 1, 1, 0, 30, tzinfo=timezone.utc)
     assert state.end_label is None
@@ -460,7 +460,9 @@ def test_derive_boost_state_uses_parse_datetime(
     monkeypatch.setattr(dt_util, "parse_datetime", _fake_parse, raising=False)
 
     coordinator = SimpleNamespace(resolve_boost_end=None)
-    state = heater_module.derive_boost_state({"boost_end": iso_value}, coordinator)
+    state = heater_module.derive_boost_state(
+        {"boost_end_datetime": iso_value}, coordinator
+    )
 
     assert calls == [iso_value]
     assert state.end_datetime == parsed

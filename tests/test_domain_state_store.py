@@ -52,6 +52,8 @@ def test_domain_state_store_applies_snapshots_and_patches() -> None:
             "current_charge_per": "45.5",
             "target_charge_per": 95,
             "boost_end": {"day": 7, "minute": 15},
+            "boost_end_day": 7,
+            "boost_end_min": 15,
             "boost_remaining": 10,
             "extra": {"raw": "data"},
         },
@@ -72,9 +74,14 @@ def test_domain_state_store_applies_snapshots_and_patches() -> None:
     assert settings["acm"]["2"]["current_charge_per"] == 45.5
     assert settings["acm"]["2"]["target_charge_per"] == 95
     assert settings["acm"]["2"]["boost"] is True
-    assert settings["acm"]["2"]["boost_end"] == {"day": 7, "minute": 15}
+    assert "boost_end" not in settings["acm"]["2"]
+    assert settings["acm"]["2"]["boost_end_day"] == 7
+    assert settings["acm"]["2"]["boost_end_min"] == 15
     assert settings["acm"]["2"]["boost_remaining"] == 10
     assert "extra" not in settings["acm"]["2"]
+    assert all(
+        not isinstance(value, Mapping) for value in settings["acm"]["2"].values()
+    )
 
     store.apply_patch("htr", "1", {"stemp": "19.5"})
     patched = {

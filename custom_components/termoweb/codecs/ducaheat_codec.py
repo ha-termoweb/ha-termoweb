@@ -101,7 +101,6 @@ def _decode_status_payload(
     for extra_key in (
         "boost_active",
         "boost_remaining",
-        "boost_end",
         "lock",
         "lock_active",
         "max_power",
@@ -262,7 +261,6 @@ def _merge_boost_metadata(
 
     if "boost_end" in source:
         boost_end = source["boost_end"]
-        _assign("boost_end", boost_end, allow_none=True)
         if isinstance(boost_end, Mapping):
             _assign("boost_end_day", boost_end.get("day"), prefer=True)
             _assign("boost_end_min", boost_end.get("minute"), prefer=True)

@@ -66,7 +66,6 @@ class AccumulatorState(HeaterState):
     current_charge_per: int | float | None = None
     target_charge_per: int | float | None = None
     boost_active: bool | None = None
-    boost_end: Any | None = None
     boost_remaining: float | int | None = None
     boost_time: int | float | None = None
     boost_temp: Any | None = None
@@ -263,9 +262,6 @@ def _populate_accumulator_fields(
         state.target_charge_per = _coerce_number(payload.get("target_charge_per"))
     if "boost_active" in payload:
         state.boost_active = payload.get("boost_active")
-    if "boost_end" in payload:
-        end_payload = payload.get("boost_end")
-        state.boost_end = _copy_mapping(end_payload) or end_payload
     if "boost_remaining" in payload:
         state.boost_remaining = _coerce_number(payload.get("boost_remaining"))
     if "boost_time" in payload:

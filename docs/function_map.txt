@@ -1186,6 +1186,8 @@ custom_components/termoweb/heater.py :: iter_boost_button_metadata
     Yield the metadata describing boost helper buttons.
 custom_components/termoweb/heater.py :: iter_boostable_heater_nodes
     Yield heater nodes that expose boost functionality.
+custom_components/termoweb/heater.py :: _parse_iso_timestamp
+    Parse an ISO timestamp string defensively.
 custom_components/termoweb/heater.py :: derive_boost_state
     Return derived boost metadata for ``settings`` using ``coordinator``.
 custom_components/termoweb/heater.py :: derive_boost_state_from_domain

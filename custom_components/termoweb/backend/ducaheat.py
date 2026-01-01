@@ -557,6 +557,7 @@ class DucaheatRESTClient(RESTClient):
 
         self._merge_boost_metadata(settings, settings)
         self._merge_accumulator_charge_metadata(settings, settings)
+        settings.pop("boost_end", None)
 
         return settings
 
@@ -598,7 +599,6 @@ class DucaheatRESTClient(RESTClient):
 
         if "boost_end" in source:
             boost_end = source["boost_end"]
-            _assign("boost_end", boost_end, allow_none=True)
             if isinstance(boost_end, Mapping):
                 _assign("boost_end_day", boost_end.get("day"), prefer=True)
                 _assign("boost_end_min", boost_end.get("minute"), prefer=True)
@@ -696,7 +696,6 @@ class DucaheatRESTClient(RESTClient):
         for extra_key in (
             "boost_active",
             "boost_remaining",
-            "boost_end",
             "lock",
             "lock_active",
             "max_power",
@@ -1133,7 +1132,6 @@ class DucaheatRESTClient(RESTClient):
                 metadata["boost_minutes_delta"] = minutes
             else:
                 metadata.setdefault("boost_minutes_delta", 0)
-            metadata.setdefault("boost_end", None)
             metadata.setdefault("boost_end_day", None)
             metadata.setdefault("boost_end_min", None)
             metadata.setdefault("boost_end_timestamp", None)
@@ -1152,7 +1150,6 @@ class DucaheatRESTClient(RESTClient):
                 metadata["boost_minutes_delta"] = minutes
             else:
                 metadata.setdefault("boost_minutes_delta", 0)
-            metadata.setdefault("boost_end", None)
             metadata.setdefault("boost_end_day", None)
             metadata.setdefault("boost_end_min", None)
             metadata.setdefault("boost_end_timestamp", None)
@@ -1162,10 +1159,8 @@ class DucaheatRESTClient(RESTClient):
             end_dt = rtc_dt + timedelta(minutes=minutes)
             day_of_year = end_dt.timetuple().tm_yday
             minute_of_day = end_dt.hour * 60 + end_dt.minute
-            end_payload = {"day": day_of_year, "minute": minute_of_day}
             metadata.update(
                 {
-                    "boost_end": end_payload,
                     "boost_end_day": day_of_year,
                     "boost_end_min": minute_of_day,
                     "boost_minutes_delta": minutes,
@@ -1175,7 +1170,6 @@ class DucaheatRESTClient(RESTClient):
         else:
             metadata.update(
                 {
-                    "boost_end": None,
                     "boost_end_day": None,
                     "boost_end_min": None,
                     "boost_minutes_delta": 0 if minutes is None else max(0, minutes),

@@ -9,6 +9,9 @@ import pytest
 
 from aiohttp import ClientResponseError
 
+from custom_components.termoweb.codecs.ducaheat_codec import decode_settings
+from custom_components.termoweb.domain.ids import NodeType
+from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
 
 def test_ducaheat_rest_normalise_ws_nodes_passthrough_scalars() -> None:
     """Non-mapping payloads should return the original object unchanged."""
@@ -55,9 +58,6 @@ def test_ducaheat_rest_normalise_ws_nodes_preserve_non_settings_sections() -> No
 
     # Original payload must remain untouched after normalisation.
     assert len(payload["htr"]["settings"]["01"]["prog"]["prog"]["1"]) == 48
-
-
-from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
 
 
 def test_ducaheat_rest_normalise_ws_nodes_mixed_settings_types() -> None:
@@ -118,7 +118,7 @@ def test_ducaheat_rest_normalise_ws_nodes_mixed_settings_types() -> None:
 
 
 def test_ducaheat_rest_normalise_ws_settings_boost_fields() -> None:
-    """Websocket settings should expose boost end metadata consistently."""
+    """Websocket settings should expose boost end metadata without raw blobs."""
 
     client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
 
@@ -131,10 +131,27 @@ def test_ducaheat_rest_normalise_ws_settings_boost_fields() -> None:
     result = client._normalise_ws_settings(payload)
 
     assert result["boost"] is False
-    assert result["boost_end"] == {"day": 6, "minute": 15}
-    # Direct fields should take precedence over derived values.
+    assert "boost_end" not in result
     assert result["boost_end_day"] == 3
     assert result["boost_end_min"] == 15
+
+
+def test_ducaheat_decode_settings_drops_boost_end_mapping() -> None:
+    """Decoded accumulator settings should not retain raw boost_end mappings."""
+
+    payload = {
+        "status": {
+            "mode": "boost",
+            "boost_end": {"day": 2, "minute": 45},
+        },
+        "setup": {"extra_options": {"boost_end_min": 90}},
+    }
+
+    decoded = decode_settings(payload, node_type=NodeType.ACCUMULATOR)
+
+    assert "boost_end" not in decoded
+    assert decoded["boost_end_day"] == 2
+    assert decoded["boost_end_min"] == 45
 
 
 def test_ducaheat_rest_normalise_settings_charge_fields() -> None:

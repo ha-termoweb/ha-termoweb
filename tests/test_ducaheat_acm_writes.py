@@ -130,7 +130,6 @@ async def test_ducaheat_acm_boost_metadata_fallback_releases_selection(
             "boost_active": True,
             "_fallback": True,
             "boost_minutes_delta": 120,
-            "boost_end": None,
             "boost_end_day": None,
             "boost_end_min": None,
             "boost_end_timestamp": None,
@@ -191,7 +190,6 @@ async def test_ducaheat_acm_boost_metadata_happy_path(
     boost_state = result.get("boost_state")
     assert boost_state == {
         "boost_active": True,
-        "boost_end": {"day": 1, "minute": 510},
         "boost_end_day": 1,
         "boost_end_min": 510,
         "boost_minutes_delta": 180,
@@ -392,7 +390,6 @@ async def test_collect_boost_metadata_rtc_exception_inactive(
         "boost_active": False,
         "_fallback": True,
         "boost_minutes_delta": 0,
-        "boost_end": None,
         "boost_end_day": None,
         "boost_end_min": None,
         "boost_end_timestamp": None,
@@ -447,7 +444,6 @@ async def test_collect_boost_metadata_inactive_valid(
 
     assert metadata == {
         "boost_active": False,
-        "boost_end": None,
         "boost_end_day": None,
         "boost_end_min": None,
         "boost_minutes_delta": 15,
