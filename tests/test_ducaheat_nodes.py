@@ -154,6 +154,44 @@ def test_ducaheat_decode_settings_drops_boost_end_mapping() -> None:
     assert decoded["boost_end_min"] == 45
 
 
+def test_ducaheat_decode_settings_validates_aliases_with_models() -> None:
+    """Pydantic validation should normalise accumulator payload aliases."""
+
+    payload = {
+        "status": {
+            "set_temp": "22.5",
+            "ambient": "19.3",
+            "units": "c",
+            "boost_end": {"day": "5", "minute": "75"},
+            "current_charge_per": "110",
+            "lock": "off",
+        },
+        "setup": {
+            "extra_options": {
+                "boost_time": "120",
+                "boost_end_min": 30,
+                "target_charge_per": "15.9",
+            }
+        },
+        "prog": [0, 1, 2] * 56,
+        "prog_temps": {"antifrost": "7", "eco": "17.0", "comfort": "21"},
+    }
+
+    decoded = decode_settings(payload, node_type=NodeType.ACCUMULATOR)
+
+    assert decoded["stemp"] == "22.5"
+    assert decoded["mtemp"] == "19.3"
+    assert decoded["units"] == "C"
+    assert decoded["boost_end_day"] == 5
+    assert decoded["boost_end_min"] == 75
+    assert decoded["boost_time"] == 120
+    assert decoded["current_charge_per"] == 100
+    assert decoded["target_charge_per"] == 15
+    assert decoded["prog"] == [0, 1, 2] * 56
+    assert decoded["ptemp"] == ["7.0", "17.0", "21.0"]
+    assert "boost_end" not in decoded
+
+
 def test_ducaheat_rest_normalise_settings_charge_fields() -> None:
     """Accumulator settings should expose normalised charge metadata."""
 
@@ -178,6 +216,38 @@ def test_ducaheat_rest_normalise_settings_charge_fields() -> None:
     assert result["charging"] is True
     assert result["current_charge_per"] == 45
     assert result["target_charge_per"] == 100
+
+
+def test_ducaheat_decode_thermostat_aliases_and_limits() -> None:
+    """Thermostat decoding should rely on Pydantic validation."""
+
+    valid_day = {"values": [1] * 24}
+    payload = {
+        "mode": "Manual",
+        "state": "On",
+        "setpoint": "20.0",
+        "room_temp": "19.5",
+        "units": "f",
+        "ptemp": {"cold": "5", "night": "10.0", "day": "21"},
+        "prog": {
+            "days": {
+                day: valid_day
+                for day in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+            }
+        },
+        "batt_level": "6",
+    }
+
+    decoded = decode_settings(payload, node_type=NodeType.THERMOSTAT)
+
+    assert decoded["mode"] == "manual"
+    assert decoded["state"] == "on"
+    assert decoded["stemp"] == pytest.approx(20.0)
+    assert decoded["mtemp"] == pytest.approx(19.5)
+    assert decoded["units"] == "F"
+    assert decoded["ptemp"] == ["5.0", "10.0", "21.0"]
+    assert decoded["prog"] == [1] * 168
+    assert decoded["batt_level"] == 5
 
 
 def test_ducaheat_rest_normalise_ws_status_merges_charge_fields() -> None:
