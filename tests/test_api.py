@@ -1072,7 +1072,7 @@ def test_get_node_settings_acm_logs(
         node = AccumulatorNode(name="Store", addr="7")
         data = await client.get_node_settings("dev", node)
 
-        assert data["status"]["mode"] == "auto"
+        assert data["mode"] == "auto"
         expected = (
             f"GET settings node {mask_identifier('dev')}/{mask_identifier('7')}"
             " (acm) payload"
@@ -1105,7 +1105,7 @@ def test_get_node_settings_pmo_uses_device_endpoint(monkeypatch) -> None:
 
         payload = await client.get_node_settings("dev", ("pmo", "4"))
 
-        assert payload == {"status": {"power": 0}}
+        assert payload == {"power": 0}
         assert captured == {
             "method": "GET",
             "path": "/api/v2/devs/dev/pmo/4",
@@ -1750,7 +1750,7 @@ def test_ducaheat_get_node_settings_normalises_payload(
     asyncio.run(_run())
 
 
-def test_ducaheat_get_node_settings_acm_merges_capabilities(
+def test_ducaheat_get_node_settings_acm_strips_capabilities(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def _run() -> None:
@@ -1793,10 +1793,7 @@ def test_ducaheat_get_node_settings_acm_merges_capabilities(
         assert data["mode"] == "auto"
         assert data["boost_temp"] == "25.0"
         assert data["boost_time"] == 30
-        assert data["capabilities"] == {
-            "boost": {"max": 90, "min": 10},
-            "charge": {"modes": ["eco"], "levels": [1, 2, 3]},
-        }
+        assert "capabilities" not in data
         assert session.request_calls[0][1] == (
             "https://api.termoweb.fake/api/v2/devs/dev/acm/2"
         )
@@ -2140,7 +2137,7 @@ def test_ducaheat_normalise_settings_fallbacks() -> None:
     assert "boost_temp" not in result
     assert "boost_time" not in result
     assert result["ptemp"] == ["5.0", "", "18.0"]
-    assert result["name"] == "Heater"
+    assert "name" not in result
 
 
 def test_ducaheat_normalise_settings_acm_status_boost() -> None:

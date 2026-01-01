@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from custom_components.termoweb.domain import canonicalize_settings_payload
 from custom_components.termoweb.domain.commands import (
     AccumulatorCommand,
     BaseCommand,
@@ -55,16 +56,16 @@ def decode_prog(payload: Any) -> Any:
 
 
 def decode_settings(payload: Any, *, node_type: NodeType) -> dict[str, Any]:
-    """Decode segmented settings payloads into the legacy mapping."""
+    """Decode segmented settings payloads into canonical mappings."""
 
     if node_type is NodeType.THERMOSTAT:
         return _decode_thm_settings(payload)
     if node_type in {NodeType.HEATER, NodeType.ACCUMULATOR}:
         return _decode_status_payload(payload, node_type=node_type)
-    return payload if isinstance(payload, dict) else {}
+    return {} if not isinstance(payload, dict) else canonicalize_settings_payload(payload)
 
 
-def _decode_status_payload(  # noqa: C901
+def _decode_status_payload(
     payload: Any, *, node_type: NodeType
 ) -> dict[str, Any]:
     """Normalise heater/accumulator settings payloads."""
@@ -173,16 +174,7 @@ def _decode_status_payload(  # noqa: C901
     if ptemp_list is not None:
         flattened["ptemp"] = ptemp_list
 
-    for key in ("addr", "name", "type", "brand", "model"):
-        if key in payload:
-            flattened[key] = payload[key]
-
-    if node_type is NodeType.ACCUMULATOR:
-        capabilities = _normalise_acm_capabilities(payload)
-        if capabilities:
-            flattened["capabilities"] = capabilities
-
-    return flattened
+    return canonicalize_settings_payload(flattened)
 
 
 def _decode_thm_settings(payload: Any) -> dict[str, Any]:
@@ -254,11 +246,7 @@ def _decode_thm_settings(payload: Any) -> dict[str, Any]:
     if batt_value is not None:
         normalised["batt_level"] = max(0, min(5, batt_value))
 
-    sync_status = payload.get("sync_status")
-    if isinstance(sync_status, str):
-        normalised["sync_status"] = sync_status
-
-    return normalised
+    return canonicalize_settings_payload(normalised)
 
 
 def _merge_boost_metadata(
@@ -340,35 +328,6 @@ def _merge_accumulator_charge_metadata(
         except (TypeError, ValueError):
             continue
         target[key] = max(0, min(100, value))
-
-
-def _normalise_acm_capabilities(payload: Any) -> dict[str, Any]:
-    """Merge accumulator capability dictionaries into a single mapping."""
-
-    merged: dict[str, Any] = {}
-
-    def _merge(target: dict[str, Any], source: dict[str, Any]) -> None:
-        """Recursively merge capability dictionaries."""
-
-        for key, value in source.items():
-            if isinstance(value, dict) and isinstance(target.get(key), dict):
-                _merge(target[key], value)
-            elif isinstance(value, dict):
-                target[key] = dict(value)
-            else:
-                target[key] = value
-
-    for container in (
-        payload,
-        payload.get("status") if isinstance(payload, dict) else None,
-        payload.get("setup") if isinstance(payload, dict) else None,
-    ):
-        if isinstance(container, dict):
-            candidate = container.get("capabilities")
-            if isinstance(candidate, dict):
-                _merge(merged, candidate)
-
-    return merged
 
 
 def _normalise_prog(data: Any) -> list[int] | None:

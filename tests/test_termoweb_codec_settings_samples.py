@@ -38,10 +38,11 @@ def test_decode_node_settings_handles_status_block() -> None:
 
     decoded = decode_node_settings("acm", raw)
 
-    assert decoded["status"]["mode"] == "off"
-    assert decoded["status"]["stemp"] == "19.0"
-    assert decoded["status"]["prog"] == [0, 1, 2]
-    assert decoded["status"]["ptemp"] == ["7.0", "17.5", "21.0"]
+    assert decoded["mode"] == "off"
+    assert decoded["stemp"] == "19.0"
+    assert decoded["prog"] == [0, 1, 2]
+    assert decoded["ptemp"] == ["7.0", "17.5", "21.0"]
+    assert "status" not in decoded
 
 
 def test_decode_node_settings_preserves_short_prog() -> None:
@@ -50,6 +51,18 @@ def test_decode_node_settings_preserves_short_prog() -> None:
     decoded = decode_node_settings("htr", raw)
 
     assert decoded["prog"] == [0, 1, 2]
+
+
+def test_decode_node_settings_strips_vendor_blobs() -> None:
+    raw = {
+        "mode": "auto",
+        "capabilities": {"raw": True},
+        "status": {"mode": "manual", "extra": "ignored"},
+    }
+
+    decoded = decode_node_settings("htr", raw)
+
+    assert decoded == {"mode": "auto"}
 
 
 def test_decode_samples_filters_invalid_items(caplog: pytest.LogCaptureFixture) -> None:
