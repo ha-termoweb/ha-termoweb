@@ -160,10 +160,6 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_
     Return a normalised thermostat settings mapping.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_thm_settings._to_float
     Return ``value`` coerced to float when possible.
-custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_acm_capabilities
-    Merge accumulator capability dictionaries into a single mapping.
-custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_acm_capabilities._merge
-    Recursively merge capability dictionaries.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_prog
     Convert vendor programme payloads into a 168-slot list.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_prog._coerce_slots
@@ -543,7 +539,7 @@ custom_components/termoweb/binary_sensor.py :: HeaterBoostActiveBinarySensor._pa
 custom_components/termoweb/binary_sensor.py :: _iter_boostable_inventory_nodes
     Yield boostable heater metadata from ``inventory``.
 custom_components/termoweb/binary_sensor.py :: _build_settings_resolver
-    Return callable resolving boost settings for a heater node.
+    Return callable resolving typed boost state for a heater node.
 custom_components/termoweb/boost.py :: coerce_int
     Return ``value`` as ``int`` when possible, else ``None``.
 custom_components/termoweb/boost.py :: coerce_boost_bool
@@ -588,8 +584,8 @@ custom_components/termoweb/button.py :: AccumulatorBoostButtonBase.async_added_t
     Register coordinator listener hooks once the entity is added.
 custom_components/termoweb/button.py :: AccumulatorBoostButtonBase._handle_coordinator_update
     Refresh entity state when the coordinator updates.
-custom_components/termoweb/button.py :: AccumulatorBoostButtonBase._coordinator_settings
-    Return cached coordinator settings for this accumulator.
+custom_components/termoweb/button.py :: AccumulatorBoostButtonBase._coordinator_state
+    Return cached coordinator state for this accumulator.
 custom_components/termoweb/button.py :: AccumulatorBoostButtonBase._coordinator_boost_active
     Return True when coordinator cache reports boost activity.
 custom_components/termoweb/button.py :: AccumulatorBoostButtonBase.device_info
@@ -639,7 +635,7 @@ custom_components/termoweb/climate.py :: HeaterClimateEntity._current_prog_slot
 custom_components/termoweb/climate.py :: HeaterClimateEntity._shared_inventory
     Return the shared immutable inventory for this coordinator.
 custom_components/termoweb/climate.py :: HeaterClimateEntity._optimistic_update
-    Apply ``mutator`` to cached settings and refresh state if changed.
+    Apply ``mutator`` to cached state and refresh state if changed.
 custom_components/termoweb/climate.py :: HeaterClimateEntity._async_write_settings
     Submit a settings update to the TermoWeb API.
 custom_components/termoweb/climate.py :: HeaterClimateEntity._async_client_call
@@ -726,26 +722,6 @@ custom_components/termoweb/codecs/common.py :: validate_units
     Validate and normalise temperature units.
 custom_components/termoweb/codecs/ducaheat_codec.py :: decode_settings
     Decode segmented settings payloads into canonical mappings.
-custom_components/termoweb/codecs/ducaheat_codec.py :: _decode_status_payload
-    Normalise heater/accumulator settings payloads.
-custom_components/termoweb/codecs/ducaheat_codec.py :: _decode_thm_settings
-    Return a normalised thermostat settings mapping.
-custom_components/termoweb/codecs/ducaheat_codec.py :: _decode_thm_settings._to_float
-    Return ``value`` coerced to float when possible.
-custom_components/termoweb/codecs/ducaheat_codec.py :: _merge_boost_metadata
-    Copy boost metadata from ``source`` into ``target`` safely.
-custom_components/termoweb/codecs/ducaheat_codec.py :: _merge_boost_metadata._assign
-    Assign a metadata value while respecting preference rules.
-custom_components/termoweb/codecs/ducaheat_codec.py :: _merge_accumulator_charge_metadata
-    Copy accumulator charge metadata from ``source`` into ``target``.
-custom_components/termoweb/codecs/ducaheat_codec.py :: _normalise_prog
-    Convert vendor programme payloads into a 168-slot list.
-custom_components/termoweb/codecs/ducaheat_codec.py :: _normalise_prog._coerce_slots
-    Convert a day's slots into a 24-value list.
-custom_components/termoweb/codecs/ducaheat_codec.py :: _normalise_prog_temps
-    Convert preset temperature payloads into stringified list.
-custom_components/termoweb/codecs/ducaheat_codec.py :: _safe_temperature
-    Defensively format inbound temperature values.
 custom_components/termoweb/codecs/ducaheat_codec.py :: encode_select_payload
     Encode a selection payload.
 custom_components/termoweb/codecs/ducaheat_codec.py :: encode_mode_command
@@ -800,6 +776,92 @@ custom_components/termoweb/codecs/ducaheat_planner.py :: _build_write_call
     Build the primary write call for the supplied command.
 custom_components/termoweb/codecs/ducaheat_planner.py :: _ensure_accumulator
     Validate that accumulator-only commands target an accumulator.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: _coerce_bool
+    Coerce common truthy and falsy values to ``bool``.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: _coerce_number
+    Return ``value`` as a number when possible.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: _coerce_percentage
+    Clamp percentage values to the 0-100 range.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: _coerce_int
+    Return ``value`` coerced to int when possible.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: _safe_temperature
+    Defensively format inbound temperature values.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: _normalise_prog
+    Convert vendor programme payloads into a 168-slot list.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: _normalise_prog._coerce_slots
+    Convert a day's slots into a 24-value list.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: _normalise_prog_temps
+    Convert preset temperature payloads into stringified list.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatStatusSegment._normalise_mode
+    Lowercase mode strings when provided.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatStatusSegment._normalise_state
+    Lowercase state strings when provided.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatStatusSegment._clean_units
+    Ensure units are uppercase when provided.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatStatusSegment._format_temps
+    Validate and format temperature strings.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatStatusSegment._coerce_booleans
+    Coerce truthy and falsy values.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatStatusSegment._validate_boost_time
+    Validate boost duration values.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatStatusSegment._coerce_numbers
+    Coerce numeric metadata safely.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatStatusSegment._clean_boost_end
+    Convert boost end metadata to integers when possible.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatStatusSegment._clean_percentages
+    Clamp charge percentage values.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatStatusSegment._derive_boost_end
+    Populate boost end fields from nested mappings when supplied.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatExtraOptions._validate_boost_time
+    Validate boost duration values.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatExtraOptions._format_boost_temp
+    Format boost temperature strings.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatExtraOptions._clean_boost_end
+    Convert boost end metadata to integers when possible.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatExtraOptions._coerce_charging
+    Coerce charging metadata to booleans.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatExtraOptions._clean_percentages
+    Clamp charge percentage values.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatExtraOptions._derive_boost_end
+    Populate boost end fields from nested mappings when supplied.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatSetupSegment._validate_boost_time
+    Validate boost duration values.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatSetupSegment._format_boost_temp
+    Format boost temperature strings.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatSetupSegment._clean_boost_end
+    Convert boost end metadata to integers when possible.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatSetupSegment._coerce_charging
+    Coerce charging metadata to booleans.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatSetupSegment._clean_percentages
+    Clamp charge percentage values.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatSetupSegment._derive_boost_end
+    Populate boost end fields from nested mappings when supplied.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatThermostatSettings._normalise_mode
+    Lowercase mode strings when provided.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatThermostatSettings._normalise_state
+    Lowercase state strings when provided.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatThermostatSettings._coerce_temps
+    Coerce temperature values to floats.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatThermostatSettings._clean_units
+    Ensure units are uppercase when provided.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatThermostatSettings._normalise_ptemp
+    Normalise preset temperatures.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatThermostatSettings._normalise_prog
+    Convert weekly programmes to canonical lists.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatThermostatSettings._clean_battery
+    Clamp battery level values.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatSegmentedSettings._normalise_prog
+    Convert weekly programmes to canonical lists.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatSegmentedSettings._normalise_prog_temps
+    Normalise preset temperature payloads.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatSegmentedSettings.to_flat_dict
+    Return a canonicalised mapping for domain storage.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: _merge_boost_metadata
+    Copy boost metadata from ``source`` into ``target`` safely.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: _merge_boost_metadata._assign
+    Assign a metadata value while respecting preference rules.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: _merge_accumulator_charge_metadata
+    Copy accumulator charge metadata from ``source`` into ``target``.
 custom_components/termoweb/codecs/termoweb_codec.py :: _validate_prog
     Validate a weekly program sequence.
 custom_components/termoweb/codecs/termoweb_codec.py :: _validate_ptemp
@@ -1006,10 +1068,6 @@ custom_components/termoweb/coordinator.py :: _wrap_logger
     Return a logger proxy that exposes ``isEnabledFor`` when missing.
 custom_components/termoweb/diagnostics.py :: async_get_config_entry_diagnostics
     Return a diagnostics payload for ``entry``.
-custom_components/termoweb/domain/ids.py :: normalize_node_type
-    Normalize assorted node type inputs to ``NodeType``.
-custom_components/termoweb/domain/ids.py :: NodeId.__post_init__
-    Normalise the node address to a non-empty string.
 custom_components/termoweb/domain/energy.py :: EnergySnapshot.metrics_for_type
     Return metrics keyed by address for ``node_type`` when known.
 custom_components/termoweb/domain/energy.py :: EnergySnapshot.iter_metrics
@@ -1018,6 +1076,10 @@ custom_components/termoweb/domain/energy.py :: build_empty_snapshot
     Return an empty snapshot placeholder for ``dev_id``.
 custom_components/termoweb/domain/energy.py :: coerce_snapshot
     Return ``candidate`` when it behaves like an :class:`EnergySnapshot`.
+custom_components/termoweb/domain/ids.py :: normalize_node_type
+    Normalize assorted node type inputs to ``NodeType``.
+custom_components/termoweb/domain/ids.py :: NodeId.__post_init__
+    Normalise the node address to a non-empty string.
 custom_components/termoweb/domain/inventory.py :: InstallationInventory.__post_init__
     Ensure nodes mapping is immutable.
 custom_components/termoweb/domain/state.py :: _copy_sequence
@@ -1026,8 +1088,6 @@ custom_components/termoweb/domain/state.py :: _copy_mapping
     Return a shallow copy of a mapping when applicable.
 custom_components/termoweb/domain/state.py :: _coerce_number
     Return ``value`` as a number when possible.
-custom_components/termoweb/domain/state.py :: _copy_state_field_value
-    Return a shallow copy for mappings and sequences.
 custom_components/termoweb/domain/state.py :: canonicalize_settings_payload
     Return canonical setting fields derived from ``payload``.
 custom_components/termoweb/domain/state.py :: NodeDelta.payload
@@ -1086,6 +1146,8 @@ custom_components/termoweb/domain/state.py :: _normalize_node_type
     Return a canonical ``NodeType`` when possible.
 custom_components/termoweb/domain/state.py :: build_state_from_payload
     Return a domain state instance derived from a legacy payload.
+custom_components/termoweb/domain/state.py :: _copy_state_field_value
+    Return a shallow copy for mappings and sequences.
 custom_components/termoweb/domain/state.py :: state_to_dict
     Return a defensive mapping representation of ``state``.
 custom_components/termoweb/domain/state.py :: clone_state
@@ -1188,10 +1250,12 @@ custom_components/termoweb/heater.py :: iter_boost_button_metadata
     Yield the metadata describing boost helper buttons.
 custom_components/termoweb/heater.py :: iter_boostable_heater_nodes
     Yield heater nodes that expose boost functionality.
-custom_components/termoweb/heater.py :: _parse_iso_timestamp
+custom_components/termoweb/heater.py :: _derive_boost_state
+    Return derived boost metadata for ``source`` using ``coordinator``.
+custom_components/termoweb/heater.py :: _derive_boost_state._parse_iso_timestamp
     Parse an ISO timestamp string defensively.
 custom_components/termoweb/heater.py :: derive_boost_state
-    Return derived boost metadata for ``settings`` using ``coordinator``.
+    Return derived boost metadata for mapping ``settings``.
 custom_components/termoweb/heater.py :: derive_boost_state_from_domain
     Return derived boost metadata for typed ``state``.
 custom_components/termoweb/heater.py :: DispatcherSubscriptionHelper.__init__
@@ -1514,8 +1578,8 @@ custom_components/termoweb/sensor.py :: HeaterEnergyBase.__init__
     Initialise a heater energy-derived sensor entity.
 custom_components/termoweb/sensor.py :: HeaterEnergyBase._device_available
     Return True when inventory and coordinator expose this heater node.
-custom_components/termoweb/sensor.py :: HeaterEnergyBase._metric_section
-    Return the dictionary with the requested metric values.
+custom_components/termoweb/sensor.py :: HeaterEnergyBase._metric_entry
+    Return the cached metric entry for this heater.
 custom_components/termoweb/sensor.py :: HeaterEnergyBase._raw_native_value
     Return the raw metric value for this heater address.
 custom_components/termoweb/sensor.py :: HeaterEnergyBase._coerce_native_value
@@ -1548,10 +1612,8 @@ custom_components/termoweb/sensor.py :: PowerMonitorSensorBase.__init__
     Initialise the power monitor sensor base entity.
 custom_components/termoweb/sensor.py :: PowerMonitorSensorBase._resolve_inventory
     Return the immutable inventory backing this sensor.
-custom_components/termoweb/sensor.py :: PowerMonitorSensorBase._device_record
-    Return the cached coordinator data for this device.
-custom_components/termoweb/sensor.py :: PowerMonitorSensorBase._metric_bucket
-    Return the metric bucket for this power monitor.
+custom_components/termoweb/sensor.py :: PowerMonitorSensorBase._metric_entry
+    Return the cached metric entry for this power monitor.
 custom_components/termoweb/sensor.py :: PowerMonitorSensorBase._coerce_native_value
     Convert a metric payload value to ``float`` if possible.
 custom_components/termoweb/sensor.py :: PowerMonitorSensorBase.should_poll
