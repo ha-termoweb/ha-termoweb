@@ -18,6 +18,7 @@ from custom_components.termoweb.domain import (
     NodeId as DomainNodeId,
     NodeType as DomainNodeType,
 )
+from custom_components.termoweb.domain.state import HeaterState
 from custom_components.termoweb.inventory import (
     Inventory,
     InventoryNodeMetadata,
@@ -174,7 +175,9 @@ def test_heater_section_requires_inventory_for_name() -> None:
     section = heater._heater_section()
 
     assert section == {"settings": {"1": {"mode": "auto"}}}
-    assert heater.heater_settings() == {"mode": "auto"}
+    state = heater.heater_state()
+    assert isinstance(state, HeaterState)
+    assert state.mode == "auto"
     assert heater.available is False
 
 
@@ -196,7 +199,9 @@ def test_heater_section_includes_inventory_details() -> None:
 
     assert section["settings"] == {"1": {"mode": "auto"}}
     assert section["name"] == "Living"
-    assert heater.heater_settings() == {"mode": "auto"}
+    state = heater.heater_state()
+    assert isinstance(state, HeaterState)
+    assert state.mode == "auto"
     assert heater.available is True
 
 

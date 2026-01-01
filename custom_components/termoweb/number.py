@@ -252,8 +252,10 @@ class AccumulatorBoostDurationNumber(RestoreEntity, HeaterNodeBase, NumberEntity
     def _initial_minutes_from_settings(self) -> int:
         """Return the bootstrap value sourced from cached settings."""
 
-        settings = self.heater_settings() or {}
-        candidate = coerce_boost_minutes(settings.get("boost_time"))
+        state = self.accumulator_state()
+        candidate = coerce_boost_minutes(
+            getattr(state, "boost_time", None) if state is not None else None
+        )
         if candidate in ALLOWED_BOOST_MINUTES:
             return candidate
         return DEFAULT_BOOST_DURATION
@@ -441,10 +443,14 @@ class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEnt
     def _initial_temperature_from_settings(self) -> float:
         """Return the bootstrap value sourced from cached settings."""
 
-        settings = self.heater_settings() or {}
-        candidate = float_or_none(settings.get("boost_temp"))
+        state = self.accumulator_state()
+        candidate = float_or_none(
+            getattr(state, "boost_temp", None) if state is not None else None
+        )
         if candidate is None:
-            candidate = float_or_none(settings.get("stemp"))
+            candidate = float_or_none(
+                getattr(state, "stemp", None) if state is not None else None
+            )
         if candidate is None:
             return DEFAULT_BOOST_TEMPERATURE
         return self._validate_temperature(candidate) or DEFAULT_BOOST_TEMPERATURE

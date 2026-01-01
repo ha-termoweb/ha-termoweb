@@ -931,7 +931,7 @@ def test_settings_maps_include_inventory_aliases(
     entity.hass = hass
     entity.async_write_ha_state = MagicMock()
 
-    entity._optimistic_update(lambda payload: payload.__setitem__("mode", "manual"))
+    entity._optimistic_update(lambda payload: setattr(payload, "mode", "manual"))
 
     device_state = coordinator.data[dev_id]
     assert device_state["settings"]["htr"][addr]["mode"] == "manual"
@@ -989,20 +989,20 @@ def test_accumulator_hvac_mode_reporting() -> None:
     assert entity.hvac_mode == HVACMode.OFF
     settings["mode"] = "auto"
     assert coordinator.apply_entity_patch(
-        "acm", addr, lambda cur: cur.__setitem__("mode", "auto")
+        "acm", addr, lambda cur: setattr(cur, "mode", "auto")
     )
     assert entity.hvac_mode == HVACMode.AUTO
     assert coordinator.apply_entity_patch(
-        "acm", addr, lambda cur: cur.__setitem__("mode", "boost")
+        "acm", addr, lambda cur: setattr(cur, "mode", "boost")
     )
     assert entity.hvac_mode == HVACMode.AUTO
     assert entity.preset_mode == "boost"
     assert coordinator.apply_entity_patch(
-        "acm", addr, lambda cur: cur.__setitem__("mode", "manual")
+        "acm", addr, lambda cur: setattr(cur, "mode", "manual")
     )
     assert entity.hvac_mode == HVACMode.HEAT
     assert coordinator.apply_entity_patch(
-        "acm", addr, lambda cur: cur.__setitem__("mode", "unexpected")
+        "acm", addr, lambda cur: setattr(cur, "mode", "unexpected")
     )
     assert entity.hvac_mode == HVACMode.HEAT
     assert entity.preset_mode == "none"
@@ -1466,7 +1466,9 @@ def test_accumulator_submit_settings_handles_boost_state_error() -> None:
             }
         }
 
-        entity.heater_settings = MagicMock(return_value={"boost_active": True})
+        entity.accumulator_state = MagicMock(
+            return_value=types.SimpleNamespace(boost_active=True)
+        )
 
         def _boom() -> Any:
             raise RuntimeError("boom")
@@ -1530,8 +1532,10 @@ def test_accumulator_submit_settings_legacy_mode_detection() -> None:
         }
 
         entity.boost_state = MagicMock(return_value=types.SimpleNamespace(active=None))  # type: ignore[assignment]
-        entity.heater_settings = MagicMock(
-            return_value={"boost_active": "maybe", "boost": "no", "mode": " Boost "}
+        entity.accumulator_state = MagicMock(
+            return_value=types.SimpleNamespace(
+                boost_active="maybe", boost="no", mode=" Boost "
+            )
         )
 
         client = types.SimpleNamespace(set_node_settings=AsyncMock())
@@ -1591,8 +1595,10 @@ def test_accumulator_submit_settings_legacy_boost_flag() -> None:
         }
 
         entity.boost_state = MagicMock(return_value=types.SimpleNamespace(active=None))  # type: ignore[assignment]
-        entity.heater_settings = MagicMock(
-            return_value={"boost_active": None, "boost": True, "mode": "auto"}
+        entity.accumulator_state = MagicMock(
+            return_value=types.SimpleNamespace(
+                boost_active=None, boost=True, mode="auto"
+            )
         )
 
         client = types.SimpleNamespace(set_node_settings=AsyncMock())
@@ -2565,17 +2571,17 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
                 raise ValueError("cancel slot")
 
         monkeypatch.setattr(climate_module.asyncio, "CancelledError", ValueError)
-        settings["prog"] = CancelList(list(base_prog))
+        cancel_state = types.SimpleNamespace(prog=CancelList(list(base_prog)))
         with pytest.raises(ValueError):
-            heater._current_prog_slot(settings)
+            heater._current_prog_slot(cancel_state)
         settings["prog"] = list(base_prog)
         assert coordinator.apply_entity_patch(
-            "htr", addr, lambda cur: cur.__setitem__("prog", settings["prog"])
+            "htr", addr, lambda cur: setattr(cur, "prog", settings["prog"])
         )
 
         settings["ptemp"] = None
         assert coordinator.apply_entity_patch(
-            "htr", addr, lambda cur: cur.__setitem__("ptemp", settings["ptemp"])
+            "htr", addr, lambda cur: setattr(cur, "ptemp", settings["ptemp"])
         )
         attrs = heater.extra_state_attributes
         assert "program_setpoint" not in attrs
@@ -2772,19 +2778,15 @@ def test_heater_cancelled_paths_propagate(
             await heater.async_set_preset_temperatures()
         assert "Preset temperatures require" in caplog.text
 
-        class CancelSettings(dict):
-            def get(self, *_args: Any, **_kwargs: Any) -> Any:
-                raise asyncio.CancelledError()
+        original_state = heater.heater_state
 
-        original_payload = heater._heater_state_payload
-
-        def _cancel_payload() -> Any:
+        def _cancel_state(*_args: Any, **_kwargs: Any) -> Any:
             raise asyncio.CancelledError()
 
-        heater._heater_state_payload = _cancel_payload  # type: ignore[assignment]
+        heater.heater_state = types.MethodType(_cancel_state, heater)  # type: ignore[assignment]
         with pytest.raises(asyncio.CancelledError):
             await heater.async_set_preset_temperatures(ptemp=[18.0, 19.0, 20.0])
-        heater._heater_state_payload = original_payload  # type: ignore[assignment]
+        heater.heater_state = original_state  # type: ignore[assignment]
 
         client.set_node_settings.side_effect = asyncio.CancelledError()
         heater._pending_mode = HVACMode.AUTO

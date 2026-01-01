@@ -18,12 +18,12 @@ from .boost import supports_boost
 from .const import DOMAIN, signal_ws_data, signal_ws_status
 from .coordinator import StateCoordinator
 from .domain import DomainStateView
-from .domain.state import state_to_dict
+from .domain.state import DomainState
 from .entity import GatewayDispatcherEntity
 from .heater import (
     BoostState,
     DispatcherSubscriptionHelper,
-    derive_boost_state,
+    derive_boost_state_from_domain,
     log_skipped_nodes,
 )
 from .i18n import async_get_fallback_translations, attach_fallbacks
@@ -38,7 +38,7 @@ from .utils import build_gateway_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
-SettingsResolver = Callable[[], Mapping[str, Any] | None]
+SettingsResolver = Callable[[], DomainState | None]
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -249,8 +249,9 @@ class HeaterBoostActiveBinarySensor(
     def boost_state(self) -> BoostState:
         """Return derived boost metadata for this heater."""
 
-        settings = self._settings_resolver() or {}
-        return derive_boost_state(settings, self.coordinator)
+        return derive_boost_state_from_domain(
+            self._settings_resolver(), self.coordinator
+        )
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to websocket updates once the entity is added."""
@@ -331,15 +332,12 @@ def _build_settings_resolver(
     node_type: str,
     addr: str,
 ) -> SettingsResolver:
-    """Return callable resolving boost settings for a heater node."""
+    """Return callable resolving typed boost state for a heater node."""
 
-    def _resolver() -> Mapping[str, Any] | None:
+    def _resolver() -> DomainState | None:
         view = getattr(coordinator, "domain_view", None)
         if isinstance(view, DomainStateView):
-            state = view.get_heater_state(node_type, addr)
-            if state is not None:
-                payload = state_to_dict(state)
-                return payload if isinstance(payload, Mapping) else None
+            return view.get_heater_state(node_type, addr)
         return None
 
     return _resolver
