@@ -1633,7 +1633,6 @@ from custom_components.termoweb.domain.ids import (  # noqa: E402
 )
 from custom_components.termoweb.domain.state import (  # noqa: E402
     AccumulatorState,
-    apply_payload_to_state,
     DomainStateStore,
     HeaterState,
     PowerMonitorState,
@@ -1915,33 +1914,40 @@ class FakeCoordinator:
         if self._state_store is None or self.inventory is None:
             return False
 
-        target_types = {str(node_type)}
-        for known_type, addresses in self._state_store.addresses_by_type.items():
-            if addr in addresses:
-                target_types.add(known_type)
+        primary_node = self._state_store.resolve_node_id(node_type, addr)
+        if primary_node is None:
+            return False
 
-        for target_type in target_types:
-            current_state = self._state_store.get_state(target_type, addr)
+        target_ids = [primary_node]
+        seen: set[Any] = {primary_node}
+        for candidate_type, addresses in self._state_store.addresses_by_type.items():
+            if addr not in addresses or candidate_type == primary_node.node_type.value:
+                continue
+            extra = self._state_store.resolve_node_id(candidate_type, addr)
+            if extra is not None and extra not in seen:
+                target_ids.append(extra)
+                seen.add(extra)
+
+        for target_id in target_ids:
+            current_state = self._state_store.get_state(
+                target_id.node_type, target_id.addr
+            )
             working_state = clone_state(current_state)
             if working_state is None:
-                if target_type == DomainNodeType.ACCUMULATOR.value:
+                if target_id.node_type is DomainNodeType.ACCUMULATOR:
                     working_state = AccumulatorState()
-                elif target_type == DomainNodeType.THERMOSTAT.value:
+                elif target_id.node_type is DomainNodeType.THERMOSTAT:
                     working_state = ThermostatState()
-                elif target_type == DomainNodeType.POWER_MONITOR.value:
+                elif target_id.node_type is DomainNodeType.POWER_MONITOR:
                     working_state = PowerMonitorState()
                 else:
                     working_state = HeaterState()
-            try:
-                mutator(working_state)
-            except (AttributeError, TypeError):
-                payload = state_to_dict(working_state, include_none=True)
-                mutator(payload)
-                apply_payload_to_state(working_state, payload)
-            except BaseException:
-                raise
-            self._state_store.apply_patch(
-                target_type, addr, state_to_dict(working_state, include_none=True)
+
+            mutator(working_state)
+            self._state_store.replace_state(
+                target_id.node_type,
+                target_id.addr,
+                working_state,
             )
 
         try:

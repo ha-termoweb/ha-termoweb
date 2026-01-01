@@ -877,6 +877,57 @@ def test_handle_ws_deltas_updates_store(
     assert merged_settings["stemp"] == "19.0"
 
 
+def test_apply_entity_patch_uses_typed_state(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """Optimistic patches should mutate typed state without dict fallbacks."""
+
+    hass = HomeAssistant()
+    client = AsyncMock()
+    nodes = {"nodes": [{"type": "htr", "addr": "1", "name": "Heater"}]}
+    node_list = [HeaterNode(name="Heater", addr="1")]
+    inventory = inventory_builder("dev", nodes, node_list)
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=client,
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev", name="Device"),
+        nodes=None,
+        inventory=inventory,
+    )
+
+    store = coordinator._state_store or coordinator._ensure_state_store(inventory)
+    assert store is not None
+    store.apply_full_snapshot("htr", "1", {"mode": "manual"})
+
+    assert coordinator.apply_entity_patch(
+        "htr",
+        "1",
+        lambda cur: setattr(cur, "mode", "auto"),
+    )
+    state = store.get_state(NodeType.HEATER, "1")
+    assert state_to_dict(state) == {"mode": "auto"}
+
+    assert (
+        coordinator.apply_entity_patch(
+            "htr",
+            "2",
+            lambda cur: setattr(cur, "mode", "manual"),
+        )
+        is False
+    )
+
+    def _bad_mutator(cur: Any) -> None:
+        cur["mode"] = "heat"  # type: ignore[index]
+
+    assert coordinator.apply_entity_patch("htr", "1", _bad_mutator) is False
+    state_after = store.get_state(NodeType.HEATER, "1")
+    assert state_to_dict(state_after) == {"mode": "auto"}
+
+
 def test_wrap_logger_proxies_missing_helpers() -> None:
     """Ensure logger proxies expose inner attributes and ``isEnabledFor``."""
 

@@ -24,7 +24,7 @@ import voluptuous as vol
 from .backend.ducaheat import DucaheatRESTClient
 from .boost import coerce_boost_minutes, supports_boost
 from .const import BRAND_DUCAHEAT, DOMAIN
-from .domain import AccumulatorState, DomainState, HeaterState
+from .domain import DomainState, HeaterState
 from .heater import (
     DEFAULT_BOOST_DURATION,
     HeaterNodeBase,
@@ -1012,10 +1012,10 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                     exc_info=err,
                 )
 
-        def _apply(cur: dict[str, Any]) -> None:
-            if mode_api is not None:
-                cur["mode"] = mode_api
-            if stemp is not None:
+        def _apply(cur: DomainState) -> None:
+            if mode_api is not None and hasattr(cur, "mode"):
+                cur.mode = mode_api
+            if stemp is not None and hasattr(cur, "stemp"):
                 stemp_str: Any = stemp
                 try:
                     stemp_float = float(stemp)
@@ -1025,7 +1025,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                     pass
                 else:
                     stemp_str = f"{stemp_float:.1f}"
-                cur["stemp"] = stemp_str
+                cur.stemp = stemp_str
 
         self._optimistic_update(_apply)
         _LOGGER.debug(

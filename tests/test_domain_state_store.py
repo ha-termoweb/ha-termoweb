@@ -3,14 +3,18 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Callable, Mapping
 
+import pytest
+
 from custom_components.termoweb.domain import (
-    ThermostatState,
-    build_state_from_payload,
+    AccumulatorState,
     DomainStateStore,
+    HeaterState,
     NodeId,
     NodeSettingsDelta,
     NodeStatusDelta,
     NodeType,
+    ThermostatState,
+    build_state_from_payload,
     state_to_dict,
 )
 from custom_components.termoweb.inventory import build_node_inventory
@@ -153,6 +157,24 @@ def test_domain_state_store_strips_raw_status_and_capabilities() -> None:
     assert snapshot == {"mode": "auto", "stemp": "19.5"}
     assert "status" not in snapshot
     assert "capabilities" not in snapshot
+
+
+def test_replace_state_validates_types_and_inventory() -> None:
+    """Replacing state should enforce inventory and expected types."""
+
+    store = DomainStateStore([NodeId(NodeType.HEATER, "1")])
+    store.replace_state("htr", "1", None)
+    assert store.get_state("htr", "1") is None
+
+    with pytest.raises(ValueError):
+        store.replace_state("htr", "2", HeaterState(mode="manual"))
+
+    with pytest.raises(TypeError):
+        store.replace_state("htr", "1", AccumulatorState())
+
+    state = HeaterState(mode="auto")
+    store.replace_state("htr", "1", state)
+    assert store.get_state("htr", "1") is state
 
 
 def test_store_iter_states_includes_inventory_nodes(
