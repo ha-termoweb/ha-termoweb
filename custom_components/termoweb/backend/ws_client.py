@@ -50,7 +50,6 @@ CANONICAL_SETTING_KEYS: tuple[str, ...] = (
     "current_charge_per",
     "target_charge_per",
     "boost_active",
-    "boost_end",
     "boost_remaining",
     "boost_time",
     "boost_temp",

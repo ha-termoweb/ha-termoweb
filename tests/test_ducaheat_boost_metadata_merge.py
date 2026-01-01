@@ -30,7 +30,6 @@ def test_merge_boost_metadata_prefers_existing_when_requested() -> None:
         "boost": True,
         "boost_end_day": 1,
         "boost_end_min": 240,
-        "boost_end": {"day": 4, "minute": 240},
     }
 
 
@@ -47,6 +46,5 @@ def test_merge_boost_metadata_nested_mapping_respects_prefer_flags() -> None:
 
     client._merge_boost_metadata(target, {"boost_end": nested})
 
-    assert target["boost_end"] == nested
     assert target["boost_end_day"] == 3
     assert target["boost_end_min"] == 150

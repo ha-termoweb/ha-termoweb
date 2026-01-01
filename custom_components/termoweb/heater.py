@@ -574,6 +574,18 @@ def _derive_boost_state(
     fallbacks: Mapping[str, str] | None
     fallbacks = fallback_source if isinstance(fallback_source, Mapping) else None
 
+    def _parse_iso_timestamp(value: str) -> datetime | None:
+        """Parse an ISO timestamp string defensively."""
+
+        parser = getattr(dt_util, "parse_datetime", None)
+        parsed = parser(value) if callable(parser) else None  # pragma: no cover - best-effort
+        if parsed is not None:
+            return parsed
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+
     boost_active = coerce_boost_bool(_get_field("boost_active"))
     if boost_active is None:
         boost_active = coerce_boost_bool(_get_field("boost"))
@@ -586,17 +598,13 @@ def _derive_boost_state(
 
     boost_day: Any = _get_field("boost_end_day")
     boost_minute: Any = _get_field("boost_end_min")
-    raw_end = _get_field("boost_end")
-    if isinstance(raw_end, Mapping):
-        if boost_day is None:
-            boost_day = raw_end.get("day")
-        if boost_minute is None:
-            boost_minute = raw_end.get("minute")
 
     boost_end_dt: datetime | None = None
     derived_dt = _get_field("boost_end_datetime")
     if isinstance(derived_dt, datetime):
         boost_end_dt = derived_dt
+    elif isinstance(derived_dt, str):
+        boost_end_dt = _parse_iso_timestamp(derived_dt)
 
     boost_minutes: int | None = coerce_boost_minutes(_get_field("boost_minutes_delta"))
     resolver = getattr(coordinator, "resolve_boost_end", None)
@@ -631,22 +639,14 @@ def _derive_boost_state(
         try:
             boost_end_iso = boost_end_dt.isoformat()
         except Exception:  # noqa: BLE001 - defensive
-            boost_end_iso = None
-    elif isinstance(raw_end, str):
-        boost_end_iso = raw_end
-    elif isinstance(raw_end, Mapping):
-        day = raw_end.get("day")
-        minute = raw_end.get("minute")
-        if callable(resolver) and day is not None and minute is not None:
             try:
-                derived_dt, _ = resolver(day, minute)
+                boost_end_iso = datetime.fromtimestamp(
+                    boost_end_dt.timestamp(),
+                    tz=boost_end_dt.tzinfo,
+                ).isoformat()
             except Exception:  # noqa: BLE001 - defensive
-                derived_dt = None
-            if derived_dt is not None:
-                boost_end_dt = derived_dt
-                boost_end_iso = derived_dt.isoformat()
-
-    if boost_end_iso is None and boost_minutes is not None:
+                boost_end_iso = None
+    elif boost_minutes is not None:
         try:
             boost_end_dt = dt_util.now() + timedelta(minutes=boost_minutes)
             boost_end_iso = boost_end_dt.isoformat()
@@ -655,15 +655,7 @@ def _derive_boost_state(
             boost_end_iso = None
 
     if boost_end_dt is None and isinstance(boost_end_iso, str):
-        parsed: datetime | None = None
-        parser = getattr(dt_util, "parse_datetime", None)
-        if callable(parser):
-            parsed = parser(boost_end_iso)  # pragma: no cover - defensive
-        if parsed is None:
-            try:
-                parsed = datetime.fromisoformat(boost_end_iso)
-            except ValueError:  # pragma: no cover - defensive
-                parsed = None
+        parsed = _parse_iso_timestamp(boost_end_iso)
         if parsed is not None:
             boost_end_dt = parsed
 

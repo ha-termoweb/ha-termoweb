@@ -1445,8 +1445,6 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
                 cur.boost_end_day = None
             if hasattr(cur, "boost_end_min"):
                 cur.boost_end_min = None
-            if hasattr(cur, "boost_end"):
-                cur.boost_end = None
             if getattr(cur, "mode", None) == "boost":
                 cur.mode = "auto"
 
