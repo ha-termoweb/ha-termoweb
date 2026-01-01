@@ -70,6 +70,8 @@ _NODE_METADATA_KEYS = {"type", "node_type", "addr", "address", "name", "title", 
 _NODE_TYPE_LEVEL_KEYS = {"lease_seconds", "cadence_seconds", "poll_seconds"}
 _SUBSCRIBE_BACKOFF_INITIAL = 5.0
 _SUBSCRIBE_BACKOFF_MAX = 120.0
+_PARSE_ERROR_WINDOW_S = 30.0
+_PARSE_ERROR_THRESHOLD = 3
 
 
 def _rand_t() -> str:
@@ -200,6 +202,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._status: str = "stopped"
         self._healthy_since: float | None = None
         self._last_event_at: float | None = None
+        self._last_update_event_at: float | None = None
+        self._parse_error_window: deque[float] = deque(maxlen=_PARSE_ERROR_THRESHOLD)
         self._default_payload_window = _PAYLOAD_WINDOW_DEFAULT
         self._payload_stale_after = self._default_payload_window
         self._payload_window_hint: float | None = None
@@ -211,6 +215,15 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             self._suppress_default_cadence_hint = False
         self._pending_default_cadence_hint = True
         self._bind_inventory_from_context()
+        state = self._ws_state_bucket()
+        state.setdefault("subscribe_attempts_total", 0)
+        state.setdefault("subscribe_success_total", 0)
+        state.setdefault("subscribe_fail_total", 0)
+        state.setdefault("last_subscribe_success_at", None)
+        state.setdefault("last_recovery_at", None)
+        state.setdefault("recovery_attempts_total", 0)
+        state.setdefault("last_update_event_at", None)
+        state.setdefault("parse_errors_total", 0)
 
     @property
     def _ws_health(self) -> WsHealthTracker:
@@ -222,6 +235,91 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         """Return True when a status transition should reset health."""
 
         return status != "healthy"
+
+    def _increment_state_counter(self, key: str, *, delta: int = 1) -> int:
+        """Increment a numeric counter in the websocket state bucket."""
+
+        state = self._ws_state_bucket()
+        current = state.get(key, 0)
+        try:
+            value = int(current)
+        except (TypeError, ValueError):
+            value = 0
+        value += delta
+        state[key] = value
+        return value
+
+    def _record_update_event(self, *, timestamp: float | None = None) -> None:
+        """Record a meaningful update event timestamp."""
+
+        now = timestamp if isinstance(timestamp, (int, float)) else time.time()
+        self._last_update_event_at = now
+        state = self._ws_state_bucket()
+        state["last_update_event_at"] = now
+
+    def _record_parse_error(self, *, now: float, reason: str) -> bool:
+        """Track JSON parse failures and return True when reconnection is advised."""
+
+        state = self._ws_state_bucket()
+        state["last_parse_error_at"] = now
+        total = self._increment_state_counter("parse_errors_total")
+        window = self._parse_error_window
+        window.append(now)
+        while window and now - window[0] > _PARSE_ERROR_WINDOW_S:
+            window.popleft()
+        should_disconnect = len(window) >= _PARSE_ERROR_THRESHOLD
+        if should_disconnect:
+            _LOGGER.warning(
+                "WS (ducaheat): repeated parse errors (%d in %.0fs); reconnecting",
+                total,
+                _PARSE_ERROR_WINDOW_S,
+            )
+        elif _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug(
+                "WS (ducaheat): parse error (%s) count=%d window=%d",
+                reason,
+                total,
+                len(window),
+            )
+        return should_disconnect
+
+    def _decode_socketio_event(
+        self, payload: str, *, now: float
+    ) -> tuple[str, list[Any]] | None:
+        """Decode a Socket.IO ``42`` payload safely."""
+
+        content = payload
+        if content.startswith("/"):
+            _namespace, sep, content = content.partition(",")
+            if sep != ",":
+                self._record_parse_error(now=now, reason="namespace")
+                return None
+        try:
+            arr = json.loads(content)
+        except json.JSONDecodeError:
+            should_disconnect = self._record_parse_error(now=now, reason="json")
+            if should_disconnect:
+                self._loop.create_task(self._disconnect("parse_errors"))
+            return None
+        if not isinstance(arr, list) or not arr:
+            should_disconnect = self._record_parse_error(now=now, reason="shape")
+            if should_disconnect:
+                self._loop.create_task(self._disconnect("parse_errors"))
+            return None
+        return arr[0], arr[1:]
+
+    def _update_status_from_heartbeat(self, *, now: float) -> None:
+        """Update status based on heartbeat activity and payload recency."""
+
+        tracker = self._ws_health
+        has_payload = tracker.last_payload_at is not None or (
+            self._last_update_event_at is not None
+        )
+        if has_payload:
+            self._update_status("healthy")
+            return
+        if self._status not in {"connected", "healthy"}:
+            self._update_status("connected")
 
     def start(self) -> asyncio.Task:
         """Start the websocket runner task."""
@@ -431,16 +529,19 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._update_status("connected")
         self._start_keepalive()
 
-    def _record_frame(self, *, timestamp: float | None = None) -> None:
+    def _record_frame(
+        self, *, timestamp: float | None = None, mark_activity: bool = True
+    ) -> None:
         """Update cached websocket frame statistics and timestamps."""
 
         now = timestamp or time.time()
         self._stats.last_event_ts = now
-        self._last_event_at = now
-        self._reset_idle_recovery_state(now=now)
+        if mark_activity:
+            self._last_event_at = now
+            self._reset_idle_recovery_state(now=now)
         self._mark_ws_heartbeat(timestamp=now)
         state = self._ws_state_bucket()
-        state["last_event_at"] = now
+        state["last_event_at"] = self._last_event_at
         state["frames_total"] = self._stats.frames_total
         state["events_total"] = self._stats.events_total
 
@@ -448,7 +549,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         """Return the idle detection threshold in seconds."""
 
         tracker = self._ws_health
-        payload_window = tracker.payload_stale_after or self._payload_stale_after or 60.0
+        payload_window = (
+            tracker.payload_stale_after or self._payload_stale_after or 60.0
+        )
         try:
             base = float(payload_window)
         except (TypeError, ValueError):
@@ -507,15 +610,22 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         if ws is None or ws.closed:
             return True
         tracker = self._ws_health
-        last_event = self._last_event_at or tracker.last_payload_at
-        if last_event is None:
-            last_event = tracker.last_heartbeat_at
+        last_payload = tracker.last_payload_at
+        last_update = self._last_update_event_at
+        last_event = last_update or last_payload or tracker.last_heartbeat_at
         idle_for = now - last_event if isinstance(last_event, (int, float)) else None
         self._refresh_ws_payload_state(now=now, reason="idle_monitor")
         threshold = self._idle_threshold()
+        update_idle_for: float | None
+        if last_update is not None:
+            update_idle_for = now - last_update
+        elif last_payload is not None:
+            update_idle_for = now - last_payload
+        else:
+            update_idle_for = threshold
         should_recover = tracker.payload_stale or self._idle_timeout_flag
-        if not should_recover and idle_for is not None:
-            should_recover = idle_for >= threshold
+        if not should_recover and update_idle_for is not None:
+            should_recover = update_idle_for >= threshold
         if should_recover:
             await self._recover_from_idle(
                 now=now,
@@ -548,6 +658,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             self._idle_recovery_attempts += 1
             self._last_idle_recovery_at = now
             self._idle_timeout_flag = False
+            self._increment_state_counter("recovery_attempts_total")
+            state = self._ws_state_bucket()
+            state["last_recovery_at"] = now
             summary = (
                 f"idle_for={idle_for:.0f}s" if idle_for is not None else "idle_for=?"
             )
@@ -581,7 +694,11 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     exc_info=True,
                 )
             tracker = self._ws_health
-            last_event = self._last_event_at or tracker.last_payload_at
+            last_event = (
+                self._last_update_event_at
+                or tracker.last_payload_at
+                or tracker.last_heartbeat_at
+            )
             if last_event is None:
                 last_event = tracker.last_heartbeat_at
             idle_after = now - last_event if isinstance(last_event, (int, float)) else 0
@@ -663,15 +780,23 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     data = msg.data
                     self._stats.frames_total += 1
                     now = time.time()
-                    self._record_frame(timestamp=now)
+                    frame_recorded = False
                     while data:
                         if data == "2":
+                            if not frame_recorded:
+                                self._record_frame(timestamp=now, mark_activity=False)
+                                frame_recorded = True
                             await ws.send_str("3")
                             break
                         if data == "3":
-                            self._update_status("healthy")
+                            if not frame_recorded:
+                                self._record_frame(timestamp=now, mark_activity=False)
+                                frame_recorded = True
+                            self._update_status_from_heartbeat(now=now)
                             break
                         if not data.startswith("4"):
+                            if not frame_recorded:
+                                self._record_frame(timestamp=now, mark_activity=False)
                             break
                         if data.startswith("40"):
                             ns_payload = data[2:]
@@ -693,7 +818,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                     break
                                 if sep and remainder:
                                     rest_payload = remainder
-                            #                            _LOGGER.debug("WS (ducaheat): <- SIO 40 (namespace ack)")
+                            if not frame_recorded:
+                                self._record_frame(timestamp=now)
+                                frame_recorded = True
                             self._update_status("healthy")
                             if self._pending_dev_data:
                                 self._pending_dev_data = False
@@ -719,11 +846,20 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                             break
                         payload = data[1:]
                         if payload == "2":
+                            if not frame_recorded:
+                                self._record_frame(timestamp=now, mark_activity=False)
+                                frame_recorded = True
                             await ws.send_str("3")
                             break
                         if payload == "3":
-                            self._update_status("healthy")
+                            if not frame_recorded:
+                                self._record_frame(timestamp=now, mark_activity=False)
+                                frame_recorded = True
+                            self._update_status_from_heartbeat(now=now)
                             break
+                        if not frame_recorded:
+                            self._record_frame(timestamp=now)
+                            frame_recorded = True
                         if payload.startswith("2/"):
                             ns_payload = payload[1:]
                             ns, sep, body = ns_payload.partition(",")
@@ -738,19 +874,11 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                             content = payload[2:]
                         if content is None:
                             break
-                        if content.startswith("/"):
-                            _ns, sep, content = content.partition(",")
-                            if sep != ",":
-                                break
-                        try:
-                            arr = json.loads(content)
-                        except json.JSONDecodeError:
+                        decoded = self._decode_socketio_event(content, now=now)
+                        if decoded is None:
                             break
-                        if not isinstance(arr, list) or not arr:
-                            break
-                        evt, *args = arr
+                        evt, args = decoded
                         self._stats.events_total += 1
-                        self._record_frame(timestamp=now)
                         # _LOGGER.debug("WS (ducaheat): <- SIO 42 event=%s args_len=%d", evt, len(args))
 
                         if evt == "message" and args and args[0] == "ping":
@@ -792,9 +920,12 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                     dispatch_payload = nodes_map
                                 if isinstance(dispatch_payload, Mapping):
                                     self._dispatch_nodes(dispatch_payload)
+                                self._record_update_event(timestamp=now)
                                 subs = await self._maybe_subscribe(now)
                                 if subs:
-                                    _LOGGER.info("WS (ducaheat): subscribed %d feeds", subs)
+                                    _LOGGER.info(
+                                        "WS (ducaheat): subscribed %d feeds", subs
+                                    )
                                 self._update_status("healthy")
                             break
 
@@ -842,6 +973,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                     )
                                     if sample_updates:
                                         self._forward_sample_updates(sample_updates)
+                            self._record_update_event(timestamp=now)
                             self._update_status("healthy")
                             break
                         break
@@ -1065,7 +1197,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 candidate = self._normalise_cadence_value(current.get(key))
                 if candidate is not None:
                     values.append(candidate)
-            stack.extend(nested for nested in current.values() if isinstance(nested, Mapping))
+            stack.extend(
+                nested for nested in current.values() if isinstance(nested, Mapping)
+            )
         return values
 
     def _update_payload_window_from_mapping(
@@ -1450,6 +1584,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
 
         attempt_ts = now if isinstance(now, (int, float)) else time.time()
         self._last_subscribe_attempt_ts = attempt_ts
+        self._increment_state_counter("subscribe_attempts_total")
         try:
             domain_bucket = self.hass.data.setdefault(DOMAIN, {})
             existing_record = domain_bucket.get(self.entry_id)
@@ -1473,8 +1608,10 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 )
             except LookupError:
                 self._pending_subscribe = True
+                self._increment_state_counter("subscribe_fail_total")
                 should_log = (
-                    attempt_ts - self._last_subscribe_log_ts >= self._subscribe_backoff_s
+                    attempt_ts - self._last_subscribe_log_ts
+                    >= self._subscribe_backoff_s
                 )
                 if should_log:
                     self._last_subscribe_log_ts = attempt_ts
@@ -1506,6 +1643,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 self._pending_subscribe = False
                 self._subscription_paths = set()
                 self._subscribe_backoff_s = _SUBSCRIBE_BACKOFF_INITIAL
+                self._increment_state_counter("subscribe_success_total")
+                state = self._ws_state_bucket()
+                state["last_subscribe_success_at"] = attempt_ts
                 return 0
 
             for path in sorted(paths):
@@ -1514,10 +1654,14 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             self._subscription_paths = paths
             self._pending_subscribe = False
             self._subscribe_backoff_s = _SUBSCRIBE_BACKOFF_INITIAL
+            self._increment_state_counter("subscribe_success_total")
+            state = self._ws_state_bucket()
+            state["last_subscribe_success_at"] = attempt_ts
             return len(paths)
         except Exception:  # noqa: BLE001  # pragma: no cover - defensive
             _LOGGER.debug("WS (ducaheat): subscribe failed", exc_info=True)
             self._pending_subscribe = True
+            self._increment_state_counter("subscribe_fail_total")
             return 0
 
     async def _maybe_subscribe(self, now: float) -> int:
@@ -1591,6 +1735,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
     async def _disconnect(self, reason: str) -> None:
         await self._stop_idle_monitor()
         self._reset_idle_recovery_state(now=None)
+        self._last_update_event_at = None
+        self._parse_error_window.clear()
         task = self._keepalive_task
         if task:
             task.cancel()
