@@ -65,6 +65,7 @@ __all__ = [
     "normalize_node_type",
     "normalize_power_monitor_addresses",
     "power_monitor_sample_subscription_targets",
+    "store_inventory_on_entry",
 ]
 
 
@@ -949,7 +950,7 @@ class Inventory:
 
         if store:
             for target in mutable_targets:
-                target["inventory"] = resolved
+                store_inventory_on_entry(resolved, record=target)
 
         return resolved
 
@@ -972,6 +973,56 @@ class Inventory:
                 f"{context or 'inventory'} record is unavailable; cached inventory missing"
             )
         return candidate
+
+
+def _request_ws_inventory_resubscribe(target: Mapping[str, Any]) -> None:
+    """Request websocket resubscribe when inventory becomes available."""
+
+    ws_clients = target.get("ws_clients")
+    if not isinstance(ws_clients, Mapping):
+        return
+
+    for client in ws_clients.values():
+        resubscribe = getattr(client, "request_resubscribe", None)
+        if not callable(resubscribe):
+            continue
+        try:
+            resubscribe("inventory_ready")
+        except Exception:  # noqa: BLE001  # pragma: no cover - defensive
+            _LOGGER.debug(
+                "WS inventory resubscribe request failed",
+                exc_info=True,
+            )
+
+
+def store_inventory_on_entry(
+    inventory: Inventory,
+    *,
+    record: MutableMapping[str, Any] | None = None,
+    hass: Any | None = None,
+    entry_id: str | None = None,
+) -> None:
+    """Persist inventory for an entry and notify websocket clients."""
+
+    target: MutableMapping[str, Any] | None = record
+    if target is None and hass is not None and entry_id:
+        hass_data = getattr(hass, "data", None)
+        if isinstance(hass_data, Mapping):
+            domain_bucket = hass_data.get(DOMAIN)
+            if isinstance(domain_bucket, Mapping):
+                candidate = domain_bucket.get(entry_id)
+                if isinstance(candidate, MutableMapping):
+                    target = candidate
+
+    if not isinstance(target, MutableMapping):
+        return
+
+    existing = target.get("inventory")
+    target["inventory"] = inventory
+    if isinstance(existing, Inventory):
+        return
+
+    _request_ws_inventory_resubscribe(target)
 
 
 def _normalize_node_identifier(

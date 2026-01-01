@@ -55,6 +55,7 @@ from custom_components.termoweb.inventory import (
     Inventory,
     normalize_node_addr,
     normalize_node_type,
+    store_inventory_on_entry,
 )
 
 from .ws_client import (
@@ -1023,7 +1024,12 @@ class WebSocketClient(_WSCommon):
 
         record = context.record
         if isinstance(record, MutableMapping) and isinstance(inventory, Inventory):
-            record["inventory"] = inventory
+            store_inventory_on_entry(
+                inventory,
+                record=record,
+                hass=self.hass,
+                entry_id=self.entry_id,
+            )
 
         if not isinstance(inventory, Inventory):
             _LOGGER.error("WS: missing inventory for node dispatch on %s", self.dev_id)

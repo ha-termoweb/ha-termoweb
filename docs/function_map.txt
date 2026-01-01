@@ -1,6 +1,5 @@
-# TermoWeb Function Map
-
-custom_components/termoweb/__init__.py :: _build_unknown_node_probe_requests
+Wrote 871 functions to /workspace/ha-termoweb/docs/function_map.txt
+build_unknown_node_probe_requests
     Return common REST endpoints to query for an unknown node type.
 custom_components/termoweb/__init__.py :: _async_probe_unknown_node_types
     Log discovery probes for node types not yet supported.
@@ -202,6 +201,8 @@ custom_components/termoweb/backend/ducaheat_ws.py :: _decode_polling_packets
     Decode Engine.IO v3 binary polling frames.
 custom_components/termoweb/backend/ducaheat_ws.py :: _brand_headers
     Construct brand-specific headers for polling.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.__init__
+    Initialise the Ducaheat websocket client.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._ws_health
     Return the shared websocket health tracker for this client.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._status_should_reset_health
@@ -216,10 +217,34 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._decode_so
     Decode a Socket.IO ``42`` payload safely.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._update_status_from_heartbeat
     Update status based on heartbeat activity and payload recency.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.start
+    Start the websocket runner task.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.stop
+    Stop the websocket client and background tasks.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.is_running
+    Return True when the websocket runner task is active.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._build_handshake_url
     Return a handshake URL with the provided query parameters.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.ws_url
+    Return the websocket handshake URL.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._record_frame
     Update cached websocket frame statistics and timestamps.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._idle_threshold
+    Return the idle detection threshold in seconds.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._idle_monitor_interval
+    Return the sleep interval between idle checks.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._reset_idle_recovery_state
+    Clear idle recovery flags after activity is observed.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._start_idle_monitor
+    Start the idle monitor when the websocket is ready.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._stop_idle_monitor
+    Stop the idle monitor task if it is running.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._handle_idle_check
+    Perform a single idle check iteration.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._recover_from_idle
+    Attempt resubscription or reconnect when the socket is idle.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._idle_monitor
+    Monitor websocket idleness and trigger recovery steps.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._start_keepalive
     Launch the keepalive loop when the websocket is connected.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._keepalive_loop
@@ -262,22 +287,6 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.request_re
     Flag the subscription set for reinstatement.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._replay_subscription_paths
     Replay cached subscription paths after a reconnect.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._idle_threshold
-    Return the idle detection threshold in seconds.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._idle_monitor_interval
-    Return the sleep interval between idle checks.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._reset_idle_recovery_state
-    Clear idle recovery flags after activity is observed.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._start_idle_monitor
-    Start the idle monitor when the websocket is ready.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._stop_idle_monitor
-    Stop the idle monitor task if it is running.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._handle_idle_check
-    Perform a single idle check iteration.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._recover_from_idle
-    Attempt resubscription or reconnect when the socket is idle.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._idle_monitor
-    Monitor websocket idleness and trigger recovery steps.
 custom_components/termoweb/backend/factory.py :: create_backend
     Create a backend for the given brand.
 custom_components/termoweb/backend/sanitize.py :: redact_text
@@ -1460,6 +1469,10 @@ custom_components/termoweb/inventory.py :: Inventory.require_from_context
     Return the shared inventory associated with a Home Assistant entry.
 custom_components/termoweb/inventory.py :: Inventory.require_from_record
     Return the cached inventory stored within ``record``.
+custom_components/termoweb/inventory.py :: _request_ws_inventory_resubscribe
+    Request websocket resubscribe when inventory becomes available.
+custom_components/termoweb/inventory.py :: store_inventory_on_entry
+    Persist inventory for an entry and notify websocket clients.
 custom_components/termoweb/inventory.py :: _normalize_node_identifier
     Return ``value`` as a normalised node identifier string.
 custom_components/termoweb/inventory.py :: normalize_node_type

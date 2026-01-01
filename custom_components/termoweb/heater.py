@@ -32,6 +32,7 @@ from .inventory import (
     build_node_inventory,
     normalize_node_addr,
     normalize_node_type,
+    store_inventory_on_entry,
 )
 from .utils import float_or_none
 
@@ -866,7 +867,12 @@ def heater_platform_details_for_entry(
                             dev_id, build_node_inventory(nodes_payload)
                         )
                         if isinstance(entry_data, MutableMapping):
-                            entry_data["inventory"] = inventory
+                            store_inventory_on_entry(
+                                inventory,
+                                record=entry_data,
+                                hass=hass,
+                                entry_id=entry_id,
+                            )
                     except (
                         TypeError,
                         ValueError,
