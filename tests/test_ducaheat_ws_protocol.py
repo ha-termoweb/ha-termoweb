@@ -109,6 +109,8 @@ class QueueWebSocket:
 async def _run_read_loop(client: Any) -> None:
     """Execute ``_read_loop_ws`` and ignore websocket closure errors."""
 
+    if getattr(client, "_status", None) == "stopped":
+        client._status = "connected"
     try:
         await client._read_loop_ws()
     except RuntimeError as err:
@@ -805,7 +807,8 @@ async def test_read_loop_handles_stringified_dev_data(
     assert payload["inventory"] is client._inventory
     assert "addresses_by_type" not in payload
     assert "addr_map" not in payload
-    client._subscribe_feeds.assert_awaited_once_with()
+    assert client._subscribe_feeds.await_count == 1
+    assert "now" in client._subscribe_feeds.await_args.kwargs
 
 
 @pytest.mark.asyncio
@@ -843,7 +846,8 @@ async def test_read_loop_handles_list_snapshot(
     assert payload["inventory"] is client._inventory
     assert "addresses_by_type" not in payload
     assert "addr_map" not in payload
-    client._subscribe_feeds.assert_awaited_once_with()
+    assert client._subscribe_feeds.await_count == 1
+    assert "now" in client._subscribe_feeds.await_args.kwargs
 
 
 @pytest.mark.asyncio
@@ -1978,17 +1982,86 @@ async def test_subscribe_feeds_handles_missing_record(
 
 
 @pytest.mark.asyncio
-async def test_subscribe_feeds_logs_error_when_inventory_missing(
+async def test_maybe_subscribe_retries_when_inventory_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Deferred subscriptions should retry after inventory becomes available."""
+
+    client = _make_client(monkeypatch)
+    client._ws = SimpleNamespace(closed=False)
+    client._status = "connected"
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"].pop("inventory", None)
+    client._inventory = None
+    client._coordinator._inventory = None
+
+    now = 1_000.0
+    monkeypatch.setattr(ducaheat_ws.time, "time", lambda: now)
+
+    await client._subscribe_feeds()
+
+    assert client._pending_subscribe is True
+
+    inventory = Inventory(
+        client.dev_id,
+        build_node_inventory([{"type": "htr", "addr": "5"}]),
+    )
+    client.hass.data[ducaheat_ws.DOMAIN]["entry"]["inventory"] = inventory
+    client._inventory = inventory
+
+    emissions: list[str] = []
+    monkeypatch.setattr(
+        client,
+        "_emit_sio",
+        AsyncMock(side_effect=lambda evt, path: emissions.append(path)),
+    )
+
+    now += client._subscribe_backoff_s + 1.0
+    count = await client._maybe_subscribe(now)
+
+    assert count == 2
+    assert client._pending_subscribe is False
+    assert set(emissions) == {"/htr/5/samples", "/htr/5/status"}
+    assert client._subscribe_backoff_s == pytest.approx(
+        ducaheat_ws._SUBSCRIBE_BACKOFF_INITIAL
+    )
+
+
+@pytest.mark.asyncio
+async def test_maybe_subscribe_scales_backoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failed subscription attempts should lengthen the retry backoff."""
+
+    client = _make_client(monkeypatch)
+    client._ws = SimpleNamespace(closed=False)
+    client._status = "connected"
+    client._pending_subscribe = True
+    client._last_subscribe_attempt_ts = 10.0
+
+    subscribe_mock = AsyncMock(return_value=0)
+    monkeypatch.setattr(client, "_subscribe_feeds", subscribe_mock)
+
+    now = 20.0
+    count = await client._maybe_subscribe(now)
+
+    assert count == 0
+    assert client._subscribe_backoff_s > ducaheat_ws._SUBSCRIBE_BACKOFF_INITIAL
+    subscribe_kwargs = subscribe_mock.await_args.kwargs
+    assert subscribe_kwargs["now"] == now
+
+
+@pytest.mark.asyncio
+async def test_subscribe_feeds_defers_when_inventory_missing(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Inventory resolution failures should be logged and abort subscriptions."""
+    """Inventory resolution failures should mark subscriptions as pending."""
 
     client = _make_client(monkeypatch)
     client.hass.data[ducaheat_ws.DOMAIN]["entry"].pop("inventory", None)
     client.hass.data[ducaheat_ws.DOMAIN]["entry"].pop("nodes", None)
     client._inventory = None
     client._coordinator._inventory = None
-    caplog.set_level(logging.ERROR)
+    caplog.set_level(logging.INFO)
 
     emit_mock = AsyncMock()
     monkeypatch.setattr(client, "_emit_sio", emit_mock)
@@ -1996,8 +2069,25 @@ async def test_subscribe_feeds_logs_error_when_inventory_missing(
     count = await client._subscribe_feeds()
 
     assert count == 0
+    assert client._pending_subscribe is True
+    assert client._last_subscribe_attempt_ts > 0
     emit_mock.assert_not_awaited()
-    assert any("missing inventory" in message for message in caplog.messages)
+    assert any("inventory not ready" in message for message in caplog.messages)
+
+
+def test_request_resubscribe_sets_pending(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Public resubscribe requests should flag pending subscriptions."""
+
+    client = _make_client(monkeypatch)
+    client._pending_subscribe = False
+    client._subscribe_backoff_s = 2.0
+
+    client.request_resubscribe("inventory_ready")
+
+    assert client._pending_subscribe is True
+    assert client._subscribe_backoff_s == pytest.approx(
+        ducaheat_ws._SUBSCRIBE_BACKOFF_INITIAL
+    )
 
 
 @pytest.mark.asyncio
