@@ -67,6 +67,8 @@ _PAYLOAD_WINDOW_MARGIN_FLOOR = 15.0
 _CADENCE_KEYS = ("lease_seconds", "cadence_seconds", "poll_seconds")
 _NODE_METADATA_KEYS = {"type", "node_type", "addr", "address", "name", "title", "label"}
 _NODE_TYPE_LEVEL_KEYS = {"lease_seconds", "cadence_seconds", "poll_seconds"}
+_SUBSCRIBE_BACKOFF_INITIAL = 5.0
+_SUBSCRIBE_BACKOFF_MAX = 120.0
 
 
 def _rand_t() -> str:
@@ -180,6 +182,11 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._stats = WSStats()
         self._subscription_paths: set[str] = set()
+        self._pending_subscribe = True
+        self._last_subscribe_attempt_ts = 0.0
+        self._last_subscribe_log_ts = 0.0
+        self._subscribe_backoff_s = _SUBSCRIBE_BACKOFF_INITIAL
+        self._subscription_refresh_lock = asyncio.Lock()
         self._pending_dev_data = False
         self._keepalive_task: asyncio.Task | None = None
         self._ping_interval: float | None = None
@@ -434,6 +441,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         try:
             while True:
                 tracker = self._ws_health
+                await self._maybe_subscribe(time.time())
                 if tracker.payload_stale and tracker.status == "healthy":
                     self._update_status("connected")
                 deadline = tracker.stale_deadline()
@@ -503,6 +511,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                 try:
                                     await self._emit_sio("dev_data")
                                     await self._replay_subscription_paths()
+                                    if self._subscription_paths:
+                                        self._pending_subscribe = False
+                                    await self._maybe_subscribe(now)
                                 except Exception:  # noqa: BLE001  # pragma: no cover - defensive
                                     _LOGGER.debug(
                                         "WS (ducaheat): failed to emit dev_data or replay subscriptions",
@@ -591,8 +602,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                     dispatch_payload = nodes_map
                                 if isinstance(dispatch_payload, Mapping):
                                     self._dispatch_nodes(dispatch_payload)
-                                subs = await self._subscribe_feeds()
-                                _LOGGER.info("WS (ducaheat): subscribed %d feeds", subs)
+                                subs = await self._maybe_subscribe(now)
+                                if subs:
+                                    _LOGGER.info("WS (ducaheat): subscribed %d feeds", subs)
                                 self._update_status("healthy")
                             break
 
@@ -1245,9 +1257,11 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             log_prefix="WS (ducaheat)",
         )
 
-    async def _subscribe_feeds(self) -> int:
+    async def _subscribe_feeds(self, *, now: float | None = None) -> int:
         """Subscribe to heater status and sample feeds."""
 
+        attempt_ts = now if isinstance(now, (int, float)) else time.time()
+        self._last_subscribe_attempt_ts = attempt_ts
         try:
             domain_bucket = self.hass.data.setdefault(DOMAIN, {})
             existing_record = domain_bucket.get(self.entry_id)
@@ -1270,10 +1284,16 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     coordinator=self._coordinator,
                 )
             except LookupError:
-                _LOGGER.error(
-                    "WS (ducaheat): missing inventory for device %s; skipping heater subscriptions",
-                    self.dev_id,
+                self._pending_subscribe = True
+                should_log = (
+                    attempt_ts - self._last_subscribe_log_ts >= self._subscribe_backoff_s
                 )
+                if should_log:
+                    self._last_subscribe_log_ts = attempt_ts
+                    _LOGGER.info(
+                        "WS (ducaheat): inventory not ready for device %s; will retry",
+                        self.dev_id,
+                    )
                 return 0
 
             self._inventory = inventory_container
@@ -1295,16 +1315,75 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 paths.add(f"{base_path}/samples")
 
             if not paths:
+                self._pending_subscribe = False
+                self._subscription_paths = set()
+                self._subscribe_backoff_s = _SUBSCRIBE_BACKOFF_INITIAL
                 return 0
 
             for path in sorted(paths):
                 await self._emit_sio("subscribe", path)
 
             self._subscription_paths = paths
+            self._pending_subscribe = False
+            self._subscribe_backoff_s = _SUBSCRIBE_BACKOFF_INITIAL
             return len(paths)
         except Exception:  # pragma: no cover - defensive
             _LOGGER.debug("WS (ducaheat): subscribe failed", exc_info=True)
+            self._pending_subscribe = True
             return 0
+
+    async def _maybe_subscribe(self, now: float) -> int:
+        """Attempt subscription installation when prerequisites are met."""
+
+        ws = self._ws
+        if ws is None or ws.closed:
+            return 0
+        if self._pending_dev_data:
+            return 0
+        if self._status not in {"connected", "healthy"}:
+            return 0
+        if not self._pending_subscribe:
+            return 0
+
+        backoff = max(self._subscribe_backoff_s, _SUBSCRIBE_BACKOFF_INITIAL)
+        if now - self._last_subscribe_attempt_ts < backoff:
+            return 0
+
+        async with self._subscription_refresh_lock:
+            if now - self._last_subscribe_attempt_ts < backoff:
+                return 0
+            self._last_subscribe_attempt_ts = now
+            result = await self._subscribe_feeds(now=now)
+
+        if self._pending_subscribe and (result > 0 or self._subscription_paths):
+            self._pending_subscribe = False
+
+        if not self._pending_subscribe:
+            self._subscribe_backoff_s = _SUBSCRIBE_BACKOFF_INITIAL
+            return result
+        if result > 0 or self._subscription_paths:
+            self._subscribe_backoff_s = _SUBSCRIBE_BACKOFF_INITIAL
+            return result
+
+        self._subscribe_backoff_s = min(
+            max(self._subscribe_backoff_s * 1.5, _SUBSCRIBE_BACKOFF_INITIAL),
+            _SUBSCRIBE_BACKOFF_MAX,
+        )
+        return result
+
+    def request_resubscribe(self, reason: str) -> None:
+        """Flag the subscription set for reinstatement."""
+
+        self._pending_subscribe = True
+        self._subscribe_backoff_s = max(
+            self._subscribe_backoff_s, _SUBSCRIBE_BACKOFF_INITIAL
+        )
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug(
+                "WS (ducaheat): resubscribe requested (%s) for %s",
+                reason,
+                self.dev_id,
+            )
 
     async def _replay_subscription_paths(self) -> None:
         """Replay cached subscription paths after a reconnect."""

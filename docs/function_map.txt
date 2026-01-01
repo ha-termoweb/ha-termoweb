@@ -246,6 +246,10 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._forward_s
     Forward websocket heater sample updates to the energy coordinator.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._subscribe_feeds
     Subscribe to heater status and sample feeds.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._maybe_subscribe
+    Attempt subscription installation when prerequisites are met.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.request_resubscribe
+    Flag the subscription set for reinstatement.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._replay_subscription_paths
     Replay cached subscription paths after a reconnect.
 custom_components/termoweb/backend/factory.py :: create_backend
