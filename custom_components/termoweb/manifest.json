@@ -12,6 +12,6 @@
   "loggers": [
     "custom_components.termoweb"
   ],
-  "requirements": ["python-socketio==5.13.0"],
-  "version": "2.0.0-pre20"
+  "requirements": ["python-socketio==5.16.0"],
+  "version": "2.0.0-pre21"
 }

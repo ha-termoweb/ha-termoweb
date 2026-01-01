@@ -22,6 +22,12 @@ from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend.sanitize import mask_identifier
 from .boost import coerce_int, resolve_boost_end_from_fields
 from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
+from .domain.energy import (
+    EnergyNodeMetrics,
+    EnergySnapshot,
+    build_empty_snapshot,
+    coerce_snapshot,
+)
 from .domain.ids import NodeId as DomainNodeId, NodeType as DomainNodeType
 from .domain.state import (
     AccumulatorState,
@@ -136,7 +142,7 @@ def _device_display_name(device: DeviceMetadata | None, dev_id: str) -> str:
 
 
 class StateCoordinator(
-    RaiseUpdateFailedCoordinator[dict[str, dict[str, Any]]]
+    RaiseUpdateFailedCoordinator[EnergySnapshot]
 ):  # dev_id -> per-device data
     """Polls TermoWeb and exposes a per-device dict used by platforms."""
 
@@ -1052,6 +1058,7 @@ class EnergyStateCoordinator(
             "pmo": 3_600_000.0,
         }
         self.update_addresses(inventory)
+        self.data = build_empty_snapshot(dev_id)
 
     def _resolve_inventory(self, candidate: Inventory | None = None) -> Inventory:
         """Return the active inventory, preferring ``candidate`` when provided."""
@@ -1065,6 +1072,19 @@ class EnergyStateCoordinator(
             msg = "Energy inventory is unavailable"
             raise TypeError(msg)
         return inventory
+
+    @staticmethod
+    def _node_id_for(node_type: str, addr: str) -> DomainNodeId | None:
+        """Return a canonical node identifier for energy tracking."""
+
+        try:
+            node_type_enum = DomainNodeType(node_type)
+        except ValueError:
+            return None
+        try:
+            return DomainNodeId(node_type_enum, addr)
+        except ValueError:
+            return None
 
     def _iter_energy_targets(self, inventory: Inventory) -> Iterator[tuple[str, str]]:
         """Yield normalised energy node targets from ``inventory``."""
@@ -1110,33 +1130,22 @@ class EnergyStateCoordinator(
     ) -> None:
         """Seed energy and power buckets from cached coordinator state."""
 
-        cached_dev: Mapping[str, Any] | None = None
-        if isinstance(self.data, Mapping):
-            cached = self.data.get(dev_id)
-            if isinstance(cached, Mapping):
-                cached_dev = cached
-
-        if cached_dev:
+        snapshot = coerce_snapshot(self.data)
+        if snapshot is not None and snapshot.dev_id == dev_id:
             for node_type, addrs_for_type in targets_by_type.items():
-                prev_node = cached_dev.get(node_type)
-                if not isinstance(prev_node, Mapping):
+                metrics = snapshot.metrics_for_type(node_type)
+                if not metrics:
                     continue
-
-                prev_energy = prev_node.get("energy")
-                if isinstance(prev_energy, Mapping):
-                    energy_bucket = energy_by_type.setdefault(node_type, {})
-                    for addr in addrs_for_type:
-                        cached_energy = float_or_none(prev_energy.get(addr))
-                        if cached_energy is not None:
-                            energy_bucket.setdefault(addr, cached_energy)
-
-                prev_power = prev_node.get("power")
-                if isinstance(prev_power, Mapping):
-                    power_bucket = power_by_type.setdefault(node_type, {})
-                    for addr in addrs_for_type:
-                        cached_power = float_or_none(prev_power.get(addr))
-                        if cached_power is not None:
-                            power_bucket.setdefault(addr, cached_power)
+                energy_bucket = energy_by_type.setdefault(node_type, {})
+                power_bucket = power_by_type.setdefault(node_type, {})
+                for addr in addrs_for_type:
+                    current = metrics.get(addr)
+                    if current is None:
+                        continue
+                    if current.energy_kwh is not None:
+                        energy_bucket.setdefault(addr, current.energy_kwh)
+                    if current.power_w is not None:
+                        power_bucket.setdefault(addr, current.power_w)
 
         for (node_type, addr), (_, kwh) in self._last.items():
             addrs_for_type = targets_by_type.get(node_type)
@@ -1144,6 +1153,63 @@ class EnergyStateCoordinator(
                 continue
             energy_bucket = energy_by_type.setdefault(node_type, {})
             energy_bucket.setdefault(addr, kwh)
+
+    def _build_snapshot(
+        self,
+        dev_id: str,
+        targets_by_type: Mapping[str, list[str]],
+        energy_by_type: Mapping[str, Mapping[str, float]],
+        power_by_type: Mapping[str, Mapping[str, float]],
+        *,
+        source: str,
+        updated_at: float,
+        ws_deadline: float | None,
+    ) -> EnergySnapshot:
+        """Return an :class:`EnergySnapshot` built from metric buckets."""
+
+        metrics: dict[DomainNodeId, EnergyNodeMetrics] = {}
+        for node_type, addrs_for_type in targets_by_type.items():
+            for addr in addrs_for_type:
+                node_id = self._node_id_for(node_type, addr)
+                if node_id is None:
+                    continue
+                energy_value = energy_by_type.get(node_type, {}).get(addr)
+                power_value = power_by_type.get(node_type, {}).get(addr)
+                if energy_value is None and power_value is None:
+                    continue
+                last_ts = self._last.get((node_type, addr), (updated_at, 0.0))[0]
+                metrics[node_id] = EnergyNodeMetrics(
+                    energy_kwh=energy_value,
+                    power_w=power_value,
+                    source=source,
+                    ts=last_ts,
+                )
+
+        return EnergySnapshot(
+            dev_id=dev_id,
+            metrics=metrics,
+            updated_at=updated_at,
+            ws_deadline=ws_deadline,
+        )
+
+    def metric_for(self, node_type: str, addr: str) -> EnergyNodeMetrics | None:
+        """Return metrics for ``node_type``/``addr`` when cached."""
+
+        snapshot = coerce_snapshot(self.data)
+        if snapshot is None or snapshot.dev_id != self._dev_id:
+            return None
+        node_id = self._node_id_for(node_type, addr)
+        if node_id is None:
+            return None
+        return snapshot.metrics.get(node_id)
+
+    def metrics_by_type(self, node_type: str) -> dict[str, EnergyNodeMetrics]:
+        """Return metrics mapping keyed by address for ``node_type``."""
+
+        snapshot = coerce_snapshot(self.data)
+        if snapshot is None or snapshot.dev_id != self._dev_id:
+            return {}
+        return snapshot.metrics_for_type(node_type)
 
     async def _poll_recent_samples(
         self,
@@ -1261,14 +1327,15 @@ class EnergyStateCoordinator(
             return True
         return False
 
-    async def _async_update_data(self) -> dict[str, dict[str, Any]]:
+    async def _async_update_data(self) -> EnergySnapshot:
         """Fetch recent heater energy samples and derive totals and power."""
+        existing_snapshot = coerce_snapshot(self.data)
         if self._should_skip_poll():
-            existing = self.data or {}
-            if not isinstance(existing, dict):
-                return {}
-            _LOGGER.debug("Energy poll skipped (fresh websocket samples)")
-            return dict(existing)
+            if existing_snapshot is not None:
+                _LOGGER.debug("Energy poll skipped (fresh websocket samples)")
+                return existing_snapshot
+            return build_empty_snapshot(self._dev_id, ws_deadline=self._ws_deadline)
+
         dev_id = self._dev_id
         try:
             inventory = self._resolve_inventory()
@@ -1295,41 +1362,16 @@ class EnergyStateCoordinator(
                 power_by_type,
             )
 
-            dev_data: dict[str, Any] = {"dev_id": dev_id}
-
-            for node_type, addrs_for_type in targets_by_type.items():
-                bucket = {
-                    "energy": dict(energy_by_type.get(node_type, {})),
-                    "power": dict(power_by_type.get(node_type, {})),
-                    "addrs": list(addrs_for_type),
-                }
-                dev_data[node_type] = bucket
-
-            heater_data = dev_data.get("htr")
-            if not isinstance(heater_data, dict):
-                heater_data = {
-                    "energy": dict(energy_by_type.get("htr", {})),
-                    "power": dict(power_by_type.get("htr", {})),
-                    "addrs": list(targets_by_type.get("htr", ())),
-                }
-                dev_data["htr"] = heater_data
-
-            alias_map = inventory.sample_alias_map(
-                include_types=ENERGY_NODE_TYPES,
-                restrict_to=ENERGY_NODE_TYPES,
+            now = time_mod()
+            snapshot = self._build_snapshot(
+                dev_id,
+                targets_by_type,
+                energy_by_type,
+                power_by_type,
+                source="rest",
+                updated_at=now,
+                ws_deadline=None,
             )
-            for alias, canonical in alias_map.items():
-                canonical_bucket = dev_data.get(canonical)
-                if not isinstance(canonical_bucket, dict):
-                    canonical_bucket = {
-                        "energy": {},
-                        "power": {},
-                        "addrs": list(targets_by_type.get(canonical, ())),
-                    }
-                    dev_data[canonical] = canonical_bucket
-                dev_data[alias] = canonical_bucket
-
-            result: dict[str, dict[str, Any]] = {dev_id: dev_data}
 
         except TimeoutError as err:
             raise UpdateFailed("API timeout") from err
@@ -1338,18 +1380,15 @@ class EnergyStateCoordinator(
         else:
             self.update_interval = self._base_interval
             self._ws_deadline = None
-            return result
+            return snapshot
 
     def _should_skip_poll(self) -> bool:
         """Return True when websocket pushes keep energy data fresh."""
 
-        if not isinstance(self.data, dict):
+        snapshot = coerce_snapshot(self.data)
+        if snapshot is None or snapshot.dev_id != self._dev_id:
             return False
-        if self._ws_deadline is None:
-            return False
-        if time_mod() >= self._ws_deadline:
-            return False
-        return True
+        return self._ws_deadline is not None and time_mod() < self._ws_deadline
 
     def _ws_margin_seconds(self) -> float:
         """Return the buffer to wait after the websocket lease expires."""
@@ -1408,10 +1447,7 @@ class EnergyStateCoordinator(
     ) -> None:
         """Update cached heater metrics from websocket ``samples`` payloads."""
 
-        if dev_id != self._dev_id or not isinstance(self.data, dict):
-            return
-        dev_data = self.data.get(dev_id)
-        if not isinstance(dev_data, dict):
+        if dev_id != self._dev_id:
             return
 
         if lease_seconds is not None:
@@ -1429,19 +1465,41 @@ class EnergyStateCoordinator(
         else:
             self._ws_deadline = None
 
-        changed = False
-
         try:
             inventory = self._resolve_inventory()
         except TypeError:
             return
 
         targets_by_type = self._targets_by_type(inventory)
-
         alias_map = inventory.sample_alias_map(
             include_types=ENERGY_NODE_TYPES,
             restrict_to=ENERGY_NODE_TYPES,
         )
+
+        snapshot = coerce_snapshot(self.data)
+        energy_by_type: dict[str, dict[str, float]] = {
+            node_type: {} for node_type in targets_by_type
+        }
+        power_by_type: dict[str, dict[str, float]] = {
+            node_type: {} for node_type in targets_by_type
+        }
+        if snapshot is not None and snapshot.dev_id == dev_id:
+            for node_id, metrics in snapshot.iter_metrics():
+                node_type = node_id.node_type.value
+                if node_type not in targets_by_type:
+                    continue
+                if node_id.addr not in targets_by_type[node_type]:
+                    continue
+                if metrics.energy_kwh is not None:
+                    energy_by_type.setdefault(node_type, {})[node_id.addr] = (
+                        metrics.energy_kwh
+                    )
+                if metrics.power_w is not None:
+                    power_by_type.setdefault(node_type, {})[node_id.addr] = (
+                        metrics.power_w
+                    )
+
+        changed = False
 
         for raw_type, payload in updates.items():
             node_type = normalize_node_type(raw_type)
@@ -1451,18 +1509,8 @@ class EnergyStateCoordinator(
             tracked_addrs = targets_by_type.get(canonical_type)
             if not tracked_addrs:
                 continue
-            bucket = dev_data.get(canonical_type)
-            if not isinstance(bucket, dict):
-                bucket = {
-                    "energy": {},
-                    "power": {},
-                    "addrs": list(tracked_addrs),
-                }
-                dev_data[canonical_type] = bucket
-            if node_type != canonical_type:
-                dev_data[node_type] = bucket
-            energy_bucket = bucket.setdefault("energy", {})
-            power_bucket = bucket.setdefault("power", {})
+            energy_bucket = energy_by_type.setdefault(canonical_type, {})
+            power_bucket = power_by_type.setdefault(canonical_type, {})
             for raw_addr, sample_payload in payload.items():
                 addr = normalize_node_addr(raw_addr)
                 if not addr or addr not in tracked_addrs:
@@ -1483,8 +1531,19 @@ class EnergyStateCoordinator(
                 if changed_sample:
                     changed = True
 
-        if changed:
-            dev_data.setdefault("dev_id", dev_id)
+        now = time_mod()
+        snapshot = self._build_snapshot(
+            dev_id,
+            targets_by_type,
+            energy_by_type,
+            power_by_type,
+            source="ws",
+            updated_at=now,
+            ws_deadline=self._ws_deadline,
+        )
+
+        if changed or snapshot != self.data:
+            self.async_set_updated_data(snapshot)
 
     async def merge_samples_for_window(
         self,
@@ -1496,27 +1555,40 @@ class EnergyStateCoordinator(
         if dev_id != self._dev_id or not isinstance(samples, Mapping):
             return
 
-        data = self.data
-        if not isinstance(data, dict):
-            return
-
-        dev_data = data.get(dev_id)
-        if not isinstance(dev_data, dict):
-            dev_data = {"dev_id": dev_id}
-            data[dev_id] = dev_data
-
         try:
             inventory = self._resolve_inventory()
         except TypeError:
             return
 
         targets_by_type = self._targets_by_type(inventory)
-
         alias_map = inventory.sample_alias_map(
             include_types=ENERGY_NODE_TYPES,
             restrict_to=ENERGY_NODE_TYPES,
         )
+
         merge_counts: dict[tuple[str, str], int] = {}
+        snapshot = coerce_snapshot(self.data)
+        energy_by_type: dict[str, dict[str, float]] = {
+            node_type: {} for node_type in targets_by_type
+        }
+        power_by_type: dict[str, dict[str, float]] = {
+            node_type: {} for node_type in targets_by_type
+        }
+        if snapshot is not None and snapshot.dev_id == dev_id:
+            for node_id, metrics in snapshot.iter_metrics():
+                node_type = node_id.node_type.value
+                if node_type not in targets_by_type:
+                    continue
+                if node_id.addr not in targets_by_type[node_type]:
+                    continue
+                if metrics.energy_kwh is not None:
+                    energy_by_type.setdefault(node_type, {})[node_id.addr] = (
+                        metrics.energy_kwh
+                    )
+                if metrics.power_w is not None:
+                    power_by_type.setdefault(node_type, {})[node_id.addr] = (
+                        metrics.power_w
+                    )
 
         for descriptor, records in samples.items():
             if not isinstance(descriptor, tuple) or len(descriptor) != 2:
@@ -1539,21 +1611,8 @@ class EnergyStateCoordinator(
             if not tracked_addrs or addr not in tracked_addrs:
                 continue
 
-            bucket = dev_data.get(canonical_type)
-            if not isinstance(bucket, dict):
-                bucket = {
-                    "energy": {},
-                    "power": {},
-                    "addrs": list(tracked_addrs),
-                }
-                dev_data[canonical_type] = bucket
-            else:
-                bucket.setdefault("energy", {})
-                bucket.setdefault("power", {})
-                bucket.setdefault("addrs", list(tracked_addrs))
-
-            energy_bucket = bucket["energy"]
-            power_bucket = bucket["power"]
+            energy_bucket = energy_by_type.setdefault(canonical_type, {})
+            power_bucket = power_by_type.setdefault(canonical_type, {})
             scale = float(self._counter_scales.get(canonical_type, 1000.0) or 1000.0)
             factor = scale / 1000.0 if scale else 1.0
 
@@ -1579,6 +1638,9 @@ class EnergyStateCoordinator(
             prepared.sort(key=lambda item: item[0])
             merge_counts[(canonical_type, addr)] = len(prepared)
 
+            energy_bucket = energy_by_type.setdefault(canonical_type, {})
+            power_bucket = power_by_type.setdefault(canonical_type, {})
+
             for when, counter in prepared:
                 self._process_energy_sample(
                     canonical_type,
@@ -1590,19 +1652,16 @@ class EnergyStateCoordinator(
                     prune_power=True,
                 )
 
-        for canonical_type, addrs in targets_by_type.items():
-            bucket = dev_data.get(canonical_type)
-            if isinstance(bucket, dict):
-                bucket.setdefault("addrs", list(addrs))
-
-        for alias, canonical in alias_map.items():
-            if alias == canonical:
-                continue
-            canonical_bucket = dev_data.get(canonical)
-            if canonical_bucket is not None:
-                dev_data[alias] = canonical_bucket
-
-        dev_data.setdefault("dev_id", dev_id)
+        snapshot = self._build_snapshot(
+            dev_id,
+            targets_by_type,
+            energy_by_type,
+            power_by_type,
+            source="history",
+            updated_at=time_mod(),
+            ws_deadline=self._ws_deadline,
+        )
+        self.async_set_updated_data(snapshot)
 
         if merge_counts:
             summary = ", ".join(

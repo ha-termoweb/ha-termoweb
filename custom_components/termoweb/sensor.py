@@ -32,6 +32,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, signal_ws_data
 from .coordinator import EnergyStateCoordinator
+from .domain.energy import coerce_snapshot
 from .entity import GatewayDispatcherEntity
 from .heater import (
     HeaterNodeBase,
@@ -585,21 +586,25 @@ class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
         coordinator_available = getattr(coordinator, "last_update_success", True)
         return bool(coordinator_available)
 
-    def _metric_section(self) -> dict[str, Any]:
-        """Return the dictionary with the requested metric values."""
-        heater_section = self._heater_section()
-        metric = heater_section.get(self._metric_key)
-        if not isinstance(metric, Mapping):
-            device_entry = self._device_record()
-            if isinstance(device_entry, Mapping):
-                node_section = device_entry.get(self._node_type)
-                if isinstance(node_section, Mapping):
-                    metric = node_section.get(self._metric_key)
-        return metric if isinstance(metric, dict) else {}
+    def _metric_entry(self) -> Any:
+        """Return the cached metric entry for this heater."""
+
+        coordinator = getattr(self, "coordinator", None)
+        getter = getattr(coordinator, "metric_for", None)
+        if callable(getter):
+            return getter(self._node_type, self._addr)
+        return None
 
     def _raw_native_value(self) -> Any:
         """Return the raw metric value for this heater address."""
-        return self._metric_section().get(self._addr)
+        metrics = self._metric_entry()
+        if metrics is None:
+            return None
+        if self._metric_key == "energy":
+            return getattr(metrics, "energy_kwh", None)
+        if self._metric_key == "power":
+            return getattr(metrics, "power_w", None)
+        return None
 
     def _coerce_native_value(self, raw: Any) -> float | None:
         """Convert the raw metric value into a float."""
@@ -1005,29 +1010,13 @@ class PowerMonitorSensorBase(CoordinatorEntity, SensorEntity):
             return coordinator_inventory
         return None
 
-    def _device_record(self) -> Mapping[str, Any] | None:
-        """Return the cached coordinator data for this device."""
+    def _metric_entry(self) -> Any:
+        """Return the cached metric entry for this power monitor."""
 
-        data = getattr(self.coordinator, "data", None)
-        if not isinstance(data, Mapping):
-            return None
-        record = data.get(self._dev_id)
-        return record if isinstance(record, Mapping) else None
-
-    def _metric_bucket(self) -> Mapping[str, Any]:
-        """Return the metric bucket for this power monitor."""
-
-        record = self._device_record()
-        if not isinstance(record, Mapping):
-            return {}
-
-        direct_bucket = record.get("pmo")
-        if isinstance(direct_bucket, Mapping):
-            direct_metric = direct_bucket.get(self._metric_key)
-            if isinstance(direct_metric, Mapping):
-                return direct_metric
-
-        return {}
+        getter = getattr(self.coordinator, "metric_for", None)
+        if callable(getter):
+            return getter("pmo", self._addr)
+        return None
 
     def _coerce_native_value(self, raw: Any) -> float | None:
         """Convert a metric payload value to ``float`` if possible."""
@@ -1047,8 +1036,8 @@ class PowerMonitorSensorBase(CoordinatorEntity, SensorEntity):
     def available(self) -> bool:
         """Return True when the coordinator tracks this power monitor."""
 
-        bucket = self._metric_bucket()
-        if self._addr in bucket:
+        metrics = self._metric_entry()
+        if metrics is not None:
             return True
         inventory = self._resolve_inventory()
         if not isinstance(inventory, Inventory):
@@ -1059,11 +1048,12 @@ class PowerMonitorSensorBase(CoordinatorEntity, SensorEntity):
     def native_value(self) -> float | None:
         """Return the processed metric value for Home Assistant."""
 
-        bucket = self._metric_bucket()
-        raw = bucket.get(self._addr)
-        if raw is None:
+        metrics = self._metric_entry()
+        if metrics is None:
             return None
-        return self._coerce_native_value(raw)
+        attr = "energy_kwh" if self._metric_key == "energy" else "power_w"
+        value = getattr(metrics, attr, None)
+        return self._coerce_native_value(value)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -1158,26 +1148,28 @@ class InstallationTotalEnergySensor(
     @property
     def available(self) -> bool:
         """Return True if the latest coordinator data contains totals."""
-        d = (self.coordinator.data or {}).get(self._dev_id)
-        return d is not None
+        snapshot = coerce_snapshot(getattr(self, "coordinator", None).data)
+        return snapshot is not None and snapshot.dev_id == self._dev_id
 
     @property
     def native_value(self) -> float | None:
         """Return the summed energy usage across all heaters."""
-        data = (self.coordinator.data or {}).get(self._dev_id)
-        if not isinstance(data, Mapping):
+        snapshot = coerce_snapshot(getattr(self, "coordinator", None).data)
+        if snapshot is None or snapshot.dev_id != self._dev_id:
             return None
         total = 0.0
         found = False
-        for node_type in self._details.addrs_by_type:
-            section = data.get(node_type)
-            if not isinstance(section, Mapping):
+        for node_type, addrs in self._details.addrs_by_type.items():
+            metrics_by_addr = snapshot.metrics_for_type(node_type)
+            if not metrics_by_addr:
                 continue
-            energy_map = section.get("energy")
-            if not isinstance(energy_map, Mapping):
-                continue
-            for val in energy_map.values():
-                normalised = _normalise_energy_value(self.coordinator, val)
+            for addr in addrs:
+                metric = metrics_by_addr.get(addr)
+                if metric is None:
+                    continue
+                normalised = _normalise_energy_value(
+                    self.coordinator, metric.energy_kwh
+                )
                 if normalised is None:
                     continue
                 total += normalised
