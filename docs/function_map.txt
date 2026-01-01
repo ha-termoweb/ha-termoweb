@@ -1096,6 +1096,8 @@ custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.merge_sample
     Merge normalised hourly samples into the cached energy state.
 custom_components/termoweb/coordinator.py :: _wrap_logger
     Return a logger proxy that exposes ``isEnabledFor`` when missing.
+custom_components/termoweb/diagnostics.py :: _extract_websocket_clients
+    Return websocket telemetry entries for diagnostics.
 custom_components/termoweb/diagnostics.py :: async_get_config_entry_diagnostics
     Return a diagnostics payload for ``entry``.
 custom_components/termoweb/domain/energy.py :: EnergySnapshot.metrics_for_type
