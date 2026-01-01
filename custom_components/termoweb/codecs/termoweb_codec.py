@@ -242,31 +242,11 @@ def decode_node_settings(node_type: str, raw: Any) -> dict[str, Any]:
 
     try:
         model = model_cls.model_validate(raw)
-        validated = model.model_dump(exclude_none=True)
     except ValidationError:
-        validated = dict(raw)
+        return canonicalize_settings_payload(raw) if isinstance(raw, Mapping) else {}
 
-    payload: dict[str, Any] = dict(validated)
-    status_raw = raw.get("status")
-    validated_status = payload.get("status")
-    status_payload = (
-        validated_status
-        if isinstance(validated_status, Mapping)
-        else status_raw
-        if isinstance(status_raw, Mapping)
-        else None
-    )
-
-    if node_type in {"htr", "acm"}:
-        for key in ("mode", "stemp", "mtemp", "temp", "ptemp", "prog"):
-            if key in raw and key not in payload:
-                payload[key] = raw.get(key)
-
-    if status_payload:
-        payload["status"] = status_payload
-
-    payload.pop("capabilities", None)
-    return canonicalize_settings_payload(payload)
+    validated = model.model_dump(exclude_none=True)
+    return canonicalize_settings_payload(validated)
 
 
 def decode_samples(

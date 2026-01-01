@@ -154,7 +154,7 @@ class HeaterStatusPayload(BaseModel):
 class HeaterSettingsPayload(BaseModel):
     """Top-level heater settings payload."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     mode: str | None = None
     stemp: Any | None = None
@@ -191,7 +191,7 @@ class HeaterSettingsPayload(BaseModel):
 class ThermostatSettingsPayload(BaseModel):
     """Thermostat settings payload."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     mode: str | None = None
     stemp: Any | None = None
@@ -226,7 +226,7 @@ class ThermostatSettingsPayload(BaseModel):
 class PowerMonitorPayload(BaseModel):
     """Power monitor payload wrapper used by the REST endpoint."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     status: Mapping[str, Any] | None = None
     capabilities: Mapping[str, Any] | None = None
