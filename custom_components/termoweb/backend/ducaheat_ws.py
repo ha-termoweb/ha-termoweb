@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from collections.abc import Collection, Iterable, Mapping, MutableMapping
+import contextlib
 import gzip
 import json
 import logging
@@ -46,10 +47,10 @@ from custom_components.termoweb.const import (
     signal_ws_data,
 )
 from custom_components.termoweb.domain import (
-    canonicalize_settings_payload,
     NodeId as DomainNodeId,
     NodeSettingsDelta,
     NodeType as DomainNodeType,
+    canonicalize_settings_payload,
 )
 from custom_components.termoweb.inventory import (
     Inventory,
@@ -91,10 +92,8 @@ def _decode_polling_packets(body: bytes) -> list[str]:
 
     buf = body
     if len(buf) >= 2 and buf[:2] == b"\x1f\x8b":
-        try:
+        with contextlib.suppress(Exception):
             buf = gzip.decompress(buf)
-        except Exception:
-            pass
     out: list[str] = []
     i, n = 0, len(buf)
     while i < n:
@@ -121,7 +120,7 @@ def _decode_polling_packets(body: bytes) -> list[str]:
         i = end
         try:
             pkt = payload.decode("utf-8", errors="ignore")
-        except Exception:
+        except (UnicodeDecodeError, ValueError):
             pkt = ""
         if pkt:
             out.append(pkt)
@@ -160,6 +159,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         namespace: str | None = None,
         inventory: Inventory | None = None,
     ) -> None:
+        """Initialise the Ducaheat websocket client."""
         _WsLeaseMixin.__init__(self)
         _WSCommon.__init__(self, inventory=inventory)
         self.hass = hass
@@ -187,6 +187,12 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._last_subscribe_log_ts = 0.0
         self._subscribe_backoff_s = _SUBSCRIBE_BACKOFF_INITIAL
         self._subscription_refresh_lock = asyncio.Lock()
+        self._idle_monitor_task: asyncio.Task | None = None
+        self._idle_recovery_lock = asyncio.Lock()
+        self._last_idle_recovery_at = 0.0
+        self._idle_recovery_attempts = 0
+        self._idle_recovery_window_start = 0.0
+        self._idle_timeout_flag = False
         self._pending_dev_data = False
         self._keepalive_task: asyncio.Task | None = None
         self._ping_interval: float | None = None
@@ -218,6 +224,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         return status != "healthy"
 
     def start(self) -> asyncio.Task:
+        """Start the websocket runner task."""
         if self._task and not self._task.done():
             return self._task
         self._task = self._loop.create_task(
@@ -226,17 +233,17 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         return self._task
 
     async def stop(self) -> None:
+        """Stop the websocket client and background tasks."""
         await self._disconnect("stop")
         if self._task:
             self._task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
             self._task = None
         self._cleanup_ws_state()
 
     def is_running(self) -> bool:
+        """Return True when the websocket runner task is active."""
         return bool(self._task and not self._task.done())
 
     def _base_host(self) -> str:
@@ -257,6 +264,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         return urlunsplit(parsed._replace(path=self._path(), query=query))
 
     async def ws_url(self) -> str:
+        """Return the websocket handshake URL."""
         token = await self._get_token()
         params = {
             "token": token,
@@ -277,7 +285,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     await self._read_loop_ws()
                 except asyncio.CancelledError:
                     break
-                except Exception as exc:  # pragma: no cover - defensive
+                except Exception as exc:  # noqa: BLE001  # pragma: no cover - defensive
                     _LOGGER.debug("WS (ducaheat): error %s", exc, exc_info=True)
                     await asyncio.sleep(self._next_backoff())
                 finally:
@@ -289,6 +297,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
     async def _connect_once(self) -> None:
         token = await self._get_token()
         headers = _brand_headers(self._ua, self._xrw)
+        self._idle_timeout_flag = False
 
         open_params = {
             "token": token,
@@ -428,13 +437,192 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         now = timestamp or time.time()
         self._stats.last_event_ts = now
         self._last_event_at = now
+        self._reset_idle_recovery_state(now=now)
         self._mark_ws_heartbeat(timestamp=now)
         state = self._ws_state_bucket()
         state["last_event_at"] = now
         state["frames_total"] = self._stats.frames_total
         state["events_total"] = self._stats.events_total
 
-    async def _read_loop_ws(self) -> None:
+    def _idle_threshold(self) -> float:
+        """Return the idle detection threshold in seconds."""
+
+        tracker = self._ws_health
+        payload_window = tracker.payload_stale_after or self._payload_stale_after or 60.0
+        try:
+            base = float(payload_window)
+        except (TypeError, ValueError):
+            base = 60.0
+        base = base if math.isfinite(base) and base > 0 else 60.0
+        return max(30.0, base * 1.2)
+
+    def _idle_monitor_interval(self) -> float:
+        """Return the sleep interval between idle checks."""
+
+        threshold = self._idle_threshold()
+        return max(5.0, min(30.0, threshold / 4.0))
+
+    def _reset_idle_recovery_state(self, *, now: float | None = None) -> None:
+        """Clear idle recovery flags after activity is observed."""
+
+        self._idle_timeout_flag = False
+        self._last_idle_recovery_at = now if now is not None else 0.0
+        self._idle_recovery_attempts = 0
+        self._idle_recovery_window_start = 0.0
+
+    def _start_idle_monitor(self) -> None:
+        """Start the idle monitor when the websocket is ready."""
+
+        if self._idle_monitor_task and not self._idle_monitor_task.done():
+            return
+        if self._ws is None or self._ws.closed:
+            return
+        self._idle_monitor_task = self._loop.create_task(
+            self._idle_monitor(),
+            name=f"termoweb-ws-idle-{self.dev_id}",
+        )
+
+    async def _stop_idle_monitor(self) -> None:
+        """Stop the idle monitor task if it is running."""
+
+        task = self._idle_monitor_task
+        if task is None:
+            return
+        if task is asyncio.current_task():
+            self._idle_monitor_task = None
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if self._idle_monitor_task is task:
+                self._idle_monitor_task = None
+
+    async def _handle_idle_check(self, now: float) -> bool:
+        """Perform a single idle check iteration."""
+
+        ws = self._ws
+        if ws is None or ws.closed:
+            return True
+        tracker = self._ws_health
+        last_event = self._last_event_at or tracker.last_payload_at
+        if last_event is None:
+            last_event = tracker.last_heartbeat_at
+        idle_for = now - last_event if isinstance(last_event, (int, float)) else None
+        self._refresh_ws_payload_state(now=now, reason="idle_monitor")
+        threshold = self._idle_threshold()
+        should_recover = tracker.payload_stale or self._idle_timeout_flag
+        if not should_recover and idle_for is not None:
+            should_recover = idle_for >= threshold
+        if should_recover:
+            await self._recover_from_idle(
+                now=now,
+                idle_for=idle_for,
+                payload_stale=tracker.payload_stale,
+            )
+        ws_after = self._ws
+        return ws_after is None or ws_after.closed
+
+    async def _recover_from_idle(
+        self,
+        *,
+        now: float,
+        idle_for: float | None,
+        payload_stale: bool,
+    ) -> None:
+        """Attempt resubscription or reconnect when the socket is idle."""
+
+        if self._ws is None or self._ws.closed:
+            return
+        async with self._idle_recovery_lock:
+            if self._ws is None or self._ws.closed:
+                return
+            if (
+                not self._idle_recovery_window_start
+                or now - self._idle_recovery_window_start > 300.0
+            ):
+                self._idle_recovery_window_start = now
+                self._idle_recovery_attempts = 0
+            self._idle_recovery_attempts += 1
+            self._last_idle_recovery_at = now
+            self._idle_timeout_flag = False
+            summary = (
+                f"idle_for={idle_for:.0f}s" if idle_for is not None else "idle_for=?"
+            )
+            _LOGGER.info(
+                "WS (ducaheat): idle recovery (%s, stale=%s, subs=%d, pending=%s, attempts=%d)",
+                summary,
+                payload_stale,
+                len(self._subscription_paths),
+                self._pending_subscribe,
+                self._idle_recovery_attempts,
+            )
+            try:
+                await self._emit_sio("dev_data")
+            except Exception:  # noqa: BLE001  # pragma: no cover - defensive
+                _LOGGER.debug(
+                    "WS (ducaheat): idle recovery dev_data probe failed",
+                    exc_info=True,
+                )
+            try:
+                await self._replay_subscription_paths()
+            except Exception:  # noqa: BLE001  # pragma: no cover - defensive
+                _LOGGER.debug(
+                    "WS (ducaheat): idle recovery replay failed",
+                    exc_info=True,
+                )
+            try:
+                await self._maybe_subscribe(now)
+            except Exception:  # noqa: BLE001  # pragma: no cover - defensive
+                _LOGGER.debug(
+                    "WS (ducaheat): idle recovery subscribe failed",
+                    exc_info=True,
+                )
+            tracker = self._ws_health
+            last_event = self._last_event_at or tracker.last_payload_at
+            if last_event is None:
+                last_event = tracker.last_heartbeat_at
+            idle_after = now - last_event if isinstance(last_event, (int, float)) else 0
+            window_age = now - self._idle_recovery_window_start
+            should_disconnect = (
+                self._idle_recovery_attempts >= 3
+                and window_age <= 300.0
+                and (
+                    tracker.payload_stale
+                    or idle_after >= self._idle_threshold()
+                    or (idle_for is not None and idle_after >= idle_for)
+                )
+            )
+            if should_disconnect:
+                _LOGGER.warning(
+                    "WS (ducaheat): idle recovery escalation after %d attempts; reconnecting",
+                    self._idle_recovery_attempts,
+                )
+                await self._disconnect("idle_recovery_failed")
+
+    async def _idle_monitor(self) -> None:
+        """Monitor websocket idleness and trigger recovery steps."""
+
+        task = asyncio.current_task()
+        try:
+            while True:
+                await asyncio.sleep(self._idle_monitor_interval())
+                now = time.time()
+                should_exit = await self._handle_idle_check(now)
+                if should_exit:
+                    break
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001  # pragma: no cover - defensive
+            _LOGGER.debug("WS (ducaheat): idle monitor error", exc_info=True)
+        finally:
+            if self._idle_monitor_task is task:
+                self._idle_monitor_task = None
+            _LOGGER.debug("WS (ducaheat): idle monitor stopped")
+
+    async def _read_loop_ws(self) -> None:  # noqa: C901
         ws = self._ws
         if ws is None:
             return
@@ -468,6 +656,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     tracker = self._ws_health
                     if tracker.payload_stale and tracker.status == "healthy":
                         self._update_status("connected")
+                    self._idle_timeout_flag = True
                     continue
 
                 if msg.type == aiohttp.WSMsgType.TEXT:
@@ -514,6 +703,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                     if self._subscription_paths:
                                         self._pending_subscribe = False
                                     await self._maybe_subscribe(now)
+                                    self._start_idle_monitor()
                                 except Exception:  # noqa: BLE001  # pragma: no cover - defensive
                                     _LOGGER.debug(
                                         "WS (ducaheat): failed to emit dev_data or replay subscriptions",
@@ -554,7 +744,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                 break
                         try:
                             arr = json.loads(content)
-                        except Exception:
+                        except json.JSONDecodeError:
                             break
                         if not isinstance(arr, list) or not arr:
                             break
@@ -698,7 +888,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     break
         except asyncio.CancelledError:
             raise
-        except Exception:  # pragma: no cover - defensive
+        except Exception:  # noqa: BLE001  # pragma: no cover - defensive
             _LOGGER.debug("WS (ducaheat): keepalive loop error", exc_info=True)
         finally:
             if self._keepalive_task is task:
@@ -735,7 +925,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             if isinstance(item, str):
                 try:
                     decoded = json.loads(item)
-                except Exception:  # pragma: no cover - defensive
+                except json.JSONDecodeError:  # pragma: no cover - defensive
                     continue
                 queue.append(decoded)
                 continue
@@ -788,9 +978,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 for section in ("settings", "samples", "status", "advanced"):
                     sec = value.get(section)
                     if isinstance(sec, Mapping):
-                        addrs.update(
-                            addr for addr in sec.keys() if isinstance(addr, str)
-                        )
+                        addrs.update(addr for addr in sec if isinstance(addr, str))
                 kinds.append(f"{key}={len(addrs) if addrs else 0}")
         _LOGGER.info(
             "WS (ducaheat): dev_data nodes: %s",
@@ -832,14 +1020,16 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         if isinstance(snapshot, Mapping) and not isinstance(snapshot, dict):
             snapshot = dict(snapshot)
         if callable(normaliser):
+            resolved: Any
             try:
                 resolved = normaliser(snapshot)  # type: ignore[arg-type]
-                if isinstance(resolved, Mapping) and not isinstance(resolved, dict):
-                    return dict(resolved)
-                return resolved
             except Exception:  # noqa: BLE001  # pragma: no cover - defensive logging
                 _LOGGER.debug("WS (ducaheat): normalise_ws_nodes failed", exc_info=True)
                 return snapshot
+            else:
+                if isinstance(resolved, Mapping) and not isinstance(resolved, dict):
+                    return dict(resolved)
+                return resolved
         return snapshot
 
     def _normalise_cadence_value(self, value: Any) -> float | None:
@@ -875,9 +1065,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 candidate = self._normalise_cadence_value(current.get(key))
                 if candidate is not None:
                     values.append(candidate)
-            for nested in current.values():
-                if isinstance(nested, Mapping):
-                    stack.append(nested)
+            stack.extend(nested for nested in current.values() if isinstance(nested, Mapping))
         return values
 
     def _update_payload_window_from_mapping(
@@ -1204,7 +1392,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             return
         try:
             handler(self.dev_id, tuple(deltas), replace=replace)
-        except Exception:
+        except Exception:  # noqa: BLE001
             _LOGGER.debug(
                 "WS (ducaheat): failed to apply websocket deltas",
                 exc_info=True,
@@ -1302,7 +1490,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             if hasattr(energy_coordinator, "update_addresses"):
                 try:
                     energy_coordinator.update_addresses(inventory_container)
-                except Exception:  # pragma: no cover - defensive logging
+                except Exception:  # noqa: BLE001  # pragma: no cover - defensive logging
                     _LOGGER.debug(
                         "WS (ducaheat): failed to update coordinator addresses during subscribe",
                         exc_info=True,
@@ -1327,7 +1515,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             self._pending_subscribe = False
             self._subscribe_backoff_s = _SUBSCRIBE_BACKOFF_INITIAL
             return len(paths)
-        except Exception:  # pragma: no cover - defensive
+        except Exception:  # noqa: BLE001  # pragma: no cover - defensive
             _LOGGER.debug("WS (ducaheat): subscribe failed", exc_info=True)
             self._pending_subscribe = True
             return 0
@@ -1401,13 +1589,14 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 )
 
     async def _disconnect(self, reason: str) -> None:
+        await self._stop_idle_monitor()
+        self._reset_idle_recovery_state(now=None)
         task = self._keepalive_task
         if task:
             task.cancel()
             try:
-                await task
-            except asyncio.CancelledError:
-                pass
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
             finally:
                 self._keepalive_task = None
         if self._ws:
@@ -1416,7 +1605,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     code=aiohttp.WSCloseCode.GOING_AWAY,
                     message=reason.encode(),
                 )
-            except Exception:  # pragma: no cover - defensive
+            except Exception:  # noqa: BLE001  # pragma: no cover - defensive
                 _LOGGER.debug("WS (ducaheat): close failed", exc_info=True)
             self._ws = None
         self._pending_dev_data = False

@@ -252,6 +252,22 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.request_re
     Flag the subscription set for reinstatement.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._replay_subscription_paths
     Replay cached subscription paths after a reconnect.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._idle_threshold
+    Return the idle detection threshold in seconds.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._idle_monitor_interval
+    Return the sleep interval between idle checks.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._reset_idle_recovery_state
+    Clear idle recovery flags after activity is observed.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._start_idle_monitor
+    Start the idle monitor when the websocket is ready.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._stop_idle_monitor
+    Stop the idle monitor task if it is running.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._handle_idle_check
+    Perform a single idle check iteration.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._recover_from_idle
+    Attempt resubscription or reconnect when the socket is idle.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._idle_monitor
+    Monitor websocket idleness and trigger recovery steps.
 custom_components/termoweb/backend/factory.py :: create_backend
     Create a backend for the given brand.
 custom_components/termoweb/backend/sanitize.py :: redact_text

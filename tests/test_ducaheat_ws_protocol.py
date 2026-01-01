@@ -2091,6 +2091,133 @@ def test_request_resubscribe_sets_pending(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.mark.asyncio
+async def test_idle_monitor_triggers_soft_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Idle detection should trigger snapshot, replay, and subscribe."""
+
+    client = _make_client(monkeypatch)
+    client._ws = SimpleNamespace(closed=False)
+    client._status = "healthy"
+    client._pending_dev_data = False
+    client._last_event_at = 0.0
+
+    assert client._idle_monitor_interval() >= 5.0
+
+    emit_mock = AsyncMock()
+    replay_mock = AsyncMock()
+    subscribe_mock = AsyncMock()
+    monkeypatch.setattr(client, "_emit_sio", emit_mock)
+    monkeypatch.setattr(client, "_replay_subscription_paths", replay_mock)
+    monkeypatch.setattr(client, "_maybe_subscribe", subscribe_mock)
+
+    should_exit = await client._handle_idle_check(400.0)
+
+    assert should_exit is False
+    emit_mock.assert_awaited_once_with("dev_data")
+    replay_mock.assert_awaited_once()
+    subscribe_mock.assert_awaited_once_with(400.0)
+    assert client._idle_recovery_attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_idle_monitor_escalates_to_disconnect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeated idle recovery attempts should escalate to reconnect."""
+
+    client = _make_client(monkeypatch)
+    client._ws = SimpleNamespace(closed=False)
+    client._status = "healthy"
+    client._pending_dev_data = False
+    client._last_event_at = 0.0
+
+    monkeypatch.setattr(client, "_emit_sio", AsyncMock())
+    monkeypatch.setattr(client, "_replay_subscription_paths", AsyncMock())
+    monkeypatch.setattr(client, "_maybe_subscribe", AsyncMock())
+    disconnect_mock = AsyncMock(side_effect=lambda reason: setattr(client, "_ws", None))
+    monkeypatch.setattr(client, "_disconnect", disconnect_mock)
+
+    for idx in range(3):
+        now = 1_000.0 + (idx * 50.0)
+        await client._recover_from_idle(
+            now=now,
+            idle_for=now - 100.0,
+            payload_stale=True,
+        )
+
+    disconnect_mock.assert_awaited_once()
+    assert client._idle_recovery_attempts >= 3
+
+
+@pytest.mark.asyncio
+async def test_start_and_stop_idle_monitor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Starting the idle monitor should create and clean up the task."""
+
+    client = _make_client(monkeypatch)
+    client._ws = SimpleNamespace(closed=False)
+
+    finished = asyncio.Event()
+
+    async def _fake_monitor() -> None:
+        finished.set()
+
+    monkeypatch.setattr(client, "_idle_monitor", _fake_monitor)
+
+    client._start_idle_monitor()
+    await asyncio.wait_for(finished.wait(), 1.0)
+    assert client._idle_monitor_task is not None
+
+    await client._stop_idle_monitor()
+
+    assert client._idle_monitor_task is None
+
+
+@pytest.mark.asyncio
+async def test_idle_monitor_breaks_when_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The idle monitor should exit when the check requests it."""
+
+    client = _make_client(monkeypatch)
+    client._ws = SimpleNamespace(closed=False)
+
+    calls = 0
+
+    async def _fake_handle(now: float) -> bool:
+        nonlocal calls
+        calls += 1
+        return True
+
+    monkeypatch.setattr(client, "_handle_idle_check", _fake_handle)
+    monkeypatch.setattr(client, "_idle_monitor_interval", lambda: 0.0)
+
+    await client._idle_monitor()
+
+    assert calls == 1
+    assert client._idle_monitor_task is None
+
+
+def test_record_frame_resets_idle_recovery(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Heartbeat updates should clear idle recovery counters."""
+
+    client = _make_client(monkeypatch)
+    client._idle_timeout_flag = True
+    client._idle_recovery_attempts = 2
+    client._idle_recovery_window_start = 10.0
+    client._last_idle_recovery_at = 5.0
+
+    client._record_frame(timestamp=12.0)
+
+    assert client._idle_timeout_flag is False
+    assert client._idle_recovery_attempts == 0
+    assert client._idle_recovery_window_start == 0.0
+    assert client._last_idle_recovery_at == 12.0
+
+
+@pytest.mark.asyncio
 async def test_get_token_requires_authorization(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
