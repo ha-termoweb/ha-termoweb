@@ -12,6 +12,8 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
+from .backend.sanitize import mask_identifier
+from .backend.ws_health import WsHealthTracker
 from .const import CONF_BRAND, DEFAULT_BRAND, DOMAIN, get_brand_label
 from .energy import SUMMARY_KEY_LAST_RUN
 from .inventory import Inventory
@@ -29,6 +31,36 @@ SENSITIVE_FIELDS: Final = {
     "token",
     "username",
 }
+
+
+def _extract_websocket_clients(record: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Return websocket telemetry entries for diagnostics."""
+
+    ws_state = record.get("ws_state") if isinstance(record, Mapping) else None
+    trackers = record.get("ws_trackers") if isinstance(record, Mapping) else None
+
+    state_map = ws_state if isinstance(ws_state, Mapping) else {}
+    tracker_map = trackers if isinstance(trackers, Mapping) else {}
+
+    clients: list[dict[str, Any]] = []
+    for dev_id, state in state_map.items():
+        if not isinstance(dev_id, str) or not isinstance(state, Mapping):
+            continue
+
+        client_state = dict(state)
+        entry: dict[str, Any] = {
+            "device": mask_identifier(dev_id),
+            "state": client_state,
+        }
+
+        tracker = tracker_map.get(dev_id)
+        if isinstance(tracker, WsHealthTracker):
+            entry["health"] = tracker.snapshot()
+
+        clients.append(entry)
+
+    clients.sort(key=lambda item: str(item.get("device")))
+    return clients
 
 
 async def async_get_config_entry_diagnostics(
@@ -103,6 +135,10 @@ async def async_get_config_entry_diagnostics(
         energy_section["last_run"] = last_import
     if energy_section:
         diagnostics["energy_import"] = energy_section
+
+    ws_clients = _extract_websocket_clients(record)
+    if ws_clients:
+        diagnostics["websocket"] = {"clients": ws_clients}
 
     _LOGGER.debug(
         "Diagnostics inventory cache for %s: raw=%d, filtered=%d",

@@ -7,6 +7,7 @@ import logging
 import platform
 import sys
 import types
+import time
 from typing import Any, Callable
 
 import pytest
@@ -30,6 +31,7 @@ setattr(components_pkg, "diagnostics", diagnostics_stub)
 sys.modules["homeassistant.components.diagnostics"] = diagnostics_stub
 
 from custom_components.termoweb.const import BRAND_DUCAHEAT, CONF_BRAND, DOMAIN
+from custom_components.termoweb.backend.ws_health import WsHealthTracker
 from custom_components.termoweb.diagnostics import async_get_config_entry_diagnostics
 from custom_components.termoweb.inventory import (
     Inventory,
@@ -149,6 +151,59 @@ def test_diagnostics_with_cached_inventory(
     assert "username" not in flattened
 
     assert "Diagnostics inventory cache for entry-one: raw=2, filtered=2" in caplog.text
+    assert not any(record.levelno >= logging.ERROR for record in caplog.records)
+
+
+def test_diagnostics_include_websocket_clients(
+    caplog: pytest.LogCaptureFixture,
+    diagnostics_record: Callable[..., tuple[dict[str, Any], Inventory]],
+) -> None:
+    """Diagnostics should expose websocket state and health snapshots."""
+
+    hass = HomeAssistant()
+    entry = ConfigEntry(
+        "entry-ws",
+        data={CONF_BRAND: BRAND_DUCAHEAT},
+    )
+
+    dev_id = "abcdef123456"
+    record, inventory = diagnostics_record(
+        [
+            {"name": "Heater One", "addr": "1", "type": "htr"},
+        ],
+        dev_id=dev_id,
+    )
+
+    ws_state = {"status": "healthy", "last_payload_at": 10.0}
+    tracker = WsHealthTracker(dev_id=dev_id)
+    now = time.time()
+    tracker.update_status("healthy", healthy_since=now - 60)
+    tracker.mark_payload(timestamp=now, stale_after=1_000_000.0)
+
+    record.update(
+        {
+            "ws_state": {dev_id: ws_state},
+            "ws_trackers": {dev_id: tracker},
+        }
+    )
+
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN][entry.entry_id] = record
+
+    with caplog.at_level(logging.DEBUG):
+        diagnostics = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
+
+    websocket = diagnostics.get("websocket")
+    assert websocket is not None
+    clients = websocket.get("clients") if isinstance(websocket, dict) else None
+    assert isinstance(clients, list)
+    assert len(clients) == 1
+    client = clients[0]
+    assert client["device"] == "abcdef...3456"
+    assert client["state"] == ws_state
+    assert "health" in client and client["health"]["status"] == "healthy"
+
+    assert "Diagnostics inventory cache for entry-ws: raw=1, filtered=1" in caplog.text
     assert not any(record.levelno >= logging.ERROR for record in caplog.records)
 
 
