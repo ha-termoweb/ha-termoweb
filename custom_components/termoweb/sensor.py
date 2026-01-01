@@ -54,6 +54,7 @@ from .inventory import (
     PowerMonitorNode,
     normalize_node_addr,
     normalize_node_type,
+    store_inventory_on_entry,
 )
 from .utils import (
     build_gateway_device_info,
@@ -174,7 +175,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
     if not isinstance(data.get("inventory"), Inventory):
         coordinator_inventory = getattr(coordinator, "inventory", None)
         if isinstance(coordinator_inventory, Inventory):
-            data["inventory"] = coordinator_inventory
+            store_inventory_on_entry(
+                coordinator_inventory,
+                record=data,
+                hass=hass,
+                entry_id=entry.entry_id,
+            )
 
     heater_details = heater_platform_details_for_entry(
         data,

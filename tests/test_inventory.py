@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
 from typing import Any, Callable, Iterable, List, Mapping
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -13,6 +14,7 @@ from custom_components.termoweb.inventory import (
     Inventory,
     Node,
     PowerMonitorNode,
+    store_inventory_on_entry,
     normalize_power_monitor_addresses,
 )
 
@@ -35,9 +37,7 @@ def sample_nodes() -> List[DummyNode]:
 
 
 @pytest.fixture
-def inventory(
-    sample_nodes: List[DummyNode]
-) -> Inventory:
+def inventory(sample_nodes: List[DummyNode]) -> Inventory:
     """Build an inventory instance for tests."""
 
     return Inventory("abc123", sample_nodes)
@@ -539,3 +539,64 @@ def test_heater_platform_details_default_name(
     assert addrs_by_type == {"htr": ["1"], "acm": ["2"], "thm": []}
     assert resolver("htr", "1") == "Heater 1"
     assert resolver("acm", "2") == "Accumulator 2"
+
+
+def test_store_inventory_requests_resubscribe_once() -> None:
+    """Storing inventory should request a websocket resubscribe only once."""
+
+    inventory = Inventory("dev", [])
+    entry_id = "entry"
+    hass = SimpleNamespace(data={inventory_module.DOMAIN: {}})
+    ws_client = SimpleNamespace(request_resubscribe=MagicMock())
+    record = {"ws_clients": {"dev": ws_client}}
+    hass.data[inventory_module.DOMAIN][entry_id] = record
+
+    Inventory.require_from_context(
+        inventory=inventory,
+        container=record,
+        hass=hass,
+        entry_id=entry_id,
+    )
+
+    ws_client.request_resubscribe.assert_called_once_with("inventory_ready")
+
+    store_inventory_on_entry(
+        inventory,
+        record=record,
+        hass=hass,
+        entry_id=entry_id,
+    )
+
+    ws_client.request_resubscribe.assert_called_once_with("inventory_ready")
+
+
+def test_store_inventory_notifies_all_ws_clients() -> None:
+    """All websocket clients should be notified when inventory is stored."""
+
+    inventory = Inventory("dev", [])
+    entry_id = "entry"
+    first_client = SimpleNamespace(request_resubscribe=MagicMock())
+    second_client = SimpleNamespace(request_resubscribe=MagicMock())
+    hass = SimpleNamespace(
+        data={
+            inventory_module.DOMAIN: {
+                entry_id: {
+                    "ws_clients": {
+                        "one": first_client,
+                        "two": second_client,
+                    }
+                }
+            }
+        }
+    )
+    record = hass.data[inventory_module.DOMAIN][entry_id]
+
+    store_inventory_on_entry(
+        inventory,
+        record=record,
+        hass=hass,
+        entry_id=entry_id,
+    )
+
+    first_client.request_resubscribe.assert_called_once_with("inventory_ready")
+    second_client.request_resubscribe.assert_called_once_with("inventory_ready")

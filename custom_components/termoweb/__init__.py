@@ -65,6 +65,7 @@ from .inventory import (
     build_node_inventory,
     normalize_node_addr,
     normalize_node_type,
+    store_inventory_on_entry,
 )
 from .throttle import default_samples_rate_limit_state, reset_samples_rate_limit_state
 from .utils import async_get_integration_version as _async_get_integration_version
@@ -551,7 +552,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         "coordinator": coordinator,
         "energy_coordinator": energy_coordinator,
         "dev_id": dev_id,
-        "inventory": inventory,
+        "inventory": None,
         "hourly_poller": poller,
         "config_entry": entry,
         "base_poll_interval": max(base_interval, MIN_POLL_INTERVAL),
@@ -568,6 +569,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         "boost_runtime": {},
         "diagnostics_task": diagnostics_task,
     }
+
+    store_inventory_on_entry(
+        inventory,
+        record=data,
+        hass=hass,
+        entry_id=entry.entry_id,
+    )
 
     async def _async_handle_hass_stop(_event: Any) -> None:
         """Stop background activity gracefully when Home Assistant stops."""

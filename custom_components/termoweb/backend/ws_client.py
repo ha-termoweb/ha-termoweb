@@ -23,7 +23,12 @@ from ..const import (
     signal_ws_data,
     signal_ws_status,
 )
-from ..inventory import Inventory, normalize_node_addr, normalize_node_type
+from ..inventory import (
+    Inventory,
+    normalize_node_addr,
+    normalize_node_type,
+    store_inventory_on_entry,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .ducaheat_ws import DucaheatWSClient
@@ -784,7 +789,12 @@ class _WSCommon(_WSStatusMixin):
             self._inventory = inventory
             record = self.hass.data.setdefault(DOMAIN, {}).setdefault(self.entry_id, {})
             if isinstance(record, MutableMapping):
-                record["inventory"] = inventory
+                store_inventory_on_entry(
+                    inventory,
+                    record=record,
+                    hass=self.hass,
+                    entry_id=self.entry_id,
+                )
         return inventory
 
     def _ensure_type_bucket(
@@ -826,7 +836,12 @@ class _WSCommon(_WSStatusMixin):
         except LookupError:
             inventory_container = None
         else:
-            dev_map["inventory"] = inventory_container
+            store_inventory_on_entry(
+                inventory_container,
+                record=dev_map,
+                hass=self.hass,
+                entry_id=self.entry_id,
+            )
 
         settings_section = dev_map.get("settings")
         if isinstance(settings_section, MutableMapping):
