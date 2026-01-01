@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import asdict, dataclass, fields
+from dataclasses import dataclass, fields
 from typing import Any
 
 from .ids import NodeId, NodeType
@@ -565,6 +565,18 @@ def build_state_from_payload(
     return _build_state(normalized_type, canonical)
 
 
+def _copy_state_field_value(value: Any) -> Any:
+    """Return a shallow copy for mappings and sequences."""
+
+    cloned_mapping = _copy_mapping(value)
+    if cloned_mapping is not None:
+        return cloned_mapping
+    cloned_sequence = _copy_sequence(value)
+    if cloned_sequence is not None:
+        return cloned_sequence
+    return value
+
+
 def state_to_dict(
     state: DomainState | None, *, include_none: bool = False
 ) -> dict[str, Any]:
@@ -573,17 +585,13 @@ def state_to_dict(
     if state is None:
         return {}
 
-    payload = asdict(state)
     filtered: dict[str, Any] = {}
-    for key, value in payload.items():
+    for field in fields(state):
+        key = field.name
+        value = getattr(state, key)
         if value is None and not include_none:
             continue
-        if isinstance(value, Mapping):
-            filtered[key] = dict(value)
-        elif isinstance(value, list):
-            filtered[key] = list(value)
-        else:
-            filtered[key] = value
+        filtered[key] = _copy_state_field_value(value)
     return filtered
 
 
@@ -593,14 +601,12 @@ def clone_state(state: DomainState | None) -> DomainState | None:
     if state is None:
         return None
 
-    payload = state_to_dict(state)
-    if isinstance(state, AccumulatorState):
-        return _build_accumulator_state(payload)
-    if isinstance(state, ThermostatState):
-        return _build_thermostat_state(payload)
-    if isinstance(state, PowerMonitorState):
-        return _build_power_monitor_state(payload)
-    return _build_heater_state(payload)
+    state_type = type(state)
+    payload = {
+        field.name: _copy_state_field_value(getattr(state, field.name))
+        for field in fields(state_type)
+    }
+    return state_type(**payload)
 
 
 def apply_payload_to_state(

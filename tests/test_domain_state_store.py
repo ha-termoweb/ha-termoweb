@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterable, Iterator, Mapping
 
 import pytest
 
 from custom_components.termoweb.domain import (
     AccumulatorState,
+    clone_state,
     DomainStateStore,
     HeaterState,
     NodeId,
@@ -18,6 +19,20 @@ from custom_components.termoweb.domain import (
     state_to_dict,
 )
 from custom_components.termoweb.inventory import build_node_inventory
+
+
+class CountingList(list):
+    """Track iteration counts to detect redundant copies."""
+
+    def __init__(self, values: Iterable[Any]) -> None:
+        """Initialise the counting list with ``values``."""
+        super().__init__(values)
+        self.iterations = 0
+
+    def __iter__(self) -> Iterator[Any]:
+        """Iterate while incrementing the counter."""
+        self.iterations += 1
+        return super().__iter__()
 
 
 def test_domain_state_store_applies_snapshots_and_patches() -> None:
@@ -208,3 +223,52 @@ def test_store_iter_states_includes_inventory_nodes(
     assert ("acm", "2") in states
     assert states[("acm", "2")]["boost_minutes_delta"] == 15
     assert states[("htr", "1")]["mode"] == "manual"
+
+
+def test_state_to_dict_copies_mutable_fields_once() -> None:
+    """state_to_dict should shallow-copy mutable fields without asdict churn."""
+
+    prog = CountingList([1, 2, 3])
+    raw_temp = {"raw": True}
+    state = AccumulatorState(mode="auto", prog=prog)
+    state.temp = raw_temp
+
+    payload = state_to_dict(state, include_none=True)
+
+    assert payload["mode"] == "auto"
+    assert payload["prog"] == [1, 2, 3]
+    assert payload["prog"] is not prog
+    assert prog.iterations == 1
+    assert payload["temp"] == raw_temp
+    assert payload["temp"] is not raw_temp
+    assert "boost_minutes_delta" in payload
+    assert payload["boost_minutes_delta"] is None
+
+
+def test_clone_state_returns_independent_copy() -> None:
+    """clone_state should detach mutable fields."""
+
+    prog = CountingList([1, 2])
+    ptemp = [3, 4]
+    raw_temp = {"raw": False}
+    state = HeaterState(mode="manual", prog=prog, ptemp=ptemp, temp=raw_temp)
+
+    clone = clone_state(state)
+
+    assert isinstance(clone, HeaterState)
+    assert clone is not state
+    assert clone.mode == "manual"
+    assert clone.prog is not prog
+    assert clone.ptemp is not ptemp
+    assert clone.temp is not raw_temp
+
+    clone.mode = "auto"
+    clone.prog.append(5)
+    clone.ptemp.append(6)
+    clone.temp["raw"] = True
+
+    assert state.mode == "manual"
+    assert state.prog == [1, 2]
+    assert state.ptemp == [3, 4]
+    assert raw_temp == {"raw": False}
+    assert prog.iterations == 1

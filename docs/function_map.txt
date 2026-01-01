@@ -1026,6 +1026,8 @@ custom_components/termoweb/domain/state.py :: _copy_mapping
     Return a shallow copy of a mapping when applicable.
 custom_components/termoweb/domain/state.py :: _coerce_number
     Return ``value`` as a number when possible.
+custom_components/termoweb/domain/state.py :: _copy_state_field_value
+    Return a shallow copy for mappings and sequences.
 custom_components/termoweb/domain/state.py :: canonicalize_settings_payload
     Return canonical setting fields derived from ``payload``.
 custom_components/termoweb/domain/state.py :: NodeDelta.payload
