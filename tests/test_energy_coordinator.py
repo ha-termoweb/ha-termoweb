@@ -21,6 +21,16 @@ from custom_components.termoweb.const import (
     signal_ws_data,
 )
 from custom_components.termoweb.domain import state_to_dict
+from custom_components.termoweb.domain.energy import (
+    EnergyNodeMetrics,
+    EnergySnapshot,
+    build_empty_snapshot,
+    coerce_snapshot,
+)
+from custom_components.termoweb.domain.ids import (
+    NodeId as DomainNodeId,
+    NodeType as DomainNodeType,
+)
 from custom_components.termoweb.inventory import (
     AccumulatorNode,
     HeaterNode,
@@ -38,7 +48,9 @@ EnergyStateCoordinator = coord_module.EnergyStateCoordinator
 StateCoordinator = coord_module.StateCoordinator
 
 
-def _state_payload(coord: coord_module.StateCoordinator, node_type: str, addr: str) -> dict[str, Any] | None:
+def _state_payload(
+    coord: coord_module.StateCoordinator, node_type: str, addr: str
+) -> dict[str, Any] | None:
     """Return the legacy payload stored in the domain state view."""
 
     view = getattr(coord, "domain_view", None)
@@ -46,6 +58,30 @@ def _state_payload(coord: coord_module.StateCoordinator, node_type: str, addr: s
         return None
     state = view.get_heater_state(node_type, addr)
     return state_to_dict(state) if state is not None else None
+
+
+def _energy_metric(
+    coord: EnergyStateCoordinator, node_type: str, addr: str
+) -> float | None:
+    """Return the cached energy metric for ``node_type``/``addr``."""
+
+    snapshot = coerce_snapshot(coord.data)
+    assert snapshot is not None
+    metrics = snapshot.metrics_for_type(node_type)
+    metric = metrics.get(addr)
+    return None if metric is None else metric.energy_kwh
+
+
+def _power_metric(
+    coord: EnergyStateCoordinator, node_type: str, addr: str
+) -> float | None:
+    """Return the cached power metric for ``node_type``/``addr``."""
+
+    snapshot = coerce_snapshot(coord.data)
+    assert snapshot is not None
+    metrics = snapshot.metrics_for_type(node_type)
+    metric = metrics.get(addr)
+    return None if metric is None else metric.power_w
 
 
 def _inventory_from_nodes(dev_id: str, payload: Mapping[str, Any]) -> Inventory:
@@ -135,13 +171,13 @@ def test_power_calculation(
         monkeypatch.setattr(coord_module, "time_mod", _fake_time)
 
         await coord.async_refresh()
-        assert coord.data["1"]["htr"]["energy"]["A"] == pytest.approx(0.001)
-        assert "A" not in coord.data["1"]["htr"]["power"]
+        assert _energy_metric(coord, "htr", "A") == pytest.approx(0.001)
+        assert _power_metric(coord, "htr", "A") is None
 
         fake_time = 1900.0
         await coord.async_refresh()
-        assert coord.data["1"]["htr"]["energy"]["A"] == pytest.approx(0.0015)
-        power = coord.data["1"]["htr"]["power"]["A"]
+        assert _energy_metric(coord, "htr", "A") == pytest.approx(0.0015)
+        power = _power_metric(coord, "htr", "A")
         assert power == pytest.approx(2.0, rel=1e-3)
 
     asyncio.run(_run())
@@ -892,8 +928,8 @@ def test_counter_reset(
         fake_time = 1900.0
         await coord.async_refresh()
 
-        assert coord.data["1"]["htr"]["energy"]["A"] == pytest.approx(0.001)
-        assert "A" not in coord.data["1"]["htr"]["power"]
+        assert _energy_metric(coord, "htr", "A") == pytest.approx(0.001)
+        assert _power_metric(coord, "htr", "A") is None
 
     asyncio.run(_run())
 
@@ -923,9 +959,8 @@ def test_energy_processing_consistent_between_poll_and_ws(
         await poll_coord.async_refresh()
         await poll_coord.async_refresh()
 
-        poll_bucket = poll_coord.data["dev"]["htr"]
-        poll_energy = poll_bucket["energy"]["A"]
-        poll_power = poll_bucket["power"]["A"]
+        poll_energy = _energy_metric(poll_coord, "htr", "A")
+        poll_power = _power_metric(poll_coord, "htr", "A")
 
         ws_client = types.SimpleNamespace()
         ws_client.get_node_samples = AsyncMock(
@@ -941,10 +976,8 @@ def test_energy_processing_consistent_between_poll_and_ws(
             {"htr": {"A": {"samples": [{"t": 1600.0, "counter": 2400.0}]}}},
         )
 
-        ws_bucket = ws_coord.data["dev"]["htr"]
-
-        assert ws_bucket["energy"]["A"] == pytest.approx(poll_energy)
-        assert ws_bucket["power"]["A"] == pytest.approx(poll_power)
+        assert _energy_metric(ws_coord, "htr", "A") == pytest.approx(poll_energy)
+        assert _power_metric(ws_coord, "htr", "A") == pytest.approx(poll_power)
         assert ws_coord._last[("htr", "A")] == poll_coord._last[("htr", "A")]
 
     asyncio.run(_run())
@@ -979,11 +1012,9 @@ def test_merge_samples_for_window_updates_energy(
             },
         )
 
-        dev_data = coord.data["dev"]
-        assert dev_data["htr"]["energy"]["A"] == pytest.approx(2.4)
-        assert dev_data["htr"]["power"]["A"] == pytest.approx(1_200.0)
-        assert dev_data["pmo"]["energy"]["M"] == pytest.approx(0.5)
-        assert dev_data["power_monitor"] is dev_data["pmo"]
+        assert _energy_metric(coord, "htr", "A") == pytest.approx(2.4)
+        assert _power_metric(coord, "htr", "A") == pytest.approx(1_200.0)
+        assert _energy_metric(coord, "pmo", "M") == pytest.approx(0.5)
         last_point = coord._last[("htr", "A")]
         assert last_point[0] == pytest.approx((start + timedelta(hours=1)).timestamp())
         assert last_point[1] == pytest.approx(2.4)
@@ -1005,9 +1036,9 @@ def test_energy_samples_missing_fields(
         coord = EnergyStateCoordinator(hass, client, "dev", inventory)
 
         await coord.async_refresh()
-        data = coord.data["dev"]["htr"]
-        assert data["energy"] == {}
-        assert data["power"] == {}
+        snapshot = coerce_snapshot(coord.data)
+        assert snapshot is not None
+        assert snapshot.metrics_for_type("htr") == {}
 
     asyncio.run(_run())
 
@@ -1028,9 +1059,9 @@ def test_energy_samples_invalid_strings(
         coord = EnergyStateCoordinator(hass, client, "dev", inventory)
 
         await coord.async_refresh()
-        data = coord.data["dev"]["htr"]
-        assert data["energy"] == {}
-        assert data["power"] == {}
+        snapshot = coerce_snapshot(coord.data)
+        assert snapshot is not None
+        assert snapshot.metrics_for_type("htr") == {}
 
     asyncio.run(_run())
 
@@ -1050,9 +1081,9 @@ def test_energy_coordinator_alias_creates_canonical_bucket(
 
         result = await coord._async_update_data()
 
-        dev = result["dev"]
-        assert "pmo" in dev
-        assert dev["power_monitor"] is dev["pmo"]
+        snapshot = coerce_snapshot(result)
+        assert snapshot is not None
+        assert snapshot.metrics_for_type("pmo") == {}
 
     asyncio.run(_run())
 
@@ -1095,9 +1126,8 @@ def test_ws_samples_update_defers_polling(
 
         await coord.async_refresh()
 
-        data = coord.data["dev"]["htr"]
-        assert data["energy"]["A"] == pytest.approx(1.0)
-        assert "A" not in data["power"]
+        assert _energy_metric(coord, "htr", "A") == pytest.approx(1.0)
+        assert _power_metric(coord, "htr", "A") is None
 
         client.get_node_samples.reset_mock()
         client.get_node_samples.return_value = [{"t": 7200.0, "counter": 3000.0}]
@@ -1109,9 +1139,8 @@ def test_ws_samples_update_defers_polling(
             lease_seconds=300.0,
         )
 
-        updated = coord.data["dev"]["htr"]
-        assert updated["energy"]["A"] == pytest.approx(2.0)
-        assert updated["power"]["A"] == pytest.approx(1000.0)
+        assert _energy_metric(coord, "htr", "A") == pytest.approx(2.0)
+        assert _power_metric(coord, "htr", "A") == pytest.approx(1000.0)
         last_t, last_kwh = coord._last[("htr", "A")]
         assert last_t == pytest.approx(3600.0)
         assert last_kwh == pytest.approx(2.0)
@@ -1144,15 +1173,16 @@ def test_should_skip_poll_conditions(
 
     assert coord._should_skip_poll() is False
 
-    coord.data = {}
+    coord.data = None
     coord._ws_deadline = None
     assert coord._should_skip_poll() is False
 
+    coord.data = build_empty_snapshot("dev")
     coord._ws_deadline = 10.0
     monkeypatch.setattr(coord_module, "time_mod", lambda: 15.0)
     assert coord._should_skip_poll() is False
 
-    coord.data = {"dev": {}}
+    coord.data = build_empty_snapshot("dev")
     coord._ws_deadline = 20.0
     monkeypatch.setattr(coord_module, "time_mod", lambda: 5.0)
     assert coord._should_skip_poll() is True
@@ -1172,14 +1202,19 @@ def test_async_update_data_uses_cached_samples(
         inventory = inventory_from_map({"htr": ["A"]})
         coord = EnergyStateCoordinator(hass, client, "dev", inventory)
 
-        coord.data = {
-            "dev": {
-                "nodes_by_type": {
-                    "htr": {"addrs": ["A"], "energy": {"A": 1.0}, "power": {}}
-                },
-                "htr": {"addrs": ["A"], "energy": {"A": 1.0}, "power": {}},
-            }
-        }
+        node_id = DomainNodeId(DomainNodeType.HEATER, "A")
+        cached_metrics = EnergyNodeMetrics(
+            energy_kwh=1.0,
+            power_w=None,
+            source="ws",
+            ts=0.0,
+        )
+        coord.data = EnergySnapshot(
+            dev_id="dev",
+            metrics={node_id: cached_metrics},
+            updated_at=0.0,
+            ws_deadline=100.0,
+        )
         coord._ws_deadline = 100.0
 
         monkeypatch.setattr(coord_module, "time_mod", lambda: 50.0)
@@ -1189,7 +1224,9 @@ def test_async_update_data_uses_cached_samples(
 
         coord.data = ["bad"]  # type: ignore[assignment]
         monkeypatch.setattr(coord, "_should_skip_poll", lambda: True)
-        assert await coord._async_update_data() == {}
+        assert await coord._async_update_data() == build_empty_snapshot(
+            "dev", ws_deadline=coord._ws_deadline
+        )
 
     asyncio.run(_run())
 
@@ -1224,12 +1261,7 @@ def test_handle_ws_samples_skips_empty_points(
     client = types.SimpleNamespace()
     inventory = inventory_from_map({"htr": ["A"]})
     coord = EnergyStateCoordinator(hass, client, "dev", inventory)
-    coord.data = {
-        "dev": {
-            "nodes_by_type": {"htr": {"addrs": ["A"], "energy": {}, "power": {}}},
-            "htr": {"addrs": ["A"], "energy": {}, "power": {}},
-        }
-    }
+    coord.data = build_empty_snapshot("dev")
 
     coord.handle_ws_samples(
         "dev",
@@ -1250,16 +1282,7 @@ def test_pmo_samples_scale_and_power(
     client = types.SimpleNamespace()
     inventory = inventory_from_map({"pmo": ["M"]})
     coord = EnergyStateCoordinator(hass, client, "dev", inventory)
-    coord.data = {
-        "dev": {
-            "nodes_by_type": {
-                "pmo": {"addrs": ["M"], "energy": {}, "power": {}},
-                "htr": {"addrs": [], "energy": {}, "power": {}},
-            },
-            "pmo": {"addrs": ["M"], "energy": {}, "power": {}},
-            "htr": {"addrs": [], "energy": {}, "power": {}},
-        }
-    }
+    coord.data = build_empty_snapshot("dev")
     energy_bucket: dict[str, float] = {}
     power_bucket: dict[str, float] = {}
     coord._last = {("pmo", "M"): (1000.0, 1.0)}
@@ -1296,9 +1319,9 @@ def test_heater_energy_samples_empty_on_api_error(
         )
 
         await coord.async_refresh()
-        data = coord.data["1"]["htr"]
-        assert data["energy"] == {}
-        assert data["power"] == {}
+        snapshot = coerce_snapshot(coord.data)
+        assert snapshot is not None
+        assert snapshot.metrics_for_type("htr") == {}
         assert coord._last == {}
 
     asyncio.run(_run())
@@ -1364,9 +1387,8 @@ def test_energy_coordinator_handles_rate_limit_per_node(
 
         await coord.async_refresh()
 
-        dev_data = coord.data["dev"]
-        assert dev_data["htr"]["energy"]["A"] == pytest.approx(0.5)
-        assert dev_data["acm"]["energy"] == {}
+        assert _energy_metric(coord, "htr", "A") == pytest.approx(0.5)
+        assert _energy_metric(coord, "acm", "B") is None
         assert ("acm", "B") not in coord._last
         assert ("htr", "A") in coord._last
 
@@ -1569,7 +1591,7 @@ def test_ws_driven_refresh(
         coord = EnergyStateCoordinator(hass, client, "1", inventory)
 
         await coord.async_refresh()
-        assert coord.data["1"]["htr"]["energy"]["A"] == pytest.approx(0.001)
+        assert _energy_metric(coord, "htr", "A") == pytest.approx(0.001)
 
         client.get_node_samples = AsyncMock(
             return_value=[{"t": 2000, "counter": "2.0"}]
@@ -1588,7 +1610,7 @@ def test_ws_driven_refresh(
         )
         await asyncio.sleep(0)
 
-        assert coord.data["1"]["htr"]["energy"]["A"] == pytest.approx(0.002)
+        assert _energy_metric(coord, "htr", "A") == pytest.approx(0.002)
 
     asyncio.run(_run())
 
@@ -1620,18 +1642,16 @@ def test_energy_poll_preserves_cached_samples(
         await coord.async_refresh()
         await coord.async_refresh()
 
-        second_poll = coord.data["dev"]["htr"]
-        energy_after_second = second_poll["energy"]["A"]
-        power_after_second = second_poll["power"]["A"]
+        energy_after_second = _energy_metric(coord, "htr", "A")
+        power_after_second = _power_metric(coord, "htr", "A")
 
         assert energy_after_second == pytest.approx(2.0)
         assert power_after_second == pytest.approx(6_000.0)
 
         await coord.async_refresh()
 
-        third_poll = coord.data["dev"]["htr"]
-        assert third_poll["energy"]["A"] == pytest.approx(energy_after_second)
-        assert third_poll["power"]["A"] == pytest.approx(power_after_second)
+        assert _energy_metric(coord, "htr", "A") == pytest.approx(energy_after_second)
+        assert _power_metric(coord, "htr", "A") == pytest.approx(power_after_second)
 
     asyncio.run(_run())
 
