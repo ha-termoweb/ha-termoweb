@@ -206,6 +206,16 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._ws_health
     Return the shared websocket health tracker for this client.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._status_should_reset_health
     Return True when a status transition should reset health.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._increment_state_counter
+    Increment a numeric counter in the websocket state bucket.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._record_update_event
+    Record a meaningful update event timestamp.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._record_parse_error
+    Track JSON parse failures and return True when reconnection is advised.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._decode_socketio_event
+    Decode a Socket.IO ``42`` payload safely.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._update_status_from_heartbeat
+    Update status based on heartbeat activity and payload recency.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._build_handshake_url
     Return a handshake URL with the provided query parameters.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._record_frame

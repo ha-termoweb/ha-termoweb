@@ -718,7 +718,7 @@ async def test_keepalive_loop_sends_engineio_pings(
 async def test_read_loop_marks_healthy_on_engineio_pong(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Receiving a pong frame should mark the websocket as healthy."""
+    """Receiving a pong frame should not mark the websocket as healthy."""
 
     client = _make_client(monkeypatch)
     statuses: list[str] = []
@@ -739,7 +739,10 @@ async def test_read_loop_marks_healthy_on_engineio_pong(
 
     await _run_read_loop(client)
 
-    assert statuses and statuses[-1] == "healthy"
+    tracker = client._ws_health
+    assert statuses == []
+    assert tracker.last_heartbeat_at is not None
+    assert tracker.status != "healthy"
 
 
 @pytest.mark.asyncio
@@ -2215,6 +2218,106 @@ def test_record_frame_resets_idle_recovery(monkeypatch: pytest.MonkeyPatch) -> N
     assert client._idle_recovery_attempts == 0
     assert client._idle_recovery_window_start == 0.0
     assert client._last_idle_recovery_at == 12.0
+
+
+@pytest.mark.asyncio
+async def test_subscribe_telemetry_tracks_success_and_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Subscription attempts should record success and failure counters."""
+
+    client = _make_client(monkeypatch)
+    client._ws = SimpleNamespace(closed=False)
+    client._inventory = None
+    hass_bucket = client.hass.data[ducaheat_ws.DOMAIN][client.entry_id]
+    hass_bucket.pop("inventory", None)
+    monkeypatch.setattr(client, "_emit_sio", AsyncMock())
+
+    result_first = await client._subscribe_feeds(now=10.0)
+
+    state = hass_bucket["ws_state"][client.dev_id]
+    assert result_first == 0
+    assert state["subscribe_attempts_total"] == 1
+    assert state["subscribe_fail_total"] == 1
+    assert state["subscribe_success_total"] == 0
+    assert client._pending_subscribe is True
+
+    _set_inventory(client, _build_inventory_payload())
+    client._pending_subscribe = True
+    emit_mock = AsyncMock()
+    monkeypatch.setattr(client, "_emit_sio", emit_mock)
+
+    result_second = await client._subscribe_feeds(now=200.0)
+
+    state = hass_bucket["ws_state"][client.dev_id]
+    assert result_second == 2
+    assert emit_mock.await_count == 2
+    assert state["subscribe_attempts_total"] == 2
+    assert state["subscribe_fail_total"] == 1
+    assert state["subscribe_success_total"] == 1
+    assert state["last_subscribe_success_at"] == 200.0
+    assert client._pending_subscribe is False
+    assert len(client._subscription_paths) == 2
+
+
+@pytest.mark.asyncio
+async def test_idle_recovery_updates_state_bucket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Idle recovery attempts should update telemetry counters."""
+
+    client = _make_client(monkeypatch)
+    client._ws = SimpleNamespace(closed=False)
+    client._status = "healthy"
+    client._pending_dev_data = False
+
+    monkeypatch.setattr(client, "_emit_sio", AsyncMock())
+    monkeypatch.setattr(client, "_replay_subscription_paths", AsyncMock())
+    monkeypatch.setattr(client, "_maybe_subscribe", AsyncMock())
+
+    await client._recover_from_idle(
+        now=500.0,
+        idle_for=100.0,
+        payload_stale=True,
+    )
+
+    state = client.hass.data[ducaheat_ws.DOMAIN][client.entry_id]["ws_state"][
+        client.dev_id
+    ]
+    assert state["recovery_attempts_total"] == 1
+    assert state["last_recovery_at"] == 500.0
+
+
+@pytest.mark.asyncio
+async def test_parse_error_does_not_block_update_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Malformed Socket.IO events should be counted without stopping updates."""
+
+    client = _make_client(monkeypatch)
+    client._ws = QueueWebSocket(
+        [
+            SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data='42["update"'),
+            SimpleNamespace(
+                type=aiohttp.WSMsgType.TEXT,
+                data='42["update",{"path":"/htr/1/status","body":{"status":{"on":true}}}]',
+            ),
+            SimpleNamespace(type=aiohttp.WSMsgType.CLOSE, data=None),
+        ]
+    )
+    client._status = "connected"
+    client._pending_dev_data = False
+    monkeypatch.setattr(client, "_maybe_subscribe", AsyncMock(return_value=0))
+    monkeypatch.setattr(client, "_emit_sio", AsyncMock())
+
+    await _run_read_loop(client)
+
+    state = client.hass.data[ducaheat_ws.DOMAIN][client.entry_id]["ws_state"][
+        client.dev_id
+    ]
+    assert state["parse_errors_total"] == 1
+    assert state["last_update_event_at"] is not None
+    assert client._stats.events_total == 1
 
 
 @pytest.mark.asyncio

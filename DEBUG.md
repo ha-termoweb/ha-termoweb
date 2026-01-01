@@ -62,3 +62,14 @@ The integration exposes the `termoweb.import_energy_history` service to backfill
 - Device resets are detected when the cumulative counter drops by more than **0.2 kWh**. The integration starts a new accumulation segment without breaking the monotonic sum expected by Home Assistant.
 - Duplicate timestamps are discarded to avoid redundant statistics writes.
 - A per-node summary and a final run summary are logged at INFO level. The most recent summary is also exposed in diagnostics (`energy_import.last_run`).
+
+---
+
+## Websocket health telemetry (diagnostics)
+
+The **TermoWeb diagnostics JSON** now surfaces extra websocket fields to help support identify “connected but quiet” issues for Ducaheat devices:
+
+- `subscribe_attempts_total`, `subscribe_success_total`, `subscribe_fail_total`, `last_subscribe_success_at` — show whether subscriptions were installed and when they last succeeded.
+- `recovery_attempts_total`, `last_recovery_at` — count idle recovery attempts and the timestamp of the most recent recovery.
+- `last_update_event_at` — the most recent device update (dev_data/update) received from the cloud.
+- `parse_errors_total` — number of malformed websocket frames that were skipped.
