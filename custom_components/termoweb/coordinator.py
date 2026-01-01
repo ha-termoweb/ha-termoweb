@@ -140,7 +140,7 @@ def _device_display_name(device: DeviceMetadata | None, dev_id: str) -> str:
 
 
 class StateCoordinator(
-    RaiseUpdateFailedCoordinator[EnergySnapshot]
+    RaiseUpdateFailedCoordinator[dict[str, dict[str, Any]]]
 ):  # dev_id -> per-device data
     """Polls TermoWeb and exposes a per-device dict used by platforms."""
 
@@ -1060,7 +1060,7 @@ class StateCoordinator(
 
 
 class EnergyStateCoordinator(
-    RaiseUpdateFailedCoordinator[dict[str, dict[str, Any]]]
+    RaiseUpdateFailedCoordinator[EnergySnapshot]
 ):  # dev_id -> per-device data
     """Polls heater energy counters and exposes energy and power per heater."""
 

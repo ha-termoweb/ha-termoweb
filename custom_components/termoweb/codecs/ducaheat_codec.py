@@ -31,30 +31,6 @@ from .ducaheat_models import (
 )
 
 
-def decode_payload(payload: Any) -> Any:
-    """Decode a Ducaheat payload (placeholder)."""
-
-    raise NotImplementedError
-
-
-def decode_status(payload: Any) -> Any:
-    """Decode a Ducaheat status payload into domain state."""
-
-    raise NotImplementedError
-
-
-def decode_samples(payload: Any) -> Any:
-    """Decode Ducaheat samples payloads."""
-
-    raise NotImplementedError
-
-
-def decode_prog(payload: Any) -> Any:
-    """Decode Ducaheat program payloads."""
-
-    raise NotImplementedError
-
-
 def decode_settings(payload: Any, *, node_type: NodeType) -> dict[str, Any]:
     """Decode segmented settings payloads into canonical mappings."""
 

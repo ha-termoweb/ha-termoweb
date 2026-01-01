@@ -40,18 +40,6 @@ from .termoweb_models import (
 _LOGGER = logging.getLogger(__name__)
 
 
-def decode_payload(payload: Any) -> Any:
-    """Decode a TermoWeb payload."""
-
-    raise NotImplementedError
-
-
-def encode_payload(data: Any) -> Any:
-    """Encode data for TermoWeb payloads."""
-
-    raise NotImplementedError
-
-
 def _validate_prog(prog: list[int]) -> list[int]:
     """Validate a weekly program sequence."""
 
