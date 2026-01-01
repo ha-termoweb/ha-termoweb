@@ -724,14 +724,6 @@ custom_components/termoweb/codecs/common.py :: format_temperature
     Format numeric temperatures to a one-decimal string.
 custom_components/termoweb/codecs/common.py :: validate_units
     Validate and normalise temperature units.
-custom_components/termoweb/codecs/ducaheat_codec.py :: decode_payload
-    Decode a Ducaheat payload (placeholder).
-custom_components/termoweb/codecs/ducaheat_codec.py :: decode_status
-    Decode a Ducaheat status payload into domain state.
-custom_components/termoweb/codecs/ducaheat_codec.py :: decode_samples
-    Decode Ducaheat samples payloads.
-custom_components/termoweb/codecs/ducaheat_codec.py :: decode_prog
-    Decode Ducaheat program payloads.
 custom_components/termoweb/codecs/ducaheat_codec.py :: decode_settings
     Decode segmented settings payloads into canonical mappings.
 custom_components/termoweb/codecs/ducaheat_codec.py :: _decode_status_payload
@@ -808,10 +800,6 @@ custom_components/termoweb/codecs/ducaheat_planner.py :: _build_write_call
     Build the primary write call for the supplied command.
 custom_components/termoweb/codecs/ducaheat_planner.py :: _ensure_accumulator
     Validate that accumulator-only commands target an accumulator.
-custom_components/termoweb/codecs/termoweb_codec.py :: decode_payload
-    Decode a TermoWeb payload.
-custom_components/termoweb/codecs/termoweb_codec.py :: encode_payload
-    Encode data for TermoWeb payloads.
 custom_components/termoweb/codecs/termoweb_codec.py :: _validate_prog
     Validate a weekly program sequence.
 custom_components/termoweb/codecs/termoweb_codec.py :: _validate_ptemp
