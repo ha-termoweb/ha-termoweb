@@ -65,6 +65,14 @@ def test_decode_node_settings_strips_vendor_blobs() -> None:
     assert decoded == {"mode": "auto"}
 
 
+def test_decode_node_settings_falls_back_on_validation_error() -> None:
+    raw = {"mode": "manual", "status": object(), "temp": "19"}
+
+    decoded = decode_node_settings("htr", raw)
+
+    assert decoded == {"mode": "manual", "temp": "19"}
+
+
 def test_decode_samples_filters_invalid_items(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
     raw = {

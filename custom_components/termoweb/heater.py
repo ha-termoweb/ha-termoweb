@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass, fields
 from datetime import datetime, timedelta
 import logging
 from typing import Any, Final, cast
@@ -578,7 +578,9 @@ def _derive_boost_state(
         """Parse an ISO timestamp string defensively."""
 
         parser = getattr(dt_util, "parse_datetime", None)
-        parsed = parser(value) if callable(parser) else None  # pragma: no cover - best-effort
+        parsed = (
+            parser(value) if callable(parser) else None
+        )  # pragma: no cover - best-effort
         if parsed is not None:
             return parsed
         try:
@@ -853,13 +855,22 @@ def heater_platform_details_for_entry(
                     nodes_payload = entry_data.get("nodes")
                 if nodes_payload is None and coordinator is not None:
                     nodes_payload = getattr(coordinator, "nodes", None)
-                dev_id = entry_data.get("dev_id") if isinstance(entry_data, Mapping) else None
+                dev_id = (
+                    entry_data.get("dev_id")
+                    if isinstance(entry_data, Mapping)
+                    else None
+                )
                 if isinstance(nodes_payload, Mapping) and isinstance(dev_id, str):
                     try:
-                        inventory = Inventory(dev_id, build_node_inventory(nodes_payload))
+                        inventory = Inventory(
+                            dev_id, build_node_inventory(nodes_payload)
+                        )
                         if isinstance(entry_data, MutableMapping):
                             entry_data["inventory"] = inventory
-                    except (TypeError, ValueError):  # pragma: no cover - defensive reconstruction
+                    except (
+                        TypeError,
+                        ValueError,
+                    ):  # pragma: no cover - defensive reconstruction
                         inventory = None
         if inventory is None:
             dev_id: str | None = None
@@ -1085,11 +1096,11 @@ class HeaterNodeBase(CoordinatorEntity):
         settings: dict[str, Any] = {}
         state = self.heater_state()
         if state is not None:
-            state_payload = {
-                key: value
-                for key, value in asdict(state).items()
-                if value is not None
-            }
+            state_payload: dict[str, Any] = {}
+            for field in fields(state):
+                value = getattr(state, field.name)
+                if value is not None:
+                    state_payload[field.name] = value
             settings = {self._addr: state_payload}
 
         section: dict[str, Any] = {"settings": settings}
