@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import logging
 from typing import Any
 
@@ -9,6 +10,7 @@ from pydantic import BaseModel, ValidationError
 
 from custom_components.termoweb.backend.sanitize import validate_boost_minutes
 from custom_components.termoweb.codecs.common import format_temperature, validate_units
+from custom_components.termoweb.domain import canonicalize_settings_payload
 from custom_components.termoweb.domain.commands import (
     AccumulatorCommand,
     BaseCommand,
@@ -239,10 +241,10 @@ def decode_nodes_payload(raw: Any) -> Any:
 
 
 def decode_node_settings(node_type: str, raw: Any) -> dict[str, Any]:
-    """Validate and normalise node settings while preserving legacy keys."""
+    """Validate and normalise node settings while preserving canonical keys only."""
 
-    if not isinstance(raw, dict):
-        return raw if raw is not None else {}
+    if not isinstance(raw, Mapping):
+        return {}
 
     model_cls = HeaterSettingsPayload
     if node_type == "thm":
@@ -254,21 +256,29 @@ def decode_node_settings(node_type: str, raw: Any) -> dict[str, Any]:
         model = model_cls.model_validate(raw)
         validated = model.model_dump(exclude_none=True)
     except ValidationError:
-        return dict(raw)
+        validated = dict(raw)
+
+    payload: dict[str, Any] = dict(validated)
+    status_raw = raw.get("status")
+    validated_status = payload.get("status")
+    status_payload = (
+        validated_status
+        if isinstance(validated_status, Mapping)
+        else status_raw
+        if isinstance(status_raw, Mapping)
+        else None
+    )
 
     if node_type in {"htr", "acm"}:
         for key in ("mode", "stemp", "mtemp", "temp", "ptemp", "prog"):
-            if key in raw:
-                validated.setdefault(key, raw.get(key))
+            if key in raw and key not in payload:
+                payload[key] = raw.get(key)
 
-    status_raw = raw.get("status")
-    if node_type in {"htr", "acm", "thm"} and isinstance(status_raw, dict):
-        status_validated = validated.setdefault("status", {})
-        if isinstance(status_validated, dict):
-            for key in ("stemp", "mtemp", "temp", "mode", "ptemp", "prog"):
-                if key in status_raw:
-                    status_validated.setdefault(key, status_raw.get(key))
-    return validated
+    if status_payload:
+        payload["status"] = status_payload
+
+    payload.pop("capabilities", None)
+    return canonicalize_settings_payload(payload)
 
 
 def decode_samples(

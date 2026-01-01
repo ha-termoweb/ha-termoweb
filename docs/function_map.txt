@@ -733,7 +733,7 @@ custom_components/termoweb/codecs/ducaheat_codec.py :: decode_samples
 custom_components/termoweb/codecs/ducaheat_codec.py :: decode_prog
     Decode Ducaheat program payloads.
 custom_components/termoweb/codecs/ducaheat_codec.py :: decode_settings
-    Decode segmented settings payloads into the legacy mapping.
+    Decode segmented settings payloads into canonical mappings.
 custom_components/termoweb/codecs/ducaheat_codec.py :: _decode_status_payload
     Normalise heater/accumulator settings payloads.
 custom_components/termoweb/codecs/ducaheat_codec.py :: _decode_thm_settings
@@ -746,10 +746,6 @@ custom_components/termoweb/codecs/ducaheat_codec.py :: _merge_boost_metadata._as
     Assign a metadata value while respecting preference rules.
 custom_components/termoweb/codecs/ducaheat_codec.py :: _merge_accumulator_charge_metadata
     Copy accumulator charge metadata from ``source`` into ``target``.
-custom_components/termoweb/codecs/ducaheat_codec.py :: _normalise_acm_capabilities
-    Merge accumulator capability dictionaries into a single mapping.
-custom_components/termoweb/codecs/ducaheat_codec.py :: _normalise_acm_capabilities._merge
-    Recursively merge capability dictionaries.
 custom_components/termoweb/codecs/ducaheat_codec.py :: _normalise_prog
     Convert vendor programme payloads into a 168-slot list.
 custom_components/termoweb/codecs/ducaheat_codec.py :: _normalise_prog._coerce_slots
@@ -833,7 +829,7 @@ custom_components/termoweb/codecs/termoweb_codec.py :: decode_devs_payload
 custom_components/termoweb/codecs/termoweb_codec.py :: decode_nodes_payload
     Validate and normalise a nodes payload without changing semantics.
 custom_components/termoweb/codecs/termoweb_codec.py :: decode_node_settings
-    Validate and normalise node settings while preserving legacy keys.
+    Validate and normalise node settings while preserving canonical keys only.
 custom_components/termoweb/codecs/termoweb_codec.py :: decode_samples
     Normalise heater samples payloads into {"t", "counter"} lists.
 custom_components/termoweb/codecs/termoweb_models.py :: NodeSummary._stringify_numeric

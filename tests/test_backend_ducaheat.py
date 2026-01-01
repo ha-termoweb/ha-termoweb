@@ -122,7 +122,7 @@ async def test_ducaheat_rest_client_fetches_generic_node(
     monkeypatch.setattr(ducaheat_rest_client, "_request", fake_request)
 
     result = await ducaheat_rest_client.get_node_settings("dev", ("pmo", "9"))
-    assert result == {"status": {"power": 0}}
+    assert result == {"power": 0}
     assert seen["method"] == "GET"
     assert seen["path"] == "/api/v2/devs/dev/pmo/9"
     assert seen["kwargs"] == {"headers": {"Authorization": "Bearer token"}}

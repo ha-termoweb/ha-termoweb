@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from copy import deepcopy
 from datetime import datetime, timedelta
 import logging
 from typing import Any
@@ -31,6 +30,7 @@ from custom_components.termoweb.const import (
     NODE_SAMPLES_PATH_FMT,
     WS_NAMESPACE,
 )
+from custom_components.termoweb.domain import canonicalize_settings_payload
 from custom_components.termoweb.domain.commands import (
     BaseCommand,
     SetMode,
@@ -753,12 +753,7 @@ class DucaheatRESTClient(RESTClient):
             if key in payload:
                 flattened[key] = payload[key]
 
-        if node_type == "acm":
-            capabilities = self._normalise_acm_capabilities(payload)
-            if capabilities:
-                flattened["capabilities"] = capabilities
-
-        return flattened
+        return canonicalize_settings_payload(flattened)
 
     def _normalise_thm_settings(self, payload: Any) -> dict[str, Any]:
         """Return a normalised thermostat settings mapping."""
@@ -824,38 +819,7 @@ class DucaheatRESTClient(RESTClient):
         if batt_value is not None:
             normalised["batt_level"] = max(0, min(5, batt_value))
 
-        sync_status = payload.get("sync_status")
-        if isinstance(sync_status, str):
-            normalised["sync_status"] = sync_status
-
-        return normalised
-
-    def _normalise_acm_capabilities(self, payload: Any) -> dict[str, Any]:
-        """Merge accumulator capability dictionaries into a single mapping."""
-
-        merged: dict[str, Any] = {}
-
-        def _merge(target: dict[str, Any], source: dict[str, Any]) -> None:
-            """Recursively merge capability dictionaries."""
-            for key, value in source.items():
-                if isinstance(value, dict) and isinstance(target.get(key), dict):
-                    _merge(target[key], value)
-                elif isinstance(value, dict):
-                    target[key] = deepcopy(value)
-                else:
-                    target[key] = value
-
-        for container in (
-            payload,
-            payload.get("status") if isinstance(payload, dict) else None,
-            payload.get("setup") if isinstance(payload, dict) else None,
-        ):
-            if isinstance(container, dict):
-                candidate = container.get("capabilities")
-                if isinstance(candidate, dict):
-                    _merge(merged, candidate)
-
-        return merged
+        return canonicalize_settings_payload(normalised)
 
     def _normalise_prog(self, data: Any) -> list[int] | None:
         """Convert vendor programme payloads into a 168-slot list."""
