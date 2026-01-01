@@ -347,7 +347,7 @@ def test_accumulator_boost_cancel_button_tracks_availability() -> None:
         assert button.available is True
 
         assert coordinator.apply_entity_patch(
-            "acm", addr, lambda cur: cur.__setitem__("boost_active", False)
+            "acm", addr, lambda cur: setattr(cur, "boost_active", False)
         )
         for listener in list(getattr(coordinator, "listeners", [])):
             listener()

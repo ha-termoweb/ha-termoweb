@@ -37,9 +37,7 @@ from .domain.state import (
     NodeSettingsDelta,
     PowerMonitorState,
     ThermostatState,
-    apply_payload_to_state,
     clone_state,
-    state_to_dict,
 )
 from .domain.view import DomainStateView
 from .inventory import Inventory, normalize_node_addr, normalize_node_type
@@ -804,44 +802,80 @@ class StateCoordinator(
             return False
 
         try:
-            current_state = store.get_state(normalized_type, addr)
-            working_state = clone_state(current_state)
-            if working_state is None:
-                if normalized_type == DomainNodeType.ACCUMULATOR.value:
-                    working_state = AccumulatorState()
-                elif normalized_type == DomainNodeType.THERMOSTAT.value:
-                    working_state = ThermostatState()
-                elif normalized_type == DomainNodeType.POWER_MONITOR.value:
-                    working_state = PowerMonitorState()
-                else:
-                    working_state = HeaterState()
-
-            before_boost = (
-                getattr(working_state, "boost", None),
-                getattr(working_state, "boost_active", None),
-                getattr(working_state, "boost_end_day", None),
-                getattr(working_state, "boost_end_min", None),
+            node_id = store.resolve_node_id(normalized_type, addr)
+        except (TypeError, ValueError) as err:  # pragma: no cover - defensive
+            _LOGGER.debug(
+                "Failed to resolve node for optimistic patch type=%s addr=%s: %s",
+                node_type,
+                addr,
+                err,
             )
-            try:
-                mutator(working_state)
-            except (AttributeError, TypeError):
-                payload = state_to_dict(working_state, include_none=True)
-                mutator(payload)  # type: ignore[arg-type]
-                apply_payload_to_state(working_state, payload)
-            after_boost = (
-                getattr(working_state, "boost", None),
-                getattr(working_state, "boost_active", None),
-                getattr(working_state, "boost_end_day", None),
-                getattr(working_state, "boost_end_min", None),
-            )
-            if before_boost != after_boost and isinstance(
-                working_state, AccumulatorState
-            ):
-                working_state.boost_end_datetime = None
-                working_state.boost_minutes_delta = None
+            return False
 
-            payload = state_to_dict(working_state, include_none=True)
-            store.apply_patch(normalized_type, addr, payload)
+        if node_id is None:
+            return False
+
+        target_ids: list[DomainNodeId] = [node_id]
+        seen_ids: set[DomainNodeId] = {node_id}
+        for candidate_type, addresses in store.addresses_by_type.items():
+            if addr not in addresses or candidate_type == node_id.node_type.value:
+                continue
+            extra_id = store.resolve_node_id(candidate_type, addr)
+            if extra_id is not None and extra_id not in seen_ids:
+                target_ids.append(extra_id)
+                seen_ids.add(extra_id)
+
+        updated = False
+        try:
+            for target_id in target_ids:
+                current_state = store.get_state(target_id.node_type, target_id.addr)
+                working_state = clone_state(current_state)
+                if working_state is None:
+                    if target_id.node_type is DomainNodeType.ACCUMULATOR:
+                        working_state = AccumulatorState()
+                    elif target_id.node_type is DomainNodeType.THERMOSTAT:
+                        working_state = ThermostatState()
+                    elif target_id.node_type is DomainNodeType.POWER_MONITOR:
+                        working_state = PowerMonitorState()
+                    else:
+                        working_state = HeaterState()
+
+                before_boost = (
+                    getattr(working_state, "boost", None),
+                    getattr(working_state, "boost_active", None),
+                    getattr(working_state, "boost_end_day", None),
+                    getattr(working_state, "boost_end_min", None),
+                )
+                try:
+                    mutator(working_state)
+                except _CANCELLED_ERROR:
+                    raise
+                except Exception as err:  # pragma: no cover - defensive  # noqa: BLE001
+                    _LOGGER.debug(
+                        "Failed to apply optimistic patch type=%s addr=%s: %s",
+                        target_id.node_type.value,
+                        target_id.addr,
+                        err,
+                    )
+                    return False
+                after_boost = (
+                    getattr(working_state, "boost", None),
+                    getattr(working_state, "boost_active", None),
+                    getattr(working_state, "boost_end_day", None),
+                    getattr(working_state, "boost_end_min", None),
+                )
+                if before_boost != after_boost and isinstance(
+                    working_state, AccumulatorState
+                ):
+                    working_state.boost_end_datetime = None
+                    working_state.boost_minutes_delta = None
+
+                store.replace_state(
+                    target_id.node_type,
+                    target_id.addr,
+                    working_state,
+                )
+                updated = True
         except _CANCELLED_ERROR:
             raise
         except Exception as err:  # pragma: no cover - defensive  # noqa: BLE001
@@ -853,8 +887,9 @@ class StateCoordinator(
             )
             return False
 
-        self._publish_device_record()
-        return True
+        if updated:
+            self._publish_device_record()
+        return updated
 
     async def async_refresh_heater(self, node: str | tuple[str, str]) -> None:
         """Refresh settings for a specific node and push the update to listeners."""

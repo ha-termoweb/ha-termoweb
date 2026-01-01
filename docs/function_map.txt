@@ -1076,6 +1076,8 @@ custom_components/termoweb/domain/state.py :: DomainStateStore.reset_nodes
     Reset the allowed node list and prune any stale state.
 custom_components/termoweb/domain/state.py :: DomainStateStore._resolve_node_id
     Return a canonical NodeId when permitted by the inventory.
+custom_components/termoweb/domain/state.py :: DomainStateStore.resolve_node_id
+    Return the canonical NodeId when permitted by the inventory.
 custom_components/termoweb/domain/state.py :: DomainStateStore._apply_payload
     Apply ``payload`` to ``node_id`` using replace semantics when requested.
 custom_components/termoweb/domain/state.py :: DomainStateStore.apply_full_snapshot
@@ -1092,6 +1094,8 @@ custom_components/termoweb/domain/state.py :: DomainStateStore.known_types
     Return the set of node types represented in the store.
 custom_components/termoweb/domain/state.py :: DomainStateStore.iter_states
     Yield stored ``(NodeId, DomainState)`` pairs.
+custom_components/termoweb/domain/state.py :: DomainStateStore.replace_state
+    Replace the stored state for ``(node_type, addr)`` when valid.
 custom_components/termoweb/domain/state.py :: _normalize_node_type
     Return a canonical ``NodeType`` when possible.
 custom_components/termoweb/domain/state.py :: build_state_from_payload

@@ -1281,18 +1281,17 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
     settings["boost_remaining"] = ""
     coordinator.resolve_boost_end = RaisingResolver()  # type: ignore[assignment]
 
+    def _apply_first(cur: Any) -> None:
+        cur.boost_active = settings["boost_active"]
+        cur.boost_end_day = settings["boost_end_day"]
+        cur.boost_end_min = settings["boost_end_min"]
+        cur.boost_end = settings["boost_end"]
+        cur.boost_remaining = settings["boost_remaining"]
+
     assert coordinator.apply_entity_patch(
         "acm",
         addr,
-        lambda cur: cur.update(
-            {
-                "boost_active": settings["boost_active"],
-                "boost_end_day": settings["boost_end_day"],
-                "boost_end_min": settings["boost_end_min"],
-                "boost_end": settings["boost_end"],
-                "boost_remaining": settings["boost_remaining"],
-            }
-        ),
+        _apply_first,
     )
 
     attrs = entity.extra_state_attributes
@@ -1309,18 +1308,17 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
     settings["boost_remaining"] = None
     coordinator.resolve_boost_end = None  # type: ignore[assignment]
 
+    def _apply_second(cur: Any) -> None:
+        cur.boost_active = settings["boost_active"]
+        cur.boost = settings["boost"]
+        cur.mode = settings["mode"]
+        cur.boost_end = settings["boost_end"]
+        cur.boost_remaining = settings["boost_remaining"]
+
     assert coordinator.apply_entity_patch(
         "acm",
         addr,
-        lambda cur: cur.update(
-            {
-                "boost_active": settings["boost_active"],
-                "boost": settings["boost"],
-                "mode": settings["mode"],
-                "boost_end": settings["boost_end"],
-                "boost_remaining": settings["boost_remaining"],
-            }
-        ),
+        _apply_second,
     )
 
     attrs = entity.extra_state_attributes
@@ -1331,16 +1329,15 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
     settings["boost_remaining"] = 7.5
     coordinator.resolve_boost_end = None  # type: ignore[assignment]
 
+    def _apply_third(cur: Any) -> None:
+        cur.boost_active = settings["boost_active"]
+        cur.boost_end = settings["boost_end"]
+        cur.boost_remaining = settings["boost_remaining"]
+
     assert coordinator.apply_entity_patch(
         "acm",
         addr,
-        lambda cur: cur.update(
-            {
-                "boost_active": settings["boost_active"],
-                "boost_end": settings["boost_end"],
-                "boost_remaining": settings["boost_remaining"],
-            }
-        ),
+        _apply_third,
     )
 
     attrs = entity.extra_state_attributes

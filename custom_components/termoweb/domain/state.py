@@ -397,6 +397,11 @@ class DomainStateStore:
             return None
         return self._allowed.get(candidate)
 
+    def resolve_node_id(self, node_type: NodeType | str, addr: Any) -> NodeId | None:
+        """Return the canonical NodeId when permitted by the inventory."""
+
+        return self._resolve_node_id(node_type, addr)
+
     def _apply_payload(
         self, node_id: NodeId, payload: Mapping[str, Any], *, replace: bool
     ) -> None:
@@ -496,6 +501,41 @@ class DomainStateStore:
         """Yield stored ``(NodeId, DomainState)`` pairs."""
 
         yield from self._states.items()
+
+    def replace_state(
+        self,
+        node_type: NodeType | str,
+        addr: Any,
+        state: DomainState | None,
+    ) -> None:
+        """Replace the stored state for ``(node_type, addr)`` when valid."""
+
+        if state is None:
+            return
+
+        node_id = self._resolve_node_id(node_type, addr)
+        if node_id is None:
+            msg = f"Unknown node for replace_state: type={node_type} addr={addr}"
+            raise ValueError(msg)
+
+        expected_type: type[DomainState]
+        if node_id.node_type is NodeType.ACCUMULATOR:
+            expected_type = AccumulatorState
+        elif node_id.node_type is NodeType.THERMOSTAT:
+            expected_type = ThermostatState
+        elif node_id.node_type is NodeType.POWER_MONITOR:
+            expected_type = PowerMonitorState
+        else:
+            expected_type = HeaterState
+
+        if type(state) is not expected_type:
+            msg = (
+                f"State type {type(state).__name__} does not match "
+                f"node_type={node_id.node_type.value}"
+            )
+            raise TypeError(msg)
+
+        self._states[node_id] = state
 
 
 def _normalize_node_type(node_type: NodeType | str) -> NodeType | None:
