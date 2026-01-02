@@ -194,6 +194,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._subscription_refresh_lock = asyncio.Lock()
         self._send_lock = asyncio.Lock()
         self._idle_monitor_task: asyncio.Task | None = None
+        self._last_soft_refresh_at = 0.0
+        self._last_soft_refresh_payload_at = 0.0
         self._idle_recovery_lock = asyncio.Lock()
         self._last_idle_recovery_at = 0.0
         self._idle_recovery_attempts = 0
@@ -551,9 +553,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 await self._send_str("3", context="probe-pong", ws=self._ws)
                 continue
             if _LOGGER.isEnabledFor(logging.DEBUG):
-                _LOGGER.debug(
-                    "WS (ducaheat): unexpected probe frame: %r", probe
-                )
+                _LOGGER.debug("WS (ducaheat): unexpected probe frame: %r", probe)
         if not probe_ack:
             raise HandshakeError(408, ws_url, "probe ack timeout")
         await self._send_str("5", context="upgrade", ws=self._ws)
@@ -664,6 +664,69 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             if self._idle_monitor_task is task:
                 self._idle_monitor_task = None
 
+    async def _maybe_refresh_leases(self, *, now: float) -> bool:
+        """Proactively refresh subscriptions before payload staleness."""
+
+        tracker = self._ws_health
+        last_payload = tracker.last_payload_at
+        window_hint = (
+            self._payload_window_hint
+            or tracker.payload_stale_after
+            or self._payload_stale_after
+        )
+        try:
+            hint_value = float(window_hint)  # type: ignore[arg-type]
+            payload_ts = float(last_payload) if last_payload is not None else None
+        except (TypeError, ValueError):
+            return False
+
+        ws = self._ws
+        elapsed = now - payload_ts if payload_ts is not None else -1.0
+        threshold = hint_value * 0.8 if math.isfinite(hint_value) else -1.0
+        min_interval = (
+            max(30.0, hint_value * 0.25) if math.isfinite(hint_value) else 30.0
+        )
+        duplicate_refresh = (
+            payload_ts is not None
+            and self._last_soft_refresh_payload_at == payload_ts
+            and elapsed < (hint_value + _PAYLOAD_WINDOW_MARGIN_FLOOR)
+        )
+        ready = (
+            ws is not None
+            and not ws.closed
+            and self._status == "healthy"
+            and not self._pending_dev_data
+            and payload_ts is not None
+            and math.isfinite(hint_value)
+            and hint_value > 0
+            and elapsed >= threshold
+            and elapsed >= 0
+            and now - self._last_soft_refresh_at >= min_interval
+            and not duplicate_refresh
+        )
+        if not ready:
+            return False
+
+        self._last_soft_refresh_at = now
+        self._last_soft_refresh_payload_at = payload_ts
+        try:
+            await self._emit_sio("dev_data")
+            await self._replay_subscription_paths()
+        except Exception:  # noqa: BLE001  # pragma: no cover - defensive logging
+            _LOGGER.debug(
+                "WS (ducaheat): soft lease refresh failed for %s",
+                self.dev_id,
+                exc_info=True,
+            )
+            return False
+
+        _LOGGER.info(
+            "WS (ducaheat): refreshing websocket lease early (age=%.0fs window=%.0fs)",
+            elapsed,
+            hint_value,
+        )
+        return True
+
     async def _handle_idle_check(self, now: float) -> bool:
         """Perform a single idle check iteration."""
 
@@ -676,6 +739,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         last_event = last_update or last_payload or tracker.last_heartbeat_at
         idle_for = now - last_event if isinstance(last_event, (int, float)) else None
         self._refresh_ws_payload_state(now=now, reason="idle_monitor")
+        await self._maybe_refresh_leases(now=now)
         threshold = self._idle_threshold()
         update_idle_for: float | None
         if last_update is not None:

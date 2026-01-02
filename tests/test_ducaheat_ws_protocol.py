@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import math
 import logging
 import json
 from types import MappingProxyType, SimpleNamespace
@@ -272,6 +273,216 @@ async def test_request_resubscribe_kicks_immediate_subscribe(
         await client._resubscribe_kick_task
 
     assert maybe_subscribe.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_soft_refresh_triggers_before_payload_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Refresh websocket leases before payload staleness triggers idle recovery."""
+
+    client = _make_client(monkeypatch)
+    client._ws = client._session._ws  # type: ignore[attr-defined]
+    client._status = "healthy"
+    client._pending_dev_data = False
+    client._subscription_paths = {"/htr/1/status"}
+    client._payload_window_hint = 10.0
+    client._payload_stale_after = 20.0
+    client._pending_default_cadence_hint = False
+    assert client._payload_window_hint == 10.0
+    assert client._payload_stale_after == 20.0
+    tracker = client._ws_health
+    tracker.last_payload_at = 1_000.0
+    tracker.payload_stale_after = 20.0
+    tracker.refresh_payload_state(now=1_000.0)
+
+    emit = AsyncMock()
+    replay = AsyncMock()
+    monkeypatch.setattr(client, "_emit_sio", emit)
+    monkeypatch.setattr(client, "_replay_subscription_paths", replay)
+
+    window_hint = (
+        client._payload_window_hint
+        or tracker.payload_stale_after
+        or client._payload_stale_after
+    )
+    components = (
+        client._payload_window_hint,
+        tracker.payload_stale_after,
+        client._payload_stale_after,
+    )
+    assert components == (10.0, 20.0, 20.0)
+    hint_value = float(window_hint)
+    payload_ts = float(tracker.last_payload_at) if tracker.last_payload_at else None
+    elapsed = 1_009.0 - payload_ts if payload_ts is not None else -1.0
+    threshold = hint_value * 0.8 if math.isfinite(hint_value) else -1.0
+    min_interval = (
+        max(30.0, hint_value * 0.25) if math.isfinite(hint_value) else 30.0
+    )
+    duplicate_refresh = (
+        payload_ts is not None
+        and client._last_soft_refresh_payload_at == payload_ts
+        and elapsed < (hint_value + ducaheat_ws._PAYLOAD_WINDOW_MARGIN_FLOOR)
+    )
+    ready = (
+        client._ws is not None
+        and not client._ws.closed
+        and client._status == "healthy"
+        and not client._pending_dev_data
+        and payload_ts is not None
+        and math.isfinite(hint_value)
+        and hint_value > 0
+        and elapsed >= threshold
+        and elapsed >= 0
+        and 1_009.0 - client._last_soft_refresh_at >= min_interval
+        and not duplicate_refresh
+    )
+    assert hint_value == 10.0
+    assert client._ws is not None
+    assert not client._ws.closed
+    assert client._status == "healthy"
+    assert not client._pending_dev_data
+    assert payload_ts is not None
+    assert math.isfinite(hint_value)
+    assert hint_value > 0
+    assert elapsed >= threshold
+    assert elapsed >= 0
+    assert 1_009.0 - client._last_soft_refresh_at >= min_interval
+    assert not duplicate_refresh
+    assert ready is True
+
+    refreshed = await client._maybe_refresh_leases(now=1_009.0)
+
+    assert refreshed is True
+    emit.assert_awaited_once_with("dev_data")
+    replay.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_soft_refresh_rejects_insufficient_elapsed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Skip soft refresh attempts until the lease threshold is reached."""
+
+    client = _make_client(monkeypatch)
+    client._ws = client._session._ws  # type: ignore[attr-defined]
+    client._status = "healthy"
+    client._pending_dev_data = False
+    client._payload_window_hint = 20.0
+    tracker = client._ws_health
+    tracker.last_payload_at = 500.0
+    tracker.payload_stale_after = 40.0
+    tracker.refresh_payload_state(now=500.0)
+
+    emit = AsyncMock()
+    replay = AsyncMock()
+    monkeypatch.setattr(client, "_emit_sio", emit)
+    monkeypatch.setattr(client, "_replay_subscription_paths", replay)
+
+    refreshed = await client._maybe_refresh_leases(now=510.0)
+
+    assert refreshed is False
+    emit.assert_not_called()
+    replay.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_soft_refresh_handles_emit_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Return False when the soft refresh emit fails."""
+
+    client = _make_client(monkeypatch)
+    client._ws = client._session._ws  # type: ignore[attr-defined]
+    client._status = "healthy"
+    client._pending_dev_data = False
+    client._payload_window_hint = 12.0
+    client._payload_stale_after = 18.0
+    client._pending_default_cadence_hint = False
+    assert client._payload_window_hint == 12.0
+    assert client._payload_stale_after == 18.0
+    tracker = client._ws_health
+    tracker.last_payload_at = 800.0
+    tracker.payload_stale_after = 16.0
+    tracker.refresh_payload_state(now=800.0)
+    client._last_soft_refresh_at = 0.0
+
+    emit = AsyncMock(side_effect=RuntimeError("boom"))
+    replay = AsyncMock()
+    monkeypatch.setattr(client, "_emit_sio", emit)
+    monkeypatch.setattr(client, "_replay_subscription_paths", replay)
+
+    window_hint = (
+        client._payload_window_hint
+        or tracker.payload_stale_after
+        or client._payload_stale_after
+    )
+    components = (
+        client._payload_window_hint,
+        tracker.payload_stale_after,
+        client._payload_stale_after,
+    )
+    assert components == (12.0, 16.0, 18.0)
+    hint_value = float(window_hint)
+    payload_ts = float(tracker.last_payload_at) if tracker.last_payload_at else None
+    elapsed = 812.0 - payload_ts if payload_ts is not None else -1.0
+    threshold = hint_value * 0.8 if math.isfinite(hint_value) else -1.0
+    min_interval = (
+        max(30.0, hint_value * 0.25) if math.isfinite(hint_value) else 30.0
+    )
+    duplicate_refresh = (
+        payload_ts is not None
+        and client._last_soft_refresh_payload_at == payload_ts
+        and elapsed < (hint_value + ducaheat_ws._PAYLOAD_WINDOW_MARGIN_FLOOR)
+    )
+    ready = (
+        client._ws is not None
+        and not client._ws.closed
+        and client._status == "healthy"
+        and not client._pending_dev_data
+        and payload_ts is not None
+        and math.isfinite(hint_value)
+        and hint_value > 0
+        and elapsed >= threshold
+        and elapsed >= 0
+        and 812.0 - client._last_soft_refresh_at >= min_interval
+        and not duplicate_refresh
+    )
+    assert hint_value == 12.0
+    assert client._ws is not None
+    assert not client._ws.closed
+    assert client._status == "healthy"
+    assert not client._pending_dev_data
+    assert payload_ts is not None
+    assert math.isfinite(hint_value)
+    assert hint_value > 0
+    assert elapsed >= threshold
+    assert elapsed >= 0
+    assert 812.0 - client._last_soft_refresh_at >= min_interval
+    assert not duplicate_refresh
+    assert ready is True
+
+    refreshed = await client._maybe_refresh_leases(now=812.0)
+
+    assert refreshed is False
+    emit.assert_awaited_once_with("dev_data")
+    replay.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_soft_refresh_rejects_invalid_window_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Return False when payload cadence hints cannot be parsed."""
+
+    client = _make_client(monkeypatch)
+    client._payload_window_hint = object()
+    tracker = client._ws_health
+    tracker.last_payload_at = 100.0
+
+    refreshed = await client._maybe_refresh_leases(now=150.0)
+
+    assert refreshed is False
 
 
 @pytest.mark.asyncio
