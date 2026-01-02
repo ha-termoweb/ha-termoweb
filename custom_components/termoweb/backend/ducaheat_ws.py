@@ -190,6 +190,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._last_subscribe_log_ts = 0.0
         self._subscribe_backoff_s = _SUBSCRIBE_BACKOFF_INITIAL
         self._subscription_refresh_lock = asyncio.Lock()
+        self._send_lock = asyncio.Lock()
         self._idle_monitor_task: asyncio.Task | None = None
         self._idle_recovery_lock = asyncio.Lock()
         self._last_idle_recovery_at = 0.0
@@ -231,6 +232,23 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         """Return the shared websocket health tracker for this client."""
 
         return self._ws_health_tracker()
+
+    async def _send_str(
+        self,
+        payload: str,
+        *,
+        context: str,
+        ws: aiohttp.ClientWebSocketResponse | None = None,
+    ) -> None:
+        """Send a websocket frame with serialized access."""
+
+        target = ws or self._ws
+        if target is None:
+            raise RuntimeError("websocket not connected")
+        async with self._send_lock:
+            if target is not self._ws or target.closed:
+                raise RuntimeError("websocket not connected")
+            await target.send_str(payload)
 
     def _status_should_reset_health(self, status: str) -> bool:
         """Return True when a status transition should reset health."""
@@ -509,16 +527,18 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         )
         #        _LOGGER.info("WS (ducaheat): upgrade OK")
 
-        await self._ws.send_str("2probe")
+        await self._send_str("2probe", context="probe", ws=self._ws)
         #        _LOGGER.debug("WS (ducaheat): -> 2probe")
         probe = await self._ws.receive_str()
         #        _LOGGER.debug("WS (ducaheat): <- %r", probe)
         if probe != "3probe":
             _LOGGER.debug("WS (ducaheat): unexpected probe ack: %r", probe)
-        await self._ws.send_str("5")
+        await self._send_str("5", context="upgrade", ws=self._ws)
         #        _LOGGER.debug("WS (ducaheat): -> 5 (upgrade)")
 
-        await self._ws.send_str(f"40{self._namespace}")
+        await self._send_str(
+            f"40{self._namespace}", context="namespace-open", ws=self._ws
+        )
         #        _LOGGER.debug("WS (ducaheat): -> 40%s", self._namespace)
         self._pending_dev_data = True
         #        _LOGGER.debug("WS (ducaheat): dev_data pending until namespace ack")
@@ -787,7 +807,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                             if not frame_recorded:
                                 self._record_frame(timestamp=now, mark_activity=False)
                                 frame_recorded = True
-                            await ws.send_str("3")
+                            await self._send_str("3", context="engineio-pong", ws=ws)
                             break
                         if data == "3":
                             if not frame_recorded:
@@ -850,7 +870,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                             if not frame_recorded:
                                 self._record_frame(timestamp=now, mark_activity=False)
                                 frame_recorded = True
-                            await ws.send_str("3")
+                            await self._send_str("3", context="engineio-pong", ws=ws)
                             break
                         if payload == "3":
                             if not frame_recorded:
@@ -865,7 +885,11 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                             ns_payload = payload[1:]
                             ns, sep, body = ns_payload.partition(",")
                             if not sep or body in {"", "[]", '["ping"]'}:
-                                await ws.send_str("3" + ns)
+                                await self._send_str(
+                                    "3" + ns,
+                                    context="engineio-namespace-pong",
+                                    ws=ws,
+                                )
                                 break
 
                         content: str | None = None
@@ -1014,7 +1038,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 if ws is not self._ws or ws.closed:
                     continue
                 try:
-                    await ws.send_str("2")
+                    await self._send_str("2", context="keepalive-ping", ws=ws)
                     # _LOGGER.debug("WS (ducaheat): -> 2 (keepalive ping)")
                 except Exception:  # noqa: BLE001 - defensive logging
                     _LOGGER.debug("WS (ducaheat): keepalive ping failed", exc_info=True)
@@ -1136,7 +1160,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         arr = [event, *args]
         payload = json.dumps(arr, separators=(",", ":"), default=str)
         frame = f"42{self._namespace}," + payload
-        await self._ws.send_str(frame)
+        await self._send_str(frame, context=f"sio-{event}", ws=self._ws)
         if _LOGGER.isEnabledFor(logging.DEBUG):
             summary = ""
             if event in {"subscribe", "unsubscribe"} and args:
