@@ -57,11 +57,12 @@ class StubResponse:
 class StubWebSocket:
     """Simple websocket stub capturing sent frames."""
 
-    def __init__(self) -> None:
+    def __init__(self, frames: Iterable[str] | None = None) -> None:
         self.sent: list[str] = []
         self.closed = False
         self._receive = asyncio.Queue[str]()
-        self._receive.put_nowait("3probe")
+        for frame in frames or ("3probe",):
+            self._receive.put_nowait(frame)
 
     async def send_str(self, payload: str) -> None:
         """Record outgoing websocket frames."""
@@ -189,11 +190,15 @@ class DummyCoordinator:
         }
 
 
-def _make_client(monkeypatch: pytest.MonkeyPatch) -> ducaheat_ws.DucaheatWSClient:
+def _make_client(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    ws: StubWebSocket | None = None,
+) -> ducaheat_ws.DucaheatWSClient:
     """Create a websocket client with deterministic helpers."""
 
-    ws = StubWebSocket()
-    session = StubSession(ws)
+    socket = ws or StubWebSocket()
+    session = StubSession(socket)
     hass = HomeAssistant()
     hass.data.setdefault(ducaheat_ws.DOMAIN, {})["entry"] = {}
     coordinator = DummyCoordinator()
@@ -288,6 +293,38 @@ async def test_ws_send_operations_are_serialised(
         frame.startswith(f"42{client._namespace},")
         for frame in client._ws.sent  # type: ignore[attr-defined]
     )
+
+
+@pytest.mark.asyncio
+async def test_probe_allows_interleaved_ping(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Probe handshake should tolerate ping frames."""
+
+    ws = StubWebSocket(["2", "3probe"])
+    client = _make_client(monkeypatch, ws=ws)
+    client._session._ws = ws  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        ducaheat_ws,
+        "_decode_polling_packets",
+        lambda _body: ['0{"sid":"abc","pingInterval":1,"pingTimeout":1}'],
+    )
+
+    await client._connect_once()
+
+    assert ws.sent[:2] == ["2probe", "3"]
+    await client._disconnect("test")
+
+
+@pytest.mark.asyncio
+async def test_probe_timeout_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Handshake should fail cleanly when probe ack never arrives."""
+
+    ws = StubWebSocket(["2"])
+    client = _make_client(monkeypatch, ws=ws)
+    client._session._ws = ws  # type: ignore[attr-defined]
+    monkeypatch.setattr(ducaheat_ws, "_PROBE_ACK_TIMEOUT", 0.05)
+
+    with pytest.raises(ducaheat_ws.HandshakeError):
+        await client._connect_once()
 
 
 @pytest.mark.asyncio
@@ -763,6 +800,7 @@ async def test_connect_once_probe_warning(monkeypatch: pytest.MonkeyPatch) -> No
     assert client._session._ws is not None  # type: ignore[attr-defined]
     client._session._ws._receive = asyncio.Queue()  # type: ignore[attr-defined]
     client._session._ws._receive.put_nowait("weird")  # type: ignore[attr-defined]
+    client._session._ws._receive.put_nowait("3probe")  # type: ignore[attr-defined]
 
     await client._connect_once()
 
