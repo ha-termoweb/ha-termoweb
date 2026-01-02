@@ -226,6 +226,28 @@ async def test_connect_once_performs_full_handshake(
     await client._disconnect("test")
 
 
+@pytest.mark.asyncio
+async def test_request_resubscribe_kicks_immediate_subscribe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure inventory_ready resubscribe triggers a prompt subscribe attempt."""
+
+    client = _make_client(monkeypatch)
+    client._ws = client._session._ws  # type: ignore[attr-defined]
+    client._status = "connected"
+    client._pending_dev_data = False
+    client._pending_subscribe = True
+    maybe_subscribe = AsyncMock(return_value=1)
+    monkeypatch.setattr(client, "_maybe_subscribe", maybe_subscribe)
+
+    client.request_resubscribe("inventory_ready")
+    await asyncio.sleep(0)
+    if client._resubscribe_kick_task:
+        await client._resubscribe_kick_task
+
+    assert maybe_subscribe.await_count == 1
+
+
 def test_update_status_records_health(monkeypatch: pytest.MonkeyPatch) -> None:
     """Healthy websocket updates should refresh the shared state bucket."""
 

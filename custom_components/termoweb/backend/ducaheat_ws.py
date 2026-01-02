@@ -185,6 +185,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._stats = WSStats()
         self._subscription_paths: set[str] = set()
         self._pending_subscribe = True
+        self._resubscribe_kick_task: asyncio.Task | None = None
         self._last_subscribe_attempt_ts = 0.0
         self._last_subscribe_log_ts = 0.0
         self._subscribe_backoff_s = _SUBSCRIBE_BACKOFF_INITIAL
@@ -1704,18 +1705,55 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         return result
 
     def request_resubscribe(self, reason: str) -> None:
-        """Flag the subscription set for reinstatement."""
+        """Flag the subscription set for reinstatement and trigger a prompt attempt."""
 
         self._pending_subscribe = True
-        self._subscribe_backoff_s = max(
-            self._subscribe_backoff_s, _SUBSCRIBE_BACKOFF_INITIAL
-        )
+        is_inventory_ready = reason == "inventory_ready"
+        if is_inventory_ready:
+            self._subscribe_backoff_s = _SUBSCRIBE_BACKOFF_INITIAL
+            self._last_subscribe_attempt_ts = 0.0
+            self._schedule_resubscribe_kick()
+        else:
+            self._subscribe_backoff_s = max(
+                self._subscribe_backoff_s, _SUBSCRIBE_BACKOFF_INITIAL
+            )
         if _LOGGER.isEnabledFor(logging.DEBUG):
             _LOGGER.debug(
                 "WS (ducaheat): resubscribe requested (%s) for %s",
                 reason,
                 self.dev_id,
             )
+
+    def _schedule_resubscribe_kick(self) -> None:
+        """Schedule an immediate subscribe attempt when conditions allow."""
+
+        ws = self._ws
+        if ws is None or ws.closed:
+            return
+        if self._status not in {"connected", "healthy"}:
+            return
+        if self._pending_dev_data:
+            return
+        if self._resubscribe_kick_task and not self._resubscribe_kick_task.done():
+            return
+        self._resubscribe_kick_task = self._loop.create_task(
+            self._run_resubscribe_kick(),
+            name=f"termoweb-ws-{self.dev_id}-resubscribe-kick",
+        )
+
+    async def _run_resubscribe_kick(self) -> None:
+        """Attempt a single subscription refresh after a resubscribe request."""
+
+        try:
+            await self._maybe_subscribe(now=time.time())
+        except Exception:  # noqa: BLE001  # pragma: no cover - defensive logging
+            _LOGGER.debug(
+                "WS (ducaheat): resubscribe kick failed for %s",
+                self.dev_id,
+                exc_info=True,
+            )
+        finally:
+            self._resubscribe_kick_task = None
 
     async def _replay_subscription_paths(self) -> None:
         """Replay cached subscription paths after a reconnect."""
@@ -1745,6 +1783,14 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     await task
             finally:
                 self._keepalive_task = None
+        kick_task = self._resubscribe_kick_task
+        if kick_task:
+            kick_task.cancel()
+            try:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await kick_task
+            finally:
+                self._resubscribe_kick_task = None
         if self._ws:
             try:
                 await self._ws.close(
