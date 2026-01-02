@@ -118,6 +118,8 @@ custom_components/termoweb/backend/base.py :: Backend.fetch_hourly_samples
     Return normalised hourly samples grouped by node descriptor.
 custom_components/termoweb/backend/base.py :: Backend.get_energy_samples
     Return normalised energy samples between ``start_s`` and ``end_s``.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._maybe_refresh_leases
+    Proactively refresh subscriptions before payload staleness.
 custom_components/termoweb/backend/base.py :: Backend._resolve_node_descriptor
     Return canonical ``(node_type, addr)`` for ``node``.
 custom_components/termoweb/backend/base.py :: normalise_sample_records
