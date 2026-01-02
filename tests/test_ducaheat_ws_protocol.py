@@ -79,6 +79,27 @@ class StubWebSocket:
         self.closed = True
 
 
+class ConcurrencyWebSocket:
+    """Websocket stub asserting sends are serialized."""
+
+    def __init__(self) -> None:
+        self.sent: list[str] = []
+        self.closed = False
+        self._sending = False
+
+    async def send_str(self, payload: str) -> None:
+        """Assert only one send executes at a time."""
+
+        if self._sending:
+            raise AssertionError("send_str called concurrently")
+        self._sending = True
+        try:
+            await asyncio.sleep(0)
+            self.sent.append(payload)
+        finally:
+            self._sending = False
+
+
 class QueueWebSocket:
     """Queue-based websocket stub providing receive semantics."""
 
@@ -246,6 +267,54 @@ async def test_request_resubscribe_kicks_immediate_subscribe(
         await client._resubscribe_kick_task
 
     assert maybe_subscribe.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_ws_send_operations_are_serialised(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure websocket sends are serialized through a shared lock."""
+
+    client = _make_client(monkeypatch)
+    client._ws = ConcurrencyWebSocket()  # type: ignore[assignment]
+    client._status = "connected"
+
+    send_one = asyncio.create_task(client._emit_sio("message", "one"))
+    send_two = asyncio.create_task(client._emit_sio("message", "two"))
+    await asyncio.gather(send_one, send_two)
+
+    assert len(client._ws.sent) == 2  # type: ignore[attr-defined]
+    assert all(
+        frame.startswith(f"42{client._namespace},")
+        for frame in client._ws.sent  # type: ignore[attr-defined]
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_str_requires_active_websocket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Raise when sending without an active websocket."""
+
+    client = _make_client(monkeypatch)
+    client._ws = None
+
+    with pytest.raises(RuntimeError):
+        await client._send_str("payload", context="missing-ws")
+
+
+@pytest.mark.asyncio
+async def test_send_str_rejects_mismatched_socket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Raise when attempting to send on a stale websocket reference."""
+
+    client = _make_client(monkeypatch)
+    client._ws = ConcurrencyWebSocket()  # type: ignore[assignment]
+    other_ws = ConcurrencyWebSocket()
+
+    with pytest.raises(RuntimeError):
+        await client._send_str("payload", context="mismatch", ws=other_ws)
 
 
 def test_update_status_records_health(monkeypatch: pytest.MonkeyPatch) -> None:
