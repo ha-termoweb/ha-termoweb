@@ -10,7 +10,7 @@ import pytest
 from custom_components.termoweb.backend import create_backend
 from custom_components.termoweb.backend import termoweb as termoweb_backend
 from custom_components.termoweb.backend.ducaheat import DucaheatBackend
-from custom_components.termoweb.const import BRAND_DUCAHEAT
+from custom_components.termoweb.const import BRAND_DUCAHEAT, BRAND_TEVOLVE
 
 
 class DummyHttpClient:
@@ -84,6 +84,14 @@ def test_create_backend_returns_ducaheat_backend() -> None:
     backend = create_backend(brand=BRAND_DUCAHEAT, client=client)
     assert isinstance(backend, DucaheatBackend)
     assert backend.brand == BRAND_DUCAHEAT
+    assert backend.client is client
+
+
+def test_create_backend_returns_tevolve_backend() -> None:
+    client = DummyHttpClient()
+    backend = create_backend(brand=BRAND_TEVOLVE, client=client)
+    assert isinstance(backend, DucaheatBackend)
+    assert backend.brand == BRAND_TEVOLVE
     assert backend.client is client
 
 

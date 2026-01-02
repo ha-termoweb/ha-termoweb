@@ -23,7 +23,7 @@ import voluptuous as vol
 
 from .backend.ducaheat import DucaheatRESTClient
 from .boost import coerce_boost_minutes, supports_boost
-from .const import BRAND_DUCAHEAT, DOMAIN
+from .const import DOMAIN, uses_ducaheat_backend
 from .domain import DomainState, HeaterState
 from .heater import (
     DEFAULT_BOOST_DURATION,
@@ -378,9 +378,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         """Translate a program slot integer into a label."""
         return {0: "cold", 1: "night", 2: "day"}.get(v)
 
-    def _current_prog_slot(
-        self, state: HeaterState | DomainState | None
-    ) -> int | None:
+    def _current_prog_slot(self, state: HeaterState | DomainState | None) -> int | None:
         """Return the active program slot index for the heater."""
 
         prog = getattr(state, "prog", None)
@@ -432,9 +430,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                         except Exception:
                             try:
                                 loop = asyncio.get_running_loop()
-                                self._last_refresh_task = loop.create_task(
-                                    refresh_task
-                                )
+                                self._last_refresh_task = loop.create_task(refresh_task)
                             except Exception:
                                 if hasattr(refresh_task, "close"):
                                     refresh_task.close()
@@ -1475,7 +1471,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
                 if isinstance(brand_value, str):
                     brand = brand_value
 
-        if brand == BRAND_DUCAHEAT and self._node_type == "acm":
+        if uses_ducaheat_backend(brand) and self._node_type == "acm":
             cancel_boost = False
             boost_state = None
             try:
@@ -1486,7 +1482,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
                     self._addr,
                     err,
                     exc_info=err,
-            )
+                )
             if boost_state is not None and boost_state.active is not None:
                 cancel_boost = bool(boost_state.active)
             else:

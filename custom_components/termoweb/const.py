@@ -23,25 +23,30 @@ BASIC_AUTH_B64: Final = "NTIxNzJkYzg0ZjYzZDZjNzU5MDAwMDA1OmJ4djRaM3hVU2U="
 CONF_BRAND: Final = "brand"
 BRAND_TERMOWEB: Final = "termoweb"
 BRAND_DUCAHEAT: Final = "ducaheat"
+BRAND_TEVOLVE: Final = "tevolve"
 DEFAULT_BRAND: Final = BRAND_TERMOWEB
 
 BRAND_LABELS: Final[Mapping[str, str]] = {
     BRAND_TERMOWEB: "TermoWeb",
     BRAND_DUCAHEAT: "Ducaheat",
+    BRAND_TEVOLVE: "Tevolve",
 }
 
 BRAND_API_BASES: Final[Mapping[str, str]] = {
     BRAND_TERMOWEB: API_BASE,
     BRAND_DUCAHEAT: "https://api-tevolve.termoweb.net",
+    BRAND_TEVOLVE: "https://api-tevolve.termoweb.net",
 }
 
 BRAND_BASIC_AUTH: Final[Mapping[str, str]] = {
     BRAND_TERMOWEB: BASIC_AUTH_B64,
     BRAND_DUCAHEAT: "NWM0OWRjZTk3NzUxMDM1MTUwNmM0MmRiOnRldm9sdmU=",
+    BRAND_TEVOLVE: "NWM0OWRjZTk3NzUxMDM1MTUwNmM0MmRiOnRldm9sdmU=",
 }
 
 BRAND_SOCKETIO_PATHS: Final[Mapping[str, str]] = {
     BRAND_DUCAHEAT: "api/v2/socket_io",
+    BRAND_TEVOLVE: "api/v2/socket_io",
 }
 
 # UA / locale (matches app loosely; helps avoid quirky WAF rules)
@@ -55,12 +60,16 @@ ACCEPT_LANGUAGE: Final = "en-US,en;q=0.8"
 BRAND_USER_AGENTS: Final[Mapping[str, str]] = {
     BRAND_TERMOWEB: USER_AGENT,
     BRAND_DUCAHEAT: DUCAHEAT_USER_AGENT,
+    BRAND_TEVOLVE: DUCAHEAT_USER_AGENT,
 }
 
 BRAND_REQUESTED_WITH: Final[Mapping[str, str]] = {
     BRAND_TERMOWEB: TERMOWEB_REQUESTED_WITH,
     BRAND_DUCAHEAT: DUCAHEAT_REQUESTED_WITH,
+    BRAND_TEVOLVE: DUCAHEAT_REQUESTED_WITH,
 }
+
+DUCAHEAT_BRANDS: Final[frozenset[str]] = frozenset({BRAND_DUCAHEAT, BRAND_TEVOLVE})
 
 
 def get_brand_api_base(brand: str) -> str:
@@ -103,6 +112,12 @@ def get_brand_socketio_path(brand: str) -> str:
     if path:
         return path.lstrip("/")
     return "socket.io"
+
+
+def uses_ducaheat_backend(brand: str) -> bool:
+    """Return True when the brand maps to the Ducaheat backend."""
+
+    return brand in DUCAHEAT_BRANDS
 
 
 # Socket.IO namespace used by the websocket client implementation

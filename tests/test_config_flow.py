@@ -194,6 +194,44 @@ def test_async_step_user_success(monkeypatch: pytest.MonkeyPatch) -> None:
     }
 
 
+def test_async_step_user_success_tevolve(monkeypatch: pytest.MonkeyPatch) -> None:
+    hass = HomeAssistant()
+    flow = _create_flow(hass)
+
+    async def fake_version(_hass: HomeAssistant) -> str:
+        return "9.9.9"
+
+    calls: list[tuple[str, str, str]] = []
+
+    async def fake_validate(
+        _hass: HomeAssistant, username: str, password: str, brand: str
+    ) -> None:
+        calls.append((username, password, brand))
+
+    monkeypatch.setattr(config_flow, "async_get_integration_version", fake_version)
+    monkeypatch.setattr(config_flow, "_validate_login", fake_validate)
+
+    result = asyncio.run(
+        flow.async_step_user(
+            {
+                "brand": config_flow.BRAND_TEVOLVE,
+                "username": "  tv_user  ",
+                "password": "pw",
+            }
+        )
+    )
+
+    assert calls == [("tv_user", "pw", config_flow.BRAND_TEVOLVE)]
+    assert result["type"] == "create_entry"
+    assert result["title"] == "Tevolve (tv_user)"
+    assert result["data"] == {
+        "username": "tv_user",
+        "password": "pw",
+        config_flow.CONF_BRAND: config_flow.BRAND_TEVOLVE,
+        "supports_diagnostics": True,
+    }
+
+
 @pytest.mark.parametrize(
     ("raised_factory", "expected"),
     [

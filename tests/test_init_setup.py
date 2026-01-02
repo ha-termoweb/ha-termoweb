@@ -129,16 +129,29 @@ def test_create_rest_client_selects_brand(
         "pw2",
         termoweb_init.BRAND_DUCAHEAT,
     )
+    tevolve_client = termoweb_init.create_rest_client(
+        stub_hass,
+        "user3",
+        "pw3",
+        termoweb_init.BRAND_TEVOLVE,
+    )
 
     assert isinstance(default_client, DefaultClient)
     assert isinstance(duca_client, DucaClient)
+    assert isinstance(tevolve_client, DucaClient)
     assert default_client.api_base == termoweb_init.get_brand_api_base(
         termoweb_init.DEFAULT_BRAND
+    )
+    assert tevolve_client.api_base == termoweb_init.get_brand_api_base(
+        termoweb_init.BRAND_TEVOLVE
     )
     assert duca_client.basic_auth_b64 == termoweb_init.get_brand_basic_auth(
         termoweb_init.BRAND_DUCAHEAT
     )
-    assert stub_hass.client_session_calls == 2
+    assert tevolve_client.basic_auth_b64 == termoweb_init.get_brand_basic_auth(
+        termoweb_init.BRAND_TEVOLVE
+    )
+    assert stub_hass.client_session_calls == 3
 
 
 def test_diagnostics_module_registers_via_home_assistant_helper(

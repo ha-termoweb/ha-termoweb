@@ -18,6 +18,7 @@ from .const import (
     BRAND_DUCAHEAT,
     BRAND_LABELS,
     BRAND_TERMOWEB,
+    BRAND_TEVOLVE,
     CONF_BRAND,
     DEFAULT_BRAND,
     DOMAIN,
@@ -25,7 +26,7 @@ from .const import (
 )
 from .utils import async_get_integration_version
 
-__all__ = ["BRAND_DUCAHEAT"]
+__all__ = ["BRAND_DUCAHEAT", "BRAND_TEVOLVE"]
 
 _LOGGER = logging.getLogger(__name__)
 
