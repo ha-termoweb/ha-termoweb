@@ -70,6 +70,8 @@ _NODE_METADATA_KEYS = {"type", "node_type", "addr", "address", "name", "title", 
 _NODE_TYPE_LEVEL_KEYS = {"lease_seconds", "cadence_seconds", "poll_seconds"}
 _SUBSCRIBE_BACKOFF_INITIAL = 5.0
 _SUBSCRIBE_BACKOFF_MAX = 120.0
+_PROBE_ACK_TIMEOUT = 5.0
+_UPGRADE_DRAIN_TIMEOUT = 1.0
 _PARSE_ERROR_WINDOW_S = 30.0
 _PARSE_ERROR_THRESHOLD = 3
 
@@ -412,6 +414,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             self._update_status("stopped")
 
     async def _connect_once(self) -> None:
+        """Perform a single websocket handshake and upgrade attempt."""
         token = await self._get_token()
         headers = _brand_headers(self._ua, self._xrw)
         self._idle_timeout_flag = False
@@ -529,12 +532,49 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
 
         await self._send_str("2probe", context="probe", ws=self._ws)
         #        _LOGGER.debug("WS (ducaheat): -> 2probe")
-        probe = await self._ws.receive_str()
-        #        _LOGGER.debug("WS (ducaheat): <- %r", probe)
-        if probe != "3probe":
-            _LOGGER.debug("WS (ducaheat): unexpected probe ack: %r", probe)
+        probe_deadline = time.monotonic() + _PROBE_ACK_TIMEOUT
+        probe_ack = False
+        while True:
+            remaining = probe_deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                async with asyncio.timeout(remaining):
+                    probe = await self._ws.receive_str()
+            except TimeoutError:
+                break
+            #            _LOGGER.debug("WS (ducaheat): <- %r", probe)
+            if probe == "3probe":
+                probe_ack = True
+                break
+            if probe == "2":
+                await self._send_str("3", context="probe-pong", ws=self._ws)
+                continue
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug(
+                    "WS (ducaheat): unexpected probe frame: %r", probe
+                )
+        if not probe_ack:
+            raise HandshakeError(408, ws_url, "probe ack timeout")
         await self._send_str("5", context="upgrade", ws=self._ws)
         #        _LOGGER.debug("WS (ducaheat): -> 5 (upgrade)")
+
+        upgrade_deadline = time.monotonic() + _UPGRADE_DRAIN_TIMEOUT
+        with contextlib.suppress(TimeoutError):
+            while True:
+                remaining = upgrade_deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                async with asyncio.timeout(remaining):
+                    frame = await self._ws.receive_str()
+                if frame == "2":
+                    await self._send_str("3", context="upgrade-pong", ws=self._ws)
+                    continue
+                if _LOGGER.isEnabledFor(logging.DEBUG):
+                    _LOGGER.debug(
+                        "WS (ducaheat): discarding frame after upgrade: %r", frame
+                    )
+                break
 
         await self._send_str(
             f"40{self._namespace}", context="namespace-open", ws=self._ws

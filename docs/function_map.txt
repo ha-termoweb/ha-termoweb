@@ -226,6 +226,8 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.stop
     Stop the websocket client and background tasks.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.is_running
     Return True when the websocket runner task is active.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._connect_once
+    Perform a single websocket handshake and upgrade attempt.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._build_handshake_url
     Return a handshake URL with the provided query parameters.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.ws_url
