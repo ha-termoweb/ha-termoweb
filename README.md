@@ -14,7 +14,7 @@
 
 # TermoWeb heaters for Home Assistant
 
-Control your **TermoWeb** or **Ducaheat** electric heaters and thermostats in **Home Assistant** — from the HA app, automations, scenes, and voice assistants.
+Control your **TermoWeb**, **Ducaheat**, or **Tevolve** electric heaters and thermostats in **Home Assistant** — from the HA app, automations, scenes, and voice assistants.
 
 [![Open in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ha-termoweb&repository=ha-termoweb&category=integration)
 [![Open your Home Assistant instance and start setting up the integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=termoweb)
@@ -45,9 +45,9 @@ These product lines are documented to work with the **TermoWeb** portal/app:
 
 Ducasa branded heaters (with the Ducaheat app), accumulators and other devices, are now supported with basic functionality tested and working. Heaters support temperature setting, weekly programming, switching modes (auto, manual, off). Preliminary support for "boost" on accumulators is currently in testing. Energy and power readings are also in testing with some basic support. Work is ongoing with full support expected before the end of the year. 
 
-## Tevolve app
+## Tevolve app (Ducaheat backend)
 
-We do not yet have integration with heaters using the Tevolve-app, but it looks like the protocol is very similar if not identical to the TermoWeb and Ducaheat apps. If you have a heater that uses the Tevolve mobile app for control, leave an issue so we can test it. 
+Tevolve-branded heaters use the same backend as the Ducaheat app. If you manage your heaters in the **Tevolve** mobile app or on the **Tevolve** website, select **Tevolve** in the brand picker and this integration will connect using the Ducaheat backend automatically.
 
 ---
 
@@ -177,4 +177,3 @@ See DEBUG.md for information on how to turn on debugging, and download logs and 
 ## Search keywords
 
 *Home Assistant TermoWeb, TermoWeb heaters Home Assistant, ATC radiators, S&P TermoWeb Home Assistant, Soler & Palau TermoWeb, Ecotermi TermoWeb, Linea Plus TermoWeb, Electric Heating Company eco SAVE Home Assistant, eco SAVE Smart Gateway Home Assistant*
-

@@ -1,5 +1,6 @@
-Wrote 871 functions to /workspace/ha-termoweb/docs/function_map.txt
-build_unknown_node_probe_requests
+# TermoWeb Function Map
+
+custom_components/termoweb/__init__.py :: _build_unknown_node_probe_requests
     Return common REST endpoints to query for an unknown node type.
 custom_components/termoweb/__init__.py :: _async_probe_unknown_node_types
     Log discovery probes for node types not yet supported.
@@ -985,6 +986,8 @@ custom_components/termoweb/const.py :: get_brand_requested_with
     Return the X-Requested-With header value for the brand.
 custom_components/termoweb/const.py :: get_brand_socketio_path
     Return the Socket.IO path for the selected brand.
+custom_components/termoweb/const.py :: uses_ducaheat_backend
+    Return True when the brand maps to the Ducaheat backend.
 custom_components/termoweb/const.py :: signal_ws_data
     Signal name for WS ‘data’ frames dispatched to platforms.
 custom_components/termoweb/const.py :: signal_ws_status

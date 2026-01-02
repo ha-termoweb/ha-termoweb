@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Connect to TermoWeb family heaters",
-        "description": "Choose your TermoWeb or Ducaheat brand and enter your account credentials.",
+        "description": "Choose your TermoWeb, Ducaheat, or Tevolve brand and enter your account credentials. Tevolve uses the Ducaheat backend.",
         "data": {
           "brand": "Brand",
           "username": "Email",

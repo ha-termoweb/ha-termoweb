@@ -44,7 +44,8 @@ from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend import Backend, DucaheatRESTClient, WsClientProto, create_backend
 from .backend.sanitize import redact_text
 from .const import (
-    BRAND_DUCAHEAT,
+    BRAND_DUCAHEAT as BRAND_DUCAHEAT,
+    BRAND_TEVOLVE as BRAND_TEVOLVE,
     CONF_BRAND,
     DEFAULT_BRAND,
     DEFAULT_POLL_INTERVAL,
@@ -53,6 +54,7 @@ from .const import (
     get_brand_api_base,
     get_brand_basic_auth,
     signal_ws_status,
+    uses_ducaheat_backend,
 )
 from .coordinator import EnergyStateCoordinator, StateCoordinator, build_device_metadata
 from .energy import (
@@ -118,7 +120,7 @@ def _build_unknown_node_probe_requests(
         seen_paths.add(path)
         requests.append((path, params))
 
-    if brand == BRAND_DUCAHEAT and normalized_addr:
+    if uses_ducaheat_backend(brand) and normalized_addr:
         _append(base_path)
 
     _append(node_path)
@@ -376,7 +378,7 @@ def create_rest_client(
     session = aiohttp_client.async_get_clientsession(hass)
     api_base = get_brand_api_base(brand)
     basic_auth = get_brand_basic_auth(brand)
-    client_cls = DucaheatRESTClient if brand == BRAND_DUCAHEAT else RESTClient
+    client_cls = DucaheatRESTClient if uses_ducaheat_backend(brand) else RESTClient
     return client_cls(
         session,
         username,
