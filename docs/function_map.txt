@@ -285,7 +285,11 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._subscribe
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._maybe_subscribe
     Attempt subscription installation when prerequisites are met.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient.request_resubscribe
-    Flag the subscription set for reinstatement.
+    Flag the subscription set for reinstatement and trigger a prompt attempt.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._schedule_resubscribe_kick
+    Schedule an immediate subscribe attempt when conditions allow.
+custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._run_resubscribe_kick
+    Attempt a single subscription refresh after a resubscribe request.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._replay_subscription_paths
     Replay cached subscription paths after a reconnect.
 custom_components/termoweb/backend/factory.py :: create_backend
