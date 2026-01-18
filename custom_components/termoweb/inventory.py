@@ -8,8 +8,6 @@ from dataclasses import dataclass
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
-from .const import DOMAIN
-
 PrebuiltNode = Any
 
 _NODE_SECTION_IGNORE_KEYS = frozenset(
@@ -65,7 +63,6 @@ __all__ = [
     "normalize_node_type",
     "normalize_power_monitor_addresses",
     "power_monitor_sample_subscription_targets",
-    "store_inventory_on_entry",
 ]
 
 
@@ -77,6 +74,7 @@ HEATER_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm", "thm"})
 
 if TYPE_CHECKING:
     from .heater import HeaterPlatformDetails
+    from .runtime import EntryRuntime
 
 
 @dataclass(frozen=True, slots=True)
@@ -898,132 +896,6 @@ class Inventory:
         signature_parts = [part for part in (module or "", name, code_hint) if part]
         return "|".join(signature_parts)
 
-    @staticmethod
-    def require_from_context(
-        *,
-        inventory: Inventory | None = None,
-        container: Mapping[str, Any] | MutableMapping[str, Any] | None = None,
-        hass: Any | None = None,
-        entry_id: str | None = None,
-        coordinator: Any | None = None,
-        store: bool = True,
-    ) -> Inventory:
-        """Return the shared inventory associated with a Home Assistant entry."""
-
-        resolved: Inventory | None = None
-        mutable_targets: list[MutableMapping[str, Any]] = []
-
-        if isinstance(inventory, Inventory):
-            resolved = inventory
-
-        if container is not None:
-            if isinstance(container, MutableMapping):
-                mutable_targets.append(container)
-            if resolved is None and isinstance(container, Mapping):
-                candidate = container.get("inventory")
-                if isinstance(candidate, Inventory):
-                    resolved = candidate
-
-        record_candidate: Mapping[str, Any] | None = None
-        if hass is not None and entry_id:
-            hass_data = getattr(hass, "data", None)
-            if isinstance(hass_data, Mapping):
-                domain_bucket = hass_data.get(DOMAIN)
-                if isinstance(domain_bucket, Mapping):
-                    record_candidate = domain_bucket.get(entry_id)
-                    if isinstance(record_candidate, MutableMapping):
-                        mutable_targets.append(record_candidate)
-                    if resolved is None and isinstance(record_candidate, Mapping):
-                        candidate = record_candidate.get("inventory")
-                        if isinstance(candidate, Inventory):
-                            resolved = candidate
-
-        if resolved is None and coordinator is not None:
-            for attr in ("inventory", "_inventory"):
-                candidate = getattr(coordinator, attr, None)
-                if isinstance(candidate, Inventory):
-                    resolved = candidate
-                    break
-
-        if resolved is None:
-            raise LookupError("TermoWeb inventory is unavailable")
-
-        if store:
-            for target in mutable_targets:
-                store_inventory_on_entry(resolved, record=target)
-
-        return resolved
-
-    @staticmethod
-    def require_from_record(
-        record: Mapping[str, Any] | None,
-        *,
-        attr: str = "inventory",
-        context: str | None = None,
-    ) -> Inventory:
-        """Return the cached inventory stored within ``record``."""
-
-        if not isinstance(record, Mapping):
-            raise LookupError(  # noqa: TRY004
-                f"{context or 'inventory'} record is unavailable; integration state missing"
-            )
-        candidate = record.get(attr)
-        if not isinstance(candidate, Inventory):
-            raise LookupError(  # noqa: TRY004
-                f"{context or 'inventory'} record is unavailable; cached inventory missing"
-            )
-        return candidate
-
-
-def _request_ws_inventory_resubscribe(target: Mapping[str, Any]) -> None:
-    """Request websocket resubscribe when inventory becomes available."""
-
-    ws_clients = target.get("ws_clients")
-    if not isinstance(ws_clients, Mapping):
-        return
-
-    for client in ws_clients.values():
-        resubscribe = getattr(client, "request_resubscribe", None)
-        if not callable(resubscribe):
-            continue
-        try:
-            resubscribe("inventory_ready")
-        except Exception:  # noqa: BLE001  # pragma: no cover - defensive
-            _LOGGER.debug(
-                "WS inventory resubscribe request failed",
-                exc_info=True,
-            )
-
-
-def store_inventory_on_entry(
-    inventory: Inventory,
-    *,
-    record: MutableMapping[str, Any] | None = None,
-    hass: Any | None = None,
-    entry_id: str | None = None,
-) -> None:
-    """Persist inventory for an entry and notify websocket clients."""
-
-    target: MutableMapping[str, Any] | None = record
-    if target is None and hass is not None and entry_id:
-        hass_data = getattr(hass, "data", None)
-        if isinstance(hass_data, Mapping):
-            domain_bucket = hass_data.get(DOMAIN)
-            if isinstance(domain_bucket, Mapping):
-                candidate = domain_bucket.get(entry_id)
-                if isinstance(candidate, MutableMapping):
-                    target = candidate
-
-    if not isinstance(target, MutableMapping):
-        return
-
-    existing = target.get("inventory")
-    target["inventory"] = inventory
-    if isinstance(existing, Inventory):
-        return
-
-    _request_ws_inventory_resubscribe(target)
-
 
 def _normalize_node_identifier(
     value: Any,
@@ -1199,13 +1071,13 @@ def heater_platform_details_from_inventory(
 
 
 def boostable_accumulator_details_for_entry(
-    entry_data: Mapping[str, Any] | None,
+    runtime: "EntryRuntime",
     *,
     default_name_simple: Callable[[str], str],
     platform_name: str,
     logger: logging.Logger | None = None,
     accumulators_only: bool = True,
-) -> tuple[HeaterPlatformDetails, list[tuple[str, str, str]]]:
+) -> tuple["HeaterPlatformDetails", list[tuple[str, str, str]]]:
     """Return boostable accumulator metadata for a config entry."""
 
     from .heater import (  # noqa: PLC0415
@@ -1215,7 +1087,7 @@ def boostable_accumulator_details_for_entry(
     )
 
     details = heater_platform_details_for_entry(
-        entry_data,
+        runtime,
         default_name_simple=default_name_simple,
     )
 

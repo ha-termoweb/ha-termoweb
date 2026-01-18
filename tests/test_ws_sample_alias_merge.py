@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
+from conftest import runtime_from_record
 from custom_components.termoweb.backend.ws_client import forward_ws_sample_updates
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.inventory import Inventory
@@ -34,7 +35,7 @@ def test_forward_ws_sample_updates_merges_inventory_aliases() -> None:
     """forward_ws_sample_updates should canonicalise inventory alias maps."""
 
     entry_id = "entry"
-    hass = SimpleNamespace(data={DOMAIN: {entry_id: {}}})
+    hass = SimpleNamespace(data={DOMAIN: {}})
     inventory = Inventory("dev", [])
 
     object.__setattr__(
@@ -49,11 +50,17 @@ def test_forward_ws_sample_updates_merges_inventory_aliases() -> None:
     )
 
     coordinator = CoordinatorStub()
-    hass.data[DOMAIN][entry_id] = {
+    record = {
         "inventory": inventory,
         "coordinator": SimpleNamespace(inventory=inventory),
         "energy_coordinator": coordinator,
     }
+    hass.data[DOMAIN][entry_id] = runtime_from_record(
+        record,
+        hass=hass,
+        entry_id=entry_id,
+        dev_id="dev",
+    )
 
     forward_ws_sample_updates(
         hass,

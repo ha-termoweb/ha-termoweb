@@ -24,6 +24,150 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+def build_entry_runtime(
+    *,
+    hass: Any | None = None,
+    entry_id: str = "entry",
+    dev_id: str = "dev",
+    inventory: Any | None = None,
+    coordinator: Any | None = None,
+    energy_coordinator: Any | None = None,
+    client: Any | None = None,
+    backend: Any | None = None,
+    hourly_poller: Any | None = None,
+    config_entry: Any | None = None,
+    brand: str = "termoweb",
+    version: str = "0.0.0",
+    base_poll_interval: int = 30,
+) -> "EntryRuntime":
+    """Return an ``EntryRuntime`` populated with lightweight test doubles."""
+
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from custom_components.termoweb.inventory import Inventory
+    from custom_components.termoweb.runtime import EntryRuntime
+    from custom_components.termoweb.const import DOMAIN
+
+    inventory_obj = inventory
+    if not isinstance(inventory_obj, Inventory):
+        inventory_obj = Inventory(dev_id, [])
+
+    if coordinator is None:
+        coordinator = SimpleNamespace(inventory=inventory_obj, data={})
+
+    if energy_coordinator is None:
+        energy_coordinator = SimpleNamespace(
+            update_addresses=MagicMock(),
+            handle_ws_samples=MagicMock(),
+        )
+
+    if client is None:
+        client = SimpleNamespace()
+
+    if backend is None:
+        backend = SimpleNamespace(
+            client=client, brand=brand, create_ws_client=MagicMock()
+        )
+
+    if hourly_poller is None:
+        hourly_poller = SimpleNamespace(async_shutdown=AsyncMock())
+
+    if config_entry is None:
+        config_entry = SimpleNamespace(entry_id=entry_id, data={}, options={})
+
+    runtime = EntryRuntime(
+        backend=backend,
+        client=client,
+        coordinator=coordinator,
+        energy_coordinator=energy_coordinator,
+        dev_id=dev_id,
+        inventory=inventory_obj,
+        hourly_poller=hourly_poller,
+        config_entry=config_entry,
+        base_poll_interval=base_poll_interval,
+        version=version,
+        brand=brand,
+    )
+
+    if hass is not None:
+        hass.data.setdefault(DOMAIN, {})[entry_id] = runtime
+
+    return runtime
+
+
+@pytest.fixture
+def runtime_factory() -> Callable[..., "EntryRuntime"]:
+    """Return a factory that builds ``EntryRuntime`` test instances."""
+
+    return build_entry_runtime
+
+
+def runtime_from_record(
+    record: Mapping[str, Any],
+    *,
+    hass: Any | None = None,
+    entry_id: str = "entry",
+    dev_id: str = "dev",
+) -> "EntryRuntime":
+    """Return an ``EntryRuntime`` seeded from a legacy record mapping."""
+
+    runtime = build_entry_runtime(
+        hass=hass,
+        entry_id=entry_id,
+        dev_id=dev_id,
+        inventory=record.get("inventory"),
+        coordinator=record.get("coordinator"),
+        energy_coordinator=record.get("energy_coordinator"),
+        client=record.get("client"),
+        backend=record.get("backend"),
+        hourly_poller=record.get("hourly_poller"),
+        config_entry=record.get("config_entry"),
+        brand=str(record.get("brand") or "termoweb"),
+        version=str(record.get("version") or "0.0.0"),
+    )
+
+    for key, value in record.items():
+        if hasattr(runtime, key):
+            setattr(runtime, key, value)
+
+    return runtime
+
+
+@pytest.fixture(autouse=True)
+def _auto_runtime_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Convert legacy record mappings into ``EntryRuntime`` during tests."""
+
+    from custom_components.termoweb import runtime as runtime_module
+    from custom_components.termoweb.const import DOMAIN
+
+    original = runtime_module.require_runtime
+
+    def _patched_require_runtime(hass: Any, entry_id: str) -> Any:
+        """Return a runtime instance, converting legacy dicts when needed."""
+
+        try:
+            return original(hass, entry_id)
+        except LookupError:
+            domain_bucket = hass.data.get(DOMAIN, {})
+            if not isinstance(domain_bucket, Mapping):
+                raise
+            record = domain_bucket.get(entry_id)
+            if isinstance(record, Mapping):
+                dev_id = str(record.get("dev_id") or entry_id)
+                runtime = runtime_from_record(
+                    record,
+                    hass=hass,
+                    entry_id=entry_id,
+                    dev_id=dev_id,
+                )
+                domain_bucket[entry_id] = runtime
+                return runtime
+            raise
+
+    monkeypatch.setattr(runtime_module, "require_runtime", _patched_require_runtime)
+
+
 def _coerce_inventory(inventory: Any) -> tuple["Inventory" | None, list[Any]]:
     """Return an ``Inventory`` and cached node list when available."""
 

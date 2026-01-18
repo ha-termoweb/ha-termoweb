@@ -29,19 +29,15 @@ from .inventory import (
     HEATER_NODE_TYPES,
     Inventory,
     Node,
-    build_node_inventory,
     normalize_node_addr,
     normalize_node_type,
-    store_inventory_on_entry,
 )
+from .runtime import EntryRuntime, require_runtime
 from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 
 
-_BOOST_RUNTIME_KEY: Final = "boost_runtime"
-_BOOST_TEMPERATURE_KEY: Final = "boost_temperature"
-_CLIMATE_ENTITY_KEY: Final = "climate_entities"
 DEFAULT_BOOST_DURATION: Final = 60
 DEFAULT_BOOST_TEMPERATURE: Final = 20.0
 _HASS_UNSET: Final[HomeAssistant | None] = cast(HomeAssistant | None, object())
@@ -134,47 +130,27 @@ class HeaterPlatformDetails:
 
 
 def _boost_runtime_store(
-    entry_data: MutableMapping[str, Any] | None,
+    runtime: EntryRuntime,
     *,
     create: bool,
 ) -> dict[str, dict[str, int]]:
-    """Return the mutable boost runtime store for ``entry_data``."""
+    """Return the mutable boost runtime store for ``runtime``."""
 
-    if not isinstance(entry_data, MutableMapping):
+    if not create and not runtime.boost_runtime:
         return {}
-
-    store = entry_data.get(_BOOST_RUNTIME_KEY)
-    if isinstance(store, dict):
-        return store
-
-    if not create:
-        return {}
-
-    new_store: dict[str, dict[str, int]] = {}
-    entry_data[_BOOST_RUNTIME_KEY] = new_store
-    return new_store
+    return runtime.boost_runtime
 
 
 def _boost_temperature_store(
-    entry_data: MutableMapping[str, Any] | None,
+    runtime: EntryRuntime,
     *,
     create: bool,
 ) -> dict[str, dict[str, float]]:
-    """Return the mutable boost temperature store for ``entry_data``."""
+    """Return the mutable boost temperature store for ``runtime``."""
 
-    if not isinstance(entry_data, MutableMapping):
+    if not create and not runtime.boost_temperature:
         return {}
-
-    store = entry_data.get(_BOOST_TEMPERATURE_KEY)
-    if isinstance(store, dict):
-        return store
-
-    if not create:
-        return {}
-
-    new_store: dict[str, dict[str, float]] = {}
-    entry_data[_BOOST_TEMPERATURE_KEY] = new_store
-    return new_store
+    return runtime.boost_temperature
 
 
 def get_boost_runtime_minutes(
@@ -185,12 +161,9 @@ def get_boost_runtime_minutes(
 ) -> int | None:
     """Return the stored boost runtime for the specified node."""
 
-    domain_data = hass.data.get(DOMAIN)
-    if not isinstance(domain_data, MutableMapping):
-        return None
-
-    entry_data = domain_data.get(entry_id)
-    if not isinstance(entry_data, MutableMapping):
+    try:
+        runtime = require_runtime(hass, entry_id)
+    except LookupError:
         return None
 
     node_type_norm = normalize_node_type(
@@ -204,7 +177,7 @@ def get_boost_runtime_minutes(
     if not node_type_norm or not addr_norm:
         return None
 
-    store = _boost_runtime_store(entry_data, create=False)
+    store = _boost_runtime_store(runtime, create=False)
     bucket = store.get(node_type_norm)
     if not isinstance(bucket, MutableMapping):
         return None
@@ -225,12 +198,9 @@ def get_boost_temperature(
 ) -> float | None:
     """Return the stored boost temperature for the specified node."""
 
-    domain_data = hass.data.get(DOMAIN)
-    if not isinstance(domain_data, MutableMapping):
-        return None
-
-    entry_data = domain_data.get(entry_id)
-    if not isinstance(entry_data, MutableMapping):
+    try:
+        runtime = require_runtime(hass, entry_id)
+    except LookupError:
         return None
 
     node_type_norm = normalize_node_type(
@@ -244,7 +214,7 @@ def get_boost_temperature(
     if not node_type_norm or not addr_norm:
         return None
 
-    store = _boost_temperature_store(entry_data, create=False)
+    store = _boost_temperature_store(runtime, create=False)
     bucket = store.get(node_type_norm)
     if not isinstance(bucket, MutableMapping):
         return None
@@ -261,12 +231,9 @@ def set_boost_runtime_minutes(
 ) -> None:
     """Persist ``minutes`` as the preferred boost runtime for ``node``."""
 
-    domain_data = hass.data.get(DOMAIN)
-    if not isinstance(domain_data, MutableMapping):
-        return
-
-    entry_data = domain_data.get(entry_id)
-    if not isinstance(entry_data, MutableMapping):
+    try:
+        runtime = require_runtime(hass, entry_id)
+    except LookupError:
         return
 
     node_type_norm = normalize_node_type(
@@ -280,7 +247,7 @@ def set_boost_runtime_minutes(
     if not node_type_norm or not addr_norm:
         return
 
-    store = _boost_runtime_store(entry_data, create=True)
+    store = _boost_runtime_store(runtime, create=True)
 
     if minutes is None:
         bucket = store.get(node_type_norm)
@@ -307,12 +274,9 @@ def set_boost_temperature(
 ) -> None:
     """Persist ``temperature`` as the preferred boost setpoint."""
 
-    domain_data = hass.data.get(DOMAIN)
-    if not isinstance(domain_data, MutableMapping):
-        return
-
-    entry_data = domain_data.get(entry_id)
-    if not isinstance(entry_data, MutableMapping):
+    try:
+        runtime = require_runtime(hass, entry_id)
+    except LookupError:
         return
 
     node_type_norm = normalize_node_type(
@@ -326,7 +290,7 @@ def set_boost_temperature(
     if not node_type_norm or not addr_norm:
         return
 
-    store = _boost_temperature_store(entry_data, create=True)
+    store = _boost_temperature_store(runtime, create=True)
     bucket = store.setdefault(node_type_norm, {})
     if not isinstance(bucket, MutableMapping):
         bucket = {}
@@ -368,25 +332,15 @@ def resolve_boost_temperature(
 
 
 def _climate_entity_store(
-    entry_data: MutableMapping[str, Any] | None,
+    runtime: EntryRuntime,
     *,
     create: bool,
 ) -> dict[str, dict[str, str]]:
-    """Return the mutable climate entity ID store for ``entry_data``."""
+    """Return the mutable climate entity ID store for ``runtime``."""
 
-    if not isinstance(entry_data, MutableMapping):
+    if not create and not runtime.climate_entities:
         return {}
-
-    store = entry_data.get(_CLIMATE_ENTITY_KEY)
-    if isinstance(store, dict):
-        return store
-
-    if not create:
-        return {}
-
-    new_store: dict[str, dict[str, str]] = {}
-    entry_data[_CLIMATE_ENTITY_KEY] = new_store
-    return new_store
+    return runtime.climate_entities
 
 
 def register_climate_entity_id(
@@ -400,13 +354,9 @@ def register_climate_entity_id(
 
     if not entity_id:
         return
-
-    domain_data = hass.data.get(DOMAIN)
-    if not isinstance(domain_data, MutableMapping):
-        return
-
-    entry_data = domain_data.get(entry_id)
-    if not isinstance(entry_data, MutableMapping):
+    try:
+        runtime = require_runtime(hass, entry_id)
+    except LookupError:
         return
 
     node_type_norm = normalize_node_type(
@@ -420,7 +370,7 @@ def register_climate_entity_id(
     if not node_type_norm or not addr_norm:
         return
 
-    store = _climate_entity_store(entry_data, create=True)
+    store = _climate_entity_store(runtime, create=True)
     bucket = store.setdefault(node_type_norm, {})
     if not isinstance(bucket, MutableMapping):
         bucket = {}
@@ -437,12 +387,9 @@ def clear_climate_entity_id(
 ) -> None:
     """Remove the recorded climate entity ID for ``(entry_id, node_type, addr)``."""
 
-    domain_data = hass.data.get(DOMAIN)
-    if not isinstance(domain_data, MutableMapping):
-        return
-
-    entry_data = domain_data.get(entry_id)
-    if not isinstance(entry_data, MutableMapping):
+    try:
+        runtime = require_runtime(hass, entry_id)
+    except LookupError:
         return
 
     node_type_norm = normalize_node_type(
@@ -456,7 +403,7 @@ def clear_climate_entity_id(
     if not node_type_norm or not addr_norm:
         return
 
-    store = _climate_entity_store(entry_data, create=False)
+    store = _climate_entity_store(runtime, create=False)
     bucket = store.get(node_type_norm)
     if not isinstance(bucket, MutableMapping):
         return
@@ -472,12 +419,9 @@ def resolve_climate_entity_id(
 ) -> str | None:
     """Return the recorded climate entity ID for ``(entry_id, node_type, addr)``."""
 
-    domain_data = hass.data.get(DOMAIN)
-    if not isinstance(domain_data, MutableMapping):
-        return None
-
-    entry_data = domain_data.get(entry_id)
-    if not isinstance(entry_data, MutableMapping):
+    try:
+        runtime = require_runtime(hass, entry_id)
+    except LookupError:
         return None
 
     node_type_norm = normalize_node_type(
@@ -491,7 +435,7 @@ def resolve_climate_entity_id(
     if not node_type_norm or not addr_norm:
         return None
 
-    store = _climate_entity_store(entry_data, create=False)
+    store = _climate_entity_store(runtime, create=False)
     bucket = store.get(node_type_norm)
     if not isinstance(bucket, MutableMapping):
         return None
@@ -810,87 +754,19 @@ def log_skipped_nodes(
 
 
 def heater_platform_details_for_entry(
-    entry_data: Mapping[str, Any] | None,
+    runtime: EntryRuntime,
     *,
     default_name_simple: Callable[[str], str],
-    hass: HomeAssistant | None = None,
-    entry_id: str | None = None,
-    coordinator: Any | None = None,
 ) -> HeaterPlatformDetails:
-    """Return heater platform metadata derived from ``entry_data``."""
+    """Return heater platform metadata derived from ``runtime``."""
 
-    def _coerce_inventory(candidate: Any) -> Inventory | None:
-        """Return ``candidate`` when it behaves like an inventory."""
-
-        if isinstance(candidate, Inventory):
-            return candidate
-        if hasattr(candidate, "has_node"):
-            return candidate  # type: ignore[return-value]
-        return None
-
-    inventory: Inventory | None = None
-    try:
-        inventory = Inventory.require_from_context(
-            container=entry_data,
-            hass=hass,
-            entry_id=entry_id,
-            coordinator=coordinator,
+    inventory = runtime.inventory
+    if not isinstance(inventory, Inventory):
+        _LOGGER.error(
+            "TermoWeb heater setup missing inventory for device %s",
+            runtime.dev_id,
         )
-    except LookupError as err:
-        if isinstance(entry_data, Mapping):
-            candidate = _coerce_inventory(entry_data.get("inventory"))
-            if candidate is not None:
-                inventory = candidate
-            else:
-                for key in ("energy_coordinator", "coordinator"):
-                    candidate_obj = entry_data.get(key)
-                    candidate_inv = _coerce_inventory(
-                        getattr(candidate_obj, "inventory", None)
-                    )
-                    if candidate_inv is not None:
-                        inventory = candidate_inv
-                        break
-            if inventory is None:
-                nodes_payload: Mapping[str, Any] | None = None
-                if isinstance(entry_data, Mapping):
-                    nodes_payload = entry_data.get("nodes")
-                if nodes_payload is None and coordinator is not None:
-                    nodes_payload = getattr(coordinator, "nodes", None)
-                dev_id = (
-                    entry_data.get("dev_id")
-                    if isinstance(entry_data, Mapping)
-                    else None
-                )
-                if isinstance(nodes_payload, Mapping) and isinstance(dev_id, str):
-                    try:
-                        inventory = Inventory(
-                            dev_id, build_node_inventory(nodes_payload)
-                        )
-                        if isinstance(entry_data, MutableMapping):
-                            store_inventory_on_entry(
-                                inventory,
-                                record=entry_data,
-                                hass=hass,
-                                entry_id=entry_id,
-                            )
-                    except (
-                        TypeError,
-                        ValueError,
-                    ):  # pragma: no cover - defensive reconstruction
-                        inventory = None
-        if inventory is None:
-            dev_id: str | None = None
-            if isinstance(entry_data, Mapping):
-                dev_id = entry_data.get("dev_id")  # type: ignore[assignment]
-            _LOGGER.error(
-                "TermoWeb heater setup missing inventory for device %s",
-                (dev_id or "<unknown>")
-                if isinstance(dev_id, str) and dev_id
-                else "<unknown>",
-            )
-            raise ValueError(
-                "TermoWeb inventory unavailable for heater platform"
-            ) from err
+        raise ValueError("TermoWeb inventory unavailable for heater platform")
 
     return HeaterPlatformDetails(
         inventory=inventory,
@@ -1170,16 +1046,11 @@ class HeaterNodeBase(CoordinatorEntity):
         hass = self._hass_for_runtime()
         if hass is None:
             return None
-        hass_data = getattr(hass, "data", None)
-        if not isinstance(hass_data, dict):
+        try:
+            runtime = require_runtime(hass, self._entry_id)
+        except LookupError:
             return None
-        entry_bucket = hass_data.get(DOMAIN, {})
-        if not isinstance(entry_bucket, dict):
-            return None
-        entry_data = entry_bucket.get(self._entry_id, {})
-        if not isinstance(entry_data, dict):
-            return None
-        return entry_data.get("client")
+        return runtime.client
 
     def _units(self) -> str:
         """Return the configured temperature units for this heater."""

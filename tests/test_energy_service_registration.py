@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from conftest import runtime_from_record
 from custom_components.termoweb import energy
 from custom_components.termoweb.energy import (
     async_register_import_energy_history_service,
@@ -63,11 +64,17 @@ async def test_service_handler_forwards_filters(
     )
     entry = SimpleNamespace(entry_id="entry-filter")
     inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev-filter")
-    hass.data[energy.DOMAIN][entry.entry_id] = {
+    record = {
         "config_entry": entry,
         "inventory": inventory,
         "dev_id": "dev-filter",
     }
+    hass.data[energy.DOMAIN][entry.entry_id] = runtime_from_record(
+        record,
+        hass=hass,
+        entry_id=entry.entry_id,
+        dev_id="dev-filter",
+    )
 
     import_fn = AsyncMock()
 
@@ -113,11 +120,17 @@ async def test_service_logs_rejected_filters(
     )
     entry = SimpleNamespace(entry_id="entry-invalid")
     inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev-invalid")
-    hass.data[energy.DOMAIN][entry.entry_id] = {
+    record = {
         "config_entry": entry,
         "inventory": inventory,
         "dev_id": "dev-invalid",
     }
+    hass.data[energy.DOMAIN][entry.entry_id] = runtime_from_record(
+        record,
+        hass=hass,
+        entry_id=entry.entry_id,
+        dev_id="dev-invalid",
+    )
 
     import_fn = AsyncMock(side_effect=ValueError("bad filters"))
 

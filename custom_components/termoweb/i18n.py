@@ -20,6 +20,7 @@ except ImportError:  # pragma: no cover - executed in unit test stubs
 
 
 from .const import DOMAIN
+from .runtime import EntryRuntime
 from .fallback_translations import get_fallback_translations
 
 FALLBACK_TRANSLATIONS_KEY = "fallback_translations"
@@ -44,11 +45,15 @@ async def _tr(hass: HomeAssistant, key: str, **placeholders: Any) -> str:
 
 async def async_get_fallback_translations(
     hass: HomeAssistant,
-    entry_data: MutableMapping[str, Any] | None = None,
+    entry_data: EntryRuntime | MutableMapping[str, Any] | None = None,
 ) -> dict[str, str]:
     """Return cached fallback translation templates for the current language."""
 
-    if isinstance(entry_data, MutableMapping):
+    if isinstance(entry_data, EntryRuntime):
+        cached = entry_data.fallback_translations
+        if isinstance(cached, dict):
+            return cached
+    elif isinstance(entry_data, MutableMapping):
         cached = entry_data.get(FALLBACK_TRANSLATIONS_KEY)
         if isinstance(cached, dict):
             return cached
@@ -59,7 +64,9 @@ async def async_get_fallback_translations(
 
     fallbacks = get_fallback_translations(language)
 
-    if isinstance(entry_data, MutableMapping):
+    if isinstance(entry_data, EntryRuntime):
+        entry_data.fallback_translations = fallbacks
+    elif isinstance(entry_data, MutableMapping):
         entry_data[FALLBACK_TRANSLATIONS_KEY] = fallbacks
 
     return fallbacks

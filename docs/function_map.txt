@@ -1323,9 +1323,7 @@ custom_components/termoweb/heater.py :: DispatcherSubscriptionHelper.is_connecte
 custom_components/termoweb/heater.py :: log_skipped_nodes
     Log skipped TermoWeb nodes for a given platform.
 custom_components/termoweb/heater.py :: heater_platform_details_for_entry
-    Return heater platform metadata derived from ``entry_data``.
-custom_components/termoweb/heater.py :: heater_platform_details_for_entry._coerce_inventory
-    Return ``candidate`` when it behaves like an inventory.
+    Return heater platform metadata derived from ``runtime``.
 custom_components/termoweb/heater.py :: HeaterNodeBase.__init__
     Initialise a heater entity tied to a TermoWeb device.
 custom_components/termoweb/heater.py :: HeaterNodeBase.async_added_to_hass
@@ -1478,14 +1476,6 @@ custom_components/termoweb/inventory.py :: Inventory.heater_name_map._evict_stal
     Drop the oldest cached factory when exceeding the size limit.
 custom_components/termoweb/inventory.py :: Inventory._heater_factory_signature
     Return a stable cache key for ``factory`` when possible.
-custom_components/termoweb/inventory.py :: Inventory.require_from_context
-    Return the shared inventory associated with a Home Assistant entry.
-custom_components/termoweb/inventory.py :: Inventory.require_from_record
-    Return the cached inventory stored within ``record``.
-custom_components/termoweb/inventory.py :: _request_ws_inventory_resubscribe
-    Request websocket resubscribe when inventory becomes available.
-custom_components/termoweb/inventory.py :: store_inventory_on_entry
-    Persist inventory for an entry and notify websocket clients.
 custom_components/termoweb/inventory.py :: _normalize_node_identifier
     Return ``value`` as a normalised node identifier string.
 custom_components/termoweb/inventory.py :: normalize_node_type
@@ -1554,6 +1544,22 @@ custom_components/termoweb/inventory.py :: _normalise_with_fallback
     Return the first non-empty normalised value from ``candidates``.
 custom_components/termoweb/inventory.py :: build_node_inventory
     Return a list of :class:`Node` instances for the provided payload.
+custom_components/termoweb/runtime.py :: EntryRuntime._field_keys
+    Return the public runtime fields used for mapping access.
+custom_components/termoweb/runtime.py :: EntryRuntime.__getitem__
+    Return runtime attributes using mapping-style access.
+custom_components/termoweb/runtime.py :: EntryRuntime.__setitem__
+    Store runtime attributes using mapping-style access.
+custom_components/termoweb/runtime.py :: EntryRuntime.__delitem__
+    Delete runtime attributes using mapping-style access.
+custom_components/termoweb/runtime.py :: EntryRuntime.__iter__
+    Iterate over runtime keys exposed via mapping semantics.
+custom_components/termoweb/runtime.py :: EntryRuntime.__len__
+    Return the number of keys exposed via mapping semantics.
+custom_components/termoweb/runtime.py :: EntryRuntime.get
+    Return a runtime attribute or ``default``.
+custom_components/termoweb/runtime.py :: require_runtime
+    Return the runtime container stored for ``entry_id``.
 custom_components/termoweb/number.py :: _restore_boost_value
     Restore a boost preference from cache, state, or settings.
 custom_components/termoweb/number.py :: async_setup_entry

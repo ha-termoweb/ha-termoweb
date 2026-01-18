@@ -46,24 +46,23 @@ from custom_components.termoweb.const import (
     signal_ws_data,
 )
 from custom_components.termoweb.domain import (
-    canonicalize_settings_payload,
     NodeId as DomainNodeId,
     NodeSettingsDelta,
     NodeType as DomainNodeType,
+    canonicalize_settings_payload,
 )
 from custom_components.termoweb.inventory import (
     Inventory,
     normalize_node_addr,
     normalize_node_type,
-    store_inventory_on_entry,
 )
 
 from .ws_client import (
-    build_settings_delta,
     HandshakeError,
     WSStats,
     _prepare_nodes_dispatch,
     _WSCommon,
+    build_settings_delta,
     clone_payload_value,
     forward_ws_sample_updates,
     resolve_ws_update_section,
@@ -1021,15 +1020,6 @@ class WebSocketClient(_WSCommon):
         inventory = context.inventory
         if self._inventory is None and isinstance(inventory, Inventory):
             self._inventory = inventory
-
-        record = context.record
-        if isinstance(record, MutableMapping) and isinstance(inventory, Inventory):
-            store_inventory_on_entry(
-                inventory,
-                record=record,
-                hass=self.hass,
-                entry_id=self.entry_id,
-            )
 
         if not isinstance(inventory, Inventory):
             _LOGGER.error("WS: missing inventory for node dispatch on %s", self.dev_id)

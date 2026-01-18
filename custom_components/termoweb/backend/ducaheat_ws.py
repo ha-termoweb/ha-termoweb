@@ -39,7 +39,6 @@ from custom_components.termoweb.const import (
     ACCEPT_LANGUAGE,
     API_BASE,
     BRAND_DUCAHEAT,
-    DOMAIN,
     USER_AGENT,
     get_brand_api_base,
     get_brand_requested_with,
@@ -57,6 +56,7 @@ from custom_components.termoweb.inventory import (
     normalize_node_addr,
     normalize_node_type,
 )
+from custom_components.termoweb.runtime import require_runtime
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1715,27 +1715,25 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self._last_subscribe_attempt_ts = attempt_ts
         self._increment_state_counter("subscribe_attempts_total")
         try:
-            domain_bucket = self.hass.data.setdefault(DOMAIN, {})
-            existing_record = domain_bucket.get(self.entry_id)
-
-            record_mapping: MutableMapping[str, Any]
-            if isinstance(existing_record, MutableMapping):
-                record_mapping = existing_record
-            else:
-                record_mapping = {}
-                if isinstance(existing_record, Mapping):
-                    record_mapping.update(existing_record)
-                domain_bucket[self.entry_id] = record_mapping
-
             try:
-                inventory_container = Inventory.require_from_context(
-                    inventory=self._inventory,
-                    container=record_mapping,
-                    hass=self.hass,
-                    entry_id=self.entry_id,
-                    coordinator=self._coordinator,
-                )
+                runtime = require_runtime(self.hass, self.entry_id)
             except LookupError:
+                self._pending_subscribe = True
+                self._increment_state_counter("subscribe_fail_total")
+                should_log = (
+                    attempt_ts - self._last_subscribe_log_ts
+                    >= self._subscribe_backoff_s
+                )
+                if should_log:
+                    self._last_subscribe_log_ts = attempt_ts
+                    _LOGGER.info(
+                        "WS (ducaheat): inventory not ready for device %s; will retry",
+                        self.dev_id,
+                    )
+                return 0
+
+            inventory_container = runtime.inventory
+            if not isinstance(inventory_container, Inventory):
                 self._pending_subscribe = True
                 self._increment_state_counter("subscribe_fail_total")
                 should_log = (
@@ -1752,7 +1750,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
 
             self._inventory = inventory_container
 
-            energy_coordinator = record_mapping.get("energy_coordinator")
+            energy_coordinator = runtime.energy_coordinator
             if hasattr(energy_coordinator, "update_addresses"):
                 try:
                     energy_coordinator.update_addresses(inventory_container)

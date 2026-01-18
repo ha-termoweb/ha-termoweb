@@ -23,12 +23,8 @@ from ..const import (
     signal_ws_data,
     signal_ws_status,
 )
-from ..inventory import (
-    Inventory,
-    normalize_node_addr,
-    normalize_node_type,
-    store_inventory_on_entry,
-)
+from ..inventory import Inventory, normalize_node_addr, normalize_node_type
+from ..runtime import require_runtime
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .ducaheat_ws import DucaheatWSClient
@@ -169,24 +165,19 @@ def forward_ws_sample_updates(
 ) -> None:
     """Relay websocket heater sample updates to the energy coordinator."""
 
-    record = hass.data.get(DOMAIN, {}).get(entry_id)
-    if not isinstance(record, Mapping):
+    try:
+        runtime = require_runtime(hass, entry_id)
+    except LookupError:
         return
-    energy_coordinator = record.get("energy_coordinator")
+    energy_coordinator = runtime.energy_coordinator
     handler = getattr(energy_coordinator, "handle_ws_samples", None)
     if not callable(handler):
         return
 
-    try:
-        inventory = Inventory.require_from_context(
-            container=record,
-            hass=hass,
-            entry_id=entry_id,
-            coordinator=record.get("coordinator"),
-        )
-    except LookupError as err:
+    inventory = runtime.inventory
+    if not isinstance(inventory, Inventory):
         active_logger = logger or _LOGGER
-        active_logger.error("%s: %s", log_prefix, err)
+        active_logger.error("%s: inventory unavailable", log_prefix)
         return
 
     alias_map = inventory.sample_alias_map(
@@ -706,7 +697,6 @@ class NodeDispatchContext:
 
     payload: Any
     inventory: Inventory | None
-    record: MutableMapping[str, Any] | None
 
 
 def _prepare_nodes_dispatch(
@@ -719,33 +709,14 @@ def _prepare_nodes_dispatch(
 ) -> NodeDispatchContext:
     """Normalise node payload data for downstream websocket dispatch."""
 
-    record_container = hass.data.get(DOMAIN, {})
-    record_raw = (
-        record_container.get(entry_id) if isinstance(record_container, dict) else None
-    )
-    record_mapping = record_raw if isinstance(record_raw, Mapping) else None
-    record_mutable: MutableMapping[str, Any] | None = (
-        record_raw if isinstance(record_raw, MutableMapping) else None
-    )
-
-    container: Mapping[str, Any] | MutableMapping[str, Any] | None
-    if isinstance(record_mutable, MutableMapping):
-        container = record_mutable
-    else:
-        container = record_mapping
-
-    inventory_container = Inventory.require_from_context(
-        inventory=inventory,
-        container=container,
-        hass=hass,
-        entry_id=entry_id,
-        coordinator=coordinator,
-    )
+    runtime = require_runtime(hass, entry_id)
+    inventory_container = inventory if isinstance(inventory, Inventory) else None
+    if inventory_container is None:
+        inventory_container = runtime.inventory
 
     return NodeDispatchContext(
         payload=raw_nodes,
         inventory=inventory_container,
-        record=record_mutable,
     )
 
 
@@ -774,28 +745,17 @@ class _WSCommon(_WSStatusMixin):
     def _bind_inventory_from_context(self) -> Inventory | None:
         """Attach the shared inventory stored on the Home Assistant entry."""
 
+        if isinstance(self._inventory, Inventory):
+            return self._inventory
         try:
-            inventory = Inventory.require_from_context(
-                inventory=self._inventory,
-                container=self.hass.data.get(DOMAIN, {}).get(self.entry_id),
-                hass=self.hass,
-                entry_id=self.entry_id,
-                coordinator=self._coordinator,
-            )
+            runtime = require_runtime(self.hass, self.entry_id)
         except LookupError:
             return None
-
+        inventory = runtime.inventory
         if isinstance(inventory, Inventory):
             self._inventory = inventory
-            record = self.hass.data.setdefault(DOMAIN, {}).setdefault(self.entry_id, {})
-            if isinstance(record, MutableMapping):
-                store_inventory_on_entry(
-                    inventory,
-                    record=record,
-                    hass=self.hass,
-                    entry_id=self.entry_id,
-                )
-        return inventory
+            return inventory
+        return None
 
     def _ensure_type_bucket(
         self,
@@ -825,23 +785,16 @@ class _WSCommon(_WSStatusMixin):
         if not isinstance(dev_map, MutableMapping):
             return bucket
 
-        try:
-            inventory_container = Inventory.require_from_context(
-                inventory=self._inventory,
-                container=dev_map,
-                hass=self.hass,
-                entry_id=self.entry_id,
-                coordinator=self._coordinator,
-            )
-        except LookupError:
-            inventory_container = None
-        else:
-            store_inventory_on_entry(
-                inventory_container,
-                record=dev_map,
-                hass=self.hass,
-                entry_id=self.entry_id,
-            )
+        inventory_container = self._inventory
+        if not isinstance(inventory_container, Inventory):
+            try:
+                runtime = require_runtime(self.hass, self.entry_id)
+            except LookupError:
+                inventory_container = None
+            else:
+                inventory_container = runtime.inventory
+        if isinstance(inventory_container, Inventory):
+            dev_map["inventory"] = inventory_container
 
         settings_section = dev_map.get("settings")
         if isinstance(settings_section, MutableMapping):
@@ -860,25 +813,7 @@ class _WSCommon(_WSStatusMixin):
         logger: logging.Logger | None = None,
     ) -> None:
         """Update entry and coordinator state with heater address data."""
-        record_container = self.hass.data.get(DOMAIN, {})
-        record_raw = (
-            record_container.get(self.entry_id)
-            if isinstance(record_container, dict)
-            else None
-        )
-        record = record_raw if isinstance(record_raw, Mapping) else None
-        record_mutable: MutableMapping[str, Any] | None = (
-            record_raw if isinstance(record_raw, MutableMapping) else None
-        )
-        record_mapping = record_raw if isinstance(record_raw, Mapping) else None
-
         active_logger = logger or _LOGGER
-
-        container: Mapping[str, Any] | MutableMapping[str, Any] | None
-        if isinstance(record_mutable, MutableMapping):
-            container = record_mutable
-        else:
-            container = record_mapping
 
         resolved_inventory = inventory
         if not isinstance(resolved_inventory, Inventory) and isinstance(
@@ -886,33 +821,33 @@ class _WSCommon(_WSStatusMixin):
         ):
             resolved_inventory = self._inventory
 
-        try:
-            inventory_container = Inventory.require_from_context(
-                inventory=resolved_inventory,
-                container=container,
-                hass=self.hass,
-                entry_id=self.entry_id,
-                coordinator=self._coordinator,
-            )
-        except LookupError:
+        if not isinstance(resolved_inventory, Inventory):
+            try:
+                runtime = require_runtime(self.hass, self.entry_id)
+            except LookupError:
+                runtime = None
+            if runtime is not None and isinstance(runtime.inventory, Inventory):
+                resolved_inventory = runtime.inventory
+
+        if not isinstance(resolved_inventory, Inventory):
             active_logger.error(
                 "%s: missing inventory for heater address update on %s",
                 log_prefix,
                 self.dev_id,
             )
-            raise
-
-        if isinstance(record_mutable, MutableMapping):
-            record_mutable.pop("sample_aliases", None)
+            raise LookupError("TermoWeb inventory unavailable for heater address update")
         if not isinstance(self._inventory, Inventory):
-            self._inventory = inventory_container
+            self._inventory = resolved_inventory
 
-        energy_coordinator = (
-            record.get("energy_coordinator") if isinstance(record, Mapping) else None
-        )
+        try:
+            runtime = require_runtime(self.hass, self.entry_id)
+        except LookupError:
+            runtime = None
 
-        if hasattr(energy_coordinator, "update_addresses"):
-            energy_coordinator.update_addresses(inventory_container)
+        if runtime is not None:
+            energy_coordinator = runtime.energy_coordinator
+            if hasattr(energy_coordinator, "update_addresses"):
+                energy_coordinator.update_addresses(resolved_inventory)
 
     def _dispatch_nodes(self, payload: dict[str, Any]) -> None:
         raw_nodes = payload.get("nodes") if "nodes" in payload else payload
@@ -1030,8 +965,8 @@ class WebSocketClient(_WsLeaseMixin, _WSStatusMixin):
 
 __all__ = [
     "CANONICAL_SETTING_KEYS",
-    "ConnectionRateLimiter",
     "DUCAHEAT_NAMESPACE",
+    "ConnectionRateLimiter",
     "HandshakeError",
     "WSStats",
     "WebSocketClient",

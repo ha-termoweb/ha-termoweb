@@ -8,7 +8,8 @@ from unittest.mock import MagicMock
 
 from homeassistant.core import HomeAssistant
 
-from custom_components.termoweb.backend.ducaheat_ws import DucaheatWSClient, DOMAIN
+from custom_components.termoweb.backend.ducaheat_ws import DucaheatWSClient
+from custom_components.termoweb.const import DOMAIN
 
 
 class DummyREST:

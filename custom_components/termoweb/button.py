@@ -39,6 +39,7 @@ from .heater import (
 from .i18n import async_get_fallback_translations, attach_fallbacks
 from .identifiers import build_heater_entity_unique_id
 from .inventory import AccumulatorNode, Inventory
+from .runtime import require_runtime
 from .utils import build_gateway_device_info
 
 _LOGGER = logging.getLogger(__name__)
@@ -114,22 +115,20 @@ def _iter_accumulator_contexts(
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Expose hub refresh and accumulator boost helper buttons."""
+    runtime = require_runtime(hass, entry.entry_id)
+    coordinator = runtime.coordinator
+    dev_id = runtime.dev_id
 
-    data = hass.data[DOMAIN][entry.entry_id]
-    coordinator = data["coordinator"]
-    dev_id = data["dev_id"]
-
-    fallbacks = await async_get_fallback_translations(hass, data)
+    fallbacks = await async_get_fallback_translations(hass, runtime)
     attach_fallbacks(coordinator, fallbacks)
     entities: list[ButtonEntity] = [
         StateRefreshButton(coordinator, entry.entry_id, dev_id)
     ]
 
-    try:
-        inventory = Inventory.require_from_context(container=data)
-    except LookupError as err:
+    inventory = runtime.inventory
+    if not isinstance(inventory, Inventory):
         _LOGGER.error("TermoWeb button setup missing inventory for device %s", dev_id)
-        raise ValueError("TermoWeb inventory unavailable for button platform") from err
+        raise ValueError("TermoWeb inventory unavailable for button platform")
 
     log_skipped_nodes("button", inventory, logger=_LOGGER)
 

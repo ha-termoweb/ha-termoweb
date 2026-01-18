@@ -19,6 +19,7 @@ from .api import RESTClient
 from .const import DOMAIN
 from .identifiers import build_heater_energy_unique_id
 from .inventory import Inventory, normalize_node_addr, normalize_node_type
+from .runtime import EntryRuntime, require_runtime
 from .throttle import MonotonicRateLimiter
 
 _LOGGER = logging.getLogger(__name__)
@@ -557,26 +558,24 @@ async def async_import_energy_history(
     last_stats_fn = _get_last_statistics_compat
     clear_stats_fn = _clear_statistics_compat
 
-    rec = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-    if not rec:
+    try:
+        runtime = require_runtime(hass, entry.entry_id)
+    except LookupError:
         logger.debug("%s: no record found for energy import", entry.entry_id)
         return
-    client: RESTClient = rec["client"]
-    dev_id: str = rec["dev_id"]
+    client: RESTClient = runtime.client  # type: ignore[assignment]
+    dev_id: str = runtime.dev_id
 
     if nodes is not None and not isinstance(nodes, Inventory):
         raise TypeError(
             "async_import_energy_history nodes must be an Inventory instance"
         )
 
-    inventory: Inventory | None
-    container = rec if isinstance(rec, Mapping) else None
-    try:
-        inventory = Inventory.require_from_context(
-            inventory=nodes,
-            container=container,
-        )
-    except LookupError:
+    if nodes is not None:
+        inventory = nodes
+    else:
+        inventory = runtime.inventory
+    if not isinstance(inventory, Inventory):
         logger.error(
             "%s: energy import aborted; inventory missing in integration state",
             dev_id,
@@ -1306,19 +1305,16 @@ async def async_register_import_energy_history_service(
         records = hass.data.get(DOMAIN, {})
         if not isinstance(records, Mapping):
             records = {}
-        for entry_id, rec in records.items():
-            if not isinstance(rec, Mapping):
+        for entry_id, runtime in records.items():
+            if not isinstance(runtime, EntryRuntime):
                 continue
-            ent: ConfigEntry | None = rec.get("config_entry")
-            if not ent:
-                continue
-            try:
-                Inventory.require_from_context(container=rec)
-            except LookupError:
+            ent = runtime.config_entry
+            inventory = runtime.inventory
+            if not isinstance(inventory, Inventory):
                 entry_entry_id = getattr(ent, "entry_id", "<unknown>")
                 logger.error(
                     "%s: energy import aborted; inventory missing in integration state (entry=%s)",
-                    rec.get("dev_id"),
+                    runtime.dev_id,
                     entry_entry_id,
                 )
                 continue
