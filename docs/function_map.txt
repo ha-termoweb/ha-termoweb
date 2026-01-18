@@ -118,8 +118,6 @@ custom_components/termoweb/backend/base.py :: Backend.create_ws_client
     Create a websocket client for the given device.
 custom_components/termoweb/backend/base.py :: Backend.fetch_hourly_samples
     Return normalised hourly samples grouped by node descriptor.
-custom_components/termoweb/backend/base.py :: Backend.get_energy_samples
-    Return normalised energy samples between ``start_s`` and ``end_s``.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._maybe_refresh_leases
     Proactively refresh subscriptions before payload staleness.
 custom_components/termoweb/backend/base.py :: Backend._resolve_node_descriptor
@@ -128,12 +126,6 @@ custom_components/termoweb/backend/base.py :: normalise_sample_records
     Return sorted sample dictionaries containing ``ts`` and ``energy_wh``.
 custom_components/termoweb/backend/base.py :: fetch_normalised_hourly_samples
     Return per-node normalised samples for ``nodes`` between ``start`` and ``end``.
-custom_components/termoweb/backend/base.py :: _coerce_timestamp_seconds
-    Return ``value`` coerced to seconds since epoch when possible.
-custom_components/termoweb/backend/base.py :: _coerce_counter_kwh
-    Return ``value`` interpreted as a kWh counter when possible.
-custom_components/termoweb/backend/base.py :: normalise_energy_samples
-    Return energy samples expressed in epoch seconds and kWh.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRequestError.__init__
     Initialise error metadata for logging and diagnostics.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._post_segmented
@@ -318,8 +310,6 @@ custom_components/termoweb/backend/termoweb.py :: TermoWebBackend.create_ws_clie
     Instantiate the unified websocket client for TermoWeb.
 custom_components/termoweb/backend/termoweb.py :: TermoWebBackend.fetch_hourly_samples
     Return hourly samples for ``nodes`` using the REST API.
-custom_components/termoweb/backend/termoweb.py :: TermoWebBackend.get_energy_samples
-    Return energy samples normalised to epoch seconds and kWh.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient.__init__
     Initialise the websocket client container.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._reset_handshake_cache
