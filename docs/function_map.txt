@@ -112,6 +112,8 @@ custom_components/termoweb/backend/base.py :: Backend.brand
     Return the configured brand.
 custom_components/termoweb/backend/base.py :: Backend.client
     Return the HTTP client associated with this backend.
+custom_components/termoweb/backend/base.py :: Backend.set_node_settings
+    Update node settings using the backend client.
 custom_components/termoweb/backend/base.py :: Backend.create_ws_client
     Create a websocket client for the given device.
 custom_components/termoweb/backend/base.py :: Backend.fetch_hourly_samples
@@ -192,6 +194,10 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._serialise_
     Serialise preset temperatures into the API schema.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._safe_temperature
     Defensively format inbound temperature values.
+custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend._should_cancel_boost
+    Return True when accumulator updates should cancel boost.
+custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend.set_node_settings
+    Update node settings while applying Ducaheat boost heuristics.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend.create_ws_client
     Instantiate the unified websocket client for Ducaheat.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatBackend.fetch_hourly_samples

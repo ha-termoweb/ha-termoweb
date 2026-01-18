@@ -1,17 +1,13 @@
 {
-  "domain": "termoweb",
-  "name": "TermoWeb",
-  "after_dependencies": ["recorder"],
-  "codeowners": [
-    "@ha-termoweb"
-  ],
-  "config_flow": true,
-  "documentation": "https://github.com/ha-termoweb/ha-termoweb#readme",
-  "iot_class": "cloud_push",
-  "issue_tracker": "https://github.com/ha-termoweb/ha-termoweb/issues",
-  "loggers": [
-    "custom_components.termoweb"
-  ],
-  "requirements": ["python-socketio==5.16.0"],
-  "version": "2.0.1a4"
+    "domain": "termoweb",
+    "name": "TermoWeb",
+    "after_dependencies": ["recorder"],
+    "codeowners": ["@ha-termoweb"],
+    "config_flow": true,
+    "documentation": "https://github.com/ha-termoweb/ha-termoweb#readme",
+    "iot_class": "cloud_push",
+    "issue_tracker": "https://github.com/ha-termoweb/ha-termoweb/issues",
+    "loggers": ["custom_components.termoweb"],
+    "requirements": ["python-socketio==5.16.0"],
+    "version": "2.0.1a5",
 }

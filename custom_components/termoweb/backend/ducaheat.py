@@ -12,6 +12,7 @@ from aiohttp import ClientResponseError
 from custom_components.termoweb.api import RESTClient
 from custom_components.termoweb.backend.base import (
     Backend,
+    BoostContext,
     WsClientProto,
     fetch_normalised_hourly_samples,
 )
@@ -1443,6 +1444,47 @@ class DucaheatRESTClient(RESTClient):
 
 class DucaheatBackend(Backend):
     """Backend wiring for Ducaheat brand accounts."""
+
+    def _should_cancel_boost(self, context: BoostContext | None) -> bool:
+        """Return True when accumulator updates should cancel boost."""
+
+        if context is None:
+            return False
+        if context.active is not None:
+            return bool(context.active)
+        if context.legacy_active is not None:
+            return bool(context.legacy_active)
+        if context.mode is not None:
+            return context.mode.strip().lower() == "boost"
+        return False
+
+    async def set_node_settings(
+        self,
+        dev_id: str,
+        node: NodeDescriptor,
+        *,
+        mode: str | None = None,
+        stemp: float | None = None,
+        prog: list[int] | None = None,
+        ptemp: list[float] | None = None,
+        units: str = "C",
+        boost_context: BoostContext | None = None,
+    ) -> Any:
+        """Update node settings while applying Ducaheat boost heuristics."""
+
+        node_type, _addr = self._resolve_node_descriptor(node)
+        cancel_boost = node_type == "acm" and self._should_cancel_boost(boost_context)
+
+        await self.client.set_node_settings(
+            dev_id,
+            node,
+            mode=mode,
+            stemp=stemp,
+            prog=prog,
+            ptemp=ptemp,
+            units=units,
+            cancel_boost=cancel_boost,
+        )
 
     def create_ws_client(
         self,

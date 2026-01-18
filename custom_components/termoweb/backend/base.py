@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from asyncio import CancelledError, Task
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
 from typing import Any, Protocol, TypedDict
@@ -19,7 +20,6 @@ from custom_components.termoweb.inventory import (
     normalize_node_type,
 )
 from custom_components.termoweb.utils import float_or_none
-
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -86,6 +86,15 @@ class WsClientProto(Protocol):
         """Stop the websocket client."""
 
 
+@dataclass(slots=True)
+class BoostContext:
+    """Hint data used when determining boost cancellation behavior."""
+
+    active: bool | None = None
+    legacy_active: bool | None = None
+    mode: str | None = None
+
+
 class Backend(ABC):
     """Base class for brand-specific integration backends."""
 
@@ -106,6 +115,30 @@ class Backend(ABC):
         """Return the HTTP client associated with this backend."""
 
         return self._client
+
+    async def set_node_settings(
+        self,
+        dev_id: str,
+        node: NodeDescriptor,
+        *,
+        mode: str | None = None,
+        stemp: float | None = None,
+        prog: list[int] | None = None,
+        ptemp: list[float] | None = None,
+        units: str = "C",
+        boost_context: BoostContext | None = None,
+    ) -> Any:
+        """Update node settings using the backend client."""
+
+        await self.client.set_node_settings(
+            dev_id,
+            node,
+            mode=mode,
+            stemp=stemp,
+            prog=prog,
+            ptemp=ptemp,
+            units=units,
+        )
 
     @abstractmethod
     def create_ws_client(
