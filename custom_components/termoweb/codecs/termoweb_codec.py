@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-from custom_components.termoweb.backend.sanitize import validate_boost_minutes
+from custom_components.termoweb.boost import validate_boost_minutes
 from custom_components.termoweb.codecs.common import format_temperature, validate_units
 from custom_components.termoweb.domain import canonicalize_settings_payload
 from custom_components.termoweb.domain.commands import (

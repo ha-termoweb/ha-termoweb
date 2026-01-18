@@ -21,9 +21,12 @@ from custom_components.termoweb.backend.sanitize import (
     build_acm_boost_payload,
     mask_identifier,
     redact_text,
+)
+from custom_components.termoweb.boost import (
+    coerce_boost_bool,
+    coerce_int,
     validate_boost_minutes,
 )
-from custom_components.termoweb.boost import coerce_boost_bool, coerce_int
 from custom_components.termoweb.codecs.ducaheat_codec import decode_settings
 from custom_components.termoweb.codecs.ducaheat_planner import plan_command
 from custom_components.termoweb.const import (

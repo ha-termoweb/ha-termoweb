@@ -166,3 +166,22 @@ def resolve_boost_end_from_fields(
 
 ALLOWED_BOOST_MINUTES: Final[tuple[int, ...]] = tuple(range(60, 601, 60))
 """Valid boost durations (in minutes) supported by TermoWeb heaters."""
+
+ALLOWED_BOOST_MINUTES_SET: Final[frozenset[int]] = frozenset(ALLOWED_BOOST_MINUTES)
+ALLOWED_BOOST_MINUTES_MESSAGE: Final[str] = ", ".join(
+    str(option) for option in ALLOWED_BOOST_MINUTES
+)
+
+
+def validate_boost_minutes(value: int | None) -> int | None:
+    """Return a validated boost duration in minutes or ``None``."""
+
+    if value is None:
+        return None
+    try:
+        minutes = int(value)
+    except (TypeError, ValueError) as err:  # pragma: no cover - defensive
+        raise ValueError(f"Invalid boost_time value: {value!r}") from err
+    if minutes not in ALLOWED_BOOST_MINUTES_SET:
+        raise ValueError(f"boost_time must be one of: {ALLOWED_BOOST_MINUTES_MESSAGE}")
+    return minutes

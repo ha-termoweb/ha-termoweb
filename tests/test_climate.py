@@ -1080,8 +1080,7 @@ def test_accumulator_validate_boost_minutes_rejects_out_of_bounds(
     assert result is None
     assert calls == [130]
     assert any(
-        "Boost duration must be between 60 and 600" in record.message
-        for record in caplog.records
+        "Boost duration must be one of" in record.message for record in caplog.records
     )
 
 
