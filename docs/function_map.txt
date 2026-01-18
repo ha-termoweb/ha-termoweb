@@ -1014,6 +1014,14 @@ custom_components/termoweb/coordinator.py :: StateCoordinator.__init__
     Initialize the TermoWeb device coordinator.
 custom_components/termoweb/coordinator.py :: StateCoordinator.domain_view
     Return the read-only domain state view.
+custom_components/termoweb/coordinator.py :: StateCoordinator.device_metadata
+    Return immutable metadata for this gateway.
+custom_components/termoweb/coordinator.py :: StateCoordinator.gateway_name
+    Return the display name for this gateway.
+custom_components/termoweb/coordinator.py :: StateCoordinator.gateway_model
+    Return the display model name for this gateway.
+custom_components/termoweb/coordinator.py :: StateCoordinator.gateway_connected
+    Return True when the coordinator reports the gateway online.
 custom_components/termoweb/coordinator.py :: StateCoordinator._device_record
     Return a minimal coordinator payload for this device.
 custom_components/termoweb/coordinator.py :: StateCoordinator._publish_device_record

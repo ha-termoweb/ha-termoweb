@@ -136,8 +136,8 @@ class GatewayOnlineBinarySensor(
     @property
     def is_on(self) -> bool:
         """Return True when the integration reports the gateway is online."""
-        data = (self.coordinator.data or {}).get(self._dev_id, {}) or {}
-        return bool(data.get("connected"))
+        connected = getattr(self.coordinator, "gateway_connected", None)
+        return bool(connected() if callable(connected) else connected)
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -147,13 +147,16 @@ class GatewayOnlineBinarySensor(
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional gateway diagnostics and websocket state."""
-        data = (self.coordinator.data or {}).get(self._dev_id, {}) or {}
+        coordinator = self.coordinator
+        name = getattr(coordinator, "gateway_name", None)
+        model = getattr(coordinator, "gateway_model", None)
+        connected = getattr(coordinator, "gateway_connected", None)
         ws = self._ws_state()
         return {
             "dev_id": self._dev_id,
-            "name": data.get("name"),
-            "connected": data.get("connected"),
-            "model": data.get("model"),
+            "name": name() if callable(name) else name,
+            "connected": connected() if callable(connected) else connected,
+            "model": model() if callable(model) else model,
             "ws_status": ws.get("status"),
             "ws_last_event_at": ws.get("last_event_at"),
             "ws_healthy_minutes": ws.get("healthy_minutes"),
