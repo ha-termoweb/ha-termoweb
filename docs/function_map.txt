@@ -312,8 +312,6 @@ custom_components/termoweb/backend/sanitize.py :: redact_token_fragment
     Return a shortened representation of a token-like string.
 custom_components/termoweb/backend/sanitize.py :: mask_identifier
     Return a masked identifier suitable for log output.
-custom_components/termoweb/backend/sanitize.py :: validate_boost_minutes
-    Return a validated boost duration in minutes or ``None``.
 custom_components/termoweb/backend/sanitize.py :: build_acm_boost_payload
     Return a validated accumulator boost payload.
 custom_components/termoweb/backend/termoweb.py :: TermoWebBackend.create_ws_client
@@ -600,6 +598,8 @@ custom_components/termoweb/boost.py :: coerce_boost_bool
     Return ``value`` as a boolean when possible.
 custom_components/termoweb/boost.py :: coerce_boost_minutes
     Return ``value`` as positive minutes when possible.
+custom_components/termoweb/boost.py :: validate_boost_minutes
+    Return a validated boost duration in minutes or ``None``.
 custom_components/termoweb/boost.py :: _coerce_positive_minutes
     Return ``value`` as a positive integer minute count when possible.
 custom_components/termoweb/boost.py :: supports_boost

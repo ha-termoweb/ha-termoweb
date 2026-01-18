@@ -19,8 +19,8 @@ from custom_components.termoweb.backend.sanitize import (
     mask_identifier,
     redact_text,
     redact_token_fragment,
-    validate_boost_minutes,
 )
+from custom_components.termoweb.boost import validate_boost_minutes
 from custom_components.termoweb.const import WS_NAMESPACE
 from custom_components.termoweb.backend.ducaheat_ws import DucaheatWSClient
 

@@ -5,12 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from custom_components.termoweb.boost import ALLOWED_BOOST_MINUTES
-
-_ALLOWED_BOOST_MINUTES_SET = frozenset(ALLOWED_BOOST_MINUTES)
-_ALLOWED_BOOST_MINUTES_MESSAGE = ", ".join(
-    str(option) for option in ALLOWED_BOOST_MINUTES
-)
+from custom_components.termoweb.boost import validate_boost_minutes
 
 _BEARER_RE = re.compile(r"Bearer\s+[A-Za-z0-9\-._~+/]+=*", re.IGNORECASE)
 _TOKEN_QUERY_RE = re.compile(r"(?i)(token|refresh_token|access_token)=([^&\s]+)")
@@ -61,20 +56,6 @@ def mask_identifier(value: str | None) -> str:
     prefix = trimmed[:6]
     suffix = trimmed[-4:]
     return f"{prefix}...{suffix}"
-
-
-def validate_boost_minutes(value: int | None) -> int | None:
-    """Return a validated boost duration in minutes or ``None``."""
-
-    if value is None:
-        return None
-    try:
-        minutes = int(value)
-    except (TypeError, ValueError) as err:  # pragma: no cover - defensive
-        raise ValueError(f"Invalid boost_time value: {value!r}") from err
-    if minutes not in _ALLOWED_BOOST_MINUTES_SET:
-        raise ValueError(f"boost_time must be one of: {_ALLOWED_BOOST_MINUTES_MESSAGE}")
-    return minutes
 
 
 def build_acm_boost_payload(

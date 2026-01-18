@@ -14,7 +14,7 @@ from pydantic import (
     model_validator,
 )
 
-from custom_components.termoweb.backend.sanitize import validate_boost_minutes
+from custom_components.termoweb.boost import validate_boost_minutes
 from custom_components.termoweb.codecs.common import format_temperature, validate_units
 
 ACCUMULATOR_ONLY_FIELDS: set[str] = {
@@ -342,8 +342,12 @@ class DucaheatStatusSegment(DucaheatReadModel):
         """Populate boost end fields from nested mappings when supplied."""
 
         if self.boost_end and isinstance(self.boost_end, Mapping):
-            self.boost_end_day = self.boost_end_day or _coerce_int(self.boost_end.get("day"))
-            self.boost_end_min = self.boost_end_min or _coerce_int(self.boost_end.get("minute"))
+            self.boost_end_day = self.boost_end_day or _coerce_int(
+                self.boost_end.get("day")
+            )
+            self.boost_end_min = self.boost_end_min or _coerce_int(
+                self.boost_end.get("minute")
+            )
         return self
 
 
@@ -408,8 +412,12 @@ class DucaheatExtraOptions(DucaheatReadModel):
         """Populate boost end fields from nested mappings when supplied."""
 
         if self.boost_end and isinstance(self.boost_end, Mapping):
-            self.boost_end_day = self.boost_end_day or _coerce_int(self.boost_end.get("day"))
-            self.boost_end_min = self.boost_end_min or _coerce_int(self.boost_end.get("minute"))
+            self.boost_end_day = self.boost_end_day or _coerce_int(
+                self.boost_end.get("day")
+            )
+            self.boost_end_min = self.boost_end_min or _coerce_int(
+                self.boost_end.get("minute")
+            )
         return self
 
 
@@ -475,8 +483,12 @@ class DucaheatSetupSegment(DucaheatReadModel):
         """Populate boost end fields from nested mappings when supplied."""
 
         if self.boost_end and isinstance(self.boost_end, Mapping):
-            self.boost_end_day = self.boost_end_day or _coerce_int(self.boost_end.get("day"))
-            self.boost_end_min = self.boost_end_min or _coerce_int(self.boost_end.get("minute"))
+            self.boost_end_day = self.boost_end_day or _coerce_int(
+                self.boost_end.get("day")
+            )
+            self.boost_end_min = self.boost_end_min or _coerce_int(
+                self.boost_end.get("minute")
+            )
         return self
 
 

@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from custom_components.termoweb.backend.sanitize import validate_boost_minutes
+from custom_components.termoweb.boost import validate_boost_minutes
 from custom_components.termoweb.codecs.common import format_temperature, validate_units
 
 

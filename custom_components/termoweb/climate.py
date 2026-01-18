@@ -22,7 +22,12 @@ from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
 from .backend.base import BoostContext
-from .boost import coerce_boost_minutes, supports_boost
+from .boost import (
+    ALLOWED_BOOST_MINUTES_MESSAGE,
+    coerce_boost_minutes,
+    supports_boost,
+    validate_boost_minutes,
+)
 from .domain import DomainState, HeaterState
 from .heater import (
     DEFAULT_BOOST_DURATION,
@@ -1255,15 +1260,17 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
                 minutes,
             )
             return None
-        if value < 60 or value > 600 or value % 60 != 0:
+        try:
+            return validate_boost_minutes(value)
+        except ValueError:
             _LOGGER.error(
-                "Boost duration must be between 60 and 600 minutes in 60-minute increments for type=%s addr=%s: %s",
+                "Boost duration must be one of [%s] minutes for type=%s addr=%s: %s",
+                ALLOWED_BOOST_MINUTES_MESSAGE,
                 self._node_type,
                 self._addr,
                 value,
             )
             return None
-        return value
 
     async def async_set_acm_preset(
         self,
