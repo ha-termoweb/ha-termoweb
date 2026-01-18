@@ -6,19 +6,7 @@ from collections.abc import Mapping, MutableMapping
 from typing import Any
 
 from homeassistant.core import HomeAssistant
-
-try:  # pragma: no cover - fallback for stripped Home Assistant stubs in tests
-    from homeassistant.helpers.translation import async_get_translations
-except ImportError:  # pragma: no cover - executed in unit test stubs
-
-    async def async_get_translations(  # type: ignore[override]
-        hass: HomeAssistant, language: str, domain: str
-    ) -> dict[str, str]:
-        """Return an empty translation mapping when helpers are unavailable."""
-
-        return {}
-
-
+from homeassistant.helpers.translation import async_get_translations
 from .const import DOMAIN
 from .runtime import EntryRuntime
 from .fallback_translations import get_fallback_translations

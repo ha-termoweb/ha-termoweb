@@ -13,11 +13,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
-
-try:  # pragma: no cover - optional helper on older Home Assistant cores
-    from homeassistant.helpers.event import async_track_time_change
-except ImportError:  # pragma: no cover - tests provide stubbed helpers
-    async_track_time_change = None  # type: ignore[assignment]
+from homeassistant.helpers.event import async_track_time_change
 
 from custom_components.termoweb.backend import Backend
 from custom_components.termoweb.backend.sanitize import mask_identifier
@@ -67,13 +63,8 @@ class HourlySamplesPoller:
     async def async_setup(self) -> None:
         """Register the HH:05 local trigger and perform optional catch-up."""
 
-        helper = async_track_time_change
-        if helper is None:
-            _LOGGER.debug(
-                "Hourly poller: time-change helper unavailable; scheduling skipped"
-            )
-        elif self._remove_listener is None:
-            self._remove_listener = helper(
+        if self._remove_listener is None:
+            self._remove_listener = async_track_time_change(
                 self._hass,
                 self._on_time,
                 minute=5,

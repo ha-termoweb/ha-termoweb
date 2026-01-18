@@ -9,18 +9,7 @@ from typing import Any
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.core import callback
-
-try:  # pragma: no cover - fallback for stripped Home Assistant stubs in tests
-    from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
-except ImportError:  # pragma: no cover - executed in unit test stubs
-
-    class HomeAssistantError(Exception):
-        """Fallback Home Assistant error used in unit tests."""
-
-    class ServiceNotFound(HomeAssistantError):
-        """Fallback service lookup error used in unit tests."""
-
-
+from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 

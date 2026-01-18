@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Iterable, Mapping
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from functools import partial
-import inspect
 import logging
 from typing import Any, cast
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.components.recorder.statistics import (
+    async_delete_statistics,
+    async_get_last_statistics,
+    async_get_statistics_during_period,
+    async_import_statistics,
+)
 from homeassistant.helpers import entity_registry as er
 
 from .api import RESTClient
@@ -33,120 +36,66 @@ RESET_DELTA_THRESHOLD_KWH = 0.2
 SUMMARY_KEY_LAST_RUN = "last_energy_import_summary"
 
 
-@dataclass(slots=True)
-class _RecorderStatisticsHelpers:
-    """Container for recorder statistics helper callables."""
-
-    executor: Callable[..., Awaitable[Any]] | None
-    sync_target: Any | None
-    sync: Callable[..., Any] | None
-    async_fn: Callable[..., Awaitable[Any]] | None
-    instance: Any | None
-    instance_async: Callable[..., Awaitable[Any]] | None
-
-
-@dataclass(slots=True)
-class _RecorderModuleImports:
-    """Container for recorder module helper imports."""
-
-    get_instance: Callable[[HomeAssistant], Any] | None
-    statistics: Any | None
-
-
-_RECORDER_IMPORTS: _RecorderModuleImports | None = None
-
-
-def _resolve_recorder_imports() -> _RecorderModuleImports:
-    """Return cached recorder helper imports."""
-
-    global _RECORDER_IMPORTS
-    if _RECORDER_IMPORTS is not None:
-        return _RECORDER_IMPORTS
-
-    get_instance: Callable[[HomeAssistant], Any] | None = None
-    statistics_mod: Any | None = None
-
-    try:
-        from homeassistant.components.recorder import (
-            get_instance as _get_instance,
-            statistics as _statistics_module,
-        )
-    except (ImportError, AttributeError):  # pragma: no cover - defensive
-        try:
-            from homeassistant.components.recorder import (
-                statistics as _statistics_module,
-            )
-        except (ImportError, AttributeError):  # pragma: no cover - defensive
-            _statistics_module = None
-    else:
-        get_instance = _get_instance
-
-    statistics_mod = _statistics_module
-
-    _RECORDER_IMPORTS = _RecorderModuleImports(
-        get_instance=get_instance,
-        statistics=statistics_mod,
-    )
-    return _RECORDER_IMPORTS
-
-
-def _resolve_statistics_helpers(
-    hass: HomeAssistant,
-    sync_name: str,
-    async_name: str,
-    *,
-    sync_uses_instance: bool = False,
-) -> _RecorderStatisticsHelpers:
-    """Return the recorder statistics helpers for compatibility shims."""
-
-    imports = _resolve_recorder_imports()
-
-    statistics_mod: Any | None = imports.statistics
-
-    sync_helper: Callable[..., Any] | None = None
-    async_helper: Callable[..., Awaitable[Any]] | None = None
-    executor: Callable[..., Awaitable[Any]] | None = None
-    sync_target: Any | None = None
-    instance: Any | None = None
-    instance_async: Callable[..., Awaitable[Any]] | None = None
-
-    if statistics_mod is not None:
-        sync_candidate = getattr(statistics_mod, sync_name, None)
-        if callable(sync_candidate):
-            sync_helper = sync_candidate
-
-        async_candidate = getattr(statistics_mod, async_name, None)
-        if callable(async_candidate):
-            async_helper = async_candidate
-
-    if imports.get_instance is not None:
-        instance = imports.get_instance(hass)
-        instance_async_candidate = getattr(instance, async_name, None)
-        if callable(instance_async_candidate):
-            instance_async = instance_async_candidate
-
-        add_executor = getattr(instance, "async_add_executor_job", None)
-        if callable(add_executor):
-            executor = add_executor
-
-        sync_target = instance if sync_uses_instance else hass
-    else:
-        instance = None
-
-    return _RecorderStatisticsHelpers(
-        executor=executor,
-        sync_target=sync_target,
-        sync=sync_helper,
-        async_fn=async_helper,
-        instance=instance,
-        instance_async=instance_async,
-    )
-
-
 def _iso_date(ts: int) -> str:
     """Convert unix timestamp to ISO date."""
 
     return datetime.fromtimestamp(ts, UTC).date().isoformat()
+
+
+async def _statistics_during_period(
+    hass: HomeAssistant,
+    start_time: datetime,
+    end_time: datetime,
+    statistic_ids: set[str],
+) -> dict[str, list[Any]]:
+    """Return recorder statistics rows for the provided period."""
+
+    return await async_get_statistics_during_period(
+        hass,
+        start_time,
+        end_time,
+        statistic_ids,
+        period="hour",
+        types={"state", "sum"},
+    )
+
+
+async def _get_last_statistics(
+    hass: HomeAssistant,
+    number_of_stats: int,
+    statistic_id: str,
+    *,
+    types: set[str] | None = None,
+    start_time: datetime | None = None,
+) -> dict[str, list[Any]]:
+    """Return the most recent recorder statistics row for ``statistic_id``."""
+
+    types = types or {"state", "sum"}
+    return await async_get_last_statistics(
+        hass,
+        number_of_stats,
+        [statistic_id],
+        types=types,
+        start_time=start_time,
+    )
+
+
+async def _delete_statistics(
+    hass: HomeAssistant,
+    statistic_id: str,
+    *,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+) -> str:
+    """Delete recorder statistics rows for ``statistic_id``."""
+
+    await async_delete_statistics(
+        hass,
+        [statistic_id],
+        start_time=start_time,
+        end_time=end_time,
+    )
+    return "delete"
 
 
 async def _store_statistics(
@@ -157,8 +106,6 @@ async def _store_statistics(
     if not stats:
         return
 
-    from homeassistant.components.recorder.statistics import async_import_statistics
-
     stat_id = metadata.get("statistic_id")
     if not isinstance(stat_id, str) or "." not in stat_id:
         raise ValueError("metadata must include an entity statistic_id")
@@ -166,9 +113,7 @@ async def _store_statistics(
     import_metadata = dict(metadata)
     import_metadata.update({"source": "recorder", "statistic_id": stat_id})
 
-    result = async_import_statistics(hass, import_metadata, stats)
-    if inspect.isawaitable(result):
-        await result
+    await async_import_statistics(hass, import_metadata, stats)
 
 
 def _statistics_row_get(row: Any, key: str) -> Any:
@@ -177,252 +122,6 @@ def _statistics_row_get(row: Any, key: str) -> Any:
     if isinstance(row, dict):
         return row.get(key)
     return getattr(row, key, None)  # pragma: no cover - attribute rows rare in tests
-
-
-async def _statistics_during_period_compat(  # pragma: no cover - compatibility shim
-    hass: HomeAssistant,
-    start_time: datetime,
-    end_time: datetime,
-    statistic_ids: set[str],
-) -> dict[str, list[Any]] | None:
-    """Fetch statistics for a period using the best available API."""
-
-    wanted_types = {"state", "sum"}
-
-    helpers = _resolve_statistics_helpers(
-        hass,
-        "statistics_during_period",
-        "async_get_statistics_during_period",
-    )
-
-    if helpers.sync and helpers.executor and helpers.sync_target is not None:
-        return await helpers.executor(
-            helpers.sync,
-            helpers.sync_target,
-            start_time,
-            end_time,
-            statistic_ids,
-            "hour",
-            None,
-            wanted_types,
-        )
-
-    if helpers.async_fn is None:
-        return None
-
-    return await helpers.async_fn(
-        hass,
-        start_time,
-        end_time,
-        list(statistic_ids),
-        period="hour",
-        types=wanted_types,
-    )  # pragma: no cover - exercised when async helper available at runtime
-
-
-async def _get_last_statistics_compat(  # pragma: no cover - compatibility shim
-    hass: HomeAssistant,
-    number_of_stats: int,
-    statistic_id: str,
-    *,
-    types: set[str] | None = None,
-    start_time: datetime | None = None,
-) -> dict[str, list[Any]] | None:
-    """Retrieve the last statistics row via synchronous or async helpers."""
-
-    types = types or {"state", "sum"}
-
-    helpers = _resolve_statistics_helpers(
-        hass,
-        "get_last_statistics",
-        "async_get_last_statistics",
-    )
-
-    if helpers.sync and helpers.executor and helpers.sync_target is not None:
-        signature = inspect.signature(helpers.sync)
-        params = list(signature.parameters.values())
-        call_args: list[Any] = [
-            helpers.sync_target,
-            number_of_stats,
-            statistic_id,
-        ]
-        call_kwargs: dict[str, Any] = {}
-        can_call_sync = True
-
-        for param in params[len(call_args) :]:
-            if param.kind in (
-                inspect.Parameter.VAR_POSITIONAL,
-                inspect.Parameter.VAR_KEYWORD,
-            ):
-                continue
-
-            if param.name == "convert_units":
-                value: Any = True
-            elif param.name == "types":
-                value = types
-            elif param.name == "start_time":
-                if start_time is None and param.default is inspect.Signature.empty:
-                    value = None
-                elif start_time is not None:
-                    value = start_time
-                else:
-                    continue
-            else:
-                if param.default is inspect.Signature.empty:
-                    can_call_sync = False
-                    break
-                continue
-
-            if param.kind in (
-                inspect.Parameter.POSITIONAL_ONLY,
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            ):
-                call_args.append(value)
-            else:
-                call_kwargs[param.name] = value
-
-        if can_call_sync:
-            sync_call = partial(helpers.sync, *call_args, **call_kwargs)
-            try:
-                return await helpers.executor(sync_call)
-            except TypeError as err:
-                message = str(err)
-                if not any(
-                    phrase in message
-                    for phrase in (
-                        "unexpected keyword argument",
-                        "required positional argument",
-                        "positional arguments but",
-                    )
-                ):
-                    raise
-
-                fallback_calls = [
-                    partial(
-                        helpers.sync,
-                        helpers.sync_target,
-                        number_of_stats,
-                        statistic_id,
-                        types=types,
-                    ),
-                    partial(
-                        helpers.sync,
-                        helpers.sync_target,
-                        number_of_stats,
-                        statistic_id,
-                        convert_units=True,
-                        types=types,
-                    ),
-                    partial(
-                        helpers.sync,
-                        helpers.sync_target,
-                        number_of_stats,
-                        statistic_id,
-                        types,
-                        None,
-                    ),
-                    partial(
-                        helpers.sync,
-                        helpers.sync_target,
-                        number_of_stats,
-                        statistic_id,
-                        types,
-                    ),
-                ]
-
-                for call in fallback_calls:
-                    try:
-                        return await helpers.executor(call)
-                    except TypeError:
-                        continue
-
-    if helpers.async_fn is None:
-        return None
-
-    kwargs: dict[str, Any] = {"types": types}
-    if start_time is not None:
-        kwargs["start_time"] = start_time
-
-    return await helpers.async_fn(
-        hass,
-        number_of_stats,
-        [statistic_id],
-        **kwargs,
-    )  # pragma: no cover - dependent on runtime helper availability
-
-
-async def _clear_statistics_compat(  # pragma: no cover - compatibility shim
-    hass: HomeAssistant,
-    statistic_id: str,
-    *,
-    start_time: datetime | None = None,
-    end_time: datetime | None = None,
-) -> str | None:
-    """Clear statistics using whichever helper is available."""
-
-    helpers: _RecorderStatisticsHelpers | None = None
-    supports_window = False
-    for async_name, candidate_supports_window in (
-        ("async_delete_statistics", True),
-        ("async_clear_statistics", False),
-    ):
-        candidate = _resolve_statistics_helpers(
-            hass,
-            "clear_statistics",
-            async_name,
-            sync_uses_instance=True,
-        )
-        helpers = candidate
-        if candidate.async_fn or candidate.instance_async:
-            supports_window = candidate_supports_window
-            break
-
-    if helpers is None:
-        return None
-
-    if helpers.async_fn is not None:
-        delete_args: dict[str, Any] = {}
-        if supports_window:
-            if start_time is not None:
-                delete_args["start_time"] = start_time
-            if end_time is not None:
-                delete_args["end_time"] = end_time
-
-        try:
-            result = helpers.async_fn(hass, [statistic_id], **delete_args)
-        except TypeError:  # pragma: no cover - older signature fallback
-            result = helpers.async_fn(hass, [statistic_id])
-
-        if inspect.isawaitable(result):
-            await result
-        return "delete"  # pragma: no cover - dependent on async helper availability
-
-    if helpers.instance_async is not None:
-        delete_args: dict[str, Any] = {}
-        if supports_window:
-            if start_time is not None:
-                delete_args["start_time"] = start_time
-            if end_time is not None:
-                delete_args["end_time"] = end_time
-
-        try:
-            result = helpers.instance_async([statistic_id], **delete_args)
-        except TypeError:  # pragma: no cover - instance signature fallback
-            result = helpers.instance_async([statistic_id])
-
-        if inspect.isawaitable(result):
-            await result
-        return "delete"
-
-    if helpers.sync and helpers.executor and helpers.sync_target is not None:
-        await helpers.executor(
-            helpers.sync,
-            helpers.sync_target,
-            [statistic_id],
-        )
-        return "clear"
-
-    return None
 
 
 async def _collect_statistics(
@@ -434,7 +133,7 @@ async def _collect_statistics(
     """Return statistics rows for a single statistic id."""
 
     try:
-        period = await _statistics_during_period_compat(
+        period = await _statistics_during_period(
             hass,
             start,
             end,
@@ -554,9 +253,9 @@ async def async_import_energy_history(
     datetime_mod = datetime
     registry_mod = er
     store_stats = _store_statistics
-    stats_period = _statistics_during_period_compat
-    last_stats_fn = _get_last_statistics_compat
-    clear_stats_fn = _clear_statistics_compat
+    stats_period = _statistics_during_period
+    last_stats_fn = _get_last_statistics
+    clear_stats_fn = _delete_statistics
 
     try:
         runtime = require_runtime(hass, entry.entry_id)

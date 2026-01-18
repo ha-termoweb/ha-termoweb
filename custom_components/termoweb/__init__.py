@@ -14,31 +14,15 @@ from types import ModuleType
 from typing import Any
 
 from aiohttp import ClientError
-
-try:  # pragma: no cover - compatibility shim for older Home Assistant cores
-    from homeassistant.config_entries import ConfigEntry, SupportsDiagnostics
-except ImportError:  # pragma: no cover - tests provide stubbed config entries
-    from homeassistant.config_entries import ConfigEntry  # type: ignore[misc]
-
-    SupportsDiagnostics = None  # type: ignore[assignment]
-try:  # pragma: no cover - loader is optional on older Home Assistant cores
-    from homeassistant import loader as ha_loader
-except ImportError:  # pragma: no cover - tests provide minimal loader stub
-    ha_loader = None
+from homeassistant import loader as ha_loader
+from homeassistant.config_entries import ConfigEntry, SupportsDiagnostics
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client
-
-try:  # pragma: no cover - optional helper on older Home Assistant cores
-    from homeassistant.helpers.event import async_call_later
-except ImportError:  # pragma: no cover - tests provide stubbed helpers
-    async_call_later = None  # type: ignore[assignment]
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-
-try:  # pragma: no cover - optional helper on older Home Assistant cores
-    from homeassistant.setup import async_when_setup
-except ImportError:  # pragma: no cover - tests provide stubbed setup helper
-    async_when_setup = None
+from homeassistant.helpers.event import async_call_later
+from homeassistant.setup import async_when_setup
 
 from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend import Backend, DucaheatRESTClient, create_backend
@@ -71,11 +55,6 @@ from .inventory import (
 from .runtime import EntryRuntime
 from .throttle import default_samples_rate_limit_state, reset_samples_rate_limit_state
 from .utils import async_get_integration_version as _async_get_integration_version
-
-try:  # pragma: no cover - fallback for test stubs
-    from homeassistant.const import EVENT_HOMEASSISTANT_STOP
-except ImportError:  # pragma: no cover - tests provide minimal constants
-    EVENT_HOMEASSISTANT_STOP = "homeassistant_stop"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -203,40 +182,29 @@ def _register_diagnostics_platform(
 ) -> bool:
     """Ensure diagnostics helpers are registered against Home Assistant."""
 
-    if ha_loader is None:
-        _LOGGER.debug("Diagnostics cache unavailable: loader import failed")
-    else:
-        missing = getattr(ha_loader, "DATA_MISSING_PLATFORMS", None)
-        if isinstance(missing, MutableMapping):
-            _LOGGER.debug(
-                "Attempting to remove termoweb.diagnostics from missing platform cache",
-            )
-            removed = missing.pop("termoweb.diagnostics", None)
-            if removed is not None:
-                _LOGGER.debug("Removed termoweb.diagnostics cache entry")
-            else:
-                _LOGGER.debug("No cache entry stored for termoweb.diagnostics")
+    missing = getattr(ha_loader, "DATA_MISSING_PLATFORMS", None)
+    if isinstance(missing, MutableMapping):
+        _LOGGER.debug(
+            "Attempting to remove termoweb.diagnostics from missing platform cache",
+        )
+        removed = missing.pop("termoweb.diagnostics", None)
+        if removed is not None:
+            _LOGGER.debug("Removed termoweb.diagnostics cache entry")
         else:
-            _LOGGER.debug("Missing platform cache not available: %s", missing)
+            _LOGGER.debug("No cache entry stored for termoweb.diagnostics")
+    else:
+        _LOGGER.debug("Missing platform cache not available: %s", missing)
 
-    try:
-        diagnostics = import_module("homeassistant.components.diagnostics")
-    except ImportError as err:  # pragma: no cover - guard against missing helper
-        _LOGGER.debug("Diagnostics helper import failed: %s", err)
-        return False
+    diagnostics = import_module("homeassistant.components.diagnostics")
 
     register = getattr(diagnostics, "_register_diagnostics_platform", None)
     if register is None:
         _LOGGER.debug("Diagnostics registration helper unavailable on this core")
         return False
 
-    try:
-        diagnostics_module = module or import_module(
-            "custom_components.termoweb.diagnostics"
-        )
-    except ImportError as err:  # pragma: no cover - diagnostics import guard
-        _LOGGER.debug("Failed to import TermoWeb diagnostics module: %s", err)
-        return False
+    diagnostics_module = module or import_module(
+        "custom_components.termoweb.diagnostics"
+    )
 
     try:
         register(hass, DOMAIN, diagnostics_module)
@@ -294,14 +262,7 @@ async def _async_register_diagnostics_when_ready(hass: HomeAssistant) -> None:
 
     async def _attempt_once(attempt: int) -> bool:
         _LOGGER.debug("Diagnostics registration attempt %s starting", attempt)
-        try:
-            diagnostics_module = await _async_import_diagnostics_module()
-        except ImportError as err:
-            _LOGGER.debug(
-                "Diagnostics module import failed on attempt %s: %s", attempt, err
-            )
-            return False
-
+        diagnostics_module = await _async_import_diagnostics_module()
         success = _register_diagnostics_platform(hass, diagnostics_module)
         _LOGGER.debug(
             "Diagnostics registration attempt %s finished with success=%s",
@@ -337,13 +298,6 @@ async def _async_register_diagnostics_when_ready(hass: HomeAssistant) -> None:
         if _diagnostics_component_loaded(hass):
             _LOGGER.debug(
                 "Diagnostics component already loaded; registering immediately"
-            )
-            await _attempt_until_success()
-            return
-
-        if async_when_setup is None:
-            _LOGGER.debug(
-                "async_when_setup unavailable; attempting diagnostics registration"
             )
             await _attempt_until_success()
             return
@@ -452,16 +406,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         )
     brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
 
-    if SupportsDiagnostics is not None and hasattr(entry, "supports_diagnostics"):
-        entry.supports_diagnostics = SupportsDiagnostics.YES
-        update_payload = entry.data | {"supports_diagnostics": True}
-        update_method = getattr(entry, "async_update", None)
-        if callable(update_method):
-            update_result = update_method(update_payload)
-            if inspect.isawaitable(update_result):
-                await update_result
-        else:
-            hass.config_entries.async_update_entry(entry, data=update_payload)
+    entry.supports_diagnostics = SupportsDiagnostics.YES
+    update_payload = entry.data | {"supports_diagnostics": True}
+    update_method = getattr(entry, "async_update", None)
+    if callable(update_method):
+        update_result = update_method(update_payload)
+        if inspect.isawaitable(update_result):
+            await update_result
+    else:
+        hass.config_entries.async_update_entry(entry, data=update_payload)
 
     diagnostics_task = asyncio.create_task(_async_register_diagnostics_when_ready(hass))
 
@@ -705,7 +658,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
                 _LOGGER.info(
                     "WS: trackers healthy with fresh payloads; suspending REST polling",
                 )
-            if earliest_deadline is not None and async_call_later is not None:
+            if earliest_deadline is not None:
                 delay = max(0.0, earliest_deadline - time.time())
                 _cancel_timer()
 
