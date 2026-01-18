@@ -11,8 +11,9 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.loader import async_get_integration as loader_async_get_integration
 
 from .const import DOMAIN
-from .i18n import FALLBACK_TRANSLATIONS_KEY, format_fallback
+from .i18n import format_fallback
 from .inventory import normalize_node_addr
+from .runtime import EntryRuntime, require_runtime
 
 
 async def async_get_integration(*args, **kwargs):
@@ -30,46 +31,39 @@ async def async_get_integration_version(hass: HomeAssistant) -> str:
 
 def _entry_gateway_record(
     hass: HomeAssistant | None, entry_id: str | None
-) -> Mapping[str, Any] | None:
+) -> EntryRuntime | None:
     """Return the mapping storing integration data for ``entry_id``."""
 
     if hass is None or entry_id is None:
         return None
-    domain_data = hass.data.get(DOMAIN)
-    if not isinstance(domain_data, Mapping):
+    try:
+        return require_runtime(hass, entry_id)
+    except LookupError:
         return None
-    entry_data = domain_data.get(entry_id)
-    if not isinstance(entry_data, Mapping):
-        return None
-    return entry_data
 
 
 def apply_entry_device_overrides(
     info: DeviceInfo,
-    entry_data: Mapping[str, Any] | None,
+    entry_data: EntryRuntime | None,
     *,
     include_version: bool = False,
 ) -> DeviceInfo:
     """Return device info with brand and version overrides."""
 
-    if not isinstance(entry_data, Mapping):
+    if entry_data is None:
         return info
 
     manufacturer: str | None = None
 
-    brand = entry_data.get("brand")
+    brand = entry_data.brand
     if isinstance(brand, str) and brand.strip():
         manufacturer = brand.strip()
-    else:
-        override = entry_data.get("manufacturer")
-        if isinstance(override, str) and override.strip():
-            manufacturer = override.strip()
 
     if manufacturer:
         info["manufacturer"] = manufacturer
 
     if include_version:
-        version = entry_data.get("version")
+        version = entry_data.version
         if version is not None:
             info["sw_version"] = str(version)
 
@@ -99,10 +93,10 @@ def build_gateway_device_info(
         info, entry_data, include_version=include_version
     )
 
-    if not entry_data:
+    if entry_data is None:
         return info
 
-    coordinator = entry_data.get("coordinator")
+    coordinator = entry_data.coordinator
     data: Mapping[str, Any] | None = None
     if coordinator is not None:
         data = getattr(coordinator, "data", None)
@@ -136,8 +130,8 @@ def build_power_monitor_device_info(
     entry_data = _entry_gateway_record(hass, entry_id)
     if not display_name:
         fallbacks: Mapping[str, str] | None = None
-        if isinstance(entry_data, Mapping):
-            entry_fallbacks = entry_data.get(FALLBACK_TRANSLATIONS_KEY)
+        if entry_data is not None:
+            entry_fallbacks = entry_data.fallback_translations
             if isinstance(entry_fallbacks, Mapping):
                 fallbacks = entry_fallbacks
         display_name = format_fallback(

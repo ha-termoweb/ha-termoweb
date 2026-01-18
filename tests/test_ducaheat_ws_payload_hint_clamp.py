@@ -13,8 +13,8 @@ from custom_components.termoweb.backend.ducaheat_ws import (
     DucaheatWSClient,
     _PAYLOAD_WINDOW_MAX,
     _PAYLOAD_WINDOW_MIN,
-    DOMAIN,
 )
+from custom_components.termoweb.const import DOMAIN
 
 
 class DummyREST:

@@ -17,6 +17,7 @@ from .backend.ws_health import WsHealthTracker
 from .const import CONF_BRAND, DEFAULT_BRAND, DOMAIN, get_brand_label
 from .energy import SUMMARY_KEY_LAST_RUN
 from .inventory import Inventory
+from .runtime import EntryRuntime, require_runtime
 from .utils import async_get_integration_version
 
 _LOGGER = logging.getLogger(__name__)
@@ -33,14 +34,11 @@ SENSITIVE_FIELDS: Final = {
 }
 
 
-def _extract_websocket_clients(record: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _extract_websocket_clients(runtime: EntryRuntime) -> list[dict[str, Any]]:
     """Return websocket telemetry entries for diagnostics."""
 
-    ws_state = record.get("ws_state") if isinstance(record, Mapping) else None
-    trackers = record.get("ws_trackers") if isinstance(record, Mapping) else None
-
-    state_map = ws_state if isinstance(ws_state, Mapping) else {}
-    tracker_map = trackers if isinstance(trackers, Mapping) else {}
+    state_map = runtime.ws_state
+    tracker_map = runtime.ws_trackers
 
     clients: list[dict[str, Any]] = []
     for dev_id, state in state_map.items():
@@ -68,34 +66,22 @@ async def async_get_config_entry_diagnostics(
 ) -> Mapping[str, Any]:
     """Return a diagnostics payload for ``entry``."""
 
-    domain_data = hass.data.get(DOMAIN)
-    record: Mapping[str, Any] | None = None
-    if isinstance(domain_data, Mapping):
-        candidate = domain_data.get(entry.entry_id)
-        if isinstance(candidate, Mapping):
-            record = candidate
-
-    inventory = Inventory.require_from_record(
-        record,
-        context=f"diagnostics for config entry {entry.entry_id}",
-    )
+    runtime = require_runtime(hass, entry.entry_id)
+    inventory = runtime.inventory
     snapshot = inventory.snapshot()
     raw_count = snapshot.raw_count
     filtered_count = snapshot.filtered_count
     node_inventory = list(snapshot.node_inventory)
 
-    assert record is not None  # Inventory.require_from_record guarantees mapping
-
-    version = record.get("version")
+    version = runtime.version
     if version is None:
         version = await async_get_integration_version(hass)
     version_str = str(version)
 
     brand_value: str | None = None
-    if isinstance(record, Mapping):
-        candidate_brand = record.get("brand")
-        if isinstance(candidate_brand, str) and candidate_brand.strip():
-            brand_value = candidate_brand.strip()
+    candidate_brand = runtime.brand
+    if isinstance(candidate_brand, str) and candidate_brand.strip():
+        brand_value = candidate_brand.strip()
     if not brand_value:
         entry_brand = entry.data.get(CONF_BRAND)
         if isinstance(entry_brand, str) and entry_brand.strip():
@@ -127,7 +113,7 @@ async def async_get_config_entry_diagnostics(
     if time_zone_str is not None:
         diagnostics["home_assistant"]["time_zone"] = time_zone_str
 
-    last_import = record.get(SUMMARY_KEY_LAST_RUN)
+    last_import = runtime.get(SUMMARY_KEY_LAST_RUN)
     energy_section: dict[str, Any] = {}
     if isinstance(last_import, Mapping):
         energy_section["last_run"] = dict(last_import)
@@ -136,7 +122,7 @@ async def async_get_config_entry_diagnostics(
     if energy_section:
         diagnostics["energy_import"] = energy_section
 
-    ws_clients = _extract_websocket_clients(record)
+    ws_clients = _extract_websocket_clients(runtime)
     if ws_clients:
         diagnostics["websocket"] = {"clients": ws_clients}
 

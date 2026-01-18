@@ -45,31 +45,36 @@ from homeassistant.core import HomeAssistant
 @pytest.fixture
 def diagnostics_record(
     inventory_builder: Callable[[str, dict[str, Any], list[Any]], Inventory],
-) -> Callable[..., tuple[dict[str, Any], Inventory]]:
+    runtime_factory: Callable[..., Any],
+) -> Callable[..., tuple[Any, Inventory]]:
     """Return helper to build diagnostics records with cached inventory."""
 
     def _factory(
         nodes: list[dict[str, Any]],
         *,
         dev_id: str,
+        entry_id: str = "entry-one",
         version: str | None = None,
         brand: str | None = None,
         **extra: Any,
-    ) -> tuple[dict[str, Any], Inventory]:
+    ) -> tuple[Any, Inventory]:
         payload = {"nodes": list(nodes)}
         inventory = inventory_builder(
             dev_id,
             payload,
             build_node_inventory(payload),
         )
-        record: dict[str, Any] = {"inventory": inventory, "dev_id": dev_id}
-        if version is not None:
-            record["version"] = version
-        if brand is not None:
-            record["brand"] = brand
+        runtime = runtime_factory(
+            entry_id=entry_id,
+            dev_id=dev_id,
+            inventory=inventory,
+            version=version or "0.0.0",
+            brand=brand or "termoweb",
+        )
         if extra:
-            record.update(extra)
-        return record, inventory
+            for key, value in extra.items():
+                setattr(runtime, key, value)
+        return runtime, inventory
 
     return _factory
 
@@ -90,7 +95,7 @@ def _flatten(data: Any) -> list[str]:
 
 def test_diagnostics_with_cached_inventory(
     caplog: pytest.LogCaptureFixture,
-    diagnostics_record: Callable[..., tuple[dict[str, Any], Inventory]],
+    diagnostics_record: Callable[..., tuple[Any, Inventory]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Diagnostics return cached inventory and redact sensitive keys."""
@@ -110,11 +115,15 @@ def test_diagnostics_with_cached_inventory(
             {"name": "Monitor", "addr": "2", "type": "pmo"},
         ],
         dev_id="secret-dev",
+        entry_id=entry.entry_id,
         version="1.2.3",
         brand=BRAND_DUCAHEAT,
         username="user@example.com",
     )
 
+    record.config_entry = entry
+    record.version = "1.2.3"
+    record.brand = BRAND_DUCAHEAT
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = record
 
@@ -156,7 +165,7 @@ def test_diagnostics_with_cached_inventory(
 
 def test_diagnostics_include_websocket_clients(
     caplog: pytest.LogCaptureFixture,
-    diagnostics_record: Callable[..., tuple[dict[str, Any], Inventory]],
+    diagnostics_record: Callable[..., tuple[Any, Inventory]],
 ) -> None:
     """Diagnostics should expose websocket state and health snapshots."""
 
@@ -172,6 +181,7 @@ def test_diagnostics_include_websocket_clients(
             {"name": "Heater One", "addr": "1", "type": "htr"},
         ],
         dev_id=dev_id,
+        entry_id=entry.entry_id,
     )
 
     ws_state = {"status": "healthy", "last_payload_at": 10.0}
@@ -180,12 +190,8 @@ def test_diagnostics_include_websocket_clients(
     tracker.update_status("healthy", healthy_since=now - 60)
     tracker.mark_payload(timestamp=now, stale_after=1_000_000.0)
 
-    record.update(
-        {
-            "ws_state": {dev_id: ws_state},
-            "ws_trackers": {dev_id: tracker},
-        }
-    )
+    record.ws_state = {dev_id: ws_state}
+    record.ws_trackers = {dev_id: tracker}
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = record
@@ -209,7 +215,7 @@ def test_diagnostics_include_websocket_clients(
 
 def test_diagnostics_with_inventory_missing_version(
     caplog: pytest.LogCaptureFixture,
-    diagnostics_record: Callable[..., tuple[dict[str, Any], Inventory]],
+    diagnostics_record: Callable[..., tuple[Any, Inventory]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Diagnostics rely on stored inventory and fetch helper version."""
@@ -227,6 +233,7 @@ def test_diagnostics_with_inventory_missing_version(
             {"name": "Heater Two", "addr": "5", "type": "htr"},
         ],
         dev_id="dev-two",
+        entry_id=entry.entry_id,
     )
 
     hass.data.setdefault(DOMAIN, {})

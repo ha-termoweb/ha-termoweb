@@ -41,7 +41,7 @@ except ImportError:  # pragma: no cover - tests provide stubbed setup helper
     async_when_setup = None
 
 from .api import BackendAuthError, BackendRateLimitError, RESTClient
-from .backend import Backend, DucaheatRESTClient, WsClientProto, create_backend
+from .backend import Backend, DucaheatRESTClient, create_backend
 from .backend.sanitize import redact_text
 from .const import (
     BRAND_DUCAHEAT as BRAND_DUCAHEAT,
@@ -67,8 +67,8 @@ from .inventory import (
     build_node_inventory,
     normalize_node_addr,
     normalize_node_type,
-    store_inventory_on_entry,
 )
+from .runtime import EntryRuntime
 from .throttle import default_samples_rate_limit_state, reset_samples_rate_limit_state
 from .utils import async_get_integration_version as _async_get_integration_version
 
@@ -548,41 +548,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     debug_enabled = bool(entry.options.get("debug", entry.data.get("debug", False)))
 
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = data = {
-        "backend": backend,
-        "client": backend.client,
-        "coordinator": coordinator,
-        "energy_coordinator": energy_coordinator,
-        "dev_id": dev_id,
-        "inventory": None,
-        "hourly_poller": poller,
-        "config_entry": entry,
-        "base_poll_interval": max(base_interval, MIN_POLL_INTERVAL),
-        "stretched": False,
-        "poll_suspended": False,
-        "poll_resume_unsub": None,
-        "ws_tasks": {},  # dev_id -> asyncio.Task
-        "ws_clients": {},  # dev_id -> WS clients
-        "ws_state": {},  # dev_id -> status attrs
-        "ws_trackers": {},  # dev_id -> WsHealthTracker
-        "version": version,
-        "brand": brand,
-        "debug": debug_enabled,
-        "boost_runtime": {},
-        "diagnostics_task": diagnostics_task,
-    }
-
-    store_inventory_on_entry(
-        inventory,
-        record=data,
-        hass=hass,
-        entry_id=entry.entry_id,
+    runtime = EntryRuntime(
+        backend=backend,
+        client=backend.client,
+        coordinator=coordinator,
+        energy_coordinator=energy_coordinator,
+        dev_id=dev_id,
+        inventory=inventory,
+        hourly_poller=poller,
+        config_entry=entry,
+        base_poll_interval=max(base_interval, MIN_POLL_INTERVAL),
+        stretched=False,
+        poll_suspended=False,
+        poll_resume_unsub=None,
+        ws_tasks={},
+        ws_clients={},
+        ws_state={},
+        ws_trackers={},
+        version=version,
+        brand=brand,
+        debug=debug_enabled,
+        boost_runtime={},
+        boost_temperature={},
+        climate_entities={},
+        diagnostics_task=diagnostics_task,
     )
+    hass.data[DOMAIN][entry.entry_id] = runtime
 
     async def _async_handle_hass_stop(_event: Any) -> None:
         """Stop background activity gracefully when Home Assistant stops."""
 
-        await _async_shutdown_entry(data)
+        await _async_shutdown_entry(runtime)
 
     remove_stop_listener = hass.bus.async_listen_once(
         EVENT_HOMEASSISTANT_STOP, _async_handle_hass_stop
@@ -591,9 +587,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
 
     async def _start_ws(dev_id: str) -> None:
         """Ensure a websocket client exists and is running for ``dev_id``."""
-        backend: Backend = data["backend"]
-        tasks: dict[str, asyncio.Task] = data["ws_tasks"]
-        clients: dict[str, WsClientProto] = data["ws_clients"]
+        backend: Backend = runtime.backend
+        tasks = runtime.ws_tasks
+        clients = runtime.ws_clients
         if dev_id in tasks and not tasks[dev_id].done():
             return
         ws_client = clients.get(dev_id)
@@ -610,18 +606,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         tasks[dev_id] = task
         _LOGGER.info("WS: started read-only client for %s", dev_id)
 
-    data["_start_ws"] = _start_ws
+    runtime.start_ws = _start_ws
 
     def _recalc_poll_interval() -> None:
         """Suspend REST polling when websocket trackers are healthy and fresh."""
 
-        tasks: dict[str, asyncio.Task] = data["ws_tasks"]
-        trackers: dict[str, Any] = data.get("ws_trackers") or {}
-        base_interval = data["base_poll_interval"]
-        suspended = bool(data.get("poll_suspended"))
+        tasks = runtime.ws_tasks
+        trackers = runtime.ws_trackers
+        base_interval = runtime.base_poll_interval
+        suspended = runtime.poll_suspended
 
         def _cancel_timer() -> None:
-            handle = data.get("poll_resume_unsub")
+            handle = runtime.poll_resume_unsub
             if callable(handle):
                 try:
                     handle()
@@ -629,13 +625,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
                     _LOGGER.debug(
                         "WS: failed to cancel poll resume timer", exc_info=True
                     )
-            data["poll_resume_unsub"] = None
+            runtime.poll_resume_unsub = None
 
         if not tasks:
             if suspended:
                 coordinator.update_interval = timedelta(seconds=base_interval)
-                data["poll_suspended"] = False
-                data["stretched"] = False
+                runtime.poll_suspended = False
+                runtime.stretched = False
                 _cancel_timer()
                 _LOGGER.info(
                     "WS: websocket clients idle; resuming REST polling at %ss",
@@ -692,8 +688,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         if not any_running:
             if suspended:
                 coordinator.update_interval = timedelta(seconds=base_interval)
-                data["poll_suspended"] = False
-                data["stretched"] = False
+                runtime.poll_suspended = False
+                runtime.stretched = False
                 _cancel_timer()
                 _LOGGER.info(
                     "WS: websocket trackers stopped; resuming REST polling at %ss",
@@ -704,8 +700,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         if all_healthy and fresh_payload:
             if not suspended:
                 coordinator.update_interval = None
-                data["poll_suspended"] = True
-                data["stretched"] = True
+                runtime.poll_suspended = True
+                runtime.stretched = True
                 _LOGGER.info(
                     "WS: trackers healthy with fresh payloads; suspending REST polling",
                 )
@@ -714,10 +710,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
                 _cancel_timer()
 
                 def _resume_callback(_now: Any) -> None:
-                    data["poll_resume_unsub"] = None
+                    runtime.poll_resume_unsub = None
                     _recalc_poll_interval()
 
-                data["poll_resume_unsub"] = async_call_later(
+                runtime.poll_resume_unsub = async_call_later(
                     hass, delay, _resume_callback
                 )
             else:
@@ -730,11 +726,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
                 "WS: tracker unhealthy or payload stale; resuming REST polling at %ss",
                 base_interval,
             )
-        data["poll_suspended"] = False
-        data["stretched"] = False
+        runtime.poll_suspended = False
+        runtime.stretched = False
         _cancel_timer()
 
-    data["recalc_poll"] = _recalc_poll_interval
+    runtime.recalc_poll = _recalc_poll_interval
 
     def _on_ws_status(payload: dict[str, Any]) -> None:
         """Recalculate polling intervals when websocket state changes."""
@@ -755,7 +751,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     unsub = async_dispatcher_connect(
         hass, signal_ws_status(entry.entry_id), _on_ws_status
     )
-    data["unsub_ws_status"] = unsub
+    runtime.unsub_ws_status = unsub
 
     # First refresh (inventory etc.)
     await coordinator.async_config_entry_first_refresh()
@@ -792,16 +788,16 @@ async def async_register_ws_debug_probe_service(hass: HomeAssistant) -> None:
             _LOGGER.debug("ws_debug_probe: integration data unavailable")
             return
 
-        entries: list[tuple[str, Mapping[str, Any]]] = []
+        entries: list[tuple[str, EntryRuntime]] = []
         if entry_filter:
             record = domain_records.get(entry_filter)
-            if isinstance(record, Mapping):
+            if isinstance(record, EntryRuntime):
                 entries.append((entry_filter, record))
         else:
             entries = [
                 (entry_id, rec)
                 for entry_id, rec in domain_records.items()
-                if isinstance(rec, Mapping)
+                if isinstance(rec, EntryRuntime)
             ]
 
         if not entries:
@@ -809,15 +805,15 @@ async def async_register_ws_debug_probe_service(hass: HomeAssistant) -> None:
             return
 
         tasks: list[Awaitable[Any]] = []
-        for entry_id, rec in entries:
-            if not rec.get("debug"):
+        for entry_id, runtime in entries:
+            if not runtime.debug:
                 _LOGGER.debug(
                     "ws_debug_probe: debug helpers disabled for entry %s",
                     entry_id,
                 )
                 continue
-            clients = rec.get("ws_clients")
-            if not isinstance(clients, Mapping) or not clients:
+            clients = runtime.ws_clients
+            if not clients:
                 _LOGGER.debug(
                     "ws_debug_probe: no websocket clients for entry %s",
                     entry_id,
@@ -844,7 +840,7 @@ async def async_register_ws_debug_probe_service(hass: HomeAssistant) -> None:
                         dev_id,
                     )
                     continue
-                inventory_obj = rec.get("inventory")
+                inventory_obj = runtime.inventory
                 if not isinstance(inventory_obj, Inventory):
                     inventory_obj = None
                 try:
@@ -888,18 +884,15 @@ async def async_register_ws_debug_probe_service(hass: HomeAssistant) -> None:
     )
 
 
-async def _async_shutdown_entry(rec: MutableMapping[str, Any]) -> None:
+async def _async_shutdown_entry(runtime: EntryRuntime) -> None:
     """Cancel websocket tasks and listeners for an integration record."""
 
-    if not isinstance(rec, MutableMapping):
+    if getattr(runtime, "_shutdown_complete", False):
         return
 
-    if rec.get("_shutdown_complete"):
-        return
+    setattr(runtime, "_shutdown_complete", True)
 
-    rec["_shutdown_complete"] = True
-
-    diagnostics_task = rec.get("diagnostics_task")
+    diagnostics_task = runtime.diagnostics_task
     if diagnostics_task is not None:
         cancel = getattr(diagnostics_task, "cancel", None)
         if callable(cancel):
@@ -913,59 +906,53 @@ async def _async_shutdown_entry(rec: MutableMapping[str, Any]) -> None:
             pass
         except Exception:  # pragma: no cover - defensive logging
             _LOGGER.exception("Diagnostics listener task raised during shutdown")
-        rec["diagnostics_task"] = None
+        runtime.diagnostics_task = None
 
-    poller = rec.get("hourly_poller")
+    poller = runtime.hourly_poller
     if hasattr(poller, "async_shutdown"):
         try:
             await poller.async_shutdown()
         except Exception:  # pragma: no cover - defensive shutdown logging
             _LOGGER.exception("Failed to stop hourly samples poller")
 
-    ws_tasks = rec.get("ws_tasks")
-    if isinstance(ws_tasks, Mapping):
-        for dev_id, task in list(ws_tasks.items()):
-            cancel = getattr(task, "cancel", None)
-            if callable(cancel):
-                try:
-                    cancel()
-                except Exception:  # pragma: no cover - defensive logging
-                    _LOGGER.exception("WS task for %s raised during cancel", dev_id)
-                    continue
-            if hasattr(task, "__await__"):
-                try:
-                    await task  # type: ignore[func-returns-value]
-                except asyncio.CancelledError:
-                    pass
-                except Exception:  # pragma: no cover - defensive logging
-                    _LOGGER.exception("WS task for %s failed to cancel cleanly", dev_id)
-
-    ws_clients = rec.get("ws_clients")
-    if isinstance(ws_clients, Mapping):
-        for dev_id, client in list(ws_clients.items()):
-            stop = getattr(client, "stop", None)
-            if not callable(stop):
-                continue
+    for dev_id, task in list(runtime.ws_tasks.items()):
+        cancel = getattr(task, "cancel", None)
+        if callable(cancel):
             try:
-                await stop()
+                cancel()
             except Exception:  # pragma: no cover - defensive logging
-                _LOGGER.exception("WS client for %s failed to stop", dev_id)
+                _LOGGER.exception("WS task for %s raised during cancel", dev_id)
+                continue
+        if hasattr(task, "__await__"):
+            try:
+                await task  # type: ignore[func-returns-value]
+            except asyncio.CancelledError:
+                pass
+            except Exception:  # pragma: no cover - defensive logging
+                _LOGGER.exception("WS task for %s failed to cancel cleanly", dev_id)
 
-    unsub = rec.get("unsub_ws_status")
-    if callable(unsub):
+    for dev_id, client in list(runtime.ws_clients.items()):
+        stop = getattr(client, "stop", None)
+        if not callable(stop):
+            continue
         try:
-            unsub()
+            await stop()
+        except Exception:  # pragma: no cover - defensive logging
+            _LOGGER.exception("WS client for %s failed to stop", dev_id)
+
+    if callable(runtime.unsub_ws_status):
+        try:
+            runtime.unsub_ws_status()
         except Exception:  # pragma: no cover - defensive logging
             _LOGGER.exception("Failed to unsubscribe websocket status listener")
-        rec["unsub_ws_status"] = None
+        runtime.unsub_ws_status = None
 
-    poll_timer = rec.get("poll_resume_unsub")
-    if callable(poll_timer):
+    if callable(runtime.poll_resume_unsub):
         try:
-            poll_timer()
+            runtime.poll_resume_unsub()
         except Exception:  # pragma: no cover - defensive logging
             _LOGGER.exception("Failed to cancel suspended poll resume timer")
-    rec["poll_resume_unsub"] = None
+    runtime.poll_resume_unsub = None
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -992,6 +979,8 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_update_entry_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options updates; recompute interval if needed."""
-    rec = hass.data[DOMAIN][entry.entry_id]
-    rec["debug"] = bool(entry.options.get("debug", entry.data.get("debug", False)))
-    rec["recalc_poll"]()
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    if isinstance(runtime, EntryRuntime):
+        runtime.debug = bool(entry.options.get("debug", entry.data.get("debug", False)))
+        if callable(runtime.recalc_poll):
+            runtime.recalc_poll()

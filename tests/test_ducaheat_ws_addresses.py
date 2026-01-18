@@ -8,7 +8,9 @@ from unittest.mock import MagicMock
 
 from homeassistant.core import HomeAssistant
 
-from custom_components.termoweb.backend.ducaheat_ws import DucaheatWSClient, DOMAIN
+from conftest import build_entry_runtime
+from custom_components.termoweb.backend.ducaheat_ws import DucaheatWSClient
+from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
 
 
@@ -36,8 +38,13 @@ def _make_client() -> DucaheatWSClient:
     """Instantiate a websocket client with stub dependencies."""
 
     hass = HomeAssistant()
-    hass.data.setdefault(DOMAIN, {})["entry"] = {}
     coordinator = DummyCoordinator()
+    build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="device",
+        coordinator=coordinator,
+    )
     client = DucaheatWSClient(
         hass,
         entry_id="entry",

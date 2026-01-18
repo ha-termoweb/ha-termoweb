@@ -34,6 +34,7 @@ from .inventory import (
     normalize_node_addr,
     normalize_node_type,
 )
+from .runtime import require_runtime
 from .utils import build_gateway_device_info
 
 _LOGGER = logging.getLogger(__name__)
@@ -43,19 +44,18 @@ SettingsResolver = Callable[[], DomainState | None]
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up connectivity and boost binary sensors for a config entry."""
-    data = hass.data[DOMAIN][entry.entry_id]
-    coord: StateCoordinator = data["coordinator"]
-    dev_id = data["dev_id"]
+    runtime = require_runtime(hass, entry.entry_id)
+    coord: StateCoordinator = runtime.coordinator
+    dev_id = runtime.dev_id
 
-    fallbacks = await async_get_fallback_translations(hass, data)
+    fallbacks = await async_get_fallback_translations(hass, runtime)
     attach_fallbacks(coord, fallbacks)
     gateway = GatewayOnlineBinarySensor(coord, entry.entry_id, dev_id)
 
-    try:
-        inventory = Inventory.require_from_context(container=data)
-    except LookupError as err:
+    inventory = runtime.inventory
+    if not isinstance(inventory, Inventory):
         _LOGGER.error("TermoWeb heater setup missing inventory for device %s", dev_id)
-        raise ValueError("TermoWeb inventory unavailable for heater platform") from err
+        raise ValueError("TermoWeb inventory unavailable for heater platform")
 
     boost_entities: list[BinarySensorEntity] = []
     for node_type, addr_str, base_name in _iter_boostable_inventory_nodes(inventory):
@@ -124,8 +124,14 @@ class GatewayOnlineBinarySensor(
 
     def _ws_state(self) -> dict[str, Any]:
         """Return the latest websocket status payload for this device."""
-        rec = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {}) or {}
-        return (rec.get("ws_state") or {}).get(self._dev_id, {})
+        hass = self.hass
+        if hass is None:
+            return {}
+        try:
+            runtime = require_runtime(hass, self._entry_id)
+        except LookupError:
+            return {}
+        return runtime.ws_state.get(self._dev_id, {})
 
     @property
     def is_on(self) -> bool:

@@ -54,8 +54,8 @@ from .inventory import (
     PowerMonitorNode,
     normalize_node_addr,
     normalize_node_type,
-    store_inventory_on_entry,
 )
+from .runtime import require_runtime
 from .utils import (
     build_gateway_device_info,
     build_power_monitor_device_info,
@@ -155,11 +155,11 @@ def _power_monitor_display_name(
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up sensors for each heater node."""
-    data = hass.data[DOMAIN][entry.entry_id]
-    coordinator = data["coordinator"]
-    dev_id = data["dev_id"]
+    runtime = require_runtime(hass, entry.entry_id)
+    coordinator = runtime.coordinator
+    dev_id = runtime.dev_id
 
-    fallbacks = await async_get_fallback_translations(hass, data)
+    fallbacks = await async_get_fallback_translations(hass, runtime)
     attach_fallbacks(coordinator, fallbacks)
 
     def default_name(addr: str) -> str:
@@ -172,39 +172,22 @@ async def async_setup_entry(hass, entry, async_add_entities):
             addr=addr,
         )
 
-    if not isinstance(data.get("inventory"), Inventory):
-        coordinator_inventory = getattr(coordinator, "inventory", None)
-        if isinstance(coordinator_inventory, Inventory):
-            store_inventory_on_entry(
-                coordinator_inventory,
-                record=data,
-                hass=hass,
-                entry_id=entry.entry_id,
-            )
-
     heater_details = heater_platform_details_for_entry(
-        data,
+        runtime,
         default_name_simple=default_name,
-        hass=hass,
-        entry_id=entry.entry_id,
-        coordinator=coordinator,
     )
     inventory = heater_details.inventory
 
-    energy_coordinator: EnergyStateCoordinator | None = data.get(
-        "energy_coordinator",
-    )
-
-    if energy_coordinator is None:
+    energy_coordinator = runtime.energy_coordinator
+    if not isinstance(energy_coordinator, EnergyStateCoordinator):
         energy_coordinator = EnergyStateCoordinator(
-            hass, data["client"], dev_id, inventory
+            hass, runtime.client, dev_id, inventory
         )
-        data["energy_coordinator"] = energy_coordinator
+        runtime.energy_coordinator = energy_coordinator
         await energy_coordinator.async_config_entry_first_refresh()
-        attach_fallbacks(energy_coordinator, fallbacks)
-    else:
-        energy_coordinator.update_addresses(inventory)
-        attach_fallbacks(energy_coordinator, fallbacks)
+
+    energy_coordinator.update_addresses(inventory)
+    attach_fallbacks(energy_coordinator, fallbacks)
 
     power_monitor_entities: list[SensorEntity] = []
     discovered_power_monitors = False

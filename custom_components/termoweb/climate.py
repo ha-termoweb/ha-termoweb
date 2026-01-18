@@ -38,6 +38,7 @@ from .heater import (
 from .i18n import async_get_fallback_translations, attach_fallbacks, format_fallback
 from .identifiers import build_heater_entity_unique_id, thermostat_fallback_name
 from .inventory import HeaterNode, Inventory, normalize_node_addr, normalize_node_type
+from .runtime import require_runtime
 from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
@@ -63,18 +64,17 @@ _WS_ECHO_FALLBACK_REFRESH = 4.0
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Discover heater nodes and create climate entities."""
-    data = hass.data[DOMAIN][entry.entry_id]
-    coordinator = data["coordinator"]
-    dev_id = data["dev_id"]
+    runtime = require_runtime(hass, entry.entry_id)
+    coordinator = runtime.coordinator
+    dev_id = runtime.dev_id
 
-    fallbacks = await async_get_fallback_translations(hass, data)
+    fallbacks = await async_get_fallback_translations(hass, runtime)
     attach_fallbacks(coordinator, fallbacks)
 
-    try:
-        inventory = Inventory.require_from_context(container=data)
-    except LookupError as err:
+    inventory = runtime.inventory
+    if not isinstance(inventory, Inventory):
         _LOGGER.error("TermoWeb climate setup missing inventory for device %s", dev_id)
-        raise ValueError("TermoWeb inventory unavailable for climate platform") from err
+        raise ValueError("TermoWeb inventory unavailable for climate platform")
 
     def default_name_simple(addr: str) -> str:
         """Return fallback name for heater nodes."""
@@ -1465,11 +1465,12 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         brand: str | None = None
         hass = getattr(self, "hass", None)
         if hass is not None:
-            hass_data = hass.data.get(DOMAIN, {}).get(self._entry_id)
-            if isinstance(hass_data, Mapping):
-                brand_value = hass_data.get("brand")
-                if isinstance(brand_value, str):
-                    brand = brand_value
+            try:
+                runtime = require_runtime(hass, self._entry_id)
+            except LookupError:
+                runtime = None
+            if runtime is not None:
+                brand = runtime.brand
 
         if uses_ducaheat_backend(brand) and self._node_type == "acm":
             cancel_boost = False
