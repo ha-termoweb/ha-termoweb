@@ -194,6 +194,30 @@ class StateCoordinator(
 
         return self._domain_view
 
+    @property
+    def device_metadata(self) -> DeviceMetadata:
+        """Return immutable metadata for this gateway."""
+
+        return self._device_metadata
+
+    @property
+    def gateway_name(self) -> str:
+        """Return the display name for this gateway."""
+
+        return _device_display_name(self._device_metadata, self._dev_id)
+
+    @property
+    def gateway_model(self) -> str | None:
+        """Return the display model name for this gateway."""
+
+        return self._device_metadata.model
+
+    @property
+    def gateway_connected(self) -> bool:
+        """Return True when the coordinator reports the gateway online."""
+
+        return True
+
     def _device_record(self) -> dict[str, dict[str, Any]]:
         """Return a minimal coordinator payload for this device."""
 

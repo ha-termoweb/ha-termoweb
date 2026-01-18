@@ -726,30 +726,6 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         )
 
         self._optimistic_update(apply_fn)
-        coordinator_data = (
-            self.coordinator.data if hasattr(self, "coordinator") else None
-        )
-        if isinstance(coordinator_data, Mapping):
-            try:
-                coordinator_data.get(self._dev_id)
-                coordinator_data.get(self._dev_id)
-            except BaseException as err:
-                if _is_cancelled_error(err):
-                    raise
-                _LOGGER.debug(
-                    "Failed to resolve device record type=%s addr=%s: %s",
-                    self._node_type,
-                    self._addr,
-                    err,
-                )
-            else:
-                if type(coordinator_data) is not dict:
-                    _LOGGER.debug(
-                        "Failed to resolve device record type=%s addr=%s: unexpected mapping %s",
-                        self._node_type,
-                        self._addr,
-                        type(coordinator_data).__name__,
-                    )
         self._schedule_refresh_fallback()
 
     async def async_set_schedule(self, prog: list[int]) -> None:
