@@ -1,22 +1,23 @@
 # TermoWeb v2 refactor status
 
-## Invariants and staged plan
-- Inventory is immutable for each config entry: one gateway `dev_id` and a fixed set of nodes identified by `(type, addr)` with static capabilities.
-- Inventory is fetched once at setup; do not re-fetch or build auxiliary node caches outside the domain inventory.
-- All interactions go through the cloud APIs (REST + WebSocket); no direct hardware access.
-- Vendor differences live in codecs and, for Ducaheat, a planner; domain models are vendor-neutral dataclasses.
-- Pydantic v2 models are only for wire parsing/encoding. Domain state must not store Pydantic models long-term.
-- The refactor progresses via a strangler pattern: new domain/codecs coexist with legacy code until fully migrated.
+## Status
 
-## Progress log
-- **v2.0.0-pre11**: Removed legacy coordinator merges in favour of the shared domain state store for both backends, simplified entity reads to rely solely on the store façade, and pruned obsolete tests/helpers tied to legacy dict caches. Testing: _pending_.
-- **v2.0.0-pre8**: Added Ducaheat Pydantic wire models, codec helpers, and a command planner with select/write/release sequencing for segmented endpoints while factoring shared codec validators. Testing: `uv run ruff check custom_components/termoweb/codecs/ducaheat_models.py custom_components/termoweb/codecs/ducaheat_codec.py custom_components/termoweb/codecs/ducaheat_planner.py`; `uv run pytest tests/test_ducaheat_codec.py tests/test_ducaheat_planner.py tests/test_termoweb_codec_writes.py`.
-- **v2.0.0-pre9**: Wired Ducaheat REST reads through codec decoding and migrated segmented writes to planner-driven command execution for heaters and accumulators, updating tests for new payload encoding shapes. Testing: `uv run ruff check custom_components/termoweb/backend/ducaheat.py custom_components/termoweb/codecs/ducaheat_codec.py custom_components/termoweb/codecs/ducaheat_planner.py`; `uv run pytest tests/test_backend_ducaheat.py tests/test_ducaheat_acm_writes.py tests/test_ducaheat_planner.py tests/test_ducaheat_codec.py`.
-- **v2.0.0-pre10**: Translated Ducaheat websocket updates into typed domain deltas applied to the shared state store while preserving the legacy coordinator view, including inventory validation for path-based updates. Testing: `uv run ruff check custom_components/termoweb/backend/ducaheat_ws.py custom_components/termoweb/coordinator.py tests/test_ducaheat_ws_protocol.py` (reports pre-existing lint violations in ducaheat_ws); `uv run pytest tests/test_ducaheat_ws_protocol.py`.
-- **v2.0.0-pre7**: Added a domain state view façade and migrated entities to prefer domain-backed state with legacy fallbacks, including optimistic patch helpers and tests for the view. Testing: `ruff check custom_components/termoweb/binary_sensor.py custom_components/termoweb/climate.py custom_components/termoweb/coordinator.py custom_components/termoweb/domain/__init__.py custom_components/termoweb/domain/state.py custom_components/termoweb/domain/view.py custom_components/termoweb/heater.py tests/test_domain_view.py`; `pytest -q tests/test_domain_view.py`.
-- **v2.0.0-pre6**: TermoWeb websocket updates now translate into typed domain deltas applied to the DomainStateStore while preserving the legacy coordinator view, including helpers and tests for delta translation and handling. Testing: `ruff check custom_components/termoweb/domain/state.py custom_components/termoweb/domain/__init__.py custom_components/termoweb/backend/termoweb_ws.py tests/test_domain_state_store.py tests/test_ws_client.py tests/test_coordinator.py` (fails on existing websocket lint guards); `pytest -q tests/test_domain_state_store.py tests/test_ws_client.py::test_termoweb_nodes_to_deltas tests/test_ws_client.py::test_termoweb_nodes_to_deltas_validates_inventory tests/test_ws_client.py::test_termoweb_translate_path_deltas tests/test_coordinator.py::test_handle_ws_deltas_updates_store`.
-- **v2.0.0-pre5**: Added DomainStateStore with a legacy coordinator view adapter (removed in later pre20 clean-up) and wired TermoWeb REST polling through the store while preserving the existing dict-facing API. Testing: `ruff check custom_components/termoweb/domain/state.py custom_components/termoweb/coordinator.py custom_components/termoweb/domain/legacy_view.py custom_components/termoweb/domain/ids.py tests/test_domain_state_store.py`; `pytest -q tests/test_domain_state_store.py tests/test_coordinator.py::test_async_update_data_adds_boost_metadata tests/test_coordinator.py::test_poll_skips_pending_settings_merge tests/test_coordinator.py::test_refresh_skips_pending_settings_merge`.
-- **v2.0.0-pre4**: Routed TermoWeb write paths through domain commands and codec encoders, including new Pydantic request models and payload helpers for settings, extra options, and boost toggles. Added targeted unit tests for write payload formatting and validation. Testing: `ruff check custom_components/termoweb/codecs/termoweb_codec.py custom_components/termoweb/codecs/termoweb_models.py custom_components/termoweb/domain/commands.py`; `pytest -q tests/test_termoweb_codec_writes.py tests/test_api.py::test_set_node_settings_includes_prog_and_ptemp tests/test_api.py::test_set_node_settings_invalid_units tests/test_api.py::test_set_node_settings_invalid_program tests/test_api.py::test_set_node_settings_invalid_temperatures tests/test_api.py::test_set_acm_extra_options_forwards_payload tests/test_api.py::test_set_acm_boost_state_formats_payload tests/test_api.py::test_set_acm_boost_state_rejects_invalid_units tests/test_api.py::test_set_acm_boost_state_rejects_invalid_stemp`.
-- **v2.0.0-pre3**: Added Pydantic v2 models and codecs for TermoWeb node settings and samples; wired REST client read paths through codecs without changing outward behaviors. Testing: targeted codec + REST client sample/settings tests.
-- **v2.0.0-pre2**: Added TermoWeb REST codec and Pydantic v2 models for device and node inventory responses; wired REST client through codecs without changing return shapes. Testing: unit tests for codec payload normalization and API paths.
-- **v2.0.0-pre1**: Added domain and codec scaffolding; no runtime behavior changes. Testing: targeted unit tests for domain ids/inventory.
+The v2 refactor is a **clean-slate** effort. There is no legacy path and no
+strangler architecture. Documentation defines the target end state and the code
+must converge toward it.
+
+## Authoritative references
+
+- `docs/architecture.md` — target architecture and module map
+- `docs/design_contract.md` — non-negotiable rules
+- `docs/legacy_removal.md` — deletion checklist for legacy artifacts
+
+## What "done" means
+
+The refactor is complete when:
+
+- The codebase matches the design contract in full.
+- Only the canonical state pipeline exists.
+- Inventory is immutable and created once at setup.
+- Entity platforms are vendor-agnostic.
+- No compatibility shims or legacy scaffolding remain.
