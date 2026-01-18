@@ -13,18 +13,7 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.const import STATE_UNKNOWN, UnitOfTemperature
-
-try:  # pragma: no cover - fallback for older Home Assistant stubs
-    from homeassistant.const import UnitOfTime
-except ImportError:  # pragma: no cover - fallback for older Home Assistant stubs
-
-    class UnitOfTime:  # type: ignore[override]
-        """Fallback UnitOfTime namespace with minute granularity."""
-
-        MINUTES = "min"
-
-
+from homeassistant.const import STATE_UNKNOWN, UnitOfTemperature, UnitOfTime
 from homeassistant.core import callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.typing import StateType

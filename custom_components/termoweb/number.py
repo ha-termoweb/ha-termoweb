@@ -8,41 +8,8 @@ import math
 from typing import Any, TypeVar
 
 from homeassistant.components.number import NumberEntity, NumberMode
-
-try:  # pragma: no cover - fallback for stripped Home Assistant stubs in tests
-    from homeassistant.const import UnitOfTemperature
-except ImportError:  # pragma: no cover - executed in unit test stubs
-    from enum import Enum
-
-    class UnitOfTemperature(str, Enum):
-        """Fallback temperature unit namespace used in unit tests."""
-
-        CELSIUS = "°C"
-        FAHRENHEIT = "°F"
-
-
-try:  # pragma: no cover - fallback for stripped Home Assistant stubs in tests
-    from homeassistant.const import UnitOfTime
-except ImportError:  # pragma: no cover - executed in unit test stubs
-
-    class UnitOfTime(str):
-        """Fallback time unit namespace used in unit tests."""
-
-        __slots__ = ()
-        HOURS = "h"
-
-
-try:  # pragma: no cover - fallback for stripped Home Assistant stubs in tests
-    from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
-except ImportError:  # pragma: no cover - executed in unit test stubs
-
-    class HomeAssistantError(Exception):
-        """Fallback Home Assistant error used in unit tests."""
-
-    class ServiceNotFound(HomeAssistantError):
-        """Fallback service lookup error used in unit tests."""
-
-
+from homeassistant.const import UnitOfTemperature, UnitOfTime
+from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.restore_state import RestoreEntity
 

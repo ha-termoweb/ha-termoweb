@@ -843,6 +843,9 @@ def _install_stubs() -> None:
     service_mod = sys.modules.get("homeassistant.helpers.service") or types.ModuleType(
         "homeassistant.helpers.service"
     )
+    event_mod = sys.modules.get("homeassistant.helpers.event") or types.ModuleType(
+        "homeassistant.helpers.event"
+    )
 
     class _ReferencedEntities:
         def __init__(
@@ -894,6 +897,9 @@ def _install_stubs() -> None:
     loader_mod = sys.modules.get("homeassistant.loader") or types.ModuleType(
         "homeassistant.loader"
     )
+    setup_mod = sys.modules.get("homeassistant.setup") or types.ModuleType(
+        "homeassistant.setup"
+    )
     data_entry_flow_mod = sys.modules.get(
         "homeassistant.data_entry_flow"
     ) or types.ModuleType("homeassistant.data_entry_flow")
@@ -906,6 +912,12 @@ def _install_stubs() -> None:
     components_mod = sys.modules.get("homeassistant.components") or types.ModuleType(
         "homeassistant.components"
     )
+    recorder_mod = sys.modules.get(
+        "homeassistant.components.recorder"
+    ) or types.ModuleType("homeassistant.components.recorder")
+    recorder_stats_mod = sys.modules.get(
+        "homeassistant.components.recorder.statistics"
+    ) or types.ModuleType("homeassistant.components.recorder.statistics")
     http_mod = sys.modules.get("homeassistant.components.http") or types.ModuleType(
         "homeassistant.components.http"
     )
@@ -931,6 +943,110 @@ def _install_stubs() -> None:
         "homeassistant.helpers.entity_platform"
     ) or types.ModuleType("homeassistant.helpers.entity_platform")
 
+    if not hasattr(event_mod, "async_call_later"):
+
+        def async_call_later(
+            _hass: Any, _delay: float, action: Any
+        ) -> Callable[[], None]:
+            """Schedule ``action`` to run immediately in tests."""
+
+            async def _runner() -> None:
+                result = action(None)
+                if inspect.isawaitable(result):
+                    await result
+
+            task = asyncio.create_task(_runner())
+
+            def _cancel() -> None:
+                task.cancel()
+
+            return _cancel
+
+        event_mod.async_call_later = async_call_later
+
+    if not hasattr(event_mod, "async_track_time_change"):
+
+        def async_track_time_change(
+            _hass: Any, _action: Any, **_kwargs: Any
+        ) -> Callable[[], None]:
+            """Return a no-op cancel function for time change hooks."""
+
+            return lambda: None
+
+        event_mod.async_track_time_change = async_track_time_change
+
+    if not hasattr(setup_mod, "async_when_setup"):
+
+        def async_when_setup(
+            hass: Any, component: str, action: Any
+        ) -> Callable[[], None]:
+            """Invoke ``action`` immediately for setup hooks in tests."""
+
+            result = action(hass, component)
+            if inspect.isawaitable(result):
+                asyncio.create_task(result)
+            return lambda: None
+
+        setup_mod.async_when_setup = async_when_setup
+
+    if not hasattr(recorder_stats_mod, "async_get_statistics_during_period"):
+
+        async def async_get_statistics_during_period(
+            _hass: Any,
+            _start_time: dt.datetime,
+            _end_time: dt.datetime,
+            statistic_ids: Iterable[str],
+            *_args: Any,
+            **_kwargs: Any,
+        ) -> dict[str, list[Any]]:
+            """Return empty statistics buckets for test runs."""
+
+            return {stat_id: [] for stat_id in statistic_ids}
+
+        recorder_stats_mod.async_get_statistics_during_period = (
+            async_get_statistics_during_period
+        )
+
+    if not hasattr(recorder_stats_mod, "async_get_last_statistics"):
+
+        async def async_get_last_statistics(
+            _hass: Any,
+            _number_of_stats: int,
+            statistic_ids: Iterable[str],
+            *_args: Any,
+            **_kwargs: Any,
+        ) -> dict[str, list[Any]]:
+            """Return empty statistics for test runs."""
+
+            return {stat_id: [] for stat_id in statistic_ids}
+
+        recorder_stats_mod.async_get_last_statistics = async_get_last_statistics
+
+    if not hasattr(recorder_stats_mod, "async_delete_statistics"):
+
+        async def async_delete_statistics(
+            _hass: Any,
+            _statistic_ids: Iterable[str],
+            *_args: Any,
+            **_kwargs: Any,
+        ) -> None:
+            """No-op statistics deletion for tests."""
+
+            return None
+
+        recorder_stats_mod.async_delete_statistics = async_delete_statistics
+
+    if not hasattr(recorder_stats_mod, "async_import_statistics"):
+
+        async def async_import_statistics(
+            _hass: Any, _metadata: dict[str, Any], _stats: list[dict[str, Any]]
+        ) -> None:
+            """No-op statistics import for tests."""
+
+            return None
+
+        recorder_stats_mod.async_import_statistics = async_import_statistics
+
     sys.modules["homeassistant"] = homeassistant_pkg
     sys.modules["homeassistant.config_entries"] = config_entries_mod
     sys.modules["homeassistant.const"] = const_mod
@@ -944,12 +1060,16 @@ def _install_stubs() -> None:
     sys.modules["homeassistant.helpers.entity_registry"] = entity_registry_mod
     sys.modules["homeassistant.helpers.service"] = service_mod
     sys.modules["homeassistant.helpers.dispatcher"] = dispatcher_mod
+    sys.modules["homeassistant.helpers.event"] = event_mod
     sys.modules["homeassistant.helpers.translation"] = translation_mod
     sys.modules["homeassistant.helpers.update_coordinator"] = update_coordinator_mod
     sys.modules["homeassistant.helpers.restore_state"] = restore_state_mod
     sys.modules["homeassistant.helpers.entity_platform"] = entity_platform_mod
     sys.modules["homeassistant.loader"] = loader_mod
+    sys.modules["homeassistant.setup"] = setup_mod
     sys.modules["homeassistant.components"] = components_mod
+    sys.modules["homeassistant.components.recorder"] = recorder_mod
+    sys.modules["homeassistant.components.recorder.statistics"] = recorder_stats_mod
     sys.modules["homeassistant.components.http"] = http_mod
     sys.modules["homeassistant.components.binary_sensor"] = binary_sensor_mod
     sys.modules["homeassistant.components.button"] = button_mod
@@ -964,11 +1084,14 @@ def _install_stubs() -> None:
     homeassistant_pkg.exceptions = exceptions_mod
     homeassistant_pkg.helpers = helpers_mod
     helpers_mod.frame = frame_mod
+    helpers_mod.event = event_mod
     global _frame_module
     _frame_module = frame_mod
     homeassistant_pkg.data_entry_flow = data_entry_flow_mod
     homeassistant_pkg.components = components_mod
     homeassistant_pkg.loader = loader_mod
+    homeassistant_pkg.setup = setup_mod
+    recorder_mod.statistics = recorder_stats_mod
 
     def async_get_clientsession(hass: Any) -> ClientSession:
         if hasattr(hass, "client_session_calls"):
@@ -987,11 +1110,13 @@ def _install_stubs() -> None:
     components_mod.http = http_mod
     components_mod.binary_sensor = binary_sensor_mod
     components_mod.button = button_mod
+    components_mod.recorder = recorder_mod
     components_mod.sensor = sensor_mod
     components_mod.select = select_mod
     components_mod.number = number_mod
 
     const_mod.EVENT_HOMEASSISTANT_STARTED = "homeassistant_started"
+    const_mod.EVENT_HOMEASSISTANT_STOP = "homeassistant_stop"
     const_mod.STATE_UNKNOWN = "unknown"
     state_unknown_value = const_mod.STATE_UNKNOWN
 
@@ -1002,6 +1127,17 @@ def _install_stubs() -> None:
 
         translation_mod.async_get_exception_message = async_get_exception_message
 
+    if not hasattr(translation_mod, "async_get_translations"):
+
+        async def async_get_translations(
+            _hass: Any, _language: str, _domain: str
+        ) -> dict[str, str]:
+            """Return an empty translation mapping for tests."""
+
+            return {}
+
+        translation_mod.async_get_translations = async_get_translations
+
     if not hasattr(const_mod, "UnitOfTemperature"):
 
         class UnitOfTemperature(str, enum.Enum):
@@ -1011,6 +1147,16 @@ def _install_stubs() -> None:
 
     else:
         UnitOfTemperature = const_mod.UnitOfTemperature
+
+    if not hasattr(const_mod, "UnitOfTime"):
+
+        class UnitOfTime(str, enum.Enum):
+            """Minimal time unit namespace for tests."""
+
+            MINUTES = "min"
+            HOURS = "h"
+
+        const_mod.UnitOfTime = UnitOfTime
 
     if not hasattr(http_mod, "HomeAssistantApplication"):
 
@@ -1297,9 +1443,15 @@ def _install_stubs() -> None:
         def async_create_entry(self, *, title: str, data: dict[str, Any]) -> FlowResult:
             return FlowResult({"type": "create_entry", "title": title, "data": data})
 
+    class SupportsDiagnostics(enum.Enum):
+        """Minimal SupportsDiagnostics stub for integration tests."""
+
+        YES = "yes"
+
     config_entries_mod.ConfigEntry = ConfigEntry
     config_entries_mod.ConfigFlow = ConfigFlow
     config_entries_mod.OptionsFlow = OptionsFlow
+    config_entries_mod.SupportsDiagnostics = SupportsDiagnostics
     core_mod.HomeAssistant = HomeAssistant
     core_mod.callback = lambda func: func
 
@@ -1310,6 +1462,20 @@ def _install_stubs() -> None:
     core_mod.ServiceCall = ServiceCall
     exceptions_mod.ConfigEntryAuthFailed = ConfigEntryAuthFailedStub
     exceptions_mod.ConfigEntryNotReady = ConfigEntryNotReadyStub
+
+    if not hasattr(exceptions_mod, "HomeAssistantError"):
+
+        class HomeAssistantError(Exception):
+            """Base Home Assistant exception for tests."""
+
+        exceptions_mod.HomeAssistantError = HomeAssistantError
+
+    if not hasattr(exceptions_mod, "ServiceNotFound"):
+
+        class ServiceNotFound(exceptions_mod.HomeAssistantError):
+            """Service lookup exception for tests."""
+
+        exceptions_mod.ServiceNotFound = ServiceNotFound
 
     if not hasattr(update_coordinator_mod, "DataUpdateCoordinator"):
 

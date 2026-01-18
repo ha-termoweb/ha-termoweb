@@ -6,7 +6,7 @@ from asyncio import CancelledError
 from collections.abc import Iterable
 from datetime import datetime
 import logging
-from typing import Any, cast
+from typing import Any
 
 from custom_components.termoweb.backend.base import (
     Backend,
@@ -16,30 +16,15 @@ from custom_components.termoweb.backend.base import (
     normalise_energy_samples,
 )
 from custom_components.termoweb.backend.sanitize import mask_identifier
+from custom_components.termoweb.backend.termoweb_ws import TermoWebWSClient
 from custom_components.termoweb.backend.ws_client import WebSocketClient
 from custom_components.termoweb.inventory import Inventory
 
 _LOGGER = logging.getLogger(__name__)
 
-try:  # pragma: no cover - exercised via backend tests
-    from custom_components.termoweb.backend.termoweb_ws import (
-        TermoWebWSClient as _TermoWebWSClient,
-    )
-except ImportError:  # pragma: no cover - exercised via backend tests
-    _TermoWebWSClient = cast(type[Any], WebSocketClient)
-
-TermoWebWSClient = _TermoWebWSClient
-
 
 class TermoWebBackend(Backend):
     """Backend for the TermoWeb brand."""
-
-    def _resolve_ws_client_cls(self) -> type[Any]:
-        """Return the websocket client class compatible with this backend."""
-
-        if isinstance(TermoWebWSClient, type):
-            return TermoWebWSClient
-        return WebSocketClient
 
     def create_ws_client(
         self,
@@ -52,7 +37,6 @@ class TermoWebBackend(Backend):
     ) -> WsClientProto:
         """Instantiate the unified websocket client for TermoWeb."""
 
-        ws_cls = self._resolve_ws_client_cls()
         kwargs: dict[str, Any] = {
             "entry_id": entry_id,
             "dev_id": dev_id,
@@ -60,9 +44,9 @@ class TermoWebBackend(Backend):
             "coordinator": coordinator,
             "inventory": inventory,
         }
-        if issubclass(ws_cls, WebSocketClient):
+        if issubclass(TermoWebWSClient, WebSocketClient):
             kwargs["protocol"] = "socketio09"
-        return ws_cls(
+        return TermoWebWSClient(
             hass,
             **kwargs,
         )

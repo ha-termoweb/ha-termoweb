@@ -310,8 +310,6 @@ custom_components/termoweb/backend/sanitize.py :: validate_boost_minutes
     Return a validated boost duration in minutes or ``None``.
 custom_components/termoweb/backend/sanitize.py :: build_acm_boost_payload
     Return a validated accumulator boost payload.
-custom_components/termoweb/backend/termoweb.py :: TermoWebBackend._resolve_ws_client_cls
-    Return the websocket client class compatible with this backend.
 custom_components/termoweb/backend/termoweb.py :: TermoWebBackend.create_ws_client
     Instantiate the unified websocket client for TermoWeb.
 custom_components/termoweb/backend/termoweb.py :: TermoWebBackend.fetch_hourly_samples
@@ -1218,22 +1216,18 @@ custom_components/termoweb/domain/view.py :: DomainStateView.get_heater_state
     Return the heater/thermostat/accumulator state for ``addr``.
 custom_components/termoweb/domain/view.py :: DomainStateView.get_power_monitor_state
     Return the power monitor state for ``addr`` when present.
-custom_components/termoweb/energy.py :: _resolve_recorder_imports
-    Return cached recorder helper imports.
-custom_components/termoweb/energy.py :: _resolve_statistics_helpers
-    Return the recorder statistics helpers for compatibility shims.
 custom_components/termoweb/energy.py :: _iso_date
     Convert unix timestamp to ISO date.
+custom_components/termoweb/energy.py :: _statistics_during_period
+    Return recorder statistics rows for the provided period.
+custom_components/termoweb/energy.py :: _get_last_statistics
+    Return the most recent recorder statistics row for ``statistic_id``.
+custom_components/termoweb/energy.py :: _delete_statistics
+    Delete recorder statistics rows for ``statistic_id``.
 custom_components/termoweb/energy.py :: _store_statistics
     Insert entity statistics using the recorder import helper.
 custom_components/termoweb/energy.py :: _statistics_row_get
     Read a field from a statistics row regardless of its container type.
-custom_components/termoweb/energy.py :: _statistics_during_period_compat
-    Fetch statistics for a period using the best available API.
-custom_components/termoweb/energy.py :: _get_last_statistics_compat
-    Retrieve the last statistics row via synchronous or async helpers.
-custom_components/termoweb/energy.py :: _clear_statistics_compat
-    Clear statistics using whichever helper is available.
 custom_components/termoweb/energy.py :: _collect_statistics
     Return statistics rows for a single statistic id.
 custom_components/termoweb/energy.py :: _enforce_monotonic_sum
