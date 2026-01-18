@@ -21,9 +21,8 @@ from homeassistant.helpers import entity_platform
 from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
-from .backend.ducaheat import DucaheatRESTClient
+from .backend.base import BoostContext
 from .boost import coerce_boost_minutes, supports_boost
-from .const import DOMAIN, uses_ducaheat_backend
 from .domain import DomainState, HeaterState
 from .heater import (
     DEFAULT_BOOST_DURATION,
@@ -74,7 +73,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     inventory = runtime.inventory
     if not isinstance(inventory, Inventory):
         _LOGGER.error("TermoWeb climate setup missing inventory for device %s", dev_id)
-        raise ValueError("TermoWeb inventory unavailable for climate platform")
+        raise TypeError("TermoWeb inventory unavailable for climate platform")
 
     def default_name_simple(addr: str) -> str:
         """Return fallback name for heater nodes."""
@@ -1021,13 +1020,12 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         hass = self._hass_for_runtime()
         ws_record = None
         if hass is not None:
-            domain_bucket = getattr(hass, "data", None)
-            if isinstance(domain_bucket, dict):
-                entry_bucket = domain_bucket.get(DOMAIN, {})
-                if isinstance(entry_bucket, dict):
-                    entry_record = entry_bucket.get(self._entry_id, {})
-                    if isinstance(entry_record, dict):
-                        ws_record = entry_record.get("ws_state")
+            try:
+                runtime = require_runtime(hass, self._entry_id)
+            except LookupError:
+                runtime = None
+            if runtime is not None:
+                ws_record = runtime.ws_state
         if isinstance(ws_record, dict):
             ws_state = ws_record.get(self._dev_id)
             if isinstance(ws_state, dict):
@@ -1438,7 +1436,8 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         ptemp: list[float] | None,
         units: str,
     ) -> None:
-        brand: str | None = None
+        boost_context: BoostContext | None = None
+        backend = None
         hass = getattr(self, "hass", None)
         if hass is not None:
             try:
@@ -1446,10 +1445,9 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
             except LookupError:
                 runtime = None
             if runtime is not None:
-                brand = runtime.brand
+                backend = runtime.backend
 
-        if uses_ducaheat_backend(brand) and self._node_type == "acm":
-            cancel_boost = False
+        if self._node_type == "acm":
             boost_state = None
             try:
                 boost_state = self.boost_state()
@@ -1460,24 +1458,28 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
                     err,
                     exc_info=err,
                 )
-            if boost_state is not None and boost_state.active is not None:
-                cancel_boost = bool(boost_state.active)
-            else:
-                state = self.accumulator_state()
+            state = self.accumulator_state()
+            legacy_active: bool | None = None
+            mode_value: str | None = None
+            if state is not None:
                 boost_flag = getattr(state, "boost_active", None)
                 if isinstance(boost_flag, bool):
-                    cancel_boost = boost_flag
-                elif state is not None:
+                    legacy_active = boost_flag
+                else:
                     legacy_flag = getattr(state, "boost", None)
                     if isinstance(legacy_flag, bool):
-                        cancel_boost = legacy_flag
-                    else:
-                        mode_value = getattr(state, "mode", None)
-                        if isinstance(mode_value, str):
-                            cancel_boost = mode_value.strip().lower() == "boost"
+                        legacy_active = legacy_flag
+                mode_value = getattr(state, "mode", None)
+                if not isinstance(mode_value, str):
+                    mode_value = None
+            boost_context = BoostContext(
+                active=boost_state.active if boost_state is not None else None,
+                legacy_active=legacy_active,
+                mode=mode_value,
+            )
 
-            client_dh = cast(DucaheatRESTClient, client)
-            await client_dh.set_node_settings(
+        if backend is not None:
+            await backend.set_node_settings(
                 self._dev_id,
                 (self._node_type, self._addr),
                 mode=mode,
@@ -1485,7 +1487,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
                 prog=prog,
                 ptemp=ptemp,
                 units=units,
-                cancel_boost=cancel_boost,
+                boost_context=boost_context,
             )
             return
 

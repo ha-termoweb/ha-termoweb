@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from custom_components.termoweb.backend.base import Backend
+from custom_components.termoweb.backend.base import Backend, BoostContext
 from custom_components.termoweb.inventory import NodeDescriptor
 
 
@@ -89,6 +89,38 @@ class ExampleBackend(Backend):
         return {}
 
 
+class SettingsClient:
+    """Client stub that records set_node_settings calls."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def set_node_settings(
+        self,
+        dev_id: str,
+        node: NodeDescriptor,
+        *,
+        mode: str | None = None,
+        stemp: float | None = None,
+        prog: list[int] | None = None,
+        ptemp: list[float] | None = None,
+        units: str = "C",
+    ) -> None:
+        """Record the payload sent to the client."""
+
+        self.calls.append(
+            {
+                "dev_id": dev_id,
+                "node": node,
+                "mode": mode,
+                "stemp": stemp,
+                "prog": prog,
+                "ptemp": ptemp,
+                "units": units,
+            }
+        )
+
+
 @pytest.mark.asyncio
 async def test_backend_properties_and_ws_creation() -> None:
     """The backend stores metadata and returns the websocket stub."""
@@ -126,3 +158,34 @@ async def test_backend_properties_and_ws_creation() -> None:
 
     await ws_client.stop()
     assert ws_client.stopped is True
+
+
+@pytest.mark.asyncio
+async def test_backend_set_node_settings_passes_through() -> None:
+    """The base backend delegates settings writes to the client."""
+
+    client = SettingsClient()
+    backend = ExampleBackend(brand="termoweb", client=client)
+
+    await backend.set_node_settings(
+        "dev-1",
+        ("htr", "4"),
+        mode="auto",
+        stemp=21.5,
+        prog=[0] * 168,
+        ptemp=[17.0, 19.0, 21.0],
+        units="F",
+        boost_context=BoostContext(active=True),
+    )
+
+    assert client.calls == [
+        {
+            "dev_id": "dev-1",
+            "node": ("htr", "4"),
+            "mode": "auto",
+            "stemp": 21.5,
+            "prog": [0] * 168,
+            "ptemp": [17.0, 19.0, 21.0],
+            "units": "F",
+        }
+    ]

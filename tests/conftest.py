@@ -67,7 +67,10 @@ def build_entry_runtime(
 
     if backend is None:
         backend = SimpleNamespace(
-            client=client, brand=brand, create_ws_client=MagicMock()
+            client=client,
+            brand=brand,
+            create_ws_client=MagicMock(),
+            set_node_settings=AsyncMock(),
         )
 
     if hourly_poller is None:
@@ -140,6 +143,12 @@ def _auto_runtime_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
 
     from custom_components.termoweb import runtime as runtime_module
     from custom_components.termoweb.const import DOMAIN
+    from custom_components.termoweb import binary_sensor as binary_sensor_module
+    from custom_components.termoweb import button as button_module
+    from custom_components.termoweb import climate as climate_module
+    from custom_components.termoweb import number as number_module
+    from custom_components.termoweb import heater as heater_module
+    from custom_components.termoweb import sensor as sensor_module
 
     original = runtime_module.require_runtime
 
@@ -166,6 +175,15 @@ def _auto_runtime_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
             raise
 
     monkeypatch.setattr(runtime_module, "require_runtime", _patched_require_runtime)
+    for module in (
+        binary_sensor_module,
+        button_module,
+        climate_module,
+        heater_module,
+        number_module,
+        sensor_module,
+    ):
+        monkeypatch.setattr(module, "require_runtime", _patched_require_runtime)
 
 
 def _coerce_inventory(inventory: Any) -> tuple["Inventory" | None, list[Any]]:

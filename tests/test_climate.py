@@ -21,7 +21,6 @@ _install_stubs()
 
 from custom_components.termoweb import climate as climate_module
 from custom_components.termoweb.heater import DEFAULT_BOOST_DURATION
-from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
 from custom_components.termoweb.const import (
     BRAND_DUCAHEAT,
     BRAND_TERMOWEB,
@@ -309,23 +308,9 @@ def test_async_setup_entry_creates_entities(
         entity_platform_module._set_current_platform(platform)
 
         entry = types.SimpleNamespace(entry_id=entry_id)
-        calls: list[Mapping[str, Any] | None] = []
-
-        original_resolver = Inventory.require_from_context
-
-        def _record_inventory(*args: Any, **kwargs: Any) -> Inventory:
-            calls.append(kwargs.get("container"))
-            return original_resolver(*args, **kwargs)
-
-        monkeypatch.setattr(
-            inventory_module.Inventory,
-            "require_from_context",
-            staticmethod(_record_inventory),
-        )
         await async_setup_entry(hass, entry, _async_add_entities)
 
         assert len(added) == 3
-        assert calls and calls[0] is hass.data[DOMAIN][entry_id]
         entities_by_addr = {entity._addr: entity for entity in added}
         assert set(entities_by_addr) == {"A1", "B2", "C3"}
         assert isinstance(entities_by_addr["A1"], HeaterClimateEntity)
@@ -685,7 +670,6 @@ def test_async_setup_entry_creates_accumulator_entity(
         )
 
         client = AsyncMock()
-        client.set_node_settings = AsyncMock()
 
         hass.data = {
             DOMAIN: {
@@ -709,6 +693,9 @@ def test_async_setup_entry_creates_accumulator_entity(
 
         entry = types.SimpleNamespace(entry_id=entry_id)
         await async_setup_entry(hass, entry, _async_add_entities)
+        runtime = climate_module.require_runtime(hass, entry_id)
+        backend = runtime.backend
+        backend.set_node_settings.reset_mock()
 
         assert len(added) == 1
         acc = added[0]
@@ -727,26 +714,26 @@ def test_async_setup_entry_creates_accumulator_entity(
 
         prog = [0, 1, 2] * 56
         await acc.async_set_schedule(list(prog))
-        call = client.set_node_settings.await_args
+        call = backend.set_node_settings.await_args
         assert call.args == (dev_id, ("acm", "7"))
         assert call.kwargs["prog"] == list(prog)
         assert call.kwargs["units"] == "C"
-        client.set_node_settings.reset_mock()
+        backend.set_node_settings.reset_mock()
 
         hass.data[DOMAIN][entry_id]["brand"] = BRAND_TERMOWEB
 
         await acc.async_set_schedule(list(prog))
-        call = client.set_node_settings.await_args
+        call = backend.set_node_settings.await_args
         assert call.args == (dev_id, ("acm", "7"))
         assert call.kwargs["prog"] == list(prog)
         assert call.kwargs["units"] == "C"
-        client.set_node_settings.reset_mock()
+        backend.set_node_settings.reset_mock()
 
         await acc.async_set_preset_temperatures(ptemp=[18.5, 19.5, 20.5])
-        call = client.set_node_settings.await_args
+        call = backend.set_node_settings.await_args
         assert call.kwargs["ptemp"] == [18.5, 19.5, 20.5]
         assert call.kwargs["units"] == "C"
-        assert client.set_node_settings.await_count == 1
+        assert backend.set_node_settings.await_count == 1
 
     asyncio.run(_run())
 
@@ -1341,7 +1328,7 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
 
 
 def test_accumulator_submit_settings_brand_switch() -> None:
-    """Verify accumulator writes use Ducaheat client when the brand matches."""
+    """Verify accumulator writes route through the backend helper."""
 
     async def _run() -> None:
         _reset_environment()
@@ -1358,12 +1345,14 @@ def test_accumulator_submit_settings_brand_switch() -> None:
                 "htr": {"settings": {}},
             },
         )
+        backend = AsyncMock()
         hass.data = {
             DOMAIN: {
                 entry_id: {
                     "coordinator": coordinator,
                     "dev_id": dev_id,
                     "client": AsyncMock(),
+                    "backend": backend,
                     "brand": BRAND_DUCAHEAT,
                 }
             }
@@ -1379,32 +1368,29 @@ def test_accumulator_submit_settings_brand_switch() -> None:
         )
         entity.hass = hass
 
-        ducaheat_client = AsyncMock(spec=DucaheatRESTClient)
         await entity._async_submit_settings(
-            ducaheat_client,
+            AsyncMock(),
             mode="auto",
             stemp=21.0,
             prog=None,
             ptemp=None,
             units="C",
         )
-        call = ducaheat_client.set_node_settings.await_args
+        call = backend.set_node_settings.await_args
         assert call.args == (dev_id, ("acm", addr))
         assert call.kwargs["mode"] == "auto"
 
         hass.data[DOMAIN][entry_id]["brand"] = BRAND_TERMOWEB
 
-        generic_client = AsyncMock()
-        generic_client.set_node_settings = AsyncMock()
         await entity._async_submit_settings(
-            generic_client,
+            AsyncMock(),
             mode="manual",
             stemp=19.0,
             prog=[0] * 168,
             ptemp=[18.0, 19.0, 20.0],
             units="C",
         )
-        call = generic_client.set_node_settings.await_args
+        call = backend.set_node_settings.await_args
         assert call.args == (dev_id, ("acm", addr))
         assert call.kwargs["ptemp"] == [18.0, 19.0, 20.0]
 
@@ -1445,12 +1431,14 @@ def test_accumulator_submit_settings_handles_boost_state_error() -> None:
         )
         entity.hass = hass
 
+        backend = AsyncMock()
         hass.data = {
             DOMAIN: {
                 entry_id: {
                     "coordinator": coordinator,
                     "dev_id": dev_id,
                     "client": AsyncMock(),
+                    "backend": backend,
                     "brand": BRAND_DUCAHEAT,
                 }
             }
@@ -1465,9 +1453,8 @@ def test_accumulator_submit_settings_handles_boost_state_error() -> None:
 
         entity.boost_state = MagicMock(side_effect=_boom)  # type: ignore[assignment]
 
-        client = types.SimpleNamespace(set_node_settings=AsyncMock())
         await entity._async_submit_settings(
-            client,
+            AsyncMock(),
             mode="auto",
             stemp=None,
             prog=None,
@@ -1475,8 +1462,10 @@ def test_accumulator_submit_settings_handles_boost_state_error() -> None:
             units="C",
         )
 
-        call = client.set_node_settings.await_args
-        assert call.kwargs["cancel_boost"] is True
+        call = backend.set_node_settings.await_args
+        boost_context = call.kwargs["boost_context"]
+        assert boost_context.active is None
+        assert boost_context.legacy_active is True
 
     asyncio.run(_run())
 
@@ -1510,12 +1499,14 @@ def test_accumulator_submit_settings_legacy_mode_detection() -> None:
         )
         entity.hass = hass
 
+        backend = AsyncMock()
         hass.data = {
             DOMAIN: {
                 entry_id: {
                     "coordinator": coordinator,
                     "dev_id": dev_id,
                     "client": AsyncMock(),
+                    "backend": backend,
                     "brand": BRAND_DUCAHEAT,
                 }
             }
@@ -1528,9 +1519,8 @@ def test_accumulator_submit_settings_legacy_mode_detection() -> None:
             )
         )
 
-        client = types.SimpleNamespace(set_node_settings=AsyncMock())
         await entity._async_submit_settings(
-            client,
+            AsyncMock(),
             mode="auto",
             stemp=None,
             prog=None,
@@ -1538,8 +1528,11 @@ def test_accumulator_submit_settings_legacy_mode_detection() -> None:
             units="C",
         )
 
-        call = client.set_node_settings.await_args
-        assert call.kwargs["cancel_boost"] is True
+        call = backend.set_node_settings.await_args
+        boost_context = call.kwargs["boost_context"]
+        assert boost_context.active is None
+        assert boost_context.legacy_active is None
+        assert boost_context.mode == " Boost "
 
     asyncio.run(_run())
 
@@ -1573,12 +1566,14 @@ def test_accumulator_submit_settings_legacy_boost_flag() -> None:
         )
         entity.hass = hass
 
+        backend = AsyncMock()
         hass.data = {
             DOMAIN: {
                 entry_id: {
                     "coordinator": coordinator,
                     "dev_id": dev_id,
                     "client": AsyncMock(),
+                    "backend": backend,
                     "brand": BRAND_DUCAHEAT,
                 }
             }
@@ -1591,9 +1586,8 @@ def test_accumulator_submit_settings_legacy_boost_flag() -> None:
             )
         )
 
-        client = types.SimpleNamespace(set_node_settings=AsyncMock())
         await entity._async_submit_settings(
-            client,
+            AsyncMock(),
             mode="auto",
             stemp=None,
             prog=None,
@@ -1601,8 +1595,11 @@ def test_accumulator_submit_settings_legacy_boost_flag() -> None:
             units="C",
         )
 
-        call = client.set_node_settings.await_args
-        assert call.kwargs["cancel_boost"] is True
+        call = backend.set_node_settings.await_args
+        boost_context = call.kwargs["boost_context"]
+        assert boost_context.active is None
+        assert boost_context.legacy_active is True
+        assert boost_context.mode == "auto"
 
     asyncio.run(_run())
 
@@ -1696,7 +1693,7 @@ def test_commit_write_runs_optimistic_and_fallback() -> None:
 
 
 def test_async_setup_entry_without_inventory_skips_entities(
-    monkeypatch: pytest.MonkeyPatch,
+    runtime_factory: Callable[..., Any],
 ) -> None:
     async def _run() -> None:
         _reset_environment()
@@ -1717,46 +1714,32 @@ def test_async_setup_entry_without_inventory_skips_entities(
             client=AsyncMock(),
         )
 
-        record: dict[str, Any] = {
-            "coordinator": coordinator,
-            "dev_id": dev_id,
-            "client": AsyncMock(),
-            "nodes": nodes,
-        }
-        hass.data = {DOMAIN: {entry.entry_id: record}}
+        runtime = runtime_factory(
+            hass=hass,
+            entry_id=entry.entry_id,
+            dev_id=dev_id,
+            coordinator=coordinator,
+            client=AsyncMock(),
+        )
+        runtime.inventory = "invalid"
 
         added: list[HeaterClimateEntity] = []
 
         def _async_add_entities(entities: list[HeaterClimateEntity]) -> None:
             added.extend(entities)
 
-        calls: list[Mapping[str, Any] | None] = []
-
-        def _missing_inventory(*args: Any, **kwargs: Any) -> Inventory:
-            calls.append(kwargs.get("container"))
-            raise LookupError("missing inventory")
-
-        monkeypatch.setattr(
-            inventory_module.Inventory,
-            "require_from_context",
-            staticmethod(_missing_inventory),
-        )
-
-        with pytest.raises(ValueError):
+        with pytest.raises(TypeError):
             await async_setup_entry(hass, entry, _async_add_entities)
 
         assert added == []
-        record_after = hass.data[DOMAIN][entry.entry_id]
-        assert "inventory" not in record_after
-        assert "node_inventory" not in record_after
-        assert calls and calls[0] is record
+        runtime_after = hass.data[DOMAIN][entry.entry_id]
+        assert runtime_after.inventory == "invalid"
 
     asyncio.run(_run())
 
 
 def test_async_setup_entry_reuses_coordinator_inventory(
     climate_inventory: Callable[[str, Mapping[str, Any]], Inventory],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def _run() -> None:
         _reset_environment()
@@ -1788,24 +1771,10 @@ def test_async_setup_entry_reuses_coordinator_inventory(
         def _async_add_entities(entities: list[HeaterClimateEntity]) -> None:
             added.extend(entities)
 
-        calls: list[Mapping[str, Any] | None] = []
-
-        original_resolver = Inventory.require_from_context
-
-        def _reuse_inventory(*args: Any, **kwargs: Any) -> Inventory:
-            calls.append(kwargs.get("container"))
-            return original_resolver(*args, **kwargs)
-
-        monkeypatch.setattr(
-            inventory_module.Inventory,
-            "require_from_context",
-            staticmethod(_reuse_inventory),
-        )
         await async_setup_entry(hass, entry, _async_add_entities)
 
         assert len(added) == 1
         assert hass.data[DOMAIN][entry.entry_id]["inventory"] is inventory
-        assert calls and calls[0] is record
 
     asyncio.run(_run())
 
@@ -2069,12 +2038,12 @@ def test_heater_write_paths_and_errors(
         }
 
         coordinator = _make_coordinator(
-                hass,
-                dev_id,
-                coordinator_data[dev_id],
-                client=AsyncMock(),
-                inventory=inventory,
-            )
+            hass,
+            dev_id,
+            coordinator_data[dev_id],
+            client=AsyncMock(),
+            inventory=inventory,
+        )
         client = AsyncMock()
         hass.data = {
             DOMAIN: {

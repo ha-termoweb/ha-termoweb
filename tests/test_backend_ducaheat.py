@@ -9,6 +9,7 @@ import pytest
 from aiohttp import ClientResponseError
 
 from custom_components.termoweb.api import RESTClient
+from custom_components.termoweb.backend.base import BoostContext
 from custom_components.termoweb.backend.ducaheat import (
     DucaheatBackend,
     DucaheatRESTClient,
@@ -50,6 +51,7 @@ class DummyClient:
         prog: list[int] | None = None,
         ptemp: list[float] | None = None,
         units: str = "C",
+        cancel_boost: bool = False,
     ) -> dict[str, object]:
         return {}
 
@@ -94,6 +96,77 @@ async def test_ducaheat_backend_creates_ws_client() -> None:
     assert ws_client.entry_id == "entry"
     assert ws_client._namespace == WS_NAMESPACE
     assert getattr(ws_client, "_inventory", None) is inventory
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("context", "expected_cancel"),
+    [
+        (BoostContext(active=True), True),
+        (BoostContext(active=False), False),
+        (BoostContext(active=None, legacy_active=True), True),
+        (BoostContext(active=None, legacy_active=False), False),
+        (BoostContext(active=None, legacy_active=None, mode="boost"), True),
+        (BoostContext(active=None, legacy_active=None, mode="auto"), False),
+        (None, False),
+    ],
+)
+async def test_ducaheat_backend_cancel_boost_heuristic(
+    context: BoostContext | None,
+    expected_cancel: bool,
+) -> None:
+    """Ensure Ducaheat backend maps boost hints into cancel_boost flags."""
+
+    client = AsyncMock()
+    backend = DucaheatBackend(brand="ducaheat", client=client)
+
+    await backend.set_node_settings(
+        "dev-2",
+        ("acm", "9"),
+        mode="auto",
+        stemp=20.0,
+        units="C",
+        boost_context=context,
+    )
+
+    client.set_node_settings.assert_awaited_once_with(
+        "dev-2",
+        ("acm", "9"),
+        mode="auto",
+        stemp=20.0,
+        prog=None,
+        ptemp=None,
+        units="C",
+        cancel_boost=expected_cancel,
+    )
+
+
+@pytest.mark.asyncio
+async def test_ducaheat_backend_skips_cancel_boost_for_non_acm() -> None:
+    """Ensure non-accumulator writes never request boost cancellation."""
+
+    client = AsyncMock()
+    backend = DucaheatBackend(brand="ducaheat", client=client)
+
+    await backend.set_node_settings(
+        "dev-3",
+        ("htr", "1"),
+        mode="auto",
+        stemp=19.0,
+        units="F",
+        boost_context=BoostContext(active=True),
+    )
+
+    client.set_node_settings.assert_awaited_once_with(
+        "dev-3",
+        ("htr", "1"),
+        mode="auto",
+        stemp=19.0,
+        prog=None,
+        ptemp=None,
+        units="F",
+        cancel_boost=False,
+    )
 
 
 def test_dummy_client_get_node_settings_accepts_acm() -> None:
