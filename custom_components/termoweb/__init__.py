@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
-from collections.abc import Awaitable, Callable, Iterable, Mapping, MutableMapping
+from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from datetime import timedelta
 from importlib import import_module
 import inspect
@@ -17,7 +17,7 @@ from aiohttp import ClientError
 from homeassistant import loader as ha_loader
 from homeassistant.config_entries import ConfigEntry, SupportsDiagnostics
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -41,10 +41,6 @@ from .const import (
     uses_ducaheat_backend,
 )
 from .coordinator import EnergyStateCoordinator, StateCoordinator, build_device_metadata
-from .energy import (
-    async_import_energy_history as _async_import_energy_history_impl,
-    async_register_import_energy_history_service,
-)
 from .hourly_poller import HourlySamplesPoller
 from .inventory import (
     Inventory,
@@ -53,7 +49,12 @@ from .inventory import (
     normalize_node_type,
 )
 from .runtime import EntryRuntime
-from .throttle import default_samples_rate_limit_state, reset_samples_rate_limit_state
+from .services.energy_history import (
+    async_import_energy_history_with_rate_limit,
+    async_register_import_energy_history_service,
+)
+from .services.ws_debug_probe import async_register_ws_debug_probe_service
+from .throttle import reset_samples_rate_limit_state
 from .utils import async_get_integration_version as _async_get_integration_version
 
 _LOGGER = logging.getLogger(__name__)
@@ -353,42 +354,6 @@ async def async_list_devices(client: RESTClient) -> Any:
     except (TimeoutError, ClientError, BackendRateLimitError) as err:
         _LOGGER.info("list_devices connection error: %s", err)
         raise
-
-
-async def _async_import_energy_history(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    *,
-    nodes: Inventory | None = None,
-    node_types: Iterable[str] | None = None,
-    addresses: Iterable[str] | None = None,
-    day_chunk_hours: int = 24,
-    reset_progress: bool = False,
-    max_days: int | None = None,
-) -> None:
-    """Delegate to the energy helper with shared rate limiting and filters."""
-
-    rate_state = default_samples_rate_limit_state()
-    kwargs: dict[str, Any] = {
-        "reset_progress": reset_progress,
-        "max_days": max_days,
-        "rate_limit": rate_state,
-    }
-
-    if nodes is not None:
-        kwargs["nodes"] = nodes
-    if node_types is not None:
-        kwargs["node_types"] = tuple(node_types)
-    if addresses is not None:
-        kwargs["addresses"] = tuple(addresses)
-    if day_chunk_hours != 24:
-        kwargs["day_chunk_hours"] = day_chunk_hours
-
-    await _async_import_energy_history_impl(
-        hass,
-        entry,
-        **kwargs,
-    )
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  # noqa: C901
@@ -716,125 +681,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
 
     await async_register_import_energy_history_service(
         hass,
-        _async_import_energy_history,
+        async_import_energy_history_with_rate_limit,
     )
 
     await async_register_ws_debug_probe_service(hass)
 
     _LOGGER.info("TermoWeb setup complete (v%s)", version)
     return True
-
-
-async def async_register_ws_debug_probe_service(hass: HomeAssistant) -> None:
-    """Register the ws_debug_probe debug helper service."""
-
-    if hass.services.has_service(DOMAIN, "ws_debug_probe"):
-        return
-
-    async def _async_ws_debug_probe(call: ServiceCall) -> None:
-        """Emit a websocket dev_data probe for debugging."""
-
-        entry_filter = call.data.get("entry_id")
-        dev_filter = call.data.get("dev_id")
-        domain_records = hass.data.get(DOMAIN, {})
-        if not isinstance(domain_records, Mapping):
-            _LOGGER.debug("ws_debug_probe: integration data unavailable")
-            return
-
-        entries: list[tuple[str, EntryRuntime]] = []
-        if entry_filter:
-            record = domain_records.get(entry_filter)
-            if isinstance(record, EntryRuntime):
-                entries.append((entry_filter, record))
-        else:
-            entries = [
-                (entry_id, rec)
-                for entry_id, rec in domain_records.items()
-                if isinstance(rec, EntryRuntime)
-            ]
-
-        if not entries:
-            _LOGGER.debug("ws_debug_probe: no matching config entries")
-            return
-
-        tasks: list[Awaitable[Any]] = []
-        for entry_id, runtime in entries:
-            if not runtime.debug:
-                _LOGGER.debug(
-                    "ws_debug_probe: debug helpers disabled for entry %s",
-                    entry_id,
-                )
-                continue
-            clients = runtime.ws_clients
-            if not clients:
-                _LOGGER.debug(
-                    "ws_debug_probe: no websocket clients for entry %s",
-                    entry_id,
-                )
-                continue
-            if dev_filter:
-                target_dev_ids: Iterable[str] = [str(dev_filter)]
-            else:
-                target_dev_ids = [str(dev) for dev in clients]
-            for dev_id in target_dev_ids:
-                client = clients.get(dev_id)
-                if client is None:
-                    _LOGGER.debug(
-                        "ws_debug_probe: websocket client missing for %s/%s",
-                        entry_id,
-                        dev_id,
-                    )
-                    continue
-                probe = getattr(client, "debug_probe", None)
-                if probe is None:
-                    _LOGGER.debug(
-                        "ws_debug_probe: client %s/%s has no debug_probe",
-                        entry_id,
-                        dev_id,
-                    )
-                    continue
-                inventory_obj = runtime.inventory
-                if not isinstance(inventory_obj, Inventory):
-                    inventory_obj = None
-                try:
-                    result = probe(inventory_obj)
-                except TypeError as err:
-                    try:
-                        result = probe()
-                    except TypeError:
-                        _LOGGER.debug(
-                            "ws_debug_probe: client %s/%s probe invocation failed: %s",
-                            entry_id,
-                            dev_id,
-                            err,
-                        )
-                        continue
-                if asyncio.iscoroutine(result):
-                    tasks.append(result)
-                else:
-                    _LOGGER.debug(
-                        "ws_debug_probe: client %s/%s returned non-awaitable probe",
-                        entry_id,
-                        dev_id,
-                    )
-
-        if not tasks:
-            _LOGGER.debug("ws_debug_probe: no matching websocket clients to probe")
-            return
-
-        _LOGGER.debug("ws_debug_probe: awaiting %d websocket probe(s)", len(tasks))
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for res in results:
-            if isinstance(res, asyncio.CancelledError):
-                raise res
-            if isinstance(res, Exception):
-                _LOGGER.debug("ws_debug_probe: probe raised %s", res)
-
-    hass.services.async_register(
-        DOMAIN,
-        "ws_debug_probe",
-        _async_ws_debug_probe,
-    )
 
 
 async def _async_shutdown_entry(runtime: EntryRuntime) -> None:
