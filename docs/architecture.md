@@ -11,6 +11,9 @@ any legacy or transitional paths that conflict with it.
   fallback imports for older versions.
 - **Docs-first contract.** Documentation describes the final architecture; code
   changes must move the runtime toward this end state.
+- **Vendor payloads are fixed.** Vendor REST/WS schemas are stable external
+  contracts. Wire models keep vendor field names intact; normalization happens
+  after decoding into domain state.
 - **Inventory is immutable.** A single inventory snapshot is captured during
   setup and never rebuilt or cached again elsewhere.
 - **One canonical state pipeline.** Device updates flow through a single path:
@@ -55,7 +58,8 @@ This map defines responsibilities for each module family in the final design.
 - `inventory.py` — immutable inventory models and lookup helpers.
 - `domain/` — domain dataclasses, deltas, `DomainStateStore`, and
   `DomainStateView`.
-- `backend/` — vendor-specific REST/WS clients and brand selection.
+- `backend/` — vendor-specific REST/WS clients (including the REST client
+  implementation), protocol details, and brand selection.
 - `codecs/` — Pydantic payload models and conversion to/from domain types.
 - `planner/` — vendor-specific write orchestration and validation rules.
 - `entities/` — vendor-agnostic entity implementations (climate, sensor,
