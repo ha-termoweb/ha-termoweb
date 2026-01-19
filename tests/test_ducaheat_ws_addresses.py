@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any, Iterable, Mapping, MutableMapping
+from typing import Any, Mapping, MutableMapping
 from unittest.mock import MagicMock
 
 from homeassistant.core import HomeAssistant
 
 from conftest import build_entry_runtime
 from custom_components.termoweb.backend.ducaheat_ws import DucaheatWSClient
-from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
 
 
@@ -34,7 +33,7 @@ class DummyCoordinator:
         self.update_nodes = MagicMock()
 
 
-def _make_client() -> DucaheatWSClient:
+def _make_client(*, inventory: Inventory | None = None) -> DucaheatWSClient:
     """Instantiate a websocket client with stub dependencies."""
 
     hass = HomeAssistant()
@@ -44,6 +43,7 @@ def _make_client() -> DucaheatWSClient:
         entry_id="entry",
         dev_id="device",
         coordinator=coordinator,
+        inventory=inventory,
     )
     client = DucaheatWSClient(
         hass,
@@ -68,55 +68,16 @@ def _build_inventory_payload() -> dict[str, Any]:
     }
 
 
-def test_apply_heater_addresses_updates_state() -> None:
-    """Heater address normalisation should update entry and coordinator state."""
-
-    client = _make_client()
-    hass = client.hass
-    energy_coordinator = SimpleNamespace(update_addresses=MagicMock())
-    runtime = hass.data[DOMAIN]["entry"]
-    runtime.energy_coordinator = energy_coordinator
-
-    raw_nodes = {
-        "nodes": [
-            {"type": "htr", "addr": "1"},
-            {"type": "acm", "addr": "2"},
-            {"type": "pmo", "addr": "A1"},
-        ]
-    }
-    inventory = Inventory("device", build_node_inventory(raw_nodes))
-
-    normalized_map: Mapping[Any, Iterable[Any]] = {
-        "htr": [" 1 ", "01"],
-        "heater": ["003"],
-        "acm": ("2", "02", "2"),
-        "pmo": ["A1", "a1", "B2"],
-        "thm": ["9"],
-    }
-
-    client._apply_heater_addresses(normalized_map, inventory=inventory)
-
-    assert runtime.inventory is inventory
-    assert client._inventory is inventory
-    energy_coordinator.update_addresses.assert_called_once_with(inventory)
-
-    assert not hasattr(runtime, "sample_aliases")
-
-
 def test_dispatch_nodes_includes_inventory_metadata() -> None:
     """Inventory metadata should populate dispatch payloads."""
-
-    client = _make_client()
-    client._dispatcher = MagicMock()
 
     inventory_payload = _build_inventory_payload()
     inventory = Inventory(
         "device",
         build_node_inventory(inventory_payload),
     )
-
-    runtime = client.hass.data[DOMAIN][client.entry_id]
-    runtime.inventory = inventory
+    client = _make_client(inventory=inventory)
+    client._dispatcher = MagicMock()
     client._inventory = inventory
 
     client._dispatch_nodes({"htr": {"settings": {"1": {"target_temp": 21}}}})
@@ -124,4 +85,3 @@ def test_dispatch_nodes_includes_inventory_metadata() -> None:
     assert client._dispatcher.call_count == 1
     dispatched = client._dispatcher.call_args[0][2]
     assert dispatched["inventory"] is inventory
-    assert not hasattr(runtime, "sample_aliases")

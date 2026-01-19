@@ -196,7 +196,6 @@ class WebSocketClient(_WSCommon):
         state = self._ws_state_bucket()
         state.setdefault("last_payload_at", None)
         state.setdefault("idle_restart_pending", False)
-        self._bind_inventory_from_context()
 
     def _reset_handshake_cache(self, *, clear_state: bool = False) -> None:
         """Clear cached handshake metadata to avoid retaining payloads."""
@@ -723,13 +722,13 @@ class WebSocketClient(_WSCommon):
 
     def _apply_nodes_payload(self, payload: Any, *, merge: bool, event: str) -> None:
         """Update cached nodes from the websocket payload and notify listeners."""
-        inventory = self._bind_inventory_from_context()
-        if isinstance(inventory, Inventory):
-            self._inventory = inventory
-        else:
-            inventory = (
-                self._inventory if isinstance(self._inventory, Inventory) else None
+        inventory = self._inventory if isinstance(self._inventory, Inventory) else None
+        if not isinstance(inventory, Inventory):
+            _LOGGER.error(
+                "WS: missing inventory for node payload on %s",
+                self.dev_id,
             )
+            return
 
         deltas: list[NodeSettingsDelta] = []
 
@@ -1007,9 +1006,6 @@ class WebSocketClient(_WSCommon):
             raw_nodes = payload
 
         context = _prepare_nodes_dispatch(
-            self.hass,
-            entry_id=self.entry_id,
-            coordinator=self._coordinator,
             raw_nodes=raw_nodes,
             inventory=self._inventory,
         )
@@ -1021,13 +1017,6 @@ class WebSocketClient(_WSCommon):
         if not isinstance(inventory, Inventory):
             _LOGGER.error("WS: missing inventory for node dispatch on %s", self.dev_id)
             return
-
-        self._apply_heater_addresses(
-            raw_nodes,
-            inventory=inventory,
-            log_prefix="WS",
-            logger=_LOGGER,
-        )
 
         payload_copy: dict[str, Any] = {
             "dev_id": self.dev_id,
@@ -1058,12 +1047,6 @@ class WebSocketClient(_WSCommon):
         """Return ordered ``(node_type, addr)`` heater sample subscriptions."""
 
         inventory = self._inventory if isinstance(self._inventory, Inventory) else None
-        if inventory is None:
-            coordinator_inventory = getattr(self._coordinator, "inventory", None)
-            if isinstance(coordinator_inventory, Inventory):
-                inventory = coordinator_inventory
-                self._inventory = coordinator_inventory
-
         if inventory is None:
             _LOGGER.error(
                 "WS: missing inventory for heater sample subscriptions (entry=%s dev_id=%s)",

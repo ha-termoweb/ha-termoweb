@@ -57,7 +57,6 @@ from custom_components.termoweb.inventory import (
     normalize_node_addr,
     normalize_node_type,
 )
-from custom_components.termoweb.runtime import require_runtime
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -221,7 +220,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         finally:
             self._suppress_default_cadence_hint = False
         self._pending_default_cadence_hint = True
-        self._bind_inventory_from_context()
         state = self._ws_state_bucket()
         state.setdefault("subscribe_attempts_total", 0)
         state.setdefault("subscribe_success_total", 0)
@@ -1032,7 +1030,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                 inventory = (
                                     self._inventory
                                     if isinstance(self._inventory, Inventory)
-                                    else self._bind_inventory_from_context()
+                                    else None
                                 )
                                 dispatch_payload: Mapping[str, typing.Any] | None
                                 if isinstance(normalised, Mapping):
@@ -1074,7 +1072,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                     inventory = (
                                         self._inventory
                                         if isinstance(self._inventory, Inventory)
-                                        else self._bind_inventory_from_context()
+                                        else None
                                     )
                                     deltas = self._nodes_to_deltas(
                                         normalised_update,
@@ -1465,9 +1463,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             cadence_source = raw_nodes
 
         context = _prepare_nodes_dispatch(
-            self.hass,
-            entry_id=self.entry_id,
-            coordinator=self._coordinator,
             raw_nodes=raw_nodes,
             inventory=self._inventory,
         )
@@ -1483,13 +1478,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 "WS (ducaheat): missing inventory for node dispatch on %s", self.dev_id
             )
             return
-
-        self._apply_heater_addresses(
-            raw_nodes,
-            inventory=inventory,
-            log_prefix="WS (ducaheat)",
-            logger=_LOGGER,
-        )
 
         payload_copy: dict[str, Any] = {
             "dev_id": self.dev_id,
@@ -1719,65 +1707,19 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         attempt_ts = now if isinstance(now, (int, float)) else time.time()
         self._last_subscribe_attempt_ts = attempt_ts
         self._increment_state_counter("subscribe_attempts_total")
+        inventory_container = (
+            self._inventory if isinstance(self._inventory, Inventory) else None
+        )
+        if not isinstance(inventory_container, Inventory):
+            self._pending_subscribe = False
+            self._subscription_paths = set()
+            self._increment_state_counter("subscribe_fail_total")
+            _LOGGER.error(
+                "WS (ducaheat): missing inventory for subscription on %s",
+                self.dev_id,
+            )
+            raise TypeError("TermoWeb inventory unavailable for subscription")
         try:
-            try:
-                runtime = require_runtime(self.hass, self.entry_id)
-            except LookupError:
-                runtime = None
-
-            inventory_container = (
-                self._inventory
-                if isinstance(self._inventory, Inventory)
-                else (
-                    runtime.inventory
-                    if runtime is not None and isinstance(runtime.inventory, Inventory)
-                    else None
-                )
-            )
-            if inventory_container is None:
-                coordinator = self._coordinator
-                coordinator_inventory = getattr(coordinator, "_inventory", None)
-                if isinstance(coordinator_inventory, Inventory):
-                    inventory_container = coordinator_inventory
-                elif runtime is not None:
-                    runtime_inventory = getattr(runtime.coordinator, "_inventory", None)
-                    if isinstance(runtime_inventory, Inventory):
-                        inventory_container = runtime_inventory
-            if inventory_container is not None:
-                if runtime is not None:
-                    runtime.inventory = inventory_container
-
-            if not isinstance(inventory_container, Inventory):
-                self._pending_subscribe = True
-                self._increment_state_counter("subscribe_fail_total")
-                should_log = (
-                    attempt_ts - self._last_subscribe_log_ts
-                    >= self._subscribe_backoff_s
-                )
-                if should_log:
-                    self._last_subscribe_log_ts = attempt_ts
-                    _LOGGER.info(
-                        "WS (ducaheat): inventory not ready for device %s; will retry",
-                        self.dev_id,
-                    )
-                return 0
-
-            self._inventory = inventory_container
-
-            energy_coordinator = (
-                runtime.energy_coordinator
-                if runtime is not None
-                else getattr(self, "_energy_coordinator", None)
-            )
-            if hasattr(energy_coordinator, "update_addresses"):
-                try:
-                    energy_coordinator.update_addresses(inventory_container)
-                except Exception:  # noqa: BLE001  # pragma: no cover - defensive logging
-                    _LOGGER.debug(
-                        "WS (ducaheat): failed to update coordinator addresses during subscribe",
-                        exc_info=True,
-                    )
-
             paths: set[str] = set()
             for node_type, addr in inventory_container.heater_sample_targets:
                 base_path = f"/{node_type}/{addr}"

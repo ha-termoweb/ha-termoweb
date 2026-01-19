@@ -199,6 +199,7 @@ def _make_client(
         ),
         coordinator=coordinator,
         session=session or SimpleNamespace(closed=True),
+        inventory=default_inventory,
     )
     return client, holder["client"], dispatcher
 
@@ -1021,17 +1022,9 @@ def test_dispatch_nodes_with_inventory(
     """dispatch_nodes should support pre-existing inventory records."""
 
     client, _sio, dispatcher = _make_client(monkeypatch)
-    runtime = importlib.import_module(
-        "custom_components.termoweb.runtime"
-    ).require_runtime(client.hass, "entry")
-    runtime.inventory = Inventory(client.dev_id, ())
-    energy = SimpleNamespace(
-        update_addresses=MagicMock(), handle_ws_samples=MagicMock()
-    )
-    runtime.energy_coordinator = energy
     client._coordinator.update_nodes = MagicMock()
     client._coordinator.data = {
-        "device": {"inventory": runtime.inventory, "settings": {}}
+        "device": {"inventory": client._inventory, "settings": {}}
     }
     nodes_payload = {"nodes": [{"type": "htr", "addr": "1"}]}
     client._inventory = Inventory(
@@ -1055,10 +1048,6 @@ def test_dispatch_nodes_handles_unknown_types(monkeypatch: pytest.MonkeyPatch) -
     """dispatch_nodes should ignore unsupported types when inventory filters them."""
 
     client, _sio, dispatcher = _make_client(monkeypatch)
-    runtime = importlib.import_module(
-        "custom_components.termoweb.runtime"
-    ).require_runtime(client.hass, "entry")
-    runtime.energy_coordinator = SimpleNamespace(update_addresses=MagicMock())
     client._coordinator.update_nodes = MagicMock()
 
     client._inventory = Inventory(
@@ -1078,10 +1067,6 @@ def test_dispatch_nodes_uses_inventory_payload(monkeypatch: pytest.MonkeyPatch) 
     """Inventory payload should backfill missing node payload data."""
 
     client, _sio, dispatcher = _make_client(monkeypatch)
-    runtime = importlib.import_module(
-        "custom_components.termoweb.runtime"
-    ).require_runtime(client.hass, "entry")
-    runtime.energy_coordinator = SimpleNamespace(update_addresses=MagicMock())
     client._coordinator.update_nodes = MagicMock()
     node_inventory = build_node_inventory([{"type": "htr", "addr": "2"}])
 
@@ -1116,94 +1101,6 @@ def test_dispatch_nodes_uses_inventory_payload(monkeypatch: pytest.MonkeyPatch) 
     dispatcher.assert_called_once()
 
 
-def test_apply_heater_addresses_normalises_from_inventory(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Applying heater addresses should mirror inventory-normalised addresses."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    client._coordinator.data = {"device": {"settings": {}}}
-    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}, {"type": "acm", "addr": "2"}]}
-    inventory = Inventory(
-        client.dev_id,
-        build_node_inventory(raw_nodes),
-    )
-    client._apply_heater_addresses({"htr": ["1"], "acm": ["2"]}, inventory=inventory)
-    assert client._coordinator.data == {"device": {"settings": {}}}
-    runtime = importlib.import_module(
-        "custom_components.termoweb.runtime"
-    ).require_runtime(client.hass, "entry")
-    assert not hasattr(runtime, "sample_aliases")
-
-
-def test_apply_heater_addresses_includes_power_monitors(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Power monitor addresses should flow to the energy coordinator."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    energy_coordinator = SimpleNamespace(update_addresses=MagicMock())
-    runtime = importlib.import_module(
-        "custom_components.termoweb.runtime"
-    ).require_runtime(client.hass, "entry")
-    runtime.energy_coordinator = energy_coordinator
-
-    nodes_payload = {
-        "nodes": [
-            {"type": "htr", "addr": "1"},
-            {"type": "pmo", "addr": "9"},
-        ]
-    }
-    inventory = Inventory(
-        client.dev_id,
-        build_node_inventory(nodes_payload),
-    )
-
-    client._apply_heater_addresses({"htr": ["1"]}, inventory=inventory)
-    energy_coordinator.update_addresses.assert_called_once_with(inventory)
-    assert runtime.inventory is inventory
-    assert not hasattr(runtime, "sample_aliases")
-
-
-def test_apply_heater_addresses_uses_runtime_inventory(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Runtime inventory should be reused when no inventory is provided."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    runtime = importlib.import_module(
-        "custom_components.termoweb.runtime"
-    ).require_runtime(client.hass, "entry")
-    runtime_inventory = runtime.inventory
-
-    client._apply_heater_addresses({"acm": []}, inventory=None)
-
-    assert runtime.inventory is runtime_inventory
-    assert client._coordinator.data == {}
-
-
-def test_apply_heater_addresses_updates_inventory(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Applying heater addresses should refresh stored inventory when present."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    runtime = importlib.import_module(
-        "custom_components.termoweb.runtime"
-    ).require_runtime(client.hass, "entry")
-    runtime.energy_coordinator = SimpleNamespace(update_addresses=MagicMock())
-    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
-    inventory = Inventory(
-        client.dev_id,
-        build_node_inventory(raw_nodes),
-    )
-    client._apply_heater_addresses(
-        {"htr": ["1"]},
-        inventory=inventory,
-    )
-    assert runtime.inventory is inventory
-
-
 def test_heater_sample_subscription_targets(monkeypatch: pytest.MonkeyPatch) -> None:
     """Subscription helper should return inventory-derived targets."""
 
@@ -1220,26 +1117,6 @@ def test_heater_sample_subscription_targets(monkeypatch: pytest.MonkeyPatch) -> 
     assert targets == inventory.heater_sample_targets
 
 
-def test_heater_sample_subscription_targets_use_coordinator_inventory(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Coordinator-provided inventory should seed subscription targets."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    raw_nodes = {"nodes": [{"type": "htr", "addr": "3"}]}
-    inventory = Inventory(
-        client.dev_id,
-        build_node_inventory(raw_nodes),
-    )
-    client._inventory = None
-    client._coordinator.inventory = inventory
-
-    targets = list(client._heater_sample_subscription_targets())
-
-    assert targets == inventory.heater_sample_targets
-    assert client._inventory is inventory
-
-
 def test_heater_sample_subscription_targets_logs_missing_inventory(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -1248,82 +1125,12 @@ def test_heater_sample_subscription_targets_logs_missing_inventory(
 
     client, _sio, _ = _make_client(monkeypatch)
     client._inventory = None
-    client._coordinator.inventory = None
 
     with caplog.at_level(logging.ERROR):
         targets = list(client._heater_sample_subscription_targets())
 
     assert not targets
     assert any("missing inventory" in record.message for record in caplog.records)
-
-
-def test_heater_sample_targets_do_not_rebuild_from_record(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Raw node snapshots should not trigger inventory rebuilds."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-    runtime = importlib.import_module(
-        "custom_components.termoweb.runtime"
-    ).require_runtime(client.hass, "entry")
-    runtime.inventory = None  # type: ignore[assignment]
-
-    client._inventory = None
-    client._coordinator.inventory = None
-
-    targets = list(client._heater_sample_subscription_targets())
-
-    assert targets == []
-    assert client._inventory is None
-
-
-def test_apply_heater_addresses_filters_non_heaters(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Non-heater node types should be ignored when applying addresses."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-
-    nodes_payload = {"nodes": [{"type": "htr", "addr": "6"}]}
-    inventory_container = Inventory(
-        "device",
-        build_node_inventory(nodes_payload),
-    )
-
-    client._apply_heater_addresses(
-        {"foo": ["5"], "htr": ["6"]},
-        inventory=inventory_container,
-    )
-
-    runtime = importlib.import_module(
-        "custom_components.termoweb.runtime"
-    ).require_runtime(client.hass, "entry")
-    assert runtime.inventory is inventory_container
-
-
-def test_apply_heater_addresses_logs_invalid_inventory(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Unexpected inventory inputs should be ignored with a debug message."""
-
-    client, _sio, _ = _make_client(monkeypatch)
-
-    raw_nodes = {"nodes": [{"type": "htr", "addr": "4"}]}
-    inventory = Inventory(
-        client.dev_id,
-        build_node_inventory(raw_nodes),
-    )
-    client._inventory = inventory
-
-    with caplog.at_level("ERROR"):
-        client._apply_heater_addresses(
-            {"htr": ["4"]},
-            inventory=[SimpleNamespace(type="htr", addr="4")],
-        )
-
-    assert client._inventory is inventory
-    assert "missing inventory" not in caplog.text
 
 
 @pytest.mark.asyncio
