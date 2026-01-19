@@ -1888,6 +1888,7 @@ from custom_components.termoweb.domain.ids import (  # noqa: E402
 from custom_components.termoweb.domain.state import (  # noqa: E402
     AccumulatorState,
     DomainStateStore,
+    GatewayConnectionState,
     HeaterState,
     PowerMonitorState,
     ThermostatState,
@@ -2082,24 +2083,23 @@ class FakeCoordinator:
                     node_ids.append(DomainNodeId(node_type, getattr(node, "addr", "")))
                 except ValueError:
                     continue
-            if node_ids:
-                self._state_store = DomainStateStore(node_ids)
-                dev_state = self.data.get(dev_id)
-                if isinstance(dev_state, Mapping):
-                    settings = dev_state.get("settings")
-                    if isinstance(settings, Mapping):
-                        for node_type, bucket in settings.items():
-                            if not isinstance(bucket, Mapping):
+            self._state_store = DomainStateStore(node_ids)
+            dev_state = self.data.get(dev_id)
+            if isinstance(dev_state, Mapping):
+                settings = dev_state.get("settings")
+                if isinstance(settings, Mapping):
+                    for node_type, bucket in settings.items():
+                        if not isinstance(bucket, Mapping):
+                            continue
+                        for addr, payload in bucket.items():
+                            if not isinstance(payload, Mapping):
                                 continue
-                            for addr, payload in bucket.items():
-                                if not isinstance(payload, Mapping):
-                                    continue
-                                self._state_store.apply_full_snapshot(
-                                    node_type,
-                                    addr,
-                                    payload,
-                                )
-                self.domain_view = DomainStateView(dev_id, self._state_store)
+                            self._state_store.apply_full_snapshot(
+                                node_type,
+                                addr,
+                                payload,
+                            )
+            self.domain_view = DomainStateView(dev_id, self._state_store)
         if self._state_store is None:
             dev_state = self.data.get(dev_id)
             if isinstance(dev_state, Mapping):
@@ -2136,6 +2136,44 @@ class FakeCoordinator:
         self.async_refresh_heater = AsyncMock()
         self.pending_settings: dict[tuple[str, str], dict[str, Any]] = {}
         type(self).instances.append(self)
+
+    def update_gateway_connection(
+        self,
+        *,
+        status: str | None,
+        connected: bool,
+        last_event_at: float | None,
+        healthy_since: float | None,
+        healthy_minutes: float | None,
+        last_payload_at: float | None,
+        last_heartbeat_at: float | None,
+        payload_stale: bool | None,
+        payload_stale_after: float | None,
+        idle_restart_pending: bool | None,
+    ) -> None:
+        """Update the gateway connection state for tests."""
+
+        if self._state_store is None:
+            self._state_store = DomainStateStore([])
+            self.domain_view = DomainStateView(self.dev_id, self._state_store)
+
+        state = GatewayConnectionState(
+            status=status,
+            connected=connected,
+            last_event_at=last_event_at,
+            healthy_since=healthy_since,
+            healthy_minutes=healthy_minutes,
+            last_payload_at=last_payload_at,
+            last_heartbeat_at=last_heartbeat_at,
+            payload_stale=payload_stale,
+            payload_stale_after=payload_stale_after,
+            idle_restart_pending=idle_restart_pending,
+        )
+        self._state_store.set_gateway_connection_state(state)
+
+        dev_state = self.data.get(self.dev_id)
+        if isinstance(dev_state, dict):
+            dev_state["connected"] = connected
 
     async def async_config_entry_first_refresh(self) -> None:
         self.refresh_calls += 1

@@ -17,7 +17,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from custom_components.termoweb.boost import supports_boost
 from custom_components.termoweb.const import DOMAIN, signal_ws_data, signal_ws_status
 from custom_components.termoweb.coordinator import StateCoordinator
-from custom_components.termoweb.domain import DomainStateView
+from custom_components.termoweb.domain import DomainStateView, GatewayConnectionState
 from custom_components.termoweb.domain.state import DomainState
 from custom_components.termoweb.entities.entity import GatewayDispatcherEntity
 from custom_components.termoweb.entities.heater import (
@@ -127,28 +127,18 @@ class GatewayOnlineBinarySensor(
 
         return signal_ws_status(self._entry_id)
 
-    def _ws_state(self) -> dict[str, Any]:
-        """Return the latest websocket status payload for this device."""
-        hass = self.hass
-        if hass is None:
-            return {}
-        try:
-            runtime = require_runtime(hass, self._entry_id)
-        except LookupError:
-            return {}
-        return runtime.ws_state.get(self._dev_id, {})
+    def _gateway_connection_state(self) -> GatewayConnectionState:
+        """Return the gateway connection state for this device."""
+
+        domain_view = getattr(self.coordinator, "domain_view", None)
+        if isinstance(domain_view, DomainStateView):
+            return domain_view.get_gateway_connection_state()
+        return GatewayConnectionState()
 
     @property
     def is_on(self) -> bool:
         """Return True when the integration reports the gateway is online."""
-        connected = getattr(self.coordinator, "gateway_connected", None)
-        if connected is None:
-            data = getattr(self.coordinator, "data", None)
-            if isinstance(data, Mapping):
-                record = data.get(self._dev_id)
-                if isinstance(record, Mapping):
-                    connected = record.get("connected")
-        return bool(connected() if callable(connected) else connected)
+        return bool(self._gateway_connection_state().connected)
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -161,8 +151,7 @@ class GatewayOnlineBinarySensor(
         coordinator = self.coordinator
         name = getattr(coordinator, "gateway_name", None)
         model = getattr(coordinator, "gateway_model", None)
-        connected = getattr(coordinator, "gateway_connected", None)
-        if name is None or model is None or connected is None:
+        if name is None or model is None:
             data = getattr(coordinator, "data", None)
             if isinstance(data, Mapping):
                 record = data.get(self._dev_id)
@@ -171,17 +160,15 @@ class GatewayOnlineBinarySensor(
                         name = record.get("name")
                     if model is None:
                         model = record.get("model")
-                    if connected is None:
-                        connected = record.get("connected")
-        ws = self._ws_state()
+        connection_state = self._gateway_connection_state()
         return {
             "dev_id": self._dev_id,
             "name": name() if callable(name) else name,
-            "connected": connected() if callable(connected) else connected,
+            "connected": connection_state.connected,
             "model": model() if callable(model) else model,
-            "ws_status": ws.get("status"),
-            "ws_last_event_at": ws.get("last_event_at"),
-            "ws_healthy_minutes": ws.get("healthy_minutes"),
+            "ws_status": connection_state.status,
+            "ws_last_event_at": connection_state.last_event_at,
+            "ws_healthy_minutes": connection_state.healthy_minutes,
         }
 
     @callback

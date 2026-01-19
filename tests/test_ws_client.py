@@ -1768,15 +1768,21 @@ def test_ws_common_update_status_dispatches(
         entry_id="entry",
         dev_id="dev",
     )
+    coordinator = SimpleNamespace(
+        update_nodes=MagicMock(),
+        update_gateway_connection=MagicMock(),
+    )
     dispatcher = MagicMock()
     monkeypatch.setattr(base_ws, "async_dispatcher_send", dispatcher)
 
     dummy = ws_common_stub(
         hass=hass,
+        coordinator=coordinator,
     )
     dummy._update_status("connected")
 
     dispatcher.assert_called_once()
+    coordinator.update_gateway_connection.assert_called_once()
 
 
 def test_ws_common_dispatch_nodes(

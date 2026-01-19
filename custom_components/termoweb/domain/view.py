@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from .ids import NodeType
-from .state import DomainState, DomainStateStore, PowerMonitorState
+from .state import (
+    DomainState,
+    DomainStateStore,
+    GatewayConnectionState,
+    PowerMonitorState,
+)
 
 
 class DomainStateView:
@@ -46,3 +51,10 @@ class DomainStateView:
 
         state = self._build_state(NodeType.POWER_MONITOR, addr)
         return state if isinstance(state, PowerMonitorState) else None
+
+    def get_gateway_connection_state(self) -> GatewayConnectionState:
+        """Return the gateway connection state when available."""
+
+        if self._store is None:
+            return GatewayConnectionState()
+        return self._store.get_gateway_connection_state()

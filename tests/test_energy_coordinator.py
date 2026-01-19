@@ -535,6 +535,18 @@ def test_refresh_heater_updates_existing_and_new_data() -> None:
             build_device_metadata_payload("dev", name=" Device "),
             nodes,
         )
+        coord.update_gateway_connection(
+            status="connected",
+            connected=True,
+            last_event_at=None,
+            healthy_since=None,
+            healthy_minutes=None,
+            last_payload_at=None,
+            last_heartbeat_at=None,
+            payload_stale=None,
+            payload_stale_after=None,
+            idle_restart_pending=None,
+        )
 
         updates: list[dict[str, dict[str, Any]]] = []
 
@@ -689,6 +701,18 @@ def test_refresh_heater_populates_missing_metadata() -> None:
             "dev",
             {"name": " Device "},
             nodes,
+        )
+        coord.update_gateway_connection(
+            status="connected",
+            connected=True,
+            last_event_at=None,
+            healthy_since=None,
+            healthy_minutes=None,
+            last_payload_at=None,
+            last_heartbeat_at=None,
+            payload_stale=None,
+            payload_stale_after=None,
+            idle_restart_pending=None,
         )
         inventory = coord._ensure_inventory()
 

@@ -518,6 +518,8 @@ custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._cleanup_ws_st
     Remove cached websocket state and tracker entries for this device.
 custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._notify_ws_status
     Dispatch websocket status updates with tracker metadata.
+custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._sync_gateway_connection_state
+    Update gateway connection state in the domain store when available.
 custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._mark_ws_payload
     Update tracker payload timestamps and emit changes if required.
 custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._mark_ws_heartbeat
@@ -566,8 +568,8 @@ custom_components/termoweb/entities/binary_sensor.py :: GatewayOnlineBinarySenso
     Initialise the connectivity binary sensor.
 custom_components/termoweb/entities/binary_sensor.py :: GatewayOnlineBinarySensor.gateway_signal
     Return the dispatcher signal for gateway websocket status.
-custom_components/termoweb/entities/binary_sensor.py :: GatewayOnlineBinarySensor._ws_state
-    Return the latest websocket status payload for this device.
+custom_components/termoweb/entities/binary_sensor.py :: GatewayOnlineBinarySensor._gateway_connection_state
+    Return the gateway connection state for this device.
 custom_components/termoweb/entities/binary_sensor.py :: GatewayOnlineBinarySensor.is_on
     Return True when the integration reports the gateway is online.
 custom_components/termoweb/entities/binary_sensor.py :: GatewayOnlineBinarySensor.device_info
@@ -750,6 +752,8 @@ custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._schedule_
     Schedule a refresh if the websocket echo does not arrive.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._schedule_refresh_fallback._fallback
     Force a heater refresh after the fallback delay.
+custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._gateway_connection_state
+    Return the current gateway connection state.
 custom_components/termoweb/entities/climate.py :: AccumulatorClimateEntity.__init__
     Initialise the accumulator climate entity.
 custom_components/termoweb/entities/climate.py :: AccumulatorClimateEntity._default_mode_for_setpoint
@@ -1036,6 +1040,8 @@ custom_components/termoweb/coordinator.py :: StateCoordinator.gateway_model
     Return the display model name for this gateway.
 custom_components/termoweb/coordinator.py :: StateCoordinator.gateway_connected
     Return True when the coordinator reports the gateway online.
+custom_components/termoweb/coordinator.py :: StateCoordinator.update_gateway_connection
+    Update the gateway connection state in the domain store.
 custom_components/termoweb/coordinator.py :: StateCoordinator._device_record
     Return a minimal coordinator payload for this device.
 custom_components/termoweb/coordinator.py :: StateCoordinator._publish_device_record
@@ -1214,6 +1220,10 @@ custom_components/termoweb/domain/state.py :: DomainStateStore.known_types
     Return the set of node types represented in the store.
 custom_components/termoweb/domain/state.py :: DomainStateStore.iter_states
     Yield stored ``(NodeId, DomainState)`` pairs.
+custom_components/termoweb/domain/state.py :: DomainStateStore.set_gateway_connection_state
+    Store the latest gateway connection state.
+custom_components/termoweb/domain/state.py :: DomainStateStore.get_gateway_connection_state
+    Return a defensive copy of the gateway connection state.
 custom_components/termoweb/domain/state.py :: DomainStateStore.replace_state
     Replace the stored state for ``(node_type, addr)`` when valid.
 custom_components/termoweb/domain/state.py :: _normalize_node_type
@@ -1225,6 +1235,8 @@ custom_components/termoweb/domain/state.py :: _copy_state_field_value
 custom_components/termoweb/domain/state.py :: state_to_dict
     Return a defensive mapping representation of ``state``.
 custom_components/termoweb/domain/state.py :: clone_state
+    Return a detached copy of ``state`` when available.
+custom_components/termoweb/domain/state.py :: clone_gateway_connection_state
     Return a detached copy of ``state`` when available.
 custom_components/termoweb/domain/state.py :: apply_payload_to_state
     Apply a mapping payload onto ``state`` when possible.
@@ -1238,6 +1250,8 @@ custom_components/termoweb/domain/view.py :: DomainStateView.get_heater_state
     Return the heater/thermostat/accumulator state for ``addr``.
 custom_components/termoweb/domain/view.py :: DomainStateView.get_power_monitor_state
     Return the power monitor state for ``addr`` when present.
+custom_components/termoweb/domain/view.py :: DomainStateView.get_gateway_connection_state
+    Return the gateway connection state when available.
 custom_components/termoweb/energy.py :: _iso_date
     Convert unix timestamp to ISO date.
 custom_components/termoweb/energy.py :: RecorderImports.__init__

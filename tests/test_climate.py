@@ -1831,7 +1831,6 @@ def test_refresh_fallback_skips_when_hass_inactive(
             coordinator=coordinator,
             client=AsyncMock(),
             version="1",
-            ws_state={},
         )
 
         heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
@@ -1908,7 +1907,6 @@ def test_heater_additional_cancelled_edges(
             coordinator=coordinator,
             client=client,
             version="1",
-            ws_state={},
         )
 
         heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
@@ -2066,6 +2064,18 @@ def test_heater_write_paths_and_errors(
             client=AsyncMock(),
             inventory=inventory,
         )
+        coordinator.update_gateway_connection(
+            status="disconnected",
+            connected=False,
+            last_event_at=None,
+            healthy_since=None,
+            healthy_minutes=None,
+            last_payload_at=None,
+            last_heartbeat_at=None,
+            payload_stale=None,
+            payload_stale_after=None,
+            idle_restart_pending=None,
+        )
         client = AsyncMock()
         _attach_runtime(
             hass,
@@ -2074,7 +2084,6 @@ def test_heater_write_paths_and_errors(
             coordinator=coordinator,
             client=client,
             version="5.0.0",
-            ws_state={dev_id: {"status": "disconnected", "last_event_at": None}},
         )
 
         heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
@@ -2440,15 +2449,19 @@ def test_heater_write_paths_and_errors(
         coordinator.async_refresh_heater.reset_mock()
         assert not fallback_waiters
 
-        runtime = climate_module.require_runtime(hass, entry_id)
-
         # -------------------- WS healthy suppresses fallback --------------
-        runtime.ws_state[dev_id] = {
-            "status": "healthy",
-            "last_event_at": 0,
-            "last_payload_at": climate_module.time.time(),
-            "idle_restart_pending": False,
-        }
+        coordinator.update_gateway_connection(
+            status="healthy",
+            connected=True,
+            last_event_at=0.0,
+            healthy_since=0.0,
+            healthy_minutes=0.0,
+            last_payload_at=climate_module.time.time(),
+            last_heartbeat_at=None,
+            payload_stale=False,
+            payload_stale_after=None,
+            idle_restart_pending=False,
+        )
         client.set_node_settings.reset_mock()
         await heater.async_set_temperature(**{ATTR_TEMPERATURE: 22.5})
         assert heater._write_task is not None
@@ -2459,12 +2472,18 @@ def test_heater_write_paths_and_errors(
         client.set_node_settings.reset_mock()
 
         # -------------------- WS healthy but stale payload triggers fallback ----
-        runtime.ws_state[dev_id] = {
-            "status": "healthy",
-            "last_event_at": 0,
-            "last_payload_at": climate_module.time.time() - 60,
-            "idle_restart_pending": False,
-        }
+        coordinator.update_gateway_connection(
+            status="healthy",
+            connected=True,
+            last_event_at=0.0,
+            healthy_since=0.0,
+            healthy_minutes=0.0,
+            last_payload_at=climate_module.time.time() - 60,
+            last_heartbeat_at=None,
+            payload_stale=True,
+            payload_stale_after=None,
+            idle_restart_pending=False,
+        )
         await heater.async_set_temperature(**{ATTR_TEMPERATURE: 21.5})
         assert heater._write_task is not None
         await heater._write_task
@@ -2474,7 +2493,18 @@ def test_heater_write_paths_and_errors(
         client.set_node_settings.reset_mock()
 
         # -------------------- WS status missing triggers fallback ---------
-        runtime.ws_state.pop(dev_id, None)
+        coordinator.update_gateway_connection(
+            status=None,
+            connected=False,
+            last_event_at=None,
+            healthy_since=None,
+            healthy_minutes=None,
+            last_payload_at=None,
+            last_heartbeat_at=None,
+            payload_stale=None,
+            payload_stale_after=None,
+            idle_restart_pending=None,
+        )
         await heater.async_set_temperature(**{ATTR_TEMPERATURE: 24.5})
         assert heater._write_task is not None
         await heater._write_task
@@ -2483,10 +2513,18 @@ def test_heater_write_paths_and_errors(
         client.set_node_settings.reset_mock()
 
         # -------------------- WS down restores fallback -------------------
-        runtime.ws_state[dev_id] = {
-            "status": "disconnected",
-            "last_event_at": None,
-        }
+        coordinator.update_gateway_connection(
+            status="disconnected",
+            connected=False,
+            last_event_at=None,
+            healthy_since=None,
+            healthy_minutes=None,
+            last_payload_at=None,
+            last_heartbeat_at=None,
+            payload_stale=None,
+            payload_stale_after=None,
+            idle_restart_pending=None,
+        )
         await heater.async_set_temperature(**{ATTR_TEMPERATURE: 23.5})
         assert heater._write_task is not None
         await heater._write_task
@@ -2536,7 +2574,6 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
             coordinator=coordinator,
             client=client,
             version="1",
-            ws_state={},
         )
 
         heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
@@ -2723,7 +2760,6 @@ def test_heater_cancelled_paths_propagate(
             coordinator=coordinator,
             client=client,
             version="1",
-            ws_state={},
         )
 
         heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
