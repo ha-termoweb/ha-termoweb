@@ -1,5 +1,7 @@
 # TermoWeb Function Map
 
+custom_components/termoweb/__init__.py :: _async_import_energy_history
+    Delegate to the energy helper with shared rate limiting and filters.
 custom_components/termoweb/__init__.py :: _build_unknown_node_probe_requests
     Return common REST endpoints to query for an unknown node type.
 custom_components/termoweb/__init__.py :: _async_probe_unknown_node_types
@@ -26,6 +28,20 @@ custom_components/termoweb/__init__.py :: async_setup_entry._recalc_poll_interva
     Suspend REST polling when websocket trackers are healthy and fresh.
 custom_components/termoweb/__init__.py :: async_setup_entry._on_ws_status
     Recalculate polling intervals when websocket state changes.
+custom_components/termoweb/__init__.py :: _set_runtime_value
+    Persist ``value`` for ``key`` on a runtime container when possible.
+custom_components/termoweb/__init__.py :: _collect_shutdown_targets
+    Return shutdown targets or ``None`` if shutdown already ran.
+custom_components/termoweb/__init__.py :: _shutdown_diagnostics_task
+    Cancel and await the diagnostics task when present.
+custom_components/termoweb/__init__.py :: _shutdown_hourly_poller
+    Stop the hourly poller when it exposes async_shutdown.
+custom_components/termoweb/__init__.py :: _shutdown_ws_tasks
+    Cancel and await websocket tasks.
+custom_components/termoweb/__init__.py :: _shutdown_ws_clients
+    Stop websocket clients that expose a stop coroutine.
+custom_components/termoweb/__init__.py :: _shutdown_runtime_callback
+    Invoke and clear a runtime callback with error logging.
 custom_components/termoweb/__init__.py :: _async_shutdown_entry
     Cancel websocket tasks and listeners for an integration record.
 custom_components/termoweb/__init__.py :: async_unload_entry
@@ -1226,8 +1242,18 @@ custom_components/termoweb/domain/view.py :: DomainStateView.get_power_monitor_s
     Return the power monitor state for ``addr`` when present.
 custom_components/termoweb/energy.py :: _iso_date
     Convert unix timestamp to ISO date.
+custom_components/termoweb/energy.py :: RecorderImports.__init__
+    Initialize the recorder import references.
+custom_components/termoweb/energy.py :: _resolve_recorder_imports
+    Return cached recorder imports for statistics helpers.
+custom_components/termoweb/energy.py :: _clear_statistics_compat
+    Delete statistics using recorder instance APIs when possible.
+custom_components/termoweb/energy.py :: _resolve_statistics_module
+    Return the recorder statistics module when available.
 custom_components/termoweb/energy.py :: _statistics_during_period
     Return recorder statistics rows for the provided period.
+custom_components/termoweb/energy.py :: _statistics_during_period_compat
+    Return recorder statistics rows with compatibility shims.
 custom_components/termoweb/energy.py :: _get_last_statistics
     Return the most recent recorder statistics row for ``statistic_id``.
 custom_components/termoweb/energy.py :: _delete_statistics

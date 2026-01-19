@@ -19,6 +19,7 @@ from custom_components.termoweb.inventory import (
     Inventory,
     build_node_inventory,
 )
+from custom_components.termoweb.runtime import EntryRuntime
 from homeassistant.core import HomeAssistant
 
 
@@ -223,6 +224,15 @@ def _make_client(
     return client
 
 
+def _drop_inventory(bucket: dict[str, Any] | EntryRuntime) -> None:
+    """Remove inventory data from a runtime or mapping bucket."""
+
+    if isinstance(bucket, EntryRuntime):
+        bucket.inventory = None  # type: ignore[assignment]
+        return
+    bucket.pop("inventory", None)
+
+
 @pytest.mark.asyncio
 async def test_connect_once_performs_full_handshake(
     monkeypatch: pytest.MonkeyPatch,
@@ -316,9 +326,7 @@ async def test_soft_refresh_triggers_before_payload_window(
     payload_ts = float(tracker.last_payload_at) if tracker.last_payload_at else None
     elapsed = 1_009.0 - payload_ts if payload_ts is not None else -1.0
     threshold = hint_value * 0.8 if math.isfinite(hint_value) else -1.0
-    min_interval = (
-        max(30.0, hint_value * 0.25) if math.isfinite(hint_value) else 30.0
-    )
+    min_interval = max(30.0, hint_value * 0.25) if math.isfinite(hint_value) else 30.0
     duplicate_refresh = (
         payload_ts is not None
         and client._last_soft_refresh_payload_at == payload_ts
@@ -427,9 +435,7 @@ async def test_soft_refresh_handles_emit_failure(
     payload_ts = float(tracker.last_payload_at) if tracker.last_payload_at else None
     elapsed = 812.0 - payload_ts if payload_ts is not None else -1.0
     threshold = hint_value * 0.8 if math.isfinite(hint_value) else -1.0
-    min_interval = (
-        max(30.0, hint_value * 0.25) if math.isfinite(hint_value) else 30.0
-    )
+    min_interval = max(30.0, hint_value * 0.25) if math.isfinite(hint_value) else 30.0
     duplicate_refresh = (
         payload_ts is not None
         and client._last_soft_refresh_payload_at == payload_ts
@@ -2117,7 +2123,7 @@ async def test_subscribe_feeds_stores_inventory_only(
 
     client = _make_client(monkeypatch)
     bucket = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
-    bucket.pop("inventory", None)
+    _drop_inventory(bucket)
 
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
     inventory = Inventory(
@@ -2237,7 +2243,7 @@ async def test_subscribe_feeds_prefers_coordinator_inventory(
     """Coordinator inventory should avoid resolver lookups."""
 
     client = _make_client(monkeypatch)
-    client.hass.data[ducaheat_ws.DOMAIN]["entry"].pop("inventory", None)
+    _drop_inventory(client.hass.data[ducaheat_ws.DOMAIN]["entry"])
     client.hass.data[ducaheat_ws.DOMAIN]["entry"].pop("nodes", None)
     inventory_nodes = build_node_inventory([{"type": "htr", "addr": "3"}])
     coordinator_inventory = Inventory(
@@ -2266,7 +2272,7 @@ async def test_subscribe_feeds_handles_mapping_record(
     """Mapping entries should be normalised to mutable state."""
 
     client = _make_client(monkeypatch)
-    client.hass.data[ducaheat_ws.DOMAIN]["entry"].pop("inventory", None)
+    _drop_inventory(client.hass.data[ducaheat_ws.DOMAIN]["entry"])
     raw_nodes = {"nodes": [{"addr": "8", "type": "htr"}]}
     inventory = Inventory(
         client.dev_id,
@@ -2288,8 +2294,12 @@ async def test_subscribe_feeds_handles_mapping_record(
     assert count == 2
     assert set(emissions) == {"/htr/8/samples", "/htr/8/status"}
     entry_record = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
-    assert isinstance(entry_record, dict)
-    assert entry_record.get("inventory") is inventory
+    if isinstance(entry_record, EntryRuntime):
+        stored = entry_record.inventory
+    else:
+        assert isinstance(entry_record, dict)
+        stored = entry_record.get("inventory")
+    assert stored is inventory
 
 
 @pytest.mark.asyncio
@@ -2333,7 +2343,7 @@ async def test_maybe_subscribe_retries_when_inventory_ready(
     client = _make_client(monkeypatch)
     client._ws = SimpleNamespace(closed=False)
     client._status = "connected"
-    client.hass.data[ducaheat_ws.DOMAIN]["entry"].pop("inventory", None)
+    _drop_inventory(client.hass.data[ducaheat_ws.DOMAIN]["entry"])
     client._inventory = None
     client._coordinator._inventory = None
 
@@ -2400,7 +2410,7 @@ async def test_subscribe_feeds_defers_when_inventory_missing(
     """Inventory resolution failures should mark subscriptions as pending."""
 
     client = _make_client(monkeypatch)
-    client.hass.data[ducaheat_ws.DOMAIN]["entry"].pop("inventory", None)
+    _drop_inventory(client.hass.data[ducaheat_ws.DOMAIN]["entry"])
     client.hass.data[ducaheat_ws.DOMAIN]["entry"].pop("nodes", None)
     client._inventory = None
     client._coordinator._inventory = None
@@ -2570,7 +2580,7 @@ async def test_subscribe_telemetry_tracks_success_and_failure(
     client._ws = SimpleNamespace(closed=False)
     client._inventory = None
     hass_bucket = client.hass.data[ducaheat_ws.DOMAIN][client.entry_id]
-    hass_bucket.pop("inventory", None)
+    _drop_inventory(hass_bucket)
     monkeypatch.setattr(client, "_emit_sio", AsyncMock())
 
     result_first = await client._subscribe_feeds(now=10.0)

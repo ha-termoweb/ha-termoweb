@@ -14,26 +14,30 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from ..boost import coerce_boost_bool, coerce_boost_minutes, supports_boost
-from ..const import DOMAIN, signal_ws_data
-from ..domain import DomainStateView
-from ..domain.state import (
+from custom_components.termoweb.boost import (
+    coerce_boost_bool,
+    coerce_boost_minutes,
+    supports_boost,
+)
+from custom_components.termoweb.const import DOMAIN, signal_ws_data
+from custom_components.termoweb.domain import DomainStateView
+from custom_components.termoweb.domain.state import (
     AccumulatorState,
     DomainState,
     HeaterState,
     PowerMonitorState,
     ThermostatState,
 )
-from ..i18n import COORDINATOR_FALLBACK_ATTR, format_fallback
-from ..inventory import (
+from custom_components.termoweb.i18n import COORDINATOR_FALLBACK_ATTR, format_fallback
+from custom_components.termoweb.inventory import (
     HEATER_NODE_TYPES,
     Inventory,
     Node,
     normalize_node_addr,
     normalize_node_type,
 )
-from ..runtime import EntryRuntime, require_runtime
-from ..utils import float_or_none
+from custom_components.termoweb.runtime import EntryRuntime, require_runtime
+from custom_components.termoweb.utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,6 +45,7 @@ _LOGGER = logging.getLogger(__name__)
 DEFAULT_BOOST_DURATION: Final = 60
 DEFAULT_BOOST_TEMPERATURE: Final = 20.0
 _HASS_UNSET: Final[HomeAssistant | None] = cast(HomeAssistant | None, object())
+_BOOST_RUNTIME_KEY: Final = "boost_runtime"
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,15 +135,25 @@ class HeaterPlatformDetails:
 
 
 def _boost_runtime_store(
-    runtime: EntryRuntime,
+    runtime: EntryRuntime | Mapping[str, Any] | None,
     *,
     create: bool,
 ) -> dict[str, dict[str, int]]:
     """Return the mutable boost runtime store for ``runtime``."""
 
-    if not create and not runtime.boost_runtime:
+    if isinstance(runtime, EntryRuntime):
+        if not create and not runtime.boost_runtime:
+            return {}
+        return runtime.boost_runtime
+    if not isinstance(runtime, Mapping):
         return {}
-    return runtime.boost_runtime
+    store = runtime.get(_BOOST_RUNTIME_KEY)
+    if isinstance(store, Mapping):
+        return store  # type: ignore[return-value]
+    if not create:
+        return {}
+    runtime[_BOOST_RUNTIME_KEY] = {}
+    return runtime[_BOOST_RUNTIME_KEY]
 
 
 def _boost_temperature_store(
@@ -754,19 +769,24 @@ def log_skipped_nodes(
 
 
 def heater_platform_details_for_entry(
-    runtime: EntryRuntime,
+    runtime: EntryRuntime | Mapping[str, Any],
     *,
     default_name_simple: Callable[[str], str],
 ) -> HeaterPlatformDetails:
     """Return heater platform metadata derived from ``runtime``."""
 
-    inventory = runtime.inventory
+    if isinstance(runtime, EntryRuntime):
+        inventory = runtime.inventory
+        dev_id = runtime.dev_id
+    else:
+        inventory = runtime.get("inventory")
+        dev_id = runtime.get("dev_id", "<unknown>")
     if not isinstance(inventory, Inventory):
         _LOGGER.error(
             "TermoWeb heater setup missing inventory for device %s",
-            runtime.dev_id,
+            dev_id,
         )
-        raise ValueError("TermoWeb inventory unavailable for heater platform")
+        raise ValueError("TermoWeb inventory unavailable for heater platform")  # noqa: TRY004
 
     return HeaterPlatformDetails(
         inventory=inventory,
@@ -1045,6 +1065,8 @@ class HeaterNodeBase(CoordinatorEntity):
         """Return the REST client used for write operations."""
         hass = self._hass_for_runtime()
         if hass is None:
+            return None
+        if not isinstance(getattr(hass, "data", None), Mapping):
             return None
         try:
             runtime = require_runtime(hass, self._entry_id)

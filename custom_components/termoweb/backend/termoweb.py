@@ -7,20 +7,29 @@ from datetime import datetime
 import logging
 from typing import Any
 
+from custom_components.termoweb.backend import termoweb_ws
 from custom_components.termoweb.backend.base import (
     Backend,
     WsClientProto,
     fetch_normalised_hourly_samples,
 )
-from custom_components.termoweb.backend.termoweb_ws import TermoWebWSClient
 from custom_components.termoweb.backend.ws_client import WebSocketClient
 from custom_components.termoweb.inventory import Inventory
 
 _LOGGER = logging.getLogger(__name__)
 
+TermoWebWSClient = getattr(termoweb_ws, "TermoWebWSClient", WebSocketClient)
+
 
 class TermoWebBackend(Backend):
     """Backend for the TermoWeb brand."""
+
+    def _resolve_ws_client_cls(self) -> type[WsClientProto]:
+        """Return the websocket client class for TermoWeb."""
+
+        if isinstance(TermoWebWSClient, type):
+            return TermoWebWSClient
+        return WebSocketClient
 
     def create_ws_client(
         self,
@@ -40,9 +49,10 @@ class TermoWebBackend(Backend):
             "coordinator": coordinator,
             "inventory": inventory,
         }
-        if issubclass(TermoWebWSClient, WebSocketClient):
+        ws_client_cls = self._resolve_ws_client_cls()
+        if issubclass(ws_client_cls, WebSocketClient):
             kwargs["protocol"] = "socketio09"
-        return TermoWebWSClient(
+        return ws_client_cls(
             hass,
             **kwargs,
         )

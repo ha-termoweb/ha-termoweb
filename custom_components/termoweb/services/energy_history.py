@@ -4,19 +4,21 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Iterable, Mapping
-import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from ..const import DOMAIN
-from ..energy import async_import_energy_history as _async_import_energy_history_impl
-from ..inventory import Inventory
-from ..runtime import EntryRuntime
-from ..throttle import default_samples_rate_limit_state
+from custom_components.termoweb import energy as energy_module
+from custom_components.termoweb.const import DOMAIN
+from custom_components.termoweb.energy import (
+    async_import_energy_history as _async_import_energy_history_impl,
+)
+from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.runtime import EntryRuntime
+from custom_components.termoweb.throttle import default_samples_rate_limit_state
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = energy_module._LOGGER  # noqa: SLF001
 
 
 async def async_import_energy_history_with_rate_limit(
@@ -106,7 +108,7 @@ async def async_register_import_energy_history_service(
         records = hass.data.get(DOMAIN, {})
         if not isinstance(records, Mapping):
             records = {}
-        for entry_id, runtime in records.items():
+        for runtime in records.values():
             if not isinstance(runtime, EntryRuntime):
                 continue
             ent = runtime.config_entry

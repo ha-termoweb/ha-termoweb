@@ -35,7 +35,9 @@ def test_handle_event_routes_updates_to_deltas(
     handle_ws_deltas = MagicMock()
     coordinator = SimpleNamespace(data={}, handle_ws_deltas=handle_ws_deltas)
 
-    monkeypatch.setattr(module.TermoWebWSClient, "_install_write_hook", lambda self: None)
+    monkeypatch.setattr(
+        module.TermoWebWSClient, "_install_write_hook", lambda self: None
+    )
 
     client = module.TermoWebWSClient(
         hass,

@@ -39,6 +39,7 @@ def build_entry_runtime(
     brand: str = "termoweb",
     version: str = "0.0.0",
     base_poll_interval: int = 30,
+    allow_missing_inventory: bool = False,
 ) -> "EntryRuntime":
     """Return an ``EntryRuntime`` populated with lightweight test doubles."""
 
@@ -51,7 +52,12 @@ def build_entry_runtime(
 
     inventory_obj = inventory
     if not isinstance(inventory_obj, Inventory):
-        inventory_obj = Inventory(dev_id, [])
+        if coordinator is not None:
+            coordinator_inventory = getattr(coordinator, "inventory", None)
+            if isinstance(coordinator_inventory, Inventory):
+                inventory_obj = coordinator_inventory
+        if not isinstance(inventory_obj, Inventory) and not allow_missing_inventory:
+            inventory_obj = Inventory(dev_id, [])
 
     if coordinator is None:
         coordinator = SimpleNamespace(inventory=inventory_obj, data={})
@@ -128,6 +134,7 @@ def runtime_from_record(
         config_entry=record.get("config_entry"),
         brand=str(record.get("brand") or "termoweb"),
         version=str(record.get("version") or "0.0.0"),
+        allow_missing_inventory=True,
     )
 
     for key, value in record.items():
@@ -146,9 +153,20 @@ def _auto_runtime_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
     from custom_components.termoweb import binary_sensor as binary_sensor_module
     from custom_components.termoweb import button as button_module
     from custom_components.termoweb import climate as climate_module
+    from custom_components.termoweb.entities import (
+        binary_sensor as entities_binary_sensor_module,
+    )
+    from custom_components.termoweb.entities import button as entities_button_module
+    from custom_components.termoweb.entities import climate as entities_climate_module
+    from custom_components.termoweb.entities import heater as entities_heater_module
+    from custom_components.termoweb.entities import number as entities_number_module
+    from custom_components.termoweb.entities import sensor as entities_sensor_module
     from custom_components.termoweb import number as number_module
     from custom_components.termoweb import heater as heater_module
     from custom_components.termoweb import sensor as sensor_module
+    from custom_components.termoweb.backend import ws_client as ws_client_module
+    from custom_components.termoweb.backend import ducaheat_ws as ducaheat_ws_module
+    from custom_components.termoweb import energy as energy_module
 
     original = runtime_module.require_runtime
 
@@ -182,6 +200,15 @@ def _auto_runtime_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
         heater_module,
         number_module,
         sensor_module,
+        entities_binary_sensor_module,
+        entities_button_module,
+        entities_climate_module,
+        entities_heater_module,
+        entities_number_module,
+        entities_sensor_module,
+        ws_client_module,
+        ducaheat_ws_module,
+        energy_module,
     ):
         monkeypatch.setattr(module, "require_runtime", _patched_require_runtime)
 

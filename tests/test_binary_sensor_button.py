@@ -17,6 +17,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 import custom_components.termoweb.binary_sensor as binary_sensor_module
 import custom_components.termoweb.button as button_module
+from custom_components.termoweb.entities import button as entities_button_module
 import custom_components.termoweb.heater as heater_module
 from custom_components.termoweb import identifiers as identifiers_module
 from custom_components.termoweb.const import DOMAIN, signal_ws_status
@@ -284,7 +285,17 @@ def test_accumulator_boost_button_triggers_service(
             lambda *_: 180,
         )
         monkeypatch.setattr(
+            entities_button_module,
+            "resolve_boost_runtime_minutes",
+            lambda *_: 180,
+        )
+        monkeypatch.setattr(
             button_module,
+            "resolve_boost_temperature",
+            lambda *_args, **_kwargs: 22.5,
+        )
+        monkeypatch.setattr(
+            entities_button_module,
             "resolve_boost_temperature",
             lambda *_args, **_kwargs: 22.5,
         )

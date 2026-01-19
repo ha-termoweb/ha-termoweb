@@ -3,19 +3,23 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime, timedelta
+import importlib
+import importlib.util
+import inspect
 import logging
+import sys
 from typing import Any, cast
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
 from homeassistant.components.recorder.statistics import (
     async_delete_statistics,
     async_get_last_statistics,
     async_get_statistics_during_period,
     async_import_statistics,
 )
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
 from .api import RESTClient
@@ -26,6 +30,19 @@ from .runtime import require_runtime
 from .throttle import MonotonicRateLimiter
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class RecorderImports:
+    """Container for recorder imports that may be missing at runtime."""
+
+    def __init__(
+        self, get_instance: Callable[..., Any] | None, statistics: Any
+    ) -> None:
+        """Initialize the recorder import references."""
+
+        self.get_instance = get_instance
+        self.statistics = statistics
+
 
 OPTION_ENERGY_HISTORY_IMPORTED = "energy_history_imported"
 OPTION_ENERGY_HISTORY_PROGRESS = "energy_history_progress"
@@ -42,6 +59,76 @@ def _iso_date(ts: int) -> str:
     return datetime.fromtimestamp(ts, UTC).date().isoformat()
 
 
+_RECORDER_IMPORTS: RecorderImports | None = None
+
+
+def _resolve_recorder_imports() -> RecorderImports:
+    """Return cached recorder imports for statistics helpers."""
+    cached = globals().get("_RECORDER_IMPORTS")
+    if isinstance(cached, RecorderImports):
+        return cached
+
+    if "homeassistant.components.recorder" in sys.modules:
+        recorder_mod = sys.modules["homeassistant.components.recorder"]
+    else:
+        spec = importlib.util.find_spec("homeassistant.components.recorder")
+        if spec is None:
+            cached = RecorderImports(None, None)
+            globals()["_RECORDER_IMPORTS"] = cached
+            return cached
+        recorder_mod = importlib.import_module("homeassistant.components.recorder")
+    statistics = getattr(recorder_mod, "statistics", None)
+    get_instance = getattr(recorder_mod, "get_instance", None)
+    cached = RecorderImports(get_instance, statistics)
+    globals()["_RECORDER_IMPORTS"] = cached
+    return cached
+
+
+async def _clear_statistics_compat(
+    hass: HomeAssistant,
+    statistic_id: str,
+    *,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+) -> str:
+    """Delete statistics using recorder instance APIs when possible."""
+
+    recorder_imports = _resolve_recorder_imports()
+    instance = None
+    if callable(recorder_imports.get_instance):
+        instance = recorder_imports.get_instance(hass)
+    if instance is not None:
+        async_delete = getattr(instance, "async_delete_statistics", None)
+        if callable(async_delete):
+            await async_delete(
+                [statistic_id],
+                start_time=start_time,
+                end_time=end_time,
+            )
+            return "delete"
+        async_clear = getattr(instance, "async_clear_statistics", None)
+        if callable(async_clear):
+            await async_clear([statistic_id])
+            return "delete"
+
+    await _delete_statistics(
+        hass,
+        statistic_id,
+        start_time=start_time,
+        end_time=end_time,
+    )
+    return "delete"
+
+
+def _resolve_statistics_module() -> Any:
+    """Return the recorder statistics module when available."""
+
+    if "homeassistant.components.recorder.statistics" in sys.modules:
+        return sys.modules["homeassistant.components.recorder.statistics"]
+    recorder_imports = _resolve_recorder_imports()
+    return recorder_imports.statistics
+
+
 async def _statistics_during_period(
     hass: HomeAssistant,
     start_time: datetime,
@@ -50,13 +137,33 @@ async def _statistics_during_period(
 ) -> dict[str, list[Any]]:
     """Return recorder statistics rows for the provided period."""
 
-    return await async_get_statistics_during_period(
+    stats_mod = _resolve_statistics_module()
+    stats_func = getattr(stats_mod, "async_get_statistics_during_period", None)
+    if not callable(stats_func):
+        stats_func = async_get_statistics_during_period
+    return await stats_func(
         hass,
         start_time,
         end_time,
         statistic_ids,
         period="hour",
         types={"state", "sum"},
+    )
+
+
+async def _statistics_during_period_compat(
+    hass: HomeAssistant,
+    start_time: datetime,
+    end_time: datetime,
+    statistic_ids: set[str],
+) -> dict[str, list[Any]]:
+    """Return recorder statistics rows with compatibility shims."""
+
+    return await _statistics_during_period(
+        hass,
+        start_time,
+        end_time,
+        statistic_ids,
     )
 
 
@@ -71,7 +178,11 @@ async def _get_last_statistics(
     """Return the most recent recorder statistics row for ``statistic_id``."""
 
     types = types or {"state", "sum"}
-    return await async_get_last_statistics(
+    stats_mod = _resolve_statistics_module()
+    stats_func = getattr(stats_mod, "async_get_last_statistics", None)
+    if not callable(stats_func):
+        stats_func = async_get_last_statistics
+    return await stats_func(
         hass,
         number_of_stats,
         [statistic_id],
@@ -89,7 +200,11 @@ async def _delete_statistics(
 ) -> str:
     """Delete recorder statistics rows for ``statistic_id``."""
 
-    await async_delete_statistics(
+    stats_mod = _resolve_statistics_module()
+    stats_func = getattr(stats_mod, "async_delete_statistics", None)
+    if not callable(stats_func):
+        stats_func = async_delete_statistics
+    await stats_func(
         hass,
         [statistic_id],
         start_time=start_time,
@@ -113,7 +228,13 @@ async def _store_statistics(
     import_metadata = dict(metadata)
     import_metadata.update({"source": "recorder", "statistic_id": stat_id})
 
-    await async_import_statistics(hass, import_metadata, stats)
+    stats_mod = _resolve_statistics_module()
+    stats_func = getattr(stats_mod, "async_import_statistics", None)
+    if not callable(stats_func):
+        stats_func = async_import_statistics
+    result = stats_func(hass, import_metadata, stats)
+    if inspect.isawaitable(result):
+        await result
 
 
 def _statistics_row_get(row: Any, key: str) -> Any:
@@ -133,7 +254,7 @@ async def _collect_statistics(
     """Return statistics rows for a single statistic id."""
 
     try:
-        period = await _statistics_during_period(
+        period = await _statistics_during_period_compat(
             hass,
             start,
             end,
@@ -234,7 +355,7 @@ async def _enforce_monotonic_sum(
     _LOGGER.info("%s: enforced monotonic sum for %d hour(s)", entity_id, len(rewrites))
 
 
-async def async_import_energy_history(
+async def async_import_energy_history(  # noqa: C901
     hass: HomeAssistant,
     entry: ConfigEntry,
     nodes: Inventory | None = None,
@@ -253,9 +374,9 @@ async def async_import_energy_history(
     datetime_mod = datetime
     registry_mod = er
     store_stats = _store_statistics
-    stats_period = _statistics_during_period
+    stats_period = _statistics_during_period_compat
     last_stats_fn = _get_last_statistics
-    clear_stats_fn = _delete_statistics
+    clear_stats_fn = _clear_statistics_compat
 
     try:
         runtime = require_runtime(hass, entry.entry_id)
@@ -491,7 +612,7 @@ async def async_import_energy_history(
             return await client.get_node_samples(dev_id, (node_type, addr), start, stop)
         except async_mod.CancelledError:  # pragma: no cover - allow cancellation
             raise
-        except Exception as err:  # pragma: no cover - defensive
+        except Exception as err:  # pragma: no cover - defensive  # noqa: BLE001
             logger.debug("%s:%s: error fetching samples: %s", node_type, addr, err)
             return []
 
@@ -657,14 +778,12 @@ async def async_import_energy_history(
             )
         except async_mod.CancelledError:  # pragma: no cover - allow cancellation
             raise
-        except Exception as err:  # pragma: no cover - defensive
-            logger.error(
-                "%s: error fetching statistics window %s-%s: %s",
+        except Exception:  # pragma: no cover - defensive
+            logger.exception(
+                "%s: error fetching statistics window %s-%s",
                 addr,
                 lookback_start,
                 import_end_dt,
-                err,
-                exc_info=True,
             )
 
         if period_stats:
@@ -702,14 +821,12 @@ async def async_import_energy_history(
                     async_mod.CancelledError
                 ):  # pragma: no cover - allow cancellation
                     raise
-                except Exception as err:  # pragma: no cover - defensive
-                    logger.error(
-                        "%s: error fetching statistics window %s-%s: %s",
+                except Exception:  # pragma: no cover - defensive
+                    logger.exception(
+                        "%s: error fetching statistics window %s-%s",
                         addr,
                         lookback_start,
                         import_end_dt,
-                        err,
-                        exc_info=True,
                     )
                     continue
                 if not last_stats:
@@ -758,13 +875,11 @@ async def async_import_energy_history(
                 )
             except async_mod.CancelledError:  # pragma: no cover - allow cancellation
                 raise
-            except Exception as err:  # pragma: no cover - defensive
-                logger.error(
-                    "%s: failed to clear statistics for %s: %s",
+            except Exception:  # pragma: no cover - defensive
+                logger.exception(
+                    "%s: failed to clear statistics for %s",
                     addr,
                     stat_id,
-                    err,
-                    exc_info=True,
                 )
                 continue
             if cleared == "clear":
@@ -875,9 +990,9 @@ async def async_import_energy_history(
         store_failed = False
         try:
             await store_stats(hass, metadata, stats)
-        except Exception as err:  # pragma: no cover - log & continue
+        except Exception:  # pragma: no cover - log & continue
             store_failed = True
-            logger.exception("%s: statistics insert failed: %s", addr, err)
+            logger.exception("%s: statistics insert failed", addr)
 
         written_count = 0 if store_failed else len(stats)
         if not store_failed:
@@ -939,8 +1054,8 @@ async def async_import_energy_history(
     }
 
     try:
-        rec[SUMMARY_KEY_LAST_RUN] = run_summary  # type: ignore[index]
-    except Exception:  # pragma: no cover - defensive
+        runtime[SUMMARY_KEY_LAST_RUN] = run_summary
+    except Exception:  # pragma: no cover - defensive  # noqa: BLE001
         logger.debug("%s: unable to store energy import summary on record", dev_id)
 
     logger.info(

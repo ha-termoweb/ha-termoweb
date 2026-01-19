@@ -9,9 +9,9 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant, ServiceCall
 
-from ..const import DOMAIN
-from ..inventory import Inventory
-from ..runtime import EntryRuntime
+from custom_components.termoweb.const import DOMAIN
+from custom_components.termoweb.inventory import Inventory
+from custom_components.termoweb.runtime import EntryRuntime
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,16 +32,16 @@ async def async_register_ws_debug_probe_service(hass: HomeAssistant) -> None:
             _LOGGER.debug("ws_debug_probe: integration data unavailable")
             return
 
-        entries: list[tuple[str, EntryRuntime]] = []
+        entries: list[tuple[str, EntryRuntime | Mapping[str, Any]]] = []
         if entry_filter:
             record = domain_records.get(entry_filter)
-            if isinstance(record, EntryRuntime):
+            if isinstance(record, (EntryRuntime, Mapping)):
                 entries.append((entry_filter, record))
         else:
             entries = [
                 (entry_id, rec)
                 for entry_id, rec in domain_records.items()
-                if isinstance(rec, EntryRuntime)
+                if isinstance(rec, (EntryRuntime, Mapping))
             ]
 
         if not entries:
@@ -50,13 +50,21 @@ async def async_register_ws_debug_probe_service(hass: HomeAssistant) -> None:
 
         tasks: list[Awaitable[Any]] = []
         for entry_id, runtime in entries:
-            if not runtime.debug:
+            if isinstance(runtime, EntryRuntime):
+                debug_enabled = runtime.debug
+                clients = runtime.ws_clients
+                inventory_obj = runtime.inventory
+            else:
+                debug_enabled = bool(runtime.get("debug", False))
+                clients = runtime.get("ws_clients")
+                inventory_obj = runtime.get("inventory")
+
+            if not debug_enabled:
                 _LOGGER.debug(
                     "ws_debug_probe: debug helpers disabled for entry %s",
                     entry_id,
                 )
                 continue
-            clients = runtime.ws_clients
             if not clients:
                 _LOGGER.debug(
                     "ws_debug_probe: no websocket clients for entry %s",
@@ -84,7 +92,6 @@ async def async_register_ws_debug_probe_service(hass: HomeAssistant) -> None:
                         dev_id,
                     )
                     continue
-                inventory_obj = runtime.inventory
                 if not isinstance(inventory_obj, Inventory):
                     inventory_obj = None
                 try:

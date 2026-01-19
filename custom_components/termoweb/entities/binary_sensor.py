@@ -14,28 +14,31 @@ from homeassistant.core import callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from ..boost import supports_boost
-from ..const import DOMAIN, signal_ws_data, signal_ws_status
-from ..coordinator import StateCoordinator
-from ..domain import DomainStateView
-from ..domain.state import DomainState
-from .entity import GatewayDispatcherEntity
-from .heater import (
+from custom_components.termoweb.boost import supports_boost
+from custom_components.termoweb.const import DOMAIN, signal_ws_data, signal_ws_status
+from custom_components.termoweb.coordinator import StateCoordinator
+from custom_components.termoweb.domain import DomainStateView
+from custom_components.termoweb.domain.state import DomainState
+from custom_components.termoweb.entities.entity import GatewayDispatcherEntity
+from custom_components.termoweb.entities.heater import (
     BoostState,
     DispatcherSubscriptionHelper,
     derive_boost_state_from_domain,
     log_skipped_nodes,
 )
-from ..i18n import async_get_fallback_translations, attach_fallbacks
-from ..identifiers import build_heater_entity_unique_id
-from ..inventory import (
+from custom_components.termoweb.i18n import (
+    async_get_fallback_translations,
+    attach_fallbacks,
+)
+from custom_components.termoweb.identifiers import build_heater_entity_unique_id
+from custom_components.termoweb.inventory import (
     HEATER_NODE_TYPES,
     Inventory,
     normalize_node_addr,
     normalize_node_type,
 )
-from ..runtime import require_runtime
-from ..utils import build_gateway_device_info
+from custom_components.termoweb.runtime import require_runtime
+from custom_components.termoweb.utils import build_gateway_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -55,7 +58,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     inventory = runtime.inventory
     if not isinstance(inventory, Inventory):
         _LOGGER.error("TermoWeb heater setup missing inventory for device %s", dev_id)
-        raise ValueError("TermoWeb inventory unavailable for heater platform")
+        raise ValueError(  # noqa: TRY004
+            "TermoWeb inventory unavailable for heater platform"
+        )
 
     boost_entities: list[BinarySensorEntity] = []
     for node_type, addr_str, base_name in _iter_boostable_inventory_nodes(inventory):
@@ -137,6 +142,12 @@ class GatewayOnlineBinarySensor(
     def is_on(self) -> bool:
         """Return True when the integration reports the gateway is online."""
         connected = getattr(self.coordinator, "gateway_connected", None)
+        if connected is None:
+            data = getattr(self.coordinator, "data", None)
+            if isinstance(data, Mapping):
+                record = data.get(self._dev_id)
+                if isinstance(record, Mapping):
+                    connected = record.get("connected")
         return bool(connected() if callable(connected) else connected)
 
     @property
@@ -151,6 +162,17 @@ class GatewayOnlineBinarySensor(
         name = getattr(coordinator, "gateway_name", None)
         model = getattr(coordinator, "gateway_model", None)
         connected = getattr(coordinator, "gateway_connected", None)
+        if name is None or model is None or connected is None:
+            data = getattr(coordinator, "data", None)
+            if isinstance(data, Mapping):
+                record = data.get(self._dev_id)
+                if isinstance(record, Mapping):
+                    if name is None:
+                        name = record.get("name")
+                    if model is None:
+                        model = record.get("model")
+                    if connected is None:
+                        connected = record.get("connected")
         ws = self._ws_state()
         return {
             "dev_id": self._dev_id,

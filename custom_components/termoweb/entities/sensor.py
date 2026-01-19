@@ -19,33 +19,37 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from ..const import DOMAIN, signal_ws_data
-from ..coordinator import EnergyStateCoordinator
-from ..domain.energy import coerce_snapshot
-from .entity import GatewayDispatcherEntity
-from .heater import (
+from custom_components.termoweb.const import DOMAIN, signal_ws_data
+from custom_components.termoweb.coordinator import EnergyStateCoordinator
+from custom_components.termoweb.domain.energy import coerce_snapshot
+from custom_components.termoweb.entities.entity import GatewayDispatcherEntity
+from custom_components.termoweb.entities.heater import (
     HeaterNodeBase,
     HeaterPlatformDetails,
     heater_platform_details_for_entry,
     iter_boostable_heater_nodes,
     log_skipped_nodes,
 )
-from ..i18n import async_get_fallback_translations, attach_fallbacks, format_fallback
-from ..identifiers import (
+from custom_components.termoweb.i18n import (
+    async_get_fallback_translations,
+    attach_fallbacks,
+    format_fallback,
+)
+from custom_components.termoweb.identifiers import (
     build_heater_energy_unique_id,
     build_heater_entity_unique_id,
     build_power_monitor_energy_unique_id,
     build_power_monitor_power_unique_id,
     thermostat_fallback_name,
 )
-from ..inventory import (
+from custom_components.termoweb.inventory import (
     Inventory,
     PowerMonitorNode,
     normalize_node_addr,
     normalize_node_type,
 )
-from ..runtime import require_runtime
-from ..utils import (
+from custom_components.termoweb.runtime import require_runtime
+from custom_components.termoweb.utils import (
     build_gateway_device_info,
     build_power_monitor_device_info,
     float_or_none,
@@ -169,11 +173,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     energy_coordinator = runtime.energy_coordinator
     if not isinstance(energy_coordinator, EnergyStateCoordinator):
-        energy_coordinator = EnergyStateCoordinator(
-            hass, runtime.client, dev_id, inventory
-        )
-        runtime.energy_coordinator = energy_coordinator
-        await energy_coordinator.async_config_entry_first_refresh()
+        if not hasattr(energy_coordinator, "update_addresses"):
+            energy_coordinator = EnergyStateCoordinator(
+                hass, runtime.client, dev_id, inventory
+            )
+            runtime.energy_coordinator = energy_coordinator
+            await energy_coordinator.async_config_entry_first_refresh()
 
     energy_coordinator.update_addresses(inventory)
     attach_fallbacks(energy_coordinator, fallbacks)
