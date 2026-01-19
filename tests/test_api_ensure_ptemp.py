@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import aiohttp
 import pytest
 
-from custom_components.termoweb.api import RESTClient
+from custom_components.termoweb.backend.rest_client import RESTClient
 
 
 @pytest.fixture()

@@ -26,6 +26,9 @@ from homeassistant.helpers import entity_registry as entity_registry_mod
 from custom_components.termoweb.backend.ws_health import WsHealthTracker
 from custom_components.termoweb.identifiers import build_heater_energy_unique_id
 from custom_components.termoweb.inventory import build_heater_address_map
+import custom_components.termoweb.backend.ducaheat as ducaheat_module
+import custom_components.termoweb.backend.factory as backend_factory
+import custom_components.termoweb.const as const_module
 import custom_components.termoweb.inventory as inventory_module
 
 
@@ -114,8 +117,8 @@ def test_create_rest_client_selects_brand(
         async def list_devices(self) -> list[dict[str, Any]]:
             return []
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", DefaultClient)
-    monkeypatch.setattr(termoweb_init, "DucaheatRESTClient", DucaClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", DefaultClient)
+    monkeypatch.setattr(ducaheat_module, "DucaheatRESTClient", DucaClient)
 
     default_client = termoweb_init.create_rest_client(
         stub_hass,
@@ -139,16 +142,16 @@ def test_create_rest_client_selects_brand(
     assert isinstance(default_client, DefaultClient)
     assert isinstance(duca_client, DucaClient)
     assert isinstance(tevolve_client, DucaClient)
-    assert default_client.api_base == termoweb_init.get_brand_api_base(
+    assert default_client.api_base == const_module.get_brand_api_base(
         termoweb_init.DEFAULT_BRAND
     )
-    assert tevolve_client.api_base == termoweb_init.get_brand_api_base(
+    assert tevolve_client.api_base == const_module.get_brand_api_base(
         termoweb_init.BRAND_TEVOLVE
     )
-    assert duca_client.basic_auth_b64 == termoweb_init.get_brand_basic_auth(
+    assert duca_client.basic_auth_b64 == const_module.get_brand_basic_auth(
         termoweb_init.BRAND_DUCAHEAT
     )
-    assert tevolve_client.basic_auth_b64 == termoweb_init.get_brand_basic_auth(
+    assert tevolve_client.basic_auth_b64 == const_module.get_brand_basic_auth(
         termoweb_init.BRAND_TEVOLVE
     )
     assert stub_hass.client_session_calls == 3
@@ -215,6 +218,12 @@ def termoweb_init(monkeypatch: pytest.MonkeyPatch) -> Any:
     FakeCoordinator.instances.clear()
     module = importlib.import_module("custom_components.termoweb.__init__")
     module = importlib.reload(module)
+    globals()["backend_factory"] = importlib.import_module(
+        "custom_components.termoweb.backend.factory"
+    )
+    globals()["ducaheat_module"] = importlib.import_module(
+        "custom_components.termoweb.backend.ducaheat"
+    )
     monkeypatch.setattr(module, "StateCoordinator", FakeCoordinator)
     ws_module = importlib.import_module(
         "custom_components.termoweb.backend.termoweb_ws"
@@ -474,7 +483,7 @@ def test_async_setup_entry_happy_path(
                 ]
             }
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", HappyClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", HappyClient)
     create_calls: list[tuple[Any, str, str, str]] = []
     orig_create = termoweb_init.create_rest_client
 
@@ -541,7 +550,7 @@ def test_async_setup_entry_sets_supports_diagnostics(
         async def list_devices(self) -> list[dict[str, Any]]:
             return [{"dev_id": "dev-1"}]
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", DiagnosticsClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", DiagnosticsClient)
 
     sentinel = SimpleNamespace(YES=object())
     monkeypatch.setattr(termoweb_init, "SupportsDiagnostics", sentinel)
@@ -598,7 +607,7 @@ def test_async_setup_entry_unknown_node_probe(
             param_map = {str(k): str(v) for k, v in (params or {}).items()}
             self.probe_calls.append((path, header_map, param_map))
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", ProbeClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", ProbeClient)
 
     entry = ConfigEntry("probe", data={"username": "user", "password": "pw"})
     stub_hass.config_entries.add(entry)
@@ -634,7 +643,7 @@ def test_async_setup_entry_backfills_diagnostics_marker(
         async def list_devices(self) -> list[dict[str, Any]]:
             return [{"dev_id": "dev-1"}]
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", DiagnosticsClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", DiagnosticsClient)
 
     sentinel = SimpleNamespace(YES=object())
     monkeypatch.setattr(termoweb_init, "SupportsDiagnostics", sentinel)
@@ -664,7 +673,7 @@ def test_async_setup_entry_updates_via_hass_config_entries(
         async def list_devices(self) -> list[dict[str, Any]]:
             return [{"dev_id": "dev-1"}]
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", DiagnosticsClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", DiagnosticsClient)
 
     sentinel = SimpleNamespace(YES=object())
     monkeypatch.setattr(termoweb_init, "SupportsDiagnostics", sentinel)
@@ -701,7 +710,7 @@ def test_async_setup_entry_resets_diagnostics_cache(
             await super().get_nodes(dev_id)
             return {"nodes": []}
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", DiagnosticsClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", DiagnosticsClient)
 
     loader_module = types.ModuleType("homeassistant.loader")
     missing_cache: dict[str, Any] = {
@@ -794,7 +803,7 @@ async def test_async_setup_entry_waits_for_delayed_diagnostics(
             await super().get_nodes(dev_id)
             return {"nodes": []}
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", DiagnosticsClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", DiagnosticsClient)
 
     callbacks: list[Callable[[HomeAssistant, Any], Coroutine[Any, Any, None]]] = []
 
@@ -1002,7 +1011,7 @@ def test_async_setup_entry_auth_error(
         async def list_devices(self) -> list[dict[str, Any]]:
             raise termoweb_init.BackendAuthError("bad credentials")
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", AuthClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", AuthClient)
     entry = ConfigEntry("auth", data={"username": "user", "password": "pw"})
     stub_hass.config_entries.add(entry)
 
@@ -1033,7 +1042,7 @@ def test_async_setup_entry_transient_errors(
                 raise TimeoutError("timeout")
             raise termoweb_init.BackendRateLimitError("rate limit")
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", ErrorClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", ErrorClient)
     entry = ConfigEntry("transient", data={"username": "user", "password": "pw"})
     stub_hass.config_entries.add(entry)
 
@@ -1051,7 +1060,7 @@ def test_async_setup_entry_no_devices(
         async def list_devices(self) -> list[dict[str, Any]]:
             return []
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", EmptyClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", EmptyClient)
     entry = ConfigEntry("empty", data={"username": "user", "password": "pw"})
     stub_hass.config_entries.add(entry)
 
@@ -1086,7 +1095,7 @@ def test_async_setup_entry_skips_devices_without_identifier(
             await super().get_nodes(dev_id)
             return {"nodes": []}
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", PartialClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", PartialClient)
     import_mock = AsyncMock()
     monkeypatch.setattr(termoweb_init, "_async_import_energy_history", import_mock)
 
@@ -1125,7 +1134,7 @@ def test_async_setup_entry_rejects_all_devices_without_identifier(
         async def list_devices(self) -> list[dict[str, Any]]:
             return [{"name": "Missing"}, {}]
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", InvalidClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", InvalidClient)
     entry = ConfigEntry("invalid", data={"username": "user", "password": "pw"})
     stub_hass.config_entries.add(entry)
 
@@ -1163,7 +1172,7 @@ def test_async_setup_entry_supports_mapping_devices_payload(
             await super().get_nodes(dev_id)
             return {}
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", MappingClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", MappingClient)
     import_mock = AsyncMock()
     monkeypatch.setattr(termoweb_init, "_async_import_energy_history", import_mock)
 
@@ -1197,7 +1206,7 @@ def test_async_setup_entry_logs_unexpected_devices_payload(
         async def list_devices(self) -> Any:
             return "unexpected"
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", WeirdClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", WeirdClient)
     entry = ConfigEntry("weird", data={"username": "user", "password": "pw"})
     stub_hass.config_entries.add(entry)
 
@@ -1225,7 +1234,7 @@ def test_async_setup_entry_defers_until_started(
         async def get_nodes(self, dev_id: str) -> dict[str, Any]:
             return {"nodes": [{"addr": "A", "type": "htr"}]}
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", HappyClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", HappyClient)
     import_mock = AsyncMock()
     monkeypatch.setattr(termoweb_init, "_async_import_energy_history", import_mock)
 
@@ -1268,7 +1277,7 @@ def test_import_energy_history_service_invocation(
                 ]
             }
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", HappyClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", HappyClient)
     import_mock = AsyncMock()
     monkeypatch.setattr(termoweb_init, "_async_import_energy_history", import_mock)
 
@@ -1325,7 +1334,7 @@ def test_recalc_poll_interval_transitions(
         async def list_devices(self) -> list[dict[str, Any]]:
             return [{"dev_id": "dev-1"}]
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", PollClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", PollClient)
     entry = ConfigEntry("poll", data={"username": "user", "password": "pw"})
     stub_hass.config_entries.add(entry)
 
@@ -1431,7 +1440,7 @@ def test_recalc_poll_interval_edge_cases(
         async def list_devices(self) -> list[dict[str, Any]]:
             return [{"dev_id": "dev-edge"}]
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", PollClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", PollClient)
     entry = ConfigEntry("poll-edge", data={"username": "user", "password": "pw"})
     stub_hass.config_entries.add(entry)
 
@@ -1592,7 +1601,7 @@ def test_ws_status_dispatcher_filters_entry(
         async def list_devices(self) -> list[dict[str, Any]]:
             return [{"dev_id": "dev-1"}]
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", DispatchClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", DispatchClient)
     entry1 = ConfigEntry("dispatch1", data={"username": "user", "password": "pw"})
     entry2 = ConfigEntry("dispatch2", data={"username": "user", "password": "pw"})
     stub_hass.config_entries.add(entry1)
@@ -1701,7 +1710,7 @@ def test_coordinator_listener_starts_new_ws(
         async def list_devices(self) -> list[dict[str, Any]]:
             return [{"dev_id": "dev-1"}]
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", ListenerClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", ListenerClient)
     ws_module = importlib.import_module(
         "custom_components.termoweb.backend.termoweb_ws"
     )
@@ -1769,7 +1778,7 @@ def test_import_energy_history_service_error_logging(
     def capture_exception(msg: str, *args: Any, **kwargs: Any) -> None:
         log_calls.append((msg, args, kwargs))
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", ServiceClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", ServiceClient)
     monkeypatch.setattr(termoweb_init, "_async_import_energy_history", failing_import)
     monkeypatch.setattr(termoweb_init._LOGGER, "exception", capture_exception)
 
@@ -1827,7 +1836,7 @@ def test_import_energy_history_service_logs_global_task_errors(
     def capture_exception(msg: str, *args: Any, **kwargs: Any) -> None:
         log_calls.append(msg % args if args else msg)
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", ServiceClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", ServiceClient)
     monkeypatch.setattr(termoweb_init, "_async_import_energy_history", failing_import)
     energy_mod = importlib.import_module("custom_components.termoweb.energy")
     monkeypatch.setattr(energy_mod._LOGGER, "exception", capture_exception)
@@ -1862,7 +1871,7 @@ def test_import_energy_history_service_logs_entry_task_exception(
     async def failing_import(*args: Any, **kwargs: Any) -> None:
         raise RuntimeError("entry task boom")
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", ServiceClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", ServiceClient)
     monkeypatch.setattr(termoweb_init, "_async_import_energy_history", failing_import)
 
     entry = ConfigEntry("svc-entry", data={"username": "user", "password": "pw"})
@@ -1891,7 +1900,7 @@ def test_start_ws_skips_when_task_running(
         async def list_devices(self) -> list[dict[str, Any]]:
             return [{"dev_id": "dev-1"}]
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", HappyClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", HappyClient)
     entry = ConfigEntry("skip", data={"username": "user", "password": "pw"})
     stub_hass.config_entries.add(entry)
 
@@ -1942,7 +1951,7 @@ def test_import_energy_history_service_handles_string_ids_and_cancelled(
             return {"nodes": [{"addr": "A", "type": "htr"}]}
 
     cancel_import = AsyncMock(side_effect=asyncio.CancelledError())
-    monkeypatch.setattr(termoweb_init, "RESTClient", ServiceClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", ServiceClient)
     monkeypatch.setattr(termoweb_init, "_async_import_energy_history", cancel_import)
 
     entry = ConfigEntry("svc", data={"username": "user", "password": "pw"})
@@ -1987,7 +1996,7 @@ def test_async_unload_entry_handles_task_and_client_errors(
         async def list_devices(self) -> list[dict[str, Any]]:
             return [{"dev_id": "dev-1"}]
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", HappyClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", HappyClient)
     entry = ConfigEntry("unload", data={"username": "user", "password": "pw"})
     stub_hass.config_entries.add(entry)
 
@@ -2035,7 +2044,7 @@ def test_async_setup_entry_cleans_up_on_hass_stop(
         async def list_devices(self) -> list[dict[str, Any]]:
             return [{"dev_id": "dev-stop"}]
 
-    monkeypatch.setattr(termoweb_init, "RESTClient", HappyClient)
+    monkeypatch.setattr(backend_factory, "RESTClient", HappyClient)
     entry = ConfigEntry("stop", data={"username": "user", "password": "pw"})
     stub_hass.config_entries.add(entry)
 

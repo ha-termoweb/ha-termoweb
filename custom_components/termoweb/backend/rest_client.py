@@ -1,3 +1,5 @@
+"""REST client for the TermoWeb backend."""
+
 from __future__ import annotations
 
 import asyncio
@@ -10,8 +12,8 @@ from typing import Any
 
 import aiohttp
 
-from .backend.sanitize import mask_identifier, redact_text
-from .codecs.termoweb_codec import (
+from custom_components.termoweb.backend.sanitize import mask_identifier, redact_text
+from custom_components.termoweb.codecs.termoweb_codec import (
     build_boost_payload,
     build_extra_options_payload,
     build_settings_payload,
@@ -20,7 +22,7 @@ from .codecs.termoweb_codec import (
     decode_nodes_payload,
     decode_samples,
 )
-from .const import (
+from custom_components.termoweb.const import (
     ACCEPT_LANGUAGE,
     API_BASE,
     BASIC_AUTH_B64,
@@ -34,7 +36,7 @@ from .const import (
     get_brand_requested_with,
     get_brand_user_agent,
 )
-from .domain.commands import (
+from custom_components.termoweb.domain.commands import (
     SetExtraOptions,
     SetMode,
     SetPresetTemps,
@@ -44,7 +46,12 @@ from .domain.commands import (
     StartBoost,
     StopBoost,
 )
-from .inventory import Node, NodeDescriptor, normalize_node_addr, normalize_node_type
+from custom_components.termoweb.inventory import (
+    Node,
+    NodeDescriptor,
+    normalize_node_addr,
+    normalize_node_type,
+)
 
 _LOGGER = logging.getLogger(__name__)
 

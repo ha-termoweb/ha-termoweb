@@ -2,8 +2,6 @@
 
 custom_components/termoweb/__init__.py :: _async_import_energy_history
     Delegate to the energy helper with shared rate limiting and filters.
-custom_components/termoweb/__init__.py :: _build_unknown_node_probe_requests
-    Return common REST endpoints to query for an unknown node type.
 custom_components/termoweb/__init__.py :: _async_probe_unknown_node_types
     Log discovery probes for node types not yet supported.
 custom_components/termoweb/__init__.py :: _register_diagnostics_platform
@@ -14,8 +12,6 @@ custom_components/termoweb/__init__.py :: _async_register_diagnostics_when_ready
     Wait for diagnostics setup and register TermoWeb helpers.
 custom_components/termoweb/__init__.py :: _async_register_diagnostics_when_ready._async_import_diagnostics_module
     Import the diagnostics module without blocking the event loop.
-custom_components/termoweb/__init__.py :: create_rest_client
-    Return a REST client configured for the selected brand.
 custom_components/termoweb/__init__.py :: async_list_devices
     Call ``list_devices`` logging auth/connection issues consistently.
 custom_components/termoweb/__init__.py :: async_setup_entry
@@ -48,56 +44,6 @@ custom_components/termoweb/__init__.py :: async_migrate_entry
     Migrate a config entry; no migrations are needed yet.
 custom_components/termoweb/__init__.py :: async_update_entry_options
     Handle options updates; recompute interval if needed.
-custom_components/termoweb/api.py :: RESTClient.__init__
-    Initialise the REST client with authentication context.
-custom_components/termoweb/api.py :: RESTClient.api_base
-    Expose API base for auxiliary clients (e.g. WS).
-custom_components/termoweb/api.py :: RESTClient._request
-    Perform an HTTP request.
-custom_components/termoweb/api.py :: RESTClient._ensure_token
-    Ensure a bearer token is present; fetch if missing.
-custom_components/termoweb/api.py :: RESTClient.user_agent
-    Return the configured User-Agent string.
-custom_components/termoweb/api.py :: RESTClient.requested_with
-    Return the configured X-Requested-With header.
-custom_components/termoweb/api.py :: RESTClient.authed_headers
-    Return HTTP headers including a valid bearer token.
-custom_components/termoweb/api.py :: RESTClient.refresh_token
-    Refresh the cached bearer token immediately.
-custom_components/termoweb/api.py :: RESTClient.list_devices
-    Return normalized device list: [{'dev_id', ...}, ...].
-custom_components/termoweb/api.py :: RESTClient.get_nodes
-    Return raw nodes payload for a device (shape varies by firmware).
-custom_components/termoweb/api.py :: RESTClient.get_node_settings
-    Return settings/state for a node.
-custom_components/termoweb/api.py :: RESTClient.get_rtc_time
-    Return RTC metadata for a device's manager endpoint.
-custom_components/termoweb/api.py :: RESTClient._ensure_temperature
-    Normalise a numeric temperature to a string with one decimal.
-custom_components/termoweb/api.py :: RESTClient._ensure_prog
-    Validate and normalise a weekly program list.
-custom_components/termoweb/api.py :: RESTClient._ensure_ptemp
-    Validate preset temperatures and return formatted strings.
-custom_components/termoweb/api.py :: RESTClient._extract_samples
-    Normalise heater samples payloads into {"t", "counter"} lists.
-custom_components/termoweb/api.py :: RESTClient.set_node_settings
-    Update heater settings.
-custom_components/termoweb/api.py :: RESTClient._build_acm_extra_options_payload
-    Return a validated payload for accumulator extra options.
-custom_components/termoweb/api.py :: RESTClient.set_acm_extra_options
-    Write default boost settings for an accumulator.
-custom_components/termoweb/api.py :: RESTClient.set_acm_boost_state
-    Start or stop an accumulator boost session.
-custom_components/termoweb/api.py :: RESTClient.debug_probe_get
-    Issue a GET request with verbose logging for discovery probes.
-custom_components/termoweb/api.py :: RESTClient.get_node_samples
-    Return heater samples as list of {"t", "counter"} dicts.
-custom_components/termoweb/api.py :: RESTClient._resolve_node_descriptor
-    Return ``(node_type, addr)`` for the provided descriptor.
-custom_components/termoweb/api.py :: RESTClient._log_non_htr_payload
-    Log payloads for unsupported node types at DEBUG level.
-custom_components/termoweb/api.py :: RESTClient.normalise_ws_nodes
-    Return websocket node payloads unchanged by default.
 custom_components/termoweb/backend/__init__.py :: __getattr__
     Lazily import backend implementations to avoid circular imports.
 custom_components/termoweb/backend/base.py :: HttpClientProto.list_devices
@@ -132,6 +78,8 @@ custom_components/termoweb/backend/base.py :: normalise_sample_records
     Return sorted sample dictionaries containing ``ts`` and ``energy_wh``.
 custom_components/termoweb/backend/base.py :: fetch_normalised_hourly_samples
     Return per-node normalised samples for ``nodes`` between ``start`` and ``end``.
+custom_components/termoweb/backend/debug.py :: build_unknown_node_probe_requests
+    Return common REST endpoints to query for an unknown node type.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRequestError.__init__
     Initialise error metadata for logging and diagnostics.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._post_segmented
@@ -306,6 +254,58 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._replay_su
     Replay cached subscription paths after a reconnect.
 custom_components/termoweb/backend/factory.py :: create_backend
     Create a backend for the given brand.
+custom_components/termoweb/backend/factory.py :: create_rest_client
+    Return a REST client configured for the selected brand.
+custom_components/termoweb/backend/rest_client.py :: RESTClient.__init__
+    Initialise the REST client with authentication context.
+custom_components/termoweb/backend/rest_client.py :: RESTClient.api_base
+    Expose API base for auxiliary clients (e.g. WS).
+custom_components/termoweb/backend/rest_client.py :: RESTClient._request
+    Perform an HTTP request.
+custom_components/termoweb/backend/rest_client.py :: RESTClient._ensure_token
+    Ensure a bearer token is present; fetch if missing.
+custom_components/termoweb/backend/rest_client.py :: RESTClient.user_agent
+    Return the configured User-Agent string.
+custom_components/termoweb/backend/rest_client.py :: RESTClient.requested_with
+    Return the configured X-Requested-With header.
+custom_components/termoweb/backend/rest_client.py :: RESTClient.authed_headers
+    Return HTTP headers including a valid bearer token.
+custom_components/termoweb/backend/rest_client.py :: RESTClient.refresh_token
+    Refresh the cached bearer token immediately.
+custom_components/termoweb/backend/rest_client.py :: RESTClient.list_devices
+    Return normalized device list: [{'dev_id', ...}, ...].
+custom_components/termoweb/backend/rest_client.py :: RESTClient.get_nodes
+    Return raw nodes payload for a device (shape varies by firmware).
+custom_components/termoweb/backend/rest_client.py :: RESTClient.get_node_settings
+    Return settings/state for a node.
+custom_components/termoweb/backend/rest_client.py :: RESTClient.get_rtc_time
+    Return RTC metadata for a device's manager endpoint.
+custom_components/termoweb/backend/rest_client.py :: RESTClient._ensure_temperature
+    Normalise a numeric temperature to a string with one decimal.
+custom_components/termoweb/backend/rest_client.py :: RESTClient._ensure_prog
+    Validate and normalise a weekly program list.
+custom_components/termoweb/backend/rest_client.py :: RESTClient._ensure_ptemp
+    Validate preset temperatures and return formatted strings.
+custom_components/termoweb/backend/rest_client.py :: RESTClient._extract_samples
+    Normalise heater samples payloads into {"t", "counter"} lists.
+custom_components/termoweb/backend/rest_client.py :: RESTClient.set_node_settings
+    Update heater settings.
+custom_components/termoweb/backend/rest_client.py :: RESTClient._build_acm_extra_options_payload
+    Return a validated payload for accumulator extra options.
+custom_components/termoweb/backend/rest_client.py :: RESTClient.set_acm_extra_options
+    Write default boost settings for an accumulator.
+custom_components/termoweb/backend/rest_client.py :: RESTClient.set_acm_boost_state
+    Start or stop an accumulator boost session.
+custom_components/termoweb/backend/rest_client.py :: RESTClient.debug_probe_get
+    Issue a GET request with verbose logging for discovery probes.
+custom_components/termoweb/backend/rest_client.py :: RESTClient.get_node_samples
+    Return heater samples as list of {"t", "counter"} dicts.
+custom_components/termoweb/backend/rest_client.py :: RESTClient._resolve_node_descriptor
+    Return ``(node_type, addr)`` for the provided descriptor.
+custom_components/termoweb/backend/rest_client.py :: RESTClient._log_non_htr_payload
+    Log payloads for unsupported node types at DEBUG level.
+custom_components/termoweb/backend/rest_client.py :: RESTClient.normalise_ws_nodes
+    Return websocket node payloads unchanged by default.
 custom_components/termoweb/backend/sanitize.py :: redact_text
     Return ``value`` with bearer tokens, emails and query tokens removed.
 custom_components/termoweb/backend/sanitize.py :: redact_token_fragment

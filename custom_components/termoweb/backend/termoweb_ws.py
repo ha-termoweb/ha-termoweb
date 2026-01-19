@@ -29,7 +29,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 import socketio
 
-from custom_components.termoweb.api import RESTClient
+from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.backend.sanitize import (
     mask_identifier,
     redact_token_fragment,

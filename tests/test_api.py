@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock
 import aiohttp
 import pytest
 
-import custom_components.termoweb.api as api
+import custom_components.termoweb.backend.rest_client as api
 from custom_components.termoweb.backend.ducaheat import (
     DucaheatRESTClient,
     DucaheatRequestError,
