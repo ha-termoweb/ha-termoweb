@@ -197,6 +197,7 @@ def _make_client(
     monkeypatch: pytest.MonkeyPatch,
     *,
     ws: StubWebSocket | None = None,
+    inventory: Inventory | None = None,
 ) -> ducaheat_ws.DucaheatWSClient:
     """Create a websocket client with deterministic helpers."""
 
@@ -206,11 +207,17 @@ def _make_client(
     hass.data.setdefault(DOMAIN, {})
     coordinator = DummyCoordinator()
     monkeypatch.setattr(ducaheat_ws, "resolved_nodes", None, raising=False)
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
+    resolved_inventory = inventory or Inventory(
+        "device",
+        build_node_inventory(raw_nodes),
+    )
     runtime = build_entry_runtime(
         hass=hass,
         entry_id="entry",
         dev_id="device",
         coordinator=coordinator,
+        inventory=resolved_inventory,
     )
     client = ducaheat_ws.DucaheatWSClient(
         hass,
@@ -219,22 +226,13 @@ def _make_client(
         api_client=DummyREST(),
         coordinator=coordinator,
         session=session,  # type: ignore[arg-type]
+        inventory=resolved_inventory,
     )
     monkeypatch.setattr(client, "_get_token", AsyncMock(return_value="token"))
     monkeypatch.setattr(ducaheat_ws, "_rand_t", lambda: "P123456")
-    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
-    inventory = Inventory(
-        "device",
-        build_node_inventory(raw_nodes),
-    )
-    runtime.inventory = inventory
+    client._inventory = resolved_inventory
+    runtime.inventory = resolved_inventory
     return client
-
-
-def _drop_inventory(runtime: Any) -> None:
-    """Remove inventory data from a runtime."""
-
-    runtime.inventory = None  # type: ignore[assignment]
 
 
 @pytest.mark.asyncio
@@ -641,10 +639,6 @@ def test_dispatch_nodes_includes_inventory_metadata(
     coordinator = client._coordinator
     client._dispatcher = MagicMock()
 
-    energy_coordinator = SimpleNamespace(update_addresses=MagicMock())
-    runtime = hass.data[DOMAIN][client.entry_id]
-    runtime.energy_coordinator = energy_coordinator
-
     payload = {
         "htr": {
             "settings": {"1": {"target_temp": 21}},
@@ -668,7 +662,6 @@ def test_dispatch_nodes_includes_inventory_metadata(
     runtime = hass.data[DOMAIN][client.entry_id]
     assert runtime.inventory is inventory
     assert not hasattr(runtime, "sample_aliases")
-    energy_coordinator.update_addresses.assert_called_once_with(inventory)
 
 
 def test_incremental_updates_preserve_address_payload(
@@ -2130,9 +2123,6 @@ async def test_subscribe_feeds_stores_inventory_only(
     """Subscription state should persist the resolved inventory without nodes."""
 
     client = _make_client(monkeypatch)
-    runtime = client.hass.data[DOMAIN]["entry"]
-    _drop_inventory(runtime)
-
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
     inventory = Inventory(
         client.dev_id,
@@ -2152,7 +2142,6 @@ async def test_subscribe_feeds_stores_inventory_only(
     assert count == 2
     assert {path for _evt, path in emissions} == {"/htr/1/samples", "/htr/1/status"}
     assert client._subscription_paths == {"/htr/1/samples", "/htr/1/status"}
-    assert runtime.inventory is inventory
 
 
 @pytest.mark.asyncio
@@ -2161,13 +2150,12 @@ async def test_subscribe_feeds_uses_inventory_cache(
 ) -> None:
     """Existing inventory metadata should drive subscription target selection."""
 
-    client = _make_client(monkeypatch)
     node_inventory = build_node_inventory([{"type": "htr", "addr": "7"}])
     inventory = Inventory(
-        client.dev_id,
+        "device",
         node_inventory,
     )
-    client._inventory = inventory
+    client = _make_client(monkeypatch, inventory=inventory)
 
     emissions: list[tuple[str, str]] = []
     monkeypatch.setattr(
@@ -2192,35 +2180,6 @@ async def test_subscribe_feeds_uses_inventory_cache(
 
 
 @pytest.mark.asyncio
-async def test_subscribe_feeds_uses_record_inventory_cache(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Stored record inventory should be reused when the client cache is empty."""
-
-    client = _make_client(monkeypatch)
-    client._inventory = None
-    runtime = client.hass.data[DOMAIN]["entry"]
-    node_inventory = build_node_inventory([{"type": "htr", "addr": "9"}])
-    runtime.inventory = Inventory(
-        client.dev_id,
-        node_inventory,
-    )
-
-    emissions: list[str] = []
-
-    async def _capture(event: str, path: str) -> None:
-        emissions.append(path)
-
-    monkeypatch.setattr(client, "_emit_sio", _capture)
-
-    count = await client._subscribe_feeds()
-
-    assert count == 2
-    assert set(emissions) == {"/htr/9/samples", "/htr/9/status"}
-    assert client._subscription_paths == {"/htr/9/samples", "/htr/9/status"}
-
-
-@pytest.mark.asyncio
 async def test_subscribe_feeds_handles_missing_targets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2228,7 +2187,7 @@ async def test_subscribe_feeds_handles_missing_targets(
 
     client = _make_client(monkeypatch)
     payload = {"nodes": []}
-    client.hass.data[DOMAIN]["entry"].inventory = Inventory(
+    client._inventory = Inventory(
         "device",
         build_node_inventory(payload),
     )
@@ -2240,152 +2199,6 @@ async def test_subscribe_feeds_handles_missing_targets(
     assert count == 0
     emit_mock.assert_not_awaited()
     assert client._subscription_paths == set()
-
-
-@pytest.mark.asyncio
-async def test_subscribe_feeds_prefers_coordinator_inventory(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Coordinator inventory should avoid resolver lookups."""
-
-    client = _make_client(monkeypatch)
-    runtime = client.hass.data[DOMAIN]["entry"]
-    _drop_inventory(runtime)
-    inventory_nodes = build_node_inventory([{"type": "htr", "addr": "3"}])
-    coordinator_inventory = Inventory(
-        client.dev_id,
-        inventory_nodes,
-    )
-    object.__setattr__(
-        coordinator_inventory,
-        "_heater_sample_targets_cache",
-        [("htr", "3")],
-    )
-    object.__setattr__(
-        coordinator_inventory,
-        "_energy_sample_types_cache",
-        frozenset({"htr"}),
-    )
-    client._coordinator._inventory = coordinator_inventory
-    runtime.inventory = coordinator_inventory
-    client._inventory = coordinator_inventory
-
-    emissions: list[str] = []
-
-    async def _capture(event: str, path: str) -> None:
-        emissions.append(path)
-
-    monkeypatch.setattr(client, "_emit_sio", _capture)
-
-    count = await client._subscribe_feeds()
-
-    assert count == 2
-    assert set(emissions) == {"/htr/3/samples", "/htr/3/status"}
-
-
-@pytest.mark.asyncio
-async def test_subscribe_feeds_handles_mapping_record(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Mapping entries should be normalised to mutable state."""
-
-    client = _make_client(monkeypatch)
-    _drop_inventory(client.hass.data[DOMAIN]["entry"])
-    raw_nodes = {"nodes": [{"addr": "8", "type": "htr"}]}
-    inventory = Inventory(
-        client.dev_id,
-        build_node_inventory(raw_nodes),
-    )
-    runtime = client.hass.data[DOMAIN]["entry"]
-    runtime.inventory = inventory
-    client._inventory = None
-
-    emissions: list[str] = []
-
-    async def _capture(event: str, path: str) -> None:
-        emissions.append(path)
-
-    monkeypatch.setattr(client, "_emit_sio", _capture)
-
-    count = await client._subscribe_feeds()
-
-    assert count == 2
-    assert set(emissions) == {"/htr/8/samples", "/htr/8/status"}
-    assert runtime.inventory is inventory
-
-
-@pytest.mark.asyncio
-async def test_subscribe_feeds_handles_missing_record(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Missing records should still allow subscriptions via client inventory."""
-
-    client = _make_client(monkeypatch)
-    client.hass.data[DOMAIN].pop("entry", None)
-
-    raw_nodes = {"nodes": [{"addr": "6", "type": "htr"}]}
-    inventory = Inventory(
-        client.dev_id,
-        build_node_inventory(raw_nodes),
-    )
-    client._inventory = inventory
-
-    emissions: list[str] = []
-
-    async def _capture(event: str, path: str) -> None:
-        emissions.append(path)
-
-    monkeypatch.setattr(client, "_emit_sio", _capture)
-
-    count = await client._subscribe_feeds()
-
-    assert count == 2
-    assert set(emissions) == {"/htr/6/samples", "/htr/6/status"}
-
-
-@pytest.mark.asyncio
-async def test_maybe_subscribe_retries_when_inventory_ready(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Deferred subscriptions should retry after inventory becomes available."""
-
-    client = _make_client(monkeypatch)
-    client._ws = SimpleNamespace(closed=False)
-    client._status = "connected"
-    _drop_inventory(client.hass.data[DOMAIN]["entry"])
-    client._inventory = None
-    client._coordinator._inventory = None
-
-    now = 1_000.0
-    monkeypatch.setattr(ducaheat_ws.time, "time", lambda: now)
-
-    await client._subscribe_feeds()
-
-    assert client._pending_subscribe is True
-
-    inventory = Inventory(
-        client.dev_id,
-        build_node_inventory([{"type": "htr", "addr": "5"}]),
-    )
-    client.hass.data[DOMAIN]["entry"].inventory = inventory
-    client._inventory = inventory
-
-    emissions: list[str] = []
-    monkeypatch.setattr(
-        client,
-        "_emit_sio",
-        AsyncMock(side_effect=lambda evt, path: emissions.append(path)),
-    )
-
-    now += client._subscribe_backoff_s + 1.0
-    count = await client._maybe_subscribe(now)
-
-    assert count == 2
-    assert client._pending_subscribe is False
-    assert set(emissions) == {"/htr/5/samples", "/htr/5/status"}
-    assert client._subscribe_backoff_s == pytest.approx(
-        ducaheat_ws._SUBSCRIBE_BACKOFF_INITIAL
-    )
 
 
 @pytest.mark.asyncio
@@ -2416,24 +2229,20 @@ async def test_maybe_subscribe_scales_backoff(
 async def test_subscribe_feeds_defers_when_inventory_missing(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Inventory resolution failures should mark subscriptions as pending."""
+    """Missing inventory should raise and prevent subscriptions."""
 
     client = _make_client(monkeypatch)
-    _drop_inventory(client.hass.data[DOMAIN]["entry"])
     client._inventory = None
-    client._coordinator._inventory = None
     caplog.set_level(logging.INFO)
 
     emit_mock = AsyncMock()
     monkeypatch.setattr(client, "_emit_sio", emit_mock)
 
-    count = await client._subscribe_feeds()
+    with pytest.raises(TypeError):
+        await client._subscribe_feeds()
 
-    assert count == 0
-    assert client._pending_subscribe is True
-    assert client._last_subscribe_attempt_ts > 0
+    assert client._pending_subscribe is False
     emit_mock.assert_not_awaited()
-    assert any("inventory not ready" in message for message in caplog.messages)
 
 
 def test_request_resubscribe_sets_pending(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2588,17 +2397,16 @@ async def test_subscribe_telemetry_tracks_success_and_failure(
     client._ws = SimpleNamespace(closed=False)
     client._inventory = None
     runtime = client.hass.data[DOMAIN][client.entry_id]
-    _drop_inventory(runtime)
     monkeypatch.setattr(client, "_emit_sio", AsyncMock())
 
-    result_first = await client._subscribe_feeds(now=10.0)
+    with pytest.raises(TypeError):
+        await client._subscribe_feeds(now=10.0)
 
     state = runtime.ws_state[client.dev_id]
-    assert result_first == 0
     assert state["subscribe_attempts_total"] == 1
     assert state["subscribe_fail_total"] == 1
     assert state["subscribe_success_total"] == 0
-    assert client._pending_subscribe is True
+    assert client._pending_subscribe is False
 
     _set_inventory(client, _build_inventory_payload())
     client._pending_subscribe = True

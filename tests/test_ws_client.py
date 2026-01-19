@@ -772,7 +772,7 @@ def test_dispatch_nodes_reuses_record_inventory(
         dev_id="device",
         coordinator=coordinator,
     )
-    dummy._inventory = None
+    dummy._inventory = inventory
     dummy._dispatch_nodes(payload)
 
     coordinator.update_nodes.assert_not_called()
@@ -783,69 +783,20 @@ def test_dispatch_nodes_reuses_record_inventory(
     assert "nodes" not in dispatched_payload
 
 
-def test_prepare_nodes_dispatch_uses_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_prepare_nodes_dispatch_uses_inventory() -> None:
     """Existing inventory objects should be reused by the dispatch helper."""
 
-    hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
-    coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
     node_inventory = build_node_inventory([{"type": "htr", "addr": "4"}])
     inventory = Inventory(
         "dev",
         node_inventory,
     )
     context = base_ws._prepare_nodes_dispatch(
-        hass,
-        entry_id="entry",
-        coordinator=coordinator,
         raw_nodes=None,
         inventory=inventory,
     )
 
     assert context.inventory is inventory
-    coordinator.update_nodes.assert_not_called()
-
-
-def test_prepare_nodes_dispatch_prefers_runtime_inventory() -> None:
-    """Runtime inventory should be preferred over coordinator inventory."""
-
-    inventory = Inventory("dev", [])
-    hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
-    build_entry_runtime(
-        hass=hass,
-        entry_id="entry",
-        dev_id="raw",
-        inventory=inventory,
-    )
-    coordinator = SimpleNamespace(update_nodes=MagicMock())
-
-    context = base_ws._prepare_nodes_dispatch(
-        hass,
-        entry_id="entry",
-        coordinator=coordinator,
-        raw_nodes={},
-    )
-    assert context.inventory is inventory
-    coordinator.update_nodes.assert_not_called()
-
-    hass_numeric = SimpleNamespace(data={base_ws.DOMAIN: {}})
-    build_entry_runtime(
-        hass=hass_numeric,
-        entry_id="entry",
-        dev_id="99",
-    )
-    coordinator_numeric = SimpleNamespace(update_nodes=MagicMock(), inventory=inventory)
-
-    context_numeric = base_ws._prepare_nodes_dispatch(
-        hass_numeric,
-        entry_id="entry",
-        coordinator=coordinator_numeric,
-        raw_nodes={"nodes": []},
-    )
-
-    assert context_numeric.inventory is not inventory
-    assert context_numeric.inventory is not None
-    assert context_numeric.inventory.dev_id == "99"
-    coordinator_numeric.update_nodes.assert_not_called()
 
 
 def test_termoweb_nodes_to_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1012,12 +963,7 @@ def test_ws_common_ensure_type_bucket_uses_inventory_without_clones(
         ]
     }
     inventory = Inventory("dev", build_node_inventory(raw_nodes))
-    build_entry_runtime(
-        hass=dummy.hass,
-        entry_id="entry",
-        dev_id="dev",
-        inventory=inventory,
-    )
+    dummy._inventory = inventory
 
     nodes_by_type = {
         "htr": MappingProxyType(
@@ -1054,44 +1000,6 @@ def test_ws_common_ensure_type_bucket_uses_inventory_without_clones(
     )
     assert dev_map_non_mapping_settings["settings"]["htr"] == {}
     assert "addresses_by_type" not in dev_map_non_mapping_settings
-
-
-def test_ws_common_apply_heater_addresses_uses_inventory(
-    ws_common_stub: Callable[..., base_ws._WSCommon],
-) -> None:
-    """Heater address helper should reuse the immutable inventory data."""
-
-    energy_coordinator = SimpleNamespace(update_addresses=MagicMock())
-    raw_nodes = {
-        "nodes": [
-            {"type": "htr", "addr": "1"},
-            {"type": "acm", "addr": "2"},
-            {"type": "pmo", "addr": "7"},
-        ]
-    }
-    inventory = Inventory("dev", build_node_inventory(raw_nodes))
-    hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
-    hass_record = build_entry_runtime(
-        hass=hass,
-        entry_id="entry",
-        dev_id="dev",
-        inventory=inventory,
-        energy_coordinator=energy_coordinator,
-    )
-
-    dummy = ws_common_stub(
-        hass=hass,
-        coordinator=SimpleNamespace(),
-    )
-    dummy._apply_heater_addresses({}, inventory=inventory)
-
-    assert not hasattr(hass_record, "sample_aliases")
-    energy_coordinator.update_addresses.assert_called_once_with(inventory)
-
-    energy_coordinator.update_addresses.reset_mock()
-    hass_record.inventory = None  # type: ignore[assignment]
-    dummy._apply_heater_addresses({}, inventory=None)
-    energy_coordinator.update_addresses.assert_called_once_with(inventory)
 
 
 @pytest.mark.asyncio
@@ -1814,7 +1722,7 @@ def test_ws_common_dispatch_nodes(
         hass=hass,
         coordinator=coordinator,
     )
-    dummy._inventory = None
+    dummy._inventory = inventory_obj
     payload = {"nodes": raw_nodes}
     dummy._dispatch_nodes(payload)
 
