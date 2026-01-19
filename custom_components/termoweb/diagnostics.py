@@ -6,6 +6,7 @@ from collections.abc import Mapping
 import inspect
 import logging
 import platform
+import typing
 from typing import Any, Final
 
 from homeassistant.components.diagnostics import async_redact_data
@@ -62,7 +63,7 @@ def _extract_websocket_clients(runtime: EntryRuntime) -> list[dict[str, Any]]:
 
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
-) -> Mapping[str, Any]:
+) -> Mapping[str, typing.Any]:
     """Return a diagnostics payload for ``entry``."""
 
     runtime = require_runtime(hass, entry.entry_id)

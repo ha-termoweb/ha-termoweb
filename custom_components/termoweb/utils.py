@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import math
+import typing
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -107,7 +108,7 @@ def build_gateway_device_info(
         return info
 
     coordinator = entry_data.coordinator
-    data: Mapping[str, Any] | None = None
+    data: Mapping[str, typing.Any] | None = None
     if coordinator is not None:
         data = getattr(coordinator, "data", None)
         if not isinstance(data, Mapping):

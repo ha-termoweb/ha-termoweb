@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMappin
 from dataclasses import dataclass, fields
 from datetime import datetime, timedelta
 import logging
+import typing
 from typing import Any, Final, cast
 
 from homeassistant.core import HomeAssistant, callback
@@ -639,7 +640,7 @@ def _derive_boost_state(
 
 
 def derive_boost_state(
-    settings: Mapping[str, Any] | None, coordinator: Any
+    settings: Mapping[str, typing.Any] | None, coordinator: Any
 ) -> BoostState:
     """Return derived boost metadata for mapping ``settings``."""
 

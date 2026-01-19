@@ -19,6 +19,7 @@ import logging
 import random
 import time
 from types import SimpleNamespace
+import typing
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import weakref
@@ -239,7 +240,7 @@ class WebSocketClient(_WSCommon):
             headers["Origin"] = origin
         return headers
 
-    def _sanitise_headers(self, headers: Mapping[str, Any]) -> dict[str, Any]:
+    def _sanitise_headers(self, headers: Mapping[str, typing.Any]) -> dict[str, Any]:
         """Redact sensitive header values for logging."""
 
         sanitised: dict[str, Any] = {}
@@ -844,7 +845,9 @@ class WebSocketClient(_WSCommon):
 
         return resolve_ws_update_section(section)
 
-    def _forward_sample_updates(self, updates: Mapping[str, Mapping[str, Any]]) -> None:
+    def _forward_sample_updates(
+        self, updates: Mapping[str, Mapping[str, typing.Any]]
+    ) -> None:
         """Relay websocket heater sample updates to the energy coordinator."""
 
         forward_ws_sample_updates(
@@ -909,7 +912,7 @@ class WebSocketClient(_WSCommon):
 
     def _nodes_to_deltas(
         self,
-        nodes: Mapping[str, Any],
+        nodes: Mapping[str, typing.Any],
         *,
         inventory: Inventory | None,
     ) -> list[NodeSettingsDelta]:
@@ -946,7 +949,7 @@ class WebSocketClient(_WSCommon):
                     if not addr:
                         continue
                     bucket = per_addr.setdefault(addr, {})
-                    settings_delta: Mapping[str, Any] = {}
+                    settings_delta: Mapping[str, typing.Any] = {}
                     if section == "status" and isinstance(payload, Mapping):
                         settings_delta = canonicalize_settings_payload(
                             {"status": payload}
@@ -994,7 +997,7 @@ class WebSocketClient(_WSCommon):
         except Exception:
             _LOGGER.debug("WS: failed to apply websocket deltas", exc_info=True)
 
-    def _dispatch_nodes(self, payload: Mapping[str, Any]) -> None:
+    def _dispatch_nodes(self, payload: Mapping[str, typing.Any]) -> None:
         """Publish node updates using the shared inventory metadata."""
 
         raw_nodes: Any

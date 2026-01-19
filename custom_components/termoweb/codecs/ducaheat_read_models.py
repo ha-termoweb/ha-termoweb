@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+import typing
 from typing import Any
 
 from pydantic import (
@@ -115,7 +116,7 @@ def _normalise_prog(data: Any) -> list[int] | None:
     if not isinstance(data, Mapping):
         return None
 
-    days_section: Mapping[str, Any] | None = None
+    days_section: Mapping[str, typing.Any] | None = None
     if isinstance(data.get("days"), Mapping):
         days_section = data["days"]
     else:
@@ -235,7 +236,7 @@ class DucaheatStatusSegment(DucaheatReadModel):
     boost_temp: str | None = None
     boost_end_day: int | None = None
     boost_end_min: int | None = None
-    boost_end: Mapping[str, Any] | None = Field(default=None, exclude=True)
+    boost_end: Mapping[str, typing.Any] | None = Field(default=None, exclude=True)
     charging: bool | None = None
     charge_level: float | int | None = None
     current_charge_per: int | None = None
@@ -365,7 +366,7 @@ class DucaheatExtraOptions(DucaheatReadModel):
     boost_temp: str | None = None
     boost_end_day: int | None = None
     boost_end_min: int | None = None
-    boost_end: Mapping[str, Any] | None = Field(default=None, exclude=True)
+    boost_end: Mapping[str, typing.Any] | None = Field(default=None, exclude=True)
     charging: bool | None = None
     current_charge_per: int | None = None
     target_charge_per: int | None = None
@@ -435,7 +436,7 @@ class DucaheatSetupSegment(DucaheatReadModel):
     boost_temp: str | None = None
     boost_end_day: int | None = None
     boost_end_min: int | None = None
-    boost_end: Mapping[str, Any] | None = Field(default=None, exclude=True)
+    boost_end: Mapping[str, typing.Any] | None = Field(default=None, exclude=True)
     charging: bool | None = None
     current_charge_per: int | None = None
     target_charge_per: int | None = None
@@ -680,7 +681,7 @@ class DucaheatSegmentedSettings(DucaheatReadModel):
 
 def _merge_boost_metadata(
     target: dict[str, Any],
-    source: Mapping[str, Any] | None,
+    source: Mapping[str, typing.Any] | None,
     *,
     prefer_existing: bool = False,
 ) -> None:
@@ -726,7 +727,7 @@ def _merge_boost_metadata(
 
 def _merge_accumulator_charge_metadata(
     target: dict[str, Any],
-    source: Mapping[str, Any] | None,
+    source: Mapping[str, typing.Any] | None,
     *,
     prefer_existing: bool = False,
 ) -> None:

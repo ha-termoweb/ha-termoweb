@@ -11,6 +11,7 @@ import logging
 import math
 import time
 from time import monotonic as time_mod
+import typing
 from typing import Any, TypeVar
 
 from aiohttp import ClientError
@@ -115,7 +116,7 @@ def _normalise_device_model(raw_model: Any) -> str | None:
 
 
 def build_device_metadata(
-    dev_id: str, device: Mapping[str, Any] | None
+    dev_id: str, device: Mapping[str, typing.Any] | None
 ) -> DeviceMetadata:
     """Return immutable metadata derived from a device payload."""
 
@@ -151,8 +152,8 @@ class StateCoordinator(
         client: RESTClient,
         base_interval: int,
         dev_id: str,
-        device: DeviceMetadata | Mapping[str, Any] | None,
-        nodes: Mapping[str, Any] | None,
+        device: DeviceMetadata | Mapping[str, typing.Any] | None,
+        nodes: Mapping[str, typing.Any] | None,
         inventory: Inventory | None = None,
         brand: str = BRAND_TERMOWEB,
     ) -> None:
@@ -282,7 +283,9 @@ class StateCoordinator(
 
         self.async_set_updated_data(self._device_record())
 
-    def _filtered_settings_payload(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+    def _filtered_settings_payload(
+        self, payload: Mapping[str, typing.Any]
+    ) -> dict[str, Any]:
         """Return a defensive copy of ``payload`` without raw blobs."""
 
         if not isinstance(payload, Mapping):
@@ -568,7 +571,9 @@ class StateCoordinator(
         )
 
     @staticmethod
-    def _rtc_payload_to_datetime(payload: Mapping[str, Any] | None) -> datetime | None:
+    def _rtc_payload_to_datetime(
+        payload: Mapping[str, typing.Any] | None,
+    ) -> datetime | None:
         """Return a timezone-aware datetime extracted from RTC payload."""
 
         if not isinstance(payload, Mapping):
@@ -638,7 +643,7 @@ class StateCoordinator(
         return rtc_now
 
     @staticmethod
-    def _requires_boost_resolution(payload: Mapping[str, Any] | None) -> bool:
+    def _requires_boost_resolution(payload: Mapping[str, typing.Any] | None) -> bool:
         """Return True when ``payload`` exposes boost day/min metadata."""
 
         if not isinstance(payload, Mapping):
@@ -649,7 +654,7 @@ class StateCoordinator(
 
     def _apply_accumulator_boost_metadata(
         self,
-        payload: MutableMapping[str, Any],
+        payload: MutableMapping[str, typing.Any],
         *,
         now: datetime | None,
     ) -> None:
@@ -673,7 +678,7 @@ class StateCoordinator(
 
     def _apply_boost_metadata_for_settings(
         self,
-        bucket: Mapping[str, Any] | None,
+        bucket: Mapping[str, typing.Any] | None,
         *,
         now: datetime | None,
     ) -> None:
@@ -689,7 +694,7 @@ class StateCoordinator(
         self,
         node_type: str,
         addr: str,
-        payload: Mapping[str, Any] | None,
+        payload: Mapping[str, typing.Any] | None,
     ) -> bool:
         """Return True when a pending write should defer payload merging."""
 
@@ -749,7 +754,7 @@ class StateCoordinator(
 
     def update_nodes(
         self,
-        _nodes: Mapping[str, Any] | None = None,
+        _nodes: Mapping[str, typing.Any] | None = None,
         *,
         inventory: Inventory | None = None,
     ) -> None:
@@ -1535,7 +1540,7 @@ class EnergyStateCoordinator(
     def handle_ws_samples(
         self,
         dev_id: str,
-        updates: Mapping[str, Mapping[str, Any]],
+        updates: Mapping[str, Mapping[str, typing.Any]],
         *,
         lease_seconds: float | None = None,
     ) -> None:
@@ -1642,7 +1647,7 @@ class EnergyStateCoordinator(
     async def merge_samples_for_window(
         self,
         dev_id: str,
-        samples: Mapping[tuple[str, str], Iterable[Mapping[str, Any]]],
+        samples: Mapping[tuple[str, str], Iterable[Mapping[str, typing.Any]]],
     ) -> None:
         """Merge normalised hourly samples into the cached energy state."""
 

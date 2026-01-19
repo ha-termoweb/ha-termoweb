@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta
 import logging
+import typing
 from typing import Any
 
 from aiohttp import ClientResponseError
@@ -28,7 +29,6 @@ from custom_components.termoweb.boost import (
     validate_boost_minutes,
 )
 from custom_components.termoweb.codecs.ducaheat_codec import decode_settings
-from custom_components.termoweb.planner.ducaheat_planner import plan_command
 from custom_components.termoweb.const import (
     BRAND_DUCAHEAT,
     NODE_SAMPLES_PATH_FMT,
@@ -46,6 +46,7 @@ from custom_components.termoweb.domain.commands import (
 )
 from custom_components.termoweb.domain.ids import NodeId, NodeType
 from custom_components.termoweb.inventory import Inventory, NodeDescriptor
+from custom_components.termoweb.planner.ducaheat_planner import plan_command
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ class DucaheatRESTClient(RESTClient):
         path: str,
         *,
         headers: Mapping[str, str],
-        payload: Mapping[str, Any],
+        payload: Mapping[str, typing.Any],
         dev_id: str,
         addr: str,
         node_type: str,
@@ -108,7 +109,7 @@ class DucaheatRESTClient(RESTClient):
         node_type: str,
         dev_id: str,
         addr: str,
-        payload: Mapping[str, Any] | None,
+        payload: Mapping[str, typing.Any] | None,
     ) -> None:
         """Emit a debug log for segmented POST calls with sanitized metadata."""
 
@@ -549,7 +550,9 @@ class DucaheatRESTClient(RESTClient):
 
         return normalised
 
-    def _normalise_ws_settings(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+    def _normalise_ws_settings(
+        self, payload: Mapping[str, typing.Any]
+    ) -> dict[str, Any]:
         """Normalise half-hourly program data within websocket settings."""
 
         settings: dict[str, Any] = dict(payload)
@@ -569,7 +572,7 @@ class DucaheatRESTClient(RESTClient):
     def _merge_boost_metadata(
         self,
         target: dict[str, Any],
-        source: Mapping[str, Any] | None,
+        source: Mapping[str, typing.Any] | None,
         *,
         prefer_existing: bool = False,
     ) -> None:
@@ -616,7 +619,7 @@ class DucaheatRESTClient(RESTClient):
     def _merge_accumulator_charge_metadata(
         self,
         target: dict[str, Any],
-        source: Mapping[str, Any] | None,
+        source: Mapping[str, typing.Any] | None,
         *,
         prefer_existing: bool = False,
     ) -> None:
@@ -1126,7 +1129,7 @@ class DucaheatRESTClient(RESTClient):
         """Capture RTC metadata to derive boost end timing."""
 
         metadata: dict[str, Any] = {"boost_active": boost_active}
-        rtc_payload: Mapping[str, Any] | None = None
+        rtc_payload: Mapping[str, typing.Any] | None = None
         try:
             rtc_payload = await self.get_rtc_time(dev_id)
         except Exception as err:  # noqa: BLE001 - defensive logging
@@ -1190,7 +1193,7 @@ class DucaheatRESTClient(RESTClient):
         return metadata
 
     def _rtc_payload_to_datetime(
-        self, payload: Mapping[str, Any] | None
+        self, payload: Mapping[str, typing.Any] | None
     ) -> datetime | None:
         """Convert an RTC payload into a ``datetime`` instance."""
 
@@ -1214,7 +1217,7 @@ class DucaheatRESTClient(RESTClient):
         self,
         path: str,
         headers: Mapping[str, str],
-        payload: Mapping[str, Any],
+        payload: Mapping[str, typing.Any],
         dev_id: str | None = None,
         addr: str | None = None,
     ) -> Any:

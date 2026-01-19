@@ -8,6 +8,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
+import typing
 from typing import Any, Protocol
 
 from homeassistant.util import dt as dt_util
@@ -176,7 +177,7 @@ class Backend(ABC):
 
 def normalise_sample_records(
     node_type: str,
-    records: Iterable[Mapping[str, Any] | Any],
+    records: Iterable[Mapping[str, typing.Any] | Any],
 ) -> list[dict[str, Any]]:
     """Return sorted sample dictionaries containing ``ts`` and ``energy_wh``."""
 

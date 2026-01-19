@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable, Mapping, MutableMapping
 from dataclasses import dataclass
 import logging
 import time
+import typing
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
@@ -163,7 +164,7 @@ def forward_ws_sample_updates(
     hass: HomeAssistant,
     entry_id: str,
     dev_id: str,
-    updates: Mapping[str, Mapping[str, Any]],
+    updates: Mapping[str, Mapping[str, typing.Any]],
     *,
     logger: logging.Logger | None = None,
     log_prefix: str = "WS",
@@ -207,7 +208,7 @@ def forward_ws_sample_updates(
                 continue
         elif canonical_type == "thm":
             continue
-        samples_section: Mapping[str, Any] | None = None
+        samples_section: Mapping[str, typing.Any] | None = None
         lease_candidate: Any = None
         if "samples" in section and isinstance(section.get("samples"), Mapping):
             samples_section = section["samples"]
@@ -797,11 +798,11 @@ class _WSCommon(_WSStatusMixin):
 
     def _ensure_type_bucket(
         self,
-        nodes_by_type: Mapping[str, Any] | MutableMapping[str, Any],
+        nodes_by_type: Mapping[str, typing.Any] | MutableMapping[str, typing.Any],
         node_type: str,
         *,
-        dev_map: MutableMapping[str, Any] | None = None,
-    ) -> Mapping[str, Any]:
+        dev_map: MutableMapping[str, typing.Any] | None = None,
+    ) -> Mapping[str, typing.Any]:
         """Return the node bucket for ``node_type`` without cloning metadata."""
 
         if not isinstance(nodes_by_type, Mapping):
@@ -813,7 +814,7 @@ class _WSCommon(_WSStatusMixin):
 
         existing = nodes_by_type.get(normalized_type)
         if isinstance(existing, Mapping):
-            bucket: Mapping[str, Any] = existing
+            bucket: Mapping[str, typing.Any] = existing
         else:
             mutable: dict[str, Any] = {}
             bucket = mutable
