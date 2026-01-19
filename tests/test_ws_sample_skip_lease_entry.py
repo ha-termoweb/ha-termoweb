@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
+from conftest import build_entry_runtime
 from custom_components.termoweb.backend.ws_client import forward_ws_sample_updates
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
@@ -35,19 +36,18 @@ def test_forward_ws_sample_updates_omits_inner_lease_entry() -> None:
 
     entry_id = "entry"
     coordinator = CoordinatorStub()
-    hass = SimpleNamespace(
-        data={
-            DOMAIN: {
-                entry_id: {
-                    "energy_coordinator": coordinator,
-                    "inventory": Inventory(
-                        "dev",
-                        build_node_inventory({"nodes": [{"type": "htr", "addr": "1"}]}),
-                    ),
-                }
-            }
-        }
+    hass = SimpleNamespace(data={DOMAIN: {}})
+    inventory = Inventory(
+        "dev",
+        build_node_inventory({"nodes": [{"type": "htr", "addr": "1"}]}),
     )
+    runtime = build_entry_runtime(
+        hass=hass,
+        entry_id=entry_id,
+        dev_id="dev",
+        inventory=inventory,
+    )
+    runtime.energy_coordinator = coordinator
 
     forward_ws_sample_updates(
         hass,

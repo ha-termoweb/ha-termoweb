@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import gzip
 from types import MappingProxyType, ModuleType, SimpleNamespace
 from typing import Any, Callable, Mapping
@@ -14,11 +15,10 @@ import pytest
 import logging
 import sys
 
-from custom_components.termoweb.domain import NodeSettingsDelta
+from conftest import build_entry_runtime
 from custom_components.termoweb.backend import ducaheat_ws
 from custom_components.termoweb.backend import termoweb_ws as module
 from custom_components.termoweb.backend import ws_client as base_ws
-from custom_components.termoweb.runtime import EntryRuntime
 from custom_components.termoweb.backend.sanitize import (
     mask_identifier,
     redact_token_fragment,
@@ -120,6 +120,19 @@ def patch_async_client(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(module.socketio, "AsyncClient", StubAsyncClient)
 
 
+@pytest.fixture(autouse=True)
+def reload_ws_modules(patch_async_client: None) -> None:
+    """Reload websocket modules to avoid stale references after other tests."""
+
+    global base_ws, module
+    base_ws = importlib.reload(
+        importlib.import_module("custom_components.termoweb.backend.ws_client")
+    )
+    module = importlib.reload(
+        importlib.import_module("custom_components.termoweb.backend.termoweb_ws")
+    )
+
+
 @pytest.fixture
 def ws_common_stub() -> Callable[..., base_ws._WSCommon]:
     """Provide a configurable ``_WSCommon`` test double."""
@@ -135,14 +148,24 @@ def ws_common_stub() -> Callable[..., base_ws._WSCommon]:
     ) -> base_ws._WSCommon:
         class Stub(base_ws._WSCommon):
             def __init__(self) -> None:
-                self.hass = hass or SimpleNamespace(
-                    data={base_ws.DOMAIN: {entry_id: {}}}
-                )
+                self.hass = hass or SimpleNamespace(data={base_ws.DOMAIN: {}})
                 self.entry_id = entry_id
                 self.dev_id = dev_id
                 self._coordinator = coordinator or SimpleNamespace(
                     update_nodes=MagicMock()
                 )
+                if getattr(
+                    self.hass, "data", None
+                ) is not None and entry_id not in self.hass.data.get(
+                    base_ws.DOMAIN, {}
+                ):
+                    build_entry_runtime(
+                        hass=self.hass,
+                        entry_id=entry_id,
+                        dev_id=dev_id,
+                        inventory=inventory,
+                        coordinator=self._coordinator,
+                    )
                 if call_base_init:
                     super().__init__(inventory=inventory)
                 else:
@@ -166,7 +189,12 @@ def _make_termoweb_client(
             call_soon_threadsafe=lambda cb, *args: cb(*args),
         )
 
-    hass = SimpleNamespace(loop=hass_loop, data={module.DOMAIN: {"entry": {}}})
+    hass = SimpleNamespace(loop=hass_loop, data={module.DOMAIN: {}})
+    build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="device",
+    )
     coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
     dispatcher = MagicMock()
     monkeypatch.setattr(module, "async_dispatcher_send", dispatcher)
@@ -194,7 +222,12 @@ def _make_ducaheat_client(
             create_task=lambda coro, **_: SimpleNamespace(done=lambda: True),
             call_soon_threadsafe=lambda cb, *args: cb(*args),
         )
-    hass = SimpleNamespace(loop=hass_loop, data={module.DOMAIN: {"entry": {}}})
+    hass = SimpleNamespace(loop=hass_loop, data={module.DOMAIN: {}})
+    build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="device",
+    )
     rest_client = DummyREST(is_ducaheat=True)
     dispatcher = MagicMock()
     monkeypatch.setattr(ducaheat_ws, "async_dispatcher_send", dispatcher, raising=False)
@@ -215,12 +248,15 @@ async def test_ws_state_cleanup_and_reuse() -> None:
     """Stop cycles should clean up state buckets without duplicating metadata."""
 
     loop = DummyLoop()
-    hass = SimpleNamespace(
-        loop=loop, data={base_ws.DOMAIN: {"entry": {"dev_id": "device"}}}
-    )
+    hass = SimpleNamespace(loop=loop, data={base_ws.DOMAIN: {}})
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
     inventory = Inventory("device", build_node_inventory(raw_nodes))
-    hass.data[base_ws.DOMAIN]["entry"]["inventory"] = inventory
+    runtime = build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="device",
+        inventory=inventory,
+    )
 
     client = module.WebSocketClient(
         hass,
@@ -237,17 +273,13 @@ async def test_ws_state_cleanup_and_reuse() -> None:
         client._ws_state_bucket()
         client._ws_health_tracker()
         assert client._ws_bucket_sizes() == (1, 1)
-        assert hass.data[base_ws.DOMAIN]["entry"]["inventory"] is inventory
-        assert set(hass.data[base_ws.DOMAIN]["entry"].keys()) <= {
-            "inventory",
-            "dev_id",
-            "ws_state",
-            "ws_trackers",
-        }
+        assert runtime.inventory is inventory
+        assert set(runtime.ws_state.keys()) == {"device"}
+        assert set(runtime.ws_trackers.keys()) == {"device"}
 
         await client.stop()
-        assert hass.data[base_ws.DOMAIN]["entry"].get("ws_state", {}) == {}
-        assert hass.data[base_ws.DOMAIN]["entry"].get("ws_trackers", {}) == {}
+        assert runtime.ws_state == {}
+        assert runtime.ws_trackers == {}
         assert client._ws_bucket_sizes() == (0, 0)
 
 
@@ -256,12 +288,15 @@ async def test_ducaheat_ws_cleanup_and_buckets(monkeypatch: pytest.MonkeyPatch) 
     """Ensure Ducaheat websocket cleanup removes tracker buckets across retries."""
 
     loop = DummyLoop()
-    hass = SimpleNamespace(
-        loop=loop, data={base_ws.DOMAIN: {"entry": {"dev_id": "device"}}}
-    )
+    hass = SimpleNamespace(loop=loop, data={base_ws.DOMAIN: {}})
     raw_nodes = {"nodes": [{"type": "pmo", "addr": "7"}]}
     inventory = Inventory("device", build_node_inventory(raw_nodes))
-    hass.data[base_ws.DOMAIN]["entry"]["inventory"] = inventory
+    runtime = build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="device",
+        inventory=inventory,
+    )
 
     rest_client = DummyREST(is_ducaheat=True)
     dispatcher = MagicMock()
@@ -281,11 +316,11 @@ async def test_ducaheat_ws_cleanup_and_buckets(monkeypatch: pytest.MonkeyPatch) 
         client._ws_state_bucket()
         client._ws_health_tracker()
         assert client._ws_bucket_sizes() == (1, 1)
-        assert hass.data[base_ws.DOMAIN]["entry"]["inventory"] is inventory
+        assert runtime.inventory is inventory
 
         await client.stop()
-        assert hass.data[base_ws.DOMAIN]["entry"].get("ws_state", {}) == {}
-        assert hass.data[base_ws.DOMAIN]["entry"].get("ws_trackers", {}) == {}
+        assert runtime.ws_state == {}
+        assert runtime.ws_trackers == {}
         assert client._ws_bucket_sizes() == (0, 0)
 
 
@@ -306,9 +341,18 @@ def _ensure_inventory_record(
             ]
         }
         inventory = Inventory(dev_id, build_node_inventory(payload))
-    hass.data.setdefault(base_ws.DOMAIN, {}).setdefault(entry_id, {})
-    hass.data[base_ws.DOMAIN][entry_id].setdefault("inventory", inventory)
-    hass.data[base_ws.DOMAIN][entry_id].setdefault("dev_id", dev_id)
+    hass.data.setdefault(base_ws.DOMAIN, {})
+    runtime = hass.data[base_ws.DOMAIN].get(entry_id)
+    runtime_module = importlib.import_module("custom_components.termoweb.runtime")
+    if not isinstance(runtime, runtime_module.EntryRuntime):
+        runtime = build_entry_runtime(
+            hass=hass,
+            entry_id=entry_id,
+            dev_id=dev_id,
+            inventory=inventory,
+        )
+    else:
+        runtime.inventory = inventory
     return inventory
 
 
@@ -323,9 +367,12 @@ def test_forward_ws_sample_updates_guards_and_invalid_lease() -> None:
         {"pmo": {"samples": {"7": {"power": 1}}}},
     )
 
-    hass.data[base_ws.DOMAIN]["entry"] = {
-        "energy_coordinator": SimpleNamespace(),
-    }
+    runtime = build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="dev",
+        energy_coordinator=SimpleNamespace(),
+    )
     _ensure_inventory_record(hass, "entry", dev_id="dev")
     base_ws.forward_ws_sample_updates(
         hass,
@@ -348,7 +395,7 @@ def test_forward_ws_sample_updates_guards_and_invalid_lease() -> None:
             self.calls.append((dev_id, updates, lease_seconds))
 
     coordinator = CoordinatorStub()
-    hass.data[base_ws.DOMAIN]["entry"]["energy_coordinator"] = coordinator
+    runtime.energy_coordinator = coordinator
 
     base_ws.forward_ws_sample_updates(
         hass,
@@ -367,15 +414,17 @@ def test_forward_ws_sample_updates_handles_power_monitors(
 ) -> None:
     """forward_ws_sample_updates should normalise power monitor payloads."""
 
-    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
     raw_nodes = {"nodes": [{"type": "pmo", "addr": "7", "name": "PM"}]}
     inventory = Inventory("dev", build_node_inventory(raw_nodes))
     handler = MagicMock()
-    hass.data[base_ws.DOMAIN]["entry"] = {
-        "energy_coordinator": SimpleNamespace(handle_ws_samples=handler),
-        "inventory": inventory,
-        "nodes": raw_nodes,
-    }
+    build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="dev",
+        inventory=inventory,
+        energy_coordinator=SimpleNamespace(handle_ws_samples=handler),
+    )
 
     base_ws.forward_ws_sample_updates(
         hass,
@@ -399,15 +448,17 @@ def test_forward_ws_sample_updates_handles_power_monitors(
 def test_forward_ws_sample_updates_skips_thermostats() -> None:
     """Thermostat sample payloads should be ignored."""
 
-    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
     raw_nodes = {"nodes": [{"type": "thm", "addr": "1"}]}
     inventory = Inventory("dev", build_node_inventory(raw_nodes))
     handler = MagicMock()
-    hass.data[base_ws.DOMAIN]["entry"] = {
-        "energy_coordinator": SimpleNamespace(handle_ws_samples=handler),
-        "inventory": inventory,
-        "nodes": raw_nodes,
-    }
+    build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="dev",
+        inventory=inventory,
+        energy_coordinator=SimpleNamespace(handle_ws_samples=handler),
+    )
 
     base_ws.forward_ws_sample_updates(
         hass,
@@ -424,16 +475,18 @@ def test_forward_ws_sample_updates_respect_inventory_types(
 ) -> None:
     """Samples for disallowed node types should be ignored."""
 
-    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
     raw_nodes = {"nodes": [{"type": "htr", "addr": "5"}]}
     inventory = Inventory("dev", build_node_inventory(raw_nodes))
     object.__setattr__(inventory, "_energy_sample_types_cache", frozenset({"pmo"}))
     handler = MagicMock()
-    hass.data[base_ws.DOMAIN]["entry"] = {
-        "energy_coordinator": SimpleNamespace(handle_ws_samples=handler),
-        "inventory": inventory,
-        "nodes": raw_nodes,
-    }
+    build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="dev",
+        inventory=inventory,
+        energy_coordinator=SimpleNamespace(handle_ws_samples=handler),
+    )
 
     base_ws.forward_ws_sample_updates(
         hass,
@@ -466,15 +519,13 @@ def test_forward_ws_sample_updates_uses_coordinator_inventory(
     )
 
     handler = MagicMock(side_effect=RuntimeError("boom"))
-    hass = SimpleNamespace(
-        data={
-            base_ws.DOMAIN: {
-                "entry": {
-                    "energy_coordinator": SimpleNamespace(handle_ws_samples=handler),
-                    "coordinator": SimpleNamespace(inventory=inventory),
-                }
-            }
-        }
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
+    build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="dev",
+        energy_coordinator=SimpleNamespace(handle_ws_samples=handler),
+        coordinator=SimpleNamespace(inventory=inventory),
     )
 
     logger = logging.getLogger("test_forward_ws_samples")
@@ -514,15 +565,13 @@ def test_forward_ws_sample_updates_skips_invalid_sections(
     """Invalid update payloads should be ignored without calling the handler."""
 
     handler = MagicMock()
-    hass = SimpleNamespace(
-        data={
-            base_ws.DOMAIN: {
-                "entry": {
-                    "energy_coordinator": SimpleNamespace(handle_ws_samples=handler),
-                    "inventory": Inventory("dev", []),
-                }
-            }
-        }
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
+    build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="dev",
+        inventory=Inventory("dev", []),
+        energy_coordinator=SimpleNamespace(handle_ws_samples=handler),
     )
 
     base_ws.forward_ws_sample_updates(
@@ -539,15 +588,13 @@ def test_forward_ws_sample_updates_skips_non_mapping_samples() -> None:
     """Sample sections that are not mappings should be skipped."""
 
     handler = MagicMock()
-    hass = SimpleNamespace(
-        data={
-            base_ws.DOMAIN: {
-                "entry": {
-                    "energy_coordinator": SimpleNamespace(handle_ws_samples=handler),
-                    "inventory": Inventory("dev", []),
-                }
-            }
-        }
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
+    build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="dev",
+        inventory=Inventory("dev", []),
+        energy_coordinator=SimpleNamespace(handle_ws_samples=handler),
     )
 
     class WeirdMapping(dict):
@@ -591,15 +638,13 @@ def test_forward_ws_sample_updates_inventory_validation(
     )
 
     handler = MagicMock()
-    hass = SimpleNamespace(
-        data={
-            base_ws.DOMAIN: {
-                "entry": {
-                    "energy_coordinator": SimpleNamespace(handle_ws_samples=handler),
-                    "inventory": inventory,
-                }
-            }
-        }
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
+    build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="dev",
+        inventory=inventory,
+        energy_coordinator=SimpleNamespace(handle_ws_samples=handler),
     )
 
     base_ws.forward_ws_sample_updates(
@@ -673,8 +718,10 @@ def test_ws_state_bucket_initialises_missing_data(
 
     client = _make_termoweb_client(monkeypatch)
     bucket = client._ws_state_bucket()
-    assert module.DOMAIN in client.hass.data
-    assert client.hass.data[module.DOMAIN]["entry"]["ws_state"]["device"] is bucket
+    runtime = client.hass.data[module.DOMAIN]["entry"]
+    runtime_module = importlib.import_module("custom_components.termoweb.runtime")
+    assert isinstance(runtime, runtime_module.EntryRuntime)
+    assert runtime.ws_state["device"] is bucket
 
 
 def test_handshake_error_exposes_status_and_url() -> None:
@@ -703,8 +750,13 @@ def test_dispatch_nodes_reuses_record_inventory(
     node_inventory = build_node_inventory(payload["nodes"])
     inventory = Inventory("device", node_inventory)
 
-    hass_record: dict[str, Any] = {"dev_id": "device", "inventory": inventory}
-    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": hass_record}})
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
+    build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="device",
+        inventory=inventory,
+    )
     coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
     dispatcher = MagicMock()
     monkeypatch.setattr(base_ws, "async_dispatcher_send", dispatcher)
@@ -734,7 +786,7 @@ def test_dispatch_nodes_reuses_record_inventory(
 def test_prepare_nodes_dispatch_uses_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
     """Existing inventory objects should be reused by the dispatch helper."""
 
-    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
     coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
     node_inventory = build_node_inventory([{"type": "htr", "addr": "4"}])
     inventory = Inventory(
@@ -750,18 +802,20 @@ def test_prepare_nodes_dispatch_uses_inventory(monkeypatch: pytest.MonkeyPatch) 
     )
 
     assert context.inventory is inventory
-    assert hass.data[base_ws.DOMAIN]["entry"]["inventory"] is inventory
     coordinator.update_nodes.assert_not_called()
 
 
-def test_prepare_nodes_dispatch_resolves_record_dev_id_and_coordinator_inventory(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Record dev IDs and coordinator inventory should be applied."""
+def test_prepare_nodes_dispatch_prefers_runtime_inventory() -> None:
+    """Runtime inventory should be preferred over coordinator inventory."""
 
     inventory = Inventory("dev", [])
-    hass_record: dict[str, Any] = {"dev_id": "raw", "inventory": inventory}
-    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": hass_record}})
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
+    build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="raw",
+        inventory=inventory,
+    )
     coordinator = SimpleNamespace(update_nodes=MagicMock())
 
     context = base_ws._prepare_nodes_dispatch(
@@ -773,9 +827,11 @@ def test_prepare_nodes_dispatch_resolves_record_dev_id_and_coordinator_inventory
     assert context.inventory is inventory
     coordinator.update_nodes.assert_not_called()
 
-    hass_numeric_record: dict[str, Any] = {"dev_id": 99}
-    hass_numeric = SimpleNamespace(
-        data={base_ws.DOMAIN: {"entry": hass_numeric_record}}
+    hass_numeric = SimpleNamespace(data={base_ws.DOMAIN: {}})
+    build_entry_runtime(
+        hass=hass_numeric,
+        entry_id="entry",
+        dev_id="99",
     )
     coordinator_numeric = SimpleNamespace(update_nodes=MagicMock(), inventory=inventory)
 
@@ -786,8 +842,9 @@ def test_prepare_nodes_dispatch_resolves_record_dev_id_and_coordinator_inventory
         raw_nodes={"nodes": []},
     )
 
-    assert context_numeric.inventory is inventory
-    assert hass_numeric_record["inventory"] is inventory
+    assert context_numeric.inventory is not inventory
+    assert context_numeric.inventory is not None
+    assert context_numeric.inventory.dev_id == "99"
     coordinator_numeric.update_nodes.assert_not_called()
 
 
@@ -812,7 +869,8 @@ def test_termoweb_nodes_to_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
     deltas = client._nodes_to_deltas(nodes_payload, inventory=inventory)
     assert len(deltas) == 1
     delta = deltas[0]
-    assert isinstance(delta, NodeSettingsDelta)
+    domain_module = importlib.import_module("custom_components.termoweb.domain")
+    assert isinstance(delta, domain_module.NodeSettingsDelta)
     assert delta.node_id.addr == "1"
     assert delta.payload["mode"] == "manual"
     assert delta.payload["stemp"] == "18.0"
@@ -863,10 +921,15 @@ def test_ws_status_tracker_applies_default_cadence_hint() -> None:
 
     class Dummy(base_ws._WSStatusMixin):
         def __init__(self) -> None:
-            self.hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
+            self.hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
             self.entry_id = "entry"
             self.dev_id = "dev"
             self._apply_payload_window_hint = MagicMock()
+            build_entry_runtime(
+                hass=self.hass,
+                entry_id=self.entry_id,
+                dev_id=self.dev_id,
+            )
 
     dummy = Dummy()
     tracker = dummy._ws_health_tracker()
@@ -884,12 +947,17 @@ def test_ws_status_tracker_processes_pending_cadence_hint() -> None:
 
     class Dummy(base_ws._WSStatusMixin):
         def __init__(self) -> None:
-            self.hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
+            self.hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
             self.entry_id = "entry"
             self.dev_id = "dev"
             self._apply_payload_window_hint = MagicMock()
             self._suppress_default_cadence_hint = True
             self._pending_default_cadence_hint = True
+            build_entry_runtime(
+                hass=self.hass,
+                entry_id=self.entry_id,
+                dev_id=self.dev_id,
+            )
 
     dummy = Dummy()
     dummy._ws_health_tracker()
@@ -913,8 +981,13 @@ def test_ws_common_ensure_type_bucket_handles_invalid_inputs(
     """Ensure type bucket helper should guard against invalid structures."""
 
     dummy = ws_common_stub(
-        hass=SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}}),
+        hass=SimpleNamespace(data={base_ws.DOMAIN: {}}),
         coordinator=SimpleNamespace(),
+    )
+    build_entry_runtime(
+        hass=dummy.hass,
+        entry_id="entry",
+        dev_id="dev",
     )
     assert dummy._ensure_type_bucket([], "htr") is None
     assert dummy._ensure_type_bucket({}, "", dev_map=None) is None
@@ -929,7 +1002,7 @@ def test_ws_common_ensure_type_bucket_uses_inventory_without_clones(
     """Ensure type bucket helper reuses immutable metadata containers."""
 
     dummy = ws_common_stub(
-        hass=SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}}),
+        hass=SimpleNamespace(data={base_ws.DOMAIN: {}}),
         coordinator=SimpleNamespace(),
     )
     raw_nodes = {
@@ -939,8 +1012,12 @@ def test_ws_common_ensure_type_bucket_uses_inventory_without_clones(
         ]
     }
     inventory = Inventory("dev", build_node_inventory(raw_nodes))
-    hass_record: dict[str, Any] = {"inventory": inventory}
-    dummy.hass.data[base_ws.DOMAIN]["entry"] = hass_record
+    build_entry_runtime(
+        hass=dummy.hass,
+        entry_id="entry",
+        dev_id="dev",
+        inventory=inventory,
+    )
 
     nodes_by_type = {
         "htr": MappingProxyType(
@@ -993,11 +1070,14 @@ def test_ws_common_apply_heater_addresses_uses_inventory(
         ]
     }
     inventory = Inventory("dev", build_node_inventory(raw_nodes))
-    hass_record: dict[str, Any] = {
-        "energy_coordinator": energy_coordinator,
-        "inventory": inventory,
-    }
-    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": hass_record}})
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
+    hass_record = build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="dev",
+        inventory=inventory,
+        energy_coordinator=energy_coordinator,
+    )
 
     dummy = ws_common_stub(
         hass=hass,
@@ -1005,14 +1085,11 @@ def test_ws_common_apply_heater_addresses_uses_inventory(
     )
     dummy._apply_heater_addresses({}, inventory=inventory)
 
-    assert "sample_aliases" not in hass_record
+    assert not hasattr(hass_record, "sample_aliases")
     energy_coordinator.update_addresses.assert_called_once_with(inventory)
 
     energy_coordinator.update_addresses.reset_mock()
-    if isinstance(hass_record, EntryRuntime):
-        hass_record.inventory = None  # type: ignore[assignment]
-    else:
-        hass_record.pop("inventory")
+    hass_record.inventory = None  # type: ignore[assignment]
     dummy._apply_heater_addresses({}, inventory=None)
     energy_coordinator.update_addresses.assert_called_once_with(inventory)
 
@@ -1664,14 +1741,19 @@ def test_ws_common_state_bucket(
 ) -> None:
     """WS common helper should create domain buckets when missing."""
 
-    hass = SimpleNamespace(data={})
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
+    runtime = build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="dev",
+    )
 
     dummy = ws_common_stub(
         hass=hass,
     )
     bucket = dummy._ws_state_bucket()
     assert bucket == {}
-    assert base_ws.DOMAIN in hass.data
+    assert runtime.ws_state == {"dev": {}}
 
 
 def test_ws_common_update_status_dispatches(
@@ -1680,7 +1762,12 @@ def test_ws_common_update_status_dispatches(
 ) -> None:
     """WS common status helper should forward dispatcher signals."""
 
-    hass = SimpleNamespace(data={base_ws.DOMAIN: {"entry": {}}})
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
+    build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="dev",
+    )
     dispatcher = MagicMock()
     monkeypatch.setattr(base_ws, "async_dispatcher_send", dispatcher)
 
@@ -1702,8 +1789,12 @@ def test_ws_common_dispatch_nodes(
     inventory_nodes = build_node_inventory(raw_nodes)
     inventory_obj = Inventory("dev", inventory_nodes)
 
-    hass = SimpleNamespace(
-        data={base_ws.DOMAIN: {"entry": {"inventory": inventory_obj}}}
+    hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
+    build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="dev",
+        inventory=inventory_obj,
     )
     coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
     dispatcher = MagicMock()
@@ -1723,8 +1814,6 @@ def test_ws_common_dispatch_nodes(
 
     coordinator.update_nodes.assert_not_called()
     dispatcher.assert_called_once()
-    record = hass.data[base_ws.DOMAIN]["entry"]
-    assert record.get("inventory") is inventory_obj
     dispatched_payload = dispatcher.call_args.args[2]
     assert dispatched_payload == {
         "dev_id": "dev",

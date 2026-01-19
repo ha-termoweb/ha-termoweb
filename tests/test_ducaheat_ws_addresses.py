@@ -74,7 +74,8 @@ def test_apply_heater_addresses_updates_state() -> None:
     client = _make_client()
     hass = client.hass
     energy_coordinator = SimpleNamespace(update_addresses=MagicMock())
-    hass.data[DOMAIN]["entry"]["energy_coordinator"] = energy_coordinator
+    runtime = hass.data[DOMAIN]["entry"]
+    runtime.energy_coordinator = energy_coordinator
 
     raw_nodes = {
         "nodes": [
@@ -95,11 +96,11 @@ def test_apply_heater_addresses_updates_state() -> None:
 
     client._apply_heater_addresses(normalized_map, inventory=inventory)
 
-    assert hass.data[DOMAIN]["entry"]["inventory"] is inventory
+    assert runtime.inventory is inventory
     assert client._inventory is inventory
     energy_coordinator.update_addresses.assert_called_once_with(inventory)
 
-    assert "sample_aliases" not in hass.data[DOMAIN]["entry"]
+    assert not hasattr(runtime, "sample_aliases")
 
 
 def test_dispatch_nodes_includes_inventory_metadata() -> None:
@@ -114,8 +115,8 @@ def test_dispatch_nodes_includes_inventory_metadata() -> None:
         build_node_inventory(inventory_payload),
     )
 
-    record = client.hass.data[DOMAIN][client.entry_id]
-    record["inventory"] = inventory
+    runtime = client.hass.data[DOMAIN][client.entry_id]
+    runtime.inventory = inventory
     client._inventory = inventory
 
     client._dispatch_nodes({"htr": {"settings": {"1": {"target_temp": 21}}}})
@@ -123,4 +124,4 @@ def test_dispatch_nodes_includes_inventory_metadata() -> None:
     assert client._dispatcher.call_count == 1
     dispatched = client._dispatcher.call_args[0][2]
     assert dispatched["inventory"] is inventory
-    assert "sample_aliases" not in client.hass.data[DOMAIN][client.entry_id]
+    assert not hasattr(runtime, "sample_aliases")

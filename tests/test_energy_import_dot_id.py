@@ -9,8 +9,8 @@ from typing import Any
 
 import pytest
 
+from conftest import build_entry_runtime
 from custom_components.termoweb import energy
-from custom_components.termoweb.energy import SUMMARY_KEY_LAST_RUN
 
 
 class _StubConfigEntry:
@@ -82,11 +82,14 @@ async def test_import_clears_both_ids_and_populates_dot_series(
 
     client.get_node_samples = _get_node_samples  # type: ignore[attr-defined]
 
-    stub_hass.data.setdefault(energy.DOMAIN, {})[entry.entry_id] = {
-        "client": client,
-        "dev_id": "dev-dot",
-        "inventory": inventory,
-    }
+    runtime = build_entry_runtime(
+        hass=stub_hass,
+        entry_id=entry.entry_id,
+        dev_id="dev-dot",
+        inventory=inventory,
+        client=client,
+        config_entry=entry,
+    )
 
     entity_id = "sensor.dev_dot_energy"
     colon_id = "sensor:dev_dot_energy"
@@ -214,11 +217,14 @@ async def test_import_uses_colon_history_for_sum_offset(
 
     client.get_node_samples = _get_node_samples  # type: ignore[attr-defined]
 
-    stub_hass.data.setdefault(energy.DOMAIN, {})[entry.entry_id] = {
-        "client": client,
-        "dev_id": "dev-colon",
-        "inventory": inventory,
-    }
+    build_entry_runtime(
+        hass=stub_hass,
+        entry_id=entry.entry_id,
+        dev_id="dev-colon",
+        inventory=inventory,
+        client=client,
+        config_entry=entry,
+    )
 
     entity_id = "sensor.dev_colon_energy"
     colon_id = "sensor:dev_colon_energy"
@@ -318,11 +324,14 @@ async def test_import_guard_clamps_descending_live_hour(
 
     client.get_node_samples = _get_node_samples  # type: ignore[attr-defined]
 
-    stub_hass.data.setdefault(energy.DOMAIN, {})[entry.entry_id] = {
-        "client": client,
-        "dev_id": "dev-guard",
-        "inventory": inventory,
-    }
+    runtime = build_entry_runtime(
+        hass=stub_hass,
+        entry_id=entry.entry_id,
+        dev_id="dev-guard",
+        inventory=inventory,
+        client=client,
+        config_entry=entry,
+    )
 
     entity_id = "sensor.dev_guard_energy"
 
@@ -420,6 +429,6 @@ async def test_import_guard_clamps_descending_live_hour(
         {"start": import_end_dt + timedelta(hours=2), "sum": seam_rows[1]["sum"]}
     ]
 
-    summary = stub_hass.data[energy.DOMAIN][entry.entry_id][SUMMARY_KEY_LAST_RUN]
+    summary = runtime.last_energy_import_summary
     node_summary = summary["nodes"][0]
     assert node_summary["written"] >= 2

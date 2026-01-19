@@ -75,7 +75,8 @@ def diagnostics_record(
             runtime.version = None  # type: ignore[assignment]
         if extra:
             for key, value in extra.items():
-                runtime[key] = value
+                if hasattr(runtime, key):
+                    setattr(runtime, key, value)
         return runtime, inventory
 
     return _factory

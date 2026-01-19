@@ -45,7 +45,6 @@ _LOGGER = logging.getLogger(__name__)
 DEFAULT_BOOST_DURATION: Final = 60
 DEFAULT_BOOST_TEMPERATURE: Final = 20.0
 _HASS_UNSET: Final[HomeAssistant | None] = cast(HomeAssistant | None, object())
-_BOOST_RUNTIME_KEY: Final = "boost_runtime"
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,25 +134,17 @@ class HeaterPlatformDetails:
 
 
 def _boost_runtime_store(
-    runtime: EntryRuntime | Mapping[str, Any] | None,
+    runtime: EntryRuntime | None,
     *,
     create: bool,
 ) -> dict[str, dict[str, int]]:
     """Return the mutable boost runtime store for ``runtime``."""
 
-    if isinstance(runtime, EntryRuntime):
-        if not create and not runtime.boost_runtime:
-            return {}
-        return runtime.boost_runtime
-    if not isinstance(runtime, Mapping):
+    if runtime is None:
         return {}
-    store = runtime.get(_BOOST_RUNTIME_KEY)
-    if isinstance(store, Mapping):
-        return store  # type: ignore[return-value]
-    if not create:
+    if not create and not runtime.boost_runtime:
         return {}
-    runtime[_BOOST_RUNTIME_KEY] = {}
-    return runtime[_BOOST_RUNTIME_KEY]
+    return runtime.boost_runtime
 
 
 def _boost_temperature_store(
@@ -769,18 +760,14 @@ def log_skipped_nodes(
 
 
 def heater_platform_details_for_entry(
-    runtime: EntryRuntime | Mapping[str, Any],
+    runtime: EntryRuntime,
     *,
     default_name_simple: Callable[[str], str],
 ) -> HeaterPlatformDetails:
     """Return heater platform metadata derived from ``runtime``."""
 
-    if isinstance(runtime, EntryRuntime):
-        inventory = runtime.inventory
-        dev_id = runtime.dev_id
-    else:
-        inventory = runtime.get("inventory")
-        dev_id = runtime.get("dev_id", "<unknown>")
+    inventory = runtime.inventory
+    dev_id = runtime.dev_id
     if not isinstance(inventory, Inventory):
         required_attrs = (
             "nodes_by_type",

@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from conftest import build_entry_runtime
 from custom_components.termoweb import energy
 from custom_components.termoweb.energy import OPTION_ENERGY_HISTORY_PROGRESS
 from tests.test_energy_recorder_imports import _install_fake_homeassistant
@@ -109,11 +110,14 @@ async def test_import_energy_history_fetches_until_current_minute(
     inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev-1")
     client = _RecordingClient()
 
-    stub_hass.data.setdefault(energy.DOMAIN, {})[entry.entry_id] = {
-        "client": client,
-        "dev_id": "dev-1",
-        "inventory": inventory,
-    }
+    build_entry_runtime(
+        hass=stub_hass,
+        entry_id=entry.entry_id,
+        dev_id="dev-1",
+        inventory=inventory,
+        client=client,
+        config_entry=entry,
+    )
 
     monkeypatch.setattr(energy, "datetime", _FixedDatetime, raising=False)
     monkeypatch.setattr(energy.er, "async_get", lambda hass: None, raising=False)
@@ -155,11 +159,14 @@ async def test_import_energy_history_rejects_unsupported_node_types(
     inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev-node-type")
     client = _RecordingClient()
 
-    stub_hass.data.setdefault(energy.DOMAIN, {})[entry.entry_id] = {
-        "client": client,
-        "dev_id": "dev-node-type",
-        "inventory": inventory,
-    }
+    build_entry_runtime(
+        hass=stub_hass,
+        entry_id=entry.entry_id,
+        dev_id="dev-node-type",
+        inventory=inventory,
+        client=client,
+        config_entry=entry,
+    )
 
     with pytest.raises(ValueError) as err:
         await energy.async_import_energy_history(
@@ -188,11 +195,14 @@ async def test_import_energy_history_filters_unknown_addresses(
     inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev-address")
     client = _RecordingClient()
 
-    stub_hass.data.setdefault(energy.DOMAIN, {})[entry.entry_id] = {
-        "client": client,
-        "dev_id": "dev-address",
-        "inventory": inventory,
-    }
+    build_entry_runtime(
+        hass=stub_hass,
+        entry_id=entry.entry_id,
+        dev_id="dev-address",
+        inventory=inventory,
+        client=client,
+        config_entry=entry,
+    )
 
     monkeypatch.setattr(energy, "datetime", _FixedDatetime, raising=False)
     monkeypatch.setattr(energy.er, "async_get", lambda hass: None, raising=False)
@@ -370,11 +380,14 @@ async def test_import_energy_history_uses_union_statistics_for_offset(
     client = _SampleClient(samples)
 
     inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev-1")
-    stub_hass.data.setdefault(energy.DOMAIN, {})[entry.entry_id] = {
-        "client": client,
-        "dev_id": "dev-1",
-        "inventory": inventory,
-    }
+    build_entry_runtime(
+        hass=stub_hass,
+        entry_id=entry.entry_id,
+        dev_id="dev-1",
+        inventory=inventory,
+        client=client,
+        config_entry=entry,
+    )
 
     entity_id = "sensor.test_energy"
 
@@ -565,11 +578,14 @@ async def test_import_skips_duplicate_sample_timestamps(
     client = _SampleClient(samples)
 
     inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev-dup")
-    stub_hass.data.setdefault(energy.DOMAIN, {})[entry.entry_id] = {
-        "client": client,
-        "dev_id": "dev-dup",
-        "inventory": inventory,
-    }
+    build_entry_runtime(
+        hass=stub_hass,
+        entry_id=entry.entry_id,
+        dev_id="dev-dup",
+        inventory=inventory,
+        client=client,
+        config_entry=entry,
+    )
 
     entity_id = "sensor.dup_energy"
     external_id = "sensor:dup_energy"
@@ -676,11 +692,14 @@ async def test_import_coalesces_samples_within_hour(
     client = _SampleClient(samples)
 
     inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev-merge")
-    stub_hass.data.setdefault(energy.DOMAIN, {})[entry.entry_id] = {
-        "client": client,
-        "dev_id": "dev-merge",
-        "inventory": inventory,
-    }
+    build_entry_runtime(
+        hass=stub_hass,
+        entry_id=entry.entry_id,
+        dev_id="dev-merge",
+        inventory=inventory,
+        client=client,
+        config_entry=entry,
+    )
 
     entity_id = "sensor.merge_energy"
     external_id = "sensor:merge_energy"
@@ -793,11 +812,14 @@ async def test_import_skips_negative_deltas_after_reset(
     client = _SampleClient(samples)
 
     inventory = inventory_from_map({"htr": ["B"]}, dev_id="dev-reset")
-    stub_hass.data.setdefault(energy.DOMAIN, {})[entry.entry_id] = {
-        "client": client,
-        "dev_id": "dev-reset",
-        "inventory": inventory,
-    }
+    runtime = build_entry_runtime(
+        hass=stub_hass,
+        entry_id=entry.entry_id,
+        dev_id="dev-reset",
+        inventory=inventory,
+        client=client,
+        config_entry=entry,
+    )
 
     entity_id = "sensor.reset_energy"
     external_id = "sensor:reset_energy"
@@ -874,7 +896,7 @@ async def test_import_skips_negative_deltas_after_reset(
     assert stats[0]["start"] == expected_start
     assert stats[0]["sum"] == pytest.approx(0.5)
 
-    summary = stub_hass.data[energy.DOMAIN][entry.entry_id][energy.SUMMARY_KEY_LAST_RUN]
+    summary = runtime.last_energy_import_summary
     node_summary = summary["nodes"][0]
     assert node_summary["resets"] == 1
 
@@ -962,11 +984,14 @@ async def test_import_enforces_monotonic_sum_at_seam(
     client = _SampleClient(samples)
 
     inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev-1")
-    stub_hass.data.setdefault(energy.DOMAIN, {})[entry.entry_id] = {
-        "client": client,
-        "dev_id": "dev-1",
-        "inventory": inventory,
-    }
+    build_entry_runtime(
+        hass=stub_hass,
+        entry_id=entry.entry_id,
+        dev_id="dev-1",
+        inventory=inventory,
+        client=client,
+        config_entry=entry,
+    )
 
     entity_id = "sensor.test_energy"
     external_id = "sensor:test_energy"

@@ -11,7 +11,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from conftest import FakeCoordinator, _install_stubs, build_coordinator_device_state
+from conftest import (
+    FakeCoordinator,
+    _install_stubs,
+    build_coordinator_device_state,
+    build_entry_runtime,
+)
 
 import custom_components.termoweb.inventory as inventory_module
 from custom_components.termoweb.domain import state_to_dict
@@ -204,6 +209,35 @@ def _make_coordinator(
     )
 
 
+def _attach_runtime(
+    hass: HomeAssistant,
+    entry_id: str,
+    dev_id: str,
+    *,
+    coordinator: Any,
+    client: Any | None = None,
+    inventory: Inventory | None = None,
+    version: str | None = None,
+    brand: str | None = None,
+    ws_state: Mapping[str, Any] | None = None,
+) -> "EntryRuntime":
+    """Attach an ``EntryRuntime`` to ``hass.data`` for climate tests."""
+
+    runtime = build_entry_runtime(
+        hass=hass,
+        entry_id=entry_id,
+        dev_id=dev_id,
+        coordinator=coordinator,
+        client=client,
+        inventory=inventory,
+        version=version or "",
+        brand=brand or "",
+    )
+    if ws_state is not None:
+        runtime.ws_state = dict(ws_state)
+    return runtime
+
+
 # -------------------- Helpers for tests --------------------
 
 
@@ -303,19 +337,16 @@ def test_async_setup_entry_creates_entities(
             inventory=inventory,
         )
 
-        hass.data = {
-            DOMAIN: {
-                entry_id: {
-                    "coordinator": coordinator,
-                    "dev_id": dev_id,
-                    "client": AsyncMock(),
-                    "nodes": nodes,
-                    "inventory": inventory,
-                    "version": "3.1.4",
-                    "brand": BRAND_TERMOWEB,
-                }
-            }
-        }
+        _attach_runtime(
+            hass,
+            entry_id,
+            dev_id,
+            coordinator=coordinator,
+            client=AsyncMock(),
+            inventory=inventory,
+            version="3.1.4",
+            brand=BRAND_TERMOWEB,
+        )
 
         added: list[HeaterClimateEntity] = []
 
@@ -535,17 +566,14 @@ def test_async_setup_entry_default_names_and_invalid_nodes(
             inventory=inventory,
         )
 
-        hass.data = {
-            DOMAIN: {
-                entry_id: {
-                    "coordinator": coordinator,
-                    "dev_id": dev_id,
-                    "client": AsyncMock(),
-                    "nodes": raw_nodes,
-                    "inventory": inventory,
-                }
-            }
-        }
+        _attach_runtime(
+            hass,
+            entry_id,
+            dev_id,
+            coordinator=coordinator,
+            client=AsyncMock(),
+            inventory=inventory,
+        )
 
         added: list[HeaterClimateEntity] = []
 
@@ -625,17 +653,14 @@ def test_async_setup_entry_skips_blank_addresses(
             inventory=inventory,
         )
 
-        hass.data = {
-            DOMAIN: {
-                entry_id: {
-                    "coordinator": coordinator,
-                    "dev_id": dev_id,
-                    "client": AsyncMock(),
-                    "nodes": raw_nodes,
-                    "inventory": inventory,
-                }
-            }
-        }
+        _attach_runtime(
+            hass,
+            entry_id,
+            dev_id,
+            coordinator=coordinator,
+            client=AsyncMock(),
+            inventory=inventory,
+        )
 
         added: list[HeaterClimateEntity] = []
 
@@ -689,18 +714,15 @@ def test_async_setup_entry_creates_accumulator_entity(
 
         client = AsyncMock()
 
-        hass.data = {
-            DOMAIN: {
-                entry_id: {
-                    "coordinator": coordinator,
-                    "dev_id": dev_id,
-                    "client": client,
-                    "nodes": nodes,
-                    "inventory": inventory,
-                    "brand": BRAND_DUCAHEAT,
-                }
-            }
-        }
+        runtime = _attach_runtime(
+            hass,
+            entry_id,
+            dev_id,
+            coordinator=coordinator,
+            client=client,
+            inventory=inventory,
+            brand=BRAND_DUCAHEAT,
+        )
 
         added: list[climate_module.HeaterClimateEntity] = []
 
@@ -711,7 +733,6 @@ def test_async_setup_entry_creates_accumulator_entity(
 
         entry = types.SimpleNamespace(entry_id=entry_id)
         await async_setup_entry(hass, entry, _async_add_entities)
-        runtime = climate_module.require_runtime(hass, entry_id)
         backend = runtime.backend
         backend.set_node_settings.reset_mock()
 
@@ -738,7 +759,7 @@ def test_async_setup_entry_creates_accumulator_entity(
         assert call.kwargs["units"] == "C"
         backend.set_node_settings.reset_mock()
 
-        hass.data[DOMAIN][entry_id]["brand"] = BRAND_TERMOWEB
+        runtime.brand = BRAND_TERMOWEB
 
         await acc.async_set_schedule(list(prog))
         call = backend.set_node_settings.await_args
@@ -776,14 +797,14 @@ def test_async_setup_entry_uses_inventory_node_for_boost_detection(
             inventory=inventory,
         )
 
-        record: dict[str, Any] = {
-            "coordinator": coordinator,
-            "dev_id": dev_id,
-            "client": AsyncMock(),
-            "nodes": nodes,
-            "inventory": inventory,
-        }
-        hass.data = {DOMAIN: {entry_id: record}}
+        _attach_runtime(
+            hass,
+            entry_id,
+            dev_id,
+            coordinator=coordinator,
+            client=AsyncMock(),
+            inventory=inventory,
+        )
 
         node = types.SimpleNamespace(addr="1", type="htr")
         iter_calls: list[Any] = []
@@ -845,17 +866,14 @@ def test_async_setup_entry_prefers_inventory_node_type(
             inventory=inventory,
         )
 
-        hass.data = {
-            DOMAIN: {
-                entry_id: {
-                    "coordinator": coordinator,
-                    "dev_id": dev_id,
-                    "client": AsyncMock(),
-                    "nodes": nodes,
-                    "inventory": inventory,
-                }
-            }
-        }
+        _attach_runtime(
+            hass,
+            entry_id,
+            dev_id,
+            coordinator=coordinator,
+            client=AsyncMock(),
+            inventory=inventory,
+        )
 
         node = types.SimpleNamespace(addr="2", type="acm")
 
@@ -967,16 +985,14 @@ def test_accumulator_hvac_mode_reporting() -> None:
         },
         inventory=inventory,
     )
-    hass.data = {
-        DOMAIN: {
-            entry_id: {
-                "coordinator": coordinator,
-                "dev_id": dev_id,
-                "client": AsyncMock(),
-                "brand": BRAND_TERMOWEB,
-            }
-        }
-    }
+    _attach_runtime(
+        hass,
+        entry_id,
+        dev_id,
+        coordinator=coordinator,
+        client=AsyncMock(),
+        brand=BRAND_TERMOWEB,
+    )
 
     entity = climate_module.AccumulatorClimateEntity(
         coordinator,
@@ -1154,16 +1170,14 @@ def test_accumulator_extra_state_attributes_handles_resolver_fallbacks() -> None
 
     coordinator.resolve_boost_end = FlakyResolver()  # type: ignore[assignment]
 
-    hass.data = {
-        DOMAIN: {
-            entry_id: {
-                "coordinator": coordinator,
-                "dev_id": dev_id,
-                "client": AsyncMock(),
-                "brand": BRAND_TERMOWEB,
-            }
-        }
-    }
+    _attach_runtime(
+        hass,
+        entry_id,
+        dev_id,
+        coordinator=coordinator,
+        client=AsyncMock(),
+        brand=BRAND_TERMOWEB,
+    )
 
     entity = climate_module.AccumulatorClimateEntity(
         coordinator,
@@ -1223,16 +1237,14 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
         inventory=inventory,
     )
 
-    hass.data = {
-        DOMAIN: {
-            entry_id: {
-                "coordinator": coordinator,
-                "dev_id": dev_id,
-                "client": AsyncMock(),
-                "brand": BRAND_TERMOWEB,
-            }
-        }
-    }
+    _attach_runtime(
+        hass,
+        entry_id,
+        dev_id,
+        coordinator=coordinator,
+        client=AsyncMock(),
+        brand=BRAND_TERMOWEB,
+    )
 
     entity = climate_module.AccumulatorClimateEntity(
         coordinator,
@@ -1363,17 +1375,15 @@ def test_accumulator_submit_settings_brand_switch() -> None:
             },
         )
         backend = AsyncMock()
-        hass.data = {
-            DOMAIN: {
-                entry_id: {
-                    "coordinator": coordinator,
-                    "dev_id": dev_id,
-                    "client": AsyncMock(),
-                    "backend": backend,
-                    "brand": BRAND_DUCAHEAT,
-                }
-            }
-        }
+        runtime = _attach_runtime(
+            hass,
+            entry_id,
+            dev_id,
+            coordinator=coordinator,
+            client=AsyncMock(),
+            brand=BRAND_DUCAHEAT,
+        )
+        runtime.backend = backend
 
         entity = climate_module.AccumulatorClimateEntity(
             coordinator,
@@ -1397,7 +1407,7 @@ def test_accumulator_submit_settings_brand_switch() -> None:
         assert call.args == (dev_id, ("acm", addr))
         assert call.kwargs["mode"] == "auto"
 
-        hass.data[DOMAIN][entry_id]["brand"] = BRAND_TERMOWEB
+        runtime.brand = BRAND_TERMOWEB
 
         await entity._async_submit_settings(
             AsyncMock(),
@@ -1449,17 +1459,15 @@ def test_accumulator_submit_settings_handles_boost_state_error() -> None:
         entity.hass = hass
 
         backend = AsyncMock()
-        hass.data = {
-            DOMAIN: {
-                entry_id: {
-                    "coordinator": coordinator,
-                    "dev_id": dev_id,
-                    "client": AsyncMock(),
-                    "backend": backend,
-                    "brand": BRAND_DUCAHEAT,
-                }
-            }
-        }
+        runtime = _attach_runtime(
+            hass,
+            entry_id,
+            dev_id,
+            coordinator=coordinator,
+            client=AsyncMock(),
+            brand=BRAND_DUCAHEAT,
+        )
+        runtime.backend = backend
 
         entity.accumulator_state = MagicMock(
             return_value=types.SimpleNamespace(boost_active=True)
@@ -1517,17 +1525,15 @@ def test_accumulator_submit_settings_legacy_mode_detection() -> None:
         entity.hass = hass
 
         backend = AsyncMock()
-        hass.data = {
-            DOMAIN: {
-                entry_id: {
-                    "coordinator": coordinator,
-                    "dev_id": dev_id,
-                    "client": AsyncMock(),
-                    "backend": backend,
-                    "brand": BRAND_DUCAHEAT,
-                }
-            }
-        }
+        runtime = _attach_runtime(
+            hass,
+            entry_id,
+            dev_id,
+            coordinator=coordinator,
+            client=AsyncMock(),
+            brand=BRAND_DUCAHEAT,
+        )
+        runtime.backend = backend
 
         entity.boost_state = MagicMock(return_value=types.SimpleNamespace(active=None))  # type: ignore[assignment]
         entity.accumulator_state = MagicMock(
@@ -1584,17 +1590,15 @@ def test_accumulator_submit_settings_legacy_boost_flag() -> None:
         entity.hass = hass
 
         backend = AsyncMock()
-        hass.data = {
-            DOMAIN: {
-                entry_id: {
-                    "coordinator": coordinator,
-                    "dev_id": dev_id,
-                    "client": AsyncMock(),
-                    "backend": backend,
-                    "brand": BRAND_DUCAHEAT,
-                }
-            }
-        }
+        runtime = _attach_runtime(
+            hass,
+            entry_id,
+            dev_id,
+            coordinator=coordinator,
+            client=AsyncMock(),
+            brand=BRAND_DUCAHEAT,
+        )
+        runtime.backend = backend
 
         entity.boost_state = MagicMock(return_value=types.SimpleNamespace(active=None))  # type: ignore[assignment]
         entity.accumulator_state = MagicMock(
@@ -1631,15 +1635,13 @@ def test_async_write_settings_without_client_returns_false() -> None:
             dev_id,
             {"htr": {"settings": {}}, "nodes": {}},
         )
-        hass.data = {
-            DOMAIN: {
-                "entry": {
-                    "coordinator": coordinator,
-                    "dev_id": dev_id,
-                    "client": None,
-                }
-            }
-        }
+        _attach_runtime(
+            hass,
+            "entry",
+            dev_id,
+            coordinator=coordinator,
+            client=None,
+        )
 
         heater = HeaterClimateEntity(coordinator, "entry", dev_id, "1", "Heater 1")
         heater.hass = hass
@@ -1781,7 +1783,14 @@ def test_async_setup_entry_reuses_coordinator_inventory(
             "nodes": raw_nodes,
             "inventory": inventory,
         }
-        hass.data = {DOMAIN: {entry.entry_id: record}}
+        runtime = _attach_runtime(
+            hass,
+            entry.entry_id,
+            dev_id,
+            coordinator=coordinator,
+            client=AsyncMock(),
+            inventory=inventory,
+        )
 
         added: list[HeaterClimateEntity] = []
 
@@ -1791,7 +1800,7 @@ def test_async_setup_entry_reuses_coordinator_inventory(
         await async_setup_entry(hass, entry, _async_add_entities)
 
         assert len(added) == 1
-        assert hass.data[DOMAIN][entry.entry_id]["inventory"] is inventory
+        assert runtime.inventory is inventory
 
     asyncio.run(_run())
 
@@ -1815,17 +1824,15 @@ def test_refresh_fallback_skips_when_hass_inactive(
             client=AsyncMock(),
         )
 
-        hass.data = {
-            DOMAIN: {
-                entry_id: {
-                    "client": AsyncMock(),
-                    "coordinator": coordinator,
-                    "dev_id": dev_id,
-                    "version": "1",
-                    "ws_state": {},
-                }
-            }
-        }
+        _attach_runtime(
+            hass,
+            entry_id,
+            dev_id,
+            coordinator=coordinator,
+            client=AsyncMock(),
+            version="1",
+            ws_state={},
+        )
 
         heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
         await heater.async_added_to_hass()
@@ -1894,17 +1901,15 @@ def test_heater_additional_cancelled_edges(
         client = AsyncMock()
         client.set_node_settings = AsyncMock()
 
-        hass.data = {
-            DOMAIN: {
-                entry_id: {
-                    "client": client,
-                    "coordinator": coordinator,
-                    "dev_id": dev_id,
-                    "ws_state": {},
-                    "version": "1",
-                }
-            }
-        }
+        _attach_runtime(
+            hass,
+            entry_id,
+            dev_id,
+            coordinator=coordinator,
+            client=client,
+            version="1",
+            ws_state={},
+        )
 
         heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
         await heater.async_added_to_hass()
@@ -2062,19 +2067,15 @@ def test_heater_write_paths_and_errors(
             inventory=inventory,
         )
         client = AsyncMock()
-        hass.data = {
-            DOMAIN: {
-                entry_id: {
-                    "client": client,
-                    "coordinator": coordinator,
-                    "dev_id": dev_id,
-                    "version": "5.0.0",
-                    "ws_state": {
-                        dev_id: {"status": "disconnected", "last_event_at": None}
-                    },
-                }
-            }
-        }
+        _attach_runtime(
+            hass,
+            entry_id,
+            dev_id,
+            coordinator=coordinator,
+            client=client,
+            version="5.0.0",
+            ws_state={dev_id: {"status": "disconnected", "last_event_at": None}},
+        )
 
         heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
         await heater.async_added_to_hass()
@@ -2439,8 +2440,10 @@ def test_heater_write_paths_and_errors(
         coordinator.async_refresh_heater.reset_mock()
         assert not fallback_waiters
 
+        runtime = climate_module.require_runtime(hass, entry_id)
+
         # -------------------- WS healthy suppresses fallback --------------
-        hass.data[DOMAIN][entry_id]["ws_state"][dev_id] = {
+        runtime.ws_state[dev_id] = {
             "status": "healthy",
             "last_event_at": 0,
             "last_payload_at": climate_module.time.time(),
@@ -2456,7 +2459,7 @@ def test_heater_write_paths_and_errors(
         client.set_node_settings.reset_mock()
 
         # -------------------- WS healthy but stale payload triggers fallback ----
-        hass.data[DOMAIN][entry_id]["ws_state"][dev_id] = {
+        runtime.ws_state[dev_id] = {
             "status": "healthy",
             "last_event_at": 0,
             "last_payload_at": climate_module.time.time() - 60,
@@ -2471,7 +2474,7 @@ def test_heater_write_paths_and_errors(
         client.set_node_settings.reset_mock()
 
         # -------------------- WS status missing triggers fallback ---------
-        hass.data[DOMAIN][entry_id]["ws_state"].pop(dev_id, None)
+        runtime.ws_state.pop(dev_id, None)
         await heater.async_set_temperature(**{ATTR_TEMPERATURE: 24.5})
         assert heater._write_task is not None
         await heater._write_task
@@ -2480,7 +2483,7 @@ def test_heater_write_paths_and_errors(
         client.set_node_settings.reset_mock()
 
         # -------------------- WS down restores fallback -------------------
-        hass.data[DOMAIN][entry_id]["ws_state"][dev_id] = {
+        runtime.ws_state[dev_id] = {
             "status": "disconnected",
             "last_event_at": None,
         }
@@ -2526,17 +2529,15 @@ def test_heater_cancellation_and_error_paths(monkeypatch: pytest.MonkeyPatch) ->
         client = AsyncMock()
         client.set_node_settings = AsyncMock()
 
-        hass.data = {
-            DOMAIN: {
-                entry_id: {
-                    "client": client,
-                    "coordinator": coordinator,
-                    "dev_id": dev_id,
-                    "version": "1",
-                    "ws_state": {},
-                }
-            }
-        }
+        _attach_runtime(
+            hass,
+            entry_id,
+            dev_id,
+            coordinator=coordinator,
+            client=client,
+            version="1",
+            ws_state={},
+        )
 
         heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
         await heater.async_added_to_hass()
@@ -2715,17 +2716,15 @@ def test_heater_cancelled_paths_propagate(
         client = AsyncMock()
         client.set_node_settings = AsyncMock()
 
-        hass.data = {
-            DOMAIN: {
-                entry_id: {
-                    "client": client,
-                    "coordinator": coordinator,
-                    "dev_id": dev_id,
-                    "ws_state": {},
-                    "version": "1",
-                }
-            }
-        }
+        _attach_runtime(
+            hass,
+            entry_id,
+            dev_id,
+            coordinator=coordinator,
+            client=client,
+            version="1",
+            ws_state={},
+        )
 
         heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
         await heater.async_added_to_hass()

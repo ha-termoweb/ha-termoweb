@@ -387,29 +387,17 @@ class _WSStatusMixin:
 
         return False
 
-    def _ws_bucket_sizes(
-        self,
-        *,
-        entry_bucket: Mapping[str, Any] | None = None,
-        ws_bucket: Mapping[str, Any] | None = None,
-        trackers: Mapping[str, Any] | None = None,
-    ) -> tuple[int, int]:
+    def _ws_bucket_sizes(self) -> tuple[int, int]:
         """Return the current websocket state and tracker bucket sizes."""
 
-        hass_data = getattr(self.hass, "data", None)
-        domain_bucket: Mapping[str, Any] | None = None
-        if isinstance(hass_data, Mapping):
-            domain_bucket = hass_data.get(DOMAIN)
-
-        if entry_bucket is None and isinstance(domain_bucket, Mapping):
-            entry_bucket = domain_bucket.get(self.entry_id)
-        if ws_bucket is None and isinstance(entry_bucket, Mapping):
-            ws_bucket = entry_bucket.get("ws_state")
-        if trackers is None and isinstance(entry_bucket, Mapping):
-            trackers = entry_bucket.get("ws_trackers")
-
-        ws_size = len(ws_bucket) if isinstance(ws_bucket, Mapping) else 0
-        trackers_size = len(trackers) if isinstance(trackers, Mapping) else 0
+        try:
+            runtime = require_runtime(self.hass, self.entry_id)
+        except LookupError:
+            ws_size = 0
+            trackers_size = 0
+        else:
+            ws_size = len(runtime.ws_state)
+            trackers_size = len(runtime.ws_trackers)
 
         footprint = getattr(self, "_ws_bucket_baseline", None)
         snapshot = (ws_size, trackers_size)
@@ -435,17 +423,20 @@ class _WSStatusMixin:
         if isinstance(ws_state, dict):
             return ws_state
 
-        hass_data = getattr(self.hass, "data", None)
-        if hass_data is None:
-            hass_data = {}
-            setattr(self.hass, "data", hass_data)  # type: ignore[attr-defined]
+        try:
+            runtime = require_runtime(self.hass, self.entry_id)
+        except LookupError:
+            ws_state = {}
+            setattr(self, "_ws_state", ws_state)
+            return ws_state
 
-        domain_bucket = hass_data.setdefault(DOMAIN, {})
-        entry_bucket = domain_bucket.setdefault(self.entry_id, {})
-        ws_bucket = entry_bucket.setdefault("ws_state", {})
+        ws_bucket = runtime.ws_state
+        if not isinstance(ws_bucket, dict):
+            runtime.ws_state = {}
+            ws_bucket = runtime.ws_state
         ws_state = ws_bucket.setdefault(self.dev_id, {})
         setattr(self, "_ws_state", ws_state)
-        self._ws_bucket_sizes(entry_bucket=entry_bucket, ws_bucket=ws_bucket)
+        self._ws_bucket_sizes()
         return ws_state
 
     def _ws_health_tracker(self) -> WsHealthTracker:
@@ -466,14 +457,17 @@ class _WSStatusMixin:
                 )
             return cached
 
-        hass_data = getattr(self.hass, "data", None)
-        if hass_data is None:
-            hass_data = {}
-            setattr(self.hass, "data", hass_data)  # type: ignore[attr-defined]
+        try:
+            runtime = require_runtime(self.hass, self.entry_id)
+        except LookupError:
+            tracker = WsHealthTracker(self.dev_id)
+            setattr(self, "_ws_tracker", tracker)
+            return tracker
 
-        domain_bucket = hass_data.setdefault(DOMAIN, {})
-        entry_bucket = domain_bucket.setdefault(self.entry_id, {})
-        trackers = entry_bucket.setdefault("ws_trackers", {})
+        trackers = runtime.ws_trackers
+        if not isinstance(trackers, dict):
+            runtime.ws_trackers = {}
+            trackers = runtime.ws_trackers
         tracker = trackers.get(self.dev_id)
         created = False
         if not isinstance(tracker, WsHealthTracker):
@@ -499,7 +493,7 @@ class _WSStatusMixin:
         ):
             tracker.last_heartbeat_at = float(legacy_heartbeat)
         setattr(self, "_ws_tracker", tracker)
-        self._ws_bucket_sizes(entry_bucket=entry_bucket, trackers=trackers)
+        self._ws_bucket_sizes()
         should_apply_hint = created and hasattr(self, "_apply_payload_window_hint")
         if should_apply_hint and getattr(self, "_suppress_default_cadence_hint", False):
             should_apply_hint = False
@@ -525,39 +519,17 @@ class _WSStatusMixin:
     def _cleanup_ws_state(self) -> None:
         """Remove cached websocket state and tracker entries for this device."""
 
-        hass_data = getattr(self.hass, "data", None)
-        if not isinstance(hass_data, MutableMapping):
-            return
-        domain_bucket = hass_data.get(DOMAIN)
-        if not isinstance(domain_bucket, MutableMapping):
-            return
-        entry_bucket = domain_bucket.get(self.entry_id)
-        if isinstance(entry_bucket, EntryRuntime):
-            ws_bucket = entry_bucket.ws_state
-            if isinstance(ws_bucket, MutableMapping):
-                ws_bucket.pop(self.dev_id, None)
-            trackers = entry_bucket.ws_trackers
-            if isinstance(trackers, MutableMapping):
-                trackers.pop(self.dev_id, None)
-
-            setattr(self, "_ws_state", None)
-            setattr(self, "_ws_tracker", None)
-            setattr(self, "_ws_bucket_baseline", None)
-            return
-        if not isinstance(entry_bucket, MutableMapping):
+        try:
+            runtime = require_runtime(self.hass, self.entry_id)
+        except LookupError:
             return
 
-        ws_bucket = entry_bucket.get("ws_state")
+        ws_bucket = runtime.ws_state
         if isinstance(ws_bucket, MutableMapping):
             ws_bucket.pop(self.dev_id, None)
-            if not ws_bucket:
-                entry_bucket.pop("ws_state", None)
-
-        trackers = entry_bucket.get("ws_trackers")
+        trackers = runtime.ws_trackers
         if isinstance(trackers, MutableMapping):
             trackers.pop(self.dev_id, None)
-            if not trackers:
-                entry_bucket.pop("ws_trackers", None)
 
         setattr(self, "_ws_state", None)
         setattr(self, "_ws_tracker", None)
@@ -715,7 +687,6 @@ class NodeDispatchContext:
 
     payload: Any
     inventory: Inventory | None
-    record: MutableMapping[str, Any] | None = None
 
 
 def _prepare_nodes_dispatch(
@@ -728,22 +699,8 @@ def _prepare_nodes_dispatch(
 ) -> NodeDispatchContext:
     """Normalise node payload data for downstream websocket dispatch."""
 
-    hass_data = getattr(hass, "data", None)
-    entry_bucket: MutableMapping[str, Any] | None = None
-    if isinstance(hass_data, MutableMapping):
-        domain_bucket = hass_data.get(DOMAIN)
-        if isinstance(domain_bucket, MutableMapping):
-            entry_bucket = domain_bucket.get(entry_id)
-            if not isinstance(entry_bucket, MutableMapping):
-                entry_bucket = None
-
     inventory_container = inventory if isinstance(inventory, Inventory) else None
-    if inventory_container is None and isinstance(entry_bucket, Mapping):
-        entry_inventory = entry_bucket.get("inventory")
-        if isinstance(entry_inventory, Inventory):
-            inventory_container = entry_inventory
-
-    runtime: EntryRuntime | Mapping[str, Any] | None = None
+    runtime: EntryRuntime | None = None
     if inventory_container is None:
         try:
             runtime = require_runtime(hass, entry_id)
@@ -758,19 +715,9 @@ def _prepare_nodes_dispatch(
         if isinstance(coordinator_inventory, Inventory):
             inventory_container = coordinator_inventory
 
-    if inventory_container is not None:
-        if entry_bucket is not None:
-            entry_bucket["inventory"] = inventory_container
-        if runtime is not None:
-            if isinstance(runtime, EntryRuntime):
-                runtime.inventory = inventory_container
-            elif isinstance(runtime, MutableMapping):
-                runtime["inventory"] = inventory_container
-
     return NodeDispatchContext(
         payload=raw_nodes,
         inventory=inventory_container,
-        record=entry_bucket,
     )
 
 

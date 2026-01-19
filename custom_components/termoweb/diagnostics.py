@@ -15,7 +15,6 @@ from homeassistant.core import HomeAssistant
 from .backend.sanitize import mask_identifier
 from .backend.ws_health import WsHealthTracker
 from .const import CONF_BRAND, DEFAULT_BRAND, DOMAIN, get_brand_label
-from .energy import SUMMARY_KEY_LAST_RUN
 from .inventory import Inventory
 from .runtime import EntryRuntime, require_runtime
 from .utils import async_get_integration_version
@@ -113,7 +112,7 @@ async def async_get_config_entry_diagnostics(
     if time_zone_str is not None:
         diagnostics["home_assistant"]["time_zone"] = time_zone_str
 
-    last_import = runtime.get(SUMMARY_KEY_LAST_RUN)
+    last_import = runtime.last_energy_import_summary
     energy_section: dict[str, Any] = {}
     if isinstance(last_import, Mapping):
         energy_section["last_run"] = dict(last_import)

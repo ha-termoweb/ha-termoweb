@@ -551,7 +551,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         _LOGGER.info("WS: started read-only client for %s", dev_id)
 
     runtime.start_ws = _start_ws
-    runtime["_start_ws"] = _start_ws
 
     def _recalc_poll_interval() -> None:
         """Suspend REST polling when websocket trackers are healthy and fresh."""
@@ -723,63 +722,34 @@ class _ShutdownTargets:
 
     diagnostics_task: Any | None
     poller: Any | None
-    ws_tasks: Mapping[str, Any]
-    ws_clients: Mapping[str, Any]
+    ws_tasks: dict[str, Any]
+    ws_clients: dict[str, Any]
     unsub_ws_status: Callable[[], None] | None
     poll_resume_unsub: Callable[[], None] | None
 
 
-def _set_runtime_value(
-    runtime: EntryRuntime | Mapping[str, Any], key: str, value: Any
-) -> None:
-    """Persist ``value`` for ``key`` on a runtime container when possible."""
-
-    if isinstance(runtime, EntryRuntime):
-        setattr(runtime, key, value)
-    elif isinstance(runtime, MutableMapping):
-        runtime[key] = value
-
-
 def _collect_shutdown_targets(
-    runtime: EntryRuntime | Mapping[str, Any],
+    runtime: EntryRuntime,
 ) -> _ShutdownTargets | None:
     """Return shutdown targets or ``None`` if shutdown already ran."""
 
-    if isinstance(runtime, EntryRuntime):
-        if getattr(runtime, "_shutdown_complete", False):
-            return None
-        setattr(runtime, "_shutdown_complete", True)
-        ws_tasks = runtime.ws_tasks if isinstance(runtime.ws_tasks, Mapping) else {}
-        ws_clients = (
-            runtime.ws_clients if isinstance(runtime.ws_clients, Mapping) else {}
-        )
-        return _ShutdownTargets(
-            diagnostics_task=runtime.diagnostics_task,
-            poller=runtime.hourly_poller,
-            ws_tasks=ws_tasks,
-            ws_clients=ws_clients,
-            unsub_ws_status=runtime.unsub_ws_status,
-            poll_resume_unsub=runtime.poll_resume_unsub,
-        )
-    if not isinstance(runtime, Mapping):
+    if runtime._shutdown_complete:  # noqa: SLF001
         return None
-    if runtime.get("_shutdown_complete"):
-        return None
-    runtime["_shutdown_complete"] = True
-    ws_tasks = runtime.get("ws_tasks", {})
-    ws_clients = runtime.get("ws_clients", {})
+    runtime._shutdown_complete = True  # noqa: SLF001
+    ws_tasks = runtime.ws_tasks
+    ws_clients = runtime.ws_clients
     return _ShutdownTargets(
-        diagnostics_task=runtime.get("diagnostics_task"),
-        poller=runtime.get("hourly_poller"),
-        ws_tasks=ws_tasks if isinstance(ws_tasks, Mapping) else {},
-        ws_clients=ws_clients if isinstance(ws_clients, Mapping) else {},
-        unsub_ws_status=runtime.get("unsub_ws_status"),
-        poll_resume_unsub=runtime.get("poll_resume_unsub"),
+        diagnostics_task=runtime.diagnostics_task,
+        poller=runtime.hourly_poller,
+        ws_tasks=ws_tasks,
+        ws_clients=ws_clients,
+        unsub_ws_status=runtime.unsub_ws_status,
+        poll_resume_unsub=runtime.poll_resume_unsub,
     )
 
 
 async def _shutdown_diagnostics_task(
-    runtime: EntryRuntime | Mapping[str, Any],
+    runtime: EntryRuntime,
     diagnostics_task: Any,
 ) -> None:
     """Cancel and await the diagnostics task when present."""
@@ -796,7 +766,7 @@ async def _shutdown_diagnostics_task(
         pass
     except Exception:  # pragma: no cover - defensive logging
         _LOGGER.exception("Diagnostics listener task raised during shutdown")
-    _set_runtime_value(runtime, "diagnostics_task", None)
+    runtime.diagnostics_task = None
 
 
 async def _shutdown_hourly_poller(poller: Any) -> None:
@@ -844,7 +814,7 @@ async def _shutdown_ws_clients(ws_clients: Mapping[str, Any]) -> None:
 
 
 def _shutdown_runtime_callback(
-    runtime: EntryRuntime | Mapping[str, Any],
+    runtime: EntryRuntime,
     key: str,
     callback: Callable[[], None] | None,
     error_message: str,
@@ -856,10 +826,10 @@ def _shutdown_runtime_callback(
             callback()
         except Exception:  # pragma: no cover - defensive logging
             _LOGGER.exception(error_message)
-    _set_runtime_value(runtime, key, None)
+    setattr(runtime, key, None)
 
 
-async def _async_shutdown_entry(runtime: EntryRuntime | Mapping[str, Any]) -> None:
+async def _async_shutdown_entry(runtime: EntryRuntime) -> None:
     """Cancel websocket tasks and listeners for an integration record."""
 
     targets = _collect_shutdown_targets(runtime)
@@ -916,8 +886,3 @@ async def async_update_entry_options(hass: HomeAssistant, entry: ConfigEntry) ->
         runtime.debug = debug_enabled
         if callable(runtime.recalc_poll):
             runtime.recalc_poll()
-    elif isinstance(runtime, Mapping):
-        runtime["debug"] = debug_enabled
-        recalc = runtime.get("recalc_poll")
-        if callable(recalc):
-            recalc()

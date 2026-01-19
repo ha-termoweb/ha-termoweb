@@ -14,12 +14,13 @@ from unittest.mock import AsyncMock, MagicMock
 import aiohttp
 import pytest
 
+from conftest import build_entry_runtime
 from custom_components.termoweb.backend import ducaheat_ws, ws_client
+from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.inventory import (
     Inventory,
     build_node_inventory,
 )
-from custom_components.termoweb.runtime import EntryRuntime
 from homeassistant.core import HomeAssistant
 
 
@@ -202,9 +203,15 @@ def _make_client(
     socket = ws or StubWebSocket()
     session = StubSession(socket)
     hass = HomeAssistant()
-    hass.data.setdefault(ducaheat_ws.DOMAIN, {})["entry"] = {}
+    hass.data.setdefault(DOMAIN, {})
     coordinator = DummyCoordinator()
     monkeypatch.setattr(ducaheat_ws, "resolved_nodes", None, raising=False)
+    runtime = build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="device",
+        coordinator=coordinator,
+    )
     client = ducaheat_ws.DucaheatWSClient(
         hass,
         entry_id="entry",
@@ -220,17 +227,14 @@ def _make_client(
         "device",
         build_node_inventory(raw_nodes),
     )
-    hass.data[ducaheat_ws.DOMAIN]["entry"]["inventory"] = inventory
+    runtime.inventory = inventory
     return client
 
 
-def _drop_inventory(bucket: dict[str, Any] | EntryRuntime) -> None:
-    """Remove inventory data from a runtime or mapping bucket."""
+def _drop_inventory(runtime: Any) -> None:
+    """Remove inventory data from a runtime."""
 
-    if isinstance(bucket, EntryRuntime):
-        bucket.inventory = None  # type: ignore[assignment]
-        return
-    bucket.pop("inventory", None)
+    runtime.inventory = None  # type: ignore[assignment]
 
 
 @pytest.mark.asyncio
@@ -586,7 +590,8 @@ def test_update_status_records_health(monkeypatch: pytest.MonkeyPatch) -> None:
 
     client._update_status("healthy")
 
-    ws_state = hass.data[ducaheat_ws.DOMAIN]["entry"]["ws_state"][client.dev_id]
+    runtime = hass.data[DOMAIN]["entry"]
+    ws_state = runtime.ws_state[client.dev_id]
     assert ws_state["status"] == "healthy"
     assert ws_state["healthy_since"] == first_ts
     assert ws_state["healthy_minutes"] == 0
@@ -601,7 +606,7 @@ def test_update_status_records_health(monkeypatch: pytest.MonkeyPatch) -> None:
 
     client._update_status("healthy")
 
-    ws_state = hass.data[ducaheat_ws.DOMAIN]["entry"]["ws_state"][client.dev_id]
+    ws_state = runtime.ws_state[client.dev_id]
     assert ws_state["healthy_since"] == first_ts
     assert ws_state["healthy_minutes"] == 10
     assert ws_state["frames_total"] == 5
@@ -620,8 +625,8 @@ def _set_inventory(
     """Bind a fresh inventory container to the client and hass record."""
 
     inventory = Inventory(client.dev_id, build_node_inventory(payload))
-    hass_record = client.hass.data[ducaheat_ws.DOMAIN][client.entry_id]
-    hass_record["inventory"] = inventory
+    runtime = client.hass.data[DOMAIN][client.entry_id]
+    runtime.inventory = inventory
     client._inventory = inventory
     return inventory
 
@@ -637,9 +642,8 @@ def test_dispatch_nodes_includes_inventory_metadata(
     client._dispatcher = MagicMock()
 
     energy_coordinator = SimpleNamespace(update_addresses=MagicMock())
-    hass.data[ducaheat_ws.DOMAIN][client.entry_id]["energy_coordinator"] = (
-        energy_coordinator
-    )
+    runtime = hass.data[DOMAIN][client.entry_id]
+    runtime.energy_coordinator = energy_coordinator
 
     payload = {
         "htr": {
@@ -661,9 +665,9 @@ def test_dispatch_nodes_includes_inventory_metadata(
     coordinator.update_nodes.assert_not_called()
     assert client._inventory.addresses_by_type["htr"] == ["1"]
 
-    record = hass.data[ducaheat_ws.DOMAIN][client.entry_id]
-    assert record.get("inventory") is inventory
-    assert "sample_aliases" not in record
+    runtime = hass.data[DOMAIN][client.entry_id]
+    assert runtime.inventory is inventory
+    assert not hasattr(runtime, "sample_aliases")
     energy_coordinator.update_addresses.assert_called_once_with(inventory)
 
 
@@ -1119,7 +1123,8 @@ async def test_read_loop_updates_ws_state_on_dev_data(
 
     await _run_read_loop(client)
 
-    ws_state = hass.data[ducaheat_ws.DOMAIN]["entry"]["ws_state"][client.dev_id]
+    runtime = hass.data[DOMAIN]["entry"]
+    ws_state = runtime.ws_state[client.dev_id]
     assert ws_state["status"] == "healthy"
     assert ws_state["healthy_since"] == base_ts
     assert ws_state["last_event_at"] == base_ts
@@ -1503,9 +1508,14 @@ async def test_read_loop_forwards_sample_updates(
     def _handler(dev_id: str, payload: Mapping[str, Any], **kwargs: Any) -> None:
         forwarded.append((dev_id, payload, kwargs))
 
-    client.hass.data[ducaheat_ws.DOMAIN]["entry"]["energy_coordinator"] = (
-        SimpleNamespace(handle_ws_samples=_handler)
+    runtime = client.hass.data[DOMAIN]["entry"]
+    runtime.energy_coordinator = SimpleNamespace(handle_ws_samples=_handler)
+    object.__setattr__(
+        runtime.inventory,
+        "_energy_sample_types_cache",
+        frozenset({"htr"}),
     )
+    client._inventory = runtime.inventory
     statuses: list[str] = []
     monkeypatch.setattr(
         client, "_update_status", lambda status: statuses.append(status)
@@ -1714,7 +1724,7 @@ def test_forward_sample_updates_handles_guard_paths(
     client._forward_sample_updates({"htr": {"samples": {"1": {"power": 1}}}})
 
     client = _make_client(monkeypatch)
-    client.hass.data[ducaheat_ws.DOMAIN]["entry"]["energy_coordinator"] = object()
+    client.hass.data[DOMAIN]["entry"].energy_coordinator = object()
     client._forward_sample_updates({"htr": {"samples": {"1": {"power": 1}}}})
 
 
@@ -1729,9 +1739,7 @@ def test_forward_sample_updates_handles_exception(
         def handle_ws_samples(self, *_: Any, **__: Any) -> None:
             raise RuntimeError
 
-    client.hass.data[ducaheat_ws.DOMAIN]["entry"]["energy_coordinator"] = (
-        FailingCoordinator()
-    )
+    client.hass.data[DOMAIN]["entry"].energy_coordinator = FailingCoordinator()
     client._forward_sample_updates({"htr": {"samples": {"1": {"power": 1}}}})
 
 
@@ -2122,8 +2130,8 @@ async def test_subscribe_feeds_stores_inventory_only(
     """Subscription state should persist the resolved inventory without nodes."""
 
     client = _make_client(monkeypatch)
-    bucket = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
-    _drop_inventory(bucket)
+    runtime = client.hass.data[DOMAIN]["entry"]
+    _drop_inventory(runtime)
 
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
     inventory = Inventory(
@@ -2144,9 +2152,7 @@ async def test_subscribe_feeds_stores_inventory_only(
     assert count == 2
     assert {path for _evt, path in emissions} == {"/htr/1/samples", "/htr/1/status"}
     assert client._subscription_paths == {"/htr/1/samples", "/htr/1/status"}
-    bucket = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
-    stored = bucket.get("inventory")
-    assert stored is inventory
+    assert runtime.inventory is inventory
 
 
 @pytest.mark.asyncio
@@ -2178,11 +2184,11 @@ async def test_subscribe_feeds_uses_inventory_cache(
         ("subscribe", "/htr/7/status"),
     ]
     assert client._subscription_paths == {"/htr/7/samples", "/htr/7/status"}
-    record = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
-    inventory = record.get("inventory")
+    runtime = client.hass.data[DOMAIN]["entry"]
+    inventory = runtime.inventory
     assert isinstance(inventory, Inventory)
     assert any(getattr(node, "addr", "") == "7" for node in inventory.nodes)
-    assert "node_inventory" not in record
+    assert not hasattr(runtime, "node_inventory")
 
 
 @pytest.mark.asyncio
@@ -2193,9 +2199,9 @@ async def test_subscribe_feeds_uses_record_inventory_cache(
 
     client = _make_client(monkeypatch)
     client._inventory = None
-    record = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
+    runtime = client.hass.data[DOMAIN]["entry"]
     node_inventory = build_node_inventory([{"type": "htr", "addr": "9"}])
-    record["inventory"] = Inventory(
+    runtime.inventory = Inventory(
         client.dev_id,
         node_inventory,
     )
@@ -2222,7 +2228,7 @@ async def test_subscribe_feeds_handles_missing_targets(
 
     client = _make_client(monkeypatch)
     payload = {"nodes": []}
-    client.hass.data[ducaheat_ws.DOMAIN]["entry"]["inventory"] = Inventory(
+    client.hass.data[DOMAIN]["entry"].inventory = Inventory(
         "device",
         build_node_inventory(payload),
     )
@@ -2243,14 +2249,26 @@ async def test_subscribe_feeds_prefers_coordinator_inventory(
     """Coordinator inventory should avoid resolver lookups."""
 
     client = _make_client(monkeypatch)
-    _drop_inventory(client.hass.data[ducaheat_ws.DOMAIN]["entry"])
-    client.hass.data[ducaheat_ws.DOMAIN]["entry"].pop("nodes", None)
+    runtime = client.hass.data[DOMAIN]["entry"]
+    _drop_inventory(runtime)
     inventory_nodes = build_node_inventory([{"type": "htr", "addr": "3"}])
     coordinator_inventory = Inventory(
         client.dev_id,
         inventory_nodes,
     )
+    object.__setattr__(
+        coordinator_inventory,
+        "_heater_sample_targets_cache",
+        [("htr", "3")],
+    )
+    object.__setattr__(
+        coordinator_inventory,
+        "_energy_sample_types_cache",
+        frozenset({"htr"}),
+    )
     client._coordinator._inventory = coordinator_inventory
+    runtime.inventory = coordinator_inventory
+    client._inventory = coordinator_inventory
 
     emissions: list[str] = []
 
@@ -2272,14 +2290,14 @@ async def test_subscribe_feeds_handles_mapping_record(
     """Mapping entries should be normalised to mutable state."""
 
     client = _make_client(monkeypatch)
-    _drop_inventory(client.hass.data[ducaheat_ws.DOMAIN]["entry"])
+    _drop_inventory(client.hass.data[DOMAIN]["entry"])
     raw_nodes = {"nodes": [{"addr": "8", "type": "htr"}]}
     inventory = Inventory(
         client.dev_id,
         build_node_inventory(raw_nodes),
     )
-    mapping_record = MappingProxyType({"inventory": inventory})
-    client.hass.data[ducaheat_ws.DOMAIN]["entry"] = mapping_record
+    runtime = client.hass.data[DOMAIN]["entry"]
+    runtime.inventory = inventory
     client._inventory = None
 
     emissions: list[str] = []
@@ -2293,23 +2311,17 @@ async def test_subscribe_feeds_handles_mapping_record(
 
     assert count == 2
     assert set(emissions) == {"/htr/8/samples", "/htr/8/status"}
-    entry_record = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
-    if isinstance(entry_record, EntryRuntime):
-        stored = entry_record.inventory
-    else:
-        assert isinstance(entry_record, dict)
-        stored = entry_record.get("inventory")
-    assert stored is inventory
+    assert runtime.inventory is inventory
 
 
 @pytest.mark.asyncio
 async def test_subscribe_feeds_handles_missing_record(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """None records should be replaced with mutable containers."""
+    """Missing records should still allow subscriptions via client inventory."""
 
     client = _make_client(monkeypatch)
-    client.hass.data[ducaheat_ws.DOMAIN]["entry"] = None
+    client.hass.data[DOMAIN].pop("entry", None)
 
     raw_nodes = {"nodes": [{"addr": "6", "type": "htr"}]}
     inventory = Inventory(
@@ -2329,9 +2341,6 @@ async def test_subscribe_feeds_handles_missing_record(
 
     assert count == 2
     assert set(emissions) == {"/htr/6/samples", "/htr/6/status"}
-    entry_record = client.hass.data[ducaheat_ws.DOMAIN]["entry"]
-    assert isinstance(entry_record, dict)
-    assert entry_record.get("inventory") is inventory
 
 
 @pytest.mark.asyncio
@@ -2343,7 +2352,7 @@ async def test_maybe_subscribe_retries_when_inventory_ready(
     client = _make_client(monkeypatch)
     client._ws = SimpleNamespace(closed=False)
     client._status = "connected"
-    _drop_inventory(client.hass.data[ducaheat_ws.DOMAIN]["entry"])
+    _drop_inventory(client.hass.data[DOMAIN]["entry"])
     client._inventory = None
     client._coordinator._inventory = None
 
@@ -2358,7 +2367,7 @@ async def test_maybe_subscribe_retries_when_inventory_ready(
         client.dev_id,
         build_node_inventory([{"type": "htr", "addr": "5"}]),
     )
-    client.hass.data[ducaheat_ws.DOMAIN]["entry"]["inventory"] = inventory
+    client.hass.data[DOMAIN]["entry"].inventory = inventory
     client._inventory = inventory
 
     emissions: list[str] = []
@@ -2410,8 +2419,7 @@ async def test_subscribe_feeds_defers_when_inventory_missing(
     """Inventory resolution failures should mark subscriptions as pending."""
 
     client = _make_client(monkeypatch)
-    _drop_inventory(client.hass.data[ducaheat_ws.DOMAIN]["entry"])
-    client.hass.data[ducaheat_ws.DOMAIN]["entry"].pop("nodes", None)
+    _drop_inventory(client.hass.data[DOMAIN]["entry"])
     client._inventory = None
     client._coordinator._inventory = None
     caplog.set_level(logging.INFO)
@@ -2579,13 +2587,13 @@ async def test_subscribe_telemetry_tracks_success_and_failure(
     client = _make_client(monkeypatch)
     client._ws = SimpleNamespace(closed=False)
     client._inventory = None
-    hass_bucket = client.hass.data[ducaheat_ws.DOMAIN][client.entry_id]
-    _drop_inventory(hass_bucket)
+    runtime = client.hass.data[DOMAIN][client.entry_id]
+    _drop_inventory(runtime)
     monkeypatch.setattr(client, "_emit_sio", AsyncMock())
 
     result_first = await client._subscribe_feeds(now=10.0)
 
-    state = hass_bucket["ws_state"][client.dev_id]
+    state = runtime.ws_state[client.dev_id]
     assert result_first == 0
     assert state["subscribe_attempts_total"] == 1
     assert state["subscribe_fail_total"] == 1
@@ -2599,7 +2607,7 @@ async def test_subscribe_telemetry_tracks_success_and_failure(
 
     result_second = await client._subscribe_feeds(now=200.0)
 
-    state = hass_bucket["ws_state"][client.dev_id]
+    state = runtime.ws_state[client.dev_id]
     assert result_second == 2
     assert emit_mock.await_count == 2
     assert state["subscribe_attempts_total"] == 2
@@ -2631,9 +2639,8 @@ async def test_idle_recovery_updates_state_bucket(
         payload_stale=True,
     )
 
-    state = client.hass.data[ducaheat_ws.DOMAIN][client.entry_id]["ws_state"][
-        client.dev_id
-    ]
+    runtime = client.hass.data[DOMAIN][client.entry_id]
+    state = runtime.ws_state[client.dev_id]
     assert state["recovery_attempts_total"] == 1
     assert state["last_recovery_at"] == 500.0
 
@@ -2662,9 +2669,8 @@ async def test_parse_error_does_not_block_update_stream(
 
     await _run_read_loop(client)
 
-    state = client.hass.data[ducaheat_ws.DOMAIN][client.entry_id]["ws_state"][
-        client.dev_id
-    ]
+    runtime = client.hass.data[DOMAIN][client.entry_id]
+    state = runtime.ws_state[client.dev_id]
     assert state["parse_errors_total"] == 1
     assert state["last_update_event_at"] is not None
     assert client._stats.events_total == 1

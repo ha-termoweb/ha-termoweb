@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from conftest import build_entry_runtime
 from custom_components.termoweb.backend.ws_client import _WSStatusMixin
 from custom_components.termoweb.const import DOMAIN
 
@@ -123,9 +124,10 @@ def test_ws_health_tracker_bootstraps_legacy_state() -> None:
     """Ensure tracker initialization consumes legacy mixin attributes."""
 
     hass = DummyHass()
+    runtime = build_entry_runtime(hass=hass, entry_id="entry", dev_id="device")
     client = LegacyStatusClient(hass)
 
-    assert hass.data == {}
+    assert hass.data[DOMAIN][client.entry_id] is runtime
 
     tracker = client._ws_health_tracker()
 
@@ -134,11 +136,8 @@ def test_ws_health_tracker_bootstraps_legacy_state() -> None:
     assert tracker.last_payload_at == 222.2
     assert tracker.last_heartbeat_at == 333.3
 
-    assert DOMAIN in hass.data
-    assert client.entry_id in hass.data[DOMAIN]
-    entry_bucket = hass.data[DOMAIN][client.entry_id]
-    assert "ws_trackers" in entry_bucket
-    assert entry_bucket["ws_trackers"][client.dev_id] is tracker
+    assert client.dev_id in runtime.ws_trackers
+    assert runtime.ws_trackers[client.dev_id] is tracker
 
     assert client._ws_health_tracker() is tracker
 

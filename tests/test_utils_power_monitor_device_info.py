@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import types
 
+from conftest import build_entry_runtime
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.utils import build_power_monitor_device_info
 
@@ -23,7 +24,13 @@ def test_build_power_monitor_device_info_uses_brand_override() -> None:
     """Ensure brand overrides manufacturer while keeping fallback name."""
 
     entry_id = "entry-id"
-    hass = types.SimpleNamespace(data={DOMAIN: {entry_id: {"brand": "Ducaheat"}}})
+    hass = types.SimpleNamespace(data={DOMAIN: {}})
+    build_entry_runtime(
+        hass=hass,
+        entry_id=entry_id,
+        dev_id="gateway",
+        brand="Ducaheat",
+    )
 
     info = build_power_monitor_device_info(hass, entry_id, "gateway", "02")
 
@@ -53,8 +60,12 @@ def test_build_power_monitor_device_info_trimmed_name_with_brand_override() -> N
     """Ensure trimmed names persist when brand overrides the manufacturer."""
 
     entry_id = "entry-id"
-    hass = types.SimpleNamespace(
-        data={DOMAIN: {entry_id: {"brand": "  Tevolve  "}}},
+    hass = types.SimpleNamespace(data={DOMAIN: {}})
+    build_entry_runtime(
+        hass=hass,
+        entry_id=entry_id,
+        dev_id="gateway-99",
+        brand="  Tevolve  ",
     )
 
     info = build_power_monitor_device_info(
@@ -67,26 +78,6 @@ def test_build_power_monitor_device_info_trimmed_name_with_brand_override() -> N
 
     assert info["name"] == "Kitchen Meter"
     assert info["manufacturer"] == "Tevolve"
-
-
-def test_build_power_monitor_device_info_uses_manufacturer_override() -> None:
-    """Fallback manufacturer override should apply when brand is missing."""
-
-    entry_id = "entry-id"
-    hass = types.SimpleNamespace(
-        data={DOMAIN: {entry_id: {"manufacturer": "  Custom Co  "}}},
-    )
-
-    info = build_power_monitor_device_info(
-        hass,
-        entry_id,
-        "gateway-77",
-        "03",
-    )
-
-    assert info["manufacturer"] == "Custom Co"
-    assert info["name"] == "Power Monitor 03"
-    assert info["identifiers"] == {(DOMAIN, "gateway-77", "pmo", "03")}
 
 
 def test_build_power_monitor_device_info_sets_via_device_reference() -> None:

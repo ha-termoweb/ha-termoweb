@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from conftest import build_entry_runtime
 from custom_components.termoweb.backend import ducaheat_ws
 from homeassistant.core import HomeAssistant
 
@@ -22,7 +23,6 @@ def _make_client() -> ducaheat_ws.DucaheatWSClient:
     """Return a websocket client with stubbed dependencies."""
 
     hass = HomeAssistant()
-    hass.data.setdefault(ducaheat_ws.DOMAIN, {})["entry"] = {}
     coordinator = SimpleNamespace(
         update_nodes=MagicMock(),
         data={
@@ -30,6 +30,12 @@ def _make_client() -> ducaheat_ws.DucaheatWSClient:
                 "settings": {},
             }
         },
+    )
+    build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="device",
+        coordinator=coordinator,
     )
     return ducaheat_ws.DucaheatWSClient(
         hass,

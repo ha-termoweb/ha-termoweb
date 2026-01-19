@@ -56,6 +56,7 @@ from custom_components.termoweb.inventory import (
     normalize_node_addr,
     normalize_node_type,
 )
+from custom_components.termoweb.runtime import require_runtime
 
 from .ws_client import (
     HandshakeError,
@@ -209,19 +210,12 @@ class WebSocketClient(_WSCommon):
             state.pop("last_handshake_at", None)
             return
 
-        hass_data = getattr(self.hass, "data", None)
-        if not isinstance(hass_data, MutableMapping):
+        try:
+            runtime = require_runtime(self.hass, self.entry_id)
+        except LookupError:
             return
 
-        domain_bucket = hass_data.get(DOMAIN)
-        if not isinstance(domain_bucket, MutableMapping):
-            return
-
-        entry_bucket = domain_bucket.get(self.entry_id)
-        if not isinstance(entry_bucket, MutableMapping):
-            return
-
-        ws_bucket = entry_bucket.get("ws_state")
+        ws_bucket = runtime.ws_state
         if not isinstance(ws_bucket, MutableMapping):
             return
 

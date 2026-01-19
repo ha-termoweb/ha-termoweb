@@ -32,16 +32,16 @@ async def async_register_ws_debug_probe_service(hass: HomeAssistant) -> None:
             _LOGGER.debug("ws_debug_probe: integration data unavailable")
             return
 
-        entries: list[tuple[str, EntryRuntime | Mapping[str, Any]]] = []
+        entries: list[tuple[str, EntryRuntime]] = []
         if entry_filter:
             record = domain_records.get(entry_filter)
-            if isinstance(record, (EntryRuntime, Mapping)):
+            if isinstance(record, EntryRuntime):
                 entries.append((entry_filter, record))
         else:
             entries = [
                 (entry_id, rec)
                 for entry_id, rec in domain_records.items()
-                if isinstance(rec, (EntryRuntime, Mapping))
+                if isinstance(rec, EntryRuntime)
             ]
 
         if not entries:
@@ -50,14 +50,9 @@ async def async_register_ws_debug_probe_service(hass: HomeAssistant) -> None:
 
         tasks: list[Awaitable[Any]] = []
         for entry_id, runtime in entries:
-            if isinstance(runtime, EntryRuntime):
-                debug_enabled = runtime.debug
-                clients = runtime.ws_clients
-                inventory_obj = runtime.inventory
-            else:
-                debug_enabled = bool(runtime.get("debug", False))
-                clients = runtime.get("ws_clients")
-                inventory_obj = runtime.get("inventory")
+            debug_enabled = runtime.debug
+            clients = runtime.ws_clients
+            inventory_obj = runtime.inventory
 
             if not debug_enabled:
                 _LOGGER.debug(
