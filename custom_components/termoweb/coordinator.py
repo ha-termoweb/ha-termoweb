@@ -19,7 +19,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .api import BackendAuthError, BackendRateLimitError, RESTClient
+from .backend.rest_client import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend.sanitize import mask_identifier
 from .boost import coerce_int, resolve_boost_end_from_fields
 from .const import BRAND_TERMOWEB, HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL

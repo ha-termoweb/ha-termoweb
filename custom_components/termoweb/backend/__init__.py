@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .base import Backend, HttpClientProto, WsClientProto
-from .factory import create_backend
+from .factory import create_backend, create_rest_client
 
 __all__ = [
     "Backend",
@@ -15,6 +15,7 @@ __all__ = [
     "TermoWebBackend",
     "WsClientProto",
     "create_backend",
+    "create_rest_client",
 ]
 
 
@@ -22,7 +23,7 @@ def __getattr__(name: str) -> Any:
     """Lazily import backend implementations to avoid circular imports."""
 
     if name in {"DucaheatBackend", "DucaheatRESTClient"}:
-        from .ducaheat import DucaheatBackend, DucaheatRESTClient
+        from .ducaheat import DucaheatBackend, DucaheatRESTClient  # noqa: PLC0415
 
         mapping = {
             "DucaheatBackend": DucaheatBackend,
@@ -32,7 +33,7 @@ def __getattr__(name: str) -> Any:
         globals()[name] = value
         return value
     if name == "TermoWebBackend":
-        from .termoweb import TermoWebBackend
+        from .termoweb import TermoWebBackend  # noqa: PLC0415
 
         globals()[name] = TermoWebBackend
         return TermoWebBackend

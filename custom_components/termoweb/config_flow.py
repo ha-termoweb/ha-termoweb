@@ -13,7 +13,7 @@ from homeassistant.data_entry_flow import FlowResult
 import voluptuous as vol
 
 from . import async_list_devices, create_rest_client
-from .api import BackendAuthError, BackendRateLimitError
+from .backend.rest_client import BackendAuthError, BackendRateLimitError
 from .const import (
     BRAND_DUCAHEAT,
     BRAND_LABELS,

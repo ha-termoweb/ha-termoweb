@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 from aiohttp import ClientResponseError
 
-from custom_components.termoweb.api import RESTClient
+from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.backend.base import BoostContext
 from custom_components.termoweb.backend.ducaheat import (
     DucaheatBackend,

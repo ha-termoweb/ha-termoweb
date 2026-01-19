@@ -8,7 +8,7 @@ import logging
 import aiohttp
 import pytest
 
-import custom_components.termoweb.api as api
+import custom_components.termoweb.backend.rest_client as api
 from tests.test_api import FakeSession, MockResponse
 
 

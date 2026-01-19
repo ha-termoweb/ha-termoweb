@@ -127,7 +127,7 @@ Then, add the Lovelace resource in the UI (see step A‑3).
   The card calls `termoweb.set_schedule` (entity service). Confirm it appears in **Developer Tools → Actions**. If missing, restart Home Assistant.
 
 - **Save succeeds but nothing updates**  
-  Make sure your `prog` has exactly 168 integers in `{0,1,2}`. Check the log for `custom_components.termoweb.climate` and `custom_components.termoweb.api` lines.
+  Make sure your `prog` has exactly 168 integers in `{0,1,2}`. Check the log for `custom_components.termoweb.climate` and `custom_components.termoweb.backend.rest_client` lines.
 
 - **File paths**  
   The public resource path is `/config/www/termoweb/termoweb_schedule_card.js`. In the browser this is `/local/termoweb/termoweb_schedule_card.js`.

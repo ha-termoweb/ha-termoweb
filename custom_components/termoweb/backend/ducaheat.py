@@ -10,7 +10,6 @@ from typing import Any
 
 from aiohttp import ClientResponseError
 
-from custom_components.termoweb.api import RESTClient
 from custom_components.termoweb.backend.base import (
     Backend,
     BoostContext,
@@ -18,6 +17,7 @@ from custom_components.termoweb.backend.base import (
     fetch_normalised_hourly_samples,
 )
 from custom_components.termoweb.backend.ducaheat_ws import DucaheatWSClient
+from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.backend.sanitize import (
     build_acm_boost_payload,
     mask_identifier,

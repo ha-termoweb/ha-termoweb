@@ -22,7 +22,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
-from .api import RESTClient
+from .backend.rest_client import RESTClient
 from .const import DOMAIN
 from .identifiers import build_heater_energy_unique_id
 from .inventory import Inventory, normalize_node_addr, normalize_node_type

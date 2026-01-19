@@ -21,13 +21,13 @@ from homeassistant.config_entries import ConfigEntry, SupportsDiagnostics
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.event import async_call_later
 from homeassistant.setup import async_when_setup
 
-from .api import BackendAuthError, BackendRateLimitError, RESTClient
-from .backend import Backend, DucaheatRESTClient, create_backend
+from .backend import Backend, create_backend, create_rest_client
+from .backend.debug import build_unknown_node_probe_requests
+from .backend.rest_client import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend.sanitize import redact_text
 from .const import (
     BRAND_DUCAHEAT as BRAND_DUCAHEAT,
@@ -37,10 +37,7 @@ from .const import (
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
     MIN_POLL_INTERVAL,
-    get_brand_api_base,
-    get_brand_basic_auth,
     signal_ws_status,
-    uses_ducaheat_backend,
 )
 from .coordinator import EnergyStateCoordinator, StateCoordinator, build_device_metadata
 from .hourly_poller import HourlySamplesPoller
@@ -95,48 +92,6 @@ async def _async_import_energy_history(
     )
 
 
-def _build_unknown_node_probe_requests(
-    brand: str,
-    dev_id: str,
-    node_type: str,
-    addr: str,
-) -> tuple[tuple[str, Mapping[str, str] | None], ...]:
-    """Return common REST endpoints to query for an unknown node type."""
-
-    dev_id_str = str(dev_id).strip()
-    normalized_type = normalize_node_type(
-        node_type,
-        use_default_when_falsey=True,
-    )
-    normalized_addr = normalize_node_addr(
-        addr,
-        use_default_when_falsey=True,
-    )
-    if not dev_id_str or not normalized_type:
-        return ()
-
-    base_path = f"/api/v2/devs/{dev_id_str}/{normalized_type}"
-    node_path = base_path if not normalized_addr else f"{base_path}/{normalized_addr}"
-
-    requests: list[tuple[str, Mapping[str, str] | None]] = []
-    seen_paths: set[str] = set()
-
-    def _append(path: str, params: Mapping[str, str] | None = None) -> None:
-        if path in seen_paths:
-            return
-        seen_paths.add(path)
-        requests.append((path, params))
-
-    if uses_ducaheat_backend(brand) and normalized_addr:
-        _append(base_path)
-
-    _append(node_path)
-    _append(f"{node_path}/settings")
-    if normalized_addr:
-        _append(f"{node_path}/samples", {"start": "0", "end": "0"})
-    return tuple(requests)
-
-
 async def _async_probe_unknown_node_types(
     backend: Backend,
     dev_id: str,
@@ -172,7 +127,7 @@ async def _async_probe_unknown_node_types(
         display_addr = addr or "<missing>"
         _LOGGER.debug("Unknown node type found: %s/%s", node_type, display_addr)
 
-        requests = _build_unknown_node_probe_requests(
+        requests = build_unknown_node_probe_requests(
             backend.brand,
             dev_id,
             node_type,
@@ -350,24 +305,6 @@ async def _async_register_diagnostics_when_ready(hass: HomeAssistant) -> None:
     finally:
         if callable(listener_remove):
             listener_remove()
-
-
-def create_rest_client(
-    hass: HomeAssistant, username: str, password: str, brand: str
-) -> RESTClient:
-    """Return a REST client configured for the selected brand."""
-
-    session = aiohttp_client.async_get_clientsession(hass)
-    api_base = get_brand_api_base(brand)
-    basic_auth = get_brand_basic_auth(brand)
-    client_cls = DucaheatRESTClient if uses_ducaheat_backend(brand) else RESTClient
-    return client_cls(
-        session,
-        username,
-        password,
-        api_base=api_base,
-        basic_auth_b64=basic_auth,
-    )
 
 
 async def async_list_devices(client: RESTClient) -> Any:

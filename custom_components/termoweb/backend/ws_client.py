@@ -15,7 +15,7 @@ import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
-from custom_components.termoweb.api import RESTClient
+from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.const import (
     BRAND_DUCAHEAT,
     BRAND_TERMOWEB,

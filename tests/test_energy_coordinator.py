@@ -15,7 +15,10 @@ _install_stubs()
 
 from aiohttp import ClientError
 from custom_components.termoweb import coordinator as coord_module
-from custom_components.termoweb.api import BackendAuthError, BackendRateLimitError
+from custom_components.termoweb.backend.rest_client import (
+    BackendAuthError,
+    BackendRateLimitError,
+)
 from custom_components.termoweb.const import (
     HTR_ENERGY_UPDATE_INTERVAL,
     signal_ws_data,
