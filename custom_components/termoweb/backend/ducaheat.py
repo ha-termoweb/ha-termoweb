@@ -28,7 +28,7 @@ from custom_components.termoweb.boost import (
     validate_boost_minutes,
 )
 from custom_components.termoweb.codecs.ducaheat_codec import decode_settings
-from custom_components.termoweb.codecs.ducaheat_planner import plan_command
+from custom_components.termoweb.planner.ducaheat_planner import plan_command
 from custom_components.termoweb.const import (
     BRAND_DUCAHEAT,
     NODE_SAMPLES_PATH_FMT,
