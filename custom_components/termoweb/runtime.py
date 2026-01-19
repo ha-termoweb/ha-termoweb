@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -67,27 +67,6 @@ def require_runtime(hass: HomeAssistant, entry_id: str) -> EntryRuntime:
     runtime = domain_data.get(entry_id)
     if isinstance(runtime, EntryRuntime):
         return runtime
-    if runtime is not None and all(
-        hasattr(runtime, key)
-        for key in (
-            "backend",
-            "client",
-            "coordinator",
-            "energy_coordinator",
-            "dev_id",
-            "inventory",
-            "hourly_poller",
-            "config_entry",
-            "base_poll_interval",
-            "version",
-            "brand",
-            "ws_tasks",
-            "ws_clients",
-            "ws_state",
-            "ws_trackers",
-        )
-    ):
-        return cast(EntryRuntime, runtime)
     raise LookupError("TermoWeb runtime data is unavailable")
 
 
