@@ -39,6 +39,7 @@ from custom_components.termoweb.const import (
     ACCEPT_LANGUAGE,
     API_BASE,
     BRAND_DUCAHEAT,
+    DOMAIN,
     USER_AGENT,
     get_brand_api_base,
     get_brand_requested_with,
@@ -56,7 +57,7 @@ from custom_components.termoweb.inventory import (
     normalize_node_addr,
     normalize_node_type,
 )
-from custom_components.termoweb.runtime import require_runtime
+from custom_components.termoweb.runtime import EntryRuntime, require_runtime
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1718,21 +1719,40 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             try:
                 runtime = require_runtime(self.hass, self.entry_id)
             except LookupError:
-                self._pending_subscribe = True
-                self._increment_state_counter("subscribe_fail_total")
-                should_log = (
-                    attempt_ts - self._last_subscribe_log_ts
-                    >= self._subscribe_backoff_s
-                )
-                if should_log:
-                    self._last_subscribe_log_ts = attempt_ts
-                    _LOGGER.info(
-                        "WS (ducaheat): inventory not ready for device %s; will retry",
-                        self.dev_id,
-                    )
-                return 0
+                runtime = None
 
-            inventory_container = runtime.inventory
+            inventory_container = (
+                self._inventory
+                if isinstance(self._inventory, Inventory)
+                else (
+                    runtime.inventory
+                    if runtime is not None and isinstance(runtime.inventory, Inventory)
+                    else None
+                )
+            )
+            if inventory_container is None:
+                coordinator = self._coordinator
+                coordinator_inventory = getattr(coordinator, "_inventory", None)
+                if isinstance(coordinator_inventory, Inventory):
+                    inventory_container = coordinator_inventory
+                elif runtime is not None:
+                    runtime_inventory = getattr(runtime.coordinator, "_inventory", None)
+                    if isinstance(runtime_inventory, Inventory):
+                        inventory_container = runtime_inventory
+            if inventory_container is not None:
+                hass_data = getattr(self.hass, "data", None)
+                if isinstance(hass_data, MutableMapping):
+                    domain_bucket = hass_data.get(DOMAIN)
+                    if isinstance(domain_bucket, MutableMapping):
+                        entry_bucket = domain_bucket.get(self.entry_id)
+                        if entry_bucket is None:
+                            entry_bucket = {}
+                            domain_bucket[self.entry_id] = entry_bucket
+                        if isinstance(entry_bucket, EntryRuntime):
+                            entry_bucket.inventory = inventory_container
+                        elif isinstance(entry_bucket, MutableMapping):
+                            entry_bucket["inventory"] = inventory_container
+
             if not isinstance(inventory_container, Inventory):
                 self._pending_subscribe = True
                 self._increment_state_counter("subscribe_fail_total")
@@ -1750,7 +1770,11 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
 
             self._inventory = inventory_container
 
-            energy_coordinator = runtime.energy_coordinator
+            energy_coordinator = (
+                runtime.energy_coordinator
+                if runtime is not None
+                else getattr(self, "_energy_coordinator", None)
+            )
             if hasattr(energy_coordinator, "update_addresses"):
                 try:
                     energy_coordinator.update_addresses(inventory_container)

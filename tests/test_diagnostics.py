@@ -71,9 +71,11 @@ def diagnostics_record(
             version=version or "0.0.0",
             brand=brand or "termoweb",
         )
+        if version is None:
+            runtime.version = None  # type: ignore[assignment]
         if extra:
             for key, value in extra.items():
-                setattr(runtime, key, value)
+                runtime[key] = value
         return runtime, inventory
 
     return _factory

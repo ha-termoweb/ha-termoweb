@@ -45,7 +45,9 @@ def decode_settings(payload: Any, *, node_type: NodeType) -> dict[str, Any]:
 
     if node_type in {NodeType.HEATER, NodeType.ACCUMULATOR}:
         validated = DucaheatSegmentedSettings.model_validate(payload)
-        flattened = validated.to_flat_dict(accumulator=node_type is NodeType.ACCUMULATOR)
+        flattened = validated.to_flat_dict(
+            accumulator=node_type is NodeType.ACCUMULATOR
+        )
         return canonicalize_settings_payload(flattened)
 
     return canonicalize_settings_payload(payload)

@@ -13,6 +13,7 @@ from custom_components.termoweb.codecs.ducaheat_codec import decode_settings
 from custom_components.termoweb.domain.ids import NodeType
 from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
 
+
 def test_ducaheat_rest_normalise_ws_nodes_passthrough_scalars() -> None:
     """Non-mapping payloads should return the original object unchanged."""
 

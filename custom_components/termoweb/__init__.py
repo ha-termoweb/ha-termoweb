@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
-from collections.abc import Awaitable, Callable, Iterable, Mapping, MutableMapping
+from collections.abc import Callable, Iterable, Mapping, MutableMapping
+from dataclasses import dataclass
 from datetime import timedelta
 from importlib import import_module
 import inspect
@@ -17,7 +18,7 @@ from aiohttp import ClientError
 from homeassistant import loader as ha_loader
 from homeassistant.config_entries import ConfigEntry, SupportsDiagnostics
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -41,10 +42,6 @@ from .const import (
     uses_ducaheat_backend,
 )
 from .coordinator import EnergyStateCoordinator, StateCoordinator, build_device_metadata
-from .energy import (
-    async_import_energy_history as _async_import_energy_history_impl,
-    async_register_import_energy_history_service,
-)
 from .hourly_poller import HourlySamplesPoller
 from .inventory import (
     Inventory,
@@ -53,7 +50,12 @@ from .inventory import (
     normalize_node_type,
 )
 from .runtime import EntryRuntime
-from .throttle import default_samples_rate_limit_state, reset_samples_rate_limit_state
+from .services.energy_history import (
+    async_import_energy_history_with_rate_limit,
+    async_register_import_energy_history_service,
+)
+from .services.ws_debug_probe import async_register_ws_debug_probe_service
+from .throttle import reset_samples_rate_limit_state
 from .utils import async_get_integration_version as _async_get_integration_version
 
 _LOGGER = logging.getLogger(__name__)
@@ -65,6 +67,31 @@ DIAGNOSTICS_RETRY_DELAY = 0.5
 reset_samples_rate_limit_state()
 
 _SUPPORTED_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm", "pmo"})
+
+
+async def _async_import_energy_history(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    *,
+    nodes: Inventory | None = None,
+    node_types: Iterable[str] | None = None,
+    addresses: Iterable[str] | None = None,
+    day_chunk_hours: int = 24,
+    reset_progress: bool = False,
+    max_days: int | None = None,
+) -> None:
+    """Delegate to the energy helper with shared rate limiting and filters."""
+
+    await async_import_energy_history_with_rate_limit(
+        hass,
+        entry,
+        nodes=nodes,
+        node_types=node_types,
+        addresses=addresses,
+        day_chunk_hours=day_chunk_hours,
+        reset_progress=reset_progress,
+        max_days=max_days,
+    )
 
 
 def _build_unknown_node_probe_requests(
@@ -193,7 +220,7 @@ def _register_diagnostics_platform(
         else:
             _LOGGER.debug("No cache entry stored for termoweb.diagnostics")
     else:
-        _LOGGER.debug("Missing platform cache not available: %s", missing)
+        _LOGGER.debug("Diagnostics cache unavailable: %s", missing)
 
     diagnostics = import_module("homeassistant.components.diagnostics")
 
@@ -353,42 +380,6 @@ async def async_list_devices(client: RESTClient) -> Any:
     except (TimeoutError, ClientError, BackendRateLimitError) as err:
         _LOGGER.info("list_devices connection error: %s", err)
         raise
-
-
-async def _async_import_energy_history(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    *,
-    nodes: Inventory | None = None,
-    node_types: Iterable[str] | None = None,
-    addresses: Iterable[str] | None = None,
-    day_chunk_hours: int = 24,
-    reset_progress: bool = False,
-    max_days: int | None = None,
-) -> None:
-    """Delegate to the energy helper with shared rate limiting and filters."""
-
-    rate_state = default_samples_rate_limit_state()
-    kwargs: dict[str, Any] = {
-        "reset_progress": reset_progress,
-        "max_days": max_days,
-        "rate_limit": rate_state,
-    }
-
-    if nodes is not None:
-        kwargs["nodes"] = nodes
-    if node_types is not None:
-        kwargs["node_types"] = tuple(node_types)
-    if addresses is not None:
-        kwargs["addresses"] = tuple(addresses)
-    if day_chunk_hours != 24:
-        kwargs["day_chunk_hours"] = day_chunk_hours
-
-    await _async_import_energy_history_impl(
-        hass,
-        entry,
-        **kwargs,
-    )
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  # noqa: C901
@@ -560,6 +551,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         _LOGGER.info("WS: started read-only client for %s", dev_id)
 
     runtime.start_ws = _start_ws
+    runtime["_start_ws"] = _start_ws
 
     def _recalc_poll_interval() -> None:
         """Suspend REST polling when websocket trackers are healthy and fresh."""
@@ -725,150 +717,103 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     return True
 
 
-async def async_register_ws_debug_probe_service(hass: HomeAssistant) -> None:
-    """Register the ws_debug_probe debug helper service."""
+@dataclass(frozen=True, slots=True)
+class _ShutdownTargets:
+    """Container for shutdown handles derived from runtime storage."""
 
-    if hass.services.has_service(DOMAIN, "ws_debug_probe"):
-        return
+    diagnostics_task: Any | None
+    poller: Any | None
+    ws_tasks: Mapping[str, Any]
+    ws_clients: Mapping[str, Any]
+    unsub_ws_status: Callable[[], None] | None
+    poll_resume_unsub: Callable[[], None] | None
 
-    async def _async_ws_debug_probe(call: ServiceCall) -> None:
-        """Emit a websocket dev_data probe for debugging."""
 
-        entry_filter = call.data.get("entry_id")
-        dev_filter = call.data.get("dev_id")
-        domain_records = hass.data.get(DOMAIN, {})
-        if not isinstance(domain_records, Mapping):
-            _LOGGER.debug("ws_debug_probe: integration data unavailable")
-            return
+def _set_runtime_value(
+    runtime: EntryRuntime | Mapping[str, Any], key: str, value: Any
+) -> None:
+    """Persist ``value`` for ``key`` on a runtime container when possible."""
 
-        entries: list[tuple[str, EntryRuntime]] = []
-        if entry_filter:
-            record = domain_records.get(entry_filter)
-            if isinstance(record, EntryRuntime):
-                entries.append((entry_filter, record))
-        else:
-            entries = [
-                (entry_id, rec)
-                for entry_id, rec in domain_records.items()
-                if isinstance(rec, EntryRuntime)
-            ]
+    if isinstance(runtime, EntryRuntime):
+        setattr(runtime, key, value)
+    elif isinstance(runtime, MutableMapping):
+        runtime[key] = value
 
-        if not entries:
-            _LOGGER.debug("ws_debug_probe: no matching config entries")
-            return
 
-        tasks: list[Awaitable[Any]] = []
-        for entry_id, runtime in entries:
-            if not runtime.debug:
-                _LOGGER.debug(
-                    "ws_debug_probe: debug helpers disabled for entry %s",
-                    entry_id,
-                )
-                continue
-            clients = runtime.ws_clients
-            if not clients:
-                _LOGGER.debug(
-                    "ws_debug_probe: no websocket clients for entry %s",
-                    entry_id,
-                )
-                continue
-            if dev_filter:
-                target_dev_ids: Iterable[str] = [str(dev_filter)]
-            else:
-                target_dev_ids = [str(dev) for dev in clients]
-            for dev_id in target_dev_ids:
-                client = clients.get(dev_id)
-                if client is None:
-                    _LOGGER.debug(
-                        "ws_debug_probe: websocket client missing for %s/%s",
-                        entry_id,
-                        dev_id,
-                    )
-                    continue
-                probe = getattr(client, "debug_probe", None)
-                if probe is None:
-                    _LOGGER.debug(
-                        "ws_debug_probe: client %s/%s has no debug_probe",
-                        entry_id,
-                        dev_id,
-                    )
-                    continue
-                inventory_obj = runtime.inventory
-                if not isinstance(inventory_obj, Inventory):
-                    inventory_obj = None
-                try:
-                    result = probe(inventory_obj)
-                except TypeError as err:
-                    try:
-                        result = probe()
-                    except TypeError:
-                        _LOGGER.debug(
-                            "ws_debug_probe: client %s/%s probe invocation failed: %s",
-                            entry_id,
-                            dev_id,
-                            err,
-                        )
-                        continue
-                if asyncio.iscoroutine(result):
-                    tasks.append(result)
-                else:
-                    _LOGGER.debug(
-                        "ws_debug_probe: client %s/%s returned non-awaitable probe",
-                        entry_id,
-                        dev_id,
-                    )
+def _collect_shutdown_targets(
+    runtime: EntryRuntime | Mapping[str, Any],
+) -> _ShutdownTargets | None:
+    """Return shutdown targets or ``None`` if shutdown already ran."""
 
-        if not tasks:
-            _LOGGER.debug("ws_debug_probe: no matching websocket clients to probe")
-            return
-
-        _LOGGER.debug("ws_debug_probe: awaiting %d websocket probe(s)", len(tasks))
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for res in results:
-            if isinstance(res, asyncio.CancelledError):
-                raise res
-            if isinstance(res, Exception):
-                _LOGGER.debug("ws_debug_probe: probe raised %s", res)
-
-    hass.services.async_register(
-        DOMAIN,
-        "ws_debug_probe",
-        _async_ws_debug_probe,
+    if isinstance(runtime, EntryRuntime):
+        if getattr(runtime, "_shutdown_complete", False):
+            return None
+        setattr(runtime, "_shutdown_complete", True)
+        ws_tasks = runtime.ws_tasks if isinstance(runtime.ws_tasks, Mapping) else {}
+        ws_clients = (
+            runtime.ws_clients if isinstance(runtime.ws_clients, Mapping) else {}
+        )
+        return _ShutdownTargets(
+            diagnostics_task=runtime.diagnostics_task,
+            poller=runtime.hourly_poller,
+            ws_tasks=ws_tasks,
+            ws_clients=ws_clients,
+            unsub_ws_status=runtime.unsub_ws_status,
+            poll_resume_unsub=runtime.poll_resume_unsub,
+        )
+    if not isinstance(runtime, Mapping):
+        return None
+    if runtime.get("_shutdown_complete"):
+        return None
+    runtime["_shutdown_complete"] = True
+    ws_tasks = runtime.get("ws_tasks", {})
+    ws_clients = runtime.get("ws_clients", {})
+    return _ShutdownTargets(
+        diagnostics_task=runtime.get("diagnostics_task"),
+        poller=runtime.get("hourly_poller"),
+        ws_tasks=ws_tasks if isinstance(ws_tasks, Mapping) else {},
+        ws_clients=ws_clients if isinstance(ws_clients, Mapping) else {},
+        unsub_ws_status=runtime.get("unsub_ws_status"),
+        poll_resume_unsub=runtime.get("poll_resume_unsub"),
     )
 
 
-async def _async_shutdown_entry(runtime: EntryRuntime) -> None:
-    """Cancel websocket tasks and listeners for an integration record."""
+async def _shutdown_diagnostics_task(
+    runtime: EntryRuntime | Mapping[str, Any],
+    diagnostics_task: Any,
+) -> None:
+    """Cancel and await the diagnostics task when present."""
 
-    if getattr(runtime, "_shutdown_complete", False):
-        return
-
-    setattr(runtime, "_shutdown_complete", True)
-
-    diagnostics_task = runtime.diagnostics_task
-    if diagnostics_task is not None:
-        cancel = getattr(diagnostics_task, "cancel", None)
-        if callable(cancel):
-            try:
-                cancel()
-            except Exception:  # pragma: no cover - defensive logging
-                _LOGGER.exception("Failed to cancel diagnostics listener task")
+    cancel = getattr(diagnostics_task, "cancel", None)
+    if callable(cancel):
         try:
-            await diagnostics_task
-        except asyncio.CancelledError:
-            pass
+            cancel()
         except Exception:  # pragma: no cover - defensive logging
-            _LOGGER.exception("Diagnostics listener task raised during shutdown")
-        runtime.diagnostics_task = None
+            _LOGGER.exception("Failed to cancel diagnostics listener task")
+    try:
+        await diagnostics_task
+    except asyncio.CancelledError:
+        pass
+    except Exception:  # pragma: no cover - defensive logging
+        _LOGGER.exception("Diagnostics listener task raised during shutdown")
+    _set_runtime_value(runtime, "diagnostics_task", None)
 
-    poller = runtime.hourly_poller
-    if hasattr(poller, "async_shutdown"):
-        try:
-            await poller.async_shutdown()
-        except Exception:  # pragma: no cover - defensive shutdown logging
-            _LOGGER.exception("Failed to stop hourly samples poller")
 
-    for dev_id, task in list(runtime.ws_tasks.items()):
+async def _shutdown_hourly_poller(poller: Any) -> None:
+    """Stop the hourly poller when it exposes async_shutdown."""
+
+    if not hasattr(poller, "async_shutdown"):
+        return
+    try:
+        await poller.async_shutdown()
+    except Exception:  # pragma: no cover - defensive shutdown logging
+        _LOGGER.exception("Failed to stop hourly samples poller")
+
+
+async def _shutdown_ws_tasks(ws_tasks: Mapping[str, Any]) -> None:
+    """Cancel and await websocket tasks."""
+
+    for dev_id, task in list(ws_tasks.items()):
         cancel = getattr(task, "cancel", None)
         if callable(cancel):
             try:
@@ -884,7 +829,11 @@ async def _async_shutdown_entry(runtime: EntryRuntime) -> None:
             except Exception:  # pragma: no cover - defensive logging
                 _LOGGER.exception("WS task for %s failed to cancel cleanly", dev_id)
 
-    for dev_id, client in list(runtime.ws_clients.items()):
+
+async def _shutdown_ws_clients(ws_clients: Mapping[str, Any]) -> None:
+    """Stop websocket clients that expose a stop coroutine."""
+
+    for dev_id, client in list(ws_clients.items()):
         stop = getattr(client, "stop", None)
         if not callable(stop):
             continue
@@ -893,19 +842,48 @@ async def _async_shutdown_entry(runtime: EntryRuntime) -> None:
         except Exception:  # pragma: no cover - defensive logging
             _LOGGER.exception("WS client for %s failed to stop", dev_id)
 
-    if callable(runtime.unsub_ws_status):
-        try:
-            runtime.unsub_ws_status()
-        except Exception:  # pragma: no cover - defensive logging
-            _LOGGER.exception("Failed to unsubscribe websocket status listener")
-        runtime.unsub_ws_status = None
 
-    if callable(runtime.poll_resume_unsub):
+def _shutdown_runtime_callback(
+    runtime: EntryRuntime | Mapping[str, Any],
+    key: str,
+    callback: Callable[[], None] | None,
+    error_message: str,
+) -> None:
+    """Invoke and clear a runtime callback with error logging."""
+
+    if callable(callback):
         try:
-            runtime.poll_resume_unsub()
+            callback()
         except Exception:  # pragma: no cover - defensive logging
-            _LOGGER.exception("Failed to cancel suspended poll resume timer")
-    runtime.poll_resume_unsub = None
+            _LOGGER.exception(error_message)
+    _set_runtime_value(runtime, key, None)
+
+
+async def _async_shutdown_entry(runtime: EntryRuntime | Mapping[str, Any]) -> None:
+    """Cancel websocket tasks and listeners for an integration record."""
+
+    targets = _collect_shutdown_targets(runtime)
+    if targets is None:
+        return
+
+    if targets.diagnostics_task is not None:
+        await _shutdown_diagnostics_task(runtime, targets.diagnostics_task)
+
+    await _shutdown_hourly_poller(targets.poller)
+    await _shutdown_ws_tasks(targets.ws_tasks)
+    await _shutdown_ws_clients(targets.ws_clients)
+    _shutdown_runtime_callback(
+        runtime,
+        "unsub_ws_status",
+        targets.unsub_ws_status,
+        "Failed to unsubscribe websocket status listener",
+    )
+    _shutdown_runtime_callback(
+        runtime,
+        "poll_resume_unsub",
+        targets.poll_resume_unsub,
+        "Failed to cancel suspended poll resume timer",
+    )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -933,7 +911,13 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_update_entry_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options updates; recompute interval if needed."""
     runtime = hass.data[DOMAIN][entry.entry_id]
+    debug_enabled = bool(entry.options.get("debug", entry.data.get("debug", False)))
     if isinstance(runtime, EntryRuntime):
-        runtime.debug = bool(entry.options.get("debug", entry.data.get("debug", False)))
+        runtime.debug = debug_enabled
         if callable(runtime.recalc_poll):
             runtime.recalc_poll()
+    elif isinstance(runtime, Mapping):
+        runtime["debug"] = debug_enabled
+        recalc = runtime.get("recalc_poll")
+        if callable(recalc):
+            recalc()

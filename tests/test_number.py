@@ -13,12 +13,30 @@ import custom_components.termoweb.heater as heater_module
 _install_stubs()
 
 import custom_components.termoweb.number as number_module
+from custom_components.termoweb.entities import number as entities_number_module
 from custom_components.termoweb.const import DOMAIN
 from homeassistant.core import HomeAssistant
 
 AccumulatorBoostDurationNumber = number_module.AccumulatorBoostDurationNumber
 AccumulatorBoostTemperatureNumber = number_module.AccumulatorBoostTemperatureNumber
 async_setup_entry = number_module.async_setup_entry
+
+
+def _patch_number_attr(
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    value: object,
+    *,
+    raising: bool | None = None,
+) -> None:
+    """Patch a number module attribute across shim + entity modules."""
+
+    if raising is None:
+        monkeypatch.setattr(number_module, name, value)
+        monkeypatch.setattr(entities_number_module, name, value)
+    else:
+        monkeypatch.setattr(number_module, name, value, raising=raising)
+        monkeypatch.setattr(entities_number_module, name, value, raising=raising)
 
 
 def _make_duration_entity() -> AccumulatorBoostDurationNumber:
@@ -66,8 +84,8 @@ async def test_duration_async_added_to_hass_prefers_stored_minutes(
     get_mock = MagicMock(return_value=stored_minutes)
     set_mock = MagicMock()
 
-    monkeypatch.setattr(number_module, "get_boost_runtime_minutes", get_mock)
-    monkeypatch.setattr(number_module, "set_boost_runtime_minutes", set_mock)
+    _patch_number_attr(monkeypatch, "get_boost_runtime_minutes", get_mock)
+    _patch_number_attr(monkeypatch, "set_boost_runtime_minutes", set_mock)
     monkeypatch.setattr(
         number_module.HeaterNodeBase,
         "async_added_to_hass",
@@ -115,7 +133,7 @@ async def test_duration_async_added_to_hass_uses_last_state_when_cache_empty(
         number_module, "get_boost_runtime_minutes", MagicMock(return_value=None)
     )
     set_mock = MagicMock()
-    monkeypatch.setattr(number_module, "set_boost_runtime_minutes", set_mock)
+    _patch_number_attr(monkeypatch, "set_boost_runtime_minutes", set_mock)
     monkeypatch.setattr(
         number_module.HeaterNodeBase,
         "async_added_to_hass",
@@ -153,15 +171,13 @@ async def test_duration_async_added_to_hass_uses_settings_when_state_missing(
 
     entity = _make_duration_entity()
     entity.async_write_ha_state = MagicMock()
-    entity.accumulator_state = MagicMock(
-        return_value=SimpleNamespace(boost_time=240)
-    )
+    entity.accumulator_state = MagicMock(return_value=SimpleNamespace(boost_time=240))
 
     monkeypatch.setattr(
         number_module, "get_boost_runtime_minutes", MagicMock(return_value=None)
     )
     set_mock = MagicMock()
-    monkeypatch.setattr(number_module, "set_boost_runtime_minutes", set_mock)
+    _patch_number_attr(monkeypatch, "set_boost_runtime_minutes", set_mock)
     monkeypatch.setattr(
         number_module.HeaterNodeBase,
         "async_added_to_hass",
@@ -210,7 +226,7 @@ async def test_duration_async_set_native_value_persists_valid_and_rejects_invali
     ) -> None:
         calls.append((hass, entry_id, node_type, addr, minutes))
 
-    monkeypatch.setattr(number_module, "set_boost_runtime_minutes", fake_set)
+    _patch_number_attr(monkeypatch, "set_boost_runtime_minutes", fake_set)
 
     await entity.async_set_native_value(2.0)
 
@@ -243,8 +259,8 @@ async def test_temperature_async_added_to_hass_prefers_stored_temperature(
     get_mock = MagicMock(return_value=stored_temperature)
     set_mock = MagicMock()
 
-    monkeypatch.setattr(number_module, "get_boost_temperature", get_mock)
-    monkeypatch.setattr(number_module, "set_boost_temperature", set_mock)
+    _patch_number_attr(monkeypatch, "get_boost_temperature", get_mock)
+    _patch_number_attr(monkeypatch, "set_boost_temperature", set_mock)
     monkeypatch.setattr(
         number_module.HeaterNodeBase,
         "async_added_to_hass",
@@ -294,7 +310,7 @@ async def test_temperature_async_added_to_hass_uses_last_state_when_cache_empty(
         number_module, "get_boost_temperature", MagicMock(return_value=None)
     )
     set_mock = MagicMock()
-    monkeypatch.setattr(number_module, "set_boost_temperature", set_mock)
+    _patch_number_attr(monkeypatch, "set_boost_temperature", set_mock)
     monkeypatch.setattr(
         number_module.HeaterNodeBase,
         "async_added_to_hass",
@@ -332,15 +348,13 @@ async def test_temperature_async_added_to_hass_uses_settings_when_state_missing(
 
     entity = _make_temperature_entity()
     entity.async_write_ha_state = MagicMock()
-    entity.accumulator_state = MagicMock(
-        return_value=SimpleNamespace(boost_temp=24.4)
-    )
+    entity.accumulator_state = MagicMock(return_value=SimpleNamespace(boost_temp=24.4))
 
     monkeypatch.setattr(
         number_module, "get_boost_temperature", MagicMock(return_value=None)
     )
     set_mock = MagicMock()
-    monkeypatch.setattr(number_module, "set_boost_temperature", set_mock)
+    _patch_number_attr(monkeypatch, "set_boost_temperature", set_mock)
     monkeypatch.setattr(
         number_module.HeaterNodeBase,
         "async_added_to_hass",
@@ -383,9 +397,9 @@ async def test_temperature_async_set_native_value_calls_service(
     entity.async_write_ha_state = MagicMock()
 
     set_mock = MagicMock()
-    monkeypatch.setattr(number_module, "set_boost_temperature", set_mock)
-    monkeypatch.setattr(
-        number_module,
+    _patch_number_attr(monkeypatch, "set_boost_temperature", set_mock)
+    _patch_number_attr(
+        monkeypatch,
         "resolve_climate_entity_id",
         lambda *_: "climate.accumulator_2",
     )
@@ -441,8 +455,8 @@ async def test_async_setup_entry_creates_number_entities(
         default_name_simple=lambda addr: f"Heater {addr}",
     )
 
-    monkeypatch.setattr(
-        number_module,
+    _patch_number_attr(
+        monkeypatch,
         "boostable_accumulator_details_for_entry",
         lambda *_args, **_kwargs: (
             heater_details,

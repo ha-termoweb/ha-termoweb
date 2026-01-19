@@ -11,7 +11,7 @@ import pytest
 
 from conftest import runtime_from_record
 from custom_components.termoweb import energy
-from custom_components.termoweb.energy import (
+from custom_components.termoweb.services.energy_history import (
     async_register_import_energy_history_service,
 )
 

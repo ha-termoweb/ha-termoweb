@@ -20,6 +20,7 @@ from custom_components.termoweb.inventory import Inventory
 _install_stubs()
 
 from custom_components.termoweb import climate as climate_module
+from custom_components.termoweb.entities import climate as entities_climate_module
 from custom_components.termoweb.heater import DEFAULT_BOOST_DURATION
 from custom_components.termoweb.const import (
     BRAND_DUCAHEAT,
@@ -64,6 +65,23 @@ def _reset_environment() -> None:
     dispatcher_module._dispatch_map = {}
     dt_util.NOW = dt.datetime(2024, 1, 1, 0, 0, tzinfo=dt.timezone.utc)
     FakeCoordinator.instances.clear()
+
+
+def _patch_climate_attr(
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    value: Any,
+    *,
+    raising: bool | None = None,
+) -> None:
+    """Patch a climate module attribute across shim + entity modules."""
+
+    if raising is None:
+        monkeypatch.setattr(climate_module, name, value)
+        monkeypatch.setattr(entities_climate_module, name, value)
+    else:
+        monkeypatch.setattr(climate_module, name, value, raising=raising)
+        monkeypatch.setattr(entities_climate_module, name, value, raising=raising)
 
 
 def _make_coordinator(
@@ -233,7 +251,7 @@ def test_heater_climate_entity_normalizes_node_type(
         calls.append((value, kwargs))
         return original_normalize(value, **kwargs)
 
-    monkeypatch.setattr(climate_module, "normalize_node_type", _record_normalize)
+    _patch_climate_attr(monkeypatch, "normalize_node_type", _record_normalize)
 
     heater = HeaterClimateEntity(
         coordinator,
@@ -554,7 +572,7 @@ def test_async_setup_entry_default_names_and_invalid_nodes(
                 skipped_types=skipped_types,
             )
 
-        monkeypatch.setattr(climate_module, "log_skipped_nodes", _mock_helper)
+        _patch_climate_attr(monkeypatch, "log_skipped_nodes", _mock_helper)
 
         entry = types.SimpleNamespace(entry_id=entry_id)
         caplog.clear()
@@ -785,7 +803,7 @@ def test_async_setup_entry_uses_inventory_node_for_boost_detection(
             "iter_metadata",
             _iter_metadata,
         )
-        monkeypatch.setattr(climate_module, "supports_boost", _supports_boost)
+        _patch_climate_attr(monkeypatch, "supports_boost", _supports_boost)
 
         added: list[climate_module.HeaterClimateEntity] = []
 
@@ -853,7 +871,7 @@ def test_async_setup_entry_prefers_inventory_node_type(
         def _supports_boost(_: Any) -> bool:
             raise AssertionError("supports_boost should not run when node type is acm")
 
-        monkeypatch.setattr(climate_module, "supports_boost", _supports_boost)
+        _patch_climate_attr(monkeypatch, "supports_boost", _supports_boost)
 
         added: list[climate_module.HeaterClimateEntity] = []
 
@@ -1029,7 +1047,7 @@ def _patch_boost_minutes(
         calls.append(value)
         return return_value
 
-    monkeypatch.setattr(climate_module, "coerce_boost_minutes", _fake)
+    _patch_climate_attr(monkeypatch, "coerce_boost_minutes", _fake)
     return calls
 
 
@@ -1906,10 +1924,10 @@ def test_heater_additional_cancelled_edges(
         def raising_float(_value: Any) -> float | None:
             raise SentinelCancelled()
 
-        climate_module.float_or_none = raising_float
+        _patch_climate_attr(monkeypatch, "float_or_none", raising_float)
         with pytest.raises(SentinelCancelled):
             _ = heater.extra_state_attributes
-        climate_module.float_or_none = orig_float
+        _patch_climate_attr(monkeypatch, "float_or_none", orig_float)
 
         prog = list(base_prog)
         orig_write = heater.async_write_ha_state
@@ -2717,10 +2735,10 @@ def test_heater_cancelled_paths_propagate(
         def raising_float(_value: Any) -> float | None:
             raise asyncio.CancelledError()
 
-        monkeypatch.setattr(climate_module, "float_or_none", raising_float)
+        _patch_climate_attr(monkeypatch, "float_or_none", raising_float)
         with pytest.raises(asyncio.CancelledError):
             _ = heater.extra_state_attributes
-        monkeypatch.setattr(climate_module, "float_or_none", orig_float)
+        _patch_climate_attr(monkeypatch, "float_or_none", orig_float)
 
         class CancelInt(int):
             def __int__(self) -> int:

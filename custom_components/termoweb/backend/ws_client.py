@@ -14,8 +14,8 @@ import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
-from ..api import RESTClient
-from ..const import (
+from custom_components.termoweb.api import RESTClient
+from custom_components.termoweb.const import (
     BRAND_DUCAHEAT,
     BRAND_TERMOWEB,
     DOMAIN,
@@ -23,8 +23,12 @@ from ..const import (
     signal_ws_data,
     signal_ws_status,
 )
-from ..inventory import Inventory, normalize_node_addr, normalize_node_type
-from ..runtime import require_runtime
+from custom_components.termoweb.inventory import (
+    Inventory,
+    normalize_node_addr,
+    normalize_node_type,
+)
+from custom_components.termoweb.runtime import EntryRuntime, require_runtime
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .ducaheat_ws import DucaheatWSClient
@@ -248,7 +252,7 @@ def forward_ws_sample_updates(
             normalized_updates,
             lease_seconds=lease_seconds,
         )
-    except Exception:  # pragma: no cover - defensive logging
+    except Exception:  # pragma: no cover - defensive logging  # noqa: BLE001
         active_logger.debug(
             "%s: forwarding heater samples failed",
             log_prefix,
@@ -341,6 +345,7 @@ class HandshakeError(RuntimeError):
         detail: str,
         response_snippet: str | None = None,
     ) -> None:
+        """Initialise a handshake failure with response metadata."""
         super().__init__(f"handshake failed: status={status}, detail={detail}")
         self.status = status
         self.url = url
@@ -354,6 +359,7 @@ class _WsLeaseMixin:
     """Provide reconnect backoff management for websocket clients."""
 
     def __init__(self) -> None:
+        """Initialise lease tracking and backoff state."""
         self._payload_idle_window: float = 240.0
         self._subscription_refresh_lock = asyncio.Lock()
         self._subscription_refresh_failed = False
@@ -526,6 +532,18 @@ class _WSStatusMixin:
         if not isinstance(domain_bucket, MutableMapping):
             return
         entry_bucket = domain_bucket.get(self.entry_id)
+        if isinstance(entry_bucket, EntryRuntime):
+            ws_bucket = entry_bucket.ws_state
+            if isinstance(ws_bucket, MutableMapping):
+                ws_bucket.pop(self.dev_id, None)
+            trackers = entry_bucket.ws_trackers
+            if isinstance(trackers, MutableMapping):
+                trackers.pop(self.dev_id, None)
+
+            setattr(self, "_ws_state", None)
+            setattr(self, "_ws_tracker", None)
+            setattr(self, "_ws_bucket_baseline", None)
+            return
         if not isinstance(entry_bucket, MutableMapping):
             return
 
@@ -697,6 +715,7 @@ class NodeDispatchContext:
 
     payload: Any
     inventory: Inventory | None
+    record: MutableMapping[str, Any] | None = None
 
 
 def _prepare_nodes_dispatch(
@@ -709,14 +728,49 @@ def _prepare_nodes_dispatch(
 ) -> NodeDispatchContext:
     """Normalise node payload data for downstream websocket dispatch."""
 
-    runtime = require_runtime(hass, entry_id)
+    hass_data = getattr(hass, "data", None)
+    entry_bucket: MutableMapping[str, Any] | None = None
+    if isinstance(hass_data, MutableMapping):
+        domain_bucket = hass_data.get(DOMAIN)
+        if isinstance(domain_bucket, MutableMapping):
+            entry_bucket = domain_bucket.get(entry_id)
+            if not isinstance(entry_bucket, MutableMapping):
+                entry_bucket = None
+
     inventory_container = inventory if isinstance(inventory, Inventory) else None
+    if inventory_container is None and isinstance(entry_bucket, Mapping):
+        entry_inventory = entry_bucket.get("inventory")
+        if isinstance(entry_inventory, Inventory):
+            inventory_container = entry_inventory
+
+    runtime: EntryRuntime | Mapping[str, Any] | None = None
     if inventory_container is None:
-        inventory_container = runtime.inventory
+        try:
+            runtime = require_runtime(hass, entry_id)
+        except LookupError:
+            runtime = None
+    if inventory_container is None and runtime is not None:
+        runtime_inventory = getattr(runtime, "inventory", None)
+        if isinstance(runtime_inventory, Inventory):
+            inventory_container = runtime_inventory
+    if inventory_container is None:
+        coordinator_inventory = getattr(coordinator, "inventory", None)
+        if isinstance(coordinator_inventory, Inventory):
+            inventory_container = coordinator_inventory
+
+    if inventory_container is not None:
+        if entry_bucket is not None:
+            entry_bucket["inventory"] = inventory_container
+        if runtime is not None:
+            if isinstance(runtime, EntryRuntime):
+                runtime.inventory = inventory_container
+            elif isinstance(runtime, MutableMapping):
+                runtime["inventory"] = inventory_container
 
     return NodeDispatchContext(
         payload=raw_nodes,
         inventory=inventory_container,
+        record=entry_bucket,
     )
 
 
@@ -835,8 +889,13 @@ class _WSCommon(_WSStatusMixin):
                 log_prefix,
                 self.dev_id,
             )
-            raise LookupError("TermoWeb inventory unavailable for heater address update")
-        if not isinstance(self._inventory, Inventory):
+            raise LookupError(  # noqa: TRY004
+                "TermoWeb inventory unavailable for heater address update"
+            )
+        if (
+            not isinstance(self._inventory, Inventory)
+            or self._inventory is not resolved_inventory
+        ):
             self._inventory = resolved_inventory
 
         try:
@@ -845,6 +904,8 @@ class _WSCommon(_WSStatusMixin):
             runtime = None
 
         if runtime is not None:
+            if runtime.inventory is not resolved_inventory:
+                runtime.inventory = resolved_inventory
             energy_coordinator = runtime.energy_coordinator
             if hasattr(energy_coordinator, "update_addresses"):
                 energy_coordinator.update_addresses(resolved_inventory)
@@ -901,6 +962,7 @@ class WebSocketClient(_WsLeaseMixin, _WSStatusMixin):
         namespace: str = WS_NAMESPACE,
         inventory: Inventory | None = None,
     ) -> None:
+        """Initialise a websocket client wrapper for the active backend."""
         _WsLeaseMixin.__init__(self)
         self.hass = hass
         self.entry_id = entry_id
@@ -920,10 +982,11 @@ class WebSocketClient(_WsLeaseMixin, _WSStatusMixin):
         self._inventory = inventory
 
     def start(self) -> asyncio.Task:
+        """Start the backend-specific websocket client."""
         if self._delegate is not None:
             return self._delegate.start()
         if self._brand == BRAND_DUCAHEAT:
-            from .ducaheat_ws import DucaheatWSClient
+            from .ducaheat_ws import DucaheatWSClient  # noqa: PLC0415
 
             self._delegate = DucaheatWSClient(
                 self.hass,
@@ -936,7 +999,7 @@ class WebSocketClient(_WsLeaseMixin, _WSStatusMixin):
                 inventory=self._inventory,
             )
         else:
-            from .termoweb_ws import TermoWebWSClient
+            from .termoweb_ws import TermoWebWSClient  # noqa: PLC0415
 
             self._delegate = TermoWebWSClient(
                 self.hass,
@@ -951,13 +1014,16 @@ class WebSocketClient(_WsLeaseMixin, _WSStatusMixin):
         return self._delegate.start()
 
     async def stop(self) -> None:
+        """Stop the backend-specific websocket client."""
         if self._delegate is not None:
             await self._delegate.stop()
 
     def is_running(self) -> bool:
+        """Return True when the backend websocket client is running."""
         return bool(self._delegate and self._delegate.is_running())
 
     async def ws_url(self) -> str:
+        """Return the active websocket URL when available."""
         if self._delegate and hasattr(self._delegate, "ws_url"):
             return await self._delegate.ws_url()
         return ""
@@ -983,11 +1049,11 @@ def __getattr__(name: str) -> Any:
     """Lazily expose backend websocket client implementations."""
 
     if name == "DucaheatWSClient":
-        from .ducaheat_ws import DucaheatWSClient as _DucaheatWSClient
+        from .ducaheat_ws import DucaheatWSClient as _DucaheatWSClient  # noqa: PLC0415
 
         return _DucaheatWSClient
     if name == "TermoWebWSClient":
-        from .termoweb_ws import TermoWebWSClient as _TermoWebWSClient
+        from .termoweb_ws import TermoWebWSClient as _TermoWebWSClient  # noqa: PLC0415
 
         return _TermoWebWSClient
     raise AttributeError(name)

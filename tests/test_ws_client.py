@@ -18,6 +18,7 @@ from custom_components.termoweb.domain import NodeSettingsDelta
 from custom_components.termoweb.backend import ducaheat_ws
 from custom_components.termoweb.backend import termoweb_ws as module
 from custom_components.termoweb.backend import ws_client as base_ws
+from custom_components.termoweb.runtime import EntryRuntime
 from custom_components.termoweb.backend.sanitize import (
     mask_identifier,
     redact_token_fragment,
@@ -1008,7 +1009,10 @@ def test_ws_common_apply_heater_addresses_uses_inventory(
     energy_coordinator.update_addresses.assert_called_once_with(inventory)
 
     energy_coordinator.update_addresses.reset_mock()
-    hass_record.pop("inventory")
+    if isinstance(hass_record, EntryRuntime):
+        hass_record.inventory = None  # type: ignore[assignment]
+    else:
+        hass_record.pop("inventory")
     dummy._apply_heater_addresses({}, inventory=None)
     energy_coordinator.update_addresses.assert_called_once_with(inventory)
 

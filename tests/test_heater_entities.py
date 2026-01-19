@@ -13,6 +13,7 @@ from conftest import _install_stubs, make_ws_payload
 _install_stubs()
 
 from custom_components.termoweb import boost as boost_module, heater as heater_module
+from custom_components.termoweb.entities import heater as entities_heater_module
 from custom_components.termoweb.domain import (
     DomainStateStore,
     NodeId as DomainNodeId,
@@ -37,6 +38,23 @@ from homeassistant.util import dt as dt_util
 HeaterNodeBase = heater_module.HeaterNodeBase
 
 
+def _patch_heater_attr(
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    value: Any,
+    *,
+    raising: bool | None = None,
+) -> None:
+    """Patch a heater module attribute across shim + entity modules."""
+
+    if raising is None:
+        monkeypatch.setattr(heater_module, name, value)
+        monkeypatch.setattr(entities_heater_module, name, value)
+    else:
+        monkeypatch.setattr(heater_module, name, value, raising=raising)
+        monkeypatch.setattr(entities_heater_module, name, value, raising=raising)
+
+
 def test_heater_node_base_normalizes_address(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[object, dict]] = []
 
@@ -46,7 +64,7 @@ def test_heater_node_base_normalizes_address(monkeypatch: pytest.MonkeyPatch) ->
         calls.append((value, kwargs))
         return original(value, **kwargs)
 
-    monkeypatch.setattr(heater_module, "normalize_node_addr", _record_normalize)
+    _patch_heater_attr(monkeypatch, "normalize_node_addr", _record_normalize)
 
     coordinator = SimpleNamespace(hass=None)
     heater = HeaterNodeBase(coordinator, "entry", "dev", " 01 ", " Heater 01 ")
@@ -68,7 +86,7 @@ def test_heater_node_base_payload_matching_normalizes_address(
         calls.append((value, kwargs))
         return original(value, **kwargs)
 
-    monkeypatch.setattr(heater_module, "normalize_node_addr", _record_normalize)
+    _patch_heater_attr(monkeypatch, "normalize_node_addr", _record_normalize)
 
     coordinator = SimpleNamespace(hass=None)
     heater = HeaterNodeBase(coordinator, "entry", "dev", " 01 ", "Heater 01")
