@@ -782,14 +782,27 @@ def heater_platform_details_for_entry(
         inventory = runtime.get("inventory")
         dev_id = runtime.get("dev_id", "<unknown>")
     if not isinstance(inventory, Inventory):
+        required_attrs = (
+            "nodes_by_type",
+            "heater_address_map",
+            "resolve_heater_name",
+            "iter_heater_platform_metadata",
+        )
+        if not inventory or not all(
+            hasattr(inventory, attr) for attr in required_attrs
+        ):
+            _LOGGER.error(
+                "TermoWeb heater setup missing inventory for device %s",
+                dev_id,
+            )
+            raise ValueError("TermoWeb inventory unavailable for heater platform")
         _LOGGER.error(
-            "TermoWeb heater setup missing inventory for device %s",
+            "TermoWeb heater setup using non-standard inventory instance for device %s",
             dev_id,
         )
-        raise ValueError("TermoWeb inventory unavailable for heater platform")  # noqa: TRY004
 
     return HeaterPlatformDetails(
-        inventory=inventory,
+        inventory=cast(Inventory, inventory),
         default_name_simple=default_name_simple,
     )
 
