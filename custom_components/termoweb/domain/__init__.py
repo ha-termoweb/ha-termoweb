@@ -13,7 +13,6 @@ from .commands import (
     StopBoost,
 )
 from .ids import NodeId, NodeType, normalize_node_type
-from .inventory import InstallationInventory, NodeInventory
 from .state import (
     AccumulatorState,
     DomainState,
@@ -43,10 +42,8 @@ __all__ = [
     "DomainStateView",
     "GatewayConnectionState",
     "HeaterState",
-    "InstallationInventory",
     "NodeDelta",
     "NodeId",
-    "NodeInventory",
     "NodeSamplesDelta",
     "NodeSettingsDelta",
     "NodeStatusDelta",

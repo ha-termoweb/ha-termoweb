@@ -481,6 +481,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         device_metadata,
         None,
         inventory,
+        brand=brand,
     )
 
     energy_coordinator = EnergyStateCoordinator(hass, client, dev_id, inventory)
