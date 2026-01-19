@@ -836,11 +836,11 @@ custom_components/termoweb/codecs/ducaheat_models.py :: BoostPayload._format_boo
     Format boost temperature values.
 custom_components/termoweb/codecs/ducaheat_models.py :: BoostPayload._validate_units
     Ensure units are uppercase when provided.
-custom_components/termoweb/codecs/ducaheat_planner.py :: plan_command
+custom_components/termoweb/planner/ducaheat_planner.py :: plan_command
     Return a select→write→release plan for a single command.
-custom_components/termoweb/codecs/ducaheat_planner.py :: _build_write_call
+custom_components/termoweb/planner/ducaheat_planner.py :: _build_write_call
     Build the primary write call for the supplied command.
-custom_components/termoweb/codecs/ducaheat_planner.py :: _ensure_accumulator
+custom_components/termoweb/planner/ducaheat_planner.py :: _ensure_accumulator
     Validate that accumulator-only commands target an accumulator.
 custom_components/termoweb/codecs/ducaheat_read_models.py :: _coerce_bool
     Coerce common truthy and falsy values to ``bool``.

@@ -19,7 +19,7 @@ from custom_components.termoweb.domain.commands import (
 )
 from custom_components.termoweb.domain.ids import NodeId, NodeType
 
-from .ducaheat_codec import (
+from custom_components.termoweb.codecs.ducaheat_codec import (
     encode_boost_command,
     encode_extra_options_command,
     encode_mode_command,
@@ -29,7 +29,7 @@ from .ducaheat_codec import (
     encode_setpoint_command,
     encode_units_command,
 )
-from .ducaheat_models import StatusWritePayload
+from custom_components.termoweb.codecs.ducaheat_models import StatusWritePayload
 
 
 @dataclass(slots=True)

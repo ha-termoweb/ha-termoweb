@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from custom_components.termoweb.codecs.ducaheat_planner import plan_command
+from custom_components.termoweb.planner.ducaheat_planner import plan_command
 from custom_components.termoweb.domain.commands import SetMode, StopBoost
 from custom_components.termoweb.domain.ids import NodeId, NodeType
 
