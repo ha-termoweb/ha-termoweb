@@ -9,7 +9,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from conftest import FakeCoordinator, build_coordinator_device_state
+from conftest import (
+    FakeCoordinator,
+    build_coordinator_device_state,
+    build_entry_runtime,
+)
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.coordinator import EnergyStateCoordinator
 from custom_components.termoweb.sensor import _normalise_energy_value
@@ -185,13 +189,15 @@ async def test_async_setup_entry_handles_missing_power_monitors(
     )
 
     energy_coordinator = SimpleNamespace(update_addresses=MagicMock())
-    data_record = {
-        "coordinator": object(),
-        "dev_id": "dev-1",
-        "client": object(),
-        "energy_coordinator": energy_coordinator,
-    }
-    hass.data[DOMAIN][entry.entry_id] = data_record
+    build_entry_runtime(
+        hass=hass,
+        entry_id=entry.entry_id,
+        dev_id="dev-1",
+        coordinator=object(),
+        client=object(),
+        energy_coordinator=energy_coordinator,
+        inventory=inventory,
+    )
 
     added_entities: list[object] = []
 
@@ -303,13 +309,16 @@ async def test_heater_energy_sensor_availability() -> None:
     )
     entry_id = "entry-energy"
     entry = SimpleNamespace(entry_id=entry_id)
-    hass.data[DOMAIN][entry.entry_id] = {
-        "coordinator": coordinator,
-        "dev_id": dev_id,
-        "client": object(),
-        "inventory": inventory,
-        "energy_coordinator": energy_coordinator,
-    }
+    build_entry_runtime(
+        hass=hass,
+        entry_id=entry.entry_id,
+        dev_id=dev_id,
+        coordinator=coordinator,
+        client=object(),
+        inventory=inventory,
+        energy_coordinator=energy_coordinator,
+        config_entry=entry,
+    )
 
     added_entities: list[Any] = []
 

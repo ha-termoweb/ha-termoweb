@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from conftest import FakeCoordinator, _install_stubs
+from conftest import FakeCoordinator, _install_stubs, build_entry_runtime
 
 from custom_components.termoweb.inventory import build_node_inventory
 import custom_components.termoweb.heater as heater_module
@@ -464,10 +464,13 @@ async def test_async_setup_entry_creates_number_entities(
         ),
     )
 
-    hass.data.setdefault(DOMAIN, {})[entry_id] = {
-        "coordinator": coordinator,
-        "dev_id": dev_id,
-    }
+    build_entry_runtime(
+        hass=hass,
+        entry_id=entry_id,
+        dev_id=dev_id,
+        inventory=inventory,
+        coordinator=coordinator,
+    )
 
     calls: list[
         list[AccumulatorBoostDurationNumber | AccumulatorBoostTemperatureNumber]

@@ -8,7 +8,7 @@ from typing import Any, Callable, Iterable, Iterator
 import pytest
 from unittest.mock import MagicMock
 
-from conftest import _install_stubs, make_ws_payload
+from conftest import _install_stubs, build_entry_runtime, make_ws_payload
 
 _install_stubs()
 
@@ -246,9 +246,15 @@ def test_heater_platform_details_missing_inventory(
 
     caplog.set_level("ERROR")
 
+    runtime = build_entry_runtime(
+        entry_id="entry",
+        dev_id="dev-1",
+        allow_missing_inventory=True,
+    )
+    runtime.inventory = None  # type: ignore[assignment]
     with pytest.raises(ValueError):
         heater_module.heater_platform_details_for_entry(
-            {"dev_id": "dev-1"},
+            runtime,
             default_name_simple=lambda addr: addr,
         )
 
@@ -753,11 +759,16 @@ def test_boost_runtime_store_handles_non_mapping() -> None:
     """Verify boost runtime store creation tolerates unexpected inputs."""
 
     assert heater_module._boost_runtime_store(None, create=False) == {}
-    entry_data: dict[str, Any] = {}
-    assert heater_module._boost_runtime_store(entry_data, create=False) == {}
-    created = heater_module._boost_runtime_store(entry_data, create=True)
+    hass = HomeAssistant()
+    runtime = build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="dev",
+    )
+    assert heater_module._boost_runtime_store(runtime, create=False) == {}
+    created = heater_module._boost_runtime_store(runtime, create=True)
     assert created == {}
-    assert entry_data[heater_module._BOOST_RUNTIME_KEY] is created
+    assert runtime.boost_runtime is created
 
 
 def test_iter_nodes_metadata_uses_inventory() -> None:
@@ -845,21 +856,20 @@ def test_boost_runtime_helpers_guard_invalid_structures() -> None:
     heater_module.set_boost_runtime_minutes(hass, entry_id, "acm", "01", 30)
     assert heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01") is None
 
-    # Non-mapping entry data is ignored for get/set operations.
-    hass.data = {DOMAIN: {entry_id: []}}
-    assert heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01") is None
-    heater_module.set_boost_runtime_minutes(hass, entry_id, "acm", "01", 45)
+    runtime = build_entry_runtime(
+        hass=hass,
+        entry_id=entry_id,
+        dev_id="dev",
+    )
 
     # Missing identifiers or invalid minutes are ignored.
-    hass.data[DOMAIN][entry_id] = {}
     heater_module.set_boost_runtime_minutes(hass, entry_id, "", "01", 45)
     heater_module.set_boost_runtime_minutes(hass, entry_id, "acm", "", 45)
     heater_module.set_boost_runtime_minutes(hass, entry_id, "acm", "01", -10)
+    assert runtime.boost_runtime == {}
 
     # Stored garbage values should not be returned.
-    hass.data[DOMAIN][entry_id][heater_module._BOOST_RUNTIME_KEY] = {
-        "acm": {"01": "oops"}
-    }
+    runtime.boost_runtime = {"acm": {"01": "oops"}}
     assert heater_module.get_boost_runtime_minutes(hass, entry_id, "acm", "01") is None
     assert (
         heater_module.resolve_boost_runtime_minutes(

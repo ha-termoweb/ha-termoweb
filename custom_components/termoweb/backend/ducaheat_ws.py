@@ -39,7 +39,6 @@ from custom_components.termoweb.const import (
     ACCEPT_LANGUAGE,
     API_BASE,
     BRAND_DUCAHEAT,
-    DOMAIN,
     USER_AGENT,
     get_brand_api_base,
     get_brand_requested_with,
@@ -57,7 +56,7 @@ from custom_components.termoweb.inventory import (
     normalize_node_addr,
     normalize_node_type,
 )
-from custom_components.termoweb.runtime import EntryRuntime, require_runtime
+from custom_components.termoweb.runtime import require_runtime
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1740,18 +1739,8 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     if isinstance(runtime_inventory, Inventory):
                         inventory_container = runtime_inventory
             if inventory_container is not None:
-                hass_data = getattr(self.hass, "data", None)
-                if isinstance(hass_data, MutableMapping):
-                    domain_bucket = hass_data.get(DOMAIN)
-                    if isinstance(domain_bucket, MutableMapping):
-                        entry_bucket = domain_bucket.get(self.entry_id)
-                        if entry_bucket is None:
-                            entry_bucket = {}
-                            domain_bucket[self.entry_id] = entry_bucket
-                        if isinstance(entry_bucket, EntryRuntime):
-                            entry_bucket.inventory = inventory_container
-                        elif isinstance(entry_bucket, MutableMapping):
-                            entry_bucket["inventory"] = inventory_container
+                if runtime is not None:
+                    runtime.inventory = inventory_container
 
             if not isinstance(inventory_container, Inventory):
                 self._pending_subscribe = True

@@ -112,107 +112,6 @@ def runtime_factory() -> Callable[..., "EntryRuntime"]:
     return build_entry_runtime
 
 
-def runtime_from_record(
-    record: Mapping[str, Any],
-    *,
-    hass: Any | None = None,
-    entry_id: str = "entry",
-    dev_id: str = "dev",
-) -> "EntryRuntime":
-    """Return an ``EntryRuntime`` seeded from a legacy record mapping."""
-
-    runtime = build_entry_runtime(
-        hass=hass,
-        entry_id=entry_id,
-        dev_id=dev_id,
-        inventory=record.get("inventory"),
-        coordinator=record.get("coordinator"),
-        energy_coordinator=record.get("energy_coordinator"),
-        client=record.get("client"),
-        backend=record.get("backend"),
-        hourly_poller=record.get("hourly_poller"),
-        config_entry=record.get("config_entry"),
-        brand=str(record.get("brand") or "termoweb"),
-        version=str(record.get("version") or "0.0.0"),
-        allow_missing_inventory=True,
-    )
-
-    for key, value in record.items():
-        if hasattr(runtime, key):
-            setattr(runtime, key, value)
-
-    return runtime
-
-
-@pytest.fixture(autouse=True)
-def _auto_runtime_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Convert legacy record mappings into ``EntryRuntime`` during tests."""
-
-    from custom_components.termoweb import runtime as runtime_module
-    from custom_components.termoweb.const import DOMAIN
-    from custom_components.termoweb import binary_sensor as binary_sensor_module
-    from custom_components.termoweb import button as button_module
-    from custom_components.termoweb import climate as climate_module
-    from custom_components.termoweb.entities import (
-        binary_sensor as entities_binary_sensor_module,
-    )
-    from custom_components.termoweb.entities import button as entities_button_module
-    from custom_components.termoweb.entities import climate as entities_climate_module
-    from custom_components.termoweb.entities import heater as entities_heater_module
-    from custom_components.termoweb.entities import number as entities_number_module
-    from custom_components.termoweb.entities import sensor as entities_sensor_module
-    from custom_components.termoweb import number as number_module
-    from custom_components.termoweb import heater as heater_module
-    from custom_components.termoweb import sensor as sensor_module
-    from custom_components.termoweb.backend import ws_client as ws_client_module
-    from custom_components.termoweb.backend import ducaheat_ws as ducaheat_ws_module
-    from custom_components.termoweb import energy as energy_module
-
-    original = runtime_module.require_runtime
-
-    def _patched_require_runtime(hass: Any, entry_id: str) -> Any:
-        """Return a runtime instance, converting legacy dicts when needed."""
-
-        try:
-            return original(hass, entry_id)
-        except LookupError:
-            domain_bucket = hass.data.get(DOMAIN, {})
-            if not isinstance(domain_bucket, Mapping):
-                raise
-            record = domain_bucket.get(entry_id)
-            if isinstance(record, Mapping):
-                dev_id = str(record.get("dev_id") or entry_id)
-                runtime = runtime_from_record(
-                    record,
-                    hass=hass,
-                    entry_id=entry_id,
-                    dev_id=dev_id,
-                )
-                domain_bucket[entry_id] = runtime
-                return runtime
-            raise
-
-    monkeypatch.setattr(runtime_module, "require_runtime", _patched_require_runtime)
-    for module in (
-        binary_sensor_module,
-        button_module,
-        climate_module,
-        heater_module,
-        number_module,
-        sensor_module,
-        entities_binary_sensor_module,
-        entities_button_module,
-        entities_climate_module,
-        entities_heater_module,
-        entities_number_module,
-        entities_sensor_module,
-        ws_client_module,
-        ducaheat_ws_module,
-        energy_module,
-    ):
-        monkeypatch.setattr(module, "require_runtime", _patched_require_runtime)
-
-
 def _coerce_inventory(inventory: Any) -> tuple["Inventory" | None, list[Any]]:
     """Return an ``Inventory`` and cached node list when available."""
 
@@ -1999,7 +1898,7 @@ from custom_components.termoweb.domain.view import DomainStateView  # noqa: E402
 
 
 @pytest.fixture
-def heater_hass_data() -> Callable[..., dict[str, Any]]:
+def heater_hass_data() -> Callable[..., "EntryRuntime"]:
     """Return helper to attach TermoWeb domain data to a Home Assistant stub."""
 
     def _factory(
@@ -2012,34 +1911,35 @@ def heater_hass_data() -> Callable[..., dict[str, Any]]:
         ws_state: Mapping[str, Any] | None = None,
         extra: Mapping[str, Any] | None = None,
         inventory: "Inventory" | None = None,
-    ) -> dict[str, Any]:
+    ) -> "EntryRuntime":
         from custom_components.termoweb.inventory import Inventory
 
-        entry_data: dict[str, Any] = {
-            "coordinator": coordinator,
-            "dev_id": dev_id,
-        }
-        if boost_runtime is not None:
-            entry_data["boost_runtime"] = {
-                key: dict(value) for key, value in boost_runtime.items()
-            }
-        if ws_state is not None:
-            entry_data["ws_state"] = dict(ws_state)
-        if extra:
-            entry_data.update(dict(extra))
         container = inventory
-        if container is None:
-            candidate = entry_data.get("inventory")
-            if isinstance(candidate, Inventory):
-                container = candidate
         if container is None:
             candidate = getattr(coordinator, "inventory", None)
             if isinstance(candidate, Inventory):
                 container = candidate
-        if container is not None:
-            entry_data["inventory"] = container
-        hass.data.setdefault(DOMAIN, {})[entry_id] = entry_data
-        return entry_data
+        runtime = build_entry_runtime(
+            hass=hass,
+            entry_id=entry_id,
+            dev_id=dev_id,
+            coordinator=coordinator,
+            inventory=container,
+            allow_missing_inventory=container is None,
+        )
+        if boost_runtime is not None:
+            runtime.boost_runtime = {
+                key: dict(value) for key, value in boost_runtime.items()
+            }
+        if container is None:
+            container = runtime.inventory
+        if ws_state is not None:
+            runtime.ws_state = dict(ws_state)
+        if extra:
+            for key, value in dict(extra).items():
+                if hasattr(runtime, key):
+                    setattr(runtime, key, value)
+        return runtime
 
     return _factory
 

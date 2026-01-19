@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 import custom_components.termoweb.inventory as inventory_module
+from conftest import build_entry_runtime
 from custom_components.termoweb.const import DOMAIN
 import custom_components.termoweb.identifiers as identifiers_module
 from custom_components.termoweb.identifiers import build_heater_energy_unique_id
@@ -17,7 +18,6 @@ from custom_components.termoweb.inventory import (
     normalize_node_addr,
     normalize_node_type,
 )
-from custom_components.termoweb.i18n import FALLBACK_TRANSLATIONS_KEY
 from custom_components.termoweb.utils import (
     _entry_gateway_record,
     async_get_integration_version,
@@ -121,12 +121,16 @@ def test_entry_gateway_record_handles_invalid_sources() -> None:
 
 
 def test_entry_gateway_record_returns_valid_mapping() -> None:
-    """A well-formed mapping should be returned unchanged."""
+    """A well-formed runtime should be returned unchanged."""
 
-    entry_mapping = {"brand": "TermoWeb"}
-    hass = types.SimpleNamespace(data={DOMAIN: {"entry": entry_mapping}})
+    hass = types.SimpleNamespace(data={DOMAIN: {}})
+    runtime = build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="dev",
+    )
 
-    assert _entry_gateway_record(hass, "entry") is entry_mapping
+    assert _entry_gateway_record(hass, "entry") is runtime
 
 
 def test_build_gateway_device_info_defaults_without_entry() -> None:
@@ -140,8 +144,13 @@ def test_build_gateway_device_info_defaults_without_entry() -> None:
 
 
 def test_build_gateway_device_info_uses_brand_and_version() -> None:
-    hass = types.SimpleNamespace(
-        data={DOMAIN: {"entry": {"brand": "  Ducaheat  ", "version": 7}}}
+    hass = types.SimpleNamespace(data={DOMAIN: {}})
+    build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="dev",
+        brand="  Ducaheat  ",
+        version="7",
     )
 
     info = build_gateway_device_info(hass, "entry", "dev")
@@ -151,18 +160,14 @@ def test_build_gateway_device_info_uses_brand_and_version() -> None:
 
 
 def test_build_gateway_device_info_respects_include_version_flag() -> None:
-    hass = types.SimpleNamespace(
-        data={
-            DOMAIN: {
-                "entry": {
-                    "brand": "Ducaheat",
-                    "version": "9.1",
-                    "coordinator": types.SimpleNamespace(
-                        data={"dev": {"model": "Controller"}}
-                    ),
-                }
-            }
-        }
+    hass = types.SimpleNamespace(data={DOMAIN: {}})
+    build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="dev",
+        brand="Ducaheat",
+        version="9.1",
+        coordinator=types.SimpleNamespace(data={"dev": {"model": "Controller"}}),
     )
 
     info = build_gateway_device_info(hass, "entry", "dev", include_version=False)
@@ -173,16 +178,12 @@ def test_build_gateway_device_info_respects_include_version_flag() -> None:
 
 
 def test_build_gateway_device_info_uses_gateway_model_from_coordinator() -> None:
-    hass = types.SimpleNamespace(
-        data={
-            DOMAIN: {
-                "entry": {
-                    "coordinator": types.SimpleNamespace(
-                        data={"dev": {"model": "Controller"}}
-                    )
-                }
-            }
-        }
+    hass = types.SimpleNamespace(data={DOMAIN: {}})
+    build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="dev",
+        coordinator=types.SimpleNamespace(data={"dev": {"model": "Controller"}}),
     )
 
     info = build_gateway_device_info(hass, "entry", "dev")
@@ -191,8 +192,12 @@ def test_build_gateway_device_info_uses_gateway_model_from_coordinator() -> None
 
 
 def test_build_gateway_device_info_ignores_non_mapping_coordinator_data() -> None:
-    hass = types.SimpleNamespace(
-        data={DOMAIN: {"entry": {"coordinator": types.SimpleNamespace(data=[1, 2, 3])}}}
+    hass = types.SimpleNamespace(data={DOMAIN: {}})
+    build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="dev",
+        coordinator=types.SimpleNamespace(data=[1, 2, 3]),
     )
 
     info = build_gateway_device_info(hass, "entry", "dev")
@@ -203,17 +208,15 @@ def test_build_gateway_device_info_ignores_non_mapping_coordinator_data() -> Non
 def test_build_power_monitor_device_info_uses_fallback_translation() -> None:
     """Fallback translation strings should provide a display name."""
 
-    hass = types.SimpleNamespace(
-        data={
-            DOMAIN: {
-                "entry": {
-                    FALLBACK_TRANSLATIONS_KEY: {
-                        "fallbacks.power_monitor_name": "Meter {addr}",
-                    }
-                }
-            }
-        }
+    hass = types.SimpleNamespace(data={DOMAIN: {}})
+    runtime = build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="dev",
     )
+    runtime.fallback_translations = {
+        "fallbacks.power_monitor_name": "Meter {addr}",
+    }
 
     info = build_power_monitor_device_info(hass, "entry", "dev", " 01 ")
 

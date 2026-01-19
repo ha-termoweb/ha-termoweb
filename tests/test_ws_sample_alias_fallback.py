@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-from conftest import runtime_from_record
+from conftest import build_entry_runtime
 from custom_components.termoweb.backend.ws_client import forward_ws_sample_updates
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.inventory import Inventory
@@ -37,15 +37,12 @@ def test_forward_ws_sample_updates_requires_energy_coordinator() -> None:
     entry_id = "entry"
     coordinator = CoordinatorStub()
     hass = SimpleNamespace(data={DOMAIN: {}})
-    record = {
-        "coordinator": coordinator,
-        "energy_coordinator": object(),
-    }
-    hass.data[DOMAIN][entry_id] = runtime_from_record(
-        record,
+    build_entry_runtime(
         hass=hass,
         entry_id=entry_id,
         dev_id="dev",
+        coordinator=coordinator,
+        energy_coordinator=object(),
     )
 
     forward_ws_sample_updates(
@@ -77,16 +74,13 @@ def test_forward_ws_sample_updates_uses_alias_fallback_and_max_lease() -> None:
     )
 
     coordinator = CoordinatorStub()
-    record = {
-        "inventory": inventory,
-        "coordinator": SimpleNamespace(inventory=inventory),
-        "energy_coordinator": coordinator,
-    }
-    hass.data[DOMAIN][entry_id] = runtime_from_record(
-        record,
+    build_entry_runtime(
         hass=hass,
         entry_id=entry_id,
         dev_id="dev",
+        inventory=inventory,
+        coordinator=SimpleNamespace(inventory=inventory),
+        energy_coordinator=coordinator,
     )
 
     forward_ws_sample_updates(

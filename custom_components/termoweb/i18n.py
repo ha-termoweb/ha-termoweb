@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Mapping
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -33,16 +33,12 @@ async def _tr(hass: HomeAssistant, key: str, **placeholders: Any) -> str:
 
 async def async_get_fallback_translations(
     hass: HomeAssistant,
-    entry_data: EntryRuntime | MutableMapping[str, Any] | None = None,
+    entry_data: EntryRuntime | None = None,
 ) -> dict[str, str]:
     """Return cached fallback translation templates for the current language."""
 
     if isinstance(entry_data, EntryRuntime):
         cached = entry_data.fallback_translations
-        if isinstance(cached, dict):
-            return cached
-    elif isinstance(entry_data, MutableMapping):
-        cached = entry_data.get(FALLBACK_TRANSLATIONS_KEY)
         if isinstance(cached, dict):
             return cached
 
@@ -54,8 +50,6 @@ async def async_get_fallback_translations(
 
     if isinstance(entry_data, EntryRuntime):
         entry_data.fallback_translations = fallbacks
-    elif isinstance(entry_data, MutableMapping):
-        entry_data[FALLBACK_TRANSLATIONS_KEY] = fallbacks
 
     return fallbacks
 

@@ -50,7 +50,6 @@ OPTION_MAX_HISTORY_RETRIEVED = "max_history_retrieved"
 
 DEFAULT_MAX_HISTORY_DAYS = 7
 RESET_DELTA_THRESHOLD_KWH = 0.2
-SUMMARY_KEY_LAST_RUN = "last_energy_import_summary"
 
 
 def _iso_date(ts: int) -> str:
@@ -1053,10 +1052,7 @@ async def async_import_energy_history(  # noqa: C901
         "nodes": node_summaries,
     }
 
-    try:
-        runtime[SUMMARY_KEY_LAST_RUN] = run_summary
-    except Exception:  # pragma: no cover - defensive  # noqa: BLE001
-        logger.debug("%s: unable to store energy import summary on record", dev_id)
+    runtime.last_energy_import_summary = run_summary
 
     logger.info(
         "%s: energy history import summary nodes=%d samples=%d written=%d resets=%d",

@@ -9,6 +9,8 @@ import pytest
 
 from custom_components.termoweb.backend import create_backend
 from custom_components.termoweb.backend import termoweb as termoweb_backend
+from custom_components.termoweb.const import DOMAIN
+from conftest import build_entry_runtime
 from custom_components.termoweb.backend.ducaheat import DucaheatBackend
 from custom_components.termoweb.const import BRAND_DUCAHEAT, BRAND_TEVOLVE
 
@@ -101,7 +103,12 @@ def test_termoweb_backend_creates_ws_client() -> None:
     coordinator = object()
     loop = asyncio.new_event_loop()
     try:
-        fake_hass = SimpleNamespace(loop=loop)
+        fake_hass = SimpleNamespace(loop=loop, data={DOMAIN: {}})
+        build_entry_runtime(
+            hass=fake_hass,
+            entry_id="entry123",
+            dev_id="device456",
+        )
         inventory = object()
         ws_client = backend.create_ws_client(
             fake_hass,

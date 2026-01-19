@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from conftest import build_entry_runtime
 from custom_components.termoweb.backend import ducaheat_ws
 
 
@@ -55,7 +56,12 @@ def _make_client(
     monkeypatch.setattr(ducaheat_ws.WsHealthTracker, "set_payload_window", _spy)
 
     hass = ducaheat_ws.HomeAssistant()
-    hass.data.setdefault(ducaheat_ws.DOMAIN, {})["entry"] = {}
+    build_entry_runtime(
+        hass=hass,
+        entry_id="entry",
+        dev_id="device",
+        coordinator=DummyCoordinator(),
+    )
     session = SimpleNamespace()
     client = ducaheat_ws.DucaheatWSClient(
         hass,

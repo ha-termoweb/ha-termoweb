@@ -28,8 +28,6 @@ custom_components/termoweb/__init__.py :: async_setup_entry._recalc_poll_interva
     Suspend REST polling when websocket trackers are healthy and fresh.
 custom_components/termoweb/__init__.py :: async_setup_entry._on_ws_status
     Recalculate polling intervals when websocket state changes.
-custom_components/termoweb/__init__.py :: _set_runtime_value
-    Persist ``value`` for ``key`` on a runtime container when possible.
 custom_components/termoweb/__init__.py :: _collect_shutdown_targets
     Return shutdown targets or ``None`` if shutdown already ran.
 custom_components/termoweb/__init__.py :: _shutdown_diagnostics_task
