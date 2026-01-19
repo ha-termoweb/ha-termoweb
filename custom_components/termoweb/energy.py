@@ -664,13 +664,6 @@ async def async_import_energy_history(  # noqa: C901
         entity_id = (
             ent_reg.async_get_entity_id("sensor", DOMAIN, uid) if ent_reg else None
         )
-        if not entity_id and node_type != "htr":
-            legacy_uid = build_heater_energy_unique_id(dev_id, "htr", addr)
-            entity_id = (
-                ent_reg.async_get_entity_id("sensor", DOMAIN, legacy_uid)
-                if ent_reg
-                else None
-            )
         if not entity_id:
             logger.debug("%s:%s: no energy sensor found", node_type, addr)
             node_summary = {

@@ -1468,22 +1468,16 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
                     exc_info=err,
                 )
             state = self.accumulator_state()
-            legacy_active: bool | None = None
             mode_value: str | None = None
             if state is not None:
                 boost_flag = getattr(state, "boost_active", None)
-                if isinstance(boost_flag, bool):
-                    legacy_active = boost_flag
-                else:
-                    legacy_flag = getattr(state, "boost", None)
-                    if isinstance(legacy_flag, bool):
-                        legacy_active = legacy_flag
+                if not isinstance(boost_flag, bool):
+                    boost_flag = None
                 mode_value = getattr(state, "mode", None)
                 if not isinstance(mode_value, str):
                     mode_value = None
             boost_context = BoostContext(
                 active=boost_state.active if boost_state is not None else None,
-                legacy_active=legacy_active,
                 mode=mode_value,
             )
 

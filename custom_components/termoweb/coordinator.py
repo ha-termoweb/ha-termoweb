@@ -902,7 +902,6 @@ class StateCoordinator(
                         working_state = HeaterState()
 
                 before_boost = (
-                    getattr(working_state, "boost", None),
                     getattr(working_state, "boost_active", None),
                     getattr(working_state, "boost_end_day", None),
                     getattr(working_state, "boost_end_min", None),
@@ -920,7 +919,6 @@ class StateCoordinator(
                     )
                     return False
                 after_boost = (
-                    getattr(working_state, "boost", None),
                     getattr(working_state, "boost_active", None),
                     getattr(working_state, "boost_end_day", None),
                     getattr(working_state, "boost_end_min", None),

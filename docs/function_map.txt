@@ -878,6 +878,8 @@ custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatStatusSegme
     Clamp charge percentage values.
 custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatStatusSegment._derive_boost_end
     Populate boost end fields from nested mappings when supplied.
+custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatStatusSegment._normalise_boost_active
+    Promote legacy boost flags into ``boost_active`` when needed.
 custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatExtraOptions._validate_boost_time
     Validate boost duration values.
 custom_components/termoweb/codecs/ducaheat_read_models.py :: DucaheatExtraOptions._format_boost_temp
@@ -1228,7 +1230,6 @@ custom_components/termoweb/domain/state.py :: DomainStateStore.replace_state
     Replace the stored state for ``(node_type, addr)`` when valid.
 custom_components/termoweb/domain/state.py :: _normalize_node_type
     Return a canonical ``NodeType`` when possible.
-custom_components/termoweb/domain/state.py :: build_state_from_payload
     Return a domain state instance derived from a legacy payload.
 custom_components/termoweb/domain/state.py :: _copy_state_field_value
     Return a shallow copy for mappings and sequences.

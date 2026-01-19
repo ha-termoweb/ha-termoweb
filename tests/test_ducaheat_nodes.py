@@ -131,7 +131,8 @@ def test_ducaheat_rest_normalise_ws_settings_boost_fields() -> None:
 
     result = client._normalise_ws_settings(payload)
 
-    assert result["boost"] is False
+    assert result["boost_active"] is False
+    assert "boost" not in result
     assert "boost_end" not in result
     assert result["boost_end_day"] == 3
     assert result["boost_end_min"] == 15

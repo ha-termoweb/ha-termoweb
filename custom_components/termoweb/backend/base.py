@@ -82,7 +82,6 @@ class BoostContext:
     """Hint data used when determining boost cancellation behavior."""
 
     active: bool | None = None
-    legacy_active: bool | None = None
     mode: str | None = None
 
 

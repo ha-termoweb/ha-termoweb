@@ -1136,7 +1136,6 @@ def test_accumulator_extra_state_attributes_handles_resolver_fallbacks() -> None
         "units": "C",
         "prog": [0] * 168,
         "boost_active": None,
-        "boost": RaiseOnStr(),
         "boost_end_day": 12,
         "boost_end_min": 90,
         "boost_end_datetime": dt.datetime(2024, 1, 1, 3, 0, tzinfo=dt.timezone.utc),
@@ -1315,14 +1314,12 @@ def test_accumulator_extra_state_attributes_varied_inputs() -> None:
     assert attrs["boost_end_label"] == "Never"
 
     settings["boost_active"] = " maybe "
-    settings["boost"] = None
     settings["mode"] = "auto"
     settings["boost_remaining"] = None
     coordinator.resolve_boost_end = None  # type: ignore[assignment]
 
     def _apply_second(cur: Any) -> None:
         cur.boost_active = settings["boost_active"]
-        cur.boost = settings["boost"]
         cur.mode = settings["mode"]
         cur.boost_remaining = settings["boost_remaining"]
 
@@ -1470,7 +1467,7 @@ def test_accumulator_submit_settings_handles_boost_state_error() -> None:
         runtime.backend = backend
 
         entity.accumulator_state = MagicMock(
-            return_value=types.SimpleNamespace(boost_active=True)
+            return_value=types.SimpleNamespace(boost_active=True, mode="auto")
         )
 
         def _boom() -> Any:
@@ -1490,7 +1487,7 @@ def test_accumulator_submit_settings_handles_boost_state_error() -> None:
         call = backend.set_node_settings.await_args
         boost_context = call.kwargs["boost_context"]
         assert boost_context.active is None
-        assert boost_context.legacy_active is True
+        assert boost_context.mode == "auto"
 
     asyncio.run(_run())
 
@@ -1554,73 +1551,7 @@ def test_accumulator_submit_settings_legacy_mode_detection() -> None:
         call = backend.set_node_settings.await_args
         boost_context = call.kwargs["boost_context"]
         assert boost_context.active is None
-        assert boost_context.legacy_active is None
         assert boost_context.mode == " Boost "
-
-    asyncio.run(_run())
-
-
-def test_accumulator_submit_settings_legacy_boost_flag() -> None:
-    async def _run() -> None:
-        _reset_environment()
-        hass = HomeAssistant()
-        entry_id = "entry-acm-legacy-flag"
-        dev_id = "dev-acm-legacy-flag"
-        addr = "8"
-        settings = {"mode": "auto", "units": "C", "prog": [0] * 168}
-
-        coordinator = _make_coordinator(
-            hass,
-            dev_id,
-            {
-                "nodes": {},
-                "nodes_by_type": {"acm": {"settings": {addr: settings}}},
-                "htr": {"settings": {}},
-            },
-        )
-
-        entity = climate_module.AccumulatorClimateEntity(
-            coordinator,
-            entry_id,
-            dev_id,
-            addr,
-            "Accumulator",
-            node_type="acm",
-        )
-        entity.hass = hass
-
-        backend = AsyncMock()
-        runtime = _attach_runtime(
-            hass,
-            entry_id,
-            dev_id,
-            coordinator=coordinator,
-            client=AsyncMock(),
-            brand=BRAND_DUCAHEAT,
-        )
-        runtime.backend = backend
-
-        entity.boost_state = MagicMock(return_value=types.SimpleNamespace(active=None))  # type: ignore[assignment]
-        entity.accumulator_state = MagicMock(
-            return_value=types.SimpleNamespace(
-                boost_active=None, boost=True, mode="auto"
-            )
-        )
-
-        await entity._async_submit_settings(
-            AsyncMock(),
-            mode="auto",
-            stemp=None,
-            prog=None,
-            ptemp=None,
-            units="C",
-        )
-
-        call = backend.set_node_settings.await_args
-        boost_context = call.kwargs["boost_context"]
-        assert boost_context.active is None
-        assert boost_context.legacy_active is True
-        assert boost_context.mode == "auto"
 
     asyncio.run(_run())
 

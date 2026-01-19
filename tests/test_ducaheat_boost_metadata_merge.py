@@ -13,7 +13,7 @@ def test_merge_boost_metadata_prefers_existing_when_requested() -> None:
     client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
 
     target: dict[str, object] = {
-        "boost": True,
+        "boost_active": True,
         "boost_end_day": 1,
         "boost_end_min": None,
     }
@@ -27,7 +27,7 @@ def test_merge_boost_metadata_prefers_existing_when_requested() -> None:
     client._merge_boost_metadata(target, source, prefer_existing=True)
 
     assert target == {
-        "boost": True,
+        "boost_active": True,
         "boost_end_day": 1,
         "boost_end_min": 240,
     }

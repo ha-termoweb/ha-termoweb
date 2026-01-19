@@ -541,8 +541,6 @@ def _derive_boost_state(
 
     boost_active = coerce_boost_bool(_get_field("boost_active"))
     if boost_active is None:
-        boost_active = coerce_boost_bool(_get_field("boost"))
-    if boost_active is None:
         mode = _get_field("mode")
         if isinstance(mode, str):
             boost_active = mode.strip().lower() == "boost"

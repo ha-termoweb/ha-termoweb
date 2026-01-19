@@ -61,7 +61,6 @@ class AccumulatorState(HeaterState):
     """Runtime state for an accumulator node."""
 
     charge_level: float | int | None = None
-    boost: bool | None = None
     charging: bool | None = None
     current_charge_per: int | float | None = None
     target_charge_per: int | float | None = None
@@ -256,14 +255,6 @@ def _populate_accumulator_fields(
     _populate_heater_state(state, payload)
     if "charge_level" in payload:
         state.charge_level = _coerce_number(payload.get("charge_level"))
-    if "boost" in payload:
-        boost_value = payload.get("boost")
-        if isinstance(boost_value, bool):
-            state.boost = boost_value
-        elif isinstance(boost_value, (int, float)):
-            state.boost = bool(boost_value)
-        else:
-            state.boost = None
     if "charging" in payload:
         charging_value = payload.get("charging")
         if isinstance(charging_value, bool):
@@ -576,22 +567,6 @@ def _normalize_node_type(node_type: NodeType | str) -> NodeType | None:
             return NodeType(str(node_type).lower())
         except ValueError:
             return None
-
-
-def build_state_from_payload(
-    node_type: NodeType | str, payload: Mapping[str, Any]
-) -> DomainState | None:
-    """Return a domain state instance derived from a legacy payload."""
-
-    normalized_type = _normalize_node_type(node_type)
-    if normalized_type is None:
-        return None
-    if not isinstance(payload, Mapping):
-        return None
-    canonical = canonicalize_settings_payload(payload)
-    if not canonical:
-        return None
-    return _build_state(normalized_type, canonical)
 
 
 def _copy_state_field_value(value: Any) -> Any:

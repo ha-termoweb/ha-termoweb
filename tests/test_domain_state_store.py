@@ -15,8 +15,6 @@ from custom_components.termoweb.domain import (
     NodeSettingsDelta,
     NodeStatusDelta,
     NodeType,
-    ThermostatState,
-    build_state_from_payload,
     state_to_dict,
 )
 from custom_components.termoweb.inventory import build_node_inventory
@@ -61,7 +59,6 @@ def test_domain_state_store_applies_snapshots_and_patches() -> None:
         {
             "mode": "auto",
             "charge_level": 75,
-            "boost": True,
             "boost_active": False,
             "boost_end_datetime": dt.datetime(2024, 1, 1, tzinfo=dt.timezone.utc),
             "charging": True,
@@ -89,7 +86,6 @@ def test_domain_state_store_applies_snapshots_and_patches() -> None:
     assert settings["acm"]["2"]["charging"] is True
     assert settings["acm"]["2"]["current_charge_per"] == 45.5
     assert settings["acm"]["2"]["target_charge_per"] == 95
-    assert settings["acm"]["2"]["boost"] is True
     assert "boost_end" not in settings["acm"]["2"]
     assert settings["acm"]["2"]["boost_end_day"] == 7
     assert settings["acm"]["2"]["boost_end_min"] == 15
@@ -155,28 +151,6 @@ def test_domain_state_store_gateway_connection_state() -> None:
 
     assert fetched == state
     assert fetched is not state
-
-
-def test_build_state_from_payload_ignores_unknown_fields() -> None:
-    """Domain state instances should only retain explicit fields."""
-
-    state = build_state_from_payload(
-        "thm",
-        {
-            "mode": "auto",
-            "state": "idle",
-            "batt_level": "5",
-            "mystery": {"raw": "payload"},
-        },
-    )
-    assert isinstance(state, ThermostatState)
-    legacy = state_to_dict(state)
-    assert legacy["mode"] == "auto"
-    assert legacy["state"] == "idle"
-    assert legacy["batt_level"] == 5
-    assert "capabilities" not in legacy
-    assert "mystery" not in legacy
-    assert not hasattr(state, "status")
 
 
 def test_domain_state_store_strips_raw_status_and_capabilities() -> None:
