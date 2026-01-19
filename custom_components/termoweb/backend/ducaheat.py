@@ -561,6 +561,7 @@ class DucaheatRESTClient(RESTClient):
 
         self._merge_boost_metadata(settings, settings)
         self._merge_accumulator_charge_metadata(settings, settings)
+        settings.pop("boost", None)
         settings.pop("boost_end", None)
 
         return settings
@@ -597,7 +598,12 @@ class DucaheatRESTClient(RESTClient):
 
             target[key] = value
 
-        for key in ("boost", "boost_end_day", "boost_end_min"):
+        if "boost_active" in source:
+            _assign("boost_active", source["boost_active"])
+        elif "boost" in source:
+            _assign("boost_active", coerce_boost_bool(source.get("boost")))
+
+        for key in ("boost_end_day", "boost_end_min"):
             if key in source:
                 _assign(key, source[key])
 
@@ -1455,8 +1461,6 @@ class DucaheatBackend(Backend):
             return False
         if context.active is not None:
             return bool(context.active)
-        if context.legacy_active is not None:
-            return bool(context.legacy_active)
         if context.mode is not None:
             return context.mode.strip().lower() == "boost"
         return False

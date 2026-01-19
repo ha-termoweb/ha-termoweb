@@ -104,10 +104,8 @@ async def test_ducaheat_backend_creates_ws_client() -> None:
     [
         (BoostContext(active=True), True),
         (BoostContext(active=False), False),
-        (BoostContext(active=None, legacy_active=True), True),
-        (BoostContext(active=None, legacy_active=False), False),
-        (BoostContext(active=None, legacy_active=None, mode="boost"), True),
-        (BoostContext(active=None, legacy_active=None, mode="auto"), False),
+        (BoostContext(active=None, mode="boost"), True),
+        (BoostContext(active=None, mode="auto"), False),
         (None, False),
     ],
 )

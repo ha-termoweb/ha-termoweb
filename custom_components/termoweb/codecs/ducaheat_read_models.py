@@ -18,7 +18,6 @@ from custom_components.termoweb.boost import validate_boost_minutes
 from custom_components.termoweb.codecs.common import format_temperature, validate_units
 
 ACCUMULATOR_ONLY_FIELDS: set[str] = {
-    "boost",
     "boost_active",
     "boost_end_day",
     "boost_end_min",
@@ -350,6 +349,14 @@ class DucaheatStatusSegment(DucaheatReadModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def _normalise_boost_active(self) -> DucaheatStatusSegment:
+        """Promote legacy boost flags into ``boost_active`` when needed."""
+
+        if self.boost_active is None and self.boost is not None:
+            self.boost_active = bool(self.boost)
+        return self
+
 
 class DucaheatExtraOptions(DucaheatReadModel):
     """Nested setup.extra_options payload."""
@@ -630,6 +637,7 @@ class DucaheatSegmentedSettings(DucaheatReadModel):
             flattened.update(
                 self.status.model_dump(
                     exclude_none=True,
+                    exclude={"boost"},
                 )
             )
 
@@ -701,7 +709,12 @@ def _merge_boost_metadata(
 
         target[key] = value
 
-    for key in ("boost", "boost_end_day", "boost_end_min"):
+    if "boost_active" in source:
+        _assign("boost_active", source["boost_active"])
+    elif "boost" in source:
+        _assign("boost_active", _coerce_bool(source.get("boost")))
+
+    for key in ("boost_end_day", "boost_end_min"):
         if key in source:
             _assign(key, source[key])
 

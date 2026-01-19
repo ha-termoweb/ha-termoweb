@@ -398,7 +398,6 @@ def test_derive_boost_state_ignores_placeholder_iso(
     monkeypatch.setattr(dt_util, "parse_datetime", lambda value: None)
     settings = {
         "mode": "auto",
-        "boost": False,
         "boost_end_datetime": "1970-01-02T00:00:00UTC",
     }
 
@@ -457,7 +456,7 @@ def test_derive_boost_state_normalises_epoch_placeholder(
         return boost_module.resolve_boost_end_from_fields(day, minute, now=base_now)
 
     coordinator = SimpleNamespace(resolve_boost_end=_resolver)
-    settings = {"boost": False, "boost_end_day": 0, "boost_end_min": 0}
+    settings = {"boost_end_day": 0, "boost_end_min": 0}
 
     state = heater_module.derive_boost_state(settings, coordinator)
 
