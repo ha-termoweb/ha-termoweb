@@ -35,7 +35,7 @@ jobs:
       - name: Run tests
         run: |
           set -o pipefail
-          uv run pytest --cov=custom_components.termoweb --cov-report=term-missing | tee coverage-report.txt
+          timeout 60s uv run pytest --cov=custom_components.termoweb --cov-report=term-missing | tee coverage-report.txt
 
       - name: Enforce coverage threshold
         run: uv run coverage report --fail-under=90
