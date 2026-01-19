@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from custom_components.termoweb.domain.ids import NodeId, NodeType
-from custom_components.termoweb.domain.state import DomainStateStore
+from custom_components.termoweb.domain.state import (
+    DomainStateStore,
+    GatewayConnectionState,
+)
 from custom_components.termoweb.domain.view import DomainStateView
 
 
@@ -26,3 +29,22 @@ def test_domain_state_view_without_store_returns_none() -> None:
     view = DomainStateView("dev", None)
 
     assert view.get_heater_state("htr", "01") is None
+
+
+def test_domain_state_view_gateway_connection_state() -> None:
+    """DomainStateView should return gateway connection state defaults."""
+
+    store = DomainStateStore([])
+    store.set_gateway_connection_state(
+        GatewayConnectionState(status="connected", connected=True)
+    )
+    view = DomainStateView("dev", store)
+
+    state = view.get_gateway_connection_state()
+
+    assert state.status == "connected"
+    assert state.connected is True
+
+    empty_view = DomainStateView("dev", None)
+    empty_state = empty_view.get_gateway_connection_state()
+    assert empty_state.connected is False

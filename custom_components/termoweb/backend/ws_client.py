@@ -18,7 +18,7 @@ from custom_components.termoweb.api import RESTClient
 from custom_components.termoweb.const import (
     BRAND_DUCAHEAT,
     BRAND_TERMOWEB,
-    DOMAIN,
+    DOMAIN as TERMOWEB_DOMAIN,
     WS_NAMESPACE,
     signal_ws_data,
     signal_ws_status,
@@ -37,6 +37,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 from .ws_health import WsHealthTracker
 
 _LOGGER = logging.getLogger(__name__)
+DOMAIN = TERMOWEB_DOMAIN
 
 CANONICAL_SETTING_KEYS: tuple[str, ...] = (
     "mode",
@@ -562,6 +563,38 @@ class _WSStatusMixin:
 
         dispatcher(self.hass, signal_ws_status(self.entry_id), payload)
 
+    def _sync_gateway_connection_state(self, *, now: float | None = None) -> None:
+        """Update gateway connection state in the domain store when available."""
+
+        coordinator = getattr(self, "_coordinator", None)
+        updater = getattr(coordinator, "update_gateway_connection", None)
+        if not callable(updater):
+            return
+
+        tracker = self._ws_health_tracker()
+        ws_state = self._ws_state_bucket()
+        last_event_at = ws_state.get("last_event_at")
+        if not isinstance(last_event_at, (int, float)):
+            last_event_at = None
+
+        idle_restart_pending = ws_state.get("idle_restart_pending")
+        if idle_restart_pending is not None:
+            idle_restart_pending = bool(idle_restart_pending)
+
+        now_ts = now if isinstance(now, (int, float)) else time.time()
+        updater(
+            status=tracker.status,
+            connected=tracker.status in {"healthy", "connected"},
+            last_event_at=last_event_at,
+            healthy_since=tracker.healthy_since,
+            healthy_minutes=tracker.healthy_minutes(now=now_ts),
+            last_payload_at=tracker.last_payload_at,
+            last_heartbeat_at=tracker.last_heartbeat_at,
+            payload_stale=tracker.payload_stale,
+            payload_stale_after=tracker.payload_stale_after,
+            idle_restart_pending=idle_restart_pending,
+        )
+
     def _mark_ws_payload(
         self,
         *,
@@ -585,6 +618,7 @@ class _WSStatusMixin:
                 reason=reason,
                 payload_changed=True,
             )
+        self._sync_gateway_connection_state(now=timestamp)
 
     def _mark_ws_heartbeat(
         self,
@@ -605,6 +639,7 @@ class _WSStatusMixin:
                 reason=reason,
                 payload_changed=True,
             )
+        self._sync_gateway_connection_state(now=timestamp)
 
     def _refresh_ws_payload_state(
         self,
@@ -624,6 +659,7 @@ class _WSStatusMixin:
                 reason=reason,
                 payload_changed=True,
             )
+        self._sync_gateway_connection_state(now=now)
 
     def _update_status(self, status: str) -> None:
         """Publish websocket status updates to Home Assistant listeners."""
@@ -679,6 +715,7 @@ class _WSStatusMixin:
                 health_changed=health_changed,
                 payload_changed=payload_changed,
             )
+        self._sync_gateway_connection_state(now=now)
 
 
 @dataclass

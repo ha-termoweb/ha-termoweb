@@ -93,6 +93,22 @@ class PowerMonitorState:
 DomainState = HeaterState | AccumulatorState | ThermostatState | PowerMonitorState
 
 
+@dataclass(slots=True)
+class GatewayConnectionState:
+    """Runtime connection state for a gateway."""
+
+    status: str | None = None
+    connected: bool = False
+    last_event_at: float | None = None
+    healthy_since: float | None = None
+    healthy_minutes: float | None = None
+    last_payload_at: float | None = None
+    last_heartbeat_at: float | None = None
+    payload_stale: bool | None = None
+    payload_stale_after: float | None = None
+    idle_restart_pending: bool | None = None
+
+
 _SETTING_FIELD_NAMES: frozenset[str] = frozenset(
     field.name
     for cls in (HeaterState, AccumulatorState, ThermostatState, PowerMonitorState)
@@ -358,6 +374,7 @@ class DomainStateStore:
         self._states: dict[NodeId, DomainState] = {}
         self._allowed: dict[NodeId, NodeId] = {}
         self._addresses_by_type: dict[NodeType, set[str]] = {}
+        self._gateway_connection = GatewayConnectionState()
         self.reset_nodes(nodes)
 
     def reset_nodes(self, nodes: Iterable[NodeId]) -> None:
@@ -498,6 +515,18 @@ class DomainStateStore:
 
         yield from self._states.items()
 
+    def set_gateway_connection_state(self, state: GatewayConnectionState) -> None:
+        """Store the latest gateway connection state."""
+
+        if not isinstance(state, GatewayConnectionState):
+            return
+        self._gateway_connection = clone_gateway_connection_state(state)
+
+    def get_gateway_connection_state(self) -> GatewayConnectionState:
+        """Return a defensive copy of the gateway connection state."""
+
+        return clone_gateway_connection_state(self._gateway_connection)
+
     def replace_state(
         self,
         node_type: NodeType | str,
@@ -607,6 +636,28 @@ def clone_state(state: DomainState | None) -> DomainState | None:
         for field in fields(state_type)
     }
     return state_type(**payload)
+
+
+def clone_gateway_connection_state(
+    state: GatewayConnectionState | None,
+) -> GatewayConnectionState:
+    """Return a detached copy of ``state`` when available."""
+
+    if state is None:
+        return GatewayConnectionState()
+
+    return GatewayConnectionState(
+        status=state.status,
+        connected=state.connected,
+        last_event_at=state.last_event_at,
+        healthy_since=state.healthy_since,
+        healthy_minutes=state.healthy_minutes,
+        last_payload_at=state.last_payload_at,
+        last_heartbeat_at=state.last_heartbeat_at,
+        payload_stale=state.payload_stale,
+        payload_stale_after=state.payload_stale_after,
+        idle_restart_pending=state.idle_restart_pending,
+    )
 
 
 def apply_payload_to_state(

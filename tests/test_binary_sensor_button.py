@@ -61,18 +61,24 @@ def test_binary_sensor_setup_and_dispatch(
             },
         )
 
+        coordinator.update_gateway_connection(
+            status="healthy",
+            connected=True,
+            last_event_at=171.0,
+            healthy_since=111.0,
+            healthy_minutes=42.0,
+            last_payload_at=170.0,
+            last_heartbeat_at=169.0,
+            payload_stale=False,
+            payload_stale_after=120.0,
+            idle_restart_pending=False,
+        )
+
         heater_hass_data(
             hass,
             entry.entry_id,
             dev_id,
             coordinator,
-            ws_state={
-                dev_id: {
-                    "status": "healthy",
-                    "last_event_at": "2024-05-01T12:00:00Z",
-                    "healthy_minutes": 42,
-                }
-            },
             extra={"version": "2.1.0"},
             inventory=inventory,
         )
@@ -127,8 +133,8 @@ def test_binary_sensor_setup_and_dispatch(
             "connected": True,
             "model": "TW-GW",
             "ws_status": "healthy",
-            "ws_last_event_at": "2024-05-01T12:00:00Z",
-            "ws_healthy_minutes": 42,
+            "ws_last_event_at": 171.0,
+            "ws_healthy_minutes": 42.0,
         }
 
         entity.schedule_update_ha_state = MagicMock()

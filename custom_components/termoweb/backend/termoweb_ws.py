@@ -1134,6 +1134,7 @@ class WebSocketClient(_WSCommon):
         self._refresh_ws_payload_state(now=time.time(), reason="idle_restart")
         self._idle_restart_pending = True
         self._ws_state_bucket()["idle_restart_pending"] = True
+        self._sync_gateway_connection_state(now=time.time())
         _LOGGER.warning(
             "WS: no payloads for %.0f s (%s heartbeat); restarting", idle_for, source
         )
@@ -1145,6 +1146,7 @@ class WebSocketClient(_WSCommon):
                 self._idle_restart_pending = False
                 self._idle_restart_task = None
                 self._ws_state_bucket()["idle_restart_pending"] = False
+                self._sync_gateway_connection_state(now=time.time())
 
         self._idle_restart_task = self._loop.create_task(_restart())
 
@@ -1157,6 +1159,7 @@ class WebSocketClient(_WSCommon):
         self._idle_restart_task = None
         self._idle_restart_pending = False
         self._ws_state_bucket()["idle_restart_pending"] = False
+        self._sync_gateway_connection_state(now=time.time())
 
     async def _get_token(self) -> str:
         """Reuse the REST client token for websocket authentication."""

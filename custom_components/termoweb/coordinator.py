@@ -33,6 +33,7 @@ from .domain.state import (
     AccumulatorState,
     DomainState,
     DomainStateStore,
+    GatewayConnectionState,
     HeaterState,
     NodeSettingsDelta,
     PowerMonitorState,
@@ -216,7 +217,43 @@ class StateCoordinator(
     def gateway_connected(self) -> bool:
         """Return True when the coordinator reports the gateway online."""
 
-        return True
+        connection = self._domain_view.get_gateway_connection_state()
+        return bool(connection.connected)
+
+    def update_gateway_connection(
+        self,
+        *,
+        status: str | None,
+        connected: bool,
+        last_event_at: float | None,
+        healthy_since: float | None,
+        healthy_minutes: float | None,
+        last_payload_at: float | None,
+        last_heartbeat_at: float | None,
+        payload_stale: bool | None,
+        payload_stale_after: float | None,
+        idle_restart_pending: bool | None,
+    ) -> None:
+        """Update the gateway connection state in the domain store."""
+
+        store = self._state_store
+        if store is None:
+            return
+
+        state = GatewayConnectionState(
+            status=status,
+            connected=connected,
+            last_event_at=last_event_at,
+            healthy_since=healthy_since,
+            healthy_minutes=healthy_minutes,
+            last_payload_at=last_payload_at,
+            last_heartbeat_at=last_heartbeat_at,
+            payload_stale=payload_stale,
+            payload_stale_after=payload_stale_after,
+            idle_restart_pending=idle_restart_pending,
+        )
+        store.set_gateway_connection_state(state)
+        self._publish_device_record()
 
     def _device_record(self) -> dict[str, dict[str, Any]]:
         """Return a minimal coordinator payload for this device."""
@@ -231,7 +268,7 @@ class StateCoordinator(
             "dev_id": self._dev_id,
             "name": _device_display_name(self._device_metadata, self._dev_id),
             "model": model,
-            "connected": True,
+            "connected": self.gateway_connected,
             "backend": backend,
             "inventory": self._inventory,
             "domain_view": self._domain_view,

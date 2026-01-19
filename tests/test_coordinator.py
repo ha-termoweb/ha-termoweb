@@ -133,6 +133,45 @@ def test_rtc_payload_to_datetime(monkeypatch: pytest.MonkeyPatch) -> None:
     assert coord_module.StateCoordinator._rtc_payload_to_datetime({}) is None
 
 
+def test_coordinator_updates_gateway_connection_state(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """Gateway connection updates should flow into coordinator data."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": []})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inventory,
+    )
+
+    coordinator.update_gateway_connection(
+        status="connected",
+        connected=True,
+        last_event_at=12.0,
+        healthy_since=10.0,
+        healthy_minutes=2.0,
+        last_payload_at=11.0,
+        last_heartbeat_at=11.5,
+        payload_stale=False,
+        payload_stale_after=120.0,
+        idle_restart_pending=False,
+    )
+
+    assert coordinator.gateway_connected is True
+    record = coordinator.data["dev"]
+    assert record["connected"] is True
+    connection_state = coordinator.domain_view.get_gateway_connection_state()
+    assert connection_state.status == "connected"
+
+
 @pytest.mark.asyncio
 async def test_async_fetch_rtc_datetime_updates_reference(
     monkeypatch: pytest.MonkeyPatch,

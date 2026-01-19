@@ -28,7 +28,12 @@ from ..boost import (
     supports_boost,
     validate_boost_minutes,
 )
-from ..domain import DomainState, HeaterState
+from ..domain import (
+    DomainState,
+    DomainStateView,
+    GatewayConnectionState,
+    HeaterState,
+)
 from .heater import (
     DEFAULT_BOOST_DURATION,
     HeaterNodeBase,
@@ -1022,34 +1027,23 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
                 self._refresh_fallback.cancel()
             self._refresh_fallback = None
 
-        hass = self._hass_for_runtime()
-        ws_record = None
-        if hass is not None:
-            try:
-                runtime = require_runtime(hass, self._entry_id)
-            except LookupError:
-                runtime = None
-            if runtime is not None:
-                ws_record = runtime.ws_state
-        if isinstance(ws_record, dict):
-            ws_state = ws_record.get(self._dev_id)
-            if isinstance(ws_state, dict):
-                status = str(ws_state.get("status") or "").lower()
-                if status in {"connected", "healthy"}:
-                    last_payload_at = ws_state.get("last_payload_at")
-                    idle_restart_pending = bool(ws_state.get("idle_restart_pending"))
-                    recent_payload = False
-                    if isinstance(last_payload_at, (int, float)):
-                        recent_payload = (time.time() - last_payload_at) <= (
-                            _WS_ECHO_FALLBACK_REFRESH
-                        )
-                    if idle_restart_pending or recent_payload:
-                        _LOGGER.debug(
-                            "Skipping refresh fallback addr=%s ws_status=%s",
-                            self._addr,
-                            status,
-                        )
-                        return
+        connection_state = self._gateway_connection_state()
+        status = str(connection_state.status or "").lower()
+        if status in {"connected", "healthy"}:
+            last_payload_at = connection_state.last_payload_at
+            idle_restart_pending = connection_state.idle_restart_pending
+            recent_payload = False
+            if isinstance(last_payload_at, (int, float)):
+                recent_payload = (time.time() - last_payload_at) <= (
+                    _WS_ECHO_FALLBACK_REFRESH
+                )
+            if idle_restart_pending or recent_payload:
+                _LOGGER.debug(
+                    "Skipping refresh fallback addr=%s ws_status=%s",
+                    self._addr,
+                    status,
+                )
+                return
 
         async def _fallback() -> None:
             """Force a heater refresh after the fallback delay."""
@@ -1089,6 +1083,14 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         self._refresh_fallback = asyncio.create_task(
             _fallback(), name=f"termoweb-fallback-{self._dev_id}-{self._addr}"
         )
+
+    def _gateway_connection_state(self) -> GatewayConnectionState:
+        """Return the current gateway connection state."""
+
+        domain_view = getattr(self.coordinator, "domain_view", None)
+        if isinstance(domain_view, DomainStateView):
+            return domain_view.get_gateway_connection_state()
+        return GatewayConnectionState()
 
 
 class AccumulatorClimateEntity(HeaterClimateEntity):

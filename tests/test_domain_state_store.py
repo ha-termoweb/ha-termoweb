@@ -9,6 +9,7 @@ from custom_components.termoweb.domain import (
     AccumulatorState,
     clone_state,
     DomainStateStore,
+    GatewayConnectionState,
     HeaterState,
     NodeId,
     NodeSettingsDelta,
@@ -130,6 +131,30 @@ def test_domain_state_store_applies_deltas() -> None:
     assert legacy["htr"]["1"]["mode"] == "auto"
     assert legacy["htr"]["1"]["stemp"] == "20.5"
     assert "status" not in legacy["htr"]["1"]
+
+
+def test_domain_state_store_gateway_connection_state() -> None:
+    """Gateway connection state should be stored and cloned safely."""
+
+    store = DomainStateStore([])
+    state = GatewayConnectionState(
+        status="healthy",
+        connected=True,
+        last_event_at=12.0,
+        healthy_since=10.0,
+        healthy_minutes=2.0,
+        last_payload_at=11.0,
+        last_heartbeat_at=11.5,
+        payload_stale=False,
+        payload_stale_after=120.0,
+        idle_restart_pending=False,
+    )
+    store.set_gateway_connection_state(state)
+
+    fetched = store.get_gateway_connection_state()
+
+    assert fetched == state
+    assert fetched is not state
 
 
 def test_build_state_from_payload_ignores_unknown_fields() -> None:
