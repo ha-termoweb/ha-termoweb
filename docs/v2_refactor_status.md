@@ -2,9 +2,11 @@
 
 ## Status
 
-The v2 refactor is a **clean-slate** effort. There is no legacy path and no
-strangler architecture. Documentation defines the target end state and the code
-must converge toward it.
+The v2 refactor is a **clean-slate** effort for internal architecture. There is
+no legacy path and no strangler architecture inside the integration.
+Documentation defines the target end state and the code must converge toward
+it. Vendor payload schemas are stable external contracts and are not subject to
+legacy removal.
 
 ## Authoritative references
 
@@ -21,3 +23,4 @@ The refactor is complete when:
 - Inventory is immutable and created once at setup.
 - Entity platforms are vendor-agnostic.
 - No compatibility shims or legacy scaffolding remain.
+- Wire models preserve vendor payload fields exactly.
