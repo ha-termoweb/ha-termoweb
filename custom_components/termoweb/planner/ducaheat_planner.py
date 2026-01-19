@@ -5,6 +5,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from custom_components.termoweb.codecs.ducaheat_codec import (
+    encode_boost_command,
+    encode_extra_options_command,
+    encode_mode_command,
+    encode_preset_temps_command,
+    encode_program_command,
+    encode_select_payload,
+    encode_setpoint_command,
+    encode_units_command,
+)
+from custom_components.termoweb.codecs.ducaheat_models import StatusWritePayload
 from custom_components.termoweb.domain.commands import (
     AccumulatorCommand,
     BaseCommand,
@@ -18,18 +29,6 @@ from custom_components.termoweb.domain.commands import (
     StopBoost,
 )
 from custom_components.termoweb.domain.ids import NodeId, NodeType
-
-from custom_components.termoweb.codecs.ducaheat_codec import (
-    encode_boost_command,
-    encode_extra_options_command,
-    encode_mode_command,
-    encode_preset_temps_command,
-    encode_program_command,
-    encode_select_payload,
-    encode_setpoint_command,
-    encode_units_command,
-)
-from custom_components.termoweb.codecs.ducaheat_models import StatusWritePayload
 
 
 @dataclass(slots=True)

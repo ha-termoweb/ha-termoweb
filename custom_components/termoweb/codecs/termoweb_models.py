@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+import typing
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -163,7 +164,7 @@ class HeaterSettingsPayload(BaseModel):
     prog: list[int | float | str] | None = None
     ptemp: list[Any] | None = None
     units: str | None = None
-    status: HeaterStatusPayload | Mapping[str, Any] | None = None
+    status: HeaterStatusPayload | Mapping[str, typing.Any] | None = None
     capabilities: dict[str, Any] | None = None
 
     @field_validator("stemp", "mtemp", "temp", mode="before")
@@ -228,8 +229,8 @@ class PowerMonitorPayload(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    status: Mapping[str, Any] | None = None
-    capabilities: Mapping[str, Any] | None = None
+    status: Mapping[str, typing.Any] | None = None
+    capabilities: Mapping[str, typing.Any] | None = None
 
 
 class SampleItem(BaseModel):

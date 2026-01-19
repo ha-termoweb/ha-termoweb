@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, fields
+import typing
 from typing import Any
 
 from .ids import NodeId, NodeType
@@ -115,7 +116,7 @@ _SETTING_FIELD_NAMES: frozenset[str] = frozenset(
 )
 
 
-def canonicalize_settings_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+def canonicalize_settings_payload(payload: Mapping[str, typing.Any]) -> dict[str, Any]:
     """Return canonical setting fields derived from ``payload``."""
 
     if not isinstance(payload, Mapping):
@@ -123,7 +124,7 @@ def canonicalize_settings_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
 
     canonical: dict[str, Any] = {}
 
-    def _merge(source: Mapping[str, Any]) -> None:
+    def _merge(source: Mapping[str, typing.Any]) -> None:
         for key, value in source.items():
             if key not in _SETTING_FIELD_NAMES:
                 continue
@@ -146,7 +147,7 @@ class NodeDelta:
     node_id: NodeId
 
     @property
-    def payload(self) -> Mapping[str, Any]:
+    def payload(self) -> Mapping[str, typing.Any]:
         """Return the payload carried by the delta."""
 
         return {}
@@ -156,10 +157,10 @@ class NodeDelta:
 class NodeSettingsDelta(NodeDelta):
     """Settings delta for a node."""
 
-    changes: Mapping[str, Any]
+    changes: Mapping[str, typing.Any]
 
     @property
-    def payload(self) -> Mapping[str, Any]:
+    def payload(self) -> Mapping[str, typing.Any]:
         """Return the mapping of changed fields."""
 
         return self.changes
@@ -169,10 +170,10 @@ class NodeSettingsDelta(NodeDelta):
 class NodeStatusDelta(NodeDelta):
     """Status delta for a node."""
 
-    status: Mapping[str, Any]
+    status: Mapping[str, typing.Any]
 
     @property
-    def payload(self) -> Mapping[str, Any]:
+    def payload(self) -> Mapping[str, typing.Any]:
         """Return the status mapping payload."""
 
         return canonicalize_settings_payload({"status": self.status})
@@ -182,10 +183,10 @@ class NodeStatusDelta(NodeDelta):
 class NodeSamplesDelta(NodeDelta):
     """Samples delta placeholder for future use."""
 
-    samples: Mapping[str, Any]
+    samples: Mapping[str, typing.Any]
 
     @property
-    def payload(self) -> Mapping[str, Any]:
+    def payload(self) -> Mapping[str, typing.Any]:
         """Return the samples mapping payload."""
 
         return {"samples": self.samples}
@@ -193,7 +194,7 @@ class NodeSamplesDelta(NodeDelta):
 
 def _populate_heater_state(
     state: HeaterState,
-    payload: Mapping[str, Any],
+    payload: Mapping[str, typing.Any],
 ) -> HeaterState:
     """Populate base heater fields on ``state`` from ``payload``."""
 
@@ -241,14 +242,14 @@ def _populate_heater_state(
     return state
 
 
-def _build_heater_state(payload: Mapping[str, Any]) -> HeaterState:
+def _build_heater_state(payload: Mapping[str, typing.Any]) -> HeaterState:
     """Construct a heater state instance from ``payload``."""
 
     return _populate_heater_state(HeaterState(), payload)
 
 
 def _populate_accumulator_fields(
-    state: AccumulatorState, payload: Mapping[str, Any]
+    state: AccumulatorState, payload: Mapping[str, typing.Any]
 ) -> AccumulatorState:
     """Populate accumulator-specific fields on ``state``."""
 
@@ -286,20 +287,20 @@ def _populate_accumulator_fields(
     return state
 
 
-def _build_accumulator_state(payload: Mapping[str, Any]) -> AccumulatorState:
+def _build_accumulator_state(payload: Mapping[str, typing.Any]) -> AccumulatorState:
     """Construct an accumulator state instance from ``payload``."""
 
     state = _populate_heater_state(AccumulatorState(), payload)
     return _populate_accumulator_fields(state, payload)
 
 
-def _build_thermostat_state(payload: Mapping[str, Any]) -> ThermostatState:
+def _build_thermostat_state(payload: Mapping[str, typing.Any]) -> ThermostatState:
     """Construct a thermostat state instance from ``payload``."""
 
     return _populate_heater_state(ThermostatState(), payload)
 
 
-def _build_power_monitor_state(payload: Mapping[str, Any]) -> PowerMonitorState:
+def _build_power_monitor_state(payload: Mapping[str, typing.Any]) -> PowerMonitorState:
     """Construct a power monitor state instance from ``payload``."""
 
     state = PowerMonitorState()
@@ -307,7 +308,7 @@ def _build_power_monitor_state(payload: Mapping[str, Any]) -> PowerMonitorState:
 
 
 def _populate_power_monitor_state(
-    state: PowerMonitorState, payload: Mapping[str, Any]
+    state: PowerMonitorState, payload: Mapping[str, typing.Any]
 ) -> PowerMonitorState:
     """Populate power monitor fields on ``state``."""
 
@@ -332,7 +333,7 @@ def _populate_power_monitor_state(
     return state
 
 
-def _build_state(node_type: NodeType, payload: Mapping[str, Any]) -> DomainState:
+def _build_state(node_type: NodeType, payload: Mapping[str, typing.Any]) -> DomainState:
     """Return a domain state object for ``node_type`` and ``payload``."""
 
     if node_type is NodeType.ACCUMULATOR:
@@ -344,7 +345,7 @@ def _build_state(node_type: NodeType, payload: Mapping[str, Any]) -> DomainState
     return _build_heater_state(payload)
 
 
-def _merge_state(state: DomainState, payload: Mapping[str, Any]) -> DomainState:
+def _merge_state(state: DomainState, payload: Mapping[str, typing.Any]) -> DomainState:
     """Merge ``payload`` fields into ``state`` without altering the type."""
 
     if isinstance(state, AccumulatorState):
@@ -407,7 +408,7 @@ class DomainStateStore:
         return self._resolve_node_id(node_type, addr)
 
     def _apply_payload(
-        self, node_id: NodeId, payload: Mapping[str, Any], *, replace: bool
+        self, node_id: NodeId, payload: Mapping[str, typing.Any], *, replace: bool
     ) -> None:
         """Apply ``payload`` to ``node_id`` using replace semantics when requested."""
 
@@ -436,7 +437,7 @@ class DomainStateStore:
         self,
         node_type: NodeType | str,
         addr: Any,
-        decoded_settings: Mapping[str, Any] | None,
+        decoded_settings: Mapping[str, typing.Any] | None,
     ) -> None:
         """Store a complete settings snapshot for ``(node_type, addr)``."""
 
@@ -453,7 +454,7 @@ class DomainStateStore:
         self,
         node_type: NodeType | str,
         addr: Any,
-        delta: Mapping[str, Any] | None,
+        delta: Mapping[str, typing.Any] | None,
     ) -> None:
         """Merge partial updates for ``(node_type, addr)`` into the store."""
 
@@ -636,7 +637,7 @@ def clone_gateway_connection_state(
 
 
 def apply_payload_to_state(
-    state: DomainState | None, payload: Mapping[str, Any] | None
+    state: DomainState | None, payload: Mapping[str, typing.Any] | None
 ) -> DomainState | None:
     """Apply a mapping payload onto ``state`` when possible."""
 

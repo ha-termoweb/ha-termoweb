@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable, Mapping
 import inspect
 import logging
 import time
+import typing
 from typing import Any, cast
 
 from homeassistant.components.climate import (
@@ -28,12 +29,12 @@ from ..boost import (
     supports_boost,
     validate_boost_minutes,
 )
-from ..domain import (
-    DomainState,
-    DomainStateView,
-    GatewayConnectionState,
-    HeaterState,
-)
+from ..domain import DomainState, DomainStateView, GatewayConnectionState, HeaterState
+from ..i18n import async_get_fallback_translations, attach_fallbacks, format_fallback
+from ..identifiers import build_heater_entity_unique_id, thermostat_fallback_name
+from ..inventory import HeaterNode, Inventory, normalize_node_addr, normalize_node_type
+from ..runtime import require_runtime
+from ..utils import float_or_none
 from .heater import (
     DEFAULT_BOOST_DURATION,
     HeaterNodeBase,
@@ -44,11 +45,6 @@ from .heater import (
     register_climate_entity_id,
     resolve_boost_runtime_minutes,
 )
-from ..i18n import async_get_fallback_translations, attach_fallbacks, format_fallback
-from ..identifiers import build_heater_entity_unique_id, thermostat_fallback_name
-from ..inventory import HeaterNode, Inventory, normalize_node_addr, normalize_node_type
-from ..runtime import require_runtime
-from ..utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 _CANCELLED_ERROR = asyncio.CancelledError
@@ -569,7 +565,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             self._refresh_fallback = None
         super()._handle_ws_event(payload)
 
-    def _payload_mentions_heater(self, payload: Mapping[str, Any]) -> bool:
+    def _payload_mentions_heater(self, payload: Mapping[str, typing.Any]) -> bool:
         """Return True when a websocket payload references this heater."""
 
         if not isinstance(payload, Mapping):
@@ -708,9 +704,9 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         self,
         *,
         log_context: str,
-        write_kwargs: Mapping[str, Any],
+        write_kwargs: Mapping[str, typing.Any],
         apply_fn: Callable[[DomainState], None],
-        success_details: Mapping[str, Any] | None = None,
+        success_details: Mapping[str, typing.Any] | None = None,
     ) -> None:
         """Submit a heater write, update cached state, and schedule fallback."""
         success = await self._async_write_settings(
@@ -1221,7 +1217,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         await super().async_set_hvac_mode(resume_mode)
 
     @property
-    def extra_state_attributes(self) -> Mapping[str, Any] | None:
+    def extra_state_attributes(self) -> Mapping[str, typing.Any] | None:
         """Return accumulator attributes including boost and charge metadata."""
 
         base_attrs = super().extra_state_attributes

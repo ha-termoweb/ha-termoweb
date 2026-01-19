@@ -15,6 +15,11 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from ..boost import ALLOWED_BOOST_MINUTES, coerce_boost_minutes
 from ..const import DOMAIN
+from ..i18n import async_get_fallback_translations, attach_fallbacks, format_fallback
+from ..identifiers import build_heater_entity_unique_id
+from ..inventory import Inventory, boostable_accumulator_details_for_entry
+from ..runtime import require_runtime
+from ..utils import float_or_none
 from .heater import (
     DEFAULT_BOOST_DURATION,
     DEFAULT_BOOST_TEMPERATURE,
@@ -25,11 +30,6 @@ from .heater import (
     set_boost_runtime_minutes,
     set_boost_temperature,
 )
-from ..i18n import async_get_fallback_translations, attach_fallbacks, format_fallback
-from ..identifiers import build_heater_entity_unique_id
-from ..inventory import Inventory, boostable_accumulator_details_for_entry
-from ..runtime import require_runtime
-from ..utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 

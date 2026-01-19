@@ -5,11 +5,21 @@ from collections.abc import Iterable, Mapping
 import logging
 import time
 from time import monotonic as time_mod
+import typing
 from typing import Any
 
 import aiohttp
 
 from .backend.sanitize import mask_identifier, redact_text
+from .codecs.termoweb_codec import (
+    build_boost_payload,
+    build_extra_options_payload,
+    build_settings_payload,
+    decode_devs_payload,
+    decode_node_settings,
+    decode_nodes_payload,
+    decode_samples,
+)
 from .const import (
     ACCEPT_LANGUAGE,
     API_BASE,
@@ -23,15 +33,6 @@ from .const import (
     TOKEN_PATH,
     get_brand_requested_with,
     get_brand_user_agent,
-)
-from .codecs.termoweb_codec import (
-    build_boost_payload,
-    build_extra_options_payload,
-    build_settings_payload,
-    decode_devs_payload,
-    decode_node_settings,
-    decode_nodes_payload,
-    decode_samples,
 )
 from .domain.commands import (
     SetExtraOptions,
@@ -596,7 +597,7 @@ class RESTClient:
         path: str,
         *,
         headers: Mapping[str, str] | None = None,
-        params: Mapping[str, Any] | None = None,
+        params: Mapping[str, typing.Any] | None = None,
     ) -> None:
         """Issue a GET request with verbose logging for discovery probes."""
 
@@ -606,7 +607,7 @@ class RESTClient:
         params_dict = dict(params) if params is not None else None
         url = path if path.startswith("http") else f"{self._api_base}{path}"
 
-        def _sanitise(mapping: Mapping[str, Any] | None) -> Mapping[str, str]:
+        def _sanitise(mapping: Mapping[str, typing.Any] | None) -> Mapping[str, str]:
             if mapping is None:
                 return {}
             return {str(key): redact_text(str(value)) for key, value in mapping.items()}

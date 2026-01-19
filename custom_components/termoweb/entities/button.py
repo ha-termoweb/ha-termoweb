@@ -16,6 +16,11 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from ..const import DOMAIN
 from ..domain import DomainStateView
 from ..domain.state import DomainState
+from ..i18n import async_get_fallback_translations, attach_fallbacks
+from ..identifiers import build_heater_entity_unique_id
+from ..inventory import AccumulatorNode, Inventory
+from ..runtime import require_runtime
+from ..utils import build_gateway_device_info
 from .heater import (
     BOOST_BUTTON_METADATA,
     DEFAULT_BOOST_TEMPERATURE,
@@ -25,11 +30,6 @@ from .heater import (
     resolve_boost_runtime_minutes,
     resolve_boost_temperature,
 )
-from ..i18n import async_get_fallback_translations, attach_fallbacks
-from ..identifiers import build_heater_entity_unique_id
-from ..inventory import AccumulatorNode, Inventory
-from ..runtime import require_runtime
-from ..utils import build_gateway_device_info
 
 _LOGGER = logging.getLogger(__name__)
 

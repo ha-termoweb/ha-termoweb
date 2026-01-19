@@ -7,9 +7,10 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.translation import async_get_translations
+
 from .const import DOMAIN
-from .runtime import EntryRuntime
 from .fallback_translations import get_fallback_translations
+from .runtime import EntryRuntime
 
 FALLBACK_TRANSLATIONS_KEY = "fallback_translations"
 COORDINATOR_FALLBACK_ATTR = "_termoweb_fallback_translations"

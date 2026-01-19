@@ -6,6 +6,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from dataclasses import dataclass
 import logging
+import typing
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 PrebuiltNode = Any
@@ -189,7 +190,7 @@ class Inventory:
 
     def iter_known_entries(
         self, entries: Iterable[Any]
-    ) -> Iterator[tuple[str, str, Mapping[str, Any]]]:
+    ) -> Iterator[tuple[str, str, Mapping[str, typing.Any]]]:
         """Yield ``(node_type, addr, entry)`` for payload entries in the inventory."""
 
         for entry in entries:
@@ -470,8 +471,8 @@ class Inventory:
             return factory(normalize_node_addr(addr) or str(addr))
 
         name_map = self.heater_name_map(factory)
-        names_by_type: Mapping[str, Any]
-        legacy_names: Mapping[str, Any]
+        names_by_type: Mapping[str, typing.Any]
+        legacy_names: Mapping[str, typing.Any]
         if isinstance(name_map, Mapping):
             names_by_type = name_map.get("by_type", {})
             if not isinstance(names_by_type, Mapping):
@@ -1393,7 +1394,9 @@ NODE_CLASS_BY_TYPE: dict[str, type[Node]] = {
 }
 
 
-def _existing_nodes_map(source: Mapping[str, Any] | None) -> dict[str, dict[str, Any]]:
+def _existing_nodes_map(
+    source: Mapping[str, typing.Any] | None,
+) -> dict[str, dict[str, Any]]:
     """Return a mapping of node type sections extracted from ``source``."""
 
     if not isinstance(source, Mapping):
@@ -1417,7 +1420,7 @@ def _existing_nodes_map(source: Mapping[str, Any] | None) -> dict[str, dict[str,
 
 
 def _iter_snapshot_sections(
-    sections: Mapping[str, Any],
+    sections: Mapping[str, typing.Any],
     seen: set[tuple[str, str]],
 ) -> Iterable[dict[str, Any]]:
     """Yield node payloads derived from snapshot-style ``sections``."""
@@ -1440,7 +1443,7 @@ def _iter_snapshot_sections(
 
 
 def _iter_snapshot_section(
-    node_type: str, section: Mapping[str, Any]
+    node_type: str, section: Mapping[str, typing.Any]
 ) -> Iterable[dict[str, Any]]:
     """Yield node dictionaries for a single node type section."""
 
@@ -1454,11 +1457,11 @@ def _iter_snapshot_section(
 
 
 def _collect_snapshot_addresses(
-    section: Mapping[str, Any],
-) -> dict[str, list[Mapping[str, Any]]]:
+    section: Mapping[str, typing.Any],
+) -> dict[str, list[Mapping[str, typing.Any]]]:
     """Return mapping of addresses to candidate payloads from ``section``."""
 
-    addresses: dict[str, list[Mapping[str, Any]]] = {}
+    addresses: dict[str, list[Mapping[str, typing.Any]]] = {}
 
     addrs = section.get("addrs")
     if isinstance(addrs, (list, tuple, set)):
@@ -1483,7 +1486,7 @@ def _collect_snapshot_addresses(
     return addresses
 
 
-def _extract_snapshot_name(payloads: Iterable[Mapping[str, Any]]) -> str:
+def _extract_snapshot_name(payloads: Iterable[Mapping[str, typing.Any]]) -> str:
     """Return best candidate name extracted from ``payloads``."""
 
     queue = [payload for payload in payloads if isinstance(payload, Mapping)]

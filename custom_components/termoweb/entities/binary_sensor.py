@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 import logging
+import typing
 from typing import Any
 
 from homeassistant.components.binary_sensor import (
@@ -292,14 +293,14 @@ class HeaterBoostActiveBinarySensor(
         self._ws_subscription.unsubscribe()
         await super().async_will_remove_from_hass()
 
-    def _handle_ws_message(self, payload: Mapping[str, Any]) -> None:
+    def _handle_ws_message(self, payload: Mapping[str, typing.Any]) -> None:
         """Trigger a refresh when websocket payload targets this entity."""
 
         if not self._payload_targets_entity(payload):
             return
         self.schedule_update_ha_state()
 
-    def _payload_targets_entity(self, payload: Mapping[str, Any]) -> bool:
+    def _payload_targets_entity(self, payload: Mapping[str, typing.Any]) -> bool:
         """Return True when ``payload`` references this heater node."""
 
         if payload.get("dev_id") != self._dev_id:

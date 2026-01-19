@@ -12,6 +12,7 @@ import inspect
 import logging
 import time
 from types import ModuleType
+import typing
 from typing import Any
 
 from aiohttp import ClientError
@@ -424,7 +425,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         _LOGGER.info("list_devices returned no devices")
         raise ConfigEntryNotReady
 
-    dev: Mapping[str, Any] | None = None
+    dev: Mapping[str, typing.Any] | None = None
     dev_id = ""
     if isinstance(devices, list):
         for index, candidate in enumerate(devices):
@@ -781,7 +782,7 @@ async def _shutdown_hourly_poller(poller: Any) -> None:
         _LOGGER.exception("Failed to stop hourly samples poller")
 
 
-async def _shutdown_ws_tasks(ws_tasks: Mapping[str, Any]) -> None:
+async def _shutdown_ws_tasks(ws_tasks: Mapping[str, typing.Any]) -> None:
     """Cancel and await websocket tasks."""
 
     for dev_id, task in list(ws_tasks.items()):
@@ -801,7 +802,7 @@ async def _shutdown_ws_tasks(ws_tasks: Mapping[str, Any]) -> None:
                 _LOGGER.exception("WS task for %s failed to cancel cleanly", dev_id)
 
 
-async def _shutdown_ws_clients(ws_clients: Mapping[str, Any]) -> None:
+async def _shutdown_ws_clients(ws_clients: Mapping[str, typing.Any]) -> None:
     """Stop websocket clients that expose a stop coroutine."""
 
     for dev_id, client in list(ws_clients.items()):

@@ -13,6 +13,7 @@ import math
 import random
 import string
 import time
+import typing
 from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
@@ -377,7 +378,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
     def _path(self) -> str:
         return "/socket.io/"
 
-    def _build_handshake_url(self, params: Mapping[str, Any]) -> str:
+    def _build_handshake_url(self, params: Mapping[str, typing.Any]) -> str:
         """Return a handshake URL with the provided query parameters."""
 
         parsed = urlsplit(self._base_host())
@@ -1016,7 +1017,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
 
                         if evt == "dev_data" and args:
                             payload_map = self._extract_dev_data_payload(args)
-                            nodes_map: Mapping[str, Any] | None = None
+                            nodes_map: Mapping[str, typing.Any] | None = None
                             if isinstance(payload_map, Mapping):
                                 nodes_candidate = payload_map.get("nodes")
                                 if isinstance(nodes_candidate, Mapping):
@@ -1033,7 +1034,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                     if isinstance(self._inventory, Inventory)
                                     else self._bind_inventory_from_context()
                                 )
-                                dispatch_payload: Mapping[str, Any] | None
+                                dispatch_payload: Mapping[str, typing.Any] | None
                                 if isinstance(normalised, Mapping):
                                     dispatch_payload = normalised
                                     deltas = self._nodes_to_deltas(
@@ -1158,7 +1159,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
 
     def _extract_dev_data_payload(
         self, args: Iterable[Any]
-    ) -> Mapping[str, Any] | None:
+    ) -> Mapping[str, typing.Any] | None:
         """Return the mapping payload embedded in a dev_data Socket.IO event."""
 
         queue: deque[Any] = deque(args)
@@ -1229,7 +1230,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
 
         return snapshot or None
 
-    def _log_nodes_summary(self, nodes: Mapping[str, Any]) -> None:
+    def _log_nodes_summary(self, nodes: Mapping[str, typing.Any]) -> None:
         if not _LOGGER.isEnabledFor(logging.INFO):
             return
         kinds = []
@@ -1273,7 +1274,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 summary = f" args={args}"
             _LOGGER.debug("WS (ducaheat): -> 42 %s%s", event, summary)
 
-    def _normalise_nodes_payload(self, nodes: Mapping[str, Any]) -> Any:
+    def _normalise_nodes_payload(self, nodes: Mapping[str, typing.Any]) -> Any:
         """Normalise websocket node payloads via the REST client helper."""
 
         normaliser = getattr(self._client, "normalise_ws_nodes", None)
@@ -1306,11 +1307,13 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
             return None
         return candidate
 
-    def _extract_cadence_candidates(self, payload: Mapping[str, Any]) -> list[float]:
+    def _extract_cadence_candidates(
+        self, payload: Mapping[str, typing.Any]
+    ) -> list[float]:
         """Return cadence hints discovered in a mapping payload."""
 
         values: list[float] = []
-        stack: list[Mapping[str, Any]] = [payload]
+        stack: list[Mapping[str, typing.Any]] = [payload]
         seen: set[int] = set()
         while stack:
             current = stack.pop()
@@ -1333,7 +1336,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
 
     def _update_payload_window_from_mapping(
         self,
-        payload: Mapping[str, Any],
+        payload: Mapping[str, typing.Any],
         *,
         source: str,
     ) -> None:
@@ -1445,19 +1448,19 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 payload_changed=True,
             )
 
-    def _dispatch_nodes(self, payload: Mapping[str, Any]) -> None:
+    def _dispatch_nodes(self, payload: Mapping[str, typing.Any]) -> None:
         """Publish inventory-derived node addresses for downstream consumers."""
 
         if not isinstance(payload, Mapping):  # pragma: no cover - defensive
             return
 
-        raw_nodes: Mapping[str, Any] | None
+        raw_nodes: Mapping[str, typing.Any] | None
         if "nodes" in payload and isinstance(payload.get("nodes"), Mapping):
             raw_nodes = payload.get("nodes")  # type: ignore[assignment]
         else:
             raw_nodes = payload
 
-        cadence_source: Mapping[str, Any] | None = None
+        cadence_source: Mapping[str, typing.Any] | None = None
         if isinstance(raw_nodes, Mapping):
             cadence_source = raw_nodes
 
@@ -1509,7 +1512,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
 
     def _collect_sample_updates(
         self,
-        nodes: Mapping[str, Any],
+        nodes: Mapping[str, typing.Any],
         *,
         allowed_types: Collection[str] | None = None,
     ) -> dict[str, dict[str, Any]]:
@@ -1573,7 +1576,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
 
     def _nodes_to_deltas(
         self,
-        nodes: Mapping[str, Any],
+        nodes: Mapping[str, typing.Any],
         *,
         inventory: Inventory | None,
     ) -> list[NodeSettingsDelta]:
@@ -1610,7 +1613,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                     if not addr:
                         continue
                     bucket = per_addr.setdefault(addr, {})
-                    settings_delta: Mapping[str, Any] = {}
+                    settings_delta: Mapping[str, typing.Any] = {}
                     if section == "status" and isinstance(payload, Mapping):
                         settings_delta = canonicalize_settings_payload(
                             {"status": payload}
@@ -1675,7 +1678,9 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
 
         return resolve_ws_update_section(section)
 
-    def _forward_sample_updates(self, updates: Mapping[str, Mapping[str, Any]]) -> None:
+    def _forward_sample_updates(
+        self, updates: Mapping[str, Mapping[str, typing.Any]]
+    ) -> None:
         """Forward websocket heater sample updates to the energy coordinator."""
 
         has_payload = False
