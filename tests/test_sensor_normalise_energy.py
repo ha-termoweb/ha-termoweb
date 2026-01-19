@@ -12,13 +12,7 @@ import pytest
 from conftest import FakeCoordinator, build_coordinator_device_state
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.coordinator import EnergyStateCoordinator
-from custom_components.termoweb.inventory import (
-    Inventory,
-    PowerMonitorNode,
-    build_node_inventory,
-)
 from custom_components.termoweb.sensor import _normalise_energy_value
-from custom_components.termoweb.entities import sensor as entities_sensor_module
 from homeassistant.core import HomeAssistant
 
 
@@ -93,12 +87,16 @@ async def test_async_setup_entry_handles_missing_power_monitors(
     """Sensor setup should tolerate inventories without power monitors."""
 
     module = importlib.import_module("custom_components.termoweb.sensor")
+    entities_sensor_module = importlib.import_module(
+        "custom_components.termoweb.entities.sensor"
+    )
+    inventory_module = importlib.import_module("custom_components.termoweb.inventory")
     hass = HomeAssistant()
     hass.data = {DOMAIN: {}}
     entry = SimpleNamespace(entry_id="entry-1")
     raw_nodes = [{"type": "htr", "addr": "1", "name": "Heater"}]
-    node_inventory = build_node_inventory({"nodes": raw_nodes})
-    inventory = Inventory("dev-1", node_inventory)
+    node_inventory = inventory_module.build_node_inventory({"nodes": raw_nodes})
+    inventory = inventory_module.Inventory("dev-1", node_inventory)
     iter_calls: list[tuple[Any, Any]] = []
 
     def _iter_nodes_metadata_stub(
@@ -111,7 +109,7 @@ async def test_async_setup_entry_handles_missing_power_monitors(
         return iter(())
 
     monkeypatch.setattr(
-        Inventory,
+        inventory_module.Inventory,
         "iter_nodes_metadata",
         _iter_nodes_metadata_stub,
     )
@@ -218,7 +216,8 @@ def test_power_monitor_available_uses_inventory_has_node(
     """Power monitor availability should delegate to inventory.has_node."""
 
     module = importlib.import_module("custom_components.termoweb.sensor")
-    monkeypatch.setattr(module, "Inventory", Inventory)
+    inventory_module = importlib.import_module("custom_components.termoweb.inventory")
+    monkeypatch.setattr(module, "Inventory", inventory_module.Inventory)
 
     coordinator = SimpleNamespace(
         data={"dev-1": {"pmo": {}}},
@@ -226,9 +225,9 @@ def test_power_monitor_available_uses_inventory_has_node(
         async_remove_listener=lambda *_args, **_kwargs: None,
         inventory=None,
     )
-    inventory = Inventory(
+    inventory = inventory_module.Inventory(
         "dev-1",
-        [PowerMonitorNode(name="Monitor", addr="01")],
+        [inventory_module.PowerMonitorNode(name="Monitor", addr="01")],
     )
 
     calls: list[tuple[str, str]] = []
@@ -237,7 +236,7 @@ def test_power_monitor_available_uses_inventory_has_node(
         _calls.append((node_type, addr))
         return True
 
-    monkeypatch.setattr(Inventory, "has_node", _fake_has_node)
+    monkeypatch.setattr(inventory_module.Inventory, "has_node", _fake_has_node)
 
     sensor = module.PowerMonitorPowerSensor(
         coordinator,
@@ -265,12 +264,13 @@ async def test_heater_energy_sensor_availability() -> None:
     """Energy sensors should rely on inventory presence and coordinator health."""
 
     module = importlib.import_module("custom_components.termoweb.sensor")
+    inventory_module = importlib.import_module("custom_components.termoweb.inventory")
     hass = HomeAssistant()
     hass.data = {DOMAIN: {}}
     dev_id = "dev-energy"
     raw_nodes = {"nodes": [{"type": "htr", "addr": "01", "name": "Heater"}]}
-    node_inventory = list(build_node_inventory(raw_nodes))
-    inventory = Inventory(dev_id, node_inventory)
+    node_inventory = list(inventory_module.build_node_inventory(raw_nodes))
+    inventory = inventory_module.Inventory(dev_id, node_inventory)
     device_state = build_coordinator_device_state(
         nodes=raw_nodes,
         settings={"htr": {"01": {}}},
