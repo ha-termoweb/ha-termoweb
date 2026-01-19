@@ -2033,6 +2033,7 @@ class FakeCoordinator:
         dev: Any | None = None,
         nodes: dict[str, Any] | None = None,
         inventory: "Inventory" | None = None,
+        brand: str | None = None,
         *,
         data: dict[str, Any] | None = None,
     ) -> None:
@@ -2060,6 +2061,7 @@ class FakeCoordinator:
         self.nodes = nodes or {}
         inventory_obj, nodes_list = _coerce_inventory(inventory)
         self.inventory: "Inventory" | None = inventory_obj
+        self.brand = brand
         self.node_inventory = list(nodes_list)
         self.update_interval = dt.timedelta(seconds=base_interval or 0)
         if data is not None:

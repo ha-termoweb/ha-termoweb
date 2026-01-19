@@ -21,7 +21,7 @@ from homeassistant.util import dt as dt_util
 from .api import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend.sanitize import mask_identifier
 from .boost import coerce_int, resolve_boost_end_from_fields
-from .const import HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
+from .const import BRAND_TERMOWEB, HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
 from .domain.energy import (
     EnergyNodeMetrics,
     EnergySnapshot,
@@ -154,6 +154,7 @@ class StateCoordinator(
         device: DeviceMetadata | Mapping[str, Any] | None,
         nodes: Mapping[str, Any] | None,
         inventory: Inventory | None = None,
+        brand: str = BRAND_TERMOWEB,
     ) -> None:
         """Initialize the TermoWeb device coordinator."""
         super().__init__(
@@ -174,8 +175,7 @@ class StateCoordinator(
             msg = "StateCoordinator requires DeviceMetadata or a mapping payload"
             raise TypeError(msg)
         self._device_metadata = metadata
-        is_ducaheat = getattr(client, "_is_ducaheat", False)
-        self._is_ducaheat = bool(is_ducaheat is True)
+        self._brand = brand or BRAND_TERMOWEB
         if not isinstance(inventory, Inventory):
             msg = "EnergyStateCoordinator requires an Inventory instance"
             raise TypeError(msg)
@@ -259,7 +259,7 @@ class StateCoordinator(
         """Return a minimal coordinator payload for this device."""
 
         model: str | None = None
-        backend = "ducaheat" if self._is_ducaheat else "termoweb"
+        backend = self._brand
 
         if isinstance(self._device_metadata, DeviceMetadata):
             model = self._device_metadata.model
