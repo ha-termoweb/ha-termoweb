@@ -19,10 +19,7 @@ from custom_components.termoweb.backend.rest_client import (
     BackendAuthError,
     BackendRateLimitError,
 )
-from custom_components.termoweb.const import (
-    HTR_ENERGY_UPDATE_INTERVAL,
-    signal_ws_data,
-)
+from custom_components.termoweb.const import HTR_ENERGY_UPDATE_INTERVAL
 from custom_components.termoweb.domain import state_to_dict
 from custom_components.termoweb.domain.energy import (
     EnergyNodeMetrics,
@@ -46,7 +43,6 @@ from custom_components.termoweb.inventory import (
     normalize_power_monitor_addresses,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.dispatcher import async_dispatcher_connect, dispatcher_send
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 EnergyStateCoordinator = coord_module.EnergyStateCoordinator
@@ -1684,47 +1680,6 @@ def test_coordinator_client_error(monkeypatch: pytest.MonkeyPatch) -> None:
             return None
 
     monkeypatch.setattr(coord_module, "_LOGGER", RaisingLogger())
-
-    asyncio.run(_run())
-
-
-def test_ws_driven_refresh(
-    monkeypatch: pytest.MonkeyPatch,
-    inventory_from_map: Callable[
-        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
-    ],
-) -> None:
-    async def _run() -> None:
-        client = types.SimpleNamespace()
-        client.get_node_samples = AsyncMock(
-            return_value=[{"t": 1000, "counter": "1.0"}]
-        )
-
-        hass = HomeAssistant()
-        inventory = inventory_from_map({"htr": ["A"]}, dev_id="1")
-        coord = EnergyStateCoordinator(hass, client, "1", inventory)
-
-        await coord.async_refresh()
-        assert _energy_metric(coord, "htr", "A") == pytest.approx(0.001)
-
-        client.get_node_samples = AsyncMock(
-            return_value=[{"t": 2000, "counter": "2.0"}]
-        )
-
-        async_dispatcher_connect(
-            hass,
-            signal_ws_data("entry"),
-            lambda payload: asyncio.create_task(coord.async_request_refresh())
-            if payload.get("kind") == "htr_samples"
-            else None,
-        )
-
-        dispatcher_send(
-            signal_ws_data("entry"), {"dev_id": "1", "addr": "A", "kind": "htr_samples"}
-        )
-        await asyncio.sleep(0)
-
-        assert _energy_metric(coord, "htr", "A") == pytest.approx(0.002)
 
     asyncio.run(_run())
 

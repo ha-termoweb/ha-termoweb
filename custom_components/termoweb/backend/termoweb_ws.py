@@ -26,7 +26,6 @@ import weakref
 
 import aiohttp
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.dispatcher import async_dispatcher_send
 import socketio
 
 from custom_components.termoweb.backend.rest_client import RESTClient
@@ -44,7 +43,6 @@ from custom_components.termoweb.const import (
     WS_NAMESPACE,
     get_brand_requested_with,
     get_brand_user_agent,
-    signal_ws_data,
 )
 from custom_components.termoweb.domain import (
     NodeId as DomainNodeId,
@@ -62,7 +60,6 @@ from custom_components.termoweb.runtime import require_runtime
 from .ws_client import (
     HandshakeError,
     WSStats,
-    _prepare_nodes_dispatch,
     _WSCommon,
     build_settings_delta,
     clone_payload_value,
@@ -104,7 +101,6 @@ class WebSocketClient(_WSCommon):
         self.dev_id = dev_id
         self._client = api_client
         self._coordinator = coordinator
-        self._dispatcher = async_dispatcher_send
         self._session = session or getattr(api_client, "_session", None)
         self._protocol_hint = protocol
         self._loop = getattr(hass, "loop", None) or asyncio.get_event_loop()
@@ -752,7 +748,10 @@ class WebSocketClient(_WSCommon):
         deltas = self._nodes_to_deltas(nodes, inventory=inventory)
         if deltas:
             self._apply_deltas_to_store(deltas, replace=not merge)
-        self._dispatch_nodes(nodes)
+        self._mark_ws_payload(
+            timestamp=time.time(),
+            stale_after=self._payload_idle_window,
+        )
         inventory = self._inventory if isinstance(self._inventory, Inventory) else None
         allowed_types = (
             set(inventory.energy_sample_types)
@@ -996,53 +995,6 @@ class WebSocketClient(_WSCommon):
         except Exception:
             _LOGGER.debug("WS: failed to apply websocket deltas", exc_info=True)
 
-    def _dispatch_nodes(self, payload: Mapping[str, typing.Any]) -> None:
-        """Publish node updates using the shared inventory metadata."""
-
-        raw_nodes: Any
-        if isinstance(payload, Mapping) and "nodes" in payload:
-            raw_nodes = payload.get("nodes")
-        else:
-            raw_nodes = payload
-
-        context = _prepare_nodes_dispatch(
-            raw_nodes=raw_nodes,
-            inventory=self._inventory,
-        )
-
-        inventory = context.inventory
-        if self._inventory is None and isinstance(inventory, Inventory):
-            self._inventory = inventory
-
-        if not isinstance(inventory, Inventory):
-            _LOGGER.error("WS: missing inventory for node dispatch on %s", self.dev_id)
-            return
-
-        payload_copy: dict[str, Any] = {
-            "dev_id": self.dev_id,
-            "node_type": None,
-            "inventory": inventory,
-        }
-
-        self._mark_ws_payload(
-            timestamp=time.time(),
-            stale_after=self._payload_idle_window,
-        )
-
-        def _send() -> None:
-            """Fire the dispatcher signal with the latest node payload."""
-
-            self._dispatcher(self.hass, signal_ws_data(self.entry_id), payload_copy)
-
-        loop = getattr(self.hass, "loop", None)
-        call_soon = getattr(loop, "call_soon_threadsafe", None)
-        if callable(call_soon):
-            call_soon(_send)
-        else:  # pragma: no cover - legacy hass loop stub
-            _send()
-
-        return
-
     def _heater_sample_subscription_targets(self) -> Iterable[tuple[str, str]]:
         """Return ordered ``(node_type, addr)`` heater sample subscriptions."""
 
@@ -1199,7 +1151,6 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
         self.dev_id = dev_id
         self._client = api_client
         self._coordinator = coordinator
-        self._dispatcher = async_dispatcher_send
         self._session = session or getattr(api_client, "_session", None)
         if self._session is None:
             raise RuntimeError("aiohttp session required for websocket client")

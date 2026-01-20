@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any, Mapping
+from typing import Any
 from unittest.mock import AsyncMock
 
 import aiohttp
@@ -24,8 +24,6 @@ async def test_dev_data_snapshot_does_not_populate_cache(
 
     client = _make_client(monkeypatch)
     monkeypatch.setattr(client, "_subscribe_feeds", AsyncMock(return_value=0))
-    dispatched: list[Mapping[str, Any]] = []
-    client._dispatcher = lambda *_args: dispatched.append(_args[2])
 
     class DevDataWS(QueueWebSocket):
         def __init__(self) -> None:
@@ -43,11 +41,6 @@ async def test_dev_data_snapshot_does_not_populate_cache(
     await _run_read_loop(client)
 
     assert getattr(client, "_nodes_raw", None) is None
-    assert dispatched
-    payload = dispatched[-1]
-    assert payload["inventory"] is client._inventory
-    assert "addr_map" not in payload
-    assert "addresses_by_type" not in payload
 
 
 @pytest.mark.asyncio
@@ -57,8 +50,6 @@ async def test_update_events_do_not_cache_nodes(
     """Update events should flow through without retaining prior snapshots."""
 
     client = _make_client(monkeypatch)
-    dispatched: list[Mapping[str, Any]] = []
-    client._dispatcher = lambda *_args: dispatched.append(_args[2])
 
     class UpdateWS(QueueWebSocket):
         def __init__(self) -> None:
@@ -76,8 +67,3 @@ async def test_update_events_do_not_cache_nodes(
     await _run_read_loop(client)
 
     assert getattr(client, "_nodes_raw", None) is None
-    assert dispatched
-    payload = dispatched[-1]
-    assert payload["inventory"] is client._inventory
-    assert "addr_map" not in payload
-    assert "addresses_by_type" not in payload

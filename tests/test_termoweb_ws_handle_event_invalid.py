@@ -15,8 +15,9 @@ def _make_client() -> TermoWebWSClient:
     """Return a minimally configured TermoWeb websocket client."""
 
     client = object.__new__(TermoWebWSClient)
-    client._dispatch_nodes = MagicMock(name="_dispatch_nodes")
-    client._translate_path_update = MagicMock(name="_translate_path_update")
+    client._handle_dev_data = MagicMock(name="_handle_dev_data")
+    client._handle_update = MagicMock(name="_handle_update")
+    client._handle_legacy_data_batch = MagicMock(name="_handle_legacy_data_batch")
     client._coordinator = SimpleNamespace(data={})
     client.dev_id = "device-id"
     client.entry_id = "entry-id"
@@ -49,5 +50,11 @@ def test_handle_event_invalid_payloads(payload: Any) -> None:
 
     client._handle_event(payload)  # type: ignore[arg-type]
 
-    client._dispatch_nodes.assert_not_called()
-    client._translate_path_update.assert_not_called()
+    client._handle_dev_data.assert_not_called()
+    client._handle_update.assert_not_called()
+    if isinstance(payload, dict) and payload.get("name") == "data":
+        args = payload.get("args")
+        expected_payload = args[0] if isinstance(args, list) and args else None
+        client._handle_legacy_data_batch.assert_called_once_with(expected_payload)
+    else:
+        client._handle_legacy_data_batch.assert_not_called()

@@ -629,74 +629,6 @@ def _set_inventory(
     return inventory
 
 
-def test_dispatch_nodes_includes_inventory_metadata(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Snapshots should publish inventory metadata payloads."""
-
-    client = _make_client(monkeypatch)
-    hass = client.hass
-    coordinator = client._coordinator
-    client._dispatcher = MagicMock()
-
-    payload = {
-        "htr": {
-            "settings": {"1": {"target_temp": 21}},
-            "samples": {"1": {"power": 1200}},
-        }
-    }
-    inventory = _set_inventory(client, _build_inventory_payload())
-
-    client._dispatch_nodes(payload)
-
-    assert client._dispatcher.call_count == 1
-    dispatched = client._dispatcher.call_args[0][2]
-    assert "nodes" not in dispatched
-    assert "nodes_by_type" not in dispatched
-    assert "addresses_by_type" not in dispatched
-    assert "addr_map" not in dispatched
-    assert dispatched["inventory"] is inventory
-    coordinator.update_nodes.assert_not_called()
-    assert client._inventory.addresses_by_type["htr"] == ["1"]
-
-    runtime = hass.data[DOMAIN][client.entry_id]
-    assert runtime.inventory is inventory
-    assert not hasattr(runtime, "sample_aliases")
-
-
-def test_incremental_updates_preserve_address_payload(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Incremental websocket merges should continue to publish addresses."""
-
-    client = _make_client(monkeypatch)
-    coordinator = client._coordinator
-    client._dispatcher = MagicMock()
-
-    _set_inventory(client, _build_inventory_payload())
-
-    base = {"htr": {"settings": {"1": {"target_temp": 20}}}}
-    client._dispatch_nodes(base)
-
-    first_payload = client._dispatcher.call_args_list[-1][0][2]
-    assert "nodes" not in first_payload
-    assert "nodes_by_type" not in first_payload
-    assert "addresses_by_type" not in first_payload
-    assert "addr_map" not in first_payload
-    assert first_payload["inventory"] is client._inventory
-
-    update = {"htr": {"settings": {"1": {"target_temp": 23}}}}
-    client._dispatch_nodes(update)
-
-    dispatched = client._dispatcher.call_args_list[-1][0][2]
-    assert "nodes" not in dispatched
-    assert "nodes_by_type" not in dispatched
-    assert "addresses_by_type" not in dispatched
-    assert "addr_map" not in dispatched
-    assert dispatched["inventory"] is client._inventory
-    assert coordinator.update_nodes.call_count == 0
-
-
 def test_nodes_to_deltas_translates_payloads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1132,8 +1064,6 @@ async def test_read_loop_handles_stringified_dev_data(
 
     client = _make_client(monkeypatch)
     monkeypatch.setattr(client, "_subscribe_feeds", AsyncMock(return_value=1))
-    dispatched: list[dict[str, Any]] = []
-    client._dispatcher = lambda *_args: dispatched.append(_args[2])
 
     nodes = {"htr": {"status": {"1": {"power": 5}}}}
     wrapped = json.dumps({"nodes": nodes}, separators=(",", ":"))
@@ -1149,11 +1079,6 @@ async def test_read_loop_handles_stringified_dev_data(
     await _run_read_loop(client)
 
     assert getattr(client, "_nodes_raw", None) is None
-    assert dispatched
-    payload = dispatched[-1]
-    assert payload["inventory"] is client._inventory
-    assert "addresses_by_type" not in payload
-    assert "addr_map" not in payload
     assert client._subscribe_feeds.await_count == 1
     assert "now" in client._subscribe_feeds.await_args.kwargs
 
@@ -1170,8 +1095,6 @@ async def test_read_loop_handles_list_snapshot(
         build_node_inventory([{"type": "htr", "addr": "1"}]),
     )
     monkeypatch.setattr(client, "_subscribe_feeds", AsyncMock(return_value=2))
-    dispatched: list[dict[str, Any]] = []
-    client._dispatcher = lambda *_args: dispatched.append(_args[2])
 
     nodes_list = [
         {"type": "htr", "addr": "1", "status": {"power": 7}, "lease_seconds": 90}
@@ -1188,9 +1111,6 @@ async def test_read_loop_handles_list_snapshot(
     await _run_read_loop(client)
 
     assert getattr(client, "_nodes_raw", None) is None
-    assert dispatched
-    payload = dispatched[-1]
-    assert payload["inventory"] is client._inventory
     assert "addresses_by_type" not in payload
     assert "addr_map" not in payload
     assert client._subscribe_feeds.await_count == 1
@@ -1291,7 +1211,6 @@ async def test_read_loop_additional_flows(monkeypatch: pytest.MonkeyPatch) -> No
             send_history.append(payload)
             await super().send_str(payload)
 
-    monkeypatch.setattr(client, "_dispatch_nodes", MagicMock())
     emit_mock = AsyncMock()
     monkeypatch.setattr(client, "_emit_sio", emit_mock)
     updates: list[str] = []
@@ -1355,8 +1274,6 @@ async def test_read_loop_processes_update_event(
     monkeypatch.setattr(
         client, "_update_status", lambda status: statuses.append(status)
     )
-    dispatched: list[dict[str, Any]] = []
-    client._dispatcher = lambda *_args: dispatched.append(_args[2])
     forwarded: list[Mapping[str, Mapping[str, Any]]] = []
     monkeypatch.setattr(
         client,
@@ -1382,11 +1299,6 @@ async def test_read_loop_processes_update_event(
     assert log_calls and log_calls[0]["body"]["temp"] == 1
     assert statuses and statuses[-1] == "healthy"
     assert getattr(client, "_nodes_raw", None) is None
-    assert dispatched
-    payload = dispatched[-1]
-    assert payload["inventory"] is client._inventory
-    assert "addresses_by_type" not in payload
-    assert "addr_map" not in payload
     assert not forwarded
 
 
@@ -1404,7 +1316,6 @@ async def test_read_loop_applies_deltas_to_store(
             (dev_id, deltas, replace)
         )
     )
-    client._dispatcher = lambda *_args: None
     client._forward_sample_updates = lambda updates: None
 
     class UpdateWS(QueueWebSocket):
@@ -1513,8 +1424,6 @@ async def test_read_loop_forwards_sample_updates(
     monkeypatch.setattr(
         client, "_update_status", lambda status: statuses.append(status)
     )
-    dispatched: list[dict[str, Any]] = []
-    client._dispatcher = lambda *_args: dispatched.append(_args[2])
 
     class UpdateWS(QueueWebSocket):
         def __init__(self) -> None:
@@ -1533,11 +1442,6 @@ async def test_read_loop_forwards_sample_updates(
 
     assert statuses and statuses[-1] == "healthy"
     assert getattr(client, "_nodes_raw", None) is None
-    assert dispatched
-    payload = dispatched[-1]
-    assert payload["inventory"] is client._inventory
-    assert "addresses_by_type" not in payload
-    assert "addr_map" not in payload
     assert forwarded and forwarded[-1][0] == "device"
     assert forwarded[-1][2].get("lease_seconds") is None
     assert forwarded[-1][1]["htr"]["1"]["power"] == 10
@@ -1552,8 +1456,6 @@ async def test_read_loop_dev_data_uses_raw_snapshot(
     client = _make_client(monkeypatch)
     monkeypatch.setattr(client, "_normalise_nodes_payload", lambda nodes: "bad")
     monkeypatch.setattr(client, "_subscribe_feeds", AsyncMock(return_value=0))
-    dispatched: list[dict[str, Any]] = []
-    client._dispatcher = lambda *_args: dispatched.append(_args[2])
 
     class DevDataWS(QueueWebSocket):
         def __init__(self) -> None:
@@ -1570,11 +1472,6 @@ async def test_read_loop_dev_data_uses_raw_snapshot(
 
     await _run_read_loop(client)
 
-    assert dispatched
-    payload = dispatched[-1]
-    assert payload["inventory"] is client._inventory
-    assert "addresses_by_type" not in payload
-    assert "addr_map" not in payload
     assert getattr(client, "_nodes_raw", None) is None
 
 
@@ -1586,8 +1483,6 @@ async def test_read_loop_does_not_cache_incremental_updates(
 
     client = _make_client(monkeypatch)
     monkeypatch.setattr(client, "_forward_sample_updates", lambda updates: None)
-    dispatched: list[dict[str, Any]] = []
-    client._dispatcher = lambda *_args: dispatched.append(_args[2])
 
     class MergeWS(QueueWebSocket):
         def __init__(self) -> None:
@@ -1605,11 +1500,6 @@ async def test_read_loop_does_not_cache_incremental_updates(
     await _run_read_loop(client)
 
     assert getattr(client, "_nodes_raw", None) is None
-    assert dispatched
-    payload = dispatched[-1]
-    assert payload["inventory"] is client._inventory
-    assert "addresses_by_type" not in payload
-    assert "addr_map" not in payload
 
 
 def test_normalise_nodes_payload_handles_mappings(
@@ -1897,7 +1787,6 @@ async def test_read_loop_handles_engineio_and_socketio_frames(
     client._ws = fake_ws  # type: ignore[assignment]
     client._pending_dev_data = True
 
-    monkeypatch.setattr(client, "_dispatch_nodes", MagicMock())
     emit_mock = AsyncMock()
     monkeypatch.setattr(client, "_emit_sio", emit_mock)
     monkeypatch.setattr(client, "_update_status", lambda status: None)
@@ -1992,8 +1881,6 @@ async def test_namespace_ack_processes_embedded_event(
     monkeypatch.setattr(client, "_replay_subscription_paths", AsyncMock())
     monkeypatch.setattr(client, "_log_nodes_summary", lambda nodes: None)
     monkeypatch.setattr(client, "_normalise_nodes_payload", lambda nodes: nodes)
-    dispatch = MagicMock()
-    monkeypatch.setattr(client, "_dispatch_nodes", dispatch)
     subscribe_mock = AsyncMock(return_value=2)
     monkeypatch.setattr(client, "_subscribe_feeds", subscribe_mock)
     statuses: list[str] = []
@@ -2005,7 +1892,6 @@ async def test_namespace_ack_processes_embedded_event(
 
     assert emit_calls and emit_calls[0] == ("dev_data",)
     subscribe_mock.assert_awaited_once()
-    dispatch.assert_called_once()
     assert statuses and statuses[0] == "healthy"
     assert statuses[-1] == "healthy"
 
@@ -2040,15 +1926,12 @@ async def test_namespace_ack_skips_unexpected_namespace(
 
     monkeypatch.setattr(client, "_log_nodes_summary", lambda nodes: None)
     monkeypatch.setattr(client, "_normalise_nodes_payload", lambda nodes: nodes)
-    dispatch = MagicMock()
-    monkeypatch.setattr(client, "_dispatch_nodes", dispatch)
     subscribe_mock = AsyncMock(return_value=0)
     monkeypatch.setattr(client, "_subscribe_feeds", subscribe_mock)
     monkeypatch.setattr(client, "_update_status", lambda status: None)
 
     await _run_read_loop(client)
 
-    dispatch.assert_called_once()
     subscribe_mock.assert_awaited_once()
     assert getattr(client, "_nodes_raw", None) is None
 

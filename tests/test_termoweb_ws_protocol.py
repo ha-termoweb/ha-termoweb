@@ -21,7 +21,6 @@ from custom_components.termoweb.backend.sanitize import (
     redact_token_fragment,
 )
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
-from custom_components.termoweb.backend.ws_client import NodeDispatchContext
 from homeassistant.core import HomeAssistant
 
 
@@ -161,7 +160,6 @@ def _make_client(
 
     monkeypatch.setattr(module.socketio, "AsyncClient", factory)
     dispatcher = MagicMock()
-    monkeypatch.setattr(module, "async_dispatcher_send", dispatcher)
 
     if hass_loop is None:
         hass_loop = SimpleNamespace(
@@ -345,7 +343,7 @@ async def test_runner_handles_errors_and_backoff(
 ) -> None:
     """The connection runner should retry until ``_closing`` is set."""
 
-    client, _sio, dispatcher = _make_client(monkeypatch)
+    client, _sio, _dispatcher = _make_client(monkeypatch)
     call_order: list[str] = []
 
     async def connect_once() -> None:
@@ -939,7 +937,6 @@ def test_apply_nodes_payload_debug_branches(
     client, _sio, _ = _make_client(monkeypatch)
     caplog.set_level(logging.DEBUG)
     monkeypatch.setattr(module._LOGGER, "isEnabledFor", lambda level: True)
-    client._dispatch_nodes = MagicMock(return_value={})
     client._forward_sample_updates = MagicMock()
     client._mark_event = MagicMock()
     client._collect_update_addresses = MagicMock(
@@ -995,110 +992,23 @@ def test_handle_dev_data_and_update(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_apply_nodes_payload_merges_and_dispatches(
+def test_apply_nodes_payload_merges_and_forwards(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Applying node payloads should normalize and dispatch updates."""
+    """Applying node payloads should normalize and forward updates."""
 
     client, _sio, dispatcher = _make_client(monkeypatch)
     client._collect_update_addresses = MagicMock(return_value=[("htr", "1")])  # type: ignore[attr-defined]
-    client._dispatch_nodes = MagicMock(return_value={"htr": ["1"]})  # type: ignore[attr-defined]
     client._forward_sample_updates = MagicMock()  # type: ignore[attr-defined]
     client._mark_event = MagicMock()  # type: ignore[attr-defined]
 
     snapshot_payload = {"nodes": {"htr": {"settings": {"1": {"temp": 20}}}}}
     client._apply_nodes_payload(snapshot_payload, merge=False, event="dev_data")
-    client._dispatch_nodes.assert_called_with(snapshot_payload["nodes"])
 
     update_payload = {"path": "/api/devs/device/htr/1/samples", "body": {"power": 5}}
     client._apply_nodes_payload(update_payload, merge=True, event="update")
     client._forward_sample_updates.assert_called()
     client._mark_event.assert_called()
-
-
-def test_dispatch_nodes_with_inventory(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """dispatch_nodes should support pre-existing inventory records."""
-
-    client, _sio, dispatcher = _make_client(monkeypatch)
-    client._coordinator.update_nodes = MagicMock()
-    client._coordinator.data = {
-        "device": {"inventory": client._inventory, "settings": {}}
-    }
-    nodes_payload = {"nodes": [{"type": "htr", "addr": "1"}]}
-    client._inventory = Inventory(
-        client.dev_id,
-        build_node_inventory(nodes_payload),
-    )
-    caplog.set_level(logging.DEBUG)
-
-    result = client._dispatch_nodes({"nodes": {"htr": {"settings": {"1": {}}}}})
-    assert result is None
-    client._coordinator.update_nodes.assert_not_called()
-    dispatcher.assert_called_once()
-    _, _, payload = dispatcher.call_args[0]
-    assert "nodes" not in payload
-    assert payload["inventory"] is client._inventory
-    assert "inventory_addresses" not in payload
-    assert client._inventory.addresses_by_type["htr"] == ["1"]
-
-
-def test_dispatch_nodes_handles_unknown_types(monkeypatch: pytest.MonkeyPatch) -> None:
-    """dispatch_nodes should ignore unsupported types when inventory filters them."""
-
-    client, _sio, dispatcher = _make_client(monkeypatch)
-    client._coordinator.update_nodes = MagicMock()
-
-    client._inventory = Inventory(
-        client.dev_id,
-        build_node_inventory([{"type": "foo", "addr": "9"}]),
-    )
-    client._dispatch_nodes({"nodes": {}})
-    client._coordinator.update_nodes.assert_not_called()
-    dispatcher.assert_called_once()
-    _, _, payload = dispatcher.call_args[0]
-    assert "nodes" not in payload
-    assert "inventory_addresses" not in payload
-    assert "unknown_types" not in payload
-
-
-def test_dispatch_nodes_uses_inventory_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Inventory payload should backfill missing node payload data."""
-
-    client, _sio, dispatcher = _make_client(monkeypatch)
-    client._coordinator.update_nodes = MagicMock()
-    node_inventory = build_node_inventory([{"type": "htr", "addr": "2"}])
-
-    class TrackingInventory(Inventory):
-        def __init__(self) -> None:
-            super().__init__(
-                client.dev_id,
-                node_inventory,
-            )
-            object.__setattr__(self, "payload_calls", 0)
-
-        @property
-        def payload(self) -> Any:
-            current = getattr(self, "payload_calls", 0)
-            object.__setattr__(self, "payload_calls", current + 1)
-            return Inventory.payload.fget(self)
-
-    inventory = TrackingInventory()
-    client._inventory = inventory
-
-    def fake_prepare(*args: Any, **kwargs: Any) -> NodeDispatchContext:
-        return NodeDispatchContext(
-            payload=None,
-            inventory=inventory,
-        )
-
-    monkeypatch.setattr(module, "_prepare_nodes_dispatch", fake_prepare)
-
-    client._dispatch_nodes({"nodes": None})
-
-    client._coordinator.update_nodes.assert_not_called()
-    dispatcher.assert_called_once()
 
 
 def test_heater_sample_subscription_targets(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1456,21 +1366,19 @@ async def test_refresh_subscription_behaviour(monkeypatch: pytest.MonkeyPatch) -
 def test_apply_nodes_payload_translation(monkeypatch: pytest.MonkeyPatch) -> None:
     """Node payload application should merge data and notify listeners."""
 
-    client, _sio, dispatcher = _make_client(monkeypatch)
+    client, _sio, _dispatcher = _make_client(monkeypatch)
     raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
     client._inventory = Inventory(
         client.dev_id,
         build_node_inventory(raw_nodes),
     )
-    original_dispatch = client._dispatch_nodes
-    client._dispatch_nodes = MagicMock(side_effect=original_dispatch)
     client._handshake_payload = {"keys": ("nodes",), "received_at": 0}
     client._handle_handshake({"nodes": {"htr": {"status": {"1": {"temp": 20}}}}})
+    client._forward_sample_updates = MagicMock()
     client._apply_nodes_payload(
         {"nodes": {"htr": {"status": {"1": {"temp": 25}}}}}, merge=True, event="update"
     )
-    client._dispatch_nodes.assert_called_with({"htr": {"status": {"1": {"temp": 25}}}})
-    dispatcher.assert_called()
+    client._forward_sample_updates.assert_not_called()
 
 
 def test_forward_sample_updates_invokes_handler(

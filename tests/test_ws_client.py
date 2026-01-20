@@ -197,7 +197,6 @@ def _make_termoweb_client(
     )
     coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
     dispatcher = MagicMock()
-    monkeypatch.setattr(module, "async_dispatcher_send", dispatcher)
     client = module.WebSocketClient(
         hass,
         entry_id="entry",
@@ -230,7 +229,6 @@ def _make_ducaheat_client(
     )
     rest_client = DummyREST(is_ducaheat=True)
     dispatcher = MagicMock()
-    monkeypatch.setattr(ducaheat_ws, "async_dispatcher_send", dispatcher, raising=False)
     client = ducaheat_ws.DucaheatWSClient(
         hass,
         entry_id="entry",
@@ -738,65 +736,6 @@ def test_handshake_error_exposes_status_and_url() -> None:
     assert error.url == "https://example/ws"
     assert error.detail == "nope"
     assert error.response_snippet == "snippet"
-
-
-def test_dispatch_nodes_reuses_record_inventory(
-    monkeypatch: pytest.MonkeyPatch,
-    ws_common_stub: Callable[..., base_ws._WSCommon],
-) -> None:
-    """Node dispatch should rely on the immutable inventory stored during setup."""
-
-    payload = {"nodes": [{"addr": "1", "type": "htr"}]}
-    node_inventory = build_node_inventory(payload["nodes"])
-    inventory = Inventory("device", node_inventory)
-
-    hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
-    build_entry_runtime(
-        hass=hass,
-        entry_id="entry",
-        dev_id="device",
-        inventory=inventory,
-    )
-    coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
-    dispatcher = MagicMock()
-    monkeypatch.setattr(base_ws, "async_dispatcher_send", dispatcher)
-
-    def _fail(*_: Any, **__: Any) -> Any:
-        raise AssertionError("resolve_record_inventory should not be called")
-
-    monkeypatch.setattr(base_ws, "resolve_record_inventory", _fail, raising=False)
-
-    dummy = ws_common_stub(
-        hass=hass,
-        entry_id="entry",
-        dev_id="device",
-        coordinator=coordinator,
-    )
-    dummy._inventory = inventory
-    dummy._dispatch_nodes(payload)
-
-    coordinator.update_nodes.assert_not_called()
-    dispatcher.assert_called_once()
-    dispatched_payload = dispatcher.call_args.args[2]
-    assert dispatched_payload["inventory"] is inventory
-    assert "addresses_by_type" not in dispatched_payload
-    assert "nodes" not in dispatched_payload
-
-
-def test_prepare_nodes_dispatch_uses_inventory() -> None:
-    """Existing inventory objects should be reused by the dispatch helper."""
-
-    node_inventory = build_node_inventory([{"type": "htr", "addr": "4"}])
-    inventory = Inventory(
-        "dev",
-        node_inventory,
-    )
-    context = base_ws._prepare_nodes_dispatch(
-        raw_nodes=None,
-        inventory=inventory,
-    )
-
-    assert context.inventory is inventory
 
 
 def test_termoweb_nodes_to_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1691,49 +1630,6 @@ def test_ws_common_update_status_dispatches(
 
     dispatcher.assert_called_once()
     coordinator.update_gateway_connection.assert_called_once()
-
-
-def test_ws_common_dispatch_nodes(
-    monkeypatch: pytest.MonkeyPatch,
-    ws_common_stub: Callable[..., base_ws._WSCommon],
-) -> None:
-    """WS common dispatch should update coordinator and emit dispatcher events."""
-
-    raw_nodes = {"nodes": [{"type": "htr", "addr": "1"}]}
-    inventory_nodes = build_node_inventory(raw_nodes)
-    inventory_obj = Inventory("dev", inventory_nodes)
-
-    hass = SimpleNamespace(data={base_ws.DOMAIN: {}})
-    build_entry_runtime(
-        hass=hass,
-        entry_id="entry",
-        dev_id="dev",
-        inventory=inventory_obj,
-    )
-    coordinator = SimpleNamespace(update_nodes=MagicMock(), dev_id="dev")
-    dispatcher = MagicMock()
-    monkeypatch.setattr(base_ws, "async_dispatcher_send", dispatcher)
-
-    monkeypatch.setattr(
-        base_ws, "resolve_record_inventory", lambda *_, **__: None, raising=False
-    )
-
-    dummy = ws_common_stub(
-        hass=hass,
-        coordinator=coordinator,
-    )
-    dummy._inventory = inventory_obj
-    payload = {"nodes": raw_nodes}
-    dummy._dispatch_nodes(payload)
-
-    coordinator.update_nodes.assert_not_called()
-    dispatcher.assert_called_once()
-    dispatched_payload = dispatcher.call_args.args[2]
-    assert dispatched_payload == {
-        "dev_id": "dev",
-        "node_type": None,
-        "inventory": inventory_obj,
-    }
 
 
 def test_ws_client_start_selects_delegate(monkeypatch: pytest.MonkeyPatch) -> None:

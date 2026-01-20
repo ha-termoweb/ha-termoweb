@@ -19,14 +19,12 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import aiohttp
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.backend.ws_client import (
     DUCAHEAT_NAMESPACE,
     HandshakeError,
     WSStats,
-    _prepare_nodes_dispatch,
     _WSCommon,
     _WsLeaseMixin,
     build_settings_delta,
@@ -44,7 +42,6 @@ from custom_components.termoweb.const import (
     get_brand_api_base,
     get_brand_requested_with,
     get_brand_user_agent,
-    signal_ws_data,
 )
 from custom_components.termoweb.domain import (
     NodeId as DomainNodeId,
@@ -171,7 +168,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
         self.dev_id = dev_id
         self._client = api_client
         self._coordinator = coordinator
-        self._dispatcher = async_dispatcher_send
         self._session = session or getattr(api_client, "_session", None)
         if self._session is None:
             raise RuntimeError("aiohttp session required")
@@ -1032,9 +1028,7 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                     if isinstance(self._inventory, Inventory)
                                     else None
                                 )
-                                dispatch_payload: Mapping[str, typing.Any] | None
                                 if isinstance(normalised, Mapping):
-                                    dispatch_payload = normalised
                                     deltas = self._nodes_to_deltas(
                                         normalised,
                                         inventory=inventory,
@@ -1044,10 +1038,14 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                             deltas,
                                             replace=True,
                                         )
-                                else:
-                                    dispatch_payload = nodes_map
-                                if isinstance(dispatch_payload, Mapping):
-                                    self._dispatch_nodes(dispatch_payload)
+                                self._update_payload_window_from_mapping(
+                                    nodes_map,
+                                    source="dev_data",
+                                )
+                                self._mark_ws_payload(
+                                    timestamp=now,
+                                    stale_after=self._payload_stale_after,
+                                )
                                 self._record_update_event(timestamp=now)
                                 subs = await self._maybe_subscribe(now)
                                 if subs:
@@ -1083,7 +1081,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                             deltas,
                                             replace=False,
                                         )
-                                    self._dispatch_nodes(normalised_update)
                                     if not isinstance(inventory, Inventory):
                                         inventory = (
                                             self._inventory
@@ -1101,6 +1098,14 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                                     )
                                     if sample_updates:
                                         self._forward_sample_updates(sample_updates)
+                                    self._update_payload_window_from_mapping(
+                                        normalised_update,
+                                        source="update",
+                                    )
+                                    self._mark_ws_payload(
+                                        timestamp=now,
+                                        stale_after=self._payload_stale_after,
+                                    )
                             self._record_update_event(timestamp=now)
                             self._update_status("healthy")
                             break
@@ -1445,58 +1450,6 @@ class DucaheatWSClient(_WsLeaseMixin, _WSCommon):
                 reason="payload_window_reset",
                 payload_changed=True,
             )
-
-    def _dispatch_nodes(self, payload: Mapping[str, typing.Any]) -> None:
-        """Publish inventory-derived node addresses for downstream consumers."""
-
-        if not isinstance(payload, Mapping):  # pragma: no cover - defensive
-            return
-
-        raw_nodes: Mapping[str, typing.Any] | None
-        if "nodes" in payload and isinstance(payload.get("nodes"), Mapping):
-            raw_nodes = payload.get("nodes")  # type: ignore[assignment]
-        else:
-            raw_nodes = payload
-
-        cadence_source: Mapping[str, typing.Any] | None = None
-        if isinstance(raw_nodes, Mapping):
-            cadence_source = raw_nodes
-
-        context = _prepare_nodes_dispatch(
-            raw_nodes=raw_nodes,
-            inventory=self._inventory,
-        )
-
-        inventory = (
-            context.inventory if isinstance(context.inventory, Inventory) else None
-        )
-        if isinstance(inventory, Inventory):
-            self._inventory = inventory
-
-        if not isinstance(inventory, Inventory):
-            _LOGGER.error(
-                "WS (ducaheat): missing inventory for node dispatch on %s", self.dev_id
-            )
-            return
-
-        payload_copy: dict[str, Any] = {
-            "dev_id": self.dev_id,
-            "node_type": None,
-            "inventory": inventory,
-        }
-
-        cadence_payload = cadence_source or context.payload
-        if isinstance(cadence_payload, Mapping):
-            self._update_payload_window_from_mapping(
-                cadence_payload,
-                source="dispatch_nodes",
-            )
-
-        self._mark_ws_payload(
-            timestamp=time.time(),
-            stale_after=self._payload_stale_after,
-        )
-        self._dispatcher(self.hass, signal_ws_data(self.entry_id), payload_copy)
 
     def _collect_sample_updates(
         self,

@@ -123,14 +123,6 @@ def uses_ducaheat_backend(brand: str) -> bool:
 # Socket.IO namespace used by the websocket client implementation
 WS_NAMESPACE: Final = "/api/v2/socket_io"
 
-# --- Dispatcher signal helpers (WS → entities) ---
-
-
-def signal_ws_data(entry_id: str) -> str:
-    """Signal name for WS ‘data’ frames dispatched to platforms."""
-
-    return f"{DOMAIN}_{entry_id}_ws_data"
-
 
 def signal_ws_status(entry_id: str) -> str:
     """Signal name for WS status/health updates."""
