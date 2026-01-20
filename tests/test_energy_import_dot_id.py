@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from datetime import UTC, datetime, timedelta
 from types import ModuleType, SimpleNamespace
 from typing import Any
@@ -159,13 +158,13 @@ async def test_import_clears_both_ids_and_populates_dot_series(
 
     monkeypatch.setattr(
         energy,
-        "_statistics_during_period_compat",
+        "_statistics_during_period",
         _fake_stats_period,
         raising=False,
     )
     monkeypatch.setattr(
         energy,
-        "_clear_statistics_compat",
+        "_clear_statistics",
         _fake_clear_statistics,
         raising=False,
     )
@@ -272,13 +271,13 @@ async def test_import_uses_colon_history_for_sum_offset(
 
     monkeypatch.setattr(
         energy,
-        "_statistics_during_period_compat",
+        "_statistics_during_period",
         _fake_stats_period,
         raising=False,
     )
     monkeypatch.setattr(
         energy,
-        "_clear_statistics_compat",
+        "_clear_statistics",
         _fake_clear_statistics,
         raising=False,
     )
@@ -378,34 +377,22 @@ async def test_import_guard_clamps_descending_live_hour(
 
     monkeypatch.setattr(
         energy,
-        "_statistics_during_period_compat",
+        "_statistics_during_period",
         _fake_stats_period,
         raising=False,
     )
     monkeypatch.setattr(
         energy,
-        "_clear_statistics_compat",
+        "_clear_statistics",
         _fake_clear_statistics,
         raising=False,
     )
 
-    statistics_mod = ModuleType("homeassistant.components.recorder.statistics")
-
     async def _noop_import_statistics(hass, metadata, stats):
         return None
 
-    statistics_mod.async_import_statistics = _noop_import_statistics
-    recorder_mod = ModuleType("homeassistant.components.recorder")
-    recorder_mod.statistics = statistics_mod  # type: ignore[attr-defined]
-    monkeypatch.setitem(
-        sys.modules,
-        "homeassistant.components.recorder.statistics",
-        statistics_mod,
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "homeassistant.components.recorder",
-        recorder_mod,
+    monkeypatch.setattr(
+        energy, "async_import_statistics", _noop_import_statistics, raising=False
     )
 
     real_store = energy._store_statistics
