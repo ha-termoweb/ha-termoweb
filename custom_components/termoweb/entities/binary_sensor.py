@@ -152,15 +152,6 @@ class GatewayOnlineBinarySensor(
         coordinator = self.coordinator
         name = getattr(coordinator, "gateway_name", None)
         model = getattr(coordinator, "gateway_model", None)
-        if name is None or model is None:
-            data = getattr(coordinator, "data", None)
-            if isinstance(data, Mapping):
-                record = data.get(self._dev_id)
-                if isinstance(record, Mapping):
-                    if name is None:
-                        name = record.get("name")
-                    if model is None:
-                        model = record.get("model")
         connection_state = self._gateway_connection_state()
         return {
             "dev_id": self._dev_id,
