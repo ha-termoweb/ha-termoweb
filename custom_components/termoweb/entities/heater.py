@@ -9,8 +9,7 @@ import logging
 import typing
 from typing import Any, Final, cast
 
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
@@ -20,7 +19,7 @@ from custom_components.termoweb.boost import (
     coerce_boost_minutes,
     supports_boost,
 )
-from custom_components.termoweb.const import DOMAIN, signal_ws_data
+from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.domain import DomainStateView
 from custom_components.termoweb.domain.state import (
     AccumulatorState,
@@ -659,61 +658,6 @@ def derive_boost_state_from_domain(
 # ruff: enable=C901
 
 
-class DispatcherSubscriptionHelper:
-    """Manage dispatcher subscriptions tied to an entity lifecycle."""
-
-    def __init__(self, owner: CoordinatorEntity) -> None:
-        """Initialise the helper for the provided entity."""
-
-        self._owner = owner
-        self._unsub: Callable[[], None] | None = None
-
-    def subscribe(
-        self,
-        hass: HomeAssistant,
-        signal: str,
-        handler: Callable[[dict], None],
-    ) -> None:
-        """Subscribe to a dispatcher signal and register clean-up."""
-
-        self.unsubscribe()
-
-        try:
-            unsubscribe = async_dispatcher_connect(hass, signal, handler)
-        except Exception:  # pragma: no cover - defensive
-            _LOGGER.exception(
-                "Failed to subscribe to dispatcher signal %s for %s",
-                signal,
-                getattr(self._owner, "_attr_unique_id", self._owner),
-            )
-            return
-
-        self._owner.async_on_remove(self.unsubscribe)
-        self._unsub = unsubscribe
-
-    def unsubscribe(self) -> None:
-        """Remove the dispatcher subscription if it exists."""
-
-        unsubscribe = self._unsub
-        if unsubscribe is None:
-            return
-
-        self._unsub = None
-        try:
-            unsubscribe()
-        except Exception:  # pragma: no cover - defensive
-            _LOGGER.exception(
-                "Failed to remove dispatcher listener for %s",
-                getattr(self._owner, "_attr_unique_id", self._owner),
-            )
-
-    @property
-    def is_connected(self) -> bool:
-        """Return True when the dispatcher listener is active."""
-
-        return self._unsub is not None
-
-
 def log_skipped_nodes(
     platform_name: str,
     inventory: Inventory | HeaterPlatformDetails | None,
@@ -830,26 +774,18 @@ class HeaterNodeBase(CoordinatorEntity):
             unique_id or f"{DOMAIN}:{dev_id}:{resolved_type}:{self._addr}"
         )
         self._device_name = device_name or name
-        self._ws_subscription = DispatcherSubscriptionHelper(self)
         self._inventory: Inventory | None = inventory
 
     async def async_added_to_hass(self) -> None:
-        """Subscribe to websocket updates once the entity is added to hass."""
+        """Register coordinator listeners once the entity is added to hass."""
         coordinator = getattr(self, "coordinator", None)
         if hasattr(coordinator, "async_add_listener"):
             await super().async_added_to_hass()
         else:
             setattr(self, "_async_unsub_coordinator_update", None)
-        hass = self._hass_for_runtime()
-        if hass is None:
-            return
-
-        signal = signal_ws_data(self._entry_id)
-        self._ws_subscription.subscribe(hass, signal, self._handle_ws_message)
 
     async def async_will_remove_from_hass(self) -> None:
-        """Tidy up websocket listeners before the entity is removed."""
-        self._ws_subscription.unsubscribe()
+        """Detach coordinator listeners before the entity is removed."""
         coordinator = getattr(self, "coordinator", None)
         if hasattr(coordinator, "async_add_listener"):
             await super().async_will_remove_from_hass()
@@ -860,51 +796,6 @@ class HeaterNodeBase(CoordinatorEntity):
                     unsub()
                 finally:
                     setattr(self, "_async_unsub_coordinator_update", None)
-
-    @callback
-    def _handle_ws_message(self, payload: dict) -> None:
-        """Process websocket payloads addressed to this heater."""
-        if not self._payload_matches_heater(payload):
-            return
-        self._handle_ws_event(payload)
-
-    def _payload_matches_heater(self, payload: dict) -> bool:
-        """Return True when the websocket payload targets this heater."""
-        if payload.get("dev_id") != self._dev_id:
-            return False
-        payload_type = payload.get("node_type")
-        if payload_type is not None:
-            payload_type_str = normalize_node_type(payload_type)
-            if payload_type_str and payload_type_str != self._node_type:
-                return False
-        addr = payload.get("addr")
-        if addr is None:
-            return True
-
-        payload_addr = normalize_node_addr(addr)
-        if not payload_addr:
-            return not self._addr
-
-        return payload_addr == self._addr
-
-    @callback
-    def _handle_ws_event(self, _payload: dict) -> None:
-        """Schedule a state refresh after a websocket update."""
-
-        if getattr(self, "_removed", False):
-            return
-
-        callback = getattr(self, "schedule_update_ha_state", None)
-        if not callable(callback):
-            return
-
-        hass = self._hass_for_runtime()
-        loop = getattr(hass, "loop", None)
-        if loop and loop.is_closed():
-            return
-        if loop is None and not hasattr(callback, "call_count"):
-            return
-        callback()
 
     @property
     def should_poll(self) -> bool:

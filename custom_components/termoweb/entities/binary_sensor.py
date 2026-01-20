@@ -2,28 +2,24 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable
 import logging
-import typing
 from typing import Any
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
 )
-from homeassistant.core import callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from custom_components.termoweb.boost import supports_boost
-from custom_components.termoweb.const import DOMAIN, signal_ws_data, signal_ws_status
+from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.coordinator import StateCoordinator
 from custom_components.termoweb.domain import DomainStateView, GatewayConnectionState
 from custom_components.termoweb.domain.state import DomainState
-from custom_components.termoweb.entities.entity import GatewayDispatcherEntity
 from custom_components.termoweb.entities.heater import (
     BoostState,
-    DispatcherSubscriptionHelper,
     derive_boost_state_from_domain,
     log_skipped_nodes,
 )
@@ -102,9 +98,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
 
 class GatewayOnlineBinarySensor(
-    GatewayDispatcherEntity,
-    CoordinatorEntity[StateCoordinator],
-    BinarySensorEntity,
+    CoordinatorEntity[StateCoordinator], BinarySensorEntity
 ):
     """Connectivity sensor for the TermoWeb hub (gateway)."""
 
@@ -121,12 +115,6 @@ class GatewayOnlineBinarySensor(
         self._entry_id = entry_id
         self._dev_id = str(dev_id)
         self._attr_unique_id = f"{self._dev_id}_online"
-
-    @property
-    def gateway_signal(self) -> str:
-        """Return the dispatcher signal for gateway websocket status."""
-
-        return signal_ws_status(self._entry_id)
 
     def _gateway_connection_state(self) -> GatewayConnectionState:
         """Return the gateway connection state for this device."""
@@ -162,13 +150,6 @@ class GatewayOnlineBinarySensor(
             "ws_last_event_at": connection_state.last_event_at,
             "ws_healthy_minutes": connection_state.healthy_minutes,
         }
-
-    @callback
-    def _handle_gateway_dispatcher(self, payload: dict[str, Any]) -> None:
-        """Handle websocket status broadcasts from the integration."""
-        if payload.get("dev_id") != self._dev_id:
-            return
-        self.schedule_update_ha_state()
 
 
 class HeaterBoostActiveBinarySensor(
@@ -214,7 +195,6 @@ class HeaterBoostActiveBinarySensor(
         self._settings_resolver = settings_resolver
         resolved_device_name = device_name or name
         self._device_name = resolved_device_name if resolved_device_name else ""
-        self._ws_subscription = DispatcherSubscriptionHelper(self)
 
     @property
     def is_on(self) -> bool | None:
@@ -262,57 +242,6 @@ class HeaterBoostActiveBinarySensor(
         return derive_boost_state_from_domain(
             self._settings_resolver(), self.coordinator
         )
-
-    async def async_added_to_hass(self) -> None:
-        """Subscribe to websocket updates once the entity is added."""
-
-        await super().async_added_to_hass()
-        if self.hass is None:
-            return
-        signal = signal_ws_data(self._entry_id)
-        if not signal:
-            return
-        self._ws_subscription.subscribe(
-            self.hass,
-            signal,
-            self._handle_ws_message,
-        )
-
-    async def async_will_remove_from_hass(self) -> None:
-        """Detach websocket listeners before removal."""
-
-        self._ws_subscription.unsubscribe()
-        await super().async_will_remove_from_hass()
-
-    def _handle_ws_message(self, payload: Mapping[str, typing.Any]) -> None:
-        """Trigger a refresh when websocket payload targets this entity."""
-
-        if not self._payload_targets_entity(payload):
-            return
-        self.schedule_update_ha_state()
-
-    def _payload_targets_entity(self, payload: Mapping[str, typing.Any]) -> bool:
-        """Return True when ``payload`` references this heater node."""
-
-        if payload.get("dev_id") != self._dev_id:
-            return False
-
-        candidate_type = payload.get("node_type")
-        if candidate_type is not None:
-            canonical = normalize_node_type(
-                candidate_type, use_default_when_falsey=True
-            )
-            if canonical and canonical != self._node_type:
-                return False
-
-        addr = payload.get("addr")
-        if addr is None:
-            return True
-
-        canonical_addr = normalize_node_addr(addr, use_default_when_falsey=True)
-        if not canonical_addr:
-            return False
-        return canonical_addr == self._addr
 
 
 def _iter_boostable_inventory_nodes(

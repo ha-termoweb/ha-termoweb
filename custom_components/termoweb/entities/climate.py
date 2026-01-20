@@ -1,4 +1,4 @@
-# ruff: noqa: D100,BLE001,TRY301
+# ruff: noqa: D100,BLE001,TRY301,TID252
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from homeassistant.components.climate import (
     HVACMode,
 )
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
-from homeassistant.core import ServiceCall, callback
+from homeassistant.core import ServiceCall
 from homeassistant.helpers import entity_platform
 from homeassistant.util import dt as dt_util
 import voluptuous as vol
@@ -543,72 +543,6 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             ptemp=ptemp,
             units=units,
         )
-
-    # -------------------- WS updates --------------------
-    @callback
-    def _handle_ws_event(self, payload: dict) -> None:
-        """React to websocket updates for this heater."""
-        kind = payload.get("kind")
-        addr = payload.get("addr")
-        expected_kind = f"{self._node_type}_settings"
-        cancel_fallback = False
-        if kind == expected_kind:
-            cancel_fallback = addr is None or (
-                normalize_node_addr(addr) == self._addr if addr is not None else False
-            )
-        elif self._refresh_fallback and self._payload_mentions_heater(payload):
-            cancel_fallback = True
-
-        if cancel_fallback and self._refresh_fallback:
-            if not self._refresh_fallback.done():
-                self._refresh_fallback.cancel()
-            self._refresh_fallback = None
-        super()._handle_ws_event(payload)
-
-    def _payload_mentions_heater(self, payload: Mapping[str, typing.Any]) -> bool:
-        """Return True when a websocket payload references this heater."""
-
-        if not isinstance(payload, Mapping):
-            return False
-
-        node_type = self._node_type
-        normalized_addr = normalize_node_addr(
-            self._addr,
-            use_default_when_falsey=True,
-        )
-        if not normalized_addr:
-            return False
-
-        direct_addr = normalize_node_addr(
-            payload.get("addr"),
-            use_default_when_falsey=True,
-        )
-        if direct_addr and direct_addr == normalized_addr:
-            return True
-
-        inventory = self._shared_inventory()
-        if inventory is None:
-            return False
-
-        _, reverse_map = inventory.heater_address_map
-        addr_types = reverse_map.get(normalized_addr)
-        if addr_types and node_type in addr_types:
-            return True
-
-        for sample_type, sample_addr in inventory.heater_sample_targets:
-            canonical_type = normalize_node_type(
-                sample_type,
-                use_default_when_falsey=True,
-            )
-            if canonical_type != node_type:
-                continue
-            if (
-                normalize_node_addr(sample_addr, use_default_when_falsey=True)
-                == normalized_addr
-            ):
-                return True
-
-        return False
 
     @property
     def hvac_mode(self) -> HVACMode:

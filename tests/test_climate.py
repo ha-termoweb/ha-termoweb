@@ -31,7 +31,6 @@ from custom_components.termoweb.const import (
     BRAND_DUCAHEAT,
     BRAND_TERMOWEB,
     DOMAIN,
-    signal_ws_data,
 )
 from custom_components.termoweb.inventory import (
     HeaterNode,
