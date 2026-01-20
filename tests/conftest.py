@@ -77,6 +77,7 @@ def build_entry_runtime(
             brand=brand,
             create_ws_client=MagicMock(),
             set_node_settings=AsyncMock(),
+            set_acm_boost_state=AsyncMock(),
         )
 
     if hourly_poller is None:

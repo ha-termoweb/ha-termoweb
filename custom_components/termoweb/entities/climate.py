@@ -495,7 +495,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         client = self._client()
         if client is None:
             _LOGGER.error(
-                "%s failed type=%s addr=%s: client unavailable",
+                "%s failed type=%s addr=%s: backend unavailable",
                 log_context,
                 self._node_type,
                 self._addr,
@@ -524,7 +524,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
 
     async def _async_submit_settings(
         self,
-        client,
+        backend,
         *,
         mode: str | None,
         stemp: float | None,
@@ -534,7 +534,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
     ) -> None:
         """Send settings for this heater to the backend."""
 
-        await client.set_node_settings(
+        await backend.set_node_settings(
             self._dev_id,
             (self._node_type, self._addr),
             mode=mode,
@@ -1367,7 +1367,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
 
     async def _async_submit_settings(  # type: ignore[override]
         self,
-        client,
+        backend,
         *,
         mode: str | None,
         stemp: float | None,
@@ -1376,15 +1376,6 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
         units: str,
     ) -> None:
         boost_context: BoostContext | None = None
-        backend = None
-        hass = getattr(self, "hass", None)
-        if hass is not None:
-            try:
-                runtime = require_runtime(hass, self._entry_id)
-            except LookupError:
-                runtime = None
-            if runtime is not None:
-                backend = runtime.backend
 
         if self._node_type == "acm":
             boost_state = None
@@ -1411,20 +1402,7 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
                 mode=mode_value,
             )
 
-        if backend is not None:
-            await backend.set_node_settings(
-                self._dev_id,
-                (self._node_type, self._addr),
-                mode=mode,
-                stemp=stemp,
-                prog=prog,
-                ptemp=ptemp,
-                units=units,
-                boost_context=boost_context,
-            )
-            return
-
-        await client.set_node_settings(
+        await backend.set_node_settings(
             self._dev_id,
             (self._node_type, self._addr),
             mode=mode,
@@ -1432,4 +1410,5 @@ class AccumulatorClimateEntity(HeaterClimateEntity):
             prog=prog,
             ptemp=ptemp,
             units=units,
+            boost_context=boost_context,
         )

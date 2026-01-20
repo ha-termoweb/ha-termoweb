@@ -58,6 +58,18 @@ class HttpClientProto(Protocol):
     ) -> Any:
         """Update node settings for the specified node."""
 
+    async def set_acm_boost_state(
+        self,
+        dev_id: str,
+        addr: str | int,
+        *,
+        boost: bool,
+        boost_time: int | None = None,
+        stemp: float | None = None,
+        units: str | None = None,
+    ) -> Any:
+        """Toggle accumulator boost state for the specified node."""
+
     async def get_node_samples(
         self,
         dev_id: str,
@@ -128,6 +140,27 @@ class Backend(ABC):
             stemp=stemp,
             prog=prog,
             ptemp=ptemp,
+            units=units,
+        )
+
+    async def set_acm_boost_state(
+        self,
+        dev_id: str,
+        addr: str | int,
+        *,
+        boost: bool,
+        boost_time: int | None = None,
+        stemp: float | None = None,
+        units: str | None = None,
+    ) -> Any:
+        """Toggle accumulator boost state using the backend client."""
+
+        await self.client.set_acm_boost_state(
+            dev_id,
+            addr,
+            boost=boost,
+            boost_time=boost_time,
+            stemp=stemp,
             units=units,
         )
 

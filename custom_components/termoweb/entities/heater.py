@@ -952,7 +952,7 @@ class HeaterNodeBase(CoordinatorEntity):
         return derive_boost_state_from_domain(self.heater_state(), self.coordinator)
 
     def _client(self) -> Any:
-        """Return the REST client used for write operations."""
+        """Return the backend used for write operations."""
         hass = self._hass_for_runtime()
         if hass is None:
             return None
@@ -962,7 +962,7 @@ class HeaterNodeBase(CoordinatorEntity):
             runtime = require_runtime(hass, self._entry_id)
         except LookupError:
             return None
-        return runtime.client
+        return runtime.backend
 
     def _units(self) -> str:
         """Return the configured temperature units for this heater."""
