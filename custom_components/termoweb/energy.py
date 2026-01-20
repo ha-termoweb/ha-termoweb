@@ -3,13 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime, timedelta
-import importlib
-import importlib.util
-import inspect
 import logging
-import sys
 from typing import Any, cast
 
 from homeassistant.components.recorder.statistics import (
@@ -32,18 +28,6 @@ from .throttle import MonotonicRateLimiter
 _LOGGER = logging.getLogger(__name__)
 
 
-class RecorderImports:
-    """Container for recorder imports that may be missing at runtime."""
-
-    def __init__(
-        self, get_instance: Callable[..., Any] | None, statistics: Any
-    ) -> None:
-        """Initialize the recorder import references."""
-
-        self.get_instance = get_instance
-        self.statistics = statistics
-
-
 OPTION_ENERGY_HISTORY_IMPORTED = "energy_history_imported"
 OPTION_ENERGY_HISTORY_PROGRESS = "energy_history_progress"
 OPTION_MAX_HISTORY_RETRIEVED = "max_history_retrieved"
@@ -58,74 +42,21 @@ def _iso_date(ts: int) -> str:
     return datetime.fromtimestamp(ts, UTC).date().isoformat()
 
 
-_RECORDER_IMPORTS: RecorderImports | None = None
-
-
-def _resolve_recorder_imports() -> RecorderImports:
-    """Return cached recorder imports for statistics helpers."""
-    cached = globals().get("_RECORDER_IMPORTS")
-    if isinstance(cached, RecorderImports):
-        return cached
-
-    if "homeassistant.components.recorder" in sys.modules:
-        recorder_mod = sys.modules["homeassistant.components.recorder"]
-    else:
-        spec = importlib.util.find_spec("homeassistant.components.recorder")
-        if spec is None:
-            cached = RecorderImports(None, None)
-            globals()["_RECORDER_IMPORTS"] = cached
-            return cached
-        recorder_mod = importlib.import_module("homeassistant.components.recorder")
-    statistics = getattr(recorder_mod, "statistics", None)
-    get_instance = getattr(recorder_mod, "get_instance", None)
-    cached = RecorderImports(get_instance, statistics)
-    globals()["_RECORDER_IMPORTS"] = cached
-    return cached
-
-
-async def _clear_statistics_compat(
+async def _clear_statistics(
     hass: HomeAssistant,
     statistic_id: str,
     *,
     start_time: datetime | None = None,
     end_time: datetime | None = None,
 ) -> str:
-    """Delete statistics using recorder instance APIs when possible."""
-
-    recorder_imports = _resolve_recorder_imports()
-    instance = None
-    if callable(recorder_imports.get_instance):
-        instance = recorder_imports.get_instance(hass)
-    if instance is not None:
-        async_delete = getattr(instance, "async_delete_statistics", None)
-        if callable(async_delete):
-            await async_delete(
-                [statistic_id],
-                start_time=start_time,
-                end_time=end_time,
-            )
-            return "delete"
-        async_clear = getattr(instance, "async_clear_statistics", None)
-        if callable(async_clear):
-            await async_clear([statistic_id])
-            return "delete"
-
-    await _delete_statistics(
+    """Delete statistics using recorder statistics helpers."""
+    await async_delete_statistics(
         hass,
-        statistic_id,
+        [statistic_id],
         start_time=start_time,
         end_time=end_time,
     )
     return "delete"
-
-
-def _resolve_statistics_module() -> Any:
-    """Return the recorder statistics module when available."""
-
-    if "homeassistant.components.recorder.statistics" in sys.modules:
-        return sys.modules["homeassistant.components.recorder.statistics"]
-    recorder_imports = _resolve_recorder_imports()
-    return recorder_imports.statistics
 
 
 async def _statistics_during_period(
@@ -135,34 +66,13 @@ async def _statistics_during_period(
     statistic_ids: set[str],
 ) -> dict[str, list[Any]]:
     """Return recorder statistics rows for the provided period."""
-
-    stats_mod = _resolve_statistics_module()
-    stats_func = getattr(stats_mod, "async_get_statistics_during_period", None)
-    if not callable(stats_func):
-        stats_func = async_get_statistics_during_period
-    return await stats_func(
+    return await async_get_statistics_during_period(
         hass,
         start_time,
         end_time,
         statistic_ids,
         period="hour",
         types={"state", "sum"},
-    )
-
-
-async def _statistics_during_period_compat(
-    hass: HomeAssistant,
-    start_time: datetime,
-    end_time: datetime,
-    statistic_ids: set[str],
-) -> dict[str, list[Any]]:
-    """Return recorder statistics rows with compatibility shims."""
-
-    return await _statistics_during_period(
-        hass,
-        start_time,
-        end_time,
-        statistic_ids,
     )
 
 
@@ -175,41 +85,14 @@ async def _get_last_statistics(
     start_time: datetime | None = None,
 ) -> dict[str, list[Any]]:
     """Return the most recent recorder statistics row for ``statistic_id``."""
-
     types = types or {"state", "sum"}
-    stats_mod = _resolve_statistics_module()
-    stats_func = getattr(stats_mod, "async_get_last_statistics", None)
-    if not callable(stats_func):
-        stats_func = async_get_last_statistics
-    return await stats_func(
+    return await async_get_last_statistics(
         hass,
         number_of_stats,
         [statistic_id],
         types=types,
         start_time=start_time,
     )
-
-
-async def _delete_statistics(
-    hass: HomeAssistant,
-    statistic_id: str,
-    *,
-    start_time: datetime | None = None,
-    end_time: datetime | None = None,
-) -> str:
-    """Delete recorder statistics rows for ``statistic_id``."""
-
-    stats_mod = _resolve_statistics_module()
-    stats_func = getattr(stats_mod, "async_delete_statistics", None)
-    if not callable(stats_func):
-        stats_func = async_delete_statistics
-    await stats_func(
-        hass,
-        [statistic_id],
-        start_time=start_time,
-        end_time=end_time,
-    )
-    return "delete"
 
 
 async def _store_statistics(
@@ -227,13 +110,7 @@ async def _store_statistics(
     import_metadata = dict(metadata)
     import_metadata.update({"source": "recorder", "statistic_id": stat_id})
 
-    stats_mod = _resolve_statistics_module()
-    stats_func = getattr(stats_mod, "async_import_statistics", None)
-    if not callable(stats_func):
-        stats_func = async_import_statistics
-    result = stats_func(hass, import_metadata, stats)
-    if inspect.isawaitable(result):
-        await result
+    await async_import_statistics(hass, import_metadata, stats)
 
 
 def _statistics_row_get(row: Any, key: str) -> Any:
@@ -253,7 +130,7 @@ async def _collect_statistics(
     """Return statistics rows for a single statistic id."""
 
     try:
-        period = await _statistics_during_period_compat(
+        period = await _statistics_during_period(
             hass,
             start,
             end,
@@ -373,9 +250,9 @@ async def async_import_energy_history(  # noqa: C901
     datetime_mod = datetime
     registry_mod = er
     store_stats = _store_statistics
-    stats_period = _statistics_during_period_compat
+    stats_period = _statistics_during_period
     last_stats_fn = _get_last_statistics
-    clear_stats_fn = _clear_statistics_compat
+    clear_stats_fn = _clear_statistics
 
     try:
         runtime = require_runtime(hass, entry.entry_id)

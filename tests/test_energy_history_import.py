@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import logging
-import sys
-from importlib.machinery import ModuleSpec
 from datetime import UTC, datetime, timedelta
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -12,7 +10,6 @@ import pytest
 from conftest import build_entry_runtime
 from custom_components.termoweb import energy
 from custom_components.termoweb.energy import OPTION_ENERGY_HISTORY_PROGRESS
-from tests.test_energy_recorder_imports import _install_fake_homeassistant
 
 
 class _RecordingClient:
@@ -221,13 +218,13 @@ async def test_import_energy_history_filters_unknown_addresses(
 
     monkeypatch.setattr(
         energy,
-        "_statistics_during_period_compat",
+        "_statistics_during_period",
         _fake_stats_period,
         raising=False,
     )
     monkeypatch.setattr(
         energy,
-        "_clear_statistics_compat",
+        "_clear_statistics",
         _fake_clear_stats,
         raising=False,
     )
@@ -266,25 +263,13 @@ async def test_store_statistics_imports_entity_series(
     stats = [{"start": datetime(2024, 1, 1, tzinfo=UTC), "sum": 5.0}]
     captured: dict[str, Any] = {}
 
-    recorder_mod = ModuleType("homeassistant.components.recorder")
-    statistics_mod = ModuleType("homeassistant.components.recorder.statistics")
-    statistics_mod.__spec__ = ModuleSpec(  # type: ignore[attr-defined]
-        "homeassistant.components.recorder.statistics", loader=None, is_package=False
-    )
-
     async def _capture_import_stats(hass_arg, metadata_arg, stats_arg) -> None:
         captured["hass"] = hass_arg
         captured["metadata"] = metadata_arg
         captured["stats"] = stats_arg
 
-    statistics_mod.async_import_statistics = _capture_import_stats
-    recorder_mod.statistics = statistics_mod  # type: ignore[attr-defined]
-
-    _install_fake_homeassistant(monkeypatch, recorder_mod)
-    monkeypatch.setitem(
-        sys.modules,
-        "homeassistant.components.recorder.statistics",
-        statistics_mod,
+    monkeypatch.setattr(
+        energy, "async_import_statistics", _capture_import_stats, raising=False
     )
 
     await energy._store_statistics(hass, metadata, stats)
@@ -294,53 +279,6 @@ async def test_store_statistics_imports_entity_series(
     assert captured["metadata"]["source"] == "recorder"
     assert captured["stats"] == stats
     assert metadata["statistic_id"] == "sensor.test_energy"
-
-
-@pytest.mark.asyncio
-async def test_store_statistics_handles_sync_helper(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """_store_statistics must tolerate synchronous helpers."""
-
-    hass = object()
-    metadata = {
-        "source": "recorder",
-        "statistic_id": "sensor.sync_energy",
-        "name": "Sync Energy",
-        "unit_of_measurement": "kWh",
-        "has_sum": True,
-        "has_mean": False,
-    }
-    stats = [{"start": datetime(2024, 5, 1, tzinfo=UTC), "sum": 1.0}]
-    captured: dict[str, Any] = {}
-
-    recorder_mod = ModuleType("homeassistant.components.recorder")
-    statistics_mod = ModuleType("homeassistant.components.recorder.statistics")
-    statistics_mod.__spec__ = ModuleSpec(  # type: ignore[attr-defined]
-        "homeassistant.components.recorder.statistics", loader=None, is_package=False
-    )
-
-    def _capture_import_stats(hass_arg, metadata_arg, stats_arg) -> None:
-        captured["hass"] = hass_arg
-        captured["metadata"] = metadata_arg
-        captured["stats"] = stats_arg
-
-    statistics_mod.async_import_statistics = _capture_import_stats  # type: ignore[attr-defined]
-    recorder_mod.statistics = statistics_mod  # type: ignore[attr-defined]
-
-    _install_fake_homeassistant(monkeypatch, recorder_mod)
-    monkeypatch.setitem(
-        sys.modules,
-        "homeassistant.components.recorder.statistics",
-        statistics_mod,
-    )
-
-    await energy._store_statistics(hass, metadata, stats)
-
-    assert captured["hass"] is hass
-    assert captured["metadata"]["statistic_id"] == "sensor.sync_energy"
-    assert captured["metadata"]["source"] == "recorder"
-    assert captured["stats"] == stats
 
 
 @pytest.mark.asyncio
@@ -494,18 +432,8 @@ async def test_import_energy_history_uses_union_statistics_for_offset(
             existing.values(), key=lambda row: row["start"]
         )
 
-    monkeypatch.setattr(
-        energy,
-        "_statistics_during_period_compat",
-        _fake_stats_period,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        energy,
-        "_clear_statistics_compat",
-        _fake_clear_statistics,
-        raising=False,
-    )
+    monkeypatch.setattr(energy, "_statistics_during_period", _fake_stats_period)
+    monkeypatch.setattr(energy, "_clear_statistics", _fake_clear_statistics)
     monkeypatch.setattr(energy, "_store_statistics", _capture_store, raising=False)
 
     await energy.async_import_energy_history(
@@ -633,13 +561,13 @@ async def test_import_skips_duplicate_sample_timestamps(
 
     monkeypatch.setattr(
         energy,
-        "_statistics_during_period_compat",
+        "_statistics_during_period",
         _fake_stats_period,
         raising=False,
     )
     monkeypatch.setattr(
         energy,
-        "_clear_statistics_compat",
+        "_clear_statistics",
         _fake_clear_statistics,
         raising=False,
     )
@@ -747,13 +675,13 @@ async def test_import_coalesces_samples_within_hour(
 
     monkeypatch.setattr(
         energy,
-        "_statistics_during_period_compat",
+        "_statistics_during_period",
         _fake_stats_period,
         raising=False,
     )
     monkeypatch.setattr(
         energy,
-        "_clear_statistics_compat",
+        "_clear_statistics",
         _fake_clear_statistics,
         raising=False,
     )
@@ -867,13 +795,13 @@ async def test_import_skips_negative_deltas_after_reset(
 
     monkeypatch.setattr(
         energy,
-        "_statistics_during_period_compat",
+        "_statistics_during_period",
         _fake_stats_period,
         raising=False,
     )
     monkeypatch.setattr(
         energy,
-        "_clear_statistics_compat",
+        "_clear_statistics",
         _fake_clear_statistics,
         raising=False,
     )
@@ -1040,7 +968,7 @@ async def test_import_enforces_monotonic_sum_at_seam(
 
     monkeypatch.setattr(
         energy,
-        "_statistics_during_period_compat",
+        "_statistics_during_period",
         _fake_stats_period,
         raising=False,
     )
@@ -1056,7 +984,7 @@ async def test_import_enforces_monotonic_sum_at_seam(
 
     monkeypatch.setattr(
         energy,
-        "_clear_statistics_compat",
+        "_clear_statistics",
         _fake_clear_statistics,
         raising=False,
     )
