@@ -1603,11 +1603,11 @@ custom_components/termoweb/inventory.py :: Inventory.sample_alias_map
     Return compatibility aliases for sample payload processing.
 custom_components/termoweb/inventory.py :: Inventory.sample_alias_map._merge_alias
     Insert a normalised alias pair into ``alias_map``.
-custom_components/termoweb/inventory.py :: Inventory.heater_name_map
-    Return cached heater name mapping for ``default_factory``.
-custom_components/termoweb/inventory.py :: Inventory.heater_name_map._node_value
+custom_components/termoweb/inventory.py :: Inventory.heater_names_by_type
+    Return cached heater names by type for ``default_factory``.
+custom_components/termoweb/inventory.py :: Inventory.heater_names_by_type._node_value
     Return attribute ``key`` for ``candidate`` regardless of type.
-custom_components/termoweb/inventory.py :: Inventory.heater_name_map._evict_stale_cache
+custom_components/termoweb/inventory.py :: Inventory.heater_names_by_type._evict_stale_cache
     Drop the oldest cached factory when exceeding the size limit.
 custom_components/termoweb/inventory.py :: Inventory._heater_factory_signature
     Return a stable cache key for ``factory`` when possible.
