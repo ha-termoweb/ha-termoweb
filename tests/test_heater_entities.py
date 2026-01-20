@@ -8,7 +8,7 @@ from typing import Any, Callable, Iterable, Iterator
 import pytest
 from unittest.mock import MagicMock
 
-from conftest import _install_stubs, build_entry_runtime, make_ws_payload
+from conftest import _install_stubs, build_entry_runtime
 
 _install_stubs()
 
@@ -25,7 +25,7 @@ from custom_components.termoweb.inventory import (
     InventoryNodeMetadata,
     build_node_inventory,
 )
-from custom_components.termoweb.const import DOMAIN, signal_ws_data
+from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.binary_sensor import HeaterBoostActiveBinarySensor
 from custom_components.termoweb.sensor import (
     HeaterBoostEndSensor,
@@ -75,28 +75,6 @@ def test_heater_node_base_normalizes_address(monkeypatch: pytest.MonkeyPatch) ->
     assert calls == [(" 01 ", {})]
 
 
-def test_heater_node_base_payload_matching_normalizes_address(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[tuple[object, dict]] = []
-
-    original = heater_module.normalize_node_addr
-
-    def _record_normalize(value, **kwargs):
-        calls.append((value, kwargs))
-        return original(value, **kwargs)
-
-    _patch_heater_attr(monkeypatch, "normalize_node_addr", _record_normalize)
-
-    coordinator = SimpleNamespace(hass=None)
-    heater = HeaterNodeBase(coordinator, "entry", "dev", " 01 ", "Heater 01")
-
-    assert heater._payload_matches_heater(make_ws_payload("dev", " 01 "))
-    assert not heater._payload_matches_heater(make_ws_payload("dev", "02"))
-    assert not heater._payload_matches_heater(make_ws_payload("dev", "  "))
-    assert calls == [(" 01 ", {}), (" 01 ", {}), ("02", {}), ("  ", {})]
-
-
 def test_heater_async_will_remove_without_listener_resets_unsub() -> None:
     heater = HeaterNodeBase(SimpleNamespace(hass=None), "entry", "dev", "1", "Heater 1")
     unsub = MagicMock()
@@ -106,77 +84,6 @@ def test_heater_async_will_remove_without_listener_resets_unsub() -> None:
 
     unsub.assert_called_once_with()
     assert getattr(heater, "_async_unsub_coordinator_update") is None
-
-
-@pytest.mark.asyncio
-async def test_async_added_to_hass_without_coordinator_listener(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    hass = HomeAssistant()
-    coordinator = SimpleNamespace(hass=hass)
-    heater = HeaterNodeBase(coordinator, "entry", "dev", "1", "Heater 1")
-    heater.hass = hass
-
-    recorded: list[tuple[HomeAssistant, str, Any]] = []
-
-    def _record_subscribe(self, hass_param, signal, handler):
-        recorded.append((hass_param, signal, handler))
-
-    monkeypatch.setattr(
-        heater_module.DispatcherSubscriptionHelper,
-        "subscribe",
-        _record_subscribe,
-    )
-
-    await heater.async_added_to_hass()
-
-    assert getattr(heater, "_async_unsub_coordinator_update", None) is None
-    assert recorded == [
-        (hass, signal_ws_data("entry"), heater._handle_ws_message),
-    ]
-
-
-def test_heater_handle_ws_event_skips_removed_entity() -> None:
-    hass = HomeAssistant()
-    coordinator = SimpleNamespace(hass=hass)
-    heater = HeaterNodeBase(coordinator, "entry", "dev", "1", "Heater 1")
-    heater.hass = hass
-    callback = MagicMock()
-    heater.schedule_update_ha_state = callback  # type: ignore[assignment]
-    heater._removed = True
-
-    heater._handle_ws_event({"dev_id": "dev", "addr": "1", "node_type": "htr"})
-
-    callback.assert_not_called()
-
-
-def test_heater_handle_ws_event_requires_callable_callback() -> None:
-    hass = HomeAssistant()
-    coordinator = SimpleNamespace(hass=hass)
-    heater = HeaterNodeBase(coordinator, "entry", "dev", "1", "Heater 1")
-    heater.hass = hass
-    heater.schedule_update_ha_state = None  # type: ignore[assignment]
-    heater._removed = False
-
-    heater._handle_ws_event({"dev_id": "dev", "addr": "1", "node_type": "htr"})
-
-
-def test_heater_handle_ws_event_requires_loop_or_mock() -> None:
-    hass = SimpleNamespace(loop=None)
-    heater = HeaterNodeBase(SimpleNamespace(hass=hass), "entry", "dev", "1", "Heater 1")
-    heater.hass = hass
-    called = False
-
-    def _callback() -> None:
-        nonlocal called
-        called = True
-
-    heater.schedule_update_ha_state = _callback  # type: ignore[assignment]
-    heater._removed = False
-
-    heater._handle_ws_event({"dev_id": "dev", "addr": "1", "node_type": "htr"})
-
-    assert called is False
 
 
 def test_heater_section_requires_inventory_for_name() -> None:

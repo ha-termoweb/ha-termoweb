@@ -1090,8 +1090,6 @@ custom_components/termoweb/entities/binary_sensor.py :: async_setup_entry
     Set up connectivity and boost binary sensors for a config entry.
 custom_components/termoweb/entities/binary_sensor.py :: GatewayOnlineBinarySensor.__init__
     Initialise the connectivity binary sensor.
-custom_components/termoweb/entities/binary_sensor.py :: GatewayOnlineBinarySensor.gateway_signal
-    Return the dispatcher signal for gateway websocket status.
 custom_components/termoweb/entities/binary_sensor.py :: GatewayOnlineBinarySensor._gateway_connection_state
     Return the gateway connection state for this device.
 custom_components/termoweb/entities/binary_sensor.py :: GatewayOnlineBinarySensor.is_on
@@ -1100,8 +1098,6 @@ custom_components/termoweb/entities/binary_sensor.py :: GatewayOnlineBinarySenso
     Return Home Assistant device metadata for the gateway.
 custom_components/termoweb/entities/binary_sensor.py :: GatewayOnlineBinarySensor.extra_state_attributes
     Return additional gateway diagnostics and websocket state.
-custom_components/termoweb/entities/binary_sensor.py :: GatewayOnlineBinarySensor._handle_gateway_dispatcher
-    Handle websocket status broadcasts from the integration.
 custom_components/termoweb/entities/binary_sensor.py :: HeaterBoostActiveBinarySensor.__init__
     Initialise the boost activity binary sensor.
 custom_components/termoweb/entities/binary_sensor.py :: HeaterBoostActiveBinarySensor.is_on
@@ -1114,14 +1110,6 @@ custom_components/termoweb/entities/binary_sensor.py :: HeaterBoostActiveBinaryS
     Expose Home Assistant device metadata for the heater.
 custom_components/termoweb/entities/binary_sensor.py :: HeaterBoostActiveBinarySensor.boost_state
     Return derived boost metadata for this heater.
-custom_components/termoweb/entities/binary_sensor.py :: HeaterBoostActiveBinarySensor.async_added_to_hass
-    Subscribe to websocket updates once the entity is added.
-custom_components/termoweb/entities/binary_sensor.py :: HeaterBoostActiveBinarySensor.async_will_remove_from_hass
-    Detach websocket listeners before removal.
-custom_components/termoweb/entities/binary_sensor.py :: HeaterBoostActiveBinarySensor._handle_ws_message
-    Trigger a refresh when websocket payload targets this entity.
-custom_components/termoweb/entities/binary_sensor.py :: HeaterBoostActiveBinarySensor._payload_targets_entity
-    Return True when ``payload`` references this heater node.
 custom_components/termoweb/entities/binary_sensor.py :: _iter_boostable_inventory_nodes
     Yield boostable heater metadata from ``inventory``.
 custom_components/termoweb/entities/binary_sensor.py :: _build_settings_resolver
@@ -1216,10 +1204,6 @@ custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._async_cli
     Call a backend helper while applying standard error handling.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._async_submit_settings
     Send settings for this heater to the backend.
-custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._handle_ws_event
-    React to websocket updates for this heater.
-custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._payload_mentions_heater
-    Return True when a websocket payload references this heater.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.hvac_mode
     Return the HA HVAC mode derived from heater settings.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.hvac_action
@@ -1292,20 +1276,6 @@ custom_components/termoweb/entities/climate.py :: AccumulatorClimateEntity.async
     Start an accumulator boost session.
 custom_components/termoweb/entities/climate.py :: AccumulatorClimateEntity.async_cancel_boost
     Cancel the active accumulator boost session.
-custom_components/termoweb/entities/entity.py :: GatewaySignalHandler.__call__
-    Invoke the callback with a dispatcher payload.
-custom_components/termoweb/entities/entity.py :: GatewayDispatcherEntity.__init__
-    Initialise the dispatcher helper and base classes.
-custom_components/termoweb/entities/entity.py :: GatewayDispatcherEntity.gateway_signal
-    Return the dispatcher signal name for this entity.
-custom_components/termoweb/entities/entity.py :: GatewayDispatcherEntity.gateway_signal_handler
-    Return the callback invoked for dispatcher updates.
-custom_components/termoweb/entities/entity.py :: GatewayDispatcherEntity.async_added_to_hass
-    Subscribe to dispatcher updates when the entity is added.
-custom_components/termoweb/entities/entity.py :: GatewayDispatcherEntity.async_will_remove_from_hass
-    Unsubscribe from dispatcher updates before removal.
-custom_components/termoweb/entities/entity.py :: GatewayDispatcherEntity._handle_gateway_dispatcher
-    Handle dispatcher payloads targeting the entity.
 custom_components/termoweb/entities/heater.py :: _build_boost_button_metadata
     Return the configured metadata describing boost helper buttons.
 custom_components/termoweb/entities/heater.py :: HeaterPlatformDetails.__iter__
@@ -1356,14 +1326,6 @@ custom_components/termoweb/entities/heater.py :: derive_boost_state
     Return derived boost metadata for mapping ``settings``.
 custom_components/termoweb/entities/heater.py :: derive_boost_state_from_domain
     Return derived boost metadata for typed ``state``.
-custom_components/termoweb/entities/heater.py :: DispatcherSubscriptionHelper.__init__
-    Initialise the helper for the provided entity.
-custom_components/termoweb/entities/heater.py :: DispatcherSubscriptionHelper.subscribe
-    Subscribe to a dispatcher signal and register clean-up.
-custom_components/termoweb/entities/heater.py :: DispatcherSubscriptionHelper.unsubscribe
-    Remove the dispatcher subscription if it exists.
-custom_components/termoweb/entities/heater.py :: DispatcherSubscriptionHelper.is_connected
-    Return True when the dispatcher listener is active.
 custom_components/termoweb/entities/heater.py :: log_skipped_nodes
     Log skipped TermoWeb nodes for a given platform.
 custom_components/termoweb/entities/heater.py :: heater_platform_details_for_entry
@@ -1371,15 +1333,9 @@ custom_components/termoweb/entities/heater.py :: heater_platform_details_for_ent
 custom_components/termoweb/entities/heater.py :: HeaterNodeBase.__init__
     Initialise a heater entity tied to a TermoWeb device.
 custom_components/termoweb/entities/heater.py :: HeaterNodeBase.async_added_to_hass
-    Subscribe to websocket updates once the entity is added to hass.
+    Register coordinator listeners once the entity is added to hass.
 custom_components/termoweb/entities/heater.py :: HeaterNodeBase.async_will_remove_from_hass
-    Tidy up websocket listeners before the entity is removed.
-custom_components/termoweb/entities/heater.py :: HeaterNodeBase._handle_ws_message
-    Process websocket payloads addressed to this heater.
-custom_components/termoweb/entities/heater.py :: HeaterNodeBase._payload_matches_heater
-    Return True when the websocket payload targets this heater.
-custom_components/termoweb/entities/heater.py :: HeaterNodeBase._handle_ws_event
-    Schedule a state refresh after a websocket update.
+    Detach coordinator listeners before the entity is removed.
 custom_components/termoweb/entities/heater.py :: HeaterNodeBase.should_poll
     Home Assistant should not poll heater entities.
 custom_components/termoweb/entities/heater.py :: HeaterNodeBase.available
@@ -1550,12 +1506,8 @@ custom_components/termoweb/entities/sensor.py :: PowerMonitorEnergySensor._coerc
     Normalise the raw energy metric into kWh.
 custom_components/termoweb/entities/sensor.py :: InstallationTotalEnergySensor.__init__
     Initialise the installation-wide energy sensor.
-custom_components/termoweb/entities/sensor.py :: InstallationTotalEnergySensor.gateway_signal
-    Return the dispatcher signal for gateway websocket data.
 custom_components/termoweb/entities/sensor.py :: InstallationTotalEnergySensor.device_info
     Return the Home Assistant device metadata for the gateway.
-custom_components/termoweb/entities/sensor.py :: InstallationTotalEnergySensor._handle_gateway_dispatcher
-    Handle websocket payloads that may update the totals.
 custom_components/termoweb/entities/sensor.py :: InstallationTotalEnergySensor.available
     Return True if the domain view contains energy totals.
 custom_components/termoweb/entities/sensor.py :: InstallationTotalEnergySensor.native_value

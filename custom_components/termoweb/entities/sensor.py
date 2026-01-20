@@ -14,15 +14,13 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import STATE_UNKNOWN, UnitOfTemperature, UnitOfTime
-from homeassistant.core import callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from custom_components.termoweb.const import DOMAIN, signal_ws_data
+from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.coordinator import EnergyStateCoordinator
 from custom_components.termoweb.domain.view import DomainStateView
-from custom_components.termoweb.entities.entity import GatewayDispatcherEntity
 from custom_components.termoweb.entities.heater import (
     HeaterNodeBase,
     HeaterPlatformDetails,
@@ -1101,9 +1099,7 @@ class PowerMonitorPowerSensor(PowerMonitorSensorBase):
     _metric_key = "power"
 
 
-class InstallationTotalEnergySensor(
-    GatewayDispatcherEntity, CoordinatorEntity, SensorEntity
-):
+class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
     """Total energy consumption across all heaters."""
 
     _attr_has_entity_name = True
@@ -1132,22 +1128,9 @@ class InstallationTotalEnergySensor(
         )
 
     @property
-    def gateway_signal(self) -> str:
-        """Return the dispatcher signal for gateway websocket data."""
-
-        return signal_ws_data(self._entry_id)
-
-    @property
     def device_info(self) -> DeviceInfo:
         """Return the Home Assistant device metadata for the gateway."""
         return build_gateway_device_info(self.hass, self._entry_id, self._dev_id)
-
-    @callback
-    def _handle_gateway_dispatcher(self, payload: dict[str, Any]) -> None:
-        """Handle websocket payloads that may update the totals."""
-        if payload.get("dev_id") != self._dev_id:
-            return
-        self.schedule_update_ha_state()
 
     @property
     def available(self) -> bool:

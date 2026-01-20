@@ -5,7 +5,7 @@ import asyncio
 import logging
 import types
 from typing import Any, Callable, Iterable, Iterator
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -13,14 +13,13 @@ from conftest import FakeCoordinator
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 import custom_components.termoweb.binary_sensor as binary_sensor_module
 import custom_components.termoweb.button as button_module
 from custom_components.termoweb.entities import button as entities_button_module
 import custom_components.termoweb.heater as heater_module
 from custom_components.termoweb import identifiers as identifiers_module
-from custom_components.termoweb.const import DOMAIN, signal_ws_status
+from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.inventory import (
     AccumulatorNode,
     HeaterNode,
@@ -85,15 +84,6 @@ def test_binary_sensor_setup_and_dispatch(
         def _add_entities(entities):
             added.extend(entities)
 
-        guard_coordinator = FakeCoordinator(None, data={})
-        guard_entity = GatewayOnlineBinarySensor(
-            guard_coordinator,
-            "guard-entry",
-            "guard-device",
-        )
-        await guard_entity.async_added_to_hass()
-        assert not guard_entity._gateway_dispatcher.is_connected  # pylint: disable=protected-access
-
         await async_setup_binary_sensor_entry(hass, entry, _add_entities)
 
         assert len(added) == 1
@@ -101,24 +91,9 @@ def test_binary_sensor_setup_and_dispatch(
         assert isinstance(entity, GatewayOnlineBinarySensor)
 
         entity.hass = hass
-        with patch.object(
-            entity._gateway_dispatcher,
-            "subscribe",
-            wraps=entity._gateway_dispatcher.subscribe,
-        ) as mock_subscribe:
-            await entity.async_added_to_hass()
-
-        mock_subscribe.assert_called_once()
-        _, call_signal, call_handler = mock_subscribe.call_args[0]
-        assert call_signal == signal_ws_status(entry.entry_id)
-        assert getattr(call_handler, "__self__", None) is entity
-        assert getattr(call_handler, "__func__", None) is getattr(
-            entity._handle_gateway_dispatcher, "__func__", None
-        )
+        await entity.async_added_to_hass()
 
         assert entity.is_on is True
-        assert entity._gateway_dispatcher.is_connected  # pylint: disable=protected-access
-
         info = entity.device_info
         expected_info = build_gateway_device_info(hass, entry.entry_id, dev_id)
         assert info == expected_info
@@ -134,18 +109,7 @@ def test_binary_sensor_setup_and_dispatch(
             "ws_healthy_minutes": 42.0,
         }
 
-        entity.schedule_update_ha_state = MagicMock()
-        async_dispatcher_send(
-            hass, signal_ws_status(entry.entry_id), {"dev_id": "other"}
-        )
-        entity.schedule_update_ha_state.assert_not_called()
-        async_dispatcher_send(
-            hass, signal_ws_status(entry.entry_id), {"dev_id": dev_id}
-        )
-        entity.schedule_update_ha_state.assert_called_once_with()
-
         await entity.async_will_remove_from_hass()
-        assert not entity._gateway_dispatcher.is_connected  # pylint: disable=protected-access
 
     asyncio.run(_run())
 
