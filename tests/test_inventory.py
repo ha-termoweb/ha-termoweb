@@ -346,7 +346,7 @@ def test_normalize_power_monitor_addresses_variants() -> None:
     assert "ignored" not in ignored_compat
 
 
-def test_inventory_heater_name_map_caches_by_factory(
+def test_inventory_heater_names_by_type_caches_by_factory(
     heater_inventory: Inventory,
 ) -> None:
     """Name map computations should be cached per default factory."""
@@ -354,25 +354,25 @@ def test_inventory_heater_name_map_caches_by_factory(
     def prefixed(addr: str) -> str:
         return f"Prefixed {addr}"
 
-    first = heater_inventory.heater_name_map(prefixed)
-    second = heater_inventory.heater_name_map(prefixed)
+    first = heater_inventory.heater_names_by_type(prefixed)
+    second = heater_inventory.heater_names_by_type(prefixed)
 
     assert first is second
-    assert first[("htr", "1")] == "Lounge"
-    assert first[("htr", "2")] == "Prefixed 2"
+    assert first["htr"]["1"] == "Lounge"
+    assert first["htr"]["2"] == "Prefixed 2"
 
     def alternate(addr: str) -> str:
         return f"Alternate {addr}"
 
-    third = heater_inventory.heater_name_map(alternate)
-    fourth = heater_inventory.heater_name_map(alternate)
+    third = heater_inventory.heater_names_by_type(alternate)
+    fourth = heater_inventory.heater_names_by_type(alternate)
 
     assert third is fourth
     assert third is not first
-    assert third[("htr", "2")] == "Alternate 2"
+    assert third["htr"]["2"] == "Alternate 2"
 
 
-def test_inventory_heater_name_map_reuses_equivalent_factories(
+def test_inventory_heater_names_by_type_reuses_equivalent_factories(
     heater_inventory: Inventory,
 ) -> None:
     """Equivalent factories should share cached name maps."""
@@ -386,16 +386,16 @@ def test_inventory_heater_name_map_reuses_equivalent_factories(
     first_factory = build_factory("Shared")
     second_factory = build_factory("Shared")
 
-    first = heater_inventory.heater_name_map(first_factory)
-    second = heater_inventory.heater_name_map(second_factory)
+    first = heater_inventory.heater_names_by_type(first_factory)
+    second = heater_inventory.heater_names_by_type(second_factory)
 
     signature = heater_inventory._heater_factory_signature(first_factory)
     assert signature is not None
     assert first is second
-    assert heater_inventory._heater_name_map_cache[signature] is first
+    assert heater_inventory._heater_name_by_type_cache[signature] is first
 
 
-def test_inventory_heater_name_map_cache_boundaries(
+def test_inventory_heater_names_by_type_cache_boundaries(
     heater_inventory: Inventory,
 ) -> None:
     """Cache should evict stale factory entries when exceeding limit."""
@@ -424,9 +424,9 @@ def test_inventory_heater_name_map_cache_boundaries(
     ]
 
     for factory in factories:
-        heater_inventory.heater_name_map(factory)
+        heater_inventory.heater_names_by_type(factory)
 
-    cache = heater_inventory._heater_name_map_cache
+    cache = heater_inventory._heater_name_by_type_cache
     assert len(cache) == Inventory._HEATER_NAME_MAP_CACHE_LIMIT
 
     signature_three = heater_inventory._heater_factory_signature(factory_three)
@@ -438,7 +438,7 @@ def test_inventory_heater_name_map_cache_boundaries(
     assert signature_five in cache
 
 
-def test_inventory_heater_name_map_supports_default_factory_optional() -> None:
+def test_inventory_heater_names_by_type_supports_default_factory_optional() -> None:
     """Calling without a factory should use the built-in heater fallback names."""
 
     nodes = [
@@ -447,12 +447,46 @@ def test_inventory_heater_name_map_supports_default_factory_optional() -> None:
     ]
     inventory = Inventory("dev", nodes)
 
-    first = inventory.heater_name_map()
-    second = inventory.heater_name_map()
+    first = inventory.heater_names_by_type()
+    second = inventory.heater_names_by_type()
 
     assert first is second
-    assert first[("htr", "1")] == "Heater 1"
-    assert first[("acm", "2")] == "Storage"
+    assert first["htr"]["1"] == "Heater 1"
+    assert first["acm"]["2"] == "Storage"
+
+
+def test_inventory_resolve_heater_name_uses_overrides() -> None:
+    """Resolved names should prioritize explicit overrides."""
+
+    nodes = [
+        Node(name="Custom", addr="1", node_type="htr"),
+        Node(name="", addr="2", node_type="htr"),
+        Node(name=None, addr="3", node_type="acm"),
+        Node(name="Tank", addr="4", node_type="acm"),
+    ]
+    inventory = Inventory("dev", nodes)
+
+    assert inventory.resolve_heater_name("htr", "1") == "Custom"
+    assert inventory.resolve_heater_name("htr", "2") == "Heater 2"
+    assert inventory.resolve_heater_name("acm", "3") == "Accumulator 3"
+    assert inventory.resolve_heater_name("acm", "4") == "Tank"
+
+
+def test_inventory_heater_names_by_type_shape_is_stable(
+    heater_inventory: Inventory,
+) -> None:
+    """Name maps should only contain per-type dictionaries."""
+
+    mapping = heater_inventory.heater_names_by_type()
+
+    assert set(mapping) == {"htr", "acm", "thm"}
+    assert all(isinstance(key, str) for key in mapping)
+    assert all(isinstance(value, dict) for value in mapping.values())
+    assert all(
+        isinstance(addr, str) and isinstance(name, str)
+        for bucket in mapping.values()
+        for addr, name in bucket.items()
+    )
 
 
 def test_inventory_heater_sample_targets_filters_invalid(
@@ -508,7 +542,7 @@ def test_inventory_heater_sample_targets_deduplicate_and_strip(
 def test_heater_platform_details_default_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Default naming should activate when name map is not a mapping."""
+    """Default naming should activate when name overrides are empty."""
 
     raw_nodes = {
         "nodes": [
@@ -523,8 +557,8 @@ def test_heater_platform_details_default_name(
 
     monkeypatch.setattr(
         inventory_module.Inventory,
-        "heater_name_map",
-        lambda self, _factory: ["invalid"],
+        "heater_names_by_type",
+        lambda self, _factory: {},
     )
 
     nodes_by_type, addrs_by_type, resolver = (

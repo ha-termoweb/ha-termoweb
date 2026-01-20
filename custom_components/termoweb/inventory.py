@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 import logging
 import typing
@@ -130,8 +130,8 @@ class Inventory:
         tuple[dict[str, tuple[str, ...]], dict[str, str]] | None
     )
     _power_monitor_sample_targets_cache: tuple[tuple[str, str], ...] | None
-    _heater_name_map_cache: dict[str, dict[Any, Any]]
-    _heater_name_map_factories: dict[str, Callable[[str], str]]
+    _heater_name_by_type_cache: dict[str, dict[str, dict[str, str]]]
+    _heater_name_by_type_factories: dict[str, Callable[[str], str]]
 
     def __init__(
         self,
@@ -152,8 +152,8 @@ class Inventory:
         object.__setattr__(self, "_power_monitor_address_map_cache", None)
         object.__setattr__(self, "_power_monitor_sample_address_cache", None)
         object.__setattr__(self, "_power_monitor_sample_targets_cache", None)
-        object.__setattr__(self, "_heater_name_map_cache", {})
-        object.__setattr__(self, "_heater_name_map_factories", {})
+        object.__setattr__(self, "_heater_name_by_type_cache", {})
+        object.__setattr__(self, "_heater_name_by_type_factories", {})
         object.__setattr__(self, "_energy_sample_types_cache", None)
 
     @property
@@ -470,21 +470,7 @@ class Inventory:
         if not node_type_norm or not addr_norm:
             return factory(normalize_node_addr(addr) or str(addr))
 
-        name_map = self.heater_name_map(factory)
-        names_by_type: Mapping[str, typing.Any]
-        legacy_names: Mapping[str, typing.Any]
-        if isinstance(name_map, Mapping):
-            names_by_type = name_map.get("by_type", {})
-            if not isinstance(names_by_type, Mapping):
-                names_by_type = {}
-            legacy_names = name_map.get("htr", {})
-            if not isinstance(legacy_names, Mapping):
-                legacy_names = {}
-            pair_lookup = name_map
-        else:
-            names_by_type = {}
-            legacy_names = {}
-            pair_lookup = {}
+        names_by_type = self.heater_names_by_type(factory)
 
         default_simple = factory(addr_norm)
         explicit_names = self.explicit_heater_names
@@ -500,17 +486,10 @@ class Inventory:
                 return None
             return value
 
-        per_type_raw = names_by_type.get(node_type_norm, {})
-        per_type = per_type_raw if isinstance(per_type_raw, Mapping) else {}
-
-        for candidate_value in (
-            per_type.get(addr_norm),
-            pair_lookup.get((node_type_norm, addr_norm)),
-            legacy_names.get(addr_norm),
-        ):
-            candidate = _candidate(candidate_value)
-            if candidate:
-                return candidate
+        per_type = names_by_type.get(node_type_norm, {})
+        candidate = _candidate(per_type.get(addr_norm))
+        if candidate:
+            return candidate
 
         if node_type_norm == "acm":
             return f"Accumulator {addr_norm}"
@@ -763,17 +742,17 @@ class Inventory:
 
         return alias_map
 
-    def heater_name_map(
+    def heater_names_by_type(
         self, default_factory: Callable[[str], str] | None = None
-    ) -> dict[Any, Any]:
-        """Return cached heater name mapping for ``default_factory``."""
+    ) -> dict[str, dict[str, str]]:
+        """Return cached heater names by type for ``default_factory``."""
 
         factory = default_factory or _default_heater_name
         signature = self._heater_factory_signature(factory)
 
         if signature:
-            cached = self._heater_name_map_cache.get(signature)
-            cached_factory = self._heater_name_map_factories.get(signature)
+            cached = self._heater_name_by_type_cache.get(signature)
+            cached_factory = self._heater_name_by_type_factories.get(signature)
             if cached is not None and (
                 cached_factory is factory
                 or self._heater_factory_signature(cached_factory) == signature
@@ -815,7 +794,6 @@ class Inventory:
             return getattr(candidate, key, None)
 
         by_type: dict[str, dict[str, str]] = {}
-        by_node: dict[tuple[str, str], str] = {}
 
         for node in sanitized_nodes:
             node_type = normalize_node_type(_node_value(node, "type"))
@@ -829,18 +807,10 @@ class Inventory:
                 resolved = raw_name.strip()
             else:
                 resolved = factory(addr)
-            by_node[(node_type, addr)] = resolved
             bucket = by_type.setdefault(node_type, {})
             bucket[addr] = resolved
 
-        mapping: dict[Any, Any] = {"htr": dict(by_type.get("htr", {}))}
-        if "acm" in by_type:
-            mapping["acm"] = dict(by_type.get("acm", {}))
-        if "thm" in by_type:
-            mapping["thm"] = dict(by_type.get("thm", {}))
-        if by_type:
-            mapping["by_type"] = {k: dict(v) for k, v in by_type.items()}
-        mapping.update(by_node)
+        mapping = {node_type: dict(values) for node_type, values in by_type.items()}
 
         if not signature:
             return mapping
@@ -848,29 +818,29 @@ class Inventory:
         def _evict_stale_cache(new_key: str) -> None:
             """Drop the oldest cached factory when exceeding the size limit."""
 
-            cache_size = len(self._heater_name_map_cache)
-            if new_key in self._heater_name_map_cache:
+            cache_size = len(self._heater_name_by_type_cache)
+            if new_key in self._heater_name_by_type_cache:
                 return
             if cache_size < self._HEATER_NAME_MAP_CACHE_LIMIT:
                 return
 
             candidates = [
                 key
-                for key in self._heater_name_map_cache
+                for key in self._heater_name_by_type_cache
                 if key != self._DEFAULT_FACTORY_CACHE_KEY
             ]
             if not candidates:
-                candidates = list(self._heater_name_map_cache)
+                candidates = list(self._heater_name_by_type_cache)
 
             if candidates:
                 evicted = candidates[0]
-                self._heater_name_map_cache.pop(evicted, None)
-                self._heater_name_map_factories.pop(evicted, None)
+                self._heater_name_by_type_cache.pop(evicted, None)
+                self._heater_name_by_type_factories.pop(evicted, None)
 
         _evict_stale_cache(signature)
 
-        self._heater_name_map_cache[signature] = mapping
-        self._heater_name_map_factories[signature] = factory
+        self._heater_name_by_type_cache[signature] = mapping
+        self._heater_name_by_type_factories[signature] = factory
         return mapping
 
     @staticmethod
@@ -1072,13 +1042,13 @@ def heater_platform_details_from_inventory(
 
 
 def boostable_accumulator_details_for_entry(
-    runtime: "EntryRuntime",
+    runtime: EntryRuntime,
     *,
     default_name_simple: Callable[[str], str],
     platform_name: str,
     logger: logging.Logger | None = None,
     accumulators_only: bool = True,
-) -> tuple["HeaterPlatformDetails", list[tuple[str, str, str]]]:
+) -> tuple[HeaterPlatformDetails, list[tuple[str, str, str]]]:
     """Return boostable accumulator metadata for a config entry."""
 
     from .heater import (  # noqa: PLC0415
