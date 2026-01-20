@@ -1271,8 +1271,6 @@ custom_components/termoweb/entities/climate.py :: AccumulatorClimateEntity.async
     Cancel the active accumulator boost session.
 custom_components/termoweb/entities/heater.py :: _build_boost_button_metadata
     Return the configured metadata describing boost helper buttons.
-custom_components/termoweb/entities/heater.py :: HeaterPlatformDetails.__iter__
-    Provide tuple-style iteration compatibility.
 custom_components/termoweb/entities/heater.py :: HeaterPlatformDetails.nodes_by_type
     Return nodes grouped by type from the immutable inventory.
 custom_components/termoweb/entities/heater.py :: HeaterPlatformDetails.addrs_by_type

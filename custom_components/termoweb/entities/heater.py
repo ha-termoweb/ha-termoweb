@@ -30,7 +30,6 @@ from custom_components.termoweb.domain.state import (
 )
 from custom_components.termoweb.i18n import COORDINATOR_FALLBACK_ATTR, format_fallback
 from custom_components.termoweb.inventory import (
-    HEATER_NODE_TYPES,
     Inventory,
     Node,
     normalize_node_addr,
@@ -90,13 +89,6 @@ class HeaterPlatformDetails:
 
     inventory: Inventory
     default_name_simple: Callable[[str], str]
-
-    def __iter__(self) -> Iterator[Any]:
-        """Provide tuple-style iteration compatibility."""
-
-        yield self.nodes_by_type
-        yield self.addrs_by_type
-        yield self.resolve_name
 
     @property
     def nodes_by_type(self) -> dict[str, list[Node]]:
@@ -464,18 +456,7 @@ def iter_boostable_heater_nodes(
 ) -> Iterator[tuple[str, Node, str, str]]:
     """Yield heater nodes that expose boost functionality."""
 
-    if isinstance(details, HeaterPlatformDetails):
-        metadata_iter = details.iter_metadata()
-    elif isinstance(details, Inventory):  # pragma: no cover - compatibility shim
-        metadata_iter = (
-            (meta.node_type, meta.node, meta.addr, meta.name)
-            for meta in details.iter_nodes_metadata(
-                node_types=HEATER_NODE_TYPES,
-                default_name_simple=lambda addr: f"Heater {addr}",
-            )
-        )
-    else:
-        return
+    metadata_iter = details.iter_metadata()
 
     if node_types is None:
         filter_types: set[str] | None = None
