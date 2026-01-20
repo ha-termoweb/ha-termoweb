@@ -1334,17 +1334,6 @@ class EnergyStateCoordinator(
             ws_deadline=ws_deadline,
         )
 
-    def metric_for(self, node_type: str, addr: str) -> EnergyNodeMetrics | None:
-        """Return metrics for ``node_type``/``addr`` when cached."""
-
-        snapshot = coerce_snapshot(self.data)
-        if snapshot is None or snapshot.dev_id != self._dev_id:
-            return None
-        node_id = self._node_id_for(node_type, addr)
-        if node_id is None:
-            return None
-        return snapshot.metrics.get(node_id)
-
     def metrics_by_type(self, node_type: str) -> dict[str, EnergyNodeMetrics]:
         """Return metrics mapping keyed by address for ``node_type``."""
 
