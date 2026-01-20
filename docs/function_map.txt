@@ -4,14 +4,6 @@ custom_components/termoweb/__init__.py :: _async_import_energy_history
     Delegate to the energy helper with shared rate limiting and filters.
 custom_components/termoweb/__init__.py :: _async_probe_unknown_node_types
     Log discovery probes for node types not yet supported.
-custom_components/termoweb/__init__.py :: _register_diagnostics_platform
-    Ensure diagnostics helpers are registered against Home Assistant.
-custom_components/termoweb/__init__.py :: _diagnostics_component_loaded
-    Return True if Home Assistant reports diagnostics as loaded.
-custom_components/termoweb/__init__.py :: _async_register_diagnostics_when_ready
-    Wait for diagnostics setup and register TermoWeb helpers.
-custom_components/termoweb/__init__.py :: _async_register_diagnostics_when_ready._async_import_diagnostics_module
-    Import the diagnostics module without blocking the event loop.
 custom_components/termoweb/__init__.py :: async_list_devices
     Call ``list_devices`` logging auth/connection issues consistently.
 custom_components/termoweb/__init__.py :: async_setup_entry
@@ -26,8 +18,6 @@ custom_components/termoweb/__init__.py :: async_setup_entry._on_ws_status
     Recalculate polling intervals when websocket state changes.
 custom_components/termoweb/__init__.py :: _collect_shutdown_targets
     Return shutdown targets or ``None`` if shutdown already ran.
-custom_components/termoweb/__init__.py :: _shutdown_diagnostics_task
-    Cancel and await the diagnostics task when present.
 custom_components/termoweb/__init__.py :: _shutdown_hourly_poller
     Stop the hourly poller when it exposes async_shutdown.
 custom_components/termoweb/__init__.py :: _shutdown_ws_tasks
