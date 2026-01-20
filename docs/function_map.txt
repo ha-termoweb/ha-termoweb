@@ -922,7 +922,6 @@ custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._prefill_ene
     Seed energy and power buckets from cached coordinator state.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._build_snapshot
     Return an :class:`EnergySnapshot` built from metric buckets.
-custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.metric_for
     Return metrics for ``node_type``/``addr`` when cached.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.metrics_by_type
     Return metrics mapping keyed by address for ``node_type``.
