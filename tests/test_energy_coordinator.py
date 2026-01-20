@@ -30,6 +30,8 @@ from custom_components.termoweb.domain.energy import (
     build_empty_snapshot,
     coerce_snapshot,
 )
+from custom_components.termoweb.domain.state import DomainStateStore
+from custom_components.termoweb.domain.view import DomainStateView
 from custom_components.termoweb.domain.ids import (
     NodeId as DomainNodeId,
     NodeType as DomainNodeType,
@@ -146,6 +148,42 @@ def test_update_nodes_accepts_inventory_container(
     assert coord._inventory is container
 
 
+def test_domain_view_energy_metrics_prune() -> None:
+    """Energy view reads should honor the store inventory."""
+
+    node_id_allowed = DomainNodeId(DomainNodeType.HEATER, "A")
+    node_id_blocked = DomainNodeId(DomainNodeType.HEATER, "B")
+    store = DomainStateStore([node_id_allowed])
+    snapshot = EnergySnapshot(
+        dev_id="dev",
+        metrics={
+            node_id_allowed: EnergyNodeMetrics(
+                energy_kwh=1.25,
+                power_w=250.0,
+                source="rest",
+                ts=123.0,
+            ),
+            node_id_blocked: EnergyNodeMetrics(
+                energy_kwh=9.0,
+                power_w=900.0,
+                source="ws",
+                ts=456.0,
+            ),
+        },
+        updated_at=500.0,
+        ws_deadline=None,
+    )
+
+    assert store.set_energy_snapshot(snapshot) is True
+
+    view = DomainStateView("dev", store)
+    metric = view.get_energy_metric(DomainNodeType.HEATER, "A")
+    assert metric is not None
+    assert metric.energy_kwh == pytest.approx(1.25)
+    assert view.get_energy_metric(DomainNodeType.HEATER, "B") is None
+    assert view.get_energy_metrics_for_type(DomainNodeType.HEATER) == {"A": metric}
+
+
 def test_power_calculation(
     monkeypatch: pytest.MonkeyPatch,
     inventory_from_map: Callable[
@@ -182,6 +220,53 @@ def test_power_calculation(
         assert _energy_metric(coord, "htr", "A") == pytest.approx(0.0015)
         power = _power_metric(coord, "htr", "A")
         assert power == pytest.approx(2.0, rel=1e-3)
+
+    asyncio.run(_run())
+
+
+def test_energy_coordinator_writes_snapshot_to_state_view(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    async def _run() -> None:
+        client = types.SimpleNamespace()
+        client.get_node_samples = AsyncMock(return_value=[{"t": 1000, "counter": 1000}])
+        client.get_node_settings = AsyncMock()
+
+        hass = HomeAssistant()
+        inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+        coordinator = StateCoordinator(
+            hass,
+            client,
+            30,
+            "dev",
+            build_device_metadata_payload("dev"),
+            nodes=None,
+            inventory=inventory,
+        )
+        energy = EnergyStateCoordinator(
+            hass,
+            client,
+            "dev",
+            inventory,
+            state_coordinator=coordinator,
+        )
+
+        def _fake_time() -> float:
+            return 1000.0
+
+        monkeypatch.setattr(coord_module.time, "time", _fake_time)
+        monkeypatch.setattr(coord_module, "time_mod", _fake_time)
+
+        await energy.async_refresh()
+
+        snapshot = coordinator.domain_view.get_energy_snapshot()
+        assert snapshot is not None
+        metric = coordinator.domain_view.get_energy_metric("htr", "A")
+        assert metric is not None
+        assert metric.energy_kwh == pytest.approx(1.0)
 
     asyncio.run(_run())
 

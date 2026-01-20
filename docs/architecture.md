@@ -56,8 +56,8 @@ This map defines responsibilities for each module family in the final design.
 - `runtime.py` — `EntryRuntime` definition, `require_runtime(...)` accessor, and
   runtime invariants (single instance per entry).
 - `inventory.py` — immutable inventory models and lookup helpers.
-- `domain/` — domain dataclasses, deltas, `DomainStateStore`, and
-  `DomainStateView`.
+- `domain/` — domain dataclasses, deltas, `DomainStateStore` (including energy
+  snapshots), and `DomainStateView`.
 - `backend/` — vendor-specific REST/WS clients (including the REST client
   implementation), protocol details, and brand selection.
 - `codecs/` — Pydantic payload models and conversion to/from domain types.

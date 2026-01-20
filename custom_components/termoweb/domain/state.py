@@ -7,6 +7,7 @@ from dataclasses import dataclass, fields
 import typing
 from typing import Any
 
+from .energy import EnergySnapshot
 from .ids import NodeId, NodeType
 
 
@@ -367,6 +368,7 @@ class DomainStateStore:
         self._allowed: dict[NodeId, NodeId] = {}
         self._addresses_by_type: dict[NodeType, set[str]] = {}
         self._gateway_connection = GatewayConnectionState()
+        self._energy_snapshot: EnergySnapshot | None = None
         self.reset_nodes(nodes)
 
     def reset_nodes(self, nodes: Iterable[NodeId]) -> None:
@@ -388,6 +390,29 @@ class DomainStateStore:
             for node_id, state in self._states.items()
             if node_id in allowed
         }
+        if self._energy_snapshot is not None:
+            self._energy_snapshot = self._prune_energy_snapshot(self._energy_snapshot)
+
+    def _prune_energy_snapshot(self, snapshot: EnergySnapshot) -> EnergySnapshot:
+        """Return ``snapshot`` with metrics restricted to allowed nodes."""
+
+        allowed = self._allowed
+        metrics = dict(snapshot.metrics)
+        if not metrics:
+            return snapshot
+        filtered = {
+            node_id: metrics_value
+            for node_id, metrics_value in metrics.items()
+            if node_id in allowed
+        }
+        if filtered == metrics:
+            return snapshot
+        return EnergySnapshot(
+            dev_id=snapshot.dev_id,
+            metrics=filtered,
+            updated_at=snapshot.updated_at,
+            ws_deadline=snapshot.ws_deadline,
+        )
 
     def _resolve_node_id(self, node_type: NodeType | str, addr: Any) -> NodeId | None:
         """Return a canonical NodeId when permitted by the inventory."""
@@ -486,6 +511,22 @@ class DomainStateStore:
         if node_id is None:
             return None
         return self._states.get(node_id)
+
+    def get_energy_snapshot(self) -> EnergySnapshot | None:
+        """Return the stored energy snapshot when available."""
+
+        return self._energy_snapshot
+
+    def set_energy_snapshot(self, snapshot: EnergySnapshot) -> bool:
+        """Store an energy snapshot and return ``True`` when it changed."""
+
+        if not isinstance(snapshot, EnergySnapshot):
+            return False
+        pruned = self._prune_energy_snapshot(snapshot)
+        if self._energy_snapshot == pruned:
+            return False
+        self._energy_snapshot = pruned
+        return True
 
     @property
     def addresses_by_type(self) -> dict[str, tuple[str, ...]]:
