@@ -230,8 +230,6 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._apply_pay
     Update the payload window using cadence metadata.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._reset_payload_window
     Reset the payload stale window to the default.
-custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._dispatch_nodes
-    Publish inventory-derived node addresses for downstream consumers.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._collect_sample_updates
     Extract heater sample updates from a websocket payload.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._nodes_to_deltas
@@ -416,10 +414,6 @@ custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._nodes_to_d
     Convert websocket node payloads into domain delta objects.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._apply_deltas_to_store
     Apply deltas to the domain store via the coordinator.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._dispatch_nodes
-    Publish node updates using the shared inventory metadata.
-custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._dispatch_nodes._send
-    Fire the dispatcher signal with the latest node payload.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._heater_sample_subscription_targets
     Return ordered ``(node_type, addr)`` heater sample subscriptions.
 custom_components/termoweb/backend/termoweb_ws.py :: WebSocketClient._heater_sample_subscription_targets._bind_inventory
@@ -528,8 +522,6 @@ custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._refresh_ws_pa
     Re-evaluate payload staleness and emit notifications if it changed.
 custom_components/termoweb/backend/ws_client.py :: _WSStatusMixin._update_status
     Publish websocket status updates to Home Assistant listeners.
-custom_components/termoweb/backend/ws_client.py :: _prepare_nodes_dispatch
-    Normalise node payload data for downstream websocket dispatch.
 custom_components/termoweb/backend/ws_client.py :: _WSCommon.__init__
     Initialise shared websocket state.
 custom_components/termoweb/backend/ws_client.py :: _WSCommon._throttle_connection_attempt
@@ -810,8 +802,6 @@ custom_components/termoweb/const.py :: get_brand_socketio_path
     Return the Socket.IO path for the selected brand.
 custom_components/termoweb/const.py :: uses_ducaheat_backend
     Return True when the brand maps to the Ducaheat backend.
-custom_components/termoweb/const.py :: signal_ws_data
-    Signal name for WS ‘data’ frames dispatched to platforms.
 custom_components/termoweb/const.py :: signal_ws_status
     Signal name for WS status/health updates.
 custom_components/termoweb/coordinator.py :: RaiseUpdateFailedCoordinator.async_refresh

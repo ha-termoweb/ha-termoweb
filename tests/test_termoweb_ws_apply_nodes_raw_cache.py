@@ -15,7 +15,6 @@ def test_apply_nodes_payload_does_not_cache(monkeypatch: pytest.MonkeyPatch) -> 
     """Runtime updates should be forwarded without duplicating node payloads."""
 
     client, _sio, _dispatcher = _make_client(monkeypatch)
-    client._dispatch_nodes = MagicMock(return_value={})
     client._forward_sample_updates = MagicMock()
     client._mark_event = MagicMock()
     payload: dict[str, Any] = {
@@ -34,7 +33,6 @@ def test_apply_nodes_payload_does_not_cache(monkeypatch: pytest.MonkeyPatch) -> 
 
     client._apply_nodes_payload(payload, merge=True, event="update")
 
-    client._dispatch_nodes.assert_called_once_with(payload["nodes"])
     client._forward_sample_updates.assert_called_once()
     client._mark_event.assert_called_once()
     assert not hasattr(client, "_nodes_raw")

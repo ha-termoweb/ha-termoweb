@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -24,13 +25,10 @@ def test_apply_nodes_payload_uses_raw_payload_on_normaliser_failure(
 
     client._client.normalise_ws_nodes = raise_runtime_error  # type: ignore[attr-defined]
 
-    captured: dict[str, Any] = {}
-
-    def capture_nodes(nodes: dict[str, Any]) -> None:
-        captured["nodes"] = nodes
-
-    client._dispatch_nodes = capture_nodes  # type: ignore[assignment]
+    client._forward_sample_updates = MagicMock()
 
     client._apply_nodes_payload(payload, merge=True, event="update")
 
-    assert captured["nodes"] is payload["nodes"]
+    client._forward_sample_updates.assert_called_once_with(
+        {"htr": {"samples": {"1": {"power": 10}}, "lease_seconds": None}}
+    )

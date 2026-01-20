@@ -21,7 +21,6 @@ from custom_components.termoweb.const import (
     BRAND_TERMOWEB,
     DOMAIN as TERMOWEB_DOMAIN,
     WS_NAMESPACE,
-    signal_ws_data,
     signal_ws_status,
 )
 from custom_components.termoweb.inventory import (
@@ -719,29 +718,6 @@ class _WSStatusMixin:
         self._sync_gateway_connection_state(now=now)
 
 
-@dataclass
-class NodeDispatchContext:
-    """Container for shared node dispatch metadata."""
-
-    payload: Any
-    inventory: Inventory | None
-
-
-def _prepare_nodes_dispatch(
-    *,
-    raw_nodes: Any,
-    inventory: Inventory | None = None,
-) -> NodeDispatchContext:
-    """Normalise node payload data for downstream websocket dispatch."""
-
-    inventory_container = inventory if isinstance(inventory, Inventory) else None
-
-    return NodeDispatchContext(
-        payload=raw_nodes,
-        inventory=inventory_container,
-    )
-
-
 class _WSCommon(_WSStatusMixin):
     """Shared helpers for websocket clients."""
 
@@ -802,31 +778,6 @@ class _WSCommon(_WSStatusMixin):
             dev_map["settings"] = {normalized_type: {}}
 
         return bucket
-
-    def _dispatch_nodes(self, payload: dict[str, Any]) -> None:
-        raw_nodes = payload.get("nodes") if "nodes" in payload else payload
-        context = _prepare_nodes_dispatch(
-            raw_nodes=raw_nodes,
-            inventory=self._inventory,
-        )
-        inventory = (
-            context.inventory if isinstance(context.inventory, Inventory) else None
-        )
-        if inventory is not None and not isinstance(self._inventory, Inventory):
-            self._inventory = inventory
-
-        if not isinstance(inventory, Inventory):
-            _LOGGER.error(
-                "WS: missing inventory for dispatch on device %s", self.dev_id
-            )
-            return
-
-        payload_copy = {
-            "dev_id": self.dev_id,
-            "node_type": None,
-            "inventory": inventory,
-        }
-        async_dispatcher_send(self.hass, signal_ws_data(self.entry_id), payload_copy)
 
 
 class WebSocketClient(_WsLeaseMixin, _WSStatusMixin):
