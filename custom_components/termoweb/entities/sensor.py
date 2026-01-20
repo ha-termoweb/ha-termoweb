@@ -21,7 +21,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from custom_components.termoweb.const import DOMAIN, signal_ws_data
 from custom_components.termoweb.coordinator import EnergyStateCoordinator
-from custom_components.termoweb.domain.energy import coerce_snapshot
+from custom_components.termoweb.domain.view import DomainStateView
 from custom_components.termoweb.entities.entity import GatewayDispatcherEntity
 from custom_components.termoweb.entities.heater import (
     HeaterNodeBase,
@@ -151,6 +151,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     runtime = require_runtime(hass, entry.entry_id)
     coordinator = runtime.coordinator
     dev_id = runtime.dev_id
+    domain_view = getattr(coordinator, "domain_view", None)
+    if not isinstance(domain_view, DomainStateView):
+        domain_view = None
 
     fallbacks = await async_get_fallback_translations(hass, runtime)
     attach_fallbacks(coordinator, fallbacks)
@@ -202,6 +205,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 energy_unique_id,
                 device_name=display_name,
                 inventory=heater_details.inventory,
+                domain_view=domain_view,
             )
         )
         power_monitor_entities.append(
@@ -213,6 +217,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 power_unique_id,
                 device_name=display_name,
                 inventory=heater_details.inventory,
+                domain_view=domain_view,
             )
         )
 
@@ -249,6 +254,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             _create_heater_sensors(
                 coordinator,
                 energy_coordinator,
+                domain_view,
                 entry.entry_id,
                 dev_id,
                 addr,
@@ -312,6 +318,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             dev_id,
             uid_total,
             heater_details,
+            domain_view,
         )
     )
 
@@ -537,6 +544,7 @@ class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
     def __init__(
         self,
         coordinator: EnergyStateCoordinator,
+        domain_view: DomainStateView | None,
         entry_id: str,
         dev_id: str,
         addr: str,
@@ -558,6 +566,9 @@ class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
             node_type=node_type,
             inventory=inventory,
         )
+        self._domain_view = (
+            domain_view if isinstance(domain_view, DomainStateView) else None
+        )
 
     def _device_available(self) -> bool:
         """Return True when inventory and coordinator expose this heater node."""
@@ -570,13 +581,12 @@ class HeaterEnergyBase(HeaterNodeBase, SensorEntity):
         return bool(coordinator_available)
 
     def _metric_entry(self) -> Any:
-        """Return the cached metric entry for this heater."""
+        """Return the energy metrics for this heater from the domain view."""
 
-        coordinator = getattr(self, "coordinator", None)
-        getter = getattr(coordinator, "metric_for", None)
-        if callable(getter):
-            return getter(self._node_type, self._addr)
-        return None
+        view = self._domain_view
+        if view is None:
+            return None
+        return view.get_energy_metric(self._node_type, self._addr)
 
     def _raw_native_value(self) -> Any:
         """Return the raw metric value for this heater address."""
@@ -770,6 +780,7 @@ class HeaterBoostEndSensor(HeaterNodeBase, SensorEntity):
 def _create_heater_sensors(
     coordinator: Any,
     energy_coordinator: EnergyStateCoordinator,
+    domain_view: DomainStateView | None,
     entry_id: str,
     dev_id: str,
     addr: str,
@@ -883,6 +894,7 @@ def _create_heater_sensors(
             (
                 energy_cls(
                     energy_coordinator,
+                    domain_view,
                     entry_id,
                     dev_id,
                     canonical_addr,
@@ -893,6 +905,7 @@ def _create_heater_sensors(
                 ),
                 power_cls(
                     energy_coordinator,
+                    domain_view,
                     entry_id,
                     dev_id,
                     canonical_addr,
@@ -969,6 +982,7 @@ class PowerMonitorSensorBase(CoordinatorEntity, SensorEntity):
         device_name: str,
         *,
         inventory: Inventory,
+        domain_view: DomainStateView | None = None,
     ) -> None:
         """Initialise the power monitor sensor base entity."""
 
@@ -980,6 +994,9 @@ class PowerMonitorSensorBase(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = unique_id
         self._device_name = device_name
         self._inventory: Inventory | None = inventory
+        self._domain_view = (
+            domain_view if isinstance(domain_view, DomainStateView) else None
+        )
 
     def _resolve_inventory(self) -> Inventory | None:
         """Return the immutable inventory backing this sensor."""
@@ -994,12 +1011,12 @@ class PowerMonitorSensorBase(CoordinatorEntity, SensorEntity):
         return None
 
     def _metric_entry(self) -> Any:
-        """Return the cached metric entry for this power monitor."""
+        """Return the energy metrics for this power monitor from the domain view."""
 
-        getter = getattr(self.coordinator, "metric_for", None)
-        if callable(getter):
-            return getter("pmo", self._addr)
-        return None
+        view = self._domain_view
+        if view is None:
+            return None
+        return view.get_energy_metric("pmo", self._addr)
 
     def _coerce_native_value(self, raw: Any) -> float | None:
         """Convert a metric payload value to ``float`` if possible."""
@@ -1102,6 +1119,7 @@ class InstallationTotalEnergySensor(
         dev_id: str,
         unique_id: str,
         details: HeaterPlatformDetails,
+        domain_view: DomainStateView | None,
     ) -> None:
         """Initialise the installation-wide energy sensor."""
         super().__init__(coordinator)
@@ -1109,6 +1127,9 @@ class InstallationTotalEnergySensor(
         self._dev_id = dev_id
         self._attr_unique_id = unique_id
         self._details = details
+        self._domain_view = (
+            domain_view if isinstance(domain_view, DomainStateView) else None
+        )
 
     @property
     def gateway_signal(self) -> str:
@@ -1130,20 +1151,22 @@ class InstallationTotalEnergySensor(
 
     @property
     def available(self) -> bool:
-        """Return True if the latest coordinator data contains totals."""
-        snapshot = coerce_snapshot(getattr(self, "coordinator", None).data)
-        return snapshot is not None and snapshot.dev_id == self._dev_id
+        """Return True if the domain view contains energy totals."""
+        view = self._domain_view
+        if view is None:
+            return False
+        return view.get_energy_snapshot() is not None
 
     @property
     def native_value(self) -> float | None:
         """Return the summed energy usage across all heaters."""
-        snapshot = coerce_snapshot(getattr(self, "coordinator", None).data)
-        if snapshot is None or snapshot.dev_id != self._dev_id:
+        view = self._domain_view
+        if view is None:
             return None
         total = 0.0
         found = False
         for node_type, addrs in self._details.addrs_by_type.items():
-            metrics_by_addr = snapshot.metrics_for_type(node_type)
+            metrics_by_addr = view.get_energy_metrics_for_type(node_type)
             if not metrics_by_addr:
                 continue
             for addr in addrs:

@@ -337,9 +337,126 @@ async def test_heater_energy_sensor_availability() -> None:
     energy_sensor = energy_entities[0]
     energy_sensor.hass = hass
     await energy_sensor.async_added_to_hass()
-
-    energy_coordinator.data = {}
     assert energy_sensor.available is True
 
     energy_coordinator.last_update_success = False
     assert energy_sensor.available is False
+
+
+def test_energy_sensors_read_domain_view_without_coordinator_data() -> None:
+    """Energy sensors should read metrics from the domain view only."""
+
+    module = importlib.import_module("custom_components.termoweb.sensor")
+    energy_module = importlib.import_module("custom_components.termoweb.domain.energy")
+    ids_module = importlib.import_module("custom_components.termoweb.domain.ids")
+    inventory_module = importlib.import_module("custom_components.termoweb.inventory")
+    state_module = importlib.import_module("custom_components.termoweb.domain.state")
+    view_module = importlib.import_module("custom_components.termoweb.domain.view")
+
+    dev_id = "dev-energy"
+    node_id = ids_module.NodeId(ids_module.NodeType.HEATER, "01")
+    store = state_module.DomainStateStore([node_id])
+    snapshot = energy_module.EnergySnapshot(
+        dev_id=dev_id,
+        metrics={
+            node_id: energy_module.EnergyNodeMetrics(
+                energy_kwh=2.5,
+                power_w=125.0,
+                source="test",
+                ts=0.0,
+            )
+        },
+        updated_at=0.0,
+        ws_deadline=None,
+    )
+    store.set_energy_snapshot(snapshot)
+    view = view_module.DomainStateView(dev_id, store)
+
+    raw_nodes = {"nodes": [{"type": "htr", "addr": "01", "name": "Heater"}]}
+    node_inventory = list(inventory_module.build_node_inventory(raw_nodes))
+    inventory = inventory_module.Inventory(dev_id, node_inventory)
+
+    class _Coordinator:
+        """Coordinator stub that forbids data access."""
+
+        last_update_success = True
+
+        @property
+        def data(self) -> None:
+            """Fail the test when coordinator data is accessed."""
+
+            raise AssertionError("Energy sensors must not access coordinator.data")
+
+    sensor = module.HeaterEnergyTotalSensor(
+        _Coordinator(),
+        view,
+        "entry-1",
+        dev_id,
+        "01",
+        "uid-1",
+        device_name="Heater",
+        node_type="htr",
+        inventory=inventory,
+    )
+
+    assert sensor.native_value == 2.5
+
+
+def test_power_monitor_sensors_read_domain_view_metrics() -> None:
+    """Power monitor sensors should read metrics from the domain view."""
+
+    module = importlib.import_module("custom_components.termoweb.sensor")
+    energy_module = importlib.import_module("custom_components.termoweb.domain.energy")
+    ids_module = importlib.import_module("custom_components.termoweb.domain.ids")
+    inventory_module = importlib.import_module("custom_components.termoweb.inventory")
+    state_module = importlib.import_module("custom_components.termoweb.domain.state")
+    view_module = importlib.import_module("custom_components.termoweb.domain.view")
+
+    dev_id = "dev-power"
+    node_id = ids_module.NodeId(ids_module.NodeType.POWER_MONITOR, "01")
+    store = state_module.DomainStateStore([node_id])
+    snapshot = energy_module.EnergySnapshot(
+        dev_id=dev_id,
+        metrics={
+            node_id: energy_module.EnergyNodeMetrics(
+                energy_kwh=1.0,
+                power_w=50.0,
+                source="test",
+                ts=0.0,
+            )
+        },
+        updated_at=0.0,
+        ws_deadline=None,
+    )
+    store.set_energy_snapshot(snapshot)
+    view = view_module.DomainStateView(dev_id, store)
+
+    inventory = inventory_module.Inventory(
+        dev_id,
+        [inventory_module.PowerMonitorNode(name="Monitor", addr="01")],
+    )
+
+    class _Coordinator:
+        """Coordinator stub that forbids data access."""
+
+        @property
+        def data(self) -> None:
+            """Fail the test when coordinator data is accessed."""
+
+            raise AssertionError(
+                "Power monitor sensors must not access coordinator.data"
+            )
+
+    sensor = module.PowerMonitorPowerSensor(
+        _Coordinator(),
+        "entry-1",
+        dev_id,
+        "01",
+        "uid-1",
+        device_name="Monitor",
+        inventory=inventory,
+        domain_view=view,
+    )
+
+    assert sensor.available is True
+    assert sensor.native_value == 50.0
