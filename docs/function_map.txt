@@ -834,6 +834,8 @@ custom_components/termoweb/coordinator.py :: StateCoordinator.gateway_connected
     Return True when the coordinator reports the gateway online.
 custom_components/termoweb/coordinator.py :: StateCoordinator.update_gateway_connection
     Update the gateway connection state in the domain store.
+custom_components/termoweb/coordinator.py :: StateCoordinator.apply_energy_snapshot
+    Store an energy snapshot in the domain state store.
 custom_components/termoweb/coordinator.py :: StateCoordinator._device_record
     Return a minimal coordinator payload for this device.
 custom_components/termoweb/coordinator.py :: StateCoordinator._publish_device_record
@@ -900,6 +902,10 @@ custom_components/termoweb/coordinator.py :: StateCoordinator._async_update_data
     Fetch the latest settings for every known node on each poll.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.__init__
     Initialize the heater energy coordinator.
+custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._publish_to_state_store
+    Update the canonical state store with ``snapshot``.
+custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.async_set_updated_data
+    Store ``data`` in the domain state before notifying listeners.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._resolve_inventory
     Return the active inventory, preferring ``candidate`` when provided.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._node_id_for
@@ -990,6 +996,8 @@ custom_components/termoweb/domain/state.py :: DomainStateStore.__init__
     Initialise the store for a set of allowable nodes.
 custom_components/termoweb/domain/state.py :: DomainStateStore.reset_nodes
     Reset the allowed node list and prune any stale state.
+custom_components/termoweb/domain/state.py :: DomainStateStore._prune_energy_snapshot
+    Return ``snapshot`` with metrics restricted to allowed nodes.
 custom_components/termoweb/domain/state.py :: DomainStateStore._resolve_node_id
     Return a canonical NodeId when permitted by the inventory.
 custom_components/termoweb/domain/state.py :: DomainStateStore.resolve_node_id
@@ -1004,6 +1012,10 @@ custom_components/termoweb/domain/state.py :: DomainStateStore.apply_delta
     Apply a typed domain delta to the store.
 custom_components/termoweb/domain/state.py :: DomainStateStore.get_state
     Return the stored state for ``(node_type, addr)`` when known.
+custom_components/termoweb/domain/state.py :: DomainStateStore.get_energy_snapshot
+    Return the stored energy snapshot when available.
+custom_components/termoweb/domain/state.py :: DomainStateStore.set_energy_snapshot
+    Store an energy snapshot and return ``True`` when it changed.
 custom_components/termoweb/domain/state.py :: DomainStateStore.addresses_by_type
     Return known addresses grouped by node type.
 custom_components/termoweb/domain/state.py :: DomainStateStore.known_types
@@ -1040,6 +1052,12 @@ custom_components/termoweb/domain/view.py :: DomainStateView.get_power_monitor_s
     Return the power monitor state for ``addr`` when present.
 custom_components/termoweb/domain/view.py :: DomainStateView.get_gateway_connection_state
     Return the gateway connection state when available.
+custom_components/termoweb/domain/view.py :: DomainStateView.get_energy_snapshot
+    Return the latest energy snapshot for this gateway.
+custom_components/termoweb/domain/view.py :: DomainStateView.get_energy_metric
+    Return metrics for ``(node_type, addr)`` when available.
+custom_components/termoweb/domain/view.py :: DomainStateView.get_energy_metrics_for_type
+    Return metrics keyed by address for ``node_type``.
 custom_components/termoweb/energy.py :: RecorderImports.__init__
     Initialize the recorder import references.
 custom_components/termoweb/energy.py :: _iso_date

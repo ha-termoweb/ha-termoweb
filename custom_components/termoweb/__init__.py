@@ -422,7 +422,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         brand=brand,
     )
 
-    energy_coordinator = EnergyStateCoordinator(hass, client, dev_id, inventory)
+    energy_coordinator = EnergyStateCoordinator(
+        hass,
+        client,
+        dev_id,
+        inventory,
+        state_coordinator=coordinator,
+    )
     await energy_coordinator.async_config_entry_first_refresh()
 
     poller = HourlySamplesPoller(hass, energy_coordinator, backend, inventory)

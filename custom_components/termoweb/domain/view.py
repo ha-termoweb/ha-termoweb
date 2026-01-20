@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from .ids import NodeType
+from .energy import EnergyNodeMetrics, EnergySnapshot
+from .ids import NodeId, NodeType, normalize_node_type
 from .state import (
     DomainState,
     DomainStateStore,
@@ -58,3 +59,41 @@ class DomainStateView:
         if self._store is None:
             return GatewayConnectionState()
         return self._store.get_gateway_connection_state()
+
+    def get_energy_snapshot(self) -> EnergySnapshot | None:
+        """Return the latest energy snapshot for this gateway."""
+
+        if self._store is None:
+            return None
+        snapshot = self._store.get_energy_snapshot()
+        if snapshot is None or snapshot.dev_id != self._dev_id:
+            return None
+        return snapshot
+
+    def get_energy_metric(
+        self, node_type: NodeType | str, addr: str
+    ) -> EnergyNodeMetrics | None:
+        """Return metrics for ``(node_type, addr)`` when available."""
+
+        snapshot = self.get_energy_snapshot()
+        if snapshot is None:
+            return None
+        try:
+            normalized_type = normalize_node_type(node_type)
+        except ValueError:
+            return None
+        try:
+            node_id = NodeId(normalized_type, addr)
+        except ValueError:
+            return None
+        return snapshot.metrics.get(node_id)
+
+    def get_energy_metrics_for_type(
+        self, node_type: NodeType | str
+    ) -> dict[str, EnergyNodeMetrics]:
+        """Return metrics keyed by address for ``node_type``."""
+
+        snapshot = self.get_energy_snapshot()
+        if snapshot is None:
+            return {}
+        return snapshot.metrics_for_type(node_type)

@@ -256,6 +256,23 @@ class StateCoordinator(
         store.set_gateway_connection_state(state)
         self._publish_device_record()
 
+    def apply_energy_snapshot(self, snapshot: EnergySnapshot) -> None:
+        """Store an energy snapshot in the domain state store."""
+
+        if not isinstance(snapshot, EnergySnapshot):
+            return
+        if snapshot.dev_id != self._dev_id:
+            return
+        inventory = self._inventory
+        if not isinstance(inventory, Inventory):
+            return
+        store = self._state_store or self._ensure_state_store(inventory)
+        if store is None:
+            return
+        changed = store.set_energy_snapshot(snapshot)
+        if changed:
+            self._publish_device_record()
+
     def _device_record(self) -> dict[str, dict[str, Any]]:
         """Return a minimal coordinator payload for this device."""
 
@@ -1134,6 +1151,7 @@ class EnergyStateCoordinator(
         client: RESTClient,
         dev_id: str,
         inventory: Inventory | None,
+        state_coordinator: StateCoordinator | None = None,
     ) -> None:
         """Initialize the heater energy coordinator."""
         super().__init__(
@@ -1151,6 +1169,10 @@ class EnergyStateCoordinator(
         self._ws_lease: float = 0.0
         self._ws_deadline: float | None = None
         self._ws_margin_default = 60.0
+        if isinstance(state_coordinator, StateCoordinator):
+            self._state_coordinator = state_coordinator
+        else:
+            self._state_coordinator = None
         self._counter_scales: dict[str, float] = {
             "htr": 1000.0,
             "acm": 1000.0,
@@ -1158,6 +1180,21 @@ class EnergyStateCoordinator(
         }
         self.update_addresses(inventory)
         self.data = build_empty_snapshot(dev_id)
+
+    def _publish_to_state_store(self, snapshot: EnergySnapshot) -> None:
+        """Update the canonical state store with ``snapshot``."""
+
+        coordinator = self._state_coordinator
+        if coordinator is None:
+            return
+        coordinator.apply_energy_snapshot(snapshot)
+
+    def async_set_updated_data(self, data: EnergySnapshot) -> None:
+        """Store ``data`` in the domain state before notifying listeners."""
+
+        if isinstance(data, EnergySnapshot):
+            self._publish_to_state_store(data)
+        super().async_set_updated_data(data)
 
     def _resolve_inventory(self, candidate: Inventory | None = None) -> Inventory:
         """Return the active inventory, preferring ``candidate`` when provided."""
@@ -1432,8 +1469,11 @@ class EnergyStateCoordinator(
         if self._should_skip_poll():
             if existing_snapshot is not None:
                 _LOGGER.debug("Energy poll skipped (fresh websocket samples)")
+                self._publish_to_state_store(existing_snapshot)
                 return existing_snapshot
-            return build_empty_snapshot(self._dev_id, ws_deadline=self._ws_deadline)
+            snapshot = build_empty_snapshot(self._dev_id, ws_deadline=self._ws_deadline)
+            self._publish_to_state_store(snapshot)
+            return snapshot
 
         dev_id = self._dev_id
         try:
@@ -1479,6 +1519,7 @@ class EnergyStateCoordinator(
         else:
             self.update_interval = self._base_interval
             self._ws_deadline = None
+            self._publish_to_state_store(snapshot)
             return snapshot
 
     def _should_skip_poll(self) -> bool:
