@@ -47,7 +47,6 @@ class EntryRuntime:
     boost_runtime: dict[str, dict[str, int]] = field(default_factory=dict)
     boost_temperature: dict[str, dict[str, float]] = field(default_factory=dict)
     climate_entities: dict[str, dict[str, str]] = field(default_factory=dict)
-    diagnostics_task: asyncio.Task | None = None
     fallback_translations: dict[str, str] | None = None
     recalc_poll: Callable[[], None] | None = None
     start_ws: Callable[[str], Awaitable[None]] | None = None
