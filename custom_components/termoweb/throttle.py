@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-"""Shared throttling helpers for the TermoWeb integration."""
-
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -79,7 +77,7 @@ def default_samples_rate_limit_state(
 ) -> MonotonicRateLimiter:
     """Return the shared rate limiter for heater samples requests."""
 
-    global _SAMPLES_RATE_LIMITER
+    global _SAMPLES_RATE_LIMITER  # noqa: PLW0603
     if _SAMPLES_RATE_LIMITER is None:
         _SAMPLES_RATE_LIMITER = _new_samples_rate_limiter(
             time_module=time_module,
@@ -98,6 +96,5 @@ def reset_samples_rate_limit_state(
 ) -> None:
     """Reset the shared samples rate limiter to its initial state."""
 
-    global _SAMPLES_RATE_LIMITER
     limiter = default_samples_rate_limit_state(time_module=time_module, sleep=sleep)
     limiter.reset()
