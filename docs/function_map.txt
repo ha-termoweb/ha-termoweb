@@ -54,6 +54,8 @@ custom_components/termoweb/backend/base.py :: HttpClientProto.get_node_settings
     Return settings for the specified node.
 custom_components/termoweb/backend/base.py :: HttpClientProto.set_node_settings
     Update node settings for the specified node.
+custom_components/termoweb/backend/base.py :: HttpClientProto.set_acm_boost_state
+    Toggle accumulator boost state for the specified node.
 custom_components/termoweb/backend/base.py :: HttpClientProto.get_node_samples
     Return historical samples for the specified node.
 custom_components/termoweb/backend/base.py :: WsClientProto.start
@@ -68,6 +70,8 @@ custom_components/termoweb/backend/base.py :: Backend.client
     Return the HTTP client associated with this backend.
 custom_components/termoweb/backend/base.py :: Backend.set_node_settings
     Update node settings using the backend client.
+custom_components/termoweb/backend/base.py :: Backend.set_acm_boost_state
+    Toggle accumulator boost state using the backend client.
 custom_components/termoweb/backend/base.py :: Backend.create_ws_client
     Create a websocket client for the given device.
 custom_components/termoweb/backend/base.py :: Backend.fetch_hourly_samples
@@ -1367,7 +1371,7 @@ custom_components/termoweb/entities/heater.py :: HeaterNodeBase.hass
 custom_components/termoweb/entities/heater.py :: HeaterNodeBase.boost_state
     Return derived boost metadata for this heater.
 custom_components/termoweb/entities/heater.py :: HeaterNodeBase._client
-    Return the REST client used for write operations.
+    Return the backend used for write operations.
 custom_components/termoweb/entities/heater.py :: HeaterNodeBase._units
     Return the configured temperature units for this heater.
 custom_components/termoweb/entities/heater.py :: HeaterNodeBase.device_info
