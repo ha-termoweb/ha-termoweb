@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib
 from types import SimpleNamespace
 from typing import Any, Callable
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -188,7 +187,12 @@ async def test_async_setup_entry_handles_missing_power_monitors(
         entities_sensor_module, "InstallationTotalEnergySensor", _DummyTotalEnergy
     )
 
-    energy_coordinator = SimpleNamespace(update_addresses=MagicMock())
+    energy_coordinator = EnergyStateCoordinator(
+        hass,
+        SimpleNamespace(),
+        "dev-1",
+        inventory,
+    )
     build_entry_runtime(
         hass=hass,
         entry_id=entry.entry_id,
@@ -206,7 +210,6 @@ async def test_async_setup_entry_handles_missing_power_monitors(
 
     await module.async_setup_entry(hass, entry, _async_add_entities)
 
-    energy_coordinator.update_addresses.assert_called_once_with(inventory)
     assert iter_calls == [(("pmo",), None)]
     assert added_entities[:3] == [
         "temp-sensor",

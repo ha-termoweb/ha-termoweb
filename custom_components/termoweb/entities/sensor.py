@@ -174,14 +174,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     energy_coordinator = runtime.energy_coordinator
     if not isinstance(energy_coordinator, EnergyStateCoordinator):
-        if not hasattr(energy_coordinator, "update_addresses"):
-            energy_coordinator = EnergyStateCoordinator(
-                hass, runtime.client, dev_id, inventory
-            )
-            runtime.energy_coordinator = energy_coordinator
-            await energy_coordinator.async_config_entry_first_refresh()
-
-    energy_coordinator.update_addresses(inventory)
+        listener = getattr(energy_coordinator, "async_add_listener", None)
+        if not callable(listener):
+            _LOGGER.error("Energy coordinator unavailable for %s", dev_id)
+            return
     attach_fallbacks(energy_coordinator, fallbacks)
 
     power_monitor_entities: list[SensorEntity] = []
