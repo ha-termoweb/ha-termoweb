@@ -1,5 +1,10 @@
 # Developer notes
 
+## Architecture reference
+
+Review the authoritative architecture overview before making structural
+changes: [`docs/architecture.md`](./architecture.md).
+
 ## Backend factory API change
 
 The `create_backend` helper in `custom_components.termoweb.backend.factory` no longer accepts a

@@ -1,5 +1,7 @@
 # TermoWeb v2 refactor status
 
+Historical: v2 refactor tracking (no longer active).
+
 ## Status
 
 The v2 refactor is a **clean-slate** effort for internal architecture. There is
@@ -8,11 +10,9 @@ Documentation defines the target end state and the code must converge toward
 it. Vendor payload schemas are stable external contracts and are not subject to
 legacy removal.
 
-## Authoritative references
+## Authoritative references (historical)
 
-- `docs/architecture.md` — target architecture and module map
-- `docs/design_contract.md` — non-negotiable rules
-- `docs/legacy_removal.md` — deletion checklist for legacy artifacts
+- `docs/architecture.md` — architecture overview and module map
 
 ## What "done" means
 

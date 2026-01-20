@@ -1,5 +1,7 @@
 # Legacy Removal Checklist
 
+Historical: v2 refactor tracking (no longer active).
+
 Use this checklist to verify that **no legacy or transitional code** remains
 inside the integration. Vendor REST/WS payload schemas are stable external
 contracts and are not subject to "legacy removal."

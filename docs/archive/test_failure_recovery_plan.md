@@ -1,5 +1,7 @@
 # Test Failure Recovery Plan
 
+Historical: v2 refactor tracking (no longer active).
+
 The recent backend sanitisation changes tightened accumulator boost validation, requiring `boost_time` values to be between 60 and 600 minutes in 60-minute increments. Several legacy tests still expect the previous behaviour and now fail. The following focused tasks update the affected test suites. Each task edits a single test module so the fixes can be executed in parallel without conflicts.
 
 1. **tests/test_api.py** – Update accumulator API helper tests to use valid `boost_time` increments and assert the new validation error text. Refresh fixtures and parametrised cases that currently rely on 15-, 30-, or 45-minute durations.
