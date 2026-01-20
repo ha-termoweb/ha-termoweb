@@ -1,16 +1,15 @@
 # HA-TermoWeb Architecture Overview
 
-This document defines the **target end state** for the TermoWeb integration.
-It is authoritative: implementation work must align to this design and remove
-any legacy or transitional paths that conflict with it.
+This document defines the authoritative **v2 architecture** for the TermoWeb
+integration. **v2.0.1** is the clean release of this architecture.
 
-## Design principles
+## Architecture invariants
 
 - **Latest Home Assistant only.** The integration targets the current HA
   baseline (`homeassistant>=2025.1.0`). There are no compatibility shims or
   fallback imports for older versions.
-- **Docs-first contract.** Documentation describes the final architecture; code
-  changes must move the runtime toward this end state.
+- **Single architecture.** There is one canonical implementation path; legacy
+  or transitional code is not allowed.
 - **Vendor payloads are fixed.** Vendor REST/WS schemas are stable external
   contracts. Wire models keep vendor field names intact; normalization happens
   after decoding into domain state.
