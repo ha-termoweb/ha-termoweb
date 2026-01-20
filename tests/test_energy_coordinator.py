@@ -1512,6 +1512,8 @@ def test_state_coordinator_update_nodes_uses_provided_inventory(
         [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
     ],
 ) -> None:
+    """Inventory rebinding after setup should be rejected."""
+
     hass = HomeAssistant()
     client = types.SimpleNamespace()
     nodes = {"nodes": [{"addr": "A", "type": "htr"}]}
@@ -1529,11 +1531,11 @@ def test_state_coordinator_update_nodes_uses_provided_inventory(
         inventory=inventory,
     )
 
-    coord.update_nodes(nodes, inventory=provided_inventory)
+    with pytest.raises(ValueError, match="Inventory rebinding"):
+        coord.update_nodes(nodes, inventory=provided_inventory)
 
     inventory = coord._inventory
-    assert inventory is provided_inventory
-    assert inventory.nodes[0] is provided_nodes[0]
+    assert inventory is not provided_inventory
 
 
 def test_energy_state_coordinator_requires_inventory(

@@ -775,7 +775,13 @@ class StateCoordinator(
         *,
         inventory: Inventory | None = None,
     ) -> None:
-        """Update cached inventory metadata."""
+        """Update cached inventory metadata when first configured."""
+
+        if self._inventory is not None:
+            if inventory is None or inventory is self._inventory:
+                return
+            msg = "Inventory rebinding is not allowed after setup"
+            raise ValueError(msg)
 
         if isinstance(inventory, Inventory):
             self._inventory = inventory

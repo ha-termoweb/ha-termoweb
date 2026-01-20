@@ -889,7 +889,7 @@ custom_components/termoweb/coordinator.py :: StateCoordinator._apply_boost_metad
 custom_components/termoweb/coordinator.py :: StateCoordinator._should_defer_pending_setting
     Return True when a pending write should defer payload merging.
 custom_components/termoweb/coordinator.py :: StateCoordinator.update_nodes
-    Update cached inventory metadata.
+    Update cached inventory metadata when first configured.
 custom_components/termoweb/coordinator.py :: StateCoordinator._ensure_inventory
     Ensure cached inventory metadata is available.
 custom_components/termoweb/coordinator.py :: StateCoordinator._node_ids_from_inventory
