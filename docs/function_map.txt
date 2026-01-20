@@ -1499,7 +1499,7 @@ custom_components/termoweb/entities/sensor.py :: HeaterEnergyBase.__init__
 custom_components/termoweb/entities/sensor.py :: HeaterEnergyBase._device_available
     Return True when inventory and coordinator expose this heater node.
 custom_components/termoweb/entities/sensor.py :: HeaterEnergyBase._metric_entry
-    Return the cached metric entry for this heater.
+    Return the energy metrics for this heater from the domain view.
 custom_components/termoweb/entities/sensor.py :: HeaterEnergyBase._raw_native_value
     Return the raw metric value for this heater address.
 custom_components/termoweb/entities/sensor.py :: HeaterEnergyBase._coerce_native_value
@@ -1533,7 +1533,7 @@ custom_components/termoweb/entities/sensor.py :: PowerMonitorSensorBase.__init__
 custom_components/termoweb/entities/sensor.py :: PowerMonitorSensorBase._resolve_inventory
     Return the immutable inventory backing this sensor.
 custom_components/termoweb/entities/sensor.py :: PowerMonitorSensorBase._metric_entry
-    Return the cached metric entry for this power monitor.
+    Return the energy metrics for this power monitor from the domain view.
 custom_components/termoweb/entities/sensor.py :: PowerMonitorSensorBase._coerce_native_value
     Convert a metric payload value to ``float`` if possible.
 custom_components/termoweb/entities/sensor.py :: PowerMonitorSensorBase.should_poll
@@ -1557,7 +1557,7 @@ custom_components/termoweb/entities/sensor.py :: InstallationTotalEnergySensor.d
 custom_components/termoweb/entities/sensor.py :: InstallationTotalEnergySensor._handle_gateway_dispatcher
     Handle websocket payloads that may update the totals.
 custom_components/termoweb/entities/sensor.py :: InstallationTotalEnergySensor.available
-    Return True if the latest coordinator data contains totals.
+    Return True if the domain view contains energy totals.
 custom_components/termoweb/entities/sensor.py :: InstallationTotalEnergySensor.native_value
     Return the summed energy usage across all heaters.
 custom_components/termoweb/entities/sensor.py :: InstallationTotalEnergySensor.extra_state_attributes
