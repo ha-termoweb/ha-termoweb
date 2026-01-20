@@ -52,12 +52,9 @@ def test_binary_sensor_setup_and_dispatch(
             hass,
             dev_id=dev_id,
             inventory=inventory,
-            data={
-                dev_id: {
-                    "name": "Living Room",  # attributes
-                    "connected": True,
-                    "model": "TW-GW",
-                }
+            dev={
+                "name": "Living Room",
+                "model": "TW-GW",
             },
         )
 

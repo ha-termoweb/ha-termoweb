@@ -167,7 +167,7 @@ def test_build_gateway_device_info_respects_include_version_flag() -> None:
         dev_id="dev",
         brand="Ducaheat",
         version="9.1",
-        coordinator=types.SimpleNamespace(data={"dev": {"model": "Controller"}}),
+        coordinator=types.SimpleNamespace(gateway_model="Controller"),
     )
 
     info = build_gateway_device_info(hass, "entry", "dev", include_version=False)
@@ -183,7 +183,7 @@ def test_build_gateway_device_info_uses_gateway_model_from_coordinator() -> None
         hass=hass,
         entry_id="entry",
         dev_id="dev",
-        coordinator=types.SimpleNamespace(data={"dev": {"model": "Controller"}}),
+        coordinator=types.SimpleNamespace(gateway_model="Controller"),
     )
 
     info = build_gateway_device_info(hass, "entry", "dev")
@@ -191,13 +191,13 @@ def test_build_gateway_device_info_uses_gateway_model_from_coordinator() -> None
     assert info["model"] == "Controller"
 
 
-def test_build_gateway_device_info_ignores_non_mapping_coordinator_data() -> None:
+def test_build_gateway_device_info_ignores_empty_gateway_model() -> None:
     hass = types.SimpleNamespace(data={DOMAIN: {}})
     build_entry_runtime(
         hass=hass,
         entry_id="entry",
         dev_id="dev",
-        coordinator=types.SimpleNamespace(data=[1, 2, 3]),
+        coordinator=types.SimpleNamespace(gateway_model=""),
     )
 
     info = build_gateway_device_info(hass, "entry", "dev")
@@ -222,26 +222,6 @@ def test_build_power_monitor_device_info_uses_fallback_translation() -> None:
 
     assert info["name"] == "Meter 01"
     assert info["identifiers"] == {(DOMAIN, "dev", "pmo", "01")}
-
-
-def test_build_gateway_device_info_discards_truthy_non_mapping_data() -> None:
-    class TruthyNonMapping:
-        def __bool__(self) -> bool:
-            return True
-
-    hass = types.SimpleNamespace(
-        data={
-            DOMAIN: {
-                "entry": {
-                    "coordinator": types.SimpleNamespace(data=TruthyNonMapping()),
-                }
-            }
-        }
-    )
-
-    info = build_gateway_device_info(hass, "entry", "dev")
-
-    assert info["model"] == "Gateway/Controller"
 
 
 def test_normalize_heater_addresses_with_none() -> None:

@@ -2057,6 +2057,8 @@ class FakeCoordinator:
             metadata = build_device_metadata(dev_id, normalised_dev)
 
         self.dev_metadata = metadata
+        self.gateway_name = self.dev_metadata.name
+        self.gateway_model = self.dev_metadata.model
         self.dev = self._normalise_device_record(normalised_dev)
         self.nodes = nodes or {}
         inventory_obj, nodes_list = _coerce_inventory(inventory)
