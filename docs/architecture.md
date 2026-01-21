@@ -1,7 +1,7 @@
 # HA-TermoWeb Architecture Overview
 
 This document defines the authoritative **v2 architecture** for the TermoWeb
-integration. **v2.0.1** is the clean release of this architecture.
+integration. **v2.0.2** is the clean release of this architecture.
 
 ## Architecture invariants
 

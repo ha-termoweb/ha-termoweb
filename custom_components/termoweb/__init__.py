@@ -14,7 +14,8 @@ import typing
 from typing import Any
 
 from aiohttp import ClientError
-from homeassistant.config_entries import ConfigEntry, SupportsDiagnostics
+from homeassistant import config_entries as config_entries_module
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
@@ -53,6 +54,8 @@ from .throttle import reset_samples_rate_limit_state
 from .utils import async_get_integration_version as _async_get_integration_version
 
 _LOGGER = logging.getLogger(__name__)
+
+SupportsDiagnostics = getattr(config_entries_module, "SupportsDiagnostics", None)
 
 PLATFORMS = ["button", "binary_sensor", "climate", "number", "sensor"]
 
@@ -182,7 +185,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         )
     brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
 
-    entry.supports_diagnostics = SupportsDiagnostics.YES
+    supports_diagnostics_value = (
+        SupportsDiagnostics.YES if SupportsDiagnostics is not None else True
+    )
+    entry.supports_diagnostics = supports_diagnostics_value
     update_payload = entry.data | {"supports_diagnostics": True}
     update_method = getattr(entry, "async_update", None)
     if callable(update_method):

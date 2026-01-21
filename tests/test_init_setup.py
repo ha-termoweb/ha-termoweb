@@ -525,6 +525,34 @@ def test_async_setup_entry_sets_supports_diagnostics(
     assert entry.supports_diagnostics is sentinel.YES
 
 
+def test_async_setup_entry_sets_supports_diagnostics_boolean_when_enum_missing(
+    termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ensure diagnostics support falls back to boolean when enum is absent."""
+
+    class DiagnosticsClient(BaseFakeClient):
+        async def list_devices(self) -> list[dict[str, Any]]:
+            return [{"dev_id": "dev-1"}]
+
+    monkeypatch.setattr(backend_factory, "RESTClient", DiagnosticsClient)
+    monkeypatch.setattr(termoweb_init, "SupportsDiagnostics", None)
+
+    entry = DiagnosticsConfigEntry(
+        "diag-bool", data={"username": "user", "password": "pw"}
+    )
+    stub_hass.config_entries.add(entry)
+
+    async def _run() -> bool:
+        result = await termoweb_init.async_setup_entry(stub_hass, entry)
+        await _drain_tasks(stub_hass)
+        return result
+
+    assert asyncio.run(_run()) is True
+    assert entry.supports_diagnostics is True
+    assert entry.update_calls[-1]["supports_diagnostics"] is True
+    assert entry.data["supports_diagnostics"] is True
+
+
 def test_async_setup_entry_unknown_node_probe(
     termoweb_init: Any,
     stub_hass: HomeAssistant,
