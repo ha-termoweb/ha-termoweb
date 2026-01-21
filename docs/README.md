@@ -1,7 +1,7 @@
 # TermoWeb integration documentation
 
 Welcome to the TermoWeb Home Assistant integration docs. The v2 architecture is
-stable, and **v2.0.1** is the clean release.
+stable, and **v2.0.2** is the clean release.
 
 ## Start here
 
