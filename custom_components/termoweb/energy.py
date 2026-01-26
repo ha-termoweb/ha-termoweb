@@ -8,12 +8,7 @@ from datetime import UTC, datetime, timedelta
 import logging
 from typing import Any, cast
 
-from homeassistant.components.recorder.statistics import (
-    async_delete_statistics,
-    async_get_last_statistics,
-    async_get_statistics_during_period,
-    async_import_statistics,
-)
+from homeassistant.components.recorder import statistics as recorder_stats
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
@@ -50,12 +45,26 @@ async def _clear_statistics(
     end_time: datetime | None = None,
 ) -> str:
     """Delete statistics using recorder statistics helpers."""
-    await async_delete_statistics(
-        hass,
-        [statistic_id],
-        start_time=start_time,
-        end_time=end_time,
-    )
+    delete_stats = getattr(recorder_stats, "async_delete_statistics", None)
+    if delete_stats is None:
+        delete_stats = getattr(recorder_stats, "async_clear_statistics", None)
+
+    if delete_stats is None:
+        _LOGGER.error(
+            "%s: recorder statistics delete helper unavailable; skipping deletion",
+            statistic_id,
+        )
+        return "delete"
+
+    try:
+        await delete_stats(
+            hass,
+            [statistic_id],
+            start_time=start_time,
+            end_time=end_time,
+        )
+    except TypeError:
+        await delete_stats(hass, [statistic_id])
     return "delete"
 
 
@@ -66,7 +75,7 @@ async def _statistics_during_period(
     statistic_ids: set[str],
 ) -> dict[str, list[Any]]:
     """Return recorder statistics rows for the provided period."""
-    return await async_get_statistics_during_period(
+    return await recorder_stats.async_get_statistics_during_period(
         hass,
         start_time,
         end_time,
@@ -86,7 +95,7 @@ async def _get_last_statistics(
 ) -> dict[str, list[Any]]:
     """Return the most recent recorder statistics row for ``statistic_id``."""
     types = types or {"state", "sum"}
-    return await async_get_last_statistics(
+    return await recorder_stats.async_get_last_statistics(
         hass,
         number_of_stats,
         [statistic_id],
@@ -110,7 +119,7 @@ async def _store_statistics(
     import_metadata = dict(metadata)
     import_metadata.update({"source": "recorder", "statistic_id": stat_id})
 
-    await async_import_statistics(hass, import_metadata, stats)
+    await recorder_stats.async_import_statistics(hass, import_metadata, stats)
 
 
 def _statistics_row_get(row: Any, key: str) -> Any:

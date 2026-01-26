@@ -269,7 +269,10 @@ async def test_store_statistics_imports_entity_series(
         captured["stats"] = stats_arg
 
     monkeypatch.setattr(
-        energy, "async_import_statistics", _capture_import_stats, raising=False
+        energy.recorder_stats,
+        "async_import_statistics",
+        _capture_import_stats,
+        raising=False,
     )
 
     await energy._store_statistics(hass, metadata, stats)
