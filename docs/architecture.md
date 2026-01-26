@@ -111,6 +111,9 @@ flowchart LR
 - REST requests must be rate-limited and treated as a fallback when WebSocket
   updates are unavailable.
 - The `import_energy_history` service must throttle to **1 query per second**.
+- Energy history cleanup uses whichever recorder statistics delete helper is
+  available in the running Home Assistant version; missing helpers are logged
+  and deletion is skipped.
 - Inventory-driven assumptions (node list, addresses, and types) are immutable
   for the life of the entry; if hardware changes, the user must reload the
   integration.
