@@ -531,6 +531,59 @@ def test_thermostat_climate_entity_maps_settings(
     assert entity.extra_state_attributes["prog"] == prog
 
 
+def test_heater_climate_entity_exposes_temporary_override_preset(
+    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Expose modified_auto as HVAC auto plus temporary override preset."""
+
+    _reset_environment()
+    hass = HomeAssistant()
+    dev_id = "dev-htr-override"
+    addr = "11"
+    raw_nodes = {"nodes": [{"type": "htr", "addr": addr}]}
+    inventory = climate_inventory(dev_id, raw_nodes)
+
+    payload = {
+        "mode": "modified_auto",
+        "state": "on",
+        "stemp": "20.0",
+        "mtemp": "19.0",
+        "units": "C",
+    }
+
+    coordinator_record = build_coordinator_device_state(
+        nodes=raw_nodes,
+        settings={"htr": {addr: payload}},
+    )
+    coordinator = _make_coordinator(
+        hass,
+        dev_id,
+        coordinator_record,
+        client=AsyncMock(),
+        inventory=inventory,
+    )
+
+    entity = HeaterClimateEntity(
+        coordinator,
+        "entry-htr-override",
+        dev_id,
+        addr,
+        "Heater 11",
+        node_type="htr",
+        inventory=inventory,
+    )
+
+    assert entity.hvac_mode == HVACMode.AUTO
+    assert entity.preset_modes == ["none", "temporary_override"]
+    assert entity.preset_mode == "temporary_override"
+
+    with caplog.at_level(logging.INFO):
+        asyncio.run(entity.async_set_preset_mode("temporary_override"))
+
+    assert "Ignoring preset_mode write for heater" in caplog.text
+
+
 def test_async_setup_entry_default_names_and_invalid_nodes(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
