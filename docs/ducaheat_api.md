@@ -52,8 +52,11 @@ Examples observed:
 ```json
 {"mode":"off"}
 {"mode":"manual","stemp":"20.5","units":"C"}
+{"mode":"modified_auto","stemp":"20.5","units":"C"}
 {"ice_temp":"5.0","eco_temp":"17.5","comf_temp":"20.5","units":"C"}
 ```
+
+Mode note: `modified_auto` is a temporary setpoint override for the current Auto schedule period. At the next schedule boundary, the backend resumes normal `auto` behavior.
 
 Formatting rules:
 - Temperatures are **strings with exactly one decimal**, e.g. `"22.0"`.
@@ -63,7 +66,7 @@ Formatting rules:
 ### Change mode only
 **POST** `/api/v2/devs/{dev_id}/{type}/{addr}/mode`
 
-`{"mode":"auto"|"manual"|"off"}`
+`{"mode":"auto"|"modified_auto"|"manual"|"off"}`
 
 ### Weekly program
 **POST** `/api/v2/devs/{dev_id}/{type}/{addr}/prog`
@@ -139,6 +142,8 @@ TOK=$(curl -sS -u '5c49dce977510351506c42db:tevolve'   -d 'grant_type=password&u
 curl -sS -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json'   -d '{"select": true}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV/htr/$ADDR/select
 
 curl -sS -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json'   -d '{"mode":"manual","stemp":"21.0","units":"C"}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV/htr/$ADDR/status
+
+curl -sS -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json'   -d '{"mode":"modified_auto","stemp":"21.0","units":"C"}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV/htr/$ADDR/status
 
 curl -sS -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json'   -d '{"select": false}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV/htr/$ADDR/select
 
