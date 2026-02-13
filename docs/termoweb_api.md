@@ -115,7 +115,7 @@ Representative response:
   "ptemp":["10.0","16.0","21.0"],       // [cold, night, day]
   "mtemp":"25.7",                       // ambient
   "stemp":"10.0",                       // setpoint (manual)
-  "mode":"off",                         // "auto"|"manual"|"off"
+  "mode":"off",                         // "auto"|"modified_auto"|"manual"|"off"
   "max_power":"974",
   "state":"off",
   "true_radiant_active":false,
@@ -133,8 +133,11 @@ Common bodies:
 ```json
 { "mode":"manual","units":"C","stemp":"11.5" }
 { "mode":"auto" }
+{ "mode":"modified_auto","stemp":"20.0" }
 { "units":"C","prog":[ /* 168 values in {0,1,2} */ ] }
 ```
+
+Mode note: `modified_auto` is a temporary setpoint override while the heater is in Auto. It applies for the current schedule period only, then the backend resumes normal `auto` behavior at the next program boundary.
 
 ### GET `/api/v2/devs/{dev_id}/htr/{addr}/advanced_setup`
 ```json
