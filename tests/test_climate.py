@@ -1423,7 +1423,6 @@ def test_accumulator_submit_settings_brand_switch() -> None:
                 "htr": {"settings": {}},
             },
         )
-        coordinator_client = AsyncMock()
         runtime = _attach_runtime(
             hass,
             entry_id,
@@ -1432,6 +1431,7 @@ def test_accumulator_submit_settings_brand_switch() -> None:
             client=AsyncMock(),
             brand=BRAND_DUCAHEAT,
         )
+        backend = runtime.backend
         runtime.backend = backend
 
         entity = climate_module.AccumulatorClimateEntity(
@@ -1507,7 +1507,6 @@ def test_accumulator_submit_settings_handles_boost_state_error() -> None:
         )
         entity.hass = hass
 
-        coordinator_client = AsyncMock()
         runtime = _attach_runtime(
             hass,
             entry_id,
@@ -1516,6 +1515,7 @@ def test_accumulator_submit_settings_handles_boost_state_error() -> None:
             client=AsyncMock(),
             brand=BRAND_DUCAHEAT,
         )
+        backend = runtime.backend
         runtime.backend = backend
 
         entity.accumulator_state = MagicMock(
