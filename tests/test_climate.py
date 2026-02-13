@@ -2914,3 +2914,41 @@ def test_heater_setpoint_uses_modified_auto_mode() -> None:
             monkeypatch.undo()
 
     asyncio.run(_run())
+
+
+def test_heater_mode_mapping_for_modified_auto() -> None:
+    """Map modified_auto backend state to AUTO + temporary_override."""
+
+    _reset_environment()
+    hass = HomeAssistant()
+    dev_id = "dev-mod-auto"
+    addr = "4"
+    settings = {
+        "mode": "modified_auto",
+        "state": "on",
+        "mtemp": "20.1",
+        "stemp": "21.0",
+        "ptemp": ["16.0", "18.0", "20.0"],
+        "prog": [0] * 168,
+        "units": "C",
+    }
+    inventory = Inventory(
+        dev_id,
+        list(build_node_inventory({"nodes": [{"type": "htr", "addr": addr}]})),
+    )
+    coordinator = _make_coordinator(
+        hass,
+        dev_id,
+        {
+            "nodes": {},
+            "nodes_by_type": {"htr": {"settings": {addr: settings}}},
+            "htr": {"settings": {addr: settings}},
+        },
+        client=AsyncMock(),
+        inventory=inventory,
+    )
+
+    entity = HeaterClimateEntity(coordinator, "entry-mod-auto", dev_id, addr, "Heater")
+
+    assert entity.hvac_mode == HVACMode.AUTO
+    assert entity.preset_mode == "temporary_override"
