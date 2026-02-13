@@ -303,6 +303,43 @@ async def test_ducaheat_rest_set_htr_mode_uses_status_segment(
 
 
 @pytest.mark.asyncio
+async def test_ducaheat_rest_set_htr_mode_preserves_modified_auto(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure modified_auto mode is posted without being coerced."""
+
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+
+    monkeypatch.setattr(
+        client,
+        "authed_headers",
+        AsyncMock(return_value={"Authorization": "token"}),
+    )
+
+    posted_payloads: list[dict[str, Any]] = []
+
+    async def fake_post_segmented(
+        path: str,
+        *,
+        headers: Mapping[str, str],
+        payload: Mapping[str, Any],
+        dev_id: str,
+        addr: str,
+        node_type: str,
+        ignore_statuses: Iterable[int] | None = None,
+    ) -> dict[str, Any]:
+        if path.endswith("/status"):
+            posted_payloads.append(dict(payload))
+        return {}
+
+    monkeypatch.setattr(client, "_post_segmented", fake_post_segmented)
+
+    await client.set_node_settings("dev", ("htr", "2"), mode=" modified_auto ")
+
+    assert posted_payloads == [{"mode": "modified_auto"}]
+
+
+@pytest.mark.asyncio
 async def test_ducaheat_rest_set_htr_full_segment_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

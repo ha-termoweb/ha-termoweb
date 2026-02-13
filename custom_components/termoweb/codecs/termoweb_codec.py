@@ -76,7 +76,7 @@ def _validate_ptemp(ptemp: list[float | str]) -> list[str]:
 def _normalise_mode(mode: str) -> str:
     """Lower-case and normalise heater modes."""
 
-    mode_str = str(mode).lower()
+    mode_str = str(mode).strip().lower()
     if mode_str == "heat":
         return "manual"
     return mode_str

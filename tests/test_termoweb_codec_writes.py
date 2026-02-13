@@ -55,6 +55,14 @@ def test_build_settings_payload_invalid_program_length() -> None:
         )
 
 
+def test_build_settings_payload_preserves_modified_auto_mode() -> None:
+    """Ensure modified_auto survives mode normalisation unchanged."""
+
+    payload = build_settings_payload("htr", [SetMode(" modified_auto ")])
+
+    assert payload == {"mode": "modified_auto"}
+
+
 def test_build_extra_options_payload_requires_values() -> None:
     """Ensure extra options payloads need at least one field."""
 

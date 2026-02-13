@@ -2893,6 +2893,9 @@ def test_heater_setpoint_uses_modified_auto_mode() -> None:
             call = backend.set_node_settings.await_args
             assert call.kwargs["mode"] == "modified_auto"
             assert call.kwargs["stemp"] == pytest.approx(22.5)
+            pending = coordinator.pending_settings[("htr", addr)]
+            assert pending["mode"] == "modified_auto"
+            assert pending["stemp"] == pytest.approx(22.5)
 
             backend.set_node_settings.reset_mock()
             heater._pending_mode = None

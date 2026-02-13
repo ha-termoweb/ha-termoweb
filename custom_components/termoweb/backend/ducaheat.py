@@ -328,7 +328,7 @@ class DucaheatRESTClient(RESTClient):
             commands: list[BaseCommand] = []
             mode_value: str | None = None
             if mode is not None:
-                mode_value = str(mode).lower()
+                mode_value = str(mode).strip().lower()
                 if mode_value == "heat":
                     mode_value = "manual"
 
@@ -363,7 +363,7 @@ class DucaheatRESTClient(RESTClient):
             payload: dict[str, Any] = {}
 
             if mode is not None:
-                payload["mode"] = str(mode).lower()
+                payload["mode"] = str(mode).strip().lower()
             if stemp is not None:
                 try:
                     payload["stemp"] = self._ensure_temperature(stemp)
@@ -398,7 +398,7 @@ class DucaheatRESTClient(RESTClient):
         if node_type == "acm":
             mode_value: str | None = None
             if mode is not None:
-                mode_value = str(mode).lower()
+                mode_value = str(mode).strip().lower()
 
             units_value = self._ensure_units(units)
             commands: list[BaseCommand] = []
