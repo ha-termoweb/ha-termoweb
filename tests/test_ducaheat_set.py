@@ -245,3 +245,67 @@ async def test_set_node_settings_mode_segment_plan(
             "node_type": "htr",
         },
     ]
+
+
+@pytest.mark.asyncio
+async def test_set_node_settings_preserves_modified_auto_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Send modified_auto mode without coercing it to manual/auto."""
+
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+
+    async def fake_headers() -> dict[str, str]:
+        """Return static authentication headers for the fake client."""
+
+        return {"Authorization": "Bearer token"}
+
+    post_calls: list[dict[str, Any]] = []
+
+    async def fake_select_segmented_node(**_kwargs: Any) -> None:
+        """Skip real node selection while testing payload serialization."""
+
+    async def fake_post_segmented(
+        path: str,
+        *,
+        headers: Mapping[str, str],
+        payload: Mapping[str, Any],
+        dev_id: str,
+        addr: str,
+        node_type: str,
+    ) -> dict[str, bool]:
+        """Capture the status payload sent to the API."""
+
+        post_calls.append(
+            {
+                "path": path,
+                "headers": dict(headers),
+                "payload": dict(payload),
+                "dev_id": dev_id,
+                "addr": addr,
+                "node_type": node_type,
+            }
+        )
+        return {"ok": True}
+
+    monkeypatch.setattr(client, "authed_headers", fake_headers)
+    monkeypatch.setattr(client, "_select_segmented_node", fake_select_segmented_node)
+    monkeypatch.setattr(client, "_post_segmented", fake_post_segmented)
+
+    await client.set_node_settings(
+        "dev",
+        ("htr", 2),
+        mode="modified_auto",
+        stemp=20.5,
+    )
+
+    assert post_calls == [
+        {
+            "path": "/api/v2/devs/dev/htr/2/status",
+            "headers": {"Authorization": "Bearer token"},
+            "payload": {"mode": "modified_auto", "stemp": "20.5", "units": "C"},
+            "dev_id": "dev",
+            "addr": "2",
+            "node_type": "htr",
+        }
+    ]
