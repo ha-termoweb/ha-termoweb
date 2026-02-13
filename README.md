@@ -63,6 +63,17 @@ Tevolve-branded heaters use the same backend as the Ducaheat app. If you manage 
 - Track accumulator charging status and charge targets to understand storage heater behaviour.
 - Use HA **automations**, **scenes**, and **voice assistants** (including HA’s Google/Alexa integrations).
 
+### Climate mode behavior (important)
+
+Use these rules when changing heater temperature in Home Assistant:
+
+1) If the heater is in **Auto** and you change the target temperature, Home Assistant sends a **temporary override**.
+2) That temporary override runs until the next weekly program time slot starts.
+3) After that, the heater returns to the normal weekly **Auto** program temperature.
+4) The heater switches to **Manual/Heat** only when you explicitly select **Heat** (manual) mode in Home Assistant.
+
+If your dashboard shows a preset label, **temporary override** means: “Use this manual target now, but only until the next scheduled program change.”
+
 ---
 
 ## What you’ll need
