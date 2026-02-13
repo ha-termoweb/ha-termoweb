@@ -776,6 +776,10 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
     def _default_mode_for_setpoint(self) -> HVACMode | str | None:
         """Return the mode enforced when sending a bare setpoint."""
 
+        backend_mode = str(getattr(self.heater_state(), "mode", "") or "").lower()
+        if backend_mode in {"auto", "modified_auto"} or self.hvac_mode == HVACMode.AUTO:
+            return "modified_auto"
+
         return HVACMode.HEAT
 
     def _requires_setpoint_with_mode(self, hvac_mode: HVACMode | str) -> bool:
@@ -786,7 +790,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
     def _allows_setpoint_in_mode(self, hvac_mode: HVACMode | str) -> bool:
         """Return whether a mode already supports standalone setpoint writes."""
 
-        return hvac_mode == HVACMode.HEAT
+        return hvac_mode in {HVACMode.HEAT, "modified_auto"}
 
     def _hvac_mode_to_backend(self, hvac_mode: HVACMode | str) -> str:
         """Translate an HA HVAC mode to the backend string representation."""
