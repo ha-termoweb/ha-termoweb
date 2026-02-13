@@ -1370,7 +1370,7 @@ def test_accumulator_submit_settings_brand_switch() -> None:
                 "htr": {"settings": {}},
             },
         )
-        backend = AsyncMock()
+        coordinator_client = AsyncMock()
         runtime = _attach_runtime(
             hass,
             entry_id,
@@ -1454,7 +1454,7 @@ def test_accumulator_submit_settings_handles_boost_state_error() -> None:
         )
         entity.hass = hass
 
-        backend = AsyncMock()
+        coordinator_client = AsyncMock()
         runtime = _attach_runtime(
             hass,
             entry_id,
@@ -2777,5 +2777,84 @@ def test_heater_cancelled_paths_propagate(
         with pytest.raises(asyncio.CancelledError):
             await task
         assert heater._refresh_fallback is None
+
+    asyncio.run(_run())
+
+
+def test_heater_setpoint_uses_modified_auto_mode() -> None:
+    async def _run() -> None:
+        _reset_environment()
+
+        hass = HomeAssistant()
+        entry_id = "entry-auto"
+        dev_id = "dev-auto"
+        addr = "1"
+        coordinator_client = AsyncMock()
+        settings = {
+            "mode": "auto",
+            "state": "idle",
+            "mtemp": "20.0",
+            "stemp": "21.0",
+            "ptemp": ["16.0", "18.0", "20.0"],
+            "prog": [0] * 168,
+            "units": "C",
+        }
+        inventory = Inventory(
+            dev_id,
+            list(build_node_inventory({"nodes": [{"type": "htr", "addr": addr}]})),
+        )
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            {
+                "nodes": {},
+                "nodes_by_type": {"htr": {"settings": {addr: settings}}},
+                "htr": {"settings": {addr: settings}},
+            },
+            client=coordinator_client,
+            inventory=inventory,
+        )
+        runtime = _attach_runtime(
+            hass,
+            entry_id,
+            dev_id,
+            coordinator=coordinator,
+            client=coordinator_client,
+            inventory=inventory,
+        )
+        backend = runtime.backend
+        heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
+        heater.hass = hass
+
+        async def fast_sleep(_delay: float) -> None:
+            return None
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(climate_module.asyncio, "sleep", fast_sleep)
+        try:
+            assert heater._default_mode_for_setpoint() == "modified_auto"
+
+            await heater.async_set_temperature(**{ATTR_TEMPERATURE: 22.5})
+            assert heater._write_task is not None
+            await heater._write_task
+            call = backend.set_node_settings.await_args
+            assert call.kwargs["mode"] == "modified_auto"
+            assert call.kwargs["stemp"] == pytest.approx(22.5)
+
+            backend.set_node_settings.reset_mock()
+            heater._pending_mode = None
+            heater._pending_stemp = 23.0
+            await heater._write_after_debounce()
+            call = backend.set_node_settings.await_args
+            assert call.kwargs["mode"] == "modified_auto"
+            assert call.kwargs["stemp"] == pytest.approx(23.0)
+
+            await heater.async_set_hvac_mode(HVACMode.HEAT)
+            assert heater._write_task is not None
+            await heater._write_task
+            call = backend.set_node_settings.await_args
+            assert call.kwargs["mode"] == "manual"
+        finally:
+            monkeypatch.undo()
 
     asyncio.run(_run())
