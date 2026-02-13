@@ -1179,6 +1179,10 @@ custom_components/termoweb/entities/climate.py :: HeaterClimateEntity._async_sub
     Send settings for this heater to the backend.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.hvac_mode
     Return the HA HVAC mode derived from heater settings.
+custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.preset_mode
+    Return heater preset mode based on temporary override state.
+custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.async_set_preset_mode
+    Log unsupported heater preset mode write attempts.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.hvac_action
     Return the current HVAC action reported by the heater.
 custom_components/termoweb/entities/climate.py :: HeaterClimateEntity.current_temperature
