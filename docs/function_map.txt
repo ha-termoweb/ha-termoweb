@@ -85,7 +85,7 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.get_node_se
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.get_node_samples
     Return heater samples with timestamps normalised to seconds.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._execute_segmented_commands
-    Apply one or more segmented commands with a single select/release.
+    Apply one or more segmented commands and return merged segment responses.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.set_node_settings
     Write heater settings using the segmented endpoints.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.normalise_ws_nodes
@@ -119,7 +119,7 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._rtc_payloa
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._post_acm_endpoint
     POST to an ACM endpoint, translating client errors.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._select_segmented_node
-    Claim or release a segmented node before mutating state.
+    Toggle node identification cues like flashing/backlight for the target node.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.set_acm_extra_options
     Write default boost configuration using segmented endpoints.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.set_acm_boost_state
@@ -571,7 +571,7 @@ custom_components/termoweb/codecs/common.py :: validate_units
 custom_components/termoweb/codecs/ducaheat_codec.py :: decode_settings
     Decode segmented settings payloads into canonical mappings.
 custom_components/termoweb/codecs/ducaheat_codec.py :: encode_select_payload
-    Encode a selection payload.
+    Encode a payload that toggles physical node identification cues.
 custom_components/termoweb/codecs/ducaheat_codec.py :: encode_mode_command
     Encode a SetMode command for the mode endpoint.
 custom_components/termoweb/codecs/ducaheat_codec.py :: encode_setpoint_command
@@ -1664,7 +1664,7 @@ custom_components/termoweb/inventory.py :: _normalise_with_fallback
 custom_components/termoweb/inventory.py :: build_node_inventory
     Return a list of :class:`Node` instances for the provided payload.
 custom_components/termoweb/planner/ducaheat_planner.py :: plan_command
-    Return a select→write→release plan for a single command.
+    Return the segmented write call plan for a single command.
 custom_components/termoweb/planner/ducaheat_planner.py :: _build_write_call
     Build the primary write call for the supplied command.
 custom_components/termoweb/planner/ducaheat_planner.py :: _ensure_accumulator
