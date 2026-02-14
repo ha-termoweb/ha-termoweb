@@ -11,7 +11,6 @@ from custom_components.termoweb.codecs.ducaheat_codec import (
     encode_mode_command,
     encode_preset_temps_command,
     encode_program_command,
-    encode_select_payload,
     encode_setpoint_command,
     encode_units_command,
 )
@@ -48,10 +47,9 @@ def plan_command(
     *,
     units: str | None = None,
 ) -> list[PlannedHttpCall]:
-    """Return a select→write→release plan for a single command."""
+    """Return the segmented write call plan for a single command."""
 
     base_path = f"/api/v2/devs/{dev_id}/{node_id.node_type.value}/{node_id.addr}"
-    select_path = f"{base_path}/select"
     write_call = _build_write_call(
         base_path=base_path,
         node_id=node_id,
@@ -59,11 +57,7 @@ def plan_command(
         units=units,
     )
 
-    return [
-        PlannedHttpCall("POST", select_path, encode_select_payload(True)),
-        write_call,
-        PlannedHttpCall("POST", select_path, encode_select_payload(False)),
-    ]
+    return [write_call]
 
 
 def _build_write_call(

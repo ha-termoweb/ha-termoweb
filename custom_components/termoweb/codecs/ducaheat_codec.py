@@ -54,7 +54,7 @@ def decode_settings(payload: Any, *, node_type: NodeType) -> dict[str, Any]:
 
 
 def encode_select_payload(select: bool) -> dict[str, Any]:
-    """Encode a selection payload."""
+    """Encode a payload that toggles physical node identification cues."""
 
     return SelectRequest.model_validate({"select": select}).model_dump()
 

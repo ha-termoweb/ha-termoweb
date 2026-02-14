@@ -112,10 +112,10 @@ async def test_ducaheat_acm_extra_options_segmented_post(
 
 
 @pytest.mark.asyncio
-async def test_ducaheat_acm_boost_metadata_fallback_releases_selection(
+async def test_ducaheat_acm_boost_metadata_fallback(
     ducaheat_rest_harness: Callable[..., Any],
 ) -> None:
-    """Verify boost metadata falls back and selection is released when RTC fails."""
+    """Verify boost metadata falls back when RTC collection fails."""
 
     harness = ducaheat_rest_harness()
     harness.client.get_rtc_time = AsyncMock(side_effect=RuntimeError("rtc down"))
@@ -136,17 +136,17 @@ async def test_ducaheat_acm_boost_metadata_fallback_releases_selection(
         },
     }
 
-    assert harness.segmented_calls[0]["path"].endswith("/select")
-    assert harness.segmented_calls[0]["payload"] == {"select": True}
-    assert harness.segmented_calls[-1]["path"].endswith("/select")
-    assert harness.segmented_calls[-1]["payload"] == {"select": False}
+    boost_calls = [
+        call for call in harness.segmented_calls if call["path"].endswith("/boost")
+    ]
+    assert len(boost_calls) == 1
 
 
 @pytest.mark.asyncio
 async def test_ducaheat_acm_boost_metadata_happy_path(
     ducaheat_rest_harness: Callable[..., Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Ensure boost writes validate minutes, merge metadata, and release selection."""
+    """Ensure boost writes validate minutes and merge metadata."""
 
     minutes_calls: list[int | None] = []
 
@@ -172,7 +172,6 @@ async def test_ducaheat_acm_boost_metadata_happy_path(
     )
 
     assert minutes_calls == [600, 600]
-    assert harness.segmented_calls[0]["payload"] == {"select": True}
     boost_call = next(
         call for call in harness.segmented_calls if call["path"].endswith("/boost")
     )
@@ -182,8 +181,6 @@ async def test_ducaheat_acm_boost_metadata_happy_path(
         "stemp": "21.5",
         "units": "C",
     }
-    assert harness.segmented_calls[-1]["payload"] == {"select": False}
-
     assert harness.rtc_calls == ["dev"]
 
     assert result["ok"] is True
@@ -648,29 +645,6 @@ async def test_set_acm_boost_state_metadata_wrapped_response(
     result = await harness.client.set_acm_boost_state("dev", "14", boost=True)
 
     assert result["response"] is True
-    assert result["boost_state"]["boost_active"] is True
-
-
-@pytest.mark.asyncio
-async def test_set_acm_boost_state_release_logs_error(
-    ducaheat_rest_harness: Callable[..., Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Errors during release should be captured and logged."""
-
-    harness = ducaheat_rest_harness()
-    release_error = RuntimeError("release failed")
-
-    async def fake_select_segmented_node(*, select: bool, **kwargs: Any) -> None:
-        if select:
-            return None
-        raise release_error
-
-    monkeypatch.setattr(
-        harness.client, "_select_segmented_node", fake_select_segmented_node
-    )
-
-    result = await harness.client.set_acm_boost_state("dev", "15", boost=True)
-
     assert result["boost_state"]["boost_active"] is True
 
 

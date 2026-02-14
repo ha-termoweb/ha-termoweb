@@ -9,19 +9,16 @@ from custom_components.termoweb.domain.commands import SetMode, StopBoost
 from custom_components.termoweb.domain.ids import NodeId, NodeType
 
 
-def test_plan_command_wraps_write_with_selection() -> None:
-    """Ensure selection is bracketed around segmented writes."""
+def test_plan_command_returns_write_call_only() -> None:
+    """Ensure write planning only returns the segmented mutation call."""
 
     node_id = NodeId(NodeType.HEATER, "01")
 
     plan = plan_command("dev123", node_id, SetMode("Auto"))
 
-    assert [call.method for call in plan] == ["POST", "POST", "POST"]
-    assert plan[0].path.endswith("/htr/01/select")
-    assert plan[0].json == {"select": True}
-    assert plan[1].path.endswith("/htr/01/status")
-    assert plan[1].json == {"mode": "auto"}
-    assert plan[2].json == {"select": False}
+    assert [call.method for call in plan] == ["POST"]
+    assert plan[0].path.endswith("/htr/01/status")
+    assert plan[0].json == {"mode": "auto"}
 
 
 def test_plan_command_rejects_boost_for_non_accumulators() -> None:
@@ -40,6 +37,5 @@ def test_plan_command_targets_accumulator_boost_endpoint() -> None:
 
     plan = plan_command("dev123", node_id, StopBoost())
 
-    assert plan[0].path.endswith("/acm/02/select")
-    assert plan[1].path.endswith("/acm/02/boost")
-    assert plan[1].json == {"boost": False}
+    assert plan[0].path.endswith("/acm/02/boost")
+    assert plan[0].json == {"boost": False}

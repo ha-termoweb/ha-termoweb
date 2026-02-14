@@ -5,7 +5,7 @@ info:
   description: |
     This spec preserves correct details from the existing document and
     adds what was directly observed in the attached protocol dump.
-    It focuses on segmented writes, the selection gate, and Socket.IO
+    It focuses on segmented writes, optional node identification, and Socket.IO
     usage. Items not present in the dump are retained with notes.
 
 servers:
@@ -186,7 +186,7 @@ paths:
     post:
       tags: [ThermalNodes]
       summary: Update live status (mode, setpoint, units, presets)
-      description: Acquire selection first via /select.
+      description: Send writes directly; /select is only for optional physical node identification.
       parameters:
         - name: dev_id
           in: path
@@ -338,7 +338,7 @@ paths:
   /api/v2/devs/{dev_id}/{type}/{addr}/select:
     post:
       tags: [ThermalNodes]
-      summary: Claim or release selection (REQUIRED around writes)
+      summary: Toggle physical node identification cues
       parameters:
         - name: dev_id
           in: path
