@@ -531,6 +531,59 @@ def test_thermostat_climate_entity_maps_settings(
     assert entity.extra_state_attributes["prog"] == prog
 
 
+def test_heater_climate_entity_exposes_temporary_override_preset(
+    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Expose modified_auto as HVAC auto plus temporary override preset."""
+
+    _reset_environment()
+    hass = HomeAssistant()
+    dev_id = "dev-htr-override"
+    addr = "11"
+    raw_nodes = {"nodes": [{"type": "htr", "addr": addr}]}
+    inventory = climate_inventory(dev_id, raw_nodes)
+
+    payload = {
+        "mode": "modified_auto",
+        "state": "on",
+        "stemp": "20.0",
+        "mtemp": "19.0",
+        "units": "C",
+    }
+
+    coordinator_record = build_coordinator_device_state(
+        nodes=raw_nodes,
+        settings={"htr": {addr: payload}},
+    )
+    coordinator = _make_coordinator(
+        hass,
+        dev_id,
+        coordinator_record,
+        client=AsyncMock(),
+        inventory=inventory,
+    )
+
+    entity = HeaterClimateEntity(
+        coordinator,
+        "entry-htr-override",
+        dev_id,
+        addr,
+        "Heater 11",
+        node_type="htr",
+        inventory=inventory,
+    )
+
+    assert entity.hvac_mode == HVACMode.AUTO
+    assert entity.preset_modes == ["none", "temporary_override"]
+    assert entity.preset_mode == "temporary_override"
+
+    with caplog.at_level(logging.INFO):
+        asyncio.run(entity.async_set_preset_mode("temporary_override"))
+
+    assert "Ignoring preset_mode write for heater" in caplog.text
+
+
 def test_async_setup_entry_default_names_and_invalid_nodes(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -1370,7 +1423,6 @@ def test_accumulator_submit_settings_brand_switch() -> None:
                 "htr": {"settings": {}},
             },
         )
-        backend = AsyncMock()
         runtime = _attach_runtime(
             hass,
             entry_id,
@@ -1379,6 +1431,7 @@ def test_accumulator_submit_settings_brand_switch() -> None:
             client=AsyncMock(),
             brand=BRAND_DUCAHEAT,
         )
+        backend = runtime.backend
         runtime.backend = backend
 
         entity = climate_module.AccumulatorClimateEntity(
@@ -1454,7 +1507,6 @@ def test_accumulator_submit_settings_handles_boost_state_error() -> None:
         )
         entity.hass = hass
 
-        backend = AsyncMock()
         runtime = _attach_runtime(
             hass,
             entry_id,
@@ -1463,6 +1515,7 @@ def test_accumulator_submit_settings_handles_boost_state_error() -> None:
             client=AsyncMock(),
             brand=BRAND_DUCAHEAT,
         )
+        backend = runtime.backend
         runtime.backend = backend
 
         entity.accumulator_state = MagicMock(
@@ -2779,3 +2832,123 @@ def test_heater_cancelled_paths_propagate(
         assert heater._refresh_fallback is None
 
     asyncio.run(_run())
+
+
+def test_heater_setpoint_uses_modified_auto_mode() -> None:
+    async def _run() -> None:
+        _reset_environment()
+
+        hass = HomeAssistant()
+        entry_id = "entry-auto"
+        dev_id = "dev-auto"
+        addr = "1"
+        coordinator_client = AsyncMock()
+        settings = {
+            "mode": "auto",
+            "state": "idle",
+            "mtemp": "20.0",
+            "stemp": "21.0",
+            "ptemp": ["16.0", "18.0", "20.0"],
+            "prog": [0] * 168,
+            "units": "C",
+        }
+        inventory = Inventory(
+            dev_id,
+            list(build_node_inventory({"nodes": [{"type": "htr", "addr": addr}]})),
+        )
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            {
+                "nodes": {},
+                "nodes_by_type": {"htr": {"settings": {addr: settings}}},
+                "htr": {"settings": {addr: settings}},
+            },
+            client=coordinator_client,
+            inventory=inventory,
+        )
+        runtime = _attach_runtime(
+            hass,
+            entry_id,
+            dev_id,
+            coordinator=coordinator,
+            client=coordinator_client,
+            inventory=inventory,
+        )
+        backend = runtime.backend
+        heater = HeaterClimateEntity(coordinator, entry_id, dev_id, addr, "Heater")
+        heater.hass = hass
+
+        async def fast_sleep(_delay: float) -> None:
+            return None
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(climate_module.asyncio, "sleep", fast_sleep)
+        try:
+            assert heater._default_mode_for_setpoint() == "modified_auto"
+
+            await heater.async_set_temperature(**{ATTR_TEMPERATURE: 22.5})
+            assert heater._write_task is not None
+            await heater._write_task
+            call = backend.set_node_settings.await_args
+            assert call.kwargs["mode"] == "modified_auto"
+            assert call.kwargs["stemp"] == pytest.approx(22.5)
+            pending = coordinator.pending_settings[("htr", addr)]
+            assert pending["mode"] == "modified_auto"
+            assert pending["stemp"] == pytest.approx(22.5)
+
+            backend.set_node_settings.reset_mock()
+            heater._pending_mode = None
+            heater._pending_stemp = 23.0
+            await heater._write_after_debounce()
+            call = backend.set_node_settings.await_args
+            assert call.kwargs["mode"] == "modified_auto"
+            assert call.kwargs["stemp"] == pytest.approx(23.0)
+
+            await heater.async_set_hvac_mode(HVACMode.HEAT)
+            assert heater._write_task is not None
+            await heater._write_task
+            call = backend.set_node_settings.await_args
+            assert call.kwargs["mode"] == "manual"
+        finally:
+            monkeypatch.undo()
+
+    asyncio.run(_run())
+
+
+def test_heater_mode_mapping_for_modified_auto() -> None:
+    """Map modified_auto backend state to AUTO + temporary_override."""
+
+    _reset_environment()
+    hass = HomeAssistant()
+    dev_id = "dev-mod-auto"
+    addr = "4"
+    settings = {
+        "mode": "modified_auto",
+        "state": "on",
+        "mtemp": "20.1",
+        "stemp": "21.0",
+        "ptemp": ["16.0", "18.0", "20.0"],
+        "prog": [0] * 168,
+        "units": "C",
+    }
+    inventory = Inventory(
+        dev_id,
+        list(build_node_inventory({"nodes": [{"type": "htr", "addr": addr}]})),
+    )
+    coordinator = _make_coordinator(
+        hass,
+        dev_id,
+        {
+            "nodes": {},
+            "nodes_by_type": {"htr": {"settings": {addr: settings}}},
+            "htr": {"settings": {addr: settings}},
+        },
+        client=AsyncMock(),
+        inventory=inventory,
+    )
+
+    entity = HeaterClimateEntity(coordinator, "entry-mod-auto", dev_id, addr, "Heater")
+
+    assert entity.hvac_mode == HVACMode.AUTO
+    assert entity.preset_mode == "temporary_override"

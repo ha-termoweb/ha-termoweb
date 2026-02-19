@@ -117,3 +117,15 @@ flowchart LR
 - Inventory-driven assumptions (node list, addresses, and types) are immutable
   for the life of the entry; if hardware changes, the user must reload the
   integration.
+
+## Heater mode mapping (HA ↔ backend)
+
+Implementation note for heater writes:
+
+- HA **Auto** maps to backend `auto` when the active weekly program is followed
+  with no user override.
+- Changing target temperature while HA is still in **Auto** maps to backend
+  `modified_auto` (temporary override). This override lasts until the next
+  program slot boundary, then the backend resumes `auto` behavior.
+- HA **Heat** (manual mode selected explicitly by the user) maps to backend
+  `manual`.

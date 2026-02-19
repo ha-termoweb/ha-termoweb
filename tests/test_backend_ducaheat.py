@@ -288,18 +288,47 @@ async def test_ducaheat_rest_set_htr_mode_uses_status_segment(
 
     assert result == {"status": {}}
 
-    assert calls[0][0].endswith("/select")
-    assert calls[0][1] == {"select": True}
-    assert calls[0][2] == "htr"
-
     status_calls = [call for call in calls if call[0].endswith("/status")]
     assert status_calls == [("/api/v2/devs/dev/htr/2/status", {"mode": "auto"}, "htr")]
 
     assert all(not path.endswith("/mode") for path, _, _ in calls)
 
-    assert calls[-1][0].endswith("/select")
-    assert calls[-1][1] == {"select": False}
-    assert calls[-1][2] == "htr"
+
+@pytest.mark.asyncio
+async def test_ducaheat_rest_set_htr_mode_preserves_modified_auto(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure modified_auto mode is posted without being coerced."""
+
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+
+    monkeypatch.setattr(
+        client,
+        "authed_headers",
+        AsyncMock(return_value={"Authorization": "token"}),
+    )
+
+    posted_payloads: list[dict[str, Any]] = []
+
+    async def fake_post_segmented(
+        path: str,
+        *,
+        headers: Mapping[str, str],
+        payload: Mapping[str, Any],
+        dev_id: str,
+        addr: str,
+        node_type: str,
+        ignore_statuses: Iterable[int] | None = None,
+    ) -> dict[str, Any]:
+        if path.endswith("/status"):
+            posted_payloads.append(dict(payload))
+        return {}
+
+    monkeypatch.setattr(client, "_post_segmented", fake_post_segmented)
+
+    await client.set_node_settings("dev", ("htr", "2"), mode=" modified_auto ")
+
+    assert posted_payloads == [{"mode": "modified_auto"}]
 
 
 @pytest.mark.asyncio
@@ -314,15 +343,6 @@ async def test_ducaheat_rest_set_htr_full_segment_payload(
         client,
         "authed_headers",
         AsyncMock(return_value={"Authorization": "token"}),
-    )
-
-    select_calls: list[bool] = []
-
-    async def fake_select(**kwargs: Any) -> None:
-        select_calls.append(bool(kwargs.get("select")))
-
-    monkeypatch.setattr(
-        client, "_select_segmented_node", AsyncMock(side_effect=fake_select)
     )
 
     async def fake_post_segmented(
@@ -369,14 +389,12 @@ async def test_ducaheat_rest_set_htr_full_segment_payload(
         "units": "F",
     }
 
-    assert select_calls == [True, False]
-
 
 @pytest.mark.asyncio
 async def test_ducaheat_rest_set_htr_units_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure unit-only updates send a single status segment and release."""
+    """Ensure unit-only updates send a single status segment."""
 
     client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
 
@@ -384,15 +402,6 @@ async def test_ducaheat_rest_set_htr_units_only(
         client,
         "authed_headers",
         AsyncMock(return_value={"Authorization": "token"}),
-    )
-
-    select_calls: list[bool] = []
-
-    async def fake_select(**kwargs: Any) -> None:
-        select_calls.append(bool(kwargs.get("select")))
-
-    monkeypatch.setattr(
-        client, "_select_segmented_node", AsyncMock(side_effect=fake_select)
     )
 
     payloads: dict[str, Mapping[str, Any]] = {}
@@ -416,7 +425,6 @@ async def test_ducaheat_rest_set_htr_units_only(
 
     assert responses == {"status": {"segment": "status", "payload": {"units": "F"}}}
     assert payloads == {"/api/v2/devs/dev/htr/9/status": {"units": "F"}}
-    assert select_calls == [True, False]
 
 
 @pytest.mark.asyncio

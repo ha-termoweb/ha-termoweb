@@ -293,8 +293,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
 class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
     """HA climate entity representing a single TermoWeb heater."""
 
-    _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
+    _attr_supported_features = (
+        ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.PRESET_MODE
+    )
     _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT, HVACMode.AUTO]
+    _attr_preset_modes = ["none", "temporary_override"]
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
 
     def __init__(
@@ -552,11 +555,31 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
         mode = (getattr(state, "mode", None) or "").lower()
         if mode == "off":
             return HVACMode.OFF
-        if mode == "auto":
+        if mode in {"auto", "modified_auto"}:
             return HVACMode.AUTO
         if mode == "manual":
             return HVACMode.HEAT
         return HVACMode.HEAT
+
+    @property
+    def preset_mode(self) -> str:
+        """Return heater preset mode based on temporary override state."""
+
+        state = self.heater_state()
+        mode = (getattr(state, "mode", None) or "").lower()
+        if mode == "modified_auto":
+            return "temporary_override"
+        return "none"
+
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
+        """Log unsupported heater preset mode write attempts."""
+
+        _LOGGER.info(
+            "Ignoring preset_mode write for heater type=%s addr=%s preset_mode=%s",
+            self._node_type,
+            self._addr,
+            preset_mode,
+        )
 
     @property
     def hvac_action(self) -> HVACAction | None:
@@ -776,6 +799,10 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
     def _default_mode_for_setpoint(self) -> HVACMode | str | None:
         """Return the mode enforced when sending a bare setpoint."""
 
+        backend_mode = str(getattr(self.heater_state(), "mode", "") or "").lower()
+        if backend_mode in {"auto", "modified_auto"} or self.hvac_mode == HVACMode.AUTO:
+            return "modified_auto"
+
         return HVACMode.HEAT
 
     def _requires_setpoint_with_mode(self, hvac_mode: HVACMode | str) -> bool:
@@ -786,7 +813,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
     def _allows_setpoint_in_mode(self, hvac_mode: HVACMode | str) -> bool:
         """Return whether a mode already supports standalone setpoint writes."""
 
-        return hvac_mode == HVACMode.HEAT
+        return hvac_mode in {HVACMode.HEAT, "modified_auto"}
 
     def _hvac_mode_to_backend(self, hvac_mode: HVACMode | str) -> str:
         """Translate an HA HVAC mode to the backend string representation."""

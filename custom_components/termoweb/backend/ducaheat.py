@@ -251,7 +251,7 @@ class DucaheatRESTClient(RESTClient):
         units: str | None = None,
         use_acm_endpoint: bool = False,
     ) -> dict[str, Any]:
-        """Apply one or more segmented commands with a single select/release."""
+        """Apply one or more segmented commands and return merged segment responses."""
 
         if not commands:
             return {}
@@ -259,50 +259,30 @@ class DucaheatRESTClient(RESTClient):
         write_calls: list[tuple[str, dict[str, Any]]] = []
         for command in commands:
             plan = plan_command(dev_id, node_id, command, units=units)
-            write_call = plan[1]
+            write_call = plan[0]
             write_calls.append((write_call.path, write_call.json or {}))
 
         headers = await self.authed_headers()
         responses: dict[str, Any] = {}
-        selection_claimed = False
-        try:
-            await self._select_segmented_node(
-                dev_id=dev_id,
-                node_type=node_id.node_type.value,
-                addr=node_id.addr,
-                headers=headers,
-                select=True,
-            )
-            selection_claimed = True
-
-            for path, payload in write_calls:
-                if use_acm_endpoint:
-                    responses[path.rsplit("/", 1)[-1]] = await self._post_acm_endpoint(
-                        path,
-                        headers,
-                        payload,
-                        dev_id=dev_id,
-                        addr=node_id.addr,
-                    )
-                    continue
-
-                responses[path.rsplit("/", 1)[-1]] = await self._post_segmented(
+        for path, payload in write_calls:
+            if use_acm_endpoint:
+                responses[path.rsplit("/", 1)[-1]] = await self._post_acm_endpoint(
                     path,
-                    headers=headers,
-                    payload=payload,
+                    headers,
+                    payload,
                     dev_id=dev_id,
                     addr=node_id.addr,
-                    node_type=node_id.node_type.value,
                 )
-        finally:
-            if selection_claimed:
-                await self._select_segmented_node(
-                    dev_id=dev_id,
-                    node_type=node_id.node_type.value,
-                    addr=node_id.addr,
-                    headers=headers,
-                    select=False,
-                )
+                continue
+
+            responses[path.rsplit("/", 1)[-1]] = await self._post_segmented(
+                path,
+                headers=headers,
+                payload=payload,
+                dev_id=dev_id,
+                addr=node_id.addr,
+                node_type=node_id.node_type.value,
+            )
 
         return responses
 
@@ -328,7 +308,7 @@ class DucaheatRESTClient(RESTClient):
             commands: list[BaseCommand] = []
             mode_value: str | None = None
             if mode is not None:
-                mode_value = str(mode).lower()
+                mode_value = str(mode).strip().lower()
                 if mode_value == "heat":
                     mode_value = "manual"
 
@@ -363,7 +343,7 @@ class DucaheatRESTClient(RESTClient):
             payload: dict[str, Any] = {}
 
             if mode is not None:
-                payload["mode"] = str(mode).lower()
+                payload["mode"] = str(mode).strip().lower()
             if stemp is not None:
                 try:
                     payload["stemp"] = self._ensure_temperature(stemp)
@@ -398,7 +378,7 @@ class DucaheatRESTClient(RESTClient):
         if node_type == "acm":
             mode_value: str | None = None
             if mode is not None:
-                mode_value = str(mode).lower()
+                mode_value = str(mode).strip().lower()
 
             units_value = self._ensure_units(units)
             commands: list[BaseCommand] = []
@@ -1022,45 +1002,24 @@ class DucaheatRESTClient(RESTClient):
         if ptemp is not None:
             segment_plan.append(("prog_temps", {"ptemp": self._ensure_ptemp(ptemp)}))
 
-        selection_claimed = False
-        try:
-            if segment_plan or boost_payload is not None:
-                await self._select_segmented_node(
-                    dev_id=dev_id,
-                    node_type="acm",
-                    addr=addr,
-                    headers=headers,
-                    select=True,
-                )
-                selection_claimed = True
-
-            if segment_plan:
-                for name, payload in segment_plan:
-                    responses[name] = await self._post_acm_endpoint(
-                        f"{base}/{name}",
-                        headers,
-                        payload,
-                        dev_id=dev_id,
-                        addr=addr,
-                    )
-
-            if boost_payload is not None:
-                responses["boost"] = await self._post_acm_endpoint(
-                    f"{base}/boost",
+        if segment_plan:
+            for name, payload in segment_plan:
+                responses[name] = await self._post_acm_endpoint(
+                    f"{base}/{name}",
                     headers,
-                    boost_payload,
+                    payload,
                     dev_id=dev_id,
                     addr=addr,
                 )
-        finally:
-            if selection_claimed:
-                await self._select_segmented_node(
-                    dev_id=dev_id,
-                    node_type="acm",
-                    addr=addr,
-                    headers=headers,
-                    select=False,
-                )
+
+        if boost_payload is not None:
+            responses["boost"] = await self._post_acm_endpoint(
+                f"{base}/boost",
+                headers,
+                boost_payload,
+                dev_id=dev_id,
+                addr=addr,
+            )
 
         if mode_value is not None or cancel_boost_flag:
             minutes_param: int | None
@@ -1253,7 +1212,7 @@ class DucaheatRESTClient(RESTClient):
         headers: Mapping[str, str],
         select: bool,
     ) -> Any:
-        """Claim or release a segmented node before mutating state."""
+        """Toggle node identification cues like flashing/backlight for the target node."""
 
         payload = {"select": bool(select)}
         path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}/select"
@@ -1346,63 +1305,29 @@ class DucaheatRESTClient(RESTClient):
                 mask_identifier(addr_str),
             )
 
-        claim_acquired = False
-        try:
-            await self._select_segmented_node(
-                dev_id=dev_id,
-                node_type=node_type,
-                addr=addr_str,
-                headers=headers,
-                select=True,
-            )
-            claim_acquired = True
+        response = await self._post_acm_endpoint(
+            f"/api/v2/devs/{dev_id}/{node_type}/{addr_str}/boost",
+            headers,
+            payload,
+            dev_id=dev_id,
+            addr=addr_str,
+        )
 
-            response = await self._post_acm_endpoint(
-                f"/api/v2/devs/{dev_id}/{node_type}/{addr_str}/boost",
-                headers,
-                payload,
-                dev_id=dev_id,
-                addr=addr_str,
-            )
-
-            metadata = await self._collect_boost_metadata(
-                dev_id,
-                addr_str,
-                boost_active=boost,
-                minutes=minutes,
-            )
-            if isinstance(response, dict):
-                if metadata:
-                    response.setdefault("boost_state", metadata)
-                return response
-
-            result: dict[str, Any] = {"response": response}
+        metadata = await self._collect_boost_metadata(
+            dev_id,
+            addr_str,
+            boost_active=boost,
+            minutes=minutes,
+        )
+        if isinstance(response, dict):
             if metadata:
-                result["boost_state"] = metadata
-            return result
-        finally:
-            if claim_acquired:
-                try:
-                    await self._select_segmented_node(
-                        dev_id=dev_id,
-                        node_type=node_type,
-                        addr=addr_str,
-                        headers=headers,
-                        select=False,
-                    )
-                except Exception as err:  # noqa: BLE001 - defensive cleanup
-                    message = getattr(err, "body", None) or getattr(
-                        err, "message", None
-                    )
-                    if not message and err.args:
-                        message = err.args[0]
-                    _LOGGER.error(
-                        "ACM select release failed dev=%s addr=%s: %s",
-                        mask_identifier(dev_id),
-                        mask_identifier(addr_str),
-                        redact_text(str(message or err)),
-                        exc_info=err,
-                    )
+                response.setdefault("boost_state", metadata)
+            return response
+
+        result: dict[str, Any] = {"response": response}
+        if metadata:
+            result["boost_state"] = metadata
+        return result
 
     def _format_temp(self, value: float | str) -> str:
         """Format temperatures using one decimal precision."""

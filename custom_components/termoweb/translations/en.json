@@ -93,6 +93,19 @@
       }
     }
   },
+  "entity_component": {
+    "climate": {
+      "state_attributes": {
+        "preset_mode": {
+          "state": {
+            "none": "None",
+            "temporary_override": "Temporary override",
+            "boost": "Boost"
+          }
+        }
+      }
+    }
+  },
   "services": {
     "set_acm_preset": {
       "name": "Configure accumulator boost preset",

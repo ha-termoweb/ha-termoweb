@@ -24,21 +24,19 @@ Key observations from traffic captures:
 - **Temperature payloads must be strings** formatted with exactly one decimal place (e.g. `"22.0"`).
   Sending floats or integers causes the backend to reject the request.
 - The `units` field is **always uppercase** (`"C"` or `"F"`); lowercase variants fail validation.
-- Selection is a mandatory gate for **every** state-changing write. Claim the node with
-  `select: true`, perform the desired operation, and release with `select: false` as soon as the
-  write completes.
+- `/select` is an **optional identify helper**, not a write prerequisite. Use it only when a user
+  needs to physically locate a node on-site.
 - Boost (accumulators only), lock, and similar toggles are literal booleans; do not send quoted values.
 
 These semantics apply to both heater (`htr`) and accumulator (`acm`) nodes within the Ducaheat API.
 
-### Selection (required gate for writes)
+### Selection (physical identify helper)
 
 - **Endpoint:** `POST /api/v2/devs/{dev_id}/{type}/{addr}/select`
-- **Claim:** `{ "select": true }` → `201 {}`
-- **Release:** `{ "select": false }` → `201 {}`
-- Acquire the claim immediately before issuing a write, keep the hold short-lived, and always
-  release it even when the subsequent call fails. The backend tolerates idempotent reclaims and
-  releases, so retry logic can safely resend the same payload.
+- **Identify on:** `{ "select": true }` → `201 {}`
+- **Identify off:** `{ "select": false }` → `201 {}`
+- This can trigger visible hardware cues (for example display flash/backlight or showing the node
+  address) so installers can identify the physical device.
 
 ### Boost (start/stop)
 
@@ -54,8 +52,6 @@ These semantics apply to both heater (`htr`) and accumulator (`acm`) nodes withi
 - `boost_time` is measured in minutes and must fall within **60–600** (1–10 hours).
 - `stemp` is a string with exactly one decimal place that satisfies the regex `^[0-9]+\.[0-9]$`.
 - `units` must be uppercase (`"C"` or `"F"`).
-- Selection is required prior to sending the boost payload; release selection once the REST call
-  returns.
 
 ### WebSocket notifications
 
@@ -77,10 +73,8 @@ These semantics apply to both heater (`htr`) and accumulator (`acm`) nodes withi
 
 ### Canonical sequence
 
-1. `select: true` → `201 {}`
-2. `POST /boost` (start or stop) → `201 {}`
-3. WebSocket `update` on `/{type}/{addr}/status`
-4. `select: false` → `201 {}`
+1. `POST /boost` (start or stop) → `201 {}`
+2. WebSocket `update` on `/{type}/{addr}/status`
 
 ### QA checklist
 

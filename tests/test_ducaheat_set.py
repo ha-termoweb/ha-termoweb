@@ -63,13 +63,6 @@ async def test_set_node_settings_units_only(monkeypatch: pytest.MonkeyPatch) -> 
 
         return f"unit:{units}"
 
-    selection_calls: list[bool] = []
-
-    async def fake_select_segmented_node(**kwargs: Any) -> None:
-        """Record selection claims/releases."""
-
-        selection_calls.append(kwargs["select"])
-
     post_calls: list[dict[str, Any]] = []
 
     async def fake_post_segmented(
@@ -97,7 +90,6 @@ async def test_set_node_settings_units_only(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(client, "authed_headers", fake_headers)
     monkeypatch.setattr(client, "_ensure_units", fake_ensure_units)
-    monkeypatch.setattr(client, "_select_segmented_node", fake_select_segmented_node)
     monkeypatch.setattr(client, "_post_segmented", fake_post_segmented)
 
     responses = await client.set_node_settings("dev", ("htr", 1), units="F")
@@ -113,14 +105,13 @@ async def test_set_node_settings_units_only(monkeypatch: pytest.MonkeyPatch) -> 
             "node_type": "htr",
         }
     ]
-    assert selection_calls == [True, False]
 
 
 @pytest.mark.asyncio
 async def test_set_node_settings_invalid_stemp_releases(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure invalid stemp errors after claiming and releasing the node."""
+    """Ensure invalid stemp errors before issuing a segmented write."""
 
     client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
 
@@ -134,13 +125,6 @@ async def test_set_node_settings_invalid_stemp_releases(
 
         return f"unit:{units}"
 
-    selection_calls: list[bool] = []
-
-    async def fake_select_segmented_node(**kwargs: Any) -> None:
-        """Record selection claims/releases."""
-
-        selection_calls.append(kwargs["select"])
-
     async def fake_post_segmented(**kwargs: Any) -> None:
         """_post_segmented should not be reached for invalid stemp."""
 
@@ -148,14 +132,12 @@ async def test_set_node_settings_invalid_stemp_releases(
 
     monkeypatch.setattr(client, "authed_headers", fake_headers)
     monkeypatch.setattr(client, "_ensure_units", fake_ensure_units)
-    monkeypatch.setattr(client, "_select_segmented_node", fake_select_segmented_node)
     monkeypatch.setattr(client, "_post_segmented", fake_post_segmented)
 
     with pytest.raises(ValueError) as err:
         await client.set_node_settings("dev", ("htr", 1), stemp="bad", units="C")
 
     assert "Invalid temperature value" in str(err.value)
-    assert selection_calls == []
 
 
 @pytest.mark.asyncio
@@ -170,13 +152,6 @@ async def test_set_node_settings_mode_segment_plan(
         """Return static authentication headers for the fake client."""
 
         return {"Authorization": "Bearer token"}
-
-    selection_calls: list[bool] = []
-
-    async def fake_select_segmented_node(**kwargs: Any) -> None:
-        """Record node selection toggles for verification."""
-
-        selection_calls.append(bool(kwargs["select"]))
 
     post_calls: list[dict[str, Any]] = []
 
@@ -222,7 +197,6 @@ async def test_set_node_settings_mode_segment_plan(
         return "19.0"
 
     monkeypatch.setattr(client, "authed_headers", fake_headers)
-    monkeypatch.setattr(client, "_select_segmented_node", fake_select_segmented_node)
     monkeypatch.setattr(client, "_post_segmented", fake_post_segmented)
     monkeypatch.setattr(client, "_ensure_units", fake_ensure_units)
     monkeypatch.setattr(client, "_ensure_temperature", fake_ensure_temperature)
@@ -234,7 +208,6 @@ async def test_set_node_settings_mode_segment_plan(
     assert responses == {
         "status": {"ok": True},
     }
-    assert selection_calls == [True, False]
     assert post_calls == [
         {
             "path": "/api/v2/devs/dev/htr/2/status",
@@ -244,4 +217,64 @@ async def test_set_node_settings_mode_segment_plan(
             "addr": "2",
             "node_type": "htr",
         },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_set_node_settings_preserves_modified_auto_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Send modified_auto mode without coercing it to manual/auto."""
+
+    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
+
+    async def fake_headers() -> dict[str, str]:
+        """Return static authentication headers for the fake client."""
+
+        return {"Authorization": "Bearer token"}
+
+    post_calls: list[dict[str, Any]] = []
+
+    async def fake_post_segmented(
+        path: str,
+        *,
+        headers: Mapping[str, str],
+        payload: Mapping[str, Any],
+        dev_id: str,
+        addr: str,
+        node_type: str,
+    ) -> dict[str, bool]:
+        """Capture the status payload sent to the API."""
+
+        post_calls.append(
+            {
+                "path": path,
+                "headers": dict(headers),
+                "payload": dict(payload),
+                "dev_id": dev_id,
+                "addr": addr,
+                "node_type": node_type,
+            }
+        )
+        return {"ok": True}
+
+    monkeypatch.setattr(client, "authed_headers", fake_headers)
+    monkeypatch.setattr(client, "_post_segmented", fake_post_segmented)
+
+    await client.set_node_settings(
+        "dev",
+        ("htr", 2),
+        mode="modified_auto",
+        stemp=20.5,
+    )
+
+    assert post_calls == [
+        {
+            "path": "/api/v2/devs/dev/htr/2/status",
+            "headers": {"Authorization": "Bearer token"},
+            "payload": {"mode": "modified_auto", "stemp": "20.5", "units": "C"},
+            "dev_id": "dev",
+            "addr": "2",
+            "node_type": "htr",
+        }
     ]

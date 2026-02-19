@@ -14,7 +14,7 @@ This revision preserves correct details from the existing docs and adds/clarifie
 
 ## Key findings from the capture (ground truth)
 
-- **Selection gate is in use for heaters (`htr`)**: app issues `POST .../htr/{addr}/select` with `{"select": true}` **before** writes and `{"select": false}` after.
+- **`/select` is an identify helper**: `POST .../{type}/{addr}/select` toggles physical identification cues on compatible hardware (for example display flash/backlight or showing the node address).
 - **Segmented writes are used on heaters:** `POST .../htr/{addr}/status` and `POST .../htr/{addr}/prog` are present.
 - **Preset temperatures are written via `/status`**: payloads include `comf_temp, eco_temp, ice_temp` along with `units` when updating presets.
 - **Weekly program resolution in this dump is 24 slots per day**, days `0, 1, 2, 3, 4, 5, 6` (example bodies are hourly with 24 integers per day).
@@ -41,7 +41,7 @@ Accumulator websocket `status` updates surface charge metadata (`charging`, `cur
 
 ## Writes — segmented endpoints
 
-> **Always claim selection immediately before a write and release afterward.**
+> Writes are sent directly to segmented endpoints; `/select` is optional and intended for physical identification only.
 
 ### Change live status
 **POST** `/api/v2/devs/{dev_id}/{type}/{addr}/status`
@@ -52,8 +52,11 @@ Examples observed:
 ```json
 {"mode":"off"}
 {"mode":"manual","stemp":"20.5","units":"C"}
+{"mode":"modified_auto","stemp":"20.5","units":"C"}
 {"ice_temp":"5.0","eco_temp":"17.5","comf_temp":"20.5","units":"C"}
 ```
+
+Mode note: `modified_auto` is a temporary setpoint override for the current Auto schedule period. At the next schedule boundary, the backend resumes normal `auto` behavior.
 
 Formatting rules:
 - Temperatures are **strings with exactly one decimal**, e.g. `"22.0"`.
@@ -63,7 +66,7 @@ Formatting rules:
 ### Change mode only
 **POST** `/api/v2/devs/{dev_id}/{type}/{addr}/mode`
 
-`{"mode":"auto"|"manual"|"off"}`
+`{"mode":"auto"|"modified_auto"|"manual"|"off"}`
 
 ### Weekly program
 **POST** `/api/v2/devs/{dev_id}/{type}/{addr}/prog`
@@ -85,12 +88,12 @@ Not observed in this dump. The app used `/status` with keys `ice_temp`, `eco_tem
 **POST** `/api/v2/devs/{dev_id}/{type}/{addr}/setup` — defaults like `extra_options.boost_time` / `boost_temp` (strings for temps).  
 **POST** `/api/v2/devs/{dev_id}/{type}/{addr}/lock` — `{"lock": true|false}`.
 
-### Selection (required gate)
+### Selection (physical identify helper)
 **POST** `/api/v2/devs/{dev_id}/{type}/{addr}/select`
-- Claim: `{"select": true}` → `201 {}`
-- Release: `{"select": false}` → `201 {}`
+- Identify on: `{"select": true}` → `201 {}`
+- Identify off: `{"select": false}` → `201 {}`
 
-Apply `select → write → deselect` around **every** write.
+Use this endpoint only when you want a person on-site to physically locate a node.
 
 ### Boost (accumulator)
 **POST** `/api/v2/devs/{dev_id}/acm/{addr}/boost`
@@ -135,10 +138,12 @@ Not present in this heater‑focused dump; documented here for completeness.
 # Token
 TOK=$(curl -sS -u '5c49dce977510351506c42db:tevolve'   -d 'grant_type=password&username=EMAIL&password=PASS'   https://api-tevolve.termoweb.net/client/token | jq -r .access_token)
 
-# Select → write → deselect (heater)
+## Identify a heater on-site (optional)
 curl -sS -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json'   -d '{"select": true}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV/htr/$ADDR/select
 
 curl -sS -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json'   -d '{"mode":"manual","stemp":"21.0","units":"C"}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV/htr/$ADDR/status
+
+curl -sS -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json'   -d '{"mode":"modified_auto","stemp":"21.0","units":"C"}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV/htr/$ADDR/status
 
 curl -sS -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json'   -d '{"select": false}'   https://api-tevolve.termoweb.net/api/v2/devs/$DEV/htr/$ADDR/select
 
@@ -154,5 +159,5 @@ curl -sS -H "Authorization: Bearer $TOK"   "https://api-tevolve.termoweb.net/api
 ## Validation invariants
 
 - Temperatures **must** be strings with **one decimal**; **units uppercase**.
-- Claim selection before **every** write; release after, including on failure.
+- Do not require `/select` before writes; call `/select` only for physical node identification UX.
 - For weekly programs, **echo the GET shape** and write the whole object.
