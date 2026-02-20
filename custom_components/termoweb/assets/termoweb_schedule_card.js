@@ -24,6 +24,8 @@
       this._stateObj = null;
       this._progLocal = null;
       this._ptempLocal = [null, null, null];
+      this._presetInvalid = [false, false, false];
+      this._presetFeedback = "";
       this._dirtyProg = false; this._dirtyPresets = false;
       this._selectedMode = MODE.COLD;
       this._copyFrom = 0; this._copyTo = "All";
@@ -85,7 +87,10 @@
       }
       if (!this._isInteracting && !this._dirtyPresets) {
         const t = st?.attributes?.ptemp; this._ptempLocal = (Array.isArray(t) && t.length === 3) ? t.slice() : [null, null, null];
+        this._presetInvalid = [false, false, false];
+        this._presetFeedback = "";
         this._syncPresetInputs();
+        this._syncPresetValidationUI();
       }
 
       this._syncHeader(); this._syncCopySelectors(); this._syncWarn(); this._syncModeButtons();
@@ -113,6 +118,8 @@
         .modeLabel{color:var(--secondary-text-color);font-size:13px;margin-right:4px}
         .modeToggle button{border:none;color:#fff;padding:10px 14px;border-radius:12px;cursor:pointer;opacity:.95;font-weight:600;font-size:14px;min-width:70px}
         .modeToggle button.active{filter:brightness(.95);box-shadow:inset 0 0 0 2px #ffffff33;opacity:1}
+        .preset-feedback{font-size:12px;color:var(--error-color,#db4437);min-height:16px;margin-top:4px}
+        .input-invalid{border-color:var(--error-color,#db4437)!important}
         .warn{color:var(--warning-color);font-size:12px;margin-top:8px}
         .top-right{display:flex;gap:8px;align-items:center}
         .entity-select{min-width:160px}
@@ -144,6 +151,7 @@
         <label>Night <input id="tw_p_night" type="number"></label>
         <label>Day <input id="tw_p_day" type="number"></label>`;
       const savePresetsBtn = document.createElement("button"); savePresetsBtn.textContent="Save Presets"; savePresetsBtn.addEventListener("click",()=>void this._savePresets()); presetRow.appendChild(savePresetsBtn); wrap.appendChild(presetRow);
+      const presetFeedback = document.createElement("div"); presetFeedback.className="preset-feedback"; wrap.appendChild(presetFeedback);
 
       // Mode toggle with label
       const modeRow = document.createElement("div"); modeRow.className="modeToggle";
@@ -195,6 +203,7 @@
         presetCold: presetRow.querySelector("#tw_p_cold"),
         presetNight: presetRow.querySelector("#tw_p_night"),
         presetDay: presetRow.querySelector("#tw_p_day"),
+        presetFeedback,
         modeCold, modeNight, modeDay, warn, grid, cells,
         copyFromSel: copyRow.querySelector("#copyFromSel"),
         copyToSel: copyRow.querySelector("#copyToSel"),
@@ -204,9 +213,20 @@
       // Preset input handlers
       const presetHandler = (idx) => (ev)=>{
         const val=ev.target.value;
-        if (val===""||val==null){ this._ptempLocal[idx]=null; }
-        else { const num=Number(val); const step=(this._units==="F")?1:0.5; const r=Math.round(num/step)*step; this._ptempLocal[idx]=r; }
-        this._dirtyPresets=true; this._syncHeader();
+        const num=Number(val);
+        if (val===""||val==null||!Number.isFinite(num)) {
+          this._presetInvalid[idx]=true;
+          this._presetFeedback="Please enter finite numbers for all presets before saving.";
+        } else {
+          const step=(this._units==="F")?1:0.5;
+          const r=Math.round(num/step)*step;
+          this._ptempLocal[idx]=r;
+          this._presetInvalid[idx]=false;
+          if (!this._presetInvalid.some(Boolean)) this._presetFeedback="";
+        }
+        this._dirtyPresets=true;
+        this._syncHeader();
+        this._syncPresetValidationUI();
       };
       this._els.presetCold.addEventListener("input",presetHandler(0));
       this._els.presetNight.addEventListener("input",presetHandler(1));
@@ -224,7 +244,7 @@
 
       // Initial sync
       this._syncHeader(); this._syncModeButtons(); this._syncWarn(); this._renderGridColors();
-      this._syncPresetInputs(); this._syncCopySelectors(); this._syncEntityOptions(); this._syncCopyEntitySelect();
+      this._syncPresetInputs(); this._syncPresetValidationUI(); this._syncCopySelectors(); this._syncEntityOptions(); this._syncCopyEntitySelect();
     }
 
     // Sync helpers
@@ -273,6 +293,16 @@
     _syncPresetInputs(){ const [c,n,d]=this._ptempLocal??[null,null,null]; const step=(this._units==="F")?1:0.5;
       const apply=(el,v)=>{ el.step=String(step); if(el!==document.activeElement) el.value=(v==null?"":String(v)); };
       apply(this._els.presetCold,c); apply(this._els.presetNight,n); apply(this._els.presetDay,d);
+    }
+    _syncPresetValidationUI(){
+      const inputs=[this._els.presetCold,this._els.presetNight,this._els.presetDay];
+      for(let i=0;i<inputs.length;i++){
+        const el=inputs[i];
+        const invalid=Boolean(this._presetInvalid[i]);
+        el?.classList.toggle("input-invalid",invalid);
+        if(el && typeof el.setAttribute === "function") el.setAttribute("aria-invalid", invalid ? "true" : "false");
+      }
+      if(this._els.presetFeedback) this._els.presetFeedback.textContent=this._presetFeedback;
     }
     _syncModeButtons(){ const s=this._selectedMode; this._els.modeCold.classList.toggle("active",s===MODE.COLD);
       this._els.modeNight.classList.toggle("active",s===MODE.NIGHT); this._els.modeDay.classList.toggle("active",s===MODE.DAY); }
@@ -338,8 +368,8 @@
 
     _revert(){ const st=this._stateObj; const prog=st?.attributes?.prog; const ptemp=st?.attributes?.ptemp;
       this._progLocal=(Array.isArray(prog)&&prog.length===168)?prog.slice():null; this._ptempLocal=(Array.isArray(ptemp)&&ptemp.length===3)?ptemp.slice():[null,null,null];
-      this._dirtyProg=false; this._dirtyPresets=false; this._renderGridColors(); this._syncPresetInputs(); this._syncHeader(); this._syncWarn(); }
-    _refresh(){ this._isInteracting=false; this._dirtyProg=false; this._dirtyPresets=false; this.hass=this._hass; }
+      this._presetInvalid=[false,false,false]; this._presetFeedback=""; this._dirtyProg=false; this._dirtyPresets=false; this._renderGridColors(); this._syncPresetInputs(); this._syncPresetValidationUI(); this._syncHeader(); this._syncWarn(); }
+    _refresh(){ this._isInteracting=false; this._dirtyProg=false; this._dirtyPresets=false; this._presetInvalid=[false,false,false]; this._presetFeedback=""; this.hass=this._hass; }
     async _save(){ if(!this._entity||!this._hass) return;
       this._statusWarn="";
       try {
@@ -354,14 +384,24 @@
       }
     }
     async _savePresets(){ if(!this._entity||!this._hass) return; const [c,n,d]=this._ptempLocal??[null,null,null];
-      if([c,n,d].some(v=>typeof v!=="number")) return;
+      if([c,n,d].some(v=>!Number.isFinite(v)) || this._presetInvalid.some(Boolean)) {
+        this._dirtyPresets=true;
+        this._presetFeedback="Please correct preset values before saving.";
+        this._statusWarn="Preset save blocked: all preset temperatures must be finite numbers.";
+        this._syncPresetValidationUI();
+        this._syncHeader();
+        this._syncWarn();
+        return;
+      }
       this._statusWarn="";
       try {
         await this._hass.callService("termoweb","set_preset_temperatures",{ entity_id:this._entity, ptemp:[c,n,d] });
         this._dirtyPresets=false;
+        this._presetFeedback="";
       } catch (err) {
         this._statusWarn=`Save presets failed: ${err?.message || err || "Unknown error."}`;
       } finally {
+        this._syncPresetValidationUI();
         this._syncHeader();
         this._syncWarn();
       }
