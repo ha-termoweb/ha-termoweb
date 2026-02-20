@@ -394,12 +394,15 @@
       }
       if (srcPresets && srcPresets.length === 3) {
         this._ptempLocal = srcPresets.slice();
+        this._presetInvalid = [false, false, false];
+        this._presetFeedback = "";
         this._dirtyPresets = true;
       }
 
       // Paint UI
       this._renderGridColors();
       this._syncPresetInputs();
+      this._syncPresetValidationUI();
       this._syncHeader();
       this._syncWarn();
       // keep copyEntitySel selection as-is; user might repeat
