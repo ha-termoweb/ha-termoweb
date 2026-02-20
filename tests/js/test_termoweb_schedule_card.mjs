@@ -338,6 +338,8 @@ assert(
 const clonedProg = Array.from({ length: 168 }, (_, idx) => (idx % 2));
 card._progLocal = clonedProg.slice();
 card._ptempLocal = [11, 22, 33];
+card._presetInvalid = [true, false, false];
+card._presetFeedback = "Please correct preset values before saving.";
 card._dirtyProg = false;
 card._dirtyPresets = false;
 card._copyEntityTarget = "climate.other";
@@ -346,6 +348,14 @@ card._copyToEntity();
 assert(card._entity === "climate.other", "Copy to entity should retarget entity");
 assert(card._dirtyProg === true, "Copy to entity marks program dirty");
 assert(card._dirtyPresets === true, "Copy to entity marks presets dirty");
+assert(
+  JSON.stringify(card._presetInvalid) === JSON.stringify([false, false, false]),
+  "Copy to entity should clear preset invalid flags",
+);
+assert(
+  card._presetFeedback === "",
+  "Copy to entity should clear preset validation feedback",
+);
 assert(
   JSON.stringify(card._progLocal) === JSON.stringify(clonedProg),
   "Program data should be cloned to target",
