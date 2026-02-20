@@ -30,6 +30,7 @@
       this._units = "C";
       this._isDragging = false; this._isInteracting = false;
       this._copyEntityTarget = null; // selected target in "Copy to heater"
+      this._statusWarn = "";
       this._els = {}; this._built = false;
 
       this._onDocPointerUp = () => this._stopDrag();
@@ -142,7 +143,7 @@
       presetRow.innerHTML = `<label>Cold <input id="tw_p_cold" type="number"></label>
         <label>Night <input id="tw_p_night" type="number"></label>
         <label>Day <input id="tw_p_day" type="number"></label>`;
-      const savePresetsBtn = document.createElement("button"); savePresetsBtn.textContent="Save Presets"; savePresetsBtn.addEventListener("click",()=>this._savePresets()); presetRow.appendChild(savePresetsBtn); wrap.appendChild(presetRow);
+      const savePresetsBtn = document.createElement("button"); savePresetsBtn.textContent="Save Presets"; savePresetsBtn.addEventListener("click",()=>void this._savePresets()); presetRow.appendChild(savePresetsBtn); wrap.appendChild(presetRow);
 
       // Mode toggle with label
       const modeRow = document.createElement("div"); modeRow.className="modeToggle";
@@ -185,7 +186,7 @@
       // Footer
       const footer=document.createElement("div"); footer.className="row";
       const revertBtn=document.createElement("button"); revertBtn.className="secondary-btn"; revertBtn.textContent="Revert"; revertBtn.addEventListener("click",()=>this._revert());
-      const saveBtn=document.createElement("button"); saveBtn.textContent="Save"; saveBtn.addEventListener("click",()=>this._save()); footer.append(revertBtn,saveBtn); wrap.appendChild(footer);
+      const saveBtn=document.createElement("button"); saveBtn.textContent="Save"; saveBtn.addEventListener("click",()=>void this._save()); footer.append(revertBtn,saveBtn); wrap.appendChild(footer);
 
       // Refs
       this._els = {
@@ -275,7 +276,10 @@
     }
     _syncModeButtons(){ const s=this._selectedMode; this._els.modeCold.classList.toggle("active",s===MODE.COLD);
       this._els.modeNight.classList.toggle("active",s===MODE.NIGHT); this._els.modeDay.classList.toggle("active",s===MODE.DAY); }
-    _syncWarn(){ const has=Array.isArray(this._progLocal)&&this._progLocal.length===168; this._els.warn.textContent=has?"":"This entity has no valid 'prog' (expected 168 ints)."; this._els.grid.classList.toggle("ghost",!has); }
+    _syncWarn(){ const has=Array.isArray(this._progLocal)&&this._progLocal.length===168;
+      const baseWarn=has?"":"This entity has no valid 'prog' (expected 168 ints).";
+      this._els.warn.textContent=[baseWarn,this._statusWarn].filter(Boolean).join(" ");
+      this._els.grid.classList.toggle("ghost",!has); }
     _syncCopySelectors(){ const fromEl=this._els.copyFromSel, toEl=this._els.copyToSel;
       if(fromEl && fromEl!==document.activeElement) fromEl.value=String(this._copyFrom);
       if(toEl && toEl!==document.activeElement) toEl.value=(this._copyTo==="All")?"All":String(this._copyTo);
@@ -336,13 +340,32 @@
       this._progLocal=(Array.isArray(prog)&&prog.length===168)?prog.slice():null; this._ptempLocal=(Array.isArray(ptemp)&&ptemp.length===3)?ptemp.slice():[null,null,null];
       this._dirtyProg=false; this._dirtyPresets=false; this._renderGridColors(); this._syncPresetInputs(); this._syncHeader(); this._syncWarn(); }
     _refresh(){ this._isInteracting=false; this._dirtyProg=false; this._dirtyPresets=false; this.hass=this._hass; }
-    _save(){ if(!this._entity||!this._hass) return;
-      if(Array.isArray(this._progLocal)&&this._progLocal.length===168&&this._dirtyProg){
-        this._hass.callService("termoweb","set_schedule",{ entity_id:this._entity, prog:this._progLocal }); this._dirtyProg=false; }
-      if(this._dirtyPresets) this._savePresets(); this._syncHeader(); }
-    _savePresets(){ if(!this._entity||!this._hass) return; const [c,n,d]=this._ptempLocal??[null,null,null];
-      if([c,n,d].some(v=>typeof v!=="number")) return; this._hass.callService("termoweb","set_preset_temperatures",{ entity_id:this._entity, ptemp:[c,n,d] });
-      this._dirtyPresets=false; this._syncHeader(); }
+    async _save(){ if(!this._entity||!this._hass) return;
+      this._statusWarn="";
+      try {
+        if(Array.isArray(this._progLocal)&&this._progLocal.length===168&&this._dirtyProg){
+          await this._hass.callService("termoweb","set_schedule",{ entity_id:this._entity, prog:this._progLocal }); this._dirtyProg=false; }
+        if(this._dirtyPresets) await this._savePresets();
+      } catch (err) {
+        this._statusWarn=`Save failed: ${err?.message || err || "Unknown error."}`;
+      } finally {
+        this._syncHeader();
+        this._syncWarn();
+      }
+    }
+    async _savePresets(){ if(!this._entity||!this._hass) return; const [c,n,d]=this._ptempLocal??[null,null,null];
+      if([c,n,d].some(v=>typeof v!=="number")) return;
+      this._statusWarn="";
+      try {
+        await this._hass.callService("termoweb","set_preset_temperatures",{ entity_id:this._entity, ptemp:[c,n,d] });
+        this._dirtyPresets=false;
+      } catch (err) {
+        this._statusWarn=`Save presets failed: ${err?.message || err || "Unknown error."}`;
+      } finally {
+        this._syncHeader();
+        this._syncWarn();
+      }
+    }
   }
 
   if(!customElements.get("termoweb-schedule-card")) customElements.define("termoweb-schedule-card", TermoWebScheduleCard);
