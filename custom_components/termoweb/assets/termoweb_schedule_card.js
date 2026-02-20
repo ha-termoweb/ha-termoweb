@@ -119,6 +119,7 @@
         select,input[type=number]{background:var(--card-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color);border-radius:6px;padding:4px 8px}
         button{background:var(--primary-color);color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer}
         .ghost{opacity:.6;pointer-events:none}
+        .secondary-btn{opacity:.75}
       `;
       card.appendChild(style);
       const wrap = document.createElement("div"); wrap.className = "card"; card.appendChild(wrap);
@@ -183,7 +184,7 @@
 
       // Footer
       const footer=document.createElement("div"); footer.className="row";
-      const revertBtn=document.createElement("button"); revertBtn.className="ghost"; revertBtn.textContent="Revert"; revertBtn.addEventListener("click",()=>this._revert());
+      const revertBtn=document.createElement("button"); revertBtn.className="secondary-btn"; revertBtn.textContent="Revert"; revertBtn.addEventListener("click",()=>this._revert());
       const saveBtn=document.createElement("button"); saveBtn.textContent="Save"; saveBtn.addEventListener("click",()=>this._save()); footer.append(revertBtn,saveBtn); wrap.appendChild(footer);
 
       // Refs
