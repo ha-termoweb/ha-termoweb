@@ -27,6 +27,7 @@
       this._presetInvalid = [false, false, false];
       this._presetFeedback = "";
       this._dirtyProg = false; this._dirtyPresets = false;
+      this._savingProg = false; this._savingPresets = false;
       this._selectedMode = MODE.COLD;
       this._copyFrom = 0; this._copyTo = "All";
       this._units = "C";
@@ -236,11 +237,13 @@
         presetCold: presetRow.querySelector("#tw_p_cold"),
         presetNight: presetRow.querySelector("#tw_p_night"),
         presetDay: presetRow.querySelector("#tw_p_day"),
+        savePresetsBtn,
         presetFeedback,
         modeCold, modeNight, modeDay, warn, grid, cells,
         copyFromSel: copyRow.querySelector("#copyFromSel"),
         copyToSel: copyRow.querySelector("#copyToSel"),
         copyEntitySel: copyAllRow.querySelector("#copyEntitySel"),
+        saveBtn,
       };
 
       // Preset input handlers
@@ -278,11 +281,24 @@
       // Initial sync
       this._syncHeader(); this._syncModeButtons(); this._syncWarn(); this._renderGridColors();
       this._syncPresetInputs(); this._syncPresetValidationUI(); this._syncCopySelectors(); this._syncEntityOptions(); this._syncCopyEntitySelect();
+      this._syncSaveButtons();
     }
 
     // Sync helpers
     _syncHeader(){ const t=(this._stateObj?.attributes?.friendly_name||this._stateObj?.attributes?.name||this._entity||"TermoWeb schedule");
       this._els.titleEl.textContent=t; this._els.dirtyBadge.hidden=!(this._dirtyProg||this._dirtyPresets); this._els.unitsLabel.textContent=`Units: ${this._units}`; }
+
+    _syncSaveButtons(){
+      const isSavingAny = this._savingProg || this._savingPresets;
+      if (this._els.saveBtn) {
+        this._els.saveBtn.disabled = isSavingAny;
+        this._els.saveBtn.textContent = this._savingProg ? "Saving…" : "Save";
+      }
+      if (this._els.savePresetsBtn) {
+        this._els.savePresetsBtn.disabled = isSavingAny;
+        this._els.savePresetsBtn.textContent = this._savingPresets ? "Saving…" : "Save Presets";
+      }
+    }
 
     _reconcileSelectOptions(select, entities, currentValue) {
       if (!select) return;
@@ -416,19 +432,27 @@
       this._presetInvalid=[false,false,false]; this._presetFeedback=""; this._dirtyProg=false; this._dirtyPresets=false; this._renderGridColors(); this._syncPresetInputs(); this._syncPresetValidationUI(); this._syncHeader(); this._syncWarn(); }
     _refresh(){ this._isInteracting=false; this._dirtyProg=false; this._dirtyPresets=false; this._presetInvalid=[false,false,false]; this._presetFeedback=""; this.hass=this._hass; }
     async _save(){ if(!this._entity||!this._hass) return;
-      this._statusWarn="";
+      if(this._savingProg||this._savingPresets) return;
+      this._savingProg=true;
+      this._statusWarn="Saving changes...";
+      this._syncSaveButtons();
+      this._syncWarn();
       try {
         if(Array.isArray(this._progLocal)&&this._progLocal.length===168&&this._dirtyProg){
           await this._hass.callService("termoweb","set_schedule",{ entity_id:this._entity, prog:this._progLocal }); this._dirtyProg=false; }
-        if(this._dirtyPresets) await this._savePresets();
+        if(this._dirtyPresets) await this._savePresets(true);
       } catch (err) {
         this._statusWarn=`Save failed: ${err?.message || err || "Unknown error."}`;
       } finally {
+        if (this._statusWarn === "Saving changes...") this._statusWarn = "";
+        this._savingProg=false;
+        this._syncSaveButtons();
         this._syncHeader();
         this._syncWarn();
       }
     }
-    async _savePresets(){ if(!this._entity||!this._hass) return; const [c,n,d]=this._ptempLocal??[null,null,null];
+    async _savePresets(fromSave=false){ if(!this._entity||!this._hass) return; const [c,n,d]=this._ptempLocal??[null,null,null];
+      if(this._savingPresets || (this._savingProg && !fromSave)) return;
       if([c,n,d].some(v=>!Number.isFinite(v)) || this._presetInvalid.some(Boolean)) {
         this._dirtyPresets=true;
         this._presetFeedback="Please correct preset values before saving.";
@@ -438,7 +462,10 @@
         this._syncWarn();
         return;
       }
-      this._statusWarn="";
+      this._savingPresets=true;
+      this._statusWarn="Saving changes...";
+      this._syncSaveButtons();
+      this._syncWarn();
       try {
         await this._hass.callService("termoweb","set_preset_temperatures",{ entity_id:this._entity, ptemp:[c,n,d] });
         this._dirtyPresets=false;
@@ -446,6 +473,9 @@
       } catch (err) {
         this._statusWarn=`Save presets failed: ${err?.message || err || "Unknown error."}`;
       } finally {
+        if (this._statusWarn === "Saving changes...") this._statusWarn = "";
+        this._savingPresets=false;
+        this._syncSaveButtons();
         this._syncPresetValidationUI();
         this._syncHeader();
         this._syncWarn();
