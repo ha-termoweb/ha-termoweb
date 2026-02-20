@@ -118,9 +118,8 @@ ha-termoweb/ha-termoweb
 2) Choose your **Brand**. This picks the correct backend automatically, so you do **not** need to enter a portal URL manually.
 3) Enter the account **Email** used for the TermoWeb / Ducaheat / Tevolve app.
 4) Enter the account **Password**.
-5) Adjust the **Poll interval** if you want to change how often Home Assistant refreshes data from the cloud (default is fine for most users).
-6) Complete the wizard. Heaters will appear under **Devices**; add them to dashboards or use them in automations.
-
+5) Complete the wizard. Heaters will appear under **Devices**; add them to dashboards or use them in automations.
+6) Copy the custom card for a dashboard element that allows you to program presets and weekly schedule across heaters. 
 ---
 
 ## Tips
@@ -129,7 +128,10 @@ ha-termoweb/ha-termoweb
 
 ## Install custom weekly schedule card
 
-See instructions in custom_components/termoweb/assets, to install the card and create a dashboard.
+See instructions in custom_components/termoweb/assets, to install the card and create a dashboard with weekly programming like this:
+
+![programming-card-preview](docs/programming-card-preview.png)
+
 
 ## Energy monitoring & history
 - Each heater provides an **Energy** sensor in kWh and the integration adds a **Total Energy** sensor aggregating all heaters.
