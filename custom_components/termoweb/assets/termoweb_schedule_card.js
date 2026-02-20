@@ -34,6 +34,9 @@
       this._isDragging = false; this._isInteracting = false;
       this._copyEntityTarget = null; // selected target in "Copy to heater"
       this._statusWarn = "";
+      this._saveStatus = "";
+      this._saveStatusType = "";
+      this._saveStatusClearTimer = null;
       this._els = {}; this._built = false;
 
       this._onDocPointerUp = () => this._stopDrag();
@@ -51,6 +54,7 @@
       document.removeEventListener("pointerup", this._onDocPointerUp, true);
       this.removeEventListener("focusin", this._onFocusIn, true);
       this.removeEventListener("focusout", this._onFocusOut, true);
+      this._clearSaveStatusTimer();
     }
 
     setConfig(config) { this._config = { ...config }; if (config.entity) this._entity = config.entity; if (!this._built) this._build(); }
@@ -160,8 +164,14 @@
         .wide-btn{min-width:96px}
         select,input[type=number]{background:var(--card-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color);border-radius:6px;padding:4px 8px}
         button{background:var(--primary-color);color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer}
+        button.saving{position:relative;padding-left:28px;font-weight:700}
+        button.saving::before{content:"";position:absolute;left:10px;top:50%;width:12px;height:12px;margin-top:-6px;border-radius:50%;border:2px solid #ffffff80;border-top-color:#fff;animation:tw-spin .8s linear infinite}
+        .save-status{font-size:12px;color:var(--secondary-text-color);min-height:16px;display:flex;align-items:center}
+        .save-status.ok{color:var(--success-color,#2e7d32)}
+        .save-status.error{color:var(--error-color,#db4437)}
         .ghost{opacity:.6;pointer-events:none}
         .btn-muted{opacity:.75}
+        @keyframes tw-spin{to{transform:rotate(360deg)}}
       `;
       card.appendChild(style);
       const wrap = document.createElement("div"); wrap.className = "card"; card.appendChild(wrap);
@@ -229,6 +239,10 @@
       const footer=document.createElement("div"); footer.className="row";
       const revertBtn=document.createElement("button"); revertBtn.textContent="Revert"; revertBtn.addEventListener("click",()=>this._revert());
       const saveBtn=document.createElement("button"); saveBtn.textContent="Save"; saveBtn.addEventListener("click",()=>void this._save()); footer.append(revertBtn,saveBtn); wrap.appendChild(footer);
+      const saveStatus = document.createElement("div");
+      saveStatus.className = "save-status";
+      saveStatus.ariaLive = "polite";
+      wrap.appendChild(saveStatus);
 
       // Refs
       this._els = {
@@ -245,10 +259,12 @@
         copyEntitySel: copyAllRow.querySelector("#copyEntitySel"),
         revertBtn,
         saveBtn,
+        saveStatus,
       };
 
       // Preset input handlers
       const presetHandler = (idx) => (ev)=>{
+        this._clearErrorSaveStatusOnInteraction();
         const val=ev.target.value;
         const num=Number(val);
         if (val===""||val==null||!Number.isFinite(num)) {
@@ -283,6 +299,7 @@
       this._syncHeader(); this._syncModeButtons(); this._syncWarn(); this._renderGridColors();
       this._syncPresetInputs(); this._syncPresetValidationUI(); this._syncCopySelectors(); this._syncEntityOptions(); this._syncCopyEntitySelect();
       this._syncSaveButtons();
+      this._syncSaveStatus();
     }
 
     // Sync helpers
@@ -303,11 +320,46 @@
       if (this._els.saveBtn) {
         this._els.saveBtn.disabled = isSavingAny;
         this._els.saveBtn.textContent = this._savingProg ? "Saving…" : "Save";
+        this._els.saveBtn.classList.toggle("saving", this._savingProg);
       }
       if (this._els.savePresetsBtn) {
         this._els.savePresetsBtn.disabled = isSavingAny;
         this._els.savePresetsBtn.textContent = this._savingPresets ? "Saving…" : "Save Presets";
+        this._els.savePresetsBtn.classList.toggle("saving", this._savingPresets);
       }
+    }
+
+    _clearSaveStatusTimer() {
+      if (this._saveStatusClearTimer) {
+        clearTimeout(this._saveStatusClearTimer);
+        this._saveStatusClearTimer = null;
+      }
+    }
+
+    _syncSaveStatus() {
+      if (!this._els.saveStatus) return;
+      this._els.saveStatus.textContent = this._saveStatus;
+      this._els.saveStatus.classList.toggle("ok", this._saveStatusType === "ok");
+      this._els.saveStatus.classList.toggle("error", this._saveStatusType === "error");
+    }
+
+    _setSaveStatus(message, type = "", autoClearMs = 0) {
+      this._clearSaveStatusTimer();
+      this._saveStatus = message;
+      this._saveStatusType = type;
+      this._syncSaveStatus();
+      if (autoClearMs > 0 && message) {
+        this._saveStatusClearTimer = setTimeout(() => {
+          this._saveStatus = "";
+          this._saveStatusType = "";
+          this._saveStatusClearTimer = null;
+          this._syncSaveStatus();
+        }, autoClearMs);
+      }
+    }
+
+    _clearErrorSaveStatusOnInteraction() {
+      if (this._saveStatusType === "error") this._setSaveStatus("");
     }
 
     _reconcileSelectOptions(select, entities, currentValue) {
@@ -386,10 +438,12 @@
     _setMode(m){ this._selectedMode=m; this._syncModeButtons(); }
     _startDrag(){ this._isDragging=true; } _stopDrag(){ this._isDragging=false; }
     _paintCell(day,hour){ if(!Array.isArray(this._progLocal)||this._progLocal.length!==168) return;
+      this._clearErrorSaveStatusOnInteraction();
       const k=hourIdx(day,hour); if(this._progLocal[k]!==this._selectedMode){ this._progLocal=this._progLocal.slice(); this._progLocal[k]=this._selectedMode; this._dirtyProg=true;
         const cell=this._els.cells[hour*7+day]; if(cell) cell.style.background=COLORS[this._selectedMode]; this._syncHeader(); }}
 
     _copyDays(){ if(!Array.isArray(this._progLocal)||this._progLocal.length!==168) return;
+      this._clearErrorSaveStatusOnInteraction();
       const from=clamp(Number(this._copyFrom),0,6); const to=this._copyTo; const next=this._progLocal.slice(); const src=next.slice(from*24,from*24+24);
       if(to==="All"){ for(let d=0; d<7; d++) next.splice(d*24,24,...src); } else { const d=clamp(Number(to),0,6); next.splice(d*24,24,...src); }
       this._progLocal=next; this._dirtyProg=true; this._renderGridColors(); this._syncHeader(); }
@@ -399,6 +453,7 @@
 
     _copyToEntity() {
       if (!this._hass) return;
+      this._clearErrorSaveStatusOnInteraction();
       const target = this._copyEntityTarget;
       if (!target || !this._hass.states[target]) return;
 
@@ -438,27 +493,26 @@
     }
 
     _revert(){ const st=this._stateObj; const prog=st?.attributes?.prog; const ptemp=st?.attributes?.ptemp;
+      this._clearErrorSaveStatusOnInteraction();
       this._progLocal=(Array.isArray(prog)&&prog.length===168)?prog.slice():null; this._ptempLocal=this._normalizePresetTriplet(ptemp);
       this._presetInvalid=[false,false,false]; this._presetFeedback=""; this._dirtyProg=false; this._dirtyPresets=false; this._renderGridColors(); this._syncPresetInputs(); this._syncPresetValidationUI(); this._syncHeader(); this._syncWarn(); }
-    _refresh(){ this._isInteracting=false; this._dirtyProg=false; this._dirtyPresets=false; this._presetInvalid=[false,false,false]; this._presetFeedback=""; this.hass=this._hass; }
+    _refresh(){ this._clearErrorSaveStatusOnInteraction(); this._isInteracting=false; this._dirtyProg=false; this._dirtyPresets=false; this._presetInvalid=[false,false,false]; this._presetFeedback=""; this.hass=this._hass; }
     async _save(){ if(!this._entity||!this._hass) return;
       if(this._savingProg||this._savingPresets) return;
       this._savingProg=true;
-      this._statusWarn="Saving changes...";
+      this._setSaveStatus("Saving program…");
       this._syncSaveButtons();
-      this._syncWarn();
       try {
         if(Array.isArray(this._progLocal)&&this._progLocal.length===168&&this._dirtyProg){
           await this._hass.callService("termoweb","set_schedule",{ entity_id:this._entity, prog:this._progLocal }); this._dirtyProg=false; }
         if(this._dirtyPresets) await this._savePresets(true);
+        if (this._saveStatusType !== "error") this._setSaveStatus("Saved", "ok", 2200);
       } catch (err) {
-        this._statusWarn=`Save failed: ${err?.message || err || "Unknown error."}`;
+        this._setSaveStatus(`Save failed: ${err?.message || err || "Unknown error."}`, "error");
       } finally {
-        if (this._statusWarn === "Saving changes...") this._statusWarn = "";
         this._savingProg=false;
         this._syncSaveButtons();
         this._syncHeader();
-        this._syncWarn();
       }
     }
     async _savePresets(fromSave=false){ if(!this._entity||!this._hass) return; const [c,n,d]=this._ptempLocal??[null,null,null];
@@ -466,29 +520,26 @@
       if([c,n,d].some(v=>!Number.isFinite(v)) || this._presetInvalid.some(Boolean)) {
         this._dirtyPresets=true;
         this._presetFeedback="Please correct preset values before saving.";
-        this._statusWarn="Preset save blocked: all preset temperatures must be finite numbers.";
+        this._setSaveStatus("Save failed: all preset temperatures must be finite numbers.", "error");
         this._syncPresetValidationUI();
         this._syncHeader();
-        this._syncWarn();
         return;
       }
       this._savingPresets=true;
-      this._statusWarn="Saving changes...";
+      this._setSaveStatus("Saving presets…");
       this._syncSaveButtons();
-      this._syncWarn();
       try {
         await this._hass.callService("termoweb","set_preset_temperatures",{ entity_id:this._entity, ptemp:[c,n,d] });
         this._dirtyPresets=false;
         this._presetFeedback="";
+        if (!fromSave) this._setSaveStatus("Saved", "ok", 2200);
       } catch (err) {
-        this._statusWarn=`Save presets failed: ${err?.message || err || "Unknown error."}`;
+        this._setSaveStatus(`Save failed: ${err?.message || err || "Unknown error."}`, "error");
       } finally {
-        if (this._statusWarn === "Saving changes...") this._statusWarn = "";
         this._savingPresets=false;
         this._syncSaveButtons();
         this._syncPresetValidationUI();
         this._syncHeader();
-        this._syncWarn();
       }
     }
   }
