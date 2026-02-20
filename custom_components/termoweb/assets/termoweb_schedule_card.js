@@ -93,7 +93,7 @@
         this._renderGridColors();
       }
       if (!this._isInteracting && !this._dirtyPresets) {
-        const t = st?.attributes?.ptemp; this._ptempLocal = (Array.isArray(t) && t.length === 3) ? t.slice() : [null, null, null];
+        const t = st?.attributes?.ptemp; this._ptempLocal = this._normalizePresetTriplet(t);
         this._presetInvalid = [false, false, false];
         this._presetFeedback = "";
         this._syncPresetInputs();
@@ -368,13 +368,16 @@
       if(to==="All"){ for(let d=0; d<7; d++) next.splice(d*24,24,...src); } else { const d=clamp(Number(to),0,6); next.splice(d*24,24,...src); }
       this._progLocal=next; this._dirtyProg=true; this._renderGridColors(); this._syncHeader(); }
 
+    _normalizePresetTriplet(raw){ if(!Array.isArray(raw)||raw.length!==3) return [null,null,null];
+      return raw.map((value)=>{ const n=Number(value); return Number.isFinite(n)?n:null; }); }
+
     _copyToEntity() {
       if (!this._hass) return;
       const target = this._copyEntityTarget;
       if (!target || !this._hass.states[target]) return;
 
       const srcProg = Array.isArray(this._progLocal) && this._progLocal.length === 168 ? this._progLocal.slice() : null;
-      const srcPresets = Array.isArray(this._ptempLocal) && this._ptempLocal.length === 3 ? this._ptempLocal.slice() : [null, null, null];
+      const srcPresets = this._normalizePresetTriplet(this._ptempLocal);
 
       // Switch selected entity (do NOT trigger change handler)
       this._entity = target;
@@ -409,7 +412,7 @@
     }
 
     _revert(){ const st=this._stateObj; const prog=st?.attributes?.prog; const ptemp=st?.attributes?.ptemp;
-      this._progLocal=(Array.isArray(prog)&&prog.length===168)?prog.slice():null; this._ptempLocal=(Array.isArray(ptemp)&&ptemp.length===3)?ptemp.slice():[null,null,null];
+      this._progLocal=(Array.isArray(prog)&&prog.length===168)?prog.slice():null; this._ptempLocal=this._normalizePresetTriplet(ptemp);
       this._presetInvalid=[false,false,false]; this._presetFeedback=""; this._dirtyProg=false; this._dirtyPresets=false; this._renderGridColors(); this._syncPresetInputs(); this._syncPresetValidationUI(); this._syncHeader(); this._syncWarn(); }
     _refresh(){ this._isInteracting=false; this._dirtyProg=false; this._dirtyPresets=false; this._presetInvalid=[false,false,false]; this._presetFeedback=""; this.hass=this._hass; }
     async _save(){ if(!this._entity||!this._hass) return;
