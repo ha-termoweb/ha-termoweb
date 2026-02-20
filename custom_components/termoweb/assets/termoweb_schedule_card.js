@@ -62,9 +62,16 @@
       if (!this._built) this._build();
 
       const entities = Object.entries(hass.states)
-        .filter(([eid, st]) => eid.startsWith("climate.") && Array.isArray(st?.attributes?.prog) && st.attributes.prog.length === 168)
+        .filter(([eid, st]) => this._isTermoWebCandidate(eid, st))
         .map(([eid, st]) => ({ id: eid, name: st.attributes.friendly_name || st.attributes.name || eid }))
         .sort((a,b) => a.name.localeCompare(b.name));
+      if (this._config.entity && hass.states[this._config.entity] && !entities.find((e) => e.id === this._config.entity)) {
+        const st = hass.states[this._config.entity];
+        entities.unshift({
+          id: this._config.entity,
+          name: st.attributes.friendly_name || st.attributes.name || this._config.entity,
+        });
+      }
       const entKey = JSON.stringify(entities.map(e => e.id + "|" + e.name));
       if (entKey !== this._entitiesKey) {
         this._entitiesKey = entKey; this._entities = entities;
@@ -95,6 +102,32 @@
 
       this._syncHeader(); this._syncCopySelectors(); this._syncWarn(); this._syncModeButtons();
       this._syncCopyEntitySelect();
+    }
+
+    _matchesIncludePattern(entityId) {
+      const pattern = this._config?.include_pattern;
+      if (!pattern) return true;
+      try {
+        return new RegExp(pattern).test(entityId);
+      } catch (err) {
+        console.warn("termoweb-schedule-card: invalid include_pattern regex", pattern, err);
+        return true;
+      }
+    }
+
+    _hasTermoWebMarkers(attrs) {
+      if (!attrs || typeof attrs !== "object") return false;
+      const hasIdentity = typeof attrs.dev_id === "string" && attrs.dev_id.length > 0 && attrs.addr != null;
+      const hasScheduleShape = Array.isArray(attrs.ptemp) && attrs.ptemp.length === 3;
+      return hasIdentity && hasScheduleShape;
+    }
+
+    _isTermoWebCandidate(entityId, stateObj) {
+      if (!entityId?.startsWith("climate.")) return false;
+      if (!this._matchesIncludePattern(entityId)) return false;
+      const attrs = stateObj?.attributes;
+      if (this._hasTermoWebMarkers(attrs)) return true;
+      return Array.isArray(attrs?.prog) && attrs.prog.length === 168;
     }
 
     _build() {
@@ -306,8 +339,14 @@
     }
     _syncModeButtons(){ const s=this._selectedMode; this._els.modeCold.classList.toggle("active",s===MODE.COLD);
       this._els.modeNight.classList.toggle("active",s===MODE.NIGHT); this._els.modeDay.classList.toggle("active",s===MODE.DAY); }
-    _syncWarn(){ const has=Array.isArray(this._progLocal)&&this._progLocal.length===168;
-      const baseWarn=has?"":"This entity has no valid 'prog' (expected 168 ints).";
+    _syncWarn(){ const hasEntities=Array.isArray(this._entities)&&this._entities.length>0;
+      const has=Array.isArray(this._progLocal)&&this._progLocal.length===168;
+      let baseWarn="";
+      if(!hasEntities) {
+        baseWarn="No valid TermoWeb climate entities found. Set 'entity' explicitly or adjust 'include_pattern'.";
+      } else if (!has) {
+        baseWarn="This entity has no valid 'prog' (expected 168 ints).";
+      }
       this._els.warn.textContent=[baseWarn,this._statusWarn].filter(Boolean).join(" ");
       this._els.grid.classList.toggle("ghost",!has); }
     _syncCopySelectors(){ const fromEl=this._els.copyFromSel, toEl=this._els.copyToSel;
