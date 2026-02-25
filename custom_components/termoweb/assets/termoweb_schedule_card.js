@@ -57,7 +57,10 @@
       this._clearSaveStatusTimer();
     }
 
-    setConfig(config) { this._config = { ...config }; if (config.entity) this._entity = config.entity; if (!this._built) this._build(); }
+    setConfig(config) { this._config = { ...config }; if (config.entity) this._entity = config.entity;
+      this._includePatternRe = null;
+      if (config.include_pattern) { try { this._includePatternRe = new RegExp(config.include_pattern); } catch (err) { console.warn("termoweb-schedule-card: invalid include_pattern regex", config.include_pattern, err); } }
+      if (!this._built) this._build(); }
     static getConfigElement() { return null; }
     static getStubConfig() { return {}; }
     getCardSize() { return 16; }
@@ -110,14 +113,8 @@
     }
 
     _matchesIncludePattern(entityId) {
-      const pattern = this._config?.include_pattern;
-      if (!pattern) return true;
-      try {
-        return new RegExp(pattern).test(entityId);
-      } catch (err) {
-        console.warn("termoweb-schedule-card: invalid include_pattern regex", pattern, err);
-        return true;
-      }
+      if (!this._includePatternRe) return true;
+      return this._includePatternRe.test(entityId);
     }
 
     _hasTermoWebMarkers(attrs) {
@@ -449,7 +446,7 @@
       this._progLocal=next; this._dirtyProg=true; this._renderGridColors(); this._syncHeader(); }
 
     _normalizePresetTriplet(raw){ if(!Array.isArray(raw)||raw.length!==3) return [null,null,null];
-      return raw.map((value)=>{ const n=Number(value); return Number.isFinite(n)?n:null; }); }
+      return raw.map((value)=>{ if(value==null) return null; const n=Number(value); return Number.isFinite(n)?n:null; }); }
 
     _copyToEntity() {
       if (!this._hass) return;
@@ -499,13 +496,16 @@
     _refresh(){ this._clearErrorSaveStatusOnInteraction(); this._isInteracting=false; this._dirtyProg=false; this._dirtyPresets=false; this._presetInvalid=[false,false,false]; this._presetFeedback=""; this.hass=this._hass; }
     async _save(){ if(!this._entity||!this._hass) return;
       if(this._savingProg||this._savingPresets) return;
+      const willSaveProg=Array.isArray(this._progLocal)&&this._progLocal.length===168&&this._dirtyProg;
+      const willSavePresets=this._dirtyPresets;
+      if(!willSaveProg&&!willSavePresets) return;
       this._savingProg=true;
-      this._setSaveStatus("Saving program…");
+      this._setSaveStatus(willSaveProg?"Saving program…":"Saving presets…");
       this._syncSaveButtons();
       try {
-        if(Array.isArray(this._progLocal)&&this._progLocal.length===168&&this._dirtyProg){
+        if(willSaveProg){
           await this._hass.callService("termoweb","set_schedule",{ entity_id:this._entity, prog:this._progLocal }); this._dirtyProg=false; }
-        if(this._dirtyPresets) await this._savePresets(true);
+        if(willSavePresets) await this._savePresets(true);
         if (this._saveStatusType !== "error") this._setSaveStatus("Saved", "ok", 2200);
       } catch (err) {
         this._setSaveStatus(`Save failed: ${err?.message || err || "Unknown error."}`, "error");
