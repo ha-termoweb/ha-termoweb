@@ -19,7 +19,9 @@ def lock_inventory() -> Inventory:
     return Inventory("dev", build_node_inventory(payload))
 
 
-def test_child_lock_switch_available_without_lock_value(lock_inventory: Inventory) -> None:
+def test_child_lock_switch_available_without_lock_value(
+    lock_inventory: Inventory,
+) -> None:
     """Switch availability should only depend on immutable inventory membership."""
 
     coordinator = SimpleNamespace()
@@ -55,6 +57,27 @@ def test_child_lock_switch_has_feature_name(lock_inventory: Inventory) -> None:
     )
 
     assert switch.name == "Child lock"
+
+
+def test_child_lock_switch_does_not_override_default_icon(
+    lock_inventory: Inventory,
+) -> None:
+    """Switch icon should be left to Home Assistant's default switch rendering."""
+
+    coordinator = SimpleNamespace()
+    switch = ChildLockSwitch(
+        coordinator,
+        "entry",
+        "dev",
+        "htr",
+        "1",
+        unique_id="dev_htr_1_child_lock",
+        inventory=lock_inventory,
+        settings_resolver=lambda: HeaterState(lock=True),
+        device_name="Master Bedroom",
+    )
+
+    assert switch.icon is None
 
 
 @pytest.mark.asyncio

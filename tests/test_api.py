@@ -997,6 +997,44 @@ def test_get_nodes_and_settings_use_expected_paths(monkeypatch) -> None:
     asyncio.run(_run())
 
 
+def test_set_node_lock_uses_brand_specific_path(monkeypatch) -> None:
+    """Child lock writes should target the documented endpoint per backend."""
+
+    async def _run() -> None:
+        session = FakeSession()
+        termoweb = RESTClient(session, "user", "pw")
+        termoweb._access_token = "tok"
+        _set_token_expiry_seconds(termoweb, 1000.0)
+
+        ducaheat = RESTClient(
+            session,
+            "user",
+            "pw",
+            api_base="https://api-tevolve.termoweb.net",
+        )
+        ducaheat._access_token = "tok"
+        _set_token_expiry_seconds(ducaheat, 1000.0)
+
+        calls: list[tuple[str, str, dict[str, Any]]] = []
+
+        async def fake_request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+            calls.append((method, path, kwargs.get("json", {})))
+            return {"ok": True}
+
+        monkeypatch.setattr(termoweb, "_request", fake_request)
+        monkeypatch.setattr(ducaheat, "_request", fake_request)
+
+        await termoweb.set_node_lock("dev123", ("htr", "5"), lock=True)
+        await ducaheat.set_node_lock("dev123", ("htr", "5"), lock=False)
+
+        assert calls == [
+            ("POST", "/api/v2/devs/dev123/htr/5/settings", {"lock": True}),
+            ("POST", "/api/v2/devs/dev123/htr/5/lock", {"lock": False}),
+        ]
+
+    asyncio.run(_run())
+
+
 def test_get_rtc_time_uses_expected_path(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         session = FakeSession()
