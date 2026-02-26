@@ -37,6 +37,7 @@ from custom_components.termoweb.const import (
 from custom_components.termoweb.domain import canonicalize_settings_payload
 from custom_components.termoweb.domain.commands import (
     BaseCommand,
+    SetLock,
     SetMode,
     SetPresetTemps,
     SetProgram,
@@ -470,6 +471,24 @@ class DucaheatRESTClient(RESTClient):
             ptemp=ptemp,
             units=units,
             cancel_boost=cancel_boost,
+        )
+
+    async def set_node_lock(
+        self,
+        dev_id: str,
+        node: NodeDescriptor,
+        *,
+        lock: bool,
+    ) -> Any:
+        """Toggle child lock via the segmented lock endpoint."""
+
+        node_type, addr = self._resolve_node_descriptor(node)
+        node_id = NodeId(NodeType(node_type), addr)
+        return await self._execute_segmented_commands(
+            dev_id,
+            node_id,
+            [SetLock(lock)],
+            use_acm_endpoint=node_type == "acm",
         )
 
     def normalise_ws_nodes(self, nodes: dict[str, Any]) -> dict[str, Any]:

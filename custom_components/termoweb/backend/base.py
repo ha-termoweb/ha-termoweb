@@ -70,6 +70,15 @@ class HttpClientProto(Protocol):
     ) -> Any:
         """Toggle accumulator boost state for the specified node."""
 
+    async def set_node_lock(
+        self,
+        dev_id: str,
+        node: NodeDescriptor,
+        *,
+        lock: bool,
+    ) -> Any:
+        """Toggle child lock state for the specified node."""
+
     async def get_node_samples(
         self,
         dev_id: str,
@@ -163,6 +172,17 @@ class Backend(ABC):
             stemp=stemp,
             units=units,
         )
+
+    async def set_node_lock(
+        self,
+        dev_id: str,
+        node: NodeDescriptor,
+        *,
+        lock: bool,
+    ) -> Any:
+        """Toggle child lock state using the backend client."""
+
+        await self.client.set_node_lock(dev_id, node, lock=lock)
 
     @abstractmethod
     def create_ws_client(

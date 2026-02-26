@@ -57,7 +57,7 @@ _LOGGER = logging.getLogger(__name__)
 
 SupportsDiagnostics = getattr(config_entries_module, "SupportsDiagnostics", None)
 
-PLATFORMS = ["button", "binary_sensor", "climate", "number", "sensor"]
+PLATFORMS = ["button", "binary_sensor", "climate", "number", "sensor", "switch"]
 
 reset_samples_rate_limit_state()
 
