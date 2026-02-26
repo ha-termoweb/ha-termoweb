@@ -1811,13 +1811,12 @@ class EnergyStateCoordinator(
 
 
 def _wrap_logger(logger: Any) -> Any:
-    """Return a logger proxy that exposes ``isEnabledFor`` when missing."""
+    """Return a logger proxy that suppresses coordinator manual-update noise."""
 
-    if hasattr(logger, "isEnabledFor"):
-        return logger
+    suppressed_message = "Manually updated %s data"
 
     class _LoggerProxy:
-        """Proxy that adds ``isEnabledFor`` support for stubbed loggers."""
+        """Proxy that adds ``isEnabledFor`` support and filters known noise."""
 
         def __init__(self, inner: Any) -> None:
             self._inner = inner
@@ -1825,7 +1824,15 @@ def _wrap_logger(logger: Any) -> Any:
         def __getattr__(self, name: str) -> Any:
             return getattr(self._inner, name)
 
+        def debug(self, msg: Any, *args: Any, **kwargs: Any) -> Any:
+            if msg == suppressed_message:
+                return None
+            return self._inner.debug(msg, *args, **kwargs)
+
         def isEnabledFor(self, _level: int) -> bool:
+            checker = getattr(self._inner, "isEnabledFor", None)
+            if callable(checker):
+                return bool(checker(_level))
             return False
 
     return _LoggerProxy(logger)

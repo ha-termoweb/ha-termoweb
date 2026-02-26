@@ -978,3 +978,25 @@ def test_wrap_logger_proxies_missing_helpers() -> None:
 
     assert proxy.value == "logger"
     assert proxy.isEnabledFor(10) is False
+
+
+def test_wrap_logger_suppresses_manual_update_debug() -> None:
+    """Ensure wrapped loggers skip DataUpdateCoordinator manual update noise."""
+
+    class DummyLogger:
+        def __init__(self) -> None:
+            self.debug_calls: list[tuple[object, tuple[object, ...]]] = []
+
+        def debug(self, msg: object, *args: object, **_kwargs: object) -> None:
+            self.debug_calls.append((msg, args))
+
+        def isEnabledFor(self, _level: int) -> bool:
+            return True
+
+    inner = DummyLogger()
+    proxy = coord_module._wrap_logger(inner)
+
+    proxy.debug("Manually updated %s data", "termoweb")
+    proxy.debug("Retained %s", "entry")
+
+    assert inner.debug_calls == [("Retained %s", ("entry",))]
