@@ -1256,6 +1256,25 @@ class DucaheatRESTClient(RESTClient):
                 ) from err
             raise
 
+    async def set_node_display_select(
+        self,
+        dev_id: str,
+        node: NodeDescriptor,
+        *,
+        select: bool,
+    ) -> Any:
+        """Toggle display-identify cues for a Ducaheat node."""
+
+        node_type, addr_str = self._resolve_node_descriptor(node)
+        headers = await self.authed_headers()
+        return await self._select_segmented_node(
+            dev_id=dev_id,
+            node_type=node_type,
+            addr=addr_str,
+            headers=headers,
+            select=select,
+        )
+
     async def set_acm_extra_options(
         self,
         dev_id: str,

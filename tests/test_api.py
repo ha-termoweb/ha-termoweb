@@ -1661,6 +1661,31 @@ async def test_set_acm_extra_options_forwards_payload(
 
 
 @pytest.mark.asyncio
+async def test_set_node_display_select_posts_select_segment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Display flash writes should post to the segmented select endpoint."""
+
+    client = RESTClient(FakeSession(), "user", "pass")
+    request_mock = AsyncMock(return_value={"ok": True})
+    headers_mock = AsyncMock(return_value={"Authorization": "Bearer token"})
+
+    monkeypatch.setattr(client, "_request", request_mock)
+    monkeypatch.setattr(client, "authed_headers", headers_mock)
+
+    response = await client.set_node_display_select("dev123", ("htr", "7"), select=True)
+
+    assert response == {"ok": True}
+    assert request_mock.await_count == 1
+    await_call = request_mock.await_args
+    assert await_call.args[0] == "POST"
+    assert await_call.args[1] == "/api/v2/devs/dev123/htr/7/select"
+    assert await_call.kwargs["json"] == {"select": True}
+    assert await_call.kwargs["headers"] == {"Authorization": "Bearer token"}
+    assert headers_mock.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_set_acm_boost_state_formats_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

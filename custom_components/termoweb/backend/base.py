@@ -79,6 +79,15 @@ class HttpClientProto(Protocol):
     ) -> Any:
         """Toggle child lock state for the specified node."""
 
+    async def set_node_display_select(
+        self,
+        dev_id: str,
+        node: NodeDescriptor,
+        *,
+        select: bool,
+    ) -> Any:
+        """Toggle display-identify cues for the specified node."""
+
     async def get_node_samples(
         self,
         dev_id: str,
@@ -183,6 +192,17 @@ class Backend(ABC):
         """Toggle child lock state using the backend client."""
 
         await self.client.set_node_lock(dev_id, node, lock=lock)
+
+    async def set_node_display_select(
+        self,
+        dev_id: str,
+        node: NodeDescriptor,
+        *,
+        select: bool,
+    ) -> Any:
+        """Toggle display-identify cues using the backend client."""
+
+        await self.client.set_node_display_select(dev_id, node, select=select)
 
     @abstractmethod
     def create_ws_client(

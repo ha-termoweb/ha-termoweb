@@ -546,6 +546,20 @@ async def test_post_acm_endpoint_server_error(monkeypatch: pytest.MonkeyPatch) -
 
 
 @pytest.mark.asyncio
+async def test_set_node_display_select_posts_to_select_segment(
+    ducaheat_rest_harness: Callable[..., Any],
+) -> None:
+    """Display flash writes should target the segmented /select endpoint."""
+
+    harness = ducaheat_rest_harness()
+
+    await harness.client.set_node_display_select("dev", ("acm", "1"), select=True)
+
+    assert harness.segmented_calls[-1]["path"] == "/api/v2/devs/dev/acm/1/select"
+    assert harness.segmented_calls[-1]["payload"] == {"select": True}
+
+
+@pytest.mark.asyncio
 async def test_select_segmented_node_client_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
