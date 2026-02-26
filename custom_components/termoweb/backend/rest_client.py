@@ -524,15 +524,13 @@ class RESTClient:
         *,
         lock: bool,
     ) -> Any:
-        """Toggle child lock state for a heater or accumulator.
-
-        Posts ``{"lock": true|false}`` to the ``/lock`` segment.
-        """
+        """Toggle child lock state for a heater or accumulator."""
 
         node_type, addr = self._resolve_node_descriptor(node)
         payload = build_lock_payload(lock)
         headers = await self.authed_headers()
-        path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}/lock"
+        segment = "lock" if self._is_ducaheat else "settings"
+        path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}/{segment}"
         return await self._request("POST", path, headers=headers, json=payload)
 
     def _build_acm_extra_options_payload(
