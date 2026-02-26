@@ -56,6 +56,7 @@ class HeaterState:
     state: str | None = None
     max_power: float | int | None = None
     batt_level: int | None = None
+    lock: bool | None = None
 
 
 @dataclass(slots=True)
@@ -240,6 +241,14 @@ def _populate_heater_state(
             state.batt_level = int(payload.get("batt_level"))
         except (TypeError, ValueError):
             state.batt_level = None
+    if "lock" in payload:
+        lock_value = payload.get("lock")
+        if isinstance(lock_value, bool):
+            state.lock = lock_value
+        elif isinstance(lock_value, (int, float)):
+            state.lock = bool(lock_value)
+        else:
+            state.lock = None
     return state
 
 

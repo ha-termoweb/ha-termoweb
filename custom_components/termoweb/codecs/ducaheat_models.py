@@ -233,9 +233,16 @@ class BoostPayload(DucaheatModel):
         return validate_units(value, trim=True)
 
 
+class LockWritePayload(DucaheatModel):
+    """Child lock payload for the lock endpoint."""
+
+    lock: bool
+
+
 __all__ = [
     "BoostPayload",
     "ExtraOptionsPayload",
+    "LockWritePayload",
     "ModeWritePayload",
     "ProgramWritePayload",
     "SelectRequest",

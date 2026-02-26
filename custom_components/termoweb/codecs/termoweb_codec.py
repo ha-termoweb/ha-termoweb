@@ -124,6 +124,12 @@ def build_settings_payload(
     return model.model_dump(exclude_none=True)
 
 
+def build_lock_payload(lock: bool) -> dict[str, Any]:
+    """Encode a child lock payload for the TermoWeb lock endpoint."""
+
+    return {"lock": bool(lock)}
+
+
 def build_extra_options_payload(command: SetExtraOptions) -> dict[str, Any]:
     """Encode accumulator extra options for TermoWeb."""
 

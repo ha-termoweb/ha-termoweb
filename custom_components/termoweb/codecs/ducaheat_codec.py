@@ -9,6 +9,7 @@ from custom_components.termoweb.domain.commands import (
     AccumulatorCommand,
     BaseCommand,
     SetExtraOptions,
+    SetLock,
     SetMode,
     SetPresetTemps,
     SetProgram,
@@ -23,6 +24,7 @@ from .common import format_temperature, validate_units
 from .ducaheat_models import (
     BoostPayload,
     ExtraOptionsPayload,
+    LockWritePayload,
     ModeWritePayload,
     SelectRequest,
     SetupPayload,
@@ -189,6 +191,12 @@ def encode_boost_command(command: AccumulatorCommand) -> dict[str, Any]:
     return payload.model_dump(exclude_none=True)
 
 
+def encode_lock_command(command: SetLock) -> dict[str, Any]:
+    """Encode a SetLock command for the lock endpoint."""
+
+    return LockWritePayload.model_validate({"lock": command.lock}).model_dump()
+
+
 def infer_status_endpoint(node_type: NodeType, command: BaseCommand) -> str:
     """Return the segmented endpoint name for a status-like command."""
 
@@ -203,4 +211,6 @@ def infer_status_endpoint(node_type: NodeType, command: BaseCommand) -> str:
         return "setup"
     if isinstance(command, (StartBoost, StopBoost)):
         return "boost"
+    if isinstance(command, SetLock):
+        return "lock"
     raise TypeError(f"Unsupported command type: {type(command).__name__}")

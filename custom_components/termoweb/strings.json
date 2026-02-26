@@ -53,6 +53,11 @@
         "name": "Boost temperature"
       }
     },
+    "switch": {
+      "child_lock": {
+        "name": "Child lock"
+      }
+    },
     "sensor": {
       "heater_temperature": {
         "name": "Temperature"

@@ -77,3 +77,10 @@ class StopBoost(AccumulatorCommand):
     boost_time: int | None = None
     stemp: float | str | None = None
     units: str | None = None
+
+
+@dataclass(slots=True)
+class SetLock(BaseCommand):
+    """Toggle child lock state on a heater or accumulator."""
+
+    lock: bool

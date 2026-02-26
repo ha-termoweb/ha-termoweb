@@ -126,6 +126,7 @@ class HeaterStatusPayload(BaseModel):
     prog: list[int | float | str] | None = None
     ptemp: list[Any] | None = None
     units: str | None = None
+    lock: bool | None = None
     boost_active: bool | None = None
     boost_time: int | float | None = None
     boost_temp: Any | None = None
@@ -164,6 +165,7 @@ class HeaterSettingsPayload(BaseModel):
     prog: list[int | float | str] | None = None
     ptemp: list[Any] | None = None
     units: str | None = None
+    lock: bool | None = None
     status: HeaterStatusPayload | Mapping[str, typing.Any] | None = None
     capabilities: dict[str, Any] | None = None
 

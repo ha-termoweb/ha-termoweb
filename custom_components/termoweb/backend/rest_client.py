@@ -16,6 +16,7 @@ from custom_components.termoweb.backend.sanitize import mask_identifier, redact_
 from custom_components.termoweb.codecs.termoweb_codec import (
     build_boost_payload,
     build_extra_options_payload,
+    build_lock_payload,
     build_settings_payload,
     decode_devs_payload,
     decode_node_settings,
@@ -515,6 +516,24 @@ class RESTClient:
             payload=response,
         )
         return response
+
+    async def set_node_lock(
+        self,
+        dev_id: str,
+        node: NodeDescriptor,
+        *,
+        lock: bool,
+    ) -> Any:
+        """Toggle child lock state for a heater or accumulator.
+
+        Posts ``{"lock": true|false}`` to the ``/lock`` segment.
+        """
+
+        node_type, addr = self._resolve_node_descriptor(node)
+        payload = build_lock_payload(lock)
+        headers = await self.authed_headers()
+        path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}/lock"
+        return await self._request("POST", path, headers=headers, json=payload)
 
     def _build_acm_extra_options_payload(
         self,
