@@ -47,6 +47,9 @@
       },
       "accumulator_boost_cancel": {
         "name": "Cancel boost"
+      },
+      "flash_display": {
+        "name": "Flash display"
       }
     },
     "number": {

@@ -535,6 +535,21 @@ class RESTClient:
         path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}/lock"
         return await self._request("POST", path, headers=headers, json=payload)
 
+    async def set_node_display_select(
+        self,
+        dev_id: str,
+        node: NodeDescriptor,
+        *,
+        select: bool,
+    ) -> Any:
+        """Toggle display-identify cues for a heater or accumulator."""
+
+        node_type, addr = self._resolve_node_descriptor(node)
+        payload = {"select": bool(select)}
+        headers = await self.authed_headers()
+        path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}/select"
+        return await self._request("POST", path, headers=headers, json=payload)
+
     def _build_acm_extra_options_payload(
         self,
         boost_time: int | None,

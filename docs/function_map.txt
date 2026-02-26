@@ -46,6 +46,10 @@ custom_components/termoweb/backend/base.py :: HttpClientProto.set_node_settings
     Update node settings for the specified node.
 custom_components/termoweb/backend/base.py :: HttpClientProto.set_acm_boost_state
     Toggle accumulator boost state for the specified node.
+custom_components/termoweb/backend/base.py :: HttpClientProto.set_node_lock
+    Toggle child lock state for the specified node.
+custom_components/termoweb/backend/base.py :: HttpClientProto.set_node_display_select
+    Toggle display-identify cues for the specified node.
 custom_components/termoweb/backend/base.py :: HttpClientProto.get_node_samples
     Return historical samples for the specified node.
 custom_components/termoweb/backend/base.py :: WsClientProto.start
@@ -62,6 +66,10 @@ custom_components/termoweb/backend/base.py :: Backend.set_node_settings
     Update node settings using the backend client.
 custom_components/termoweb/backend/base.py :: Backend.set_acm_boost_state
     Toggle accumulator boost state using the backend client.
+custom_components/termoweb/backend/base.py :: Backend.set_node_lock
+    Toggle child lock state using the backend client.
+custom_components/termoweb/backend/base.py :: Backend.set_node_display_select
+    Toggle display-identify cues using the backend client.
 custom_components/termoweb/backend/base.py :: Backend.create_ws_client
     Create a websocket client for the given device.
 custom_components/termoweb/backend/base.py :: Backend.fetch_hourly_samples
@@ -88,6 +96,8 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._execute_se
     Apply one or more segmented commands and return merged segment responses.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.set_node_settings
     Write heater settings using the segmented endpoints.
+custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.set_node_lock
+    Toggle child lock via the segmented lock endpoint.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.normalise_ws_nodes
     Normalise websocket payloads and merge accumulator charge metadata.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._normalise_ws_settings
@@ -120,6 +130,8 @@ custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._post_acm_e
     POST to an ACM endpoint, translating client errors.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient._select_segmented_node
     Toggle node identification cues like flashing/backlight for the target node.
+custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.set_node_display_select
+    Toggle display-identify cues for a Ducaheat node.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.set_acm_extra_options
     Write default boost configuration using segmented endpoints.
 custom_components/termoweb/backend/ducaheat.py :: DucaheatRESTClient.set_acm_boost_state
@@ -282,6 +294,10 @@ custom_components/termoweb/backend/rest_client.py :: RESTClient._extract_samples
     Normalise heater samples payloads into {"t", "counter"} lists.
 custom_components/termoweb/backend/rest_client.py :: RESTClient.set_node_settings
     Update heater settings.
+custom_components/termoweb/backend/rest_client.py :: RESTClient.set_node_lock
+    Toggle child lock state for a heater or accumulator.
+custom_components/termoweb/backend/rest_client.py :: RESTClient.set_node_display_select
+    Toggle display-identify cues for a heater or accumulator.
 custom_components/termoweb/backend/rest_client.py :: RESTClient._build_acm_extra_options_payload
     Return a validated payload for accumulator extra options.
 custom_components/termoweb/backend/rest_client.py :: RESTClient.set_acm_extra_options
@@ -586,6 +602,8 @@ custom_components/termoweb/codecs/ducaheat_codec.py :: encode_extra_options_comm
     Encode an extra options command for the setup endpoint.
 custom_components/termoweb/codecs/ducaheat_codec.py :: encode_boost_command
     Encode accumulator boost commands for the boost endpoint.
+custom_components/termoweb/codecs/ducaheat_codec.py :: encode_lock_command
+    Encode a SetLock command for the lock endpoint.
 custom_components/termoweb/codecs/ducaheat_codec.py :: infer_status_endpoint
     Return the segmented endpoint name for a status-like command.
 custom_components/termoweb/codecs/ducaheat_models.py :: _validate_prog_slots
@@ -714,6 +732,8 @@ custom_components/termoweb/codecs/termoweb_codec.py :: _normalise_mode
     Lower-case and normalise heater modes.
 custom_components/termoweb/codecs/termoweb_codec.py :: build_settings_payload
     Encode node setting commands into a TermoWeb payload.
+custom_components/termoweb/codecs/termoweb_codec.py :: build_lock_payload
+    Encode a child lock payload for the TermoWeb lock endpoint.
 custom_components/termoweb/codecs/termoweb_codec.py :: build_extra_options_payload
     Encode accumulator extra options for TermoWeb.
 custom_components/termoweb/codecs/termoweb_codec.py :: build_boost_payload
@@ -902,7 +922,6 @@ custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._prefill_ene
     Seed energy and power buckets from cached coordinator state.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._build_snapshot
     Return an :class:`EnergySnapshot` built from metric buckets.
-    Return metrics for ``node_type``/``addr`` when cached.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator.metrics_by_type
     Return metrics mapping keyed by address for ``node_type``.
 custom_components/termoweb/coordinator.py :: EnergyStateCoordinator._poll_recent_samples
@@ -1087,6 +1106,10 @@ custom_components/termoweb/entities/binary_sensor.py :: _iter_boostable_inventor
     Yield boostable heater metadata from ``inventory``.
 custom_components/termoweb/entities/binary_sensor.py :: _build_settings_resolver
     Return callable resolving typed boost state for a heater node.
+custom_components/termoweb/entities/button.py :: DisplayFlashContext.unique_id
+    Return the stable unique ID for this flash button.
+custom_components/termoweb/entities/button.py :: _iter_display_flash_contexts
+    Yield flash-button contexts for flash-capable inventory nodes.
 custom_components/termoweb/entities/button.py :: AccumulatorBoostContext.from_inventory
     Build context for ``node`` using the shared inventory.
 custom_components/termoweb/entities/button.py :: AccumulatorBoostContext.dev_id
@@ -1137,6 +1160,14 @@ custom_components/termoweb/entities/button.py :: AccumulatorBoostCancelButton.av
     Return True when an accumulator boost is active.
 custom_components/termoweb/entities/button.py :: AccumulatorBoostCancelButton.async_press
     Cancel the active accumulator boost session.
+custom_components/termoweb/entities/button.py :: DisplayFlashButton.__init__
+    Initialise the display flash button entity.
+custom_components/termoweb/entities/button.py :: DisplayFlashButton.available
+    Return True when the target node is still in immutable inventory.
+custom_components/termoweb/entities/button.py :: DisplayFlashButton.device_info
+    Expose Home Assistant device metadata for the flash target.
+custom_components/termoweb/entities/button.py :: DisplayFlashButton.async_press
+    Call the backend /select endpoint to flash the unit display.
 custom_components/termoweb/entities/button.py :: _create_boost_button_entities
     Return boost helper buttons described by shared metadata.
 custom_components/termoweb/entities/button.py :: _build_boost_button
@@ -1489,6 +1520,24 @@ custom_components/termoweb/entities/sensor.py :: InstallationTotalEnergySensor.n
     Return the summed energy usage across all heaters.
 custom_components/termoweb/entities/sensor.py :: InstallationTotalEnergySensor.extra_state_attributes
     Return identifiers describing the aggregated energy value.
+custom_components/termoweb/entities/switch.py :: async_setup_entry
+    Set up child lock switches for heater and accumulator nodes.
+custom_components/termoweb/entities/switch.py :: ChildLockSwitch.__init__
+    Initialise the child lock switch entity.
+custom_components/termoweb/entities/switch.py :: ChildLockSwitch.is_on
+    Return True when the child lock is engaged.
+custom_components/termoweb/entities/switch.py :: ChildLockSwitch.available
+    Return True when the node exists in the immutable inventory.
+custom_components/termoweb/entities/switch.py :: ChildLockSwitch.device_info
+    Expose Home Assistant device metadata for the node.
+custom_components/termoweb/entities/switch.py :: ChildLockSwitch.async_turn_on
+    Enable the child lock.
+custom_components/termoweb/entities/switch.py :: ChildLockSwitch.async_turn_off
+    Disable the child lock.
+custom_components/termoweb/entities/switch.py :: _iter_lockable_inventory_nodes
+    Yield htr and acm node metadata from ``inventory``.
+custom_components/termoweb/entities/switch.py :: _build_settings_resolver
+    Return callable resolving the domain state for a node.
 custom_components/termoweb/fallback_translations.py :: language_candidates
     Return ordered fallback language candidates for ``language``.
 custom_components/termoweb/fallback_translations.py :: get_fallback_translations

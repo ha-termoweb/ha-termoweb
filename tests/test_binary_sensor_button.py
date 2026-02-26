@@ -35,6 +35,7 @@ async_setup_button_entry = button_module.async_setup_entry
 AccumulatorBoostButton = button_module.AccumulatorBoostButton
 AccumulatorBoostCancelButton = button_module.AccumulatorBoostCancelButton
 AccumulatorBoostContext = button_module.AccumulatorBoostContext
+DisplayFlashButton = button_module.DisplayFlashButton
 
 
 def test_binary_sensor_setup_and_dispatch(
@@ -520,6 +521,86 @@ def test_iter_accumulator_contexts_uses_inventory_metadata(
     assert context.entry_id == entry_id
     assert context.inventory is inventory
     assert context.node is canonical
+
+
+def test_button_setup_adds_flash_display_buttons_for_all_brands(
+    heater_hass_data,
+) -> None:
+    async def _run() -> None:
+        hass = HomeAssistant()
+        entry = types.SimpleNamespace(entry_id="entry-flash-setup")
+        dev_id = "device-flash-setup"
+        inventory = Inventory(
+            dev_id,
+            [
+                HeaterNode(name="Heater", addr="1"),
+                AccumulatorNode(name="Accumulator", addr="2"),
+            ],
+        )
+        coordinator = FakeCoordinator(hass, dev_id=dev_id, inventory=inventory, data={})
+        backend = types.SimpleNamespace(set_node_display_select=AsyncMock())
+
+        for brand in ("termoweb", "ducaheat", "tevolve"):
+            heater_hass_data(
+                hass,
+                entry.entry_id,
+                dev_id,
+                coordinator,
+                inventory=inventory,
+                extra={"brand": brand, "backend": backend},
+            )
+
+            added: list[ButtonEntity] = []
+
+            def _add_entities(entities: list[ButtonEntity]) -> None:
+                added.extend(entities)
+
+            await async_setup_button_entry(hass, entry, _add_entities)
+
+            flash_buttons = [
+                entity for entity in added if isinstance(entity, DisplayFlashButton)
+            ]
+            assert len(flash_buttons) == 2
+
+    asyncio.run(_run())
+
+
+def test_flash_display_button_calls_select_endpoint(heater_hass_data) -> None:
+    async def _run() -> None:
+        hass = HomeAssistant()
+        entry = types.SimpleNamespace(entry_id="entry-flash-press")
+        dev_id = "device-flash-press"
+        coordinator = types.SimpleNamespace(hass=hass, _inventory=Inventory(dev_id, []))
+        backend = types.SimpleNamespace(set_node_display_select=AsyncMock())
+
+        heater_hass_data(
+            hass,
+            entry.entry_id,
+            dev_id,
+            coordinator,
+            extra={"brand": "termoweb", "backend": backend},
+            inventory=Inventory(dev_id, [HeaterNode(name="Heater", addr="7")]),
+        )
+
+        context = button_module.DisplayFlashContext(
+            entry_id=entry.entry_id,
+            dev_id=dev_id,
+            node_type="htr",
+            addr="7",
+            name="Heater",
+        )
+        button = DisplayFlashButton(coordinator, context)
+        button.hass = hass
+
+        await button.async_press()
+
+        backend.set_node_display_select.assert_awaited_once_with(
+            dev_id,
+            ("htr", "7"),
+            select=True,
+        )
+
+    asyncio.run(_run())
 
 
 def _make_boost_context(

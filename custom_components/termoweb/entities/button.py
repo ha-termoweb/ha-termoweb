@@ -18,7 +18,12 @@ from ..domain import DomainStateView
 from ..domain.state import DomainState
 from ..i18n import async_get_fallback_translations, attach_fallbacks
 from ..identifiers import build_heater_entity_unique_id
-from ..inventory import AccumulatorNode, Inventory
+from ..inventory import (
+    AccumulatorNode,
+    Inventory,
+    normalize_node_addr,
+    normalize_node_type,
+)
 from ..runtime import require_runtime
 from ..utils import build_gateway_device_info
 from .heater import (
@@ -35,6 +40,53 @@ _LOGGER = logging.getLogger(__name__)
 
 _SERVICE_REQUEST_ACCUMULATOR_BOOST = "request_accumulator_boost"
 _SERVICE_CANCEL_ACCUMULATOR_BOOST = "cancel_accumulator_boost"
+
+
+_FLASHABLE_NODE_TYPES: tuple[str, ...] = ("htr", "acm")
+
+
+@dataclass(frozen=True, slots=True)
+class DisplayFlashContext:
+    """Inventory-backed context describing a node display-flash target."""
+
+    entry_id: str
+    dev_id: str
+    node_type: str
+    addr: str
+    name: str
+
+    @property
+    def unique_id(self) -> str:
+        """Return the stable unique ID for this flash button."""
+
+        return build_heater_entity_unique_id(
+            self.dev_id,
+            self.node_type,
+            self.addr,
+            ":flash_display",
+        )
+
+
+def _iter_display_flash_contexts(
+    entry_id: str,
+    inventory: Inventory,
+) -> Iterator[DisplayFlashContext]:
+    """Yield flash-button contexts for flash-capable inventory nodes."""
+
+    for metadata in inventory.iter_nodes_metadata(node_types=_FLASHABLE_NODE_TYPES):
+        node_type = normalize_node_type(
+            metadata.node_type, use_default_when_falsey=True
+        )
+        addr = normalize_node_addr(metadata.addr, use_default_when_falsey=True)
+        if not node_type or not addr:
+            continue
+        yield DisplayFlashContext(
+            entry_id=entry_id,
+            dev_id=inventory.dev_id,
+            node_type=node_type,
+            addr=addr,
+            name=metadata.name,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +179,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     if boost_entities:
         entities.extend(boost_entities)
+
+    flash_entities = [
+        DisplayFlashButton(coordinator, context)
+        for context in _iter_display_flash_contexts(entry.entry_id, inventory)
+    ]
+    entities.extend(flash_entities)
 
     async_add_entities(entities)
 
@@ -451,6 +509,78 @@ class AccumulatorBoostCancelButton(AccumulatorBoostButtonBase):
                 self.boost_context.node_type,
                 err,
             )
+
+
+class DisplayFlashButton(CoordinatorEntity, ButtonEntity):
+    """Button that triggers the backend display identify endpoint."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:gesture-tap-button"
+    _attr_translation_key = "flash_display"
+
+    def __init__(self, coordinator, context: DisplayFlashContext) -> None:
+        """Initialise the display flash button entity."""
+
+        super().__init__(coordinator)
+        self._context = context
+        self._attr_unique_id = context.unique_id
+
+    @property
+    def available(self) -> bool:
+        """Return True when the target node is still in immutable inventory."""
+
+        inventory = getattr(self.coordinator, "_inventory", None)
+        return bool(
+            isinstance(inventory, Inventory)
+            and inventory.has_node(self._context.node_type, self._context.addr)
+        )
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Expose Home Assistant device metadata for the flash target."""
+
+        model = "Thermostat" if self._context.node_type == "thm" else "Heater"
+        if self._context.node_type == "acm":
+            model = "Accumulator"
+
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._context.dev_id, self._context.addr)},
+            name=self._context.name,
+            manufacturer="TermoWeb",
+            model=model,
+            via_device=(DOMAIN, self._context.dev_id),
+        )
+
+    async def async_press(self) -> None:
+        """Call the backend /select endpoint to flash the unit display."""
+
+        hass = self.hass
+        if hass is None:
+            return
+
+        runtime = require_runtime(hass, self._context.entry_id)
+        _LOGGER.info(
+            "Requesting display flash for %s/%s node %s",
+            self._context.dev_id,
+            self._context.node_type,
+            self._context.addr,
+        )
+        try:
+            await runtime.backend.set_node_display_select(
+                self._context.dev_id,
+                (self._context.node_type, self._context.addr),
+                select=True,
+            )
+        except Exception as err:
+            _LOGGER.error(
+                "Display flash failed for %s/%s node %s: %s",
+                self._context.dev_id,
+                self._context.node_type,
+                self._context.addr,
+                err,
+            )
+            raise HomeAssistantError("Unable to flash the unit display") from err
 
 
 def _create_boost_button_entities(
