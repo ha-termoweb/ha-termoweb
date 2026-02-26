@@ -47,7 +47,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     inventory = runtime.inventory
     if not isinstance(inventory, Inventory):
         _LOGGER.error("TermoWeb switch setup missing inventory for device %s", dev_id)
-        raise ValueError("TermoWeb inventory unavailable for switch platform")
+        raise TypeError("TermoWeb inventory unavailable for switch platform")
 
     entities: list[SwitchEntity] = []
     for node_type, addr_str, base_name in _iter_lockable_inventory_nodes(inventory):
@@ -95,6 +95,7 @@ class ChildLockSwitch(
     _attr_has_entity_name = True
     _attr_should_poll = False
     _attr_translation_key = "child_lock"
+    _attr_name = "Child lock"
 
     def __init__(
         self,
@@ -141,14 +142,13 @@ class ChildLockSwitch(
 
     @property
     def available(self) -> bool:
-        """Return True when the node exists and reports lock state."""
+        """Return True when the node exists in the immutable inventory."""
 
         forward_map, _ = self._inventory.heater_address_map
         addresses = forward_map.get(self._node_type, [])
         if self._addr not in addresses:
             return False
-        state = self._settings_resolver()
-        return state is not None and getattr(state, "lock", None) is not None
+        return self._addr in addresses
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -166,6 +166,12 @@ class ChildLockSwitch(
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Enable the child lock."""
 
+        _LOGGER.info(
+            "Setting child lock ON for %s/%s node %s",
+            self._dev_id,
+            self._node_type,
+            self._addr,
+        )
         runtime = require_runtime(self.hass, self._entry_id)
         await runtime.backend.set_node_lock(
             self._dev_id,
@@ -177,6 +183,12 @@ class ChildLockSwitch(
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable the child lock."""
 
+        _LOGGER.info(
+            "Setting child lock OFF for %s/%s node %s",
+            self._dev_id,
+            self._node_type,
+            self._addr,
+        )
         runtime = require_runtime(self.hass, self._entry_id)
         await runtime.backend.set_node_lock(
             self._dev_id,

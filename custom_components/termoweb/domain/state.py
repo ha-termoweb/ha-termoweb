@@ -247,6 +247,14 @@ def _populate_heater_state(
             state.lock = lock_value
         elif isinstance(lock_value, (int, float)):
             state.lock = bool(lock_value)
+        elif isinstance(lock_value, str):
+            normalized_lock = lock_value.strip().lower()
+            if normalized_lock in {"on", "true", "1", "yes", "enabled"}:
+                state.lock = True
+            elif normalized_lock in {"off", "false", "0", "no", "disabled"}:
+                state.lock = False
+            else:
+                state.lock = None
         else:
             state.lock = None
     return state
