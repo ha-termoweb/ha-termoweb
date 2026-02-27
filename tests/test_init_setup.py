@@ -1889,3 +1889,31 @@ async def test_shutdown_entry_cancels_poll_timer(termoweb_init: Any) -> None:
     assert rec._shutdown_complete is True
     assert rec.poll_resume_unsub is None
     assert cancelled == [True]
+
+
+def test_platforms_for_brand_filters_lock_by_backend(termoweb_init: Any) -> None:
+    """Lock platform should be enabled only for Ducaheat-backed brands."""
+
+    assert termoweb_init._platforms_for_brand("termoweb") == [
+        "button",
+        "binary_sensor",
+        "climate",
+        "number",
+        "sensor",
+    ]
+    assert termoweb_init._platforms_for_brand("ducaheat") == [
+        "button",
+        "binary_sensor",
+        "climate",
+        "number",
+        "sensor",
+        "lock",
+    ]
+    assert termoweb_init._platforms_for_brand("tevolve") == [
+        "button",
+        "binary_sensor",
+        "climate",
+        "number",
+        "sensor",
+        "lock",
+    ]

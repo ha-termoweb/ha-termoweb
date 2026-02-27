@@ -23,7 +23,7 @@ class TokenResponse(BaseModel):
 class DevSummary(BaseModel):
     """Summary of a gateway returned by ``/api/v2/devs/``."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     dev_id: str | None = None
     id: str | int | None = None
@@ -117,7 +117,7 @@ def normalise_ptemp(value: Any) -> Any:
 class HeaterStatusPayload(BaseModel):
     """Settings/status fields shared by heater and accumulator nodes."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     mode: str | None = None
     stemp: Any | None = None
@@ -126,10 +126,10 @@ class HeaterStatusPayload(BaseModel):
     prog: list[int | float | str] | None = None
     ptemp: list[Any] | None = None
     units: str | None = None
-    lock: bool | None = None
     boost_active: bool | None = None
     boost_time: int | float | None = None
     boost_temp: Any | None = None
+
 
     @field_validator("stemp", "mtemp", "temp", "boost_temp", mode="before")
     @classmethod
@@ -165,9 +165,9 @@ class HeaterSettingsPayload(BaseModel):
     prog: list[int | float | str] | None = None
     ptemp: list[Any] | None = None
     units: str | None = None
-    lock: bool | None = None
     status: HeaterStatusPayload | Mapping[str, typing.Any] | None = None
     capabilities: dict[str, Any] | None = None
+
 
     @field_validator("stemp", "mtemp", "temp", mode="before")
     @classmethod
