@@ -56,11 +56,6 @@
         "name": "Boost temperature"
       }
     },
-    "switch": {
-      "child_lock": {
-        "name": "Child lock"
-      }
-    },
     "sensor": {
       "heater_temperature": {
         "name": "Temperature"
@@ -94,6 +89,11 @@
       },
       "accumulator_target_charge": {
         "name": "Target charge"
+      }
+    },
+    "lock": {
+      "child_lock": {
+        "name": "Child lock"
       }
     }
   },

@@ -1786,3 +1786,26 @@ scripts/prepare_release.py :: run
     Execute a subprocess and ensure it completes successfully.
 scripts/prepare_release.py :: main
     Parse arguments, update files, and perform release automation.
+
+custom_components/termoweb/entities/lock.py :: async_setup_entry
+    Set up child lock entities for heater and accumulator nodes.
+custom_components/termoweb/entities/lock.py :: ChildLockEntity.__init__
+    Initialise the child lock entity.
+custom_components/termoweb/entities/lock.py :: ChildLockEntity.is_locked
+    Return True when the child lock is engaged.
+custom_components/termoweb/entities/lock.py :: ChildLockEntity.icon
+    Return a lock icon matching the current child lock state.
+custom_components/termoweb/entities/lock.py :: ChildLockEntity.available
+    Return True when the node exists in the immutable inventory.
+custom_components/termoweb/entities/lock.py :: ChildLockEntity.device_info
+    Expose Home Assistant device metadata for the node.
+custom_components/termoweb/entities/lock.py :: ChildLockEntity.async_lock
+    Enable the child lock.
+custom_components/termoweb/entities/lock.py :: ChildLockEntity.async_unlock
+    Disable the child lock.
+custom_components/termoweb/entities/lock.py :: _iter_lockable_inventory_nodes
+    Yield htr and acm node metadata from ``inventory``.
+custom_components/termoweb/entities/lock.py :: _build_settings_resolver
+    Return callable resolving the domain state for a node.
+custom_components/termoweb/entities/lock.py :: _build_settings_resolver._resolver
+    Return the coordinator state for the node when available.

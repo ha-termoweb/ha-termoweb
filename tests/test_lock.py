@@ -1,4 +1,4 @@
-"""Unit tests for child lock switch entities."""
+"""Unit tests for child lock entities in the lock domain."""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -7,7 +7,7 @@ import pytest
 
 from custom_components.termoweb.domain import DomainStateStore, NodeId, NodeType
 from custom_components.termoweb.domain.state import HeaterState
-from custom_components.termoweb.entities.switch import ChildLockSwitch
+from custom_components.termoweb.entities.lock import ChildLockEntity
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
 
 
@@ -19,13 +19,13 @@ def lock_inventory() -> Inventory:
     return Inventory("dev", build_node_inventory(payload))
 
 
-def test_child_lock_switch_available_without_lock_value(
+def test_child_lock_entity_available_without_lock_value(
     lock_inventory: Inventory,
 ) -> None:
-    """Switch availability should only depend on immutable inventory membership."""
+    """Lock availability should only depend on immutable inventory membership."""
 
     coordinator = SimpleNamespace()
-    switch = ChildLockSwitch(
+    lock_entity = ChildLockEntity(
         coordinator,
         "entry",
         "dev",
@@ -37,14 +37,14 @@ def test_child_lock_switch_available_without_lock_value(
         device_name="Master Bedroom",
     )
 
-    assert switch.available is True
+    assert lock_entity.available is True
 
 
-def test_child_lock_switch_has_feature_name(lock_inventory: Inventory) -> None:
-    """Switch name should describe the feature, not the node."""
+def test_child_lock_entity_has_feature_name(lock_inventory: Inventory) -> None:
+    """Lock name should describe the feature, not the node."""
 
     coordinator = SimpleNamespace()
-    switch = ChildLockSwitch(
+    lock_entity = ChildLockEntity(
         coordinator,
         "entry",
         "dev",
@@ -56,16 +56,14 @@ def test_child_lock_switch_has_feature_name(lock_inventory: Inventory) -> None:
         device_name="Master Bedroom",
     )
 
-    assert switch.name == "Child lock"
+    assert lock_entity.name == "Child lock"
 
 
-def test_child_lock_switch_uses_locked_icon_when_engaged(
-    lock_inventory: Inventory,
-) -> None:
-    """Switch icon should show a locked icon when child lock is enabled."""
+def test_child_lock_entity_reports_is_locked(lock_inventory: Inventory) -> None:
+    """Lock state should mirror the domain child lock value."""
 
     coordinator = SimpleNamespace()
-    switch = ChildLockSwitch(
+    lock_entity = ChildLockEntity(
         coordinator,
         "entry",
         "dev",
@@ -77,16 +75,37 @@ def test_child_lock_switch_uses_locked_icon_when_engaged(
         device_name="Master Bedroom",
     )
 
-    assert switch.icon == "mdi:lock"
+    assert lock_entity.is_locked is True
 
 
-def test_child_lock_switch_uses_unlocked_icon_when_disengaged(
+def test_child_lock_entity_uses_locked_icon_when_engaged(
     lock_inventory: Inventory,
 ) -> None:
-    """Switch icon should show an unlocked icon when child lock is disabled."""
+    """Lock icon should show a locked icon when child lock is enabled."""
 
     coordinator = SimpleNamespace()
-    switch = ChildLockSwitch(
+    lock_entity = ChildLockEntity(
+        coordinator,
+        "entry",
+        "dev",
+        "htr",
+        "1",
+        unique_id="dev_htr_1_child_lock",
+        inventory=lock_inventory,
+        settings_resolver=lambda: HeaterState(lock=True),
+        device_name="Master Bedroom",
+    )
+
+    assert lock_entity.icon == "mdi:lock"
+
+
+def test_child_lock_entity_uses_unlocked_icon_when_disengaged(
+    lock_inventory: Inventory,
+) -> None:
+    """Lock icon should show an unlocked icon when child lock is disabled."""
+
+    coordinator = SimpleNamespace()
+    lock_entity = ChildLockEntity(
         coordinator,
         "entry",
         "dev",
@@ -98,19 +117,19 @@ def test_child_lock_switch_uses_unlocked_icon_when_disengaged(
         device_name="Master Bedroom",
     )
 
-    assert switch.icon == "mdi:lock-open-variant"
+    assert lock_entity.icon == "mdi:lock-open-variant"
 
 
 @pytest.mark.asyncio
-async def test_child_lock_switch_turn_on_off_writes_backend(
+async def test_child_lock_entity_lock_unlock_writes_backend(
     lock_inventory: Inventory,
     runtime_factory,
 ) -> None:
-    """Switch writes should call backend lock API for both states."""
+    """Lock commands should call backend lock API for both states."""
 
     backend = SimpleNamespace(set_node_lock=AsyncMock())
     coordinator = SimpleNamespace(async_request_refresh=AsyncMock())
-    switch = ChildLockSwitch(
+    lock_entity = ChildLockEntity(
         coordinator,
         "entry",
         "dev",
@@ -130,10 +149,10 @@ async def test_child_lock_switch_turn_on_off_writes_backend(
         coordinator=coordinator,
         backend=backend,
     )
-    switch.hass = hass
+    lock_entity.hass = hass
 
-    await switch.async_turn_on()
-    await switch.async_turn_off()
+    await lock_entity.async_lock()
+    await lock_entity.async_unlock()
 
     assert backend.set_node_lock.await_args_list == [
         (("dev", ("htr", "1")), {"lock": True}),
