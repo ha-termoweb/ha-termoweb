@@ -1526,6 +1526,8 @@ custom_components/termoweb/entities/switch.py :: ChildLockSwitch.__init__
     Initialise the child lock switch entity.
 custom_components/termoweb/entities/switch.py :: ChildLockSwitch.is_on
     Return True when the child lock is engaged.
+custom_components/termoweb/entities/switch.py :: ChildLockSwitch.icon
+    Return a lock icon matching the current child lock state.
 custom_components/termoweb/entities/switch.py :: ChildLockSwitch.available
     Return True when the node exists in the immutable inventory.
 custom_components/termoweb/entities/switch.py :: ChildLockSwitch.device_info

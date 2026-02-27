@@ -141,6 +141,12 @@ class ChildLockSwitch(
         return bool(lock_value)
 
     @property
+    def icon(self) -> str:
+        """Return a lock icon matching the current child lock state."""
+
+        return "mdi:lock" if self.is_on else "mdi:lock-open-variant"
+
+    @property
     def available(self) -> bool:
         """Return True when the node exists in the immutable inventory."""
 
