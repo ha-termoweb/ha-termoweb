@@ -83,6 +83,7 @@ def test_child_lock_switch_does_not_override_default_icon(
 @pytest.mark.asyncio
 async def test_child_lock_switch_turn_on_off_writes_backend(
     lock_inventory: Inventory,
+    runtime_factory,
 ) -> None:
     """Switch writes should call backend lock API for both states."""
 
@@ -99,16 +100,16 @@ async def test_child_lock_switch_turn_on_off_writes_backend(
         settings_resolver=lambda: HeaterState(lock=False),
         device_name="Master Bedroom",
     )
-    switch.hass = SimpleNamespace(
-        data={
-            "termoweb": {
-                "entry": SimpleNamespace(
-                    backend=backend,
-                    coordinator=coordinator,
-                )
-            }
-        }
+    hass = SimpleNamespace(data={})
+    runtime_factory(
+        hass=hass,
+        entry_id="entry",
+        dev_id="dev",
+        inventory=lock_inventory,
+        coordinator=coordinator,
+        backend=backend,
     )
+    switch.hass = hass
 
     await switch.async_turn_on()
     await switch.async_turn_off()
