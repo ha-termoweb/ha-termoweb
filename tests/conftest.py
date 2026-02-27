@@ -878,6 +878,9 @@ def _install_stubs() -> None:
     select_mod = sys.modules.get("homeassistant.components.select") or types.ModuleType(
         "homeassistant.components.select"
     )
+    lock_mod = sys.modules.get("homeassistant.components.lock") or types.ModuleType(
+        "homeassistant.components.lock"
+    )
     switch_mod = sys.modules.get("homeassistant.components.switch") or types.ModuleType(
         "homeassistant.components.switch"
     )
@@ -1023,6 +1026,7 @@ def _install_stubs() -> None:
     sys.modules["homeassistant.components.button"] = button_mod
     sys.modules["homeassistant.components.sensor"] = sensor_mod
     sys.modules["homeassistant.components.select"] = select_mod
+    sys.modules["homeassistant.components.lock"] = lock_mod
     sys.modules["homeassistant.components.switch"] = switch_mod
     sys.modules["homeassistant.components.number"] = number_mod
     sys.modules["homeassistant.components.climate"] = climate_mod
@@ -1062,6 +1066,7 @@ def _install_stubs() -> None:
     components_mod.recorder = recorder_mod
     components_mod.sensor = sensor_mod
     components_mod.select = select_mod
+    components_mod.lock = lock_mod
     components_mod.switch = switch_mod
     components_mod.number = number_mod
 
@@ -1818,6 +1823,23 @@ def _install_stubs() -> None:
             return getattr(self, "_attr_current_option", None)
 
     select_mod.SelectEntity = SelectEntity
+
+    class LockEntity:
+        def __init__(self) -> None:
+            self.hass: Any | None = None
+
+        async def async_added_to_hass(self) -> None:
+            return None
+
+        @property
+        def name(self) -> str | None:
+            return getattr(self, "_attr_name", None)
+
+        @property
+        def icon(self) -> str | None:
+            return getattr(self, "_attr_icon", None)
+
+    lock_mod.LockEntity = LockEntity
 
     class SwitchDeviceClass:
         SWITCH = "switch"

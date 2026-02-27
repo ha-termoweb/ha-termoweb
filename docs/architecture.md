@@ -63,6 +63,8 @@ This map defines responsibilities for each module family in the final design.
 - `planner/` — vendor-specific write orchestration and validation rules.
 - `entities/` — vendor-agnostic entity implementations (climate, sensor,
   binary_sensor, button, number, etc.) that read via `DomainStateView`.
+  - Child-lock entities now use the `lock` platform; existing entity IDs may migrate
+    from `switch.*_child_lock` to `lock.*_child_lock` based on registry behavior.
 - `services/` — Home Assistant services and rate-limited import flows that rely
   on the runtime and domain store.
 
