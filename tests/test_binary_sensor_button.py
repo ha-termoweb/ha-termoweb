@@ -603,6 +603,22 @@ def test_flash_display_button_calls_select_endpoint(heater_hass_data) -> None:
     asyncio.run(_run())
 
 
+def test_flash_display_button_keeps_home_assistant_context_attribute() -> None:
+    coordinator = types.SimpleNamespace(hass=None, _inventory=Inventory("dev", []))
+    context = button_module.DisplayFlashContext(
+        entry_id="entry",
+        dev_id="dev",
+        node_type="htr",
+        addr="1",
+        name="Heater",
+    )
+
+    button = DisplayFlashButton(coordinator, context)
+
+    assert not hasattr(button, "_context")
+    assert button._flash_context is context
+
+
 def _make_boost_context(
     entry_id: str,
     dev_id: str,

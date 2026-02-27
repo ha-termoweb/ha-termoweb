@@ -523,7 +523,7 @@ class DisplayFlashButton(CoordinatorEntity, ButtonEntity):
         """Initialise the display flash button entity."""
 
         super().__init__(coordinator)
-        self._context = context
+        self._flash_context = context
         self._attr_unique_id = context.unique_id
 
     @property
@@ -533,23 +533,32 @@ class DisplayFlashButton(CoordinatorEntity, ButtonEntity):
         inventory = getattr(self.coordinator, "_inventory", None)
         return bool(
             isinstance(inventory, Inventory)
-            and inventory.has_node(self._context.node_type, self._context.addr)
+            and inventory.has_node(
+                self._flash_context.node_type,
+                self._flash_context.addr,
+            )
         )
 
     @property
     def device_info(self) -> DeviceInfo:
         """Expose Home Assistant device metadata for the flash target."""
 
-        model = "Thermostat" if self._context.node_type == "thm" else "Heater"
-        if self._context.node_type == "acm":
+        model = "Thermostat" if self._flash_context.node_type == "thm" else "Heater"
+        if self._flash_context.node_type == "acm":
             model = "Accumulator"
 
         return DeviceInfo(
-            identifiers={(DOMAIN, self._context.dev_id, self._context.addr)},
-            name=self._context.name,
+            identifiers={
+                (
+                    DOMAIN,
+                    self._flash_context.dev_id,
+                    self._flash_context.addr,
+                )
+            },
+            name=self._flash_context.name,
             manufacturer="TermoWeb",
             model=model,
-            via_device=(DOMAIN, self._context.dev_id),
+            via_device=(DOMAIN, self._flash_context.dev_id),
         )
 
     async def async_press(self) -> None:
@@ -559,25 +568,25 @@ class DisplayFlashButton(CoordinatorEntity, ButtonEntity):
         if hass is None:
             return
 
-        runtime = require_runtime(hass, self._context.entry_id)
+        runtime = require_runtime(hass, self._flash_context.entry_id)
         _LOGGER.info(
             "Requesting display flash for %s/%s node %s",
-            self._context.dev_id,
-            self._context.node_type,
-            self._context.addr,
+            self._flash_context.dev_id,
+            self._flash_context.node_type,
+            self._flash_context.addr,
         )
         try:
             await runtime.backend.set_node_display_select(
-                self._context.dev_id,
-                (self._context.node_type, self._context.addr),
+                self._flash_context.dev_id,
+                (self._flash_context.node_type, self._flash_context.addr),
                 select=True,
             )
         except Exception as err:
             _LOGGER.error(
                 "Display flash failed for %s/%s node %s: %s",
-                self._context.dev_id,
-                self._context.node_type,
-                self._context.addr,
+                self._flash_context.dev_id,
+                self._flash_context.node_type,
+                self._flash_context.addr,
                 err,
             )
             raise HomeAssistantError("Unable to flash the unit display") from err
