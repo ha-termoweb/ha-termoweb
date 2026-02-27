@@ -997,16 +997,13 @@ def test_get_nodes_and_settings_use_expected_paths(monkeypatch) -> None:
     asyncio.run(_run())
 
 
-def test_set_node_lock_uses_brand_specific_path(monkeypatch) -> None:
-    """Child lock writes should target the documented endpoint per backend."""
+def test_set_node_lock_uses_lock_segment_for_ducaheat(monkeypatch) -> None:
+    """Ducaheat child lock writes should target the segmented lock endpoint."""
 
     async def _run() -> None:
         session = FakeSession()
-        termoweb = RESTClient(session, "user", "pw")
-        termoweb._access_token = "tok"
-        _set_token_expiry_seconds(termoweb, 1000.0)
 
-        ducaheat = RESTClient(
+        ducaheat = DucaheatRESTClient(
             session,
             "user",
             "pw",
@@ -1021,16 +1018,11 @@ def test_set_node_lock_uses_brand_specific_path(monkeypatch) -> None:
             calls.append((method, path, kwargs.get("json", {})))
             return {"ok": True}
 
-        monkeypatch.setattr(termoweb, "_request", fake_request)
         monkeypatch.setattr(ducaheat, "_request", fake_request)
 
-        await termoweb.set_node_lock("dev123", ("htr", "5"), lock=True)
         await ducaheat.set_node_lock("dev123", ("htr", "5"), lock=False)
 
-        assert calls == [
-            ("POST", "/api/v2/devs/dev123/htr/5/settings", {"lock": True}),
-            ("POST", "/api/v2/devs/dev123/htr/5/lock", {"lock": False}),
-        ]
+        assert calls == [("POST", "/api/v2/devs/dev123/htr/5/lock", {"lock": False})]
 
     asyncio.run(_run())
 

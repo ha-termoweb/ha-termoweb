@@ -35,6 +35,7 @@ from .const import (
     DOMAIN,
     MIN_POLL_INTERVAL,
     signal_ws_status,
+    uses_ducaheat_backend,
 )
 from .coordinator import EnergyStateCoordinator, StateCoordinator, build_device_metadata
 from .hourly_poller import HourlySamplesPoller
@@ -57,7 +58,16 @@ _LOGGER = logging.getLogger(__name__)
 
 SupportsDiagnostics = getattr(config_entries_module, "SupportsDiagnostics", None)
 
-PLATFORMS = ["button", "binary_sensor", "climate", "number", "sensor", "lock"]
+PLATFORMS = ["button", "binary_sensor", "climate", "number", "sensor"]
+LOCK_PLATFORMS = ["lock"]
+
+
+def _platforms_for_brand(brand: str) -> list[str]:
+    """Return entity platforms enabled for the configured brand."""
+
+    if uses_ducaheat_backend(brand):
+        return [*PLATFORMS, *LOCK_PLATFORMS]
+    return list(PLATFORMS)
 
 reset_samples_rate_limit_state()
 
@@ -499,7 +509,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
     # Always-on push: start the websocket client for this device
     hass.async_create_task(_start_ws(dev_id))
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    platforms = _platforms_for_brand(brand)
+    await hass.config_entries.async_forward_entry_setups(entry, platforms)
 
     await async_register_import_energy_history_service(
         hass,
@@ -635,7 +646,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await _async_shutdown_entry(rec)
 
-    ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    brand = entry.data.get(CONF_BRAND, DEFAULT_BRAND)
+    platforms = _platforms_for_brand(brand)
+    ok = await hass.config_entries.async_unload_platforms(entry, platforms)
 
     if ok and domain_data:
         domain_data.pop(entry.entry_id, None)

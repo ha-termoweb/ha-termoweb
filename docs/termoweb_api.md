@@ -135,10 +135,7 @@ Common bodies:
 { "mode":"auto" }
 { "mode":"modified_auto","stemp":"20.0" }
 { "units":"C","prog":[ /* 168 values in {0,1,2} */ ] }
-{ "lock": true }
 ```
-
-Child lock writes are performed through this same `/settings` endpoint using `{"lock": true|false}`.
 
 Mode note: `modified_auto` is a temporary setpoint override while the heater is in Auto. It applies for the current schedule period only, then the backend resumes normal `auto` behavior at the next program boundary.
 

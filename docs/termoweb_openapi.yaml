@@ -164,8 +164,6 @@ components:
             - 2
           minItems: 168
           maxItems: 168
-        lock:
-          type: boolean
       additionalProperties: false
     AdvancedSetup:
       type: object

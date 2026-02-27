@@ -1,5 +1,7 @@
 # TermoWeb Function Map
 
+custom_components/termoweb/__init__.py :: _platforms_for_brand
+    Return entity platforms enabled for the configured brand.
 custom_components/termoweb/__init__.py :: _async_import_energy_history
     Delegate to the energy helper with shared rate limiting and filters.
 custom_components/termoweb/__init__.py :: _async_probe_unknown_node_types
@@ -294,8 +296,6 @@ custom_components/termoweb/backend/rest_client.py :: RESTClient._extract_samples
     Normalise heater samples payloads into {"t", "counter"} lists.
 custom_components/termoweb/backend/rest_client.py :: RESTClient.set_node_settings
     Update heater settings.
-custom_components/termoweb/backend/rest_client.py :: RESTClient.set_node_lock
-    Toggle child lock state for a heater or accumulator.
 custom_components/termoweb/backend/rest_client.py :: RESTClient.set_node_display_select
     Toggle display-identify cues for a heater or accumulator.
 custom_components/termoweb/backend/rest_client.py :: RESTClient._build_acm_extra_options_payload
@@ -732,8 +732,6 @@ custom_components/termoweb/codecs/termoweb_codec.py :: _normalise_mode
     Lower-case and normalise heater modes.
 custom_components/termoweb/codecs/termoweb_codec.py :: build_settings_payload
     Encode node setting commands into a TermoWeb payload.
-custom_components/termoweb/codecs/termoweb_codec.py :: build_lock_payload
-    Encode a child lock payload for the TermoWeb lock endpoint.
 custom_components/termoweb/codecs/termoweb_codec.py :: build_extra_options_payload
     Encode accumulator extra options for TermoWeb.
 custom_components/termoweb/codecs/termoweb_codec.py :: build_boost_payload
