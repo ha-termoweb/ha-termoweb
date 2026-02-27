@@ -59,10 +59,10 @@ def test_child_lock_switch_has_feature_name(lock_inventory: Inventory) -> None:
     assert switch.name == "Child lock"
 
 
-def test_child_lock_switch_does_not_override_default_icon(
+def test_child_lock_switch_uses_locked_icon_when_engaged(
     lock_inventory: Inventory,
 ) -> None:
-    """Switch icon should be left to Home Assistant's default switch rendering."""
+    """Switch icon should show a locked icon when child lock is enabled."""
 
     coordinator = SimpleNamespace()
     switch = ChildLockSwitch(
@@ -77,7 +77,28 @@ def test_child_lock_switch_does_not_override_default_icon(
         device_name="Master Bedroom",
     )
 
-    assert switch.icon is None
+    assert switch.icon == "mdi:lock"
+
+
+def test_child_lock_switch_uses_unlocked_icon_when_disengaged(
+    lock_inventory: Inventory,
+) -> None:
+    """Switch icon should show an unlocked icon when child lock is disabled."""
+
+    coordinator = SimpleNamespace()
+    switch = ChildLockSwitch(
+        coordinator,
+        "entry",
+        "dev",
+        "htr",
+        "1",
+        unique_id="dev_htr_1_child_lock",
+        inventory=lock_inventory,
+        settings_resolver=lambda: HeaterState(lock=False),
+        device_name="Master Bedroom",
+    )
+
+    assert switch.icon == "mdi:lock-open-variant"
 
 
 @pytest.mark.asyncio
