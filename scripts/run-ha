@@ -1,4 +1,4 @@
- Use this inside the devcontainer/docker to start/stop/restart your test Home Assistant instance
+# Use this inside the devcontainer/docker to start/stop/restart your test Home Assistant instance
 
 #!/usr/bin/env bash
 set -e
