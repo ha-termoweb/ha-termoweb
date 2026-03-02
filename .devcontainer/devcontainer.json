@@ -1,7 +1,15 @@
 {
     "name": "ha-termoweb",
-    "image": "mcr.microsoft.com/devcontainers/python:3.14",
-    "postCreateCommand": "/bin/bash -c 'if ! command -v uv >/dev/null; then curl -LsSf https://astral.sh/uv/install.sh | sh; fi && scripts/setup'",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "mounts": [
+        "source=ha-termoweb-config,target=/config,type=volume",
+        "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind",
+        "source=${localEnv:HOME}/.codex,target=/home/vscode/.codex,type=bind"
+    ],
+    "postCreateCommand": "scripts/setup",
+    "postStartCommand": "scripts/run-ha start",
     "forwardPorts": [
         8123
     ],
@@ -29,17 +37,12 @@
                 "files.trimTrailingWhitespace": true,
                 "python.analysis.typeCheckingMode": "basic",
                 "python.analysis.autoImportCompletions": true,
-                "python.defaultInterpreterPath": "/usr/local/bin/python",
+                "python.defaultInterpreterPath": "/home/vscode/.local/ha-venv/bin/python",
                 "[python]": {
                     "editor.defaultFormatter": "charliermarsh.ruff"
                 }
             }
         }
     },
-    "remoteUser": "vscode",
-    "features": {
-        "ghcr.io/devcontainers-extra/features/apt-packages:1": {
-            "packages": "ffmpeg,libturbojpeg0,libpcap-dev"
-        }
-    }
+    "remoteUser": "vscode"
 }

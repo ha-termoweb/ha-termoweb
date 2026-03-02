@@ -1,10 +1,56 @@
 #!/usr/bin/env bash
 set -e
 
-# Install the project in editable mode using uv
-uv pip install --system -e .
+VENV_PATH="/home/vscode/.local/ha-venv"
+
+# Create venv if it doesn't exist (owned by vscode, no sudo needed)
+if [ ! -d "$VENV_PATH" ]; then
+    uv venv "$VENV_PATH"
+fi
+
+# Activate venv for the rest of the script
+# shellcheck source=/dev/null
+source "$VENV_PATH/bin/activate"
+
+# Install the project in editable mode with test extras
+uv pip install -e ".[test]"
+
+# Pre-install HA core requirements for the installed version.
+# Without this, hass startup has to pip-install dozens of packages on every
+# first run — and some fail due to missing build deps.
+HA_VERSION=$(python -c "from homeassistant.const import __version__; print(__version__)")
+echo "Pre-installing core requirements for Home Assistant ${HA_VERSION}..."
+HA_BASE_URL="https://raw.githubusercontent.com/home-assistant/core/${HA_VERSION}"
+HA_TMP="/tmp/ha-reqs"
+mkdir -p "$HA_TMP/homeassistant"
+if curl -fsSL "$HA_BASE_URL/requirements.txt" -o "$HA_TMP/requirements.txt" \
+   && curl -fsSL "$HA_BASE_URL/homeassistant/package_constraints.txt" -o "$HA_TMP/homeassistant/package_constraints.txt"; then
+    uv pip install -r "$HA_TMP/requirements.txt"
+else
+    echo "Warning: could not fetch HA core requirements (version tag may not match)"
+fi
+rm -rf "$HA_TMP"
 
 if [ -f ".pre-commit-config.yaml" ]; then
-    # Run pre-commit through uv to ensure the correct environment
     uv run pre-commit install
+fi
+
+# Create symlink for the custom component into the HA config directory
+if [ -d /config/custom_components ] && [ ! -e /config/custom_components/termoweb ]; then
+    ln -s "$(pwd)/custom_components/termoweb" /config/custom_components/termoweb
+    echo "Symlinked custom_components/termoweb → /config/custom_components/termoweb"
+fi
+
+# Bootstrap HA configuration if it doesn't exist
+if [ ! -f /config/configuration.yaml ]; then
+    hass --config /config --script ensure_config
+    # Append debug logging for the integration
+    cat >> /config/configuration.yaml << 'EOF'
+
+logger:
+  default: info
+  logs:
+    custom_components.termoweb: debug
+EOF
+    echo "Bootstrapped /config/configuration.yaml"
 fi

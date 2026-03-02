@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# Use this inside the devcontainer/docker to start/stop/restart your test Home Assistant instance
+
+set -e
+
+VENV_PATH="/home/vscode/.local/ha-venv"
+CONFIG_DIR="/config"
+PID_FILE="${CONFIG_DIR}/hass.pid"
+LOG_FILE="${CONFIG_DIR}/home-assistant.log"
+
+# Activate venv so hass and its pip installs use the right environment
+# shellcheck source=/dev/null
+source "$VENV_PATH/bin/activate"
+
+start() {
+    if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+        echo "Home Assistant is already running (PID $(cat "$PID_FILE"))"
+        return 0
+    fi
+
+    echo "Starting Home Assistant..."
+    hass --config "$CONFIG_DIR" &
+    local pid=$!
+    echo "$pid" > "$PID_FILE"
+    echo "Home Assistant started (PID $pid)"
+
+    # Wait for API to become responsive
+    echo "Waiting for Home Assistant API..."
+    local attempts=0
+    while [ $attempts -lt 60 ]; do
+        if curl -s -o /dev/null -w '%{http_code}' http://localhost:8123/api/ 2>/dev/null | grep -q '^\(200\|401\)$'; then
+            echo "Home Assistant is ready at http://localhost:8123"
+            return 0
+        fi
+        sleep 2
+        attempts=$((attempts + 1))
+    done
+
+    echo "Warning: Home Assistant started but API not yet responsive (may still be initializing)"
+}
+
+stop() {
+    if [ ! -f "$PID_FILE" ]; then
+        echo "No PID file found, Home Assistant is not running"
+        return 0
+    fi
+
+    local pid
+    pid=$(cat "$PID_FILE")
+
+    if ! kill -0 "$pid" 2>/dev/null; then
+        echo "Home Assistant process ($pid) not found, cleaning up PID file"
+        rm -f "$PID_FILE"
+        return 0
+    fi
+
+    echo "Stopping Home Assistant (PID $pid)..."
+    kill "$pid"
+
+    # Wait for graceful shutdown
+    local attempts=0
+    while [ $attempts -lt 15 ] && kill -0 "$pid" 2>/dev/null; do
+        sleep 1
+        attempts=$((attempts + 1))
+    done
+
+    # Force kill if still running
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "Force killing Home Assistant..."
+        kill -9 "$pid" 2>/dev/null || true
+    fi
+
+    rm -f "$PID_FILE"
+    echo "Home Assistant stopped"
+}
+
+restart() {
+    stop
+    start
+}
+
+status() {
+    if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+        echo "Home Assistant is running (PID $(cat "$PID_FILE"))"
+        local http_code
+        http_code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8123/api/ 2>/dev/null || echo "000")
+        case "$http_code" in
+            200|401) echo "API is responsive (HTTP $http_code)" ;;
+            *)       echo "API is not responsive (HTTP $http_code)" ;;
+        esac
+    else
+        echo "Home Assistant is not running"
+        [ -f "$PID_FILE" ] && rm -f "$PID_FILE"
+        return 1
+    fi
+}
+
+log() {
+    if [ -f "$LOG_FILE" ]; then
+        tail -f "$LOG_FILE"
+    else
+        echo "Log file not found: $LOG_FILE"
+        return 1
+    fi
+}
+
+case "${1:-}" in
+    start)   start ;;
+    stop)    stop ;;
+    restart) restart ;;
+    status)  status ;;
+    log)     log ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|status|log}"
+        exit 1
+        ;;
+esac
