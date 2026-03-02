@@ -1,6 +1,6 @@
+#!/usr/bin/env bash
 # Use this inside the devcontainer/docker to start/stop/restart your test Home Assistant instance
 
-#!/usr/bin/env bash
 set -e
 
 VENV_PATH="/home/vscode/.local/ha-venv"
