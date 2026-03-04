@@ -22,7 +22,12 @@ from homeassistant.util import dt as dt_util
 from .backend.rest_client import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend.sanitize import mask_identifier
 from .boost import coerce_int, resolve_boost_end_from_fields
-from .const import BRAND_TERMOWEB, HTR_ENERGY_UPDATE_INTERVAL, MIN_POLL_INTERVAL
+from .const import (
+    BRAND_TERMOWEB,
+    HTR_ENERGY_UPDATE_INTERVAL,
+    MIN_POLL_INTERVAL,
+    uses_ducaheat_backend,
+)
 from .domain.energy import (
     EnergyNodeMetrics,
     EnergySnapshot,
@@ -43,6 +48,7 @@ from .domain.state import (
 )
 from .domain.view import DomainStateView
 from .inventory import Inventory, normalize_node_addr, normalize_node_type
+from .runtime import require_runtime
 from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
@@ -156,6 +162,7 @@ class StateCoordinator(
         nodes: Mapping[str, typing.Any] | None,
         inventory: Inventory | None = None,
         brand: str = BRAND_TERMOWEB,
+        entry_id: str = "",
     ) -> None:
         """Initialize the TermoWeb device coordinator."""
         super().__init__(
@@ -168,6 +175,7 @@ class StateCoordinator(
         self._base_interval = max(base_interval, MIN_POLL_INTERVAL)
         self._backoff = 0  # seconds
         self._dev_id = dev_id
+        self._entry_id = entry_id
         if isinstance(device, DeviceMetadata):
             metadata = device
         elif isinstance(device, Mapping) or device is None:
@@ -1123,6 +1131,19 @@ class StateCoordinator(
                     store,
                     rtc_now,
                 )
+
+            # Poll installation power limit for TermoWeb brands
+            if not uses_ducaheat_backend(self._brand) and self._entry_id:
+                try:
+                    power_limit = await self.client.get_power_limit(dev_id)
+                    runtime = require_runtime(self.hass, self._entry_id)
+                    runtime.power_limit = power_limit
+                except Exception:  # noqa: BLE001
+                    _LOGGER.debug(
+                        "Failed to poll power limit for %s",
+                        mask_identifier(dev_id),
+                    )
+
             result = self._device_record()
 
         except TimeoutError as err:

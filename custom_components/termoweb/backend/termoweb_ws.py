@@ -716,6 +716,30 @@ class WebSocketClient(_WSCommon):
         """Merge incremental node updates from the websocket feed."""
         self._apply_nodes_payload(data, merge=True, event="update")
 
+    def _handle_power_limit_update(self, body: Any) -> None:
+        """Apply a system-level power_limit push to the runtime."""
+        if not isinstance(body, Mapping):
+            return
+        raw = body.get("power_limit")
+        if raw is None:
+            return
+        try:
+            value = int(raw)
+        except (ValueError, TypeError):
+            return
+        try:
+            runtime = require_runtime(self.hass, self.entry_id)
+            runtime.power_limit = value
+        except LookupError:
+            return
+        coordinator = getattr(self, "_coordinator", None)
+        if coordinator is not None and hasattr(coordinator, "async_set_updated_data"):
+            coordinator.async_set_updated_data(coordinator.data)
+        self._mark_ws_payload(
+            timestamp=time.time(),
+            stale_after=self._payload_idle_window,
+        )
+
     def _apply_nodes_payload(self, payload: Any, *, merge: bool, event: str) -> None:
         """Update cached nodes from the websocket payload and notify listeners."""
         inventory = self._inventory if isinstance(self._inventory, Inventory) else None
@@ -735,6 +759,13 @@ class WebSocketClient(_WSCommon):
                 inventory=inventory,
             )
         if nodes is None:
+            # Check for system-level htr_system updates before discarding
+            path = payload.get("path", "") if isinstance(payload, Mapping) else ""
+            if isinstance(path, str) and "/htr_system/power_limit" in path:
+                body = payload.get("body")
+                if isinstance(body, Mapping):
+                    self._handle_power_limit_update(body)
+                    return
             _LOGGER.debug("WS: %s without nodes", event)
             return
         normaliser = getattr(self._client, "normalise_ws_nodes", None)
@@ -1634,6 +1665,11 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
             if path.rstrip("/").endswith("/mgr/nodes"):
                 if isinstance(body, Mapping):
                     self._handle_dev_data({"nodes": body})
+                continue
+            # Check for system-level power_limit updates
+            if "/htr_system/power_limit" in path:
+                if isinstance(body, Mapping):
+                    self._handle_power_limit_update(body)
                 continue
             self._handle_update(item)
 

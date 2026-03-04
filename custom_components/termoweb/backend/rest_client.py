@@ -546,6 +546,27 @@ class RESTClient:
         path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}/settings"
         return await self._request("POST", path, headers=headers, json=payload)
 
+    async def get_power_limit(self, dev_id: str) -> int | None:
+        """Fetch the installation-wide power limit."""
+
+        headers = await self.authed_headers()
+        path = f"/api/v2/devs/{dev_id}/htr_system/power_limit"
+        response = await self._request("GET", path, headers=headers)
+        if isinstance(response, Mapping) and "power_limit" in response:
+            try:
+                return int(response["power_limit"])
+            except (ValueError, TypeError):
+                return None
+        return None
+
+    async def set_power_limit(self, dev_id: str, *, power_limit: int) -> Any:
+        """Set the installation-wide power limit."""
+
+        headers = await self.authed_headers()
+        path = f"/api/v2/devs/{dev_id}/htr_system/power_limit"
+        payload = {"power_limit": str(power_limit)}
+        return await self._request("POST", path, headers=headers, json=payload)
+
     def _build_acm_extra_options_payload(
         self,
         boost_time: int | None,

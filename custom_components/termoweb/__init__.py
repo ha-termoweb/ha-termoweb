@@ -69,6 +69,7 @@ def _platforms_for_brand(brand: str) -> list[str]:
         return [*PLATFORMS, *LOCK_PLATFORMS]
     return list(PLATFORMS)
 
+
 reset_samples_rate_limit_state()
 
 _SUPPORTED_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm", "pmo"})
@@ -281,6 +282,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         None,
         inventory,
         brand=brand,
+        entry_id=entry.entry_id,
     )
 
     energy_coordinator = EnergyStateCoordinator(

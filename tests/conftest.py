@@ -1113,6 +1113,15 @@ def _install_stubs() -> None:
 
         const_mod.UnitOfTime = UnitOfTime
 
+    if not hasattr(const_mod, "UnitOfPower"):
+
+        class UnitOfPower(str, enum.Enum):
+            """Minimal power unit namespace for tests."""
+
+            WATT = "W"
+
+        const_mod.UnitOfPower = UnitOfPower
+
     if not hasattr(http_mod, "HomeAssistantApplication"):
 
         class HomeAssistantApplication(dict):
@@ -2095,6 +2104,7 @@ class FakeCoordinator:
         brand: str | None = None,
         *,
         data: dict[str, Any] | None = None,
+        entry_id: str = "",
     ) -> None:
         self.hass = hass
         self.client = client

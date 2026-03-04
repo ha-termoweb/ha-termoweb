@@ -15,6 +15,7 @@ TOKEN_PATH: Final = "/client/token"
 DEVS_PATH: Final = "/api/v2/devs/"
 NODES_PATH_FMT: Final = "/api/v2/devs/{dev_id}/mgr/nodes"
 NODE_SAMPLES_PATH_FMT: Final = "/api/v2/devs/{dev_id}/{node_type}/{addr}/samples"
+POWER_LIMIT_PATH_FMT: Final = "/api/v2/devs/{dev_id}/htr_system/power_limit"
 
 # Public client creds (from APK v2.5.1)
 BASIC_AUTH_B64: Final = "NTIxNzJkYzg0ZjYzZDZjNzU5MDAwMDA1OmJ4djRaM3hVU2U="

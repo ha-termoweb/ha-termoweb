@@ -73,6 +73,14 @@ def build_power_monitor_power_unique_id(dev_id: Any, addr: Any) -> str:
     return build_power_monitor_unique_id(dev_id, addr, suffix=":power")
 
 
+def build_gateway_entity_unique_id(dev_id: Any, suffix: str) -> str:
+    """Return the canonical unique ID for a gateway-level entity."""
+    dev = normalize_node_addr(dev_id)
+    if not dev:
+        raise ValueError("dev_id must be provided")
+    return f"{DOMAIN}:{dev}:{suffix}"
+
+
 def thermostat_fallback_name(addr: Any) -> str:
     """Return the fallback friendly name for a thermostat node."""
 

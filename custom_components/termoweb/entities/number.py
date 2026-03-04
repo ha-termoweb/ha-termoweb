@@ -8,15 +8,16 @@ import math
 from typing import Any, TypeVar
 
 from homeassistant.components.number import NumberEntity, NumberMode
-from homeassistant.const import UnitOfTemperature, UnitOfTime
+from homeassistant.const import UnitOfPower, UnitOfTemperature, UnitOfTime
 from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
-from homeassistant.helpers.entity import EntityCategory
+from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from ..boost import ALLOWED_BOOST_MINUTES, coerce_boost_minutes
-from ..const import DOMAIN
+from ..const import DOMAIN, uses_ducaheat_backend
 from ..i18n import async_get_fallback_translations, attach_fallbacks, format_fallback
-from ..identifiers import build_heater_entity_unique_id
+from ..identifiers import build_gateway_entity_unique_id, build_heater_entity_unique_id
 from ..inventory import (
     Inventory,
     boostable_accumulator_details_for_entry,
@@ -24,7 +25,7 @@ from ..inventory import (
     normalize_node_type,
 )
 from ..runtime import require_runtime
-from ..utils import float_or_none
+from ..utils import build_gateway_device_info, float_or_none
 from .heater import (
     DEFAULT_BOOST_DURATION,
     DEFAULT_BOOST_TEMPERATURE,
@@ -147,6 +148,18 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 device_name=base_name,
                 node_type=canonical_type,
                 inventory=heater_details.inventory,
+            )
+        )
+
+    # Installation-wide power limit (TermoWeb only)
+    if not uses_ducaheat_backend(runtime.brand):
+        power_limit_uid = build_gateway_entity_unique_id(dev_id, "power_limit")
+        new_entities.append(
+            PowerLimitNumber(
+                coordinator,
+                entry.entry_id,
+                dev_id,
+                power_limit_uid,
             )
         )
 
@@ -545,4 +558,62 @@ class HeaterPriorityNumber(HeaterNodeBase, NumberEntity):
             (self._node_type, self._addr),
             priority=priority,
         )
+        await self.coordinator.async_request_refresh()
+
+
+class PowerLimitNumber(CoordinatorEntity, NumberEntity):
+    """Number entity for the installation-wide power limit."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:flash-alert"
+    _attr_mode = NumberMode.BOX
+    _attr_native_min_value = 0
+    _attr_native_max_value = 60000
+    _attr_native_step = 100
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_translation_key = "installation_power_limit"
+
+    def __init__(
+        self,
+        coordinator,
+        entry_id: str,
+        dev_id: str,
+        unique_id: str,
+    ) -> None:
+        """Initialise the installation power limit number entity."""
+        super().__init__(coordinator)
+        self._entry_id = entry_id
+        self._dev_id = dev_id
+        self._attr_unique_id = unique_id
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return the gateway device info."""
+        return build_gateway_device_info(self.hass, self._entry_id, self._dev_id)
+
+    @property
+    def available(self) -> bool:
+        """Return True when the power limit value is known."""
+        try:
+            runtime = require_runtime(self.hass, self._entry_id)
+            return runtime.power_limit is not None
+        except LookupError:
+            return False
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the current power limit in watts."""
+        try:
+            runtime = require_runtime(self.hass, self._entry_id)
+            return runtime.power_limit
+        except LookupError:
+            return None
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Write the new power limit to the backend API."""
+        power_limit = int(value)
+        runtime = require_runtime(self.hass, self._entry_id)
+        await runtime.client.set_power_limit(self._dev_id, power_limit=power_limit)
+        runtime.power_limit = power_limit
         await self.coordinator.async_request_refresh()
