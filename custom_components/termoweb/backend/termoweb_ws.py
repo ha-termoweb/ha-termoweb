@@ -1371,6 +1371,17 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 self._hb_send_interval = max(5.0, min(30.0, hb_timeout * 0.45))
                 await self._connect_ws(sid)
                 _LOGGER.debug("WS: websocket connection established")
+                # Yield to the event loop so any pending server-initiated
+                # close frames are processed before we attempt to write.
+                # This avoids a spurious ClientConnectionResetError when the
+                # aiohttp connector hands us a transport the server is
+                # already tearing down (common after a burst of REST calls
+                # during integration setup).
+                await asyncio.sleep(0)
+                if self._ws and self._ws.closed:
+                    raise aiohttp.ClientConnectionResetError(
+                        "transport closed before namespace join"
+                    )
                 await self._join_namespace()
                 await self._send_snapshot_request()
                 await self._subscribe_session_metadata()
@@ -1440,10 +1451,18 @@ class TermoWebWSClient(WebSocketClient):  # pragma: no cover - legacy network cl
                 self._update_status("disconnected")
             if self._closing or not should_retry:
                 break
-            delay = self._backoff_seq[
-                min(self._backoff_idx, len(self._backoff_seq) - 1)
-            ]
-            self._backoff_idx = min(self._backoff_idx + 1, len(self._backoff_seq) - 1)
+            # If we've never successfully connected, use a short retry
+            # delay so the first boot doesn't stall for 5 s due to a
+            # transient transport close.
+            if self._connected_since is None:
+                delay = 0.5
+            else:
+                delay = self._backoff_seq[
+                    min(self._backoff_idx, len(self._backoff_seq) - 1)
+                ]
+                self._backoff_idx = min(
+                    self._backoff_idx + 1, len(self._backoff_seq) - 1
+                )
             jitter = random.uniform(0.8, 1.2)
             await asyncio.sleep(delay * jitter)
 
