@@ -1873,6 +1873,7 @@ def _install_stubs() -> None:
 
     class NumberMode:
         SLIDER = "slider"
+        BOX = "box"
 
     class NumberEntity:
         def __init__(self) -> None:

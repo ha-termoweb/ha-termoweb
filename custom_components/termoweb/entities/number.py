@@ -17,7 +17,12 @@ from ..boost import ALLOWED_BOOST_MINUTES, coerce_boost_minutes
 from ..const import DOMAIN
 from ..i18n import async_get_fallback_translations, attach_fallbacks, format_fallback
 from ..identifiers import build_heater_entity_unique_id
-from ..inventory import Inventory, boostable_accumulator_details_for_entry
+from ..inventory import (
+    Inventory,
+    boostable_accumulator_details_for_entry,
+    normalize_node_addr,
+    normalize_node_type,
+)
 from ..runtime import require_runtime
 from ..utils import float_or_none
 from .heater import (
@@ -26,6 +31,7 @@ from .heater import (
     HeaterNodeBase,
     get_boost_runtime_minutes,
     get_boost_temperature,
+    heater_platform_details_for_entry,
     resolve_climate_entity_id,
     set_boost_runtime_minutes,
     set_boost_temperature,
@@ -119,8 +125,33 @@ async def async_setup_entry(hass, entry, async_add_entities):
             )
         )
 
+    heater_details = heater_platform_details_for_entry(
+        runtime,
+        default_name_simple=default_name,
+    )
+    for node_type, _node, addr_str, base_name in heater_details.iter_metadata():
+        canonical_type = normalize_node_type(node_type, use_default_when_falsey=True)
+        canonical_addr = normalize_node_addr(addr_str, use_default_when_falsey=True)
+        if not canonical_type or not canonical_addr:
+            continue
+        priority_unique_id = build_heater_entity_unique_id(
+            dev_id, canonical_type, canonical_addr, ":priority"
+        )
+        new_entities.append(
+            HeaterPriorityNumber(
+                coordinator,
+                entry.entry_id,
+                dev_id,
+                canonical_addr,
+                priority_unique_id,
+                device_name=base_name,
+                node_type=canonical_type,
+                inventory=heater_details.inventory,
+            )
+        )
+
     if new_entities:
-        _LOGGER.debug("Adding %d TermoWeb boost numbers", len(new_entities))
+        _LOGGER.debug("Adding %d TermoWeb number entities", len(new_entities))
         async_add_entities(new_entities)
 
 
@@ -175,13 +206,15 @@ class AccumulatorBoostDurationNumber(RestoreEntity, HeaterNodeBase, NumberEntity
         await _restore_boost_value(
             self,
             hass,
-            cached_lookup=lambda: None
-            if hass is None
-            else get_boost_runtime_minutes(
-                hass,
-                self._entry_id,
-                self._node_type,
-                self._addr,
+            cached_lookup=lambda: (
+                None
+                if hass is None
+                else get_boost_runtime_minutes(
+                    hass,
+                    self._entry_id,
+                    self._node_type,
+                    self._addr,
+                )
             ),
             last_state_parser=self._hours_to_minutes,
             settings_lookup=self._initial_minutes_from_settings,
@@ -316,13 +349,15 @@ class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEnt
         await _restore_boost_value(
             self,
             hass,
-            cached_lookup=lambda: None
-            if hass is None
-            else get_boost_temperature(
-                hass,
-                self._entry_id,
-                self._node_type,
-                self._addr,
+            cached_lookup=lambda: (
+                None
+                if hass is None
+                else get_boost_temperature(
+                    hass,
+                    self._entry_id,
+                    self._node_type,
+                    self._addr,
+                )
             ),
             last_state_parser=float_or_none,
             settings_lookup=self._initial_temperature_from_settings,
@@ -451,3 +486,63 @@ class AccumulatorBoostTemperatureNumber(RestoreEntity, HeaterNodeBase, NumberEnt
         ):
             return None
         return math.floor(candidate * 10 + 0.5) / 10.0
+
+
+class HeaterPriorityNumber(HeaterNodeBase, NumberEntity):
+    """Number entity controlling the heater priority level."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:priority-high"
+    _attr_mode = NumberMode.BOX
+    _attr_native_min_value = 0
+    _attr_native_max_value = 30
+    _attr_native_step = 1
+    _attr_translation_key = "heater_priority"
+
+    def __init__(
+        self,
+        coordinator,
+        entry_id: str,
+        dev_id: str,
+        addr: str,
+        unique_id: str,
+        *,
+        device_name: str,
+        node_type: str | None = None,
+        inventory: Inventory | None = None,
+    ) -> None:
+        """Initialise the priority number entity."""
+
+        super().__init__(
+            coordinator,
+            entry_id,
+            dev_id,
+            addr,
+            None,
+            unique_id,
+            device_name=device_name,
+            node_type=node_type,
+            inventory=inventory,
+        )
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the current priority value from the domain state."""
+
+        state = self.heater_state()
+        return getattr(state, "priority", None) if state else None
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Write the new priority value to the backend API."""
+
+        priority = int(value)
+        if priority < 0 or priority > 30:
+            raise ValueError(f"Priority must be 0-30, got {priority}")
+        runtime = require_runtime(self.hass, self._entry_id)
+        await runtime.backend.set_node_priority(
+            self._dev_id,
+            (self._node_type, self._addr),
+            priority=priority,
+        )
+        await self.coordinator.async_request_refresh()

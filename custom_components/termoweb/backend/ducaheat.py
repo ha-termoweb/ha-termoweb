@@ -40,6 +40,7 @@ from custom_components.termoweb.domain.commands import (
     SetLock,
     SetMode,
     SetPresetTemps,
+    SetPriority,
     SetProgram,
     SetSetpoint,
     SetUnits,
@@ -489,6 +490,23 @@ class DucaheatRESTClient(RESTClient):
             node_id,
             [SetLock(lock)],
             use_acm_endpoint=node_type == "acm",
+        )
+
+    async def set_node_priority(
+        self,
+        dev_id: str,
+        node: NodeDescriptor,
+        *,
+        priority: int,
+    ) -> Any:
+        """Set the priority level via the segmented setup endpoint."""
+
+        node_type, addr = self._resolve_node_descriptor(node)
+        node_id = NodeId(NodeType(node_type), addr)
+        return await self._execute_segmented_commands(
+            dev_id,
+            node_id,
+            [SetPriority(priority)],
         )
 
     def normalise_ws_nodes(self, nodes: dict[str, Any]) -> dict[str, Any]:

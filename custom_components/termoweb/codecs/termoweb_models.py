@@ -130,7 +130,6 @@ class HeaterStatusPayload(BaseModel):
     boost_time: int | float | None = None
     boost_temp: Any | None = None
 
-
     @field_validator("stemp", "mtemp", "temp", "boost_temp", mode="before")
     @classmethod
     def _normalise_temperature(cls, value: Any) -> Any:
@@ -167,7 +166,7 @@ class HeaterSettingsPayload(BaseModel):
     units: str | None = None
     status: HeaterStatusPayload | Mapping[str, typing.Any] | None = None
     capabilities: dict[str, Any] | None = None
-
+    priority: int | None = None
 
     @field_validator("stemp", "mtemp", "temp", mode="before")
     @classmethod

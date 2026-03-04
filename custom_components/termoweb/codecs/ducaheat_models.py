@@ -239,11 +239,18 @@ class LockWritePayload(DucaheatModel):
     lock: bool
 
 
+class PriorityWritePayload(DucaheatModel):
+    """Priority write payload for the setup endpoint."""
+
+    priority: int = Field(ge=0, le=30)
+
+
 __all__ = [
     "BoostPayload",
     "ExtraOptionsPayload",
     "LockWritePayload",
     "ModeWritePayload",
+    "PriorityWritePayload",
     "ProgramWritePayload",
     "SelectRequest",
     "SelectResponse",

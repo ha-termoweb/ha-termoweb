@@ -57,6 +57,7 @@ class HeaterState:
     max_power: float | int | None = None
     batt_level: int | None = None
     lock: bool | None = None
+    priority: int | None = None
 
 
 @dataclass(slots=True)
@@ -257,6 +258,9 @@ def _populate_heater_state(
                 state.lock = None
         else:
             state.lock = None
+    if "priority" in payload:
+        raw_priority = _coerce_number(payload.get("priority"))
+        state.priority = int(raw_priority) if raw_priority is not None else None
     return state
 
 

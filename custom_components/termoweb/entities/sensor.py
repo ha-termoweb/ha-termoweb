@@ -277,6 +277,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                     inventory=heater_details.inventory,
                 )
             )
+
     for node_type, _node, addr_str, base_name in iter_boostable_heater_nodes(
         heater_details,
     ):

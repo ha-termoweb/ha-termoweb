@@ -11,6 +11,7 @@ from custom_components.termoweb.codecs.ducaheat_codec import (
     encode_lock_command,
     encode_mode_command,
     encode_preset_temps_command,
+    encode_priority_command,
     encode_program_command,
     encode_setpoint_command,
     encode_units_command,
@@ -23,6 +24,7 @@ from custom_components.termoweb.domain.commands import (
     SetLock,
     SetMode,
     SetPresetTemps,
+    SetPriority,
     SetProgram,
     SetSetpoint,
     SetUnits,
@@ -103,6 +105,9 @@ def _build_write_call(
     elif isinstance(command, SetLock):
         payload = encode_lock_command(command)
         path = f"{base_path}/lock"
+    elif isinstance(command, SetPriority):
+        payload = encode_priority_command(command)
+        path = f"{base_path}/setup"
     elif isinstance(command, (StartBoost, StopBoost)):
         _ensure_accumulator(node_id=node_id, command=command)
         payload = encode_boost_command(command)
