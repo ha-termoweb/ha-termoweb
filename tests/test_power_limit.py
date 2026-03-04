@@ -334,7 +334,7 @@ class TestPowerLimitEntityDeviceInfo:
         assert info is not None
         identifiers = info.get("identifiers")
         assert identifiers is not None
-        assert (DOMAIN, "dev-pl", "installation") in identifiers
+        assert (DOMAIN, "dev-pl", "site") in identifiers
 
 
 class TestPowerLimitEntityAttributes:

@@ -78,7 +78,7 @@ def build_installation_entity_unique_id(dev_id: Any, suffix: str) -> str:
     dev = normalize_node_addr(dev_id)
     if not dev:
         raise ValueError("dev_id must be provided")
-    return f"{DOMAIN}:{dev}:installation:{suffix}"
+    return f"{DOMAIN}:{dev}:site:{suffix}"
 
 
 def build_gateway_entity_unique_id(dev_id: Any, suffix: str) -> str:

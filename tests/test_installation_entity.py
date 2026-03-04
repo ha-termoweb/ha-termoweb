@@ -320,7 +320,7 @@ class TestBuildInstallationDeviceInfo:
     def test_correct_identifiers(self) -> None:
         hass = types.SimpleNamespace(data={})
         info = build_installation_device_info(hass, "entry", "dev123")
-        assert info["identifiers"] == {(DOMAIN, "dev123", "installation")}
+        assert info["identifiers"] == {(DOMAIN, "dev123", "site")}
 
     def test_three_tuple_identifier(self) -> None:
         """Identifiers use a 3-tuple to avoid collision with gateway."""
@@ -329,12 +329,12 @@ class TestBuildInstallationDeviceInfo:
         ids = info["identifiers"]
         (identifier,) = ids  # exactly one identifier
         assert len(identifier) == 3
-        assert identifier[2] == "installation"
+        assert identifier[2] == "site"
 
     def test_model_is_installation(self) -> None:
         hass = types.SimpleNamespace(data={})
         info = build_installation_device_info(hass, "entry", "dev")
-        assert info["model"] == "Installation"
+        assert info["model"] == "Site"
 
     def test_no_via_device(self) -> None:
         """Installation is the top-level device -- no via_device."""
@@ -385,8 +385,8 @@ class TestBuildInstallationDeviceInfo:
         hass = types.SimpleNamespace(data={})
         info = build_installation_device_info(hass, "entry", "dev")
         assert info["manufacturer"] == "TermoWeb"
-        assert info["name"] == "Installation"
-        assert info["model"] == "Installation"
+        assert info["name"] == "Site"
+        assert info["model"] == "Site"
 
     def test_brand_override(self) -> None:
         hass = types.SimpleNamespace(data={DOMAIN: {}})
@@ -409,7 +409,7 @@ class TestBuildGatewayDeviceInfoChanges:
     def test_via_device_points_to_installation(self) -> None:
         hass = types.SimpleNamespace(data={})
         info = build_gateway_device_info(hass, "entry", "dev123")
-        assert info["via_device"] == (DOMAIN, "dev123", "installation")
+        assert info["via_device"] == (DOMAIN, "dev123", "site")
 
     def test_sw_version_from_fw_version(self) -> None:
         """Gateway device shows fw_version as sw_version."""
@@ -511,11 +511,11 @@ class TestBuildGatewayDeviceInfoChanges:
 class TestBuildInstallationEntityUniqueId:
     def test_correct_format(self) -> None:
         uid = build_installation_entity_unique_id("dev123", "total_energy")
-        assert uid == f"{DOMAIN}:dev123:installation:total_energy"
+        assert uid == f"{DOMAIN}:dev123:site:total_energy"
 
     def test_whitespace_trimming(self) -> None:
         uid = build_installation_entity_unique_id(" dev ", "power_limit")
-        assert uid == f"{DOMAIN}:dev:installation:power_limit"
+        assert uid == f"{DOMAIN}:dev:site:power_limit"
 
     def test_empty_dev_id_raises(self) -> None:
         with pytest.raises(ValueError):
@@ -563,9 +563,9 @@ class TestInstallationTotalEnergySensorDeviceInfo:
 
         info = sensor.device_info
         # Should have 3-tuple installation identifier
-        assert info["identifiers"] == {(DOMAIN, "dev1", "installation")}
+        assert info["identifiers"] == {(DOMAIN, "dev1", "site")}
         assert "via_device" not in info
-        assert info["model"] == "Installation"
+        assert info["model"] == "Site"
 
 
 class TestInstallationInfoSensor:
@@ -586,7 +586,7 @@ class TestInstallationInfoSensor:
         sensor.hass = hass
 
         info = sensor.device_info
-        assert (DOMAIN, "dev1", "installation") in info["identifiers"]
+        assert (DOMAIN, "dev1", "site") in info["identifiers"]
 
     def test_entity_category_is_diagnostic(self) -> None:
         """InstallationInfoSensor should be a diagnostic entity."""
@@ -620,7 +620,7 @@ class TestInstallationInfoSensor:
         )
 
         sensor = InstallationInfoSensor(coordinator, "entry1", "dev1")
-        assert sensor.unique_id == f"{DOMAIN}:dev1:installation:info"
+        assert sensor.unique_id == f"{DOMAIN}:dev1:site:info"
 
     def test_geo_data_attrs_when_present(self) -> None:
         """extra_state_attributes includes all geo_data fields."""
@@ -793,9 +793,9 @@ class TestPowerLimitNumberDeviceInfo:
 
         info = entity.device_info
         # Should have 3-tuple installation identifier
-        assert info["identifiers"] == {(DOMAIN, "dev1", "installation")}
+        assert info["identifiers"] == {(DOMAIN, "dev1", "site")}
         assert "via_device" not in info
-        assert info["model"] == "Installation"
+        assert info["model"] == "Site"
 
 
 # ---------------------------------------------------------------------------
@@ -899,7 +899,7 @@ class TestDiagnosticsInstallation:
 
         diagnostics = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
 
-        installation = diagnostics["installation"]
+        installation = diagnostics["site"]
         assert installation["name"] == "My Home"
         assert installation["model"] == "TW-500"
         assert installation["fw_version"] == "2.1.0"
@@ -922,7 +922,7 @@ class TestDiagnosticsInstallation:
 
         diagnostics = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
 
-        installation = diagnostics["installation"]
+        installation = diagnostics["site"]
         assert "node_inventory" in installation
         # FakeCoordinator has no device_metadata attribute
         assert "geo_data" not in installation
@@ -949,7 +949,7 @@ class TestDiagnosticsInstallation:
 
         diagnostics = asyncio.run(async_get_config_entry_diagnostics(hass, entry))
 
-        installation = diagnostics["installation"]
+        installation = diagnostics["site"]
         assert installation["name"] == "Office"
         assert installation["model"] == "TW-300"
         assert "geo_data" not in installation
