@@ -16,7 +16,6 @@ from homeassistant.core import HomeAssistant
 from .backend.sanitize import mask_identifier
 from .backend.ws_health import WsHealthTracker
 from .const import CONF_BRAND, DEFAULT_BRAND, DOMAIN, get_brand_label
-from .inventory import Inventory
 from .runtime import EntryRuntime, require_runtime
 from .utils import async_get_integration_version
 
@@ -95,6 +94,30 @@ async def async_get_config_entry_diagnostics(
     time_zone = getattr(hass_config, "time_zone", None)
     time_zone_str = str(time_zone) if time_zone not in (None, "") else None
 
+    installation_section: dict[str, Any] = {
+        "node_inventory": node_inventory,
+    }
+
+    coordinator = runtime.coordinator
+    device_metadata = (
+        getattr(coordinator, "device_metadata", None) if coordinator else None
+    )
+    if device_metadata is not None:
+        installation_section["name"] = getattr(device_metadata, "name", None)
+        installation_section["model"] = getattr(device_metadata, "model", None)
+        installation_section["fw_version"] = getattr(
+            device_metadata, "fw_version", None
+        )
+        geo_data = getattr(device_metadata, "geo_data", None)
+        if geo_data is not None:
+            installation_section["geo_data"] = {
+                "country": geo_data.country,
+                "state": geo_data.state,
+                "city": geo_data.city,
+                "tz_code": geo_data.tz_code,
+                "zip": geo_data.zip,
+            }
+
     diagnostics: dict[str, Any] = {
         "integration": {
             "domain": DOMAIN,
@@ -105,9 +128,7 @@ async def async_get_config_entry_diagnostics(
             "version": ha_version_str,
             "python_version": platform.python_version(),
         },
-        "installation": {
-            "node_inventory": node_inventory,
-        },
+        "installation": installation_section,
     }
 
     if time_zone_str is not None:

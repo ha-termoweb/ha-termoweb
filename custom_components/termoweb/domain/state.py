@@ -42,6 +42,17 @@ def _coerce_number(value: Any) -> float | int | None:
         return None
 
 
+@dataclass(frozen=True, slots=True)
+class GeoData:
+    """Geographic metadata for an installation."""
+
+    country: str | None = None
+    state: str | None = None
+    city: str | None = None
+    tz_code: str | None = None
+    zip: str | None = None
+
+
 @dataclass(slots=True)
 class HeaterState:
     """Runtime state for a heater node."""

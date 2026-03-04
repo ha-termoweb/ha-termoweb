@@ -14,7 +14,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import STATE_UNKNOWN, UnitOfTemperature, UnitOfTime
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -48,7 +48,7 @@ from custom_components.termoweb.inventory import (
 )
 from custom_components.termoweb.runtime import require_runtime
 from custom_components.termoweb.utils import (
-    build_gateway_device_info,
+    build_installation_device_info,
     build_power_monitor_device_info,
     float_or_none,
 )
@@ -314,6 +314,14 @@ async def async_setup_entry(hass, entry, async_add_entities):
             uid_total,
             heater_details,
             domain_view,
+        )
+    )
+
+    new_entities.append(
+        InstallationInfoSensor(
+            coordinator,
+            entry.entry_id,
+            dev_id,
         )
     )
 
@@ -1126,8 +1134,8 @@ class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
-        """Return the Home Assistant device metadata for the gateway."""
-        return build_gateway_device_info(self.hass, self._entry_id, self._dev_id)
+        """Return the Home Assistant device metadata for the installation."""
+        return build_installation_device_info(self.hass, self._entry_id, self._dev_id)
 
     @property
     def available(self) -> bool:
@@ -1164,7 +1172,71 @@ class InstallationTotalEnergySensor(CoordinatorEntity, SensorEntity):
             return None
         return total
 
+
+class InstallationInfoSensor(CoordinatorEntity, SensorEntity):
+    """Diagnostic sensor exposing installation metadata and geo location."""
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_translation_key = "installation_info"
+
+    def __init__(
+        self,
+        coordinator: Any,
+        entry_id: str,
+        dev_id: str,
+    ) -> None:
+        """Initialise the installation info diagnostic sensor."""
+        super().__init__(coordinator)
+        self._entry_id = entry_id
+        self._dev_id = dev_id
+        self._attr_unique_id = f"{DOMAIN}:{dev_id}:installation:info"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return the Home Assistant device metadata for the installation."""
+        return build_installation_device_info(self.hass, self._entry_id, self._dev_id)
+
+    @property
+    def native_value(self) -> str | None:
+        """Return a summary location string as the sensor state."""
+        try:
+            runtime = require_runtime(self.hass, self._entry_id)
+            coordinator = runtime.coordinator
+            device_metadata = getattr(coordinator, "device_metadata", None)
+            geo_data = getattr(device_metadata, "geo_data", None)
+            if geo_data is not None:
+                parts = [
+                    p
+                    for p in (geo_data.city, geo_data.state, geo_data.country)
+                    if p is not None
+                ]
+                if parts:
+                    return ", ".join(parts)
+        except LookupError:
+            pass
+        return None
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return identifiers describing the aggregated energy value."""
-        return {"dev_id": self._dev_id}
+        """Return geo location and timezone details for the installation."""
+        attrs: dict[str, Any] = {}
+        try:
+            runtime = require_runtime(self.hass, self._entry_id)
+            coordinator = runtime.coordinator
+            device_metadata = getattr(coordinator, "device_metadata", None)
+            geo_data = getattr(device_metadata, "geo_data", None)
+            if geo_data is not None:
+                if geo_data.country is not None:
+                    attrs["country"] = geo_data.country
+                if geo_data.state is not None:
+                    attrs["state"] = geo_data.state
+                if geo_data.city is not None:
+                    attrs["city"] = geo_data.city
+                if geo_data.tz_code is not None:
+                    attrs["timezone"] = geo_data.tz_code
+                if geo_data.zip is not None:
+                    attrs["zip"] = geo_data.zip
+        except LookupError:
+            pass
+        return attrs

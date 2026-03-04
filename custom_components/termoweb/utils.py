@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.loader import async_get_integration as loader_async_get_integration
 
-from .const import DOMAIN
+from .const import DOMAIN, get_brand_label
 from .i18n import format_fallback
 from .inventory import normalize_node_addr
 from .runtime import EntryRuntime, require_runtime
@@ -80,6 +80,39 @@ def apply_entry_device_overrides(
     return info
 
 
+def build_installation_device_info(
+    hass: HomeAssistant | None,
+    entry_id: str | None,
+    dev_id: str,
+) -> DeviceInfo:
+    """Return canonical ``DeviceInfo`` for the installation (top-level site)."""
+
+    identifiers = {(DOMAIN, str(dev_id), "installation")}
+    info: DeviceInfo = DeviceInfo(
+        identifiers=identifiers,
+        manufacturer="TermoWeb",
+        name="Installation",
+        model="Installation",
+        configuration_url="https://control.termoweb.net",
+    )
+
+    entry_data = _entry_gateway_record(hass, entry_id)
+    info = apply_entry_device_overrides(info, entry_data)
+
+    if entry_data is None:
+        return info
+
+    coordinator = entry_data.coordinator
+    if coordinator is not None:
+        gateway_name = getattr(coordinator, "gateway_name", None)
+        if callable(gateway_name):
+            gateway_name = gateway_name()
+        if gateway_name not in (None, ""):
+            info["name"] = str(gateway_name)
+
+    return info
+
+
 def build_gateway_device_info(
     hass: HomeAssistant | None,
     entry_id: str | None,
@@ -90,15 +123,21 @@ def build_gateway_device_info(
     """Return canonical ``DeviceInfo`` for the TermoWeb gateway."""
 
     identifiers = {(DOMAIN, str(dev_id))}
+    entry_data = _entry_gateway_record(hass, entry_id)
+
+    brand_label = "TermoWeb"
+    if entry_data is not None and isinstance(entry_data.brand, str):
+        brand_label = get_brand_label(entry_data.brand)
+
     info: DeviceInfo = DeviceInfo(
         identifiers=identifiers,
-        manufacturer="TermoWeb",
-        name="TermoWeb Gateway",
+        manufacturer=brand_label,
+        name=f"{brand_label} Gateway",
         model="Gateway/Controller",
         configuration_url="https://control.termoweb.net",
+        via_device=(DOMAIN, str(dev_id), "installation"),
     )
 
-    entry_data = _entry_gateway_record(hass, entry_id)
     info = apply_entry_device_overrides(
         info, entry_data, include_version=include_version
     )
@@ -113,6 +152,15 @@ def build_gateway_device_info(
             model = model()
         if model not in (None, ""):
             info["model"] = str(model)
+
+        device_metadata = getattr(coordinator, "device_metadata", None)
+        if device_metadata is not None:
+            fw_version = getattr(device_metadata, "fw_version", None)
+            if fw_version not in (None, ""):
+                info["sw_version"] = str(fw_version)
+            serial_id = getattr(device_metadata, "serial_id", None)
+            if serial_id not in (None, ""):
+                info["serial_number"] = str(serial_id)
 
     return info
 

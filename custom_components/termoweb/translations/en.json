@@ -51,6 +51,7 @@
       "power_monitor_energy": { "name": "Energy" },
       "power_monitor_power": { "name": "Power" },
       "installation_total_energy": { "name": "Total energy" },
+      "installation_info": { "name": "Location" },
       "boost_minutes_remaining": { "name": "Boost minutes remaining" },
       "boost_end": { "name": "Boost end" },
       "accumulator_charging": { "name": "Charging" },

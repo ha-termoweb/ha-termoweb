@@ -25,7 +25,7 @@ from ..inventory import (
     normalize_node_type,
 )
 from ..runtime import require_runtime
-from ..utils import build_gateway_device_info, float_or_none
+from ..utils import build_installation_device_info, float_or_none
 from .heater import (
     DEFAULT_BOOST_DURATION,
     DEFAULT_BOOST_TEMPERATURE,
@@ -589,8 +589,8 @@ class PowerLimitNumber(CoordinatorEntity, NumberEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
-        """Return the gateway device info."""
-        return build_gateway_device_info(self.hass, self._entry_id, self._dev_id)
+        """Return the installation device info."""
+        return build_installation_device_info(self.hass, self._entry_id, self._dev_id)
 
     @property
     def available(self) -> bool:

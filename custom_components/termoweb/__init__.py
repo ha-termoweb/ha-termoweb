@@ -37,7 +37,12 @@ from .const import (
     signal_ws_status,
     uses_ducaheat_backend,
 )
-from .coordinator import EnergyStateCoordinator, StateCoordinator, build_device_metadata
+from .coordinator import (
+    DeviceMetadata,
+    EnergyStateCoordinator,
+    StateCoordinator,
+    build_device_metadata,
+)
 from .hourly_poller import HourlySamplesPoller
 from .inventory import (
     Inventory,
@@ -258,6 +263,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
         raise ConfigEntryNotReady
 
     device_metadata = build_device_metadata(dev_id, dev)
+
+    geo_data = None
+    try:
+        geo_data = await client.get_geo_data(dev_id)
+    except Exception:  # noqa: BLE001 - best-effort, must not break setup
+        _LOGGER.debug("Failed to fetch geo_data for %s", dev_id)
+    if geo_data is not None:
+        device_metadata = DeviceMetadata(
+            dev_id=device_metadata.dev_id,
+            name=device_metadata.name,
+            model=device_metadata.model,
+            serial_id=device_metadata.serial_id,
+            fw_version=device_metadata.fw_version,
+            geo_data=geo_data,
+        )
+
     nodes = await client.get_nodes(dev_id)
     node_inventory = build_node_inventory(nodes)
     # Inventory-centric design: build and freeze the gateway/node topology once

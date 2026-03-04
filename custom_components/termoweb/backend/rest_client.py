@@ -30,6 +30,7 @@ from custom_components.termoweb.const import (
     BRAND_DUCAHEAT,
     BRAND_TERMOWEB,
     DEVS_PATH,
+    GEO_DATA_PATH_FMT,
     NODE_SAMPLES_PATH_FMT,
     NODES_PATH_FMT,
     TOKEN_PATH,
@@ -46,6 +47,7 @@ from custom_components.termoweb.domain.commands import (
     StartBoost,
     StopBoost,
 )
+from custom_components.termoweb.domain.state import GeoData
 from custom_components.termoweb.inventory import (
     Node,
     NodeDescriptor,
@@ -558,6 +560,32 @@ class RESTClient:
             except (ValueError, TypeError):
                 return None
         return None
+
+    async def get_geo_data(self, dev_id: str) -> GeoData | None:
+        """Fetch geographic metadata for a device.
+
+        Returns a ``GeoData`` instance on success or ``None`` when the
+        endpoint is unavailable or returns unexpected data.
+        """
+
+        headers = await self.authed_headers()
+        path = GEO_DATA_PATH_FMT.format(dev_id=dev_id)
+        try:
+            response = await self._request(
+                "GET", path, headers=headers, ignore_statuses=(404,)
+            )
+        except Exception:  # noqa: BLE001 - best-effort, must not break setup
+            _LOGGER.debug("get_geo_data failed for %s", mask_identifier(dev_id))
+            return None
+        if not isinstance(response, Mapping):
+            return None
+        return GeoData(
+            country=response.get("country"),
+            state=response.get("state"),
+            city=response.get("city"),
+            tz_code=response.get("tz_code"),
+            zip=response.get("zip"),
+        )
 
     async def set_power_limit(self, dev_id: str, *, power_limit: int) -> Any:
         """Set the installation-wide power limit."""

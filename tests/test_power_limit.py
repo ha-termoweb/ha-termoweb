@@ -328,13 +328,13 @@ class TestPowerLimitEntitySetValue:
 class TestPowerLimitEntityDeviceInfo:
     """Tests for PowerLimitNumber.device_info."""
 
-    def test_device_info_returns_gateway_info(self) -> None:
+    def test_device_info_returns_installation_info(self) -> None:
         entity = _make_power_limit_entity()
         info = entity.device_info
         assert info is not None
         identifiers = info.get("identifiers")
         assert identifiers is not None
-        assert (DOMAIN, "dev-pl") in identifiers
+        assert (DOMAIN, "dev-pl", "installation") in identifiers
 
 
 class TestPowerLimitEntityAttributes:

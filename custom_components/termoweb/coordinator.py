@@ -40,6 +40,7 @@ from .domain.state import (
     DomainState,
     DomainStateStore,
     GatewayConnectionState,
+    GeoData,
     HeaterState,
     NodeSettingsDelta,
     PowerMonitorState,
@@ -101,6 +102,9 @@ class DeviceMetadata:
     dev_id: str
     name: str
     model: str | None
+    serial_id: str | None = None
+    fw_version: str | None = None
+    geo_data: GeoData | None = None
 
 
 def _normalise_device_name(raw_name: Any, dev_id: str) -> str:
@@ -121,6 +125,16 @@ def _normalise_device_model(raw_model: Any) -> str | None:
     return trimmed or None
 
 
+def _normalise_optional_string(raw: Any) -> str | None:
+    """Return a trimmed string when present, otherwise ``None``."""
+
+    if raw in (None, ""):
+        return None
+    candidate = raw if isinstance(raw, str) else str(raw)
+    trimmed = candidate.strip()
+    return trimmed or None
+
+
 def build_device_metadata(
     dev_id: str, device: Mapping[str, typing.Any] | None
 ) -> DeviceMetadata:
@@ -136,7 +150,23 @@ def build_device_metadata(
         if isinstance(device, Mapping)
         else None
     )
-    return DeviceMetadata(dev_id=dev_id, name=name, model=model)
+    serial_id = (
+        _normalise_optional_string(device.get("serial_id"))
+        if isinstance(device, Mapping)
+        else None
+    )
+    fw_version = (
+        _normalise_optional_string(device.get("fw_version"))
+        if isinstance(device, Mapping)
+        else None
+    )
+    return DeviceMetadata(
+        dev_id=dev_id,
+        name=name,
+        model=model,
+        serial_id=serial_id,
+        fw_version=fw_version,
+    )
 
 
 def _device_display_name(device: DeviceMetadata | None, dev_id: str) -> str:
