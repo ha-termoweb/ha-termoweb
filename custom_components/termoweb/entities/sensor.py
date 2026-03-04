@@ -1190,7 +1190,7 @@ class InstallationInfoSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._dev_id = dev_id
-        self._attr_unique_id = f"{DOMAIN}:{dev_id}:installation:info"
+        self._attr_unique_id = f"{DOMAIN}:{dev_id}:site:info"
 
     @property
     def device_info(self) -> DeviceInfo:

@@ -87,12 +87,12 @@ def build_installation_device_info(
 ) -> DeviceInfo:
     """Return canonical ``DeviceInfo`` for the installation (top-level site)."""
 
-    identifiers = {(DOMAIN, str(dev_id), "installation")}
+    identifiers = {(DOMAIN, str(dev_id), "site")}
     info: DeviceInfo = DeviceInfo(
         identifiers=identifiers,
         manufacturer="TermoWeb",
-        name="Installation",
-        model="Installation",
+        name="Site",
+        model="Site",
         configuration_url="https://control.termoweb.net",
     )
 
@@ -135,7 +135,7 @@ def build_gateway_device_info(
         name=f"{brand_label} Gateway",
         model="Gateway/Controller",
         configuration_url="https://control.termoweb.net",
-        via_device=(DOMAIN, str(dev_id), "installation"),
+        via_device=(DOMAIN, str(dev_id), "site"),
     )
 
     info = apply_entry_device_overrides(

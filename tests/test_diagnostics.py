@@ -153,7 +153,7 @@ def test_diagnostics_with_cached_inventory(
         {"name": "Heater One", "addr": "1", "type": "htr"},
         {"name": "Monitor", "addr": "2", "type": "pmo"},
     ]
-    assert diagnostics["installation"]["node_inventory"] == expected_inventory
+    assert diagnostics["site"]["node_inventory"] == expected_inventory
 
     assert len(captured_snapshots) == 1
     assert list(captured_snapshots[0].node_inventory) == expected_inventory
@@ -261,7 +261,7 @@ def test_diagnostics_with_inventory_missing_version(
     expected_inventory = [
         {"name": "Heater Two", "addr": "5", "type": "htr"},
     ]
-    assert diagnostics["installation"]["node_inventory"] == expected_inventory
+    assert diagnostics["site"]["node_inventory"] == expected_inventory
     assert len(captured_snapshots) == 1
     assert list(captured_snapshots[0].node_inventory) == expected_inventory
     assert "dev_id" not in _flatten(diagnostics)

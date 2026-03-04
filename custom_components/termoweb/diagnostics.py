@@ -128,7 +128,7 @@ async def async_get_config_entry_diagnostics(
             "version": ha_version_str,
             "python_version": platform.python_version(),
         },
-        "installation": installation_section,
+        "site": installation_section,
     }
 
     if time_zone_str is not None:
