@@ -232,10 +232,46 @@ def decode_node_settings(node_type: str, raw: Any) -> dict[str, Any]:
     try:
         model = model_cls.model_validate(raw)
     except ValidationError:
-        return canonicalize_settings_payload(raw) if isinstance(raw, Mapping) else {}
+        fallback = (
+            canonicalize_settings_payload(raw) if isinstance(raw, Mapping) else {}
+        )
+
+        if isinstance(raw, Mapping):
+            raw_top = set(raw.keys())
+            status_keys = set()
+            if isinstance(raw.get("status"), Mapping):
+                status_keys = set(raw["status"].keys())
+            all_raw = raw_top | status_keys
+            decoded_keys = set(fallback.keys()) if isinstance(fallback, dict) else set()
+            dropped = all_raw - decoded_keys - {"status", "raw"}
+            if dropped:
+                _LOGGER.debug(
+                    "Undecoded fields in %s settings (fallback): %s",
+                    node_type,
+                    sorted(dropped),
+                )
+
+        return fallback
 
     validated = model.model_dump(exclude_none=True)
-    return canonicalize_settings_payload(validated)
+    result = canonicalize_settings_payload(validated)
+
+    if isinstance(raw, Mapping):
+        raw_top = set(raw.keys())
+        status_keys = set()
+        if isinstance(raw.get("status"), Mapping):
+            status_keys = set(raw["status"].keys())
+        all_raw = raw_top | status_keys
+        decoded_keys = set(result.keys()) if isinstance(result, dict) else set()
+        dropped = all_raw - decoded_keys - {"status", "raw"}
+        if dropped:
+            _LOGGER.debug(
+                "Undecoded fields in %s settings: %s",
+                node_type,
+                sorted(dropped),
+            )
+
+    return result
 
 
 def decode_samples(

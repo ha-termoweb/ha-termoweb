@@ -530,6 +530,14 @@ class StateCoordinator(
                     addr,
                     self._filtered_settings_payload(payload),
                 )
+                stored = store.get_state(resolved_type, addr)
+                if stored and hasattr(stored, "max_power"):
+                    _LOGGER.debug(
+                        "Node %s/%s max_power=%s",
+                        resolved_type,
+                        addr,
+                        getattr(stored, "max_power", None),
+                    )
         return current_rtc
 
     @staticmethod

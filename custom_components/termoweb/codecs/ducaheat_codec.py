@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from custom_components.termoweb.domain import canonicalize_settings_payload
@@ -33,6 +34,8 @@ from .ducaheat_models import (
 )
 from .ducaheat_read_models import DucaheatSegmentedSettings, DucaheatThermostatSettings
 
+_LOGGER = logging.getLogger(__name__)
+
 
 def decode_settings(payload: Any, *, node_type: NodeType) -> dict[str, Any]:
     """Decode segmented settings payloads into canonical mappings."""
@@ -51,6 +54,19 @@ def decode_settings(payload: Any, *, node_type: NodeType) -> dict[str, Any]:
         flattened = validated.to_flat_dict(
             accumulator=node_type is NodeType.ACCUMULATOR
         )
+        if isinstance(payload, dict):
+            raw_keys = set(payload.keys())
+            if isinstance(payload.get("status"), dict):
+                raw_keys |= {f"status.{k}" for k in payload["status"]}
+            if isinstance(payload.get("setup"), dict):
+                raw_keys |= {f"setup.{k}" for k in payload["setup"]}
+            decoded_keys = set(flattened.keys()) if flattened else set()
+            _LOGGER.debug(
+                "Ducaheat %s raw_keys=%s decoded_keys=%s",
+                node_type.value,
+                sorted(raw_keys),
+                sorted(decoded_keys),
+            )
         return canonicalize_settings_payload(flattened)
 
     return canonicalize_settings_payload(payload)

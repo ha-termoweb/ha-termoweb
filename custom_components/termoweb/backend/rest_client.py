@@ -351,6 +351,13 @@ class RESTClient:
         else:
             path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}/settings"
         data = await self._request("GET", path, headers=headers)
+        if isinstance(data, dict):
+            _LOGGER.debug(
+                "Raw API response keys for %s/%s: %s",
+                node_type,
+                addr,
+                sorted(data.keys()),
+            )
         decoded = decode_node_settings(node_type, data)
         self._log_non_htr_payload(
             node_type=node_type,

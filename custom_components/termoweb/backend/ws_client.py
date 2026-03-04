@@ -137,6 +137,13 @@ def build_settings_delta(section: str, payload: Any) -> dict[str, Any]:
         return {"ptemp": clone_payload_value(payload)} if payload is not None else {}
     if not isinstance(payload, Mapping):
         return {}
+    if isinstance(payload, Mapping):
+        extra_ws_keys = set(payload.keys()) - set(CANONICAL_SETTING_KEYS)
+        if extra_ws_keys:
+            _LOGGER.debug(
+                "WS payload has non-canonical keys: %s",
+                sorted(extra_ws_keys),
+            )
     return {
         key: clone_payload_value(payload[key])
         for key in CANONICAL_SETTING_KEYS
