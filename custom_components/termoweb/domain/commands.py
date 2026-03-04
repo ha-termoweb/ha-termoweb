@@ -84,3 +84,10 @@ class SetLock(BaseCommand):
     """Toggle child lock state on a heater or accumulator."""
 
     lock: bool
+
+
+@dataclass(slots=True)
+class SetPriority(BaseCommand):
+    """Set the priority level for a heater node."""
+
+    priority: int

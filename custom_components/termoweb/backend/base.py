@@ -88,6 +88,15 @@ class HttpClientProto(Protocol):
     ) -> Any:
         """Toggle display-identify cues for the specified node."""
 
+    async def set_node_priority(
+        self,
+        dev_id: str,
+        node: NodeDescriptor,
+        *,
+        priority: int,
+    ) -> Any:
+        """Set the priority level for the specified node."""
+
     async def get_node_samples(
         self,
         dev_id: str,
@@ -203,6 +212,17 @@ class Backend(ABC):
         """Toggle display-identify cues using the backend client."""
 
         await self.client.set_node_display_select(dev_id, node, select=select)
+
+    async def set_node_priority(
+        self,
+        dev_id: str,
+        node: NodeDescriptor,
+        *,
+        priority: int,
+    ) -> Any:
+        """Set the priority level using the backend client."""
+
+        await self.client.set_node_priority(dev_id, node, priority=priority)
 
     @abstractmethod
     def create_ws_client(

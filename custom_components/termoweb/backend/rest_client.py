@@ -531,6 +531,21 @@ class RESTClient:
         path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}/select"
         return await self._request("POST", path, headers=headers, json=payload)
 
+    async def set_node_priority(
+        self,
+        dev_id: str,
+        node: NodeDescriptor,
+        *,
+        priority: int,
+    ) -> Any:
+        """Set the priority level for the specified node."""
+
+        node_type, addr = self._resolve_node_descriptor(node)
+        payload = {"priority": int(priority)}
+        headers = await self.authed_headers()
+        path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}/settings"
+        return await self._request("POST", path, headers=headers, json=payload)
+
     def _build_acm_extra_options_payload(
         self,
         boost_time: int | None,

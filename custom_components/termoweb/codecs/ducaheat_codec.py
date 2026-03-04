@@ -12,6 +12,7 @@ from custom_components.termoweb.domain.commands import (
     SetLock,
     SetMode,
     SetPresetTemps,
+    SetPriority,
     SetProgram,
     SetSetpoint,
     SetUnits,
@@ -26,6 +27,7 @@ from .ducaheat_models import (
     ExtraOptionsPayload,
     LockWritePayload,
     ModeWritePayload,
+    PriorityWritePayload,
     SelectRequest,
     SetupPayload,
     StatusWritePayload,
@@ -197,6 +199,14 @@ def encode_lock_command(command: SetLock) -> dict[str, Any]:
     return LockWritePayload.model_validate({"lock": command.lock}).model_dump()
 
 
+def encode_priority_command(command: SetPriority) -> dict[str, Any]:
+    """Encode a SetPriority command for the setup endpoint."""
+
+    return PriorityWritePayload.model_validate(
+        {"priority": command.priority}
+    ).model_dump()
+
+
 def infer_status_endpoint(node_type: NodeType, command: BaseCommand) -> str:
     """Return the segmented endpoint name for a status-like command."""
 
@@ -213,4 +223,6 @@ def infer_status_endpoint(node_type: NodeType, command: BaseCommand) -> str:
         return "boost"
     if isinstance(command, SetLock):
         return "lock"
+    if isinstance(command, SetPriority):
+        return "setup"
     raise TypeError(f"Unsupported command type: {type(command).__name__}")

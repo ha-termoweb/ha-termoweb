@@ -64,6 +64,7 @@ CANONICAL_SETTING_KEYS: tuple[str, ...] = (
     "boost_end_datetime",
     "boost_minutes_delta",
     "lock",
+    "priority",
 )
 
 

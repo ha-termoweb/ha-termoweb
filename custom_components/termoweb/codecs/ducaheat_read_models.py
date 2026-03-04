@@ -440,6 +440,7 @@ class DucaheatSetupSegment(DucaheatReadModel):
     charging: bool | None = None
     current_charge_per: int | None = None
     target_charge_per: int | None = None
+    priority: int | None = None
     extra_options: DucaheatExtraOptions | None = None
 
     @field_validator("boost_time")
@@ -485,6 +486,13 @@ class DucaheatSetupSegment(DucaheatReadModel):
         """Clamp charge percentage values."""
 
         return _coerce_percentage(value)
+
+    @field_validator("priority", mode="before")
+    @classmethod
+    def _coerce_priority(cls, value: Any) -> int | None:
+        """Coerce string-wrapped numeric priority to int."""
+
+        return _coerce_int(value)
 
     @model_validator(mode="after")
     def _derive_boost_end(self) -> DucaheatSetupSegment:
@@ -662,6 +670,9 @@ class DucaheatSegmentedSettings(DucaheatReadModel):
             _merge_accumulator_charge_metadata(
                 flattened, setup_dump, prefer_existing=True
             )
+
+        if self.setup and self.setup.priority is not None:
+            flattened["priority"] = self.setup.priority
 
         if self.prog is not None:
             flattened["prog"] = self.prog
