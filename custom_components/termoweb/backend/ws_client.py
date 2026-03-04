@@ -38,6 +38,8 @@ from .ws_health import WsHealthTracker
 
 _LOGGER = logging.getLogger(__name__)
 
+_LOGGED_NON_CANONICAL: set[frozenset[str]] = set()
+
 CANONICAL_SETTING_KEYS: tuple[str, ...] = (
     "mode",
     "stemp",
@@ -140,10 +142,13 @@ def build_settings_delta(section: str, payload: Any) -> dict[str, Any]:
     if isinstance(payload, Mapping):
         extra_ws_keys = set(payload.keys()) - set(CANONICAL_SETTING_KEYS)
         if extra_ws_keys:
-            _LOGGER.debug(
-                "WS payload has non-canonical keys: %s",
-                sorted(extra_ws_keys),
-            )
+            frozen = frozenset(extra_ws_keys)
+            if frozen not in _LOGGED_NON_CANONICAL:
+                _LOGGED_NON_CANONICAL.add(frozen)
+                _LOGGER.debug(
+                    "WS payload has non-canonical keys: %s",
+                    sorted(extra_ws_keys),
+                )
     return {
         key: clone_payload_value(payload[key])
         for key in CANONICAL_SETTING_KEYS
