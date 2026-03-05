@@ -52,7 +52,6 @@ __all__ = [
     "NodeDescriptor",
     "PowerMonitorNode",
     "ThermostatNode",
-    "_normalize_node_identifier",
     "addresses_by_node_type",
     "boostable_accumulator_details_for_entry",
     "build_heater_address_map",
