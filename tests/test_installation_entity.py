@@ -206,7 +206,6 @@ def _prep_client(monkeypatch, fake_request):
     session = FakeSession()
     client = api.RESTClient(session, "user", "pass")
     client._access_token = "tok"
-    client._token_expiry = api.time.time() + 10000
     client._token_expiry_monotonic = api.time_mod() + 10000
     monkeypatch.setattr(client, "_request", fake_request)
     return client

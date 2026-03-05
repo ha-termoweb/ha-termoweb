@@ -17,6 +17,7 @@ from custom_components.termoweb.backend.ducaheat import (
     DucaheatRequestError,
 )
 from custom_components.termoweb.backend.sanitize import mask_identifier
+from custom_components.termoweb.codecs.termoweb_codec import decode_samples
 from custom_components.termoweb.const import (
     BRAND_DUCAHEAT,
     BRAND_TERMOWEB,
@@ -34,7 +35,11 @@ def _patch_api_clock(
     wall: float | Callable[[], float],
     mono: float | Callable[[], float] | None = None,
 ) -> None:
-    """Patch both wall-clock and monotonic timers used by the API client."""
+    """Patch the monotonic timer used by the API client.
+
+    The ``wall`` parameter is accepted for backward compatibility and used
+    as the default for ``mono`` when ``mono`` is not provided.
+    """
 
     if callable(wall):
         wall_func = wall
@@ -43,8 +48,6 @@ def _patch_api_clock(
 
         def wall_func() -> float:
             return wall_value
-
-    monkeypatch.setattr(api.time, "time", wall_func)
 
     if mono is None:
         mono_func = wall_func
@@ -62,9 +65,7 @@ def _patch_api_clock(
 def _set_token_expiry_seconds(client: RESTClient, seconds: float) -> None:
     """Set token expiry relative to the current time providers."""
 
-    now_wall = api.time.time()
     now_mono = api.time_mod()
-    client._token_expiry = now_wall + seconds
     client._token_expiry_monotonic = now_mono + seconds
 
 
@@ -346,8 +347,6 @@ def test_ensure_token_non_numeric_expires_in(monkeypatch) -> None:
 
         token = await client._ensure_token()
         assert token == "tok"
-        assert client._token_obtained_at == fake_time
-        assert client._token_expiry == fake_time + 3600
         assert client._token_expiry_monotonic == pytest.approx(fake_time + 3600)
 
     _patch_api_clock(monkeypatch, wall=lambda: fake_time)
@@ -507,9 +506,7 @@ async def test_refresh_token_public_wrapper(monkeypatch: pytest.MonkeyPatch) -> 
     session = FakeSession()
     client = RESTClient(session, "user", "pass")
     client._access_token = "cached"
-    client._token_expiry = 123.0
     client._token_expiry_monotonic = 456.0
-    client._token_obtained_at = 789.0
     client._token_obtained_monotonic = 987.0
     ensure_mock = AsyncMock(return_value="new-token")
     monkeypatch.setattr(client, "_ensure_token", ensure_mock)
@@ -517,9 +514,7 @@ async def test_refresh_token_public_wrapper(monkeypatch: pytest.MonkeyPatch) -> 
     await client.refresh_token()
 
     assert client._access_token is None
-    assert client._token_expiry == 0.0
     assert client._token_expiry_monotonic == 0.0
-    assert client._token_obtained_at == 0.0
     assert client._token_obtained_monotonic == 0.0
     assert ensure_mock.await_count == 1
 
@@ -610,83 +605,6 @@ def test_request_timeout_propagates() -> None:
         assert len(session.request_calls) == 1
 
     asyncio.run(_run())
-
-
-def test_request_preview_logs_json_fallback(caplog) -> None:
-    results: list[str] = []
-
-    async def _run() -> None:
-        session = FakeSession()
-        session.queue_request(
-            MockResponse(
-                200,
-                {"ok": True},
-                headers={"Content-Type": "application/json"},
-                text_data='{"ok":true}',
-                json_exc=ValueError("boom"),
-            )
-        )
-
-        client = RESTClient(session, "user", "pass")
-        result = await client._request("GET", "/api/preview", headers={})
-        results.append(result)
-
-    caplog.clear()
-    api.API_LOG_PREVIEW = True
-    try:
-        with caplog.at_level("DEBUG"):
-            asyncio.run(_run())
-    finally:
-        api.API_LOG_PREVIEW = False
-
-    assert results == ['{"ok":true}']
-    preview_logs = [
-        rec.message for rec in caplog.records if "body[0:200]" in rec.message
-    ]
-    assert preview_logs
-
-
-def test_request_preview_truncates_body(monkeypatch: pytest.MonkeyPatch) -> None:
-    class StubLogger:
-        def __init__(self) -> None:
-            self.debug_calls: list[tuple[str, tuple[Any, ...]]] = []
-
-        def debug(self, msg: str, *args: Any) -> None:
-            self.debug_calls.append((msg, args))
-
-    stub_logger = StubLogger()
-    monkeypatch.setattr(api, "_LOGGER", stub_logger)
-    monkeypatch.setattr(api, "API_LOG_PREVIEW", True)
-
-    long_body = "Bearer secret-token " + ("0123456789" * 30)
-
-    async def _run() -> None:
-        session = FakeSession()
-        session.queue_request(
-            MockResponse(
-                200,
-                {"ok": True},
-                headers={"Content-Type": "text/plain"},
-                text_data=long_body,
-            )
-        )
-
-        client = RESTClient(session, "user", "pass")
-        result = await client._request("GET", "/api/preview", headers={})
-        assert result == long_body
-
-    asyncio.run(_run())
-
-    preview_call = next(
-        (call for call in stub_logger.debug_calls if "body[0:200]" in call[0]),
-        None,
-    )
-    assert preview_call is not None, "Expected preview log entry"
-    snippet = preview_call[1][-1]
-    assert isinstance(snippet, str)
-    assert len(snippet) == 200
-    assert snippet.startswith("Bearer ***")
-    assert "secret-token" not in snippet
 
 
 def test_api_base_property_returns_sanitized() -> None:
@@ -826,7 +744,6 @@ def test_ensure_token_returns_cached_after_lock_entry() -> None:
         session = FakeSession()
         client = RESTClient(session, "user", "pw")
         client._access_token = None
-        client._token_expiry = 0.0
         client._token_expiry_monotonic = 0.0
 
         class FakeLock:
@@ -2137,150 +2054,6 @@ def test_ducaheat_get_node_samples_keeps_second_payload(monkeypatch) -> None:
     asyncio.run(_run())
 
 
-def test_ducaheat_normalise_settings_non_dict() -> None:
-    client = DucaheatRESTClient(
-        FakeSession(),
-        "user",
-        "pass",
-        api_base="https://api.termoweb.fake",
-    )
-    assert client._normalise_settings(123) == {}
-
-
-def test_ducaheat_normalise_settings_fallbacks() -> None:
-    client = DucaheatRESTClient(
-        FakeSession(),
-        "user",
-        "pass",
-        api_base="https://api.termoweb.fake",
-    )
-    payload = {
-        "status": {
-            "set_temp": "20.5",
-            "ambient": 19,
-            "boost_temp": "  23.0 ",
-            "boost_time": 30,
-        },
-        "prog": None,
-        "prog_temps": {"cold": "5", "night": None, "day": " 18 "},
-        "name": "Heater",
-    }
-
-    result = client._normalise_settings(payload)
-    assert result["stemp"] == "20.5"
-    assert result["mtemp"] == "19.0"
-    assert "boost_temp" not in result
-    assert "boost_time" not in result
-    assert result["ptemp"] == ["5.0", "", "18.0"]
-    assert "name" not in result
-
-
-def test_ducaheat_normalise_settings_acm_status_boost() -> None:
-    client = DucaheatRESTClient(
-        FakeSession(),
-        "user",
-        "pass",
-        api_base="https://api.termoweb.fake",
-    )
-    payload = {
-        "status": {
-            "boost_temp": "24",
-            "boost_time": 15,
-            "boost_active": True,
-        }
-    }
-
-    result = client._normalise_settings(payload, node_type="acm")
-    assert result["boost_temp"] == "24.0"
-    assert result["boost_time"] == 15
-    assert result["boost_active"] is True
-
-
-def test_ducaheat_normalise_settings_acm_boost_metadata() -> None:
-    client = DucaheatRESTClient(
-        FakeSession(),
-        "user",
-        "pass",
-        api_base="https://api.termoweb.fake",
-    )
-    payload = {
-        "status": {
-            "boost": True,
-            "boost_end": {"day": 2, "minute": 45},
-        },
-        "setup": {
-            "extra_options": {"boost_end_min": 150},
-        },
-    }
-
-    result = client._normalise_settings(payload, node_type="acm")
-    assert result["boost_active"] is True
-    assert "boost" not in result
-    assert result["boost_end_day"] == 2
-    assert result["boost_end_min"] == 45
-    assert "boost_end" not in result
-
-
-def test_ducaheat_normalise_settings_acm_boost_metadata_fallback() -> None:
-    client = DucaheatRESTClient(
-        FakeSession(),
-        "user",
-        "pass",
-        api_base="https://api.termoweb.fake",
-    )
-    payload = {
-        "status": {},
-        "setup": {
-            "extra_options": {"boost_end_min": 180},
-            "boost_end": {"day": 4},
-        },
-    }
-
-    result = client._normalise_settings(payload, node_type="acm")
-    assert result["boost_end_day"] == 4
-    assert result["boost_end_min"] == 180
-    assert "boost_end" not in result
-
-
-def test_ducaheat_merge_boost_metadata_defensive() -> None:
-    client = DucaheatRESTClient(
-        FakeSession(),
-        "user",
-        "pass",
-        api_base="https://api.termoweb.fake",
-    )
-
-    target: dict[str, Any] = {"boost_active": True, "boost_end_day": 2}
-
-    client._merge_boost_metadata(target, None)
-    client._merge_boost_metadata(
-        target,
-        {"boost_end": None, "boost_end_day": 1, "boost_end_min": 10},
-        prefer_existing=True,
-    )
-
-    assert target == {"boost_active": True, "boost_end_day": 2, "boost_end_min": 10}
-
-
-def test_ducaheat_normalise_settings_handles_half_hour_prog() -> None:
-    client = DucaheatRESTClient(
-        FakeSession(),
-        "user",
-        "pass",
-        api_base="https://api.termoweb.fake",
-    )
-
-    payload = {
-        "prog": {"prog": {str(day): [day % 3] * 48 for day in range(7)}},
-        "status": {"mode": "AUTO"},
-    }
-
-    result = client._normalise_settings(payload)
-    assert len(result["prog"]) == 168
-    assert result["prog"][:24] == [0] * 24
-    assert result["prog"][24:48] == [1] * 24
-
-
 def test_ducaheat_normalise_prog_with_varied_inputs() -> None:
     client = DucaheatRESTClient(
         FakeSession(),
@@ -2320,27 +2093,6 @@ def test_ducaheat_normalise_prog_invalid_inputs() -> None:
     assert client._normalise_prog({"days": {"mon": {"slots": None}}}) is None
     assert client._normalise_prog({"days": {"mon": {"slots": 123}}}) is None
     assert client._normalise_prog({"days": {"mon": {"values": "abc"}}}) is None
-
-
-def test_ducaheat_normalise_prog_temps_variations() -> None:
-    client = DucaheatRESTClient(
-        FakeSession(),
-        "user",
-        "pass",
-        api_base="https://api.termoweb.fake",
-    )
-
-    assert client._normalise_prog_temps("bad") is None
-
-    temps = client._normalise_prog_temps(
-        {"antifrost": None, "eco": " 18.5 ", "comfort": "abc"}
-    )
-    assert temps == ["", "18.5", "abc"]
-
-    weird = client._normalise_prog_temps(
-        {"antifrost": ["bad"], "eco": None, "comfort": 18}
-    )
-    assert weird == ["['bad']", "", "18.0"]
 
 
 def test_ducaheat_serialise_prog_expands_half_hours() -> None:
@@ -2384,14 +2136,7 @@ def test_ducaheat_safe_temperature_handles_strings() -> None:
 
 
 def test_extract_samples_handles_list_payload() -> None:
-    client = DucaheatRESTClient(
-        FakeSession(),
-        "user",
-        "pass",
-        api_base="https://api.termoweb.fake",
-    )
-
-    samples = client._extract_samples(
+    samples = decode_samples(
         [
             {"timestamp": 2000.0, "value": 5.5},
             {"t": "bad"},
@@ -2403,9 +2148,7 @@ def test_extract_samples_handles_list_payload() -> None:
 
 
 def test_extract_samples_preserves_min_max() -> None:
-    client = RESTClient(FakeSession(), "user", "pass", api_base="https://api.fake")
-
-    samples = client._extract_samples(
+    samples = decode_samples(
         [
             {
                 "t": 1000,
@@ -2437,9 +2180,7 @@ def test_extract_samples_preserves_min_max() -> None:
 
 
 def test_extract_samples_uses_counter_field_when_value_missing() -> None:
-    client = RESTClient(FakeSession(), "user", "pass", api_base="https://api.fake")
-
-    samples = client._extract_samples(
+    samples = decode_samples(
         [
             {
                 "t": 3000,

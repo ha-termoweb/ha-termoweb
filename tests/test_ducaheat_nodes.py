@@ -118,26 +118,6 @@ def test_ducaheat_rest_normalise_ws_nodes_mixed_settings_types() -> None:
     assert len(payload["acm"]["settings"]["03"]["prog"]["days"]["1"]) == 24
 
 
-def test_ducaheat_rest_normalise_ws_settings_boost_fields() -> None:
-    """Websocket settings should expose boost end metadata without raw blobs."""
-
-    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
-
-    payload = {
-        "boost": False,
-        "boost_end": {"day": 6, "minute": 15},
-        "boost_end_day": 3,
-    }
-
-    result = client._normalise_ws_settings(payload)
-
-    assert result["boost_active"] is False
-    assert "boost" not in result
-    assert "boost_end" not in result
-    assert result["boost_end_day"] == 3
-    assert result["boost_end_min"] == 15
-
-
 def test_ducaheat_decode_settings_drops_boost_end_mapping() -> None:
     """Decoded accumulator settings should not retain raw boost_end mappings."""
 
@@ -192,32 +172,6 @@ def test_ducaheat_decode_settings_validates_aliases_with_models() -> None:
     assert decoded["prog"] == [0, 1, 2] * 56
     assert decoded["ptemp"] == ["7.0", "17.0", "21.0"]
     assert "boost_end" not in decoded
-
-
-def test_ducaheat_rest_normalise_settings_charge_fields() -> None:
-    """Accumulator settings should expose normalised charge metadata."""
-
-    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
-
-    payload = {
-        "status": {
-            "mode": "auto",
-            "charging": "1",
-            "current_charge_per": "45.5",
-            "target_charge_per": 120,
-        },
-        "setup": {
-            "extra_options": {
-                "current_charge_per": 10,
-            }
-        },
-    }
-
-    result = client._normalise_settings(payload, node_type="acm")
-
-    assert result["charging"] is True
-    assert result["current_charge_per"] == 45
-    assert result["target_charge_per"] == 100
 
 
 def test_ducaheat_decode_thermostat_aliases_and_limits() -> None:

@@ -19,7 +19,7 @@ from custom_components.termoweb.backend.rest_client import RESTClient
 from custom_components.termoweb.const import (
     BRAND_DUCAHEAT,
     BRAND_TERMOWEB,
-    DOMAIN as TERMOWEB_DOMAIN,
+    DOMAIN,
     WS_NAMESPACE,
     signal_ws_status,
 )
@@ -37,7 +37,6 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 from .ws_health import WsHealthTracker
 
 _LOGGER = logging.getLogger(__name__)
-DOMAIN = TERMOWEB_DOMAIN
 
 CANONICAL_SETTING_KEYS: tuple[str, ...] = (
     "mode",

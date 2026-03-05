@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterable, Mapping
 import logging
-import time
 from time import monotonic as time_mod
 import typing
 from typing import Any
@@ -57,9 +56,6 @@ from custom_components.termoweb.inventory import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# Toggle to preview bodies in debug logs (redacted). Leave False by default.
-API_LOG_PREVIEW = False
-
 DUCAHEAT_API_BASE = BRAND_API_BASES[BRAND_DUCAHEAT].rstrip("/")
 DUCAHEAT_SERIAL_ID = "15"
 
@@ -91,8 +87,6 @@ class RESTClient:
         self._api_base = api_base.rstrip("/") if api_base else API_BASE
         self._basic_auth_b64 = basic_auth_b64 or BASIC_AUTH_B64
         self._access_token: str | None = None
-        self._token_obtained_at: float = 0.0
-        self._token_expiry: float = 0.0
         self._token_obtained_monotonic: float = 0.0
         self._token_expiry_monotonic: float = 0.0
         self._lock = asyncio.Lock()
@@ -158,14 +152,6 @@ class RESTClient:
                             resp.status,
                             redact_text(body_text),
                         )
-                    elif API_LOG_PREVIEW:
-                        _LOGGER.debug(
-                            "HTTP %s -> %s, ctype=%s, body[0:200]=%r",
-                            url,
-                            resp.status,
-                            ctype,
-                            (redact_text(body_text) or "")[:200],
-                        )
                     else:
                         _LOGGER.debug(
                             "HTTP %s -> %s, ctype=%s", url, resp.status, ctype
@@ -174,7 +160,6 @@ class RESTClient:
                     if resp.status == 401:
                         if attempt == 0:
                             self._access_token = None
-                            self._token_expiry = 0.0
                             self._token_expiry_monotonic = 0.0
                             token = await self._ensure_token()
                             headers["Authorization"] = f"Bearer {token}"
@@ -288,16 +273,13 @@ class RESTClient:
                     _LOGGER.error("No access_token in response JSON")
                     raise BackendAuthError("No access_token in response")
                 self._access_token = token
-                now_wall = time.time()
                 now_mono = time_mod()
-                self._token_obtained_at = now_wall
                 self._token_obtained_monotonic = now_mono
                 expires_in = js.get("expires_in")
                 if isinstance(expires_in, (int, float)):
                     ttl = max(float(expires_in), 0.0)
                 else:
                     ttl = 3600.0
-                self._token_expiry = now_wall + ttl
                 self._token_expiry_monotonic = now_mono + ttl
                 return token
 
@@ -336,9 +318,7 @@ class RESTClient:
 
         async with self._lock:
             self._access_token = None
-            self._token_obtained_at = 0.0
             self._token_obtained_monotonic = 0.0
-            self._token_expiry = 0.0
             self._token_expiry_monotonic = 0.0
         await self._ensure_token()
 
@@ -434,13 +414,6 @@ class RESTClient:
             except ValueError as err:
                 raise ValueError(f"ptemp contains non-numeric value: {value}") from err
         return formatted
-
-    def _extract_samples(
-        self, data: Any, *, timestamp_divisor: float = 1.0
-    ) -> list[dict[str, str | int]]:
-        """Normalise heater samples payloads into {"t", "counter"} lists."""
-
-        return decode_samples(data, timestamp_divisor=timestamp_divisor, logger=_LOGGER)
 
     async def set_node_settings(
         self,

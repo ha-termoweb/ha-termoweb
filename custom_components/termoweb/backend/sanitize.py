@@ -89,5 +89,4 @@ __all__ = [
     "mask_identifier",
     "redact_text",
     "redact_token_fragment",
-    "validate_boost_minutes",
 ]
