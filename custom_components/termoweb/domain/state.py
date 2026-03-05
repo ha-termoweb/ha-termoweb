@@ -193,19 +193,6 @@ class NodeStatusDelta(NodeDelta):
         return canonicalize_settings_payload({"status": self.status})
 
 
-@dataclass(slots=True)
-class NodeSamplesDelta(NodeDelta):
-    """Samples delta placeholder for future use."""
-
-    samples: Mapping[str, typing.Any]
-
-    @property
-    def payload(self) -> Mapping[str, typing.Any]:
-        """Return the samples mapping payload."""
-
-        return {"samples": self.samples}
-
-
 def _populate_heater_state(
     state: HeaterState,
     payload: Mapping[str, typing.Any],
@@ -323,8 +310,7 @@ def _populate_accumulator_fields(
 def _build_accumulator_state(payload: Mapping[str, typing.Any]) -> AccumulatorState:
     """Construct an accumulator state instance from ``payload``."""
 
-    state = _populate_heater_state(AccumulatorState(), payload)
-    return _populate_accumulator_fields(state, payload)
+    return _populate_accumulator_fields(AccumulatorState(), payload)
 
 
 def _build_thermostat_state(payload: Mapping[str, typing.Any]) -> ThermostatState:
@@ -483,12 +469,7 @@ class DomainStateStore:
             self._states[node_id] = _build_state(node_id.node_type, normalized)
             return
 
-        existing = self._states.get(node_id)
-        if existing is None:
-            self._states[node_id] = _build_state(node_id.node_type, normalized)
-            return
-
-        self._states[node_id] = _merge_state(existing, normalized)
+        self._states[node_id] = _merge_state(self._states[node_id], normalized)
 
     def apply_full_snapshot(
         self,
@@ -568,12 +549,6 @@ class DomainStateStore:
             node_type.value: tuple(sorted(addrs))
             for node_type, addrs in self._addresses_by_type.items()
         }
-
-    @property
-    def known_types(self) -> tuple[str, ...]:
-        """Return the set of node types represented in the store."""
-
-        return tuple(sorted(self.addresses_by_type))
 
     def iter_states(self) -> Iterator[tuple[NodeId, DomainState]]:
         """Yield stored ``(NodeId, DomainState)`` pairs."""
@@ -709,19 +684,3 @@ def clone_gateway_connection_state(
     )
 
 
-def apply_payload_to_state(
-    state: DomainState | None, payload: Mapping[str, typing.Any] | None
-) -> DomainState | None:
-    """Apply a mapping payload onto ``state`` when possible."""
-
-    if state is None or not isinstance(payload, Mapping):
-        return state
-
-    canonical = canonicalize_settings_payload(payload)
-    if isinstance(state, AccumulatorState):
-        return _populate_accumulator_fields(state, canonical)
-    if isinstance(state, ThermostatState):
-        return _populate_heater_state(state, canonical)
-    if isinstance(state, PowerMonitorState):
-        return _populate_power_monitor_state(state, canonical)
-    return _populate_heater_state(state, canonical)

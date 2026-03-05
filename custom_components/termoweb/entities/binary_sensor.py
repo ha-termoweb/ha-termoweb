@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 import logging
 from typing import Any
 
@@ -17,9 +17,10 @@ from custom_components.termoweb.boost import supports_boost
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.coordinator import StateCoordinator
 from custom_components.termoweb.domain import DomainStateView, GatewayConnectionState
-from custom_components.termoweb.domain.state import DomainState
 from custom_components.termoweb.entities.heater import (
     BoostState,
+    SettingsResolver,
+    build_settings_resolver,
     derive_boost_state_from_domain,
     log_skipped_nodes,
 )
@@ -38,8 +39,6 @@ from custom_components.termoweb.runtime import require_runtime
 from custom_components.termoweb.utils import build_gateway_device_info
 
 _LOGGER = logging.getLogger(__name__)
-
-SettingsResolver = Callable[[], DomainState | None]
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -67,7 +66,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             addr_str,
             ":boost_active",
         )
-        settings_resolver = _build_settings_resolver(
+        settings_resolver = build_settings_resolver(
             coord,
             dev_id,
             node_type,
@@ -265,18 +264,3 @@ def _iter_boostable_inventory_nodes(
         yield (canonical_type, canonical_addr, metadata.name)
 
 
-def _build_settings_resolver(
-    coordinator: StateCoordinator,
-    dev_id: str,
-    node_type: str,
-    addr: str,
-) -> SettingsResolver:
-    """Return callable resolving typed boost state for a heater node."""
-
-    def _resolver() -> DomainState | None:
-        view = getattr(coordinator, "domain_view", None)
-        if isinstance(view, DomainStateView):
-            return view.get_heater_state(node_type, addr)
-        return None
-
-    return _resolver

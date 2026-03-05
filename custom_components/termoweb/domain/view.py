@@ -33,12 +33,9 @@ class DomainStateView:
     def _build_state(self, node_type: str | NodeType, addr: str) -> DomainState | None:
         """Return a domain state object using the store."""
 
-        if self._store is not None:
-            state = self._store.get_state(node_type, addr)
-            if state is not None:
-                return state
-
-        return None
+        if self._store is None:
+            return None
+        return self._store.get_state(node_type, addr)
 
     def get_heater_state(
         self, node_type: str | NodeType, addr: str

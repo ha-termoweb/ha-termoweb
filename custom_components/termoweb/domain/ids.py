@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Literal
 
 
 class NodeType(str, Enum):
@@ -16,10 +15,7 @@ class NodeType(str, Enum):
     POWER_MONITOR = "pmo"
 
 
-NodeTypeLiteral = Literal["htr", "acm", "thm", "pmo"]
-
-
-def normalize_node_type(node_type: NodeType | NodeTypeLiteral | str) -> NodeType:
+def normalize_node_type(node_type: NodeType | str) -> NodeType:
     """Normalize assorted node type inputs to ``NodeType``."""
 
     try:
