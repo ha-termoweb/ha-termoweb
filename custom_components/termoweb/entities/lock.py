@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 import logging
 from typing import Any
 
@@ -12,9 +12,11 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.coordinator import StateCoordinator
-from custom_components.termoweb.domain import DomainStateView
-from custom_components.termoweb.domain.state import DomainState
-from custom_components.termoweb.entities.heater import log_skipped_nodes
+from custom_components.termoweb.entities.heater import (
+    SettingsResolver,
+    build_settings_resolver,
+    log_skipped_nodes,
+)
 from custom_components.termoweb.i18n import (
     async_get_fallback_translations,
     attach_fallbacks,
@@ -30,8 +32,6 @@ from custom_components.termoweb.runtime import require_runtime
 _LOGGER = logging.getLogger(__name__)
 
 _LOCK_NODE_TYPES: frozenset[str] = frozenset({"htr", "acm"})
-
-SettingsResolver = Callable[[], DomainState | None]
 
 
 async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> None:
@@ -57,7 +57,7 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             addr_str,
             ":child_lock",
         )
-        settings_resolver = _build_settings_resolver(
+        settings_resolver = build_settings_resolver(
             coord,
             dev_id,
             node_type,
@@ -217,20 +217,3 @@ def _iter_lockable_inventory_nodes(
         yield (canonical_type, canonical_addr, metadata.name)
 
 
-def _build_settings_resolver(
-    coordinator: StateCoordinator,
-    dev_id: str,
-    node_type: str,
-    addr: str,
-) -> SettingsResolver:
-    """Return callable resolving the domain state for a node."""
-
-    def _resolver() -> DomainState | None:
-        """Return the coordinator state for the node when available."""
-
-        view = getattr(coordinator, "domain_view", None)
-        if isinstance(view, DomainStateView):
-            return view.get_heater_state(node_type, addr)
-        return None
-
-    return _resolver

@@ -11,22 +11,6 @@ import pytest
 from custom_components.termoweb.backend.ducaheat import DucaheatRESTClient
 
 
-def test_normalise_settings_omits_raw_by_default() -> None:
-    """Normalised heater settings should exclude raw payload copies."""
-
-    client = DucaheatRESTClient(SimpleNamespace(), "user", "pass")
-    payload = {
-        "status": {"mode": "Auto", "temp": 21},
-        "setup": {"raw_only": True},
-    }
-
-    result = client._normalise_settings(payload)
-
-    assert "raw" not in result
-    assert result["mode"] == "auto"
-    assert result["mtemp"] == "21.0"
-
-
 @pytest.mark.asyncio
 async def test_get_node_settings_excludes_raw_payloads(
     caplog: pytest.LogCaptureFixture,

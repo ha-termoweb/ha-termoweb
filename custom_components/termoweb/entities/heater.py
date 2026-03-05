@@ -40,6 +40,8 @@ from custom_components.termoweb.utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
 
+SettingsResolver = Callable[[], DomainState | None]
+
 
 DEFAULT_BOOST_DURATION: Final = 60
 DEFAULT_BOOST_TEMPERATURE: Final = 20.0
@@ -102,11 +104,6 @@ class HeaterPlatformDetails:
 
         forward_map, _ = self.inventory.heater_address_map
         return forward_map
-
-    def addresses_for(self, node_type: str) -> list[str]:
-        """Return immutable heater addresses for ``node_type``."""
-
-        return list(self.addrs_by_type.get(node_type, ()))
 
     def resolve_name(self, node_type: str, addr: str) -> str:
         """Resolve the friendly name for ``(node_type, addr)``."""
@@ -442,12 +439,6 @@ def resolve_climate_entity_id(
     return str(entity_id) if isinstance(entity_id, str) else None
 
 
-def iter_boost_button_metadata() -> Iterator[BoostButtonMetadata]:
-    """Yield the metadata describing boost helper buttons."""
-
-    yield from BOOST_BUTTON_METADATA
-
-
 def iter_boostable_heater_nodes(
     details: HeaterPlatformDetails,
     *,
@@ -718,6 +709,23 @@ def heater_platform_details_for_entry(
     )
 
 
+def build_settings_resolver(
+    coordinator: Any,
+    dev_id: str,
+    node_type: str,
+    addr: str,
+) -> SettingsResolver:
+    """Return callable resolving the domain state for a node."""
+
+    def _resolver() -> DomainState | None:
+        view = getattr(coordinator, "domain_view", None)
+        if isinstance(view, DomainStateView):
+            return view.get_heater_state(node_type, addr)
+        return None
+
+    return _resolver
+
+
 class HeaterNodeBase(CoordinatorEntity):
     """Base entity implementing common TermoWeb heater behaviour."""
 
@@ -899,15 +907,6 @@ class HeaterNodeBase(CoordinatorEntity):
 
         return section
 
-    def _hass_for_runtime(self) -> HomeAssistant | None:
-        """Return the best-effort Home Assistant instance for runtime access."""
-
-        hass_attr = getattr(self, "_hass", _HASS_UNSET)
-        if hass_attr is not _HASS_UNSET:
-            return hass_attr
-        coordinator_hass = getattr(self.coordinator, "hass", None)
-        return cast(HomeAssistant | None, coordinator_hass)
-
     @property
     def hass(self) -> HomeAssistant | None:
         """Return the Home Assistant instance, falling back to the coordinator."""
@@ -934,7 +933,7 @@ class HeaterNodeBase(CoordinatorEntity):
 
     def _client(self) -> Any:
         """Return the backend used for write operations."""
-        hass = self._hass_for_runtime()
+        hass = self.hass
         if hass is None:
             return None
         if not isinstance(getattr(hass, "data", None), Mapping):

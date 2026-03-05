@@ -25,22 +25,22 @@ def ducaheat_client() -> DucaheatRESTClient:
         (18, "18.0"),
     ],
 )
-def test_format_temp_accepts_numeric_values(
+def test_ensure_temperature_accepts_numeric_values(
     ducaheat_client: DucaheatRESTClient, value: float | str, expected: str
 ) -> None:
-    """_format_temp should normalise float-able values to one decimal string."""
+    """_ensure_temperature should normalise float-able values to one decimal string."""
 
-    assert ducaheat_client._format_temp(value) == expected
+    assert ducaheat_client._ensure_temperature(value) == expected
 
 
 @pytest.mark.parametrize("value", [None, "abc", object(), ""])
-def test_format_temp_rejects_invalid_values(
+def test_ensure_temperature_rejects_invalid_values(
     ducaheat_client: DucaheatRESTClient, value: object
 ) -> None:
-    """_format_temp should raise ``ValueError`` for bad temperature input."""
+    """_ensure_temperature should raise ``ValueError`` for bad temperature input."""
 
     with pytest.raises(ValueError):
-        ducaheat_client._format_temp(value)  # type: ignore[arg-type]
+        ducaheat_client._ensure_temperature(value)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(

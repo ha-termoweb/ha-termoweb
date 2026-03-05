@@ -5,30 +5,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-from conftest import build_entry_runtime
+from conftest import CoordinatorStub, build_entry_runtime
 from custom_components.termoweb.backend.ws_client import forward_ws_sample_updates
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.inventory import Inventory
-
-
-class CoordinatorStub:
-    """Track websocket handler invocations for assertions."""
-
-    def __init__(self) -> None:
-        """Initialise the stub call recorder."""
-
-        self.calls: list[tuple[str, dict[str, dict[str, Any]], float | None]] = []
-
-    def handle_ws_samples(
-        self,
-        dev_id: str,
-        updates: dict[str, dict[str, Any]],
-        *,
-        lease_seconds: float | None = None,
-    ) -> None:
-        """Record forwarded websocket sample payloads."""
-
-        self.calls.append((dev_id, updates, lease_seconds))
 
 
 def test_forward_ws_sample_updates_merges_inventory_aliases() -> None:

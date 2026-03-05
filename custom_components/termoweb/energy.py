@@ -254,19 +254,10 @@ async def async_import_energy_history(  # noqa: C901
 ) -> None:
     """Fetch historical hourly samples and insert statistics with filters."""
 
-    logger = _LOGGER
-    async_mod = asyncio
-    datetime_mod = datetime
-    registry_mod = er
-    store_stats = _store_statistics
-    stats_period = _statistics_during_period
-    last_stats_fn = _get_last_statistics
-    clear_stats_fn = _clear_statistics
-
     try:
         runtime = require_runtime(hass, entry.entry_id)
     except LookupError:
-        logger.debug("%s: no record found for energy import", entry.entry_id)
+        _LOGGER.debug("%s: no record found for energy import", entry.entry_id)
         return
     client: RESTClient = runtime.client  # type: ignore[assignment]
     dev_id: str = runtime.dev_id
@@ -281,7 +272,7 @@ async def async_import_energy_history(  # noqa: C901
     else:
         inventory = runtime.inventory
     if not isinstance(inventory, Inventory):
-        logger.error(
+        _LOGGER.error(
             "%s: energy import aborted; inventory missing in integration state",
             dev_id,
         )
@@ -290,7 +281,7 @@ async def async_import_energy_history(  # noqa: C901
     addresses_by_type = inventory.addresses_by_type
 
     if not any(addresses_by_type.values()):
-        logger.debug("Energy import: no nodes available for device")
+        _LOGGER.debug("Energy import: no nodes available for device")
         return
 
     normalized_type_filters: set[str] | None = None
@@ -335,7 +326,7 @@ async def async_import_energy_history(  # noqa: C901
                 continue
             normalized_address_filters.add(normalized_addr)
         if unknown_addresses:
-            logger.warning(
+            _LOGGER.warning(
                 "%s: ignoring unknown addresses for energy import: %s",
                 dev_id,
                 ", ".join(sorted(set(unknown_addresses))),
@@ -378,13 +369,13 @@ async def async_import_energy_history(  # noqa: C901
     )
 
     if not target_pairs:
-        logger.debug("Energy import: no nodes available for device after filtering")
+        _LOGGER.debug("Energy import: no nodes available for device after filtering")
         return
 
     try:
         chunk_hours_value = int(day_chunk_hours)
     except (TypeError, ValueError):
-        logger.warning(
+        _LOGGER.warning(
             "%s: invalid day_chunk_hours %s; defaulting to 24",
             dev_id,
             day_chunk_hours,
@@ -392,10 +383,10 @@ async def async_import_energy_history(  # noqa: C901
         chunk_hours_value = 24
 
     if chunk_hours_value <= 0:
-        logger.warning("%s: day_chunk_hours must be positive; defaulting to 24", dev_id)
+        _LOGGER.warning("%s: day_chunk_hours must be positive; defaulting to 24", dev_id)
         chunk_hours_value = 24
     elif chunk_hours_value > 24:
-        logger.debug(
+        _LOGGER.debug(
             "%s: capping day_chunk_hours=%s to 24 hours",
             dev_id,
             chunk_hours_value,
@@ -405,7 +396,7 @@ async def async_import_energy_history(  # noqa: C901
     day = 24 * 3600
     chunk_seconds = day if chunk_hours_value >= 24 else chunk_hours_value * 3600
 
-    now_dt = datetime_mod.now(UTC)
+    now_dt = datetime.now(UTC)
     run_started_iso = now_dt.isoformat()
     current_minute = now_dt.replace(second=0, microsecond=0)
     now_ts = int(current_minute.timestamp())
@@ -447,10 +438,10 @@ async def async_import_energy_history(  # noqa: C901
         progress.clear()
         _write_progress_options(progress, imported=False)
     elif entry.options.get(OPTION_ENERGY_HISTORY_IMPORTED):
-        logger.debug("%s: energy history already imported", entry.entry_id)
+        _LOGGER.debug("%s: energy history already imported", entry.entry_id)
         return
 
-    logger.debug(
+    _LOGGER.debug(
         "Energy import: fetching hourly samples down to %s (chunk=%sh)",
         _iso_date(target),
         chunk_hours_value,
@@ -477,7 +468,7 @@ async def async_import_energy_history(  # noqa: C901
         node_type: str, addr: str, start: int, stop: int
     ) -> list[dict[str, Any]]:
         def _log_wait(wait: float) -> None:
-            logger.debug(
+            _LOGGER.debug(
                 "%s:%s/%s: sleeping %.2fs before query",
                 node_type,
                 addr,
@@ -486,7 +477,7 @@ async def async_import_energy_history(  # noqa: C901
             )
 
         await rate_limit.async_throttle(on_wait=_log_wait)
-        logger.debug(
+        _LOGGER.debug(
             "%s:%s: requesting samples %s-%s",
             node_type,
             addr,
@@ -495,16 +486,16 @@ async def async_import_energy_history(  # noqa: C901
         )
         try:
             return await client.get_node_samples(dev_id, (node_type, addr), start, stop)
-        except async_mod.CancelledError:  # pragma: no cover - allow cancellation
+        except asyncio.CancelledError:  # pragma: no cover - allow cancellation
             raise
         except Exception as err:  # pragma: no cover - defensive  # noqa: BLE001
-            logger.debug("%s:%s: error fetching samples: %s", node_type, addr, err)
+            _LOGGER.debug("%s:%s: error fetching samples: %s", node_type, addr, err)
             return []
 
-    ent_reg: er.EntityRegistry | None = registry_mod.async_get(hass)
+    ent_reg: er.EntityRegistry | None = er.async_get(hass)
     for node_type, addr in target_pairs:
         total_nodes_processed += 1
-        logger.debug(
+        _LOGGER.debug(
             "Energy import: importing history for %s %s",
             node_type,
             addr,
@@ -526,7 +517,7 @@ async def async_import_energy_history(  # noqa: C901
                 )
                 fetched = len(samples)
                 if fetched:
-                    logger.debug(
+                    _LOGGER.debug(
                         "%s:%s: fetched %d samples for %s-%s",
                         node_type,
                         addr,
@@ -551,7 +542,7 @@ async def async_import_energy_history(  # noqa: C901
             ent_reg.async_get_entity_id("sensor", DOMAIN, uid) if ent_reg else None
         )
         if not entity_id:
-            logger.debug("%s:%s: no energy sensor found", node_type, addr)
+            _LOGGER.debug("%s:%s: no energy sensor found", node_type, addr)
             node_summary = {
                 "node_type": node_type,
                 "address": addr,
@@ -565,7 +556,7 @@ async def async_import_energy_history(  # noqa: C901
                 "running_sum": 0.0,
             }
             node_summaries.append(node_summary)
-            logger.info(
+            _LOGGER.info(
                 "%s:%s energy import summary first=%s last=%s samples=%d "
                 "written=%d resets=%d sum=%.3f",
                 node_type,
@@ -604,7 +595,7 @@ async def async_import_energy_history(  # noqa: C901
                 "running_sum": 0.0,
             }
             node_summaries.append(node_summary)
-            logger.info(
+            _LOGGER.info(
                 "%s:%s energy import summary first=%s last=%s samples=%d "
                 "written=%d resets=%d sum=%.3f",
                 node_type,
@@ -618,10 +609,10 @@ async def async_import_energy_history(  # noqa: C901
             )
             continue
 
-        import_start_dt = datetime_mod.fromtimestamp(first_ts_val, UTC).replace(
+        import_start_dt = datetime.fromtimestamp(first_ts_val, UTC).replace(
             minute=0, second=0, microsecond=0
         )
-        import_end_dt = datetime_mod.fromtimestamp(last_ts_val, UTC).replace(
+        import_end_dt = datetime.fromtimestamp(last_ts_val, UTC).replace(
             minute=0, second=0, microsecond=0
         )
 
@@ -648,16 +639,16 @@ async def async_import_energy_history(  # noqa: C901
 
         period_stats: dict[str, list[Any]] | None = None
         try:
-            period_stats = await stats_period(
+            period_stats = await _statistics_during_period(
                 hass,
                 lookback_start,
                 import_end_dt + timedelta(hours=1),
                 stat_ids,
             )
-        except async_mod.CancelledError:  # pragma: no cover - allow cancellation
+        except asyncio.CancelledError:  # pragma: no cover - allow cancellation
             raise
         except Exception:  # pragma: no cover - defensive
-            logger.exception(
+            _LOGGER.exception(
                 "%s: error fetching statistics window %s-%s",
                 addr,
                 lookback_start,
@@ -689,18 +680,18 @@ async def async_import_energy_history(  # noqa: C901
         else:
             for stat_id in clear_stat_ids:
                 try:
-                    last_stats = await last_stats_fn(
+                    last_stats = await _get_last_statistics(
                         hass,
                         1,
                         stat_id,
                         start_time=import_start_dt,
                     )
                 except (
-                    async_mod.CancelledError
+                    asyncio.CancelledError
                 ):  # pragma: no cover - allow cancellation
                     raise
                 except Exception:  # pragma: no cover - defensive
-                    logger.exception(
+                    _LOGGER.exception(
                         "%s: error fetching statistics window %s-%s",
                         addr,
                         lookback_start,
@@ -726,7 +717,7 @@ async def async_import_energy_history(  # noqa: C901
             try:
                 sum_offset = float(_statistics_row_get(last_before, "sum") or 0.0)
             except (TypeError, ValueError):  # pragma: no cover - defensive
-                logger.debug(
+                _LOGGER.debug(
                     "%s: invalid sum offset in existing statistics: %s",
                     addr,
                     last_before,
@@ -737,7 +728,7 @@ async def async_import_energy_history(  # noqa: C901
                 try:
                     previous_kwh = float(prev_state)
                 except (TypeError, ValueError):  # pragma: no cover - defensive
-                    logger.debug(
+                    _LOGGER.debug(
                         "%s: invalid previous state in statistics: %s", addr, prev_state
                     )
                     previous_kwh = None
@@ -745,34 +736,34 @@ async def async_import_energy_history(  # noqa: C901
         clear_end = import_end_dt + timedelta(hours=1)
         for stat_id in clear_stat_ids:
             try:
-                cleared = await clear_stats_fn(
+                cleared = await _clear_statistics(
                     hass,
                     stat_id,
                     start_time=import_start_dt,
                     end_time=clear_end,
                 )
-            except async_mod.CancelledError:  # pragma: no cover - allow cancellation
+            except asyncio.CancelledError:  # pragma: no cover - allow cancellation
                 raise
             except Exception:  # pragma: no cover - defensive
-                logger.exception(
+                _LOGGER.exception(
                     "%s: failed to clear statistics for %s",
                     addr,
                     stat_id,
                 )
                 continue
             if cleared == "clear":
-                logger.debug("%s: cleared statistics for %s", addr, stat_id)
+                _LOGGER.debug("%s: cleared statistics for %s", addr, stat_id)
             elif cleared == "delete":
-                logger.debug("%s: deleted statistics for %s", addr, stat_id)
+                _LOGGER.debug("%s: deleted statistics for %s", addr, stat_id)
             else:
                 if not overlap_warning_logged:
-                    logger.info(
+                    _LOGGER.info(
                         "%s: recorder statistics delete helpers unavailable; proceeding "
                         "without deleting existing statistics",
                         dev_id,
                     )
                     overlap_warning_logged = True
-                logger.debug(
+                _LOGGER.debug(
                     "%s: statistics helpers unavailable to clear %s", addr, stat_id
                 )
 
@@ -789,7 +780,7 @@ async def async_import_energy_history(  # noqa: C901
                 ts = int(t_val)
                 kwh = float(counter_val) / 1000.0
             except (TypeError, ValueError):
-                logger.debug("%s: invalid sample %s", addr, sample)
+                _LOGGER.debug("%s: invalid sample %s", addr, sample)
                 continue
 
             if previous_ts is not None and ts == previous_ts:
@@ -798,7 +789,7 @@ async def async_import_energy_history(  # noqa: C901
             previous_ts = ts
             node_samples_processed += 1
 
-            start_dt = datetime_mod.fromtimestamp(ts, UTC).replace(
+            start_dt = datetime.fromtimestamp(ts, UTC).replace(
                 minute=0, second=0, microsecond=0
             )
             # Bucket to UTC hour boundaries so statistics align deterministically.
@@ -821,8 +812,8 @@ async def async_import_energy_history(  # noqa: C901
                 stats.append({"start": start_dt, "sum": running_sum})
             previous_kwh = kwh
 
-        first_iso = datetime_mod.fromtimestamp(first_ts_val, UTC).isoformat()
-        last_iso = datetime_mod.fromtimestamp(last_ts_val, UTC).isoformat()
+        first_iso = datetime.fromtimestamp(first_ts_val, UTC).isoformat()
+        last_iso = datetime.fromtimestamp(last_ts_val, UTC).isoformat()
 
         if not stats:
             total_resets_detected += node_resets_detected
@@ -839,7 +830,7 @@ async def async_import_energy_history(  # noqa: C901
                 "running_sum": running_sum,
             }
             node_summaries.append(node_summary)
-            logger.info(
+            _LOGGER.info(
                 "%s:%s energy import summary first=%s last=%s samples=%d "
                 "written=%d resets=%d sum=%.3f",
                 node_type,
@@ -853,7 +844,7 @@ async def async_import_energy_history(  # noqa: C901
             )
             continue
 
-        logger.debug("%s: inserting statistics for %s", addr, entity_id)
+        _LOGGER.debug("%s: inserting statistics for %s", addr, entity_id)
         ent_entry = ent_reg.async_get(entity_id) if ent_reg else None
         name = getattr(ent_entry, "original_name", None) or entity_id
 
@@ -864,13 +855,13 @@ async def async_import_energy_history(  # noqa: C901
             "has_sum": True,
             "has_mean": False,
         }
-        logger.debug("%s: adding %d stats entries", addr, len(stats))
+        _LOGGER.debug("%s: adding %d stats entries", addr, len(stats))
         store_failed = False
         try:
-            await store_stats(hass, metadata, stats)
+            await _store_statistics(hass, metadata, stats)
         except Exception:  # pragma: no cover - log & continue
             store_failed = True
-            logger.exception("%s: statistics insert failed", addr)
+            _LOGGER.exception("%s: statistics insert failed", addr)
 
         written_count = 0 if store_failed else len(stats)
         if not store_failed:
@@ -883,7 +874,7 @@ async def async_import_energy_history(  # noqa: C901
                     import_end_dt,
                 )
             except Exception:  # pragma: no cover - defensive
-                logger.exception("%s: monotonic sum enforcement failed", addr)
+                _LOGGER.exception("%s: monotonic sum enforcement failed", addr)
         total_resets_detected += node_resets_detected
 
         node_summary = {
@@ -899,7 +890,7 @@ async def async_import_energy_history(  # noqa: C901
             "running_sum": running_sum,
         }
         node_summaries.append(node_summary)
-        logger.info(
+        _LOGGER.info(
             "%s:%s energy import summary first=%s last=%s samples=%d "
             "written=%d resets=%d sum=%.3f",
             node_type,
@@ -922,7 +913,7 @@ async def async_import_energy_history(  # noqa: C901
     run_summary = {
         "device_id": dev_id,
         "started_at": run_started_iso,
-        "completed_at": datetime_mod.now(UTC).isoformat(),
+        "completed_at": datetime.now(UTC).isoformat(),
         "filters": filters_snapshot,
         "nodes_processed": total_nodes_processed,
         "samples_fetched": total_samples_fetched,
@@ -933,7 +924,7 @@ async def async_import_energy_history(  # noqa: C901
 
     runtime.last_energy_import_summary = run_summary
 
-    logger.info(
+    _LOGGER.info(
         "%s: energy history import summary nodes=%d samples=%d written=%d resets=%d",
         dev_id,
         total_nodes_processed,

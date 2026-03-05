@@ -62,12 +62,9 @@ def apply_entry_device_overrides(
 
     manufacturer: str | None = None
     brand = entry_data.brand
-    fallback_manufacturer = None
 
     if isinstance(brand, str) and brand.strip():
         manufacturer = brand.strip()
-    elif isinstance(fallback_manufacturer, str) and fallback_manufacturer.strip():
-        manufacturer = fallback_manufacturer.strip()
 
     if manufacturer:
         info["manufacturer"] = manufacturer

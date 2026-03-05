@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import aiohttp
 import pytest
 
-from conftest import build_entry_runtime
+from conftest import DummyREST, build_entry_runtime
 from custom_components.termoweb.backend import ducaheat_ws, ws_client
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.inventory import (
@@ -24,17 +24,7 @@ from custom_components.termoweb.inventory import (
 from homeassistant.core import HomeAssistant
 
 
-class DummyREST:
-    """Provide the minimal interface required by the websocket client."""
-
-    def __init__(self) -> None:
-        self._session = SimpleNamespace()
-        self._headers = {"Authorization": "Bearer rest-token"}
-
-    async def authed_headers(self) -> dict[str, str]:
-        """Return cached REST headers with an access token."""
-
-        return self._headers
+_REST_TOKEN_HEADERS = {"Authorization": "Bearer rest-token"}
 
 
 class StubResponse:
@@ -223,7 +213,7 @@ def _make_client(
         hass,
         entry_id="entry",
         dev_id="device",
-        api_client=DummyREST(),
+        api_client=DummyREST(authed_headers=_REST_TOKEN_HEADERS),
         coordinator=coordinator,
         session=session,  # type: ignore[arg-type]
         inventory=resolved_inventory,

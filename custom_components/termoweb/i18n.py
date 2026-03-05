@@ -91,7 +91,6 @@ def attach_fallbacks(target: Any, fallbacks: Mapping[str, str] | None) -> None:
 
 __all__ = [
     "COORDINATOR_FALLBACK_ATTR",
-    "FALLBACK_TRANSLATIONS_KEY",
     "_tr",
     "async_get_fallback_translations",
     "attach_fallbacks",

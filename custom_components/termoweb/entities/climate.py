@@ -1007,7 +1007,7 @@ class HeaterClimateEntity(HeaterNode, HeaterNodeBase, ClimateEntity):
             task = asyncio.current_task()
             await asyncio.sleep(_WS_ECHO_FALLBACK_REFRESH)
             try:
-                hass = self._hass_for_runtime()
+                hass = self.hass
                 is_stopping = getattr(hass, "is_stopping", False)
                 is_running = getattr(hass, "is_running", True)
                 if is_stopping or not is_running:

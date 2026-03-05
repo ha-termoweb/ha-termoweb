@@ -59,12 +59,6 @@ def coerce_boost_bool(value: Any) -> bool | None:
 
 
 def coerce_boost_minutes(value: Any) -> int | None:
-    """Return ``value`` as positive minutes when possible."""
-
-    return _coerce_positive_minutes(value)
-
-
-def _coerce_positive_minutes(value: Any) -> int | None:
     """Return ``value`` as a positive integer minute count when possible."""
 
     if value is None or isinstance(value, bool):

@@ -769,14 +769,8 @@ def _merge_accumulator_charge_metadata(
 
 __all__ = [
     "DucaheatExtraOptions",
-    "DucaheatReadModel",
     "DucaheatSegmentedSettings",
     "DucaheatSetupSegment",
     "DucaheatStatusSegment",
     "DucaheatThermostatSettings",
-    "_merge_accumulator_charge_metadata",
-    "_merge_boost_metadata",
-    "_normalise_prog",
-    "_normalise_prog_temps",
-    "_safe_temperature",
 ]

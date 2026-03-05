@@ -15,7 +15,6 @@ TOKEN_PATH: Final = "/client/token"
 DEVS_PATH: Final = "/api/v2/devs/"
 NODES_PATH_FMT: Final = "/api/v2/devs/{dev_id}/mgr/nodes"
 NODE_SAMPLES_PATH_FMT: Final = "/api/v2/devs/{dev_id}/{node_type}/{addr}/samples"
-POWER_LIMIT_PATH_FMT: Final = "/api/v2/devs/{dev_id}/htr_system/power_limit"
 GEO_DATA_PATH_FMT: Final = "/api/v2/devs/{dev_id}/geo_data"
 
 # Public client creds (from APK v2.5.1)
@@ -135,7 +134,5 @@ def signal_ws_status(entry_id: str) -> str:
 # Polling
 DEFAULT_POLL_INTERVAL: Final = 1800  # seconds (30 minutes)
 MIN_POLL_INTERVAL: Final = 30  # seconds
-MAX_POLL_INTERVAL: Final = 3600  # seconds
-
 # Heater energy polling interval when relying on push updates
 HTR_ENERGY_UPDATE_INTERVAL: Final = timedelta(hours=1)

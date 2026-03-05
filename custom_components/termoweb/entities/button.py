@@ -365,7 +365,6 @@ class AccumulatorBoostButton(AccumulatorBoostButtonBase):
     ) -> None:
         """Initialise the boost helper button that uses stored presets."""
 
-        self._metadata = metadata
         icon = metadata.icon or None
         super().__init__(
             coordinator,

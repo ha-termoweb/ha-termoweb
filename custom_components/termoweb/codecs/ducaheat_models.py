@@ -2,58 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from custom_components.termoweb.boost import validate_boost_minutes
 from custom_components.termoweb.codecs.common import format_temperature, validate_units
-
-
-def _validate_prog_slots(values: list[Any]) -> list[int]:
-    """Validate a daily program segment containing 24 integers."""
-
-    if len(values) != 24:
-        raise ValueError(f"Expected 24 program slots per day; got {len(values)}")
-    slots: list[int] = []
-    for value in values:
-        try:
-            ivalue = int(value)
-        except (TypeError, ValueError) as err:
-            raise ValueError(f"Invalid program value: {value!r}") from err
-        if ivalue not in (0, 1, 2):
-            raise ValueError(f"Program values must be 0, 1 or 2; got {ivalue}")
-        slots.append(ivalue)
-    return slots
-
-
-def _normalise_prog(value: Any) -> dict[str, list[int]]:
-    """Normalise weekly programs to a mapping keyed by day index."""
-
-    if isinstance(value, list):
-        if len(value) != 168:
-            raise ValueError(f"Weekly program must contain 168 slots; got {len(value)}")
-        prog_map: dict[str, list[int]] = {}
-        for day in range(7):
-            start = day * 24
-            end = start + 24
-            prog_map[str(day)] = _validate_prog_slots(value[start:end])
-        return prog_map
-
-    if isinstance(value, Mapping):
-        prog_map: dict[str, list[int]] = {}
-        for day_idx in range(7):
-            day_key_options = (str(day_idx), day_idx)
-            for key in day_key_options:
-                if key in value:
-                    prog_map[str(day_idx)] = _validate_prog_slots(value[key])
-                    break
-            else:
-                raise ValueError(f"Missing program entry for day index {day_idx}")
-        return prog_map
-
-    raise ValueError(f"Invalid program payload: {type(value).__name__}")
 
 
 class DucaheatModel(BaseModel):
@@ -66,12 +20,6 @@ class SelectRequest(DucaheatModel):
     """Selection gate payload."""
 
     select: bool
-
-
-class SelectResponse(DucaheatModel):
-    """Selection acknowledgement payload."""
-
-    select: bool | None = None
 
 
 class StatusWritePayload(DucaheatModel):
@@ -140,19 +88,6 @@ class ModeWritePayload(DucaheatModel):
         """Validate boost duration values."""
 
         return validate_boost_minutes(value)
-
-
-class ProgramWritePayload(DucaheatModel):
-    """Weekly program payload keyed by day index."""
-
-    prog: dict[str, list[int]] = Field(default_factory=dict)
-
-    @field_validator("prog", mode="before")
-    @classmethod
-    def _clean_prog(cls, value: Any) -> dict[str, list[int]]:
-        """Normalise incoming program shapes."""
-
-        return _normalise_prog(value)
 
 
 class ExtraOptionsPayload(DucaheatModel):
@@ -251,9 +186,7 @@ __all__ = [
     "LockWritePayload",
     "ModeWritePayload",
     "PriorityWritePayload",
-    "ProgramWritePayload",
     "SelectRequest",
-    "SelectResponse",
     "SetupPayload",
     "StatusWritePayload",
 ]

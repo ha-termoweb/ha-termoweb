@@ -53,8 +53,6 @@ from .runtime import require_runtime
 from .utils import float_or_none
 
 _LOGGER = logging.getLogger(__name__)
-_CANCELLED_ERROR = asyncio.CancelledError
-
 _DataT = TypeVar("_DataT")
 
 
@@ -974,7 +972,7 @@ class StateCoordinator(
                 )
                 try:
                     mutator(working_state)
-                except _CANCELLED_ERROR:
+                except asyncio.CancelledError:
                     raise
                 except Exception as err:  # pragma: no cover - defensive  # noqa: BLE001
                     _LOGGER.debug(
@@ -1001,7 +999,7 @@ class StateCoordinator(
                     working_state,
                 )
                 updated = True
-        except _CANCELLED_ERROR:
+        except asyncio.CancelledError:
             raise
         except Exception as err:  # pragma: no cover - defensive  # noqa: BLE001
             _LOGGER.debug(

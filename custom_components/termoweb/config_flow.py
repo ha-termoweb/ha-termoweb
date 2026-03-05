@@ -26,8 +26,6 @@ from .const import (
 )
 from .utils import async_get_integration_version
 
-__all__ = ["BRAND_DUCAHEAT", "BRAND_TEVOLVE"]
-
 _LOGGER = logging.getLogger(__name__)
 
 

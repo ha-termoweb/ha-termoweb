@@ -9,17 +9,6 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class TokenResponse(BaseModel):
-    """Bearer token payload returned by the password grant flow."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    access_token: str
-    token_type: str | None = None
-    expires_in: int | float | None = None
-    scope: str | None = None
-
-
 class DevSummary(BaseModel):
     """Summary of a gateway returned by ``/api/v2/devs/``."""
 

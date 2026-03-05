@@ -202,7 +202,7 @@ async def test_ducaheat_acm_settings_boost_flow(
 
     harness = ducaheat_rest_harness()
 
-    monkeypatch.setattr(harness.client, "_format_temp", lambda value: "22.0")
+    monkeypatch.setattr(harness.client, "_ensure_temperature", lambda value: "22.0")
     monkeypatch.setattr(harness.client, "_ensure_units", lambda units: units.upper())
     monkeypatch.setattr(harness.client, "_ensure_prog", lambda prog: list(prog))
     monkeypatch.setattr(
