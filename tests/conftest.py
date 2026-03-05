@@ -24,6 +24,74 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+# ---------------------------------------------------------------------------
+# Shared test stubs -- used across multiple websocket and protocol test files
+# ---------------------------------------------------------------------------
+
+
+class DummyREST:
+    """Minimal REST client stub for websocket and protocol tests.
+
+    Parameters mirror the superset of attributes consumed by
+    ``DucaheatWSClient``, ``TermoWebWSClient``, and related helpers.
+    Only ``_session`` and ``authed_headers`` are mandatory; everything
+    else has reasonable defaults that individual tests may override.
+    """
+
+    def __init__(
+        self,
+        *,
+        is_ducaheat: bool = False,
+        api_base: str | None = "https://api.termoweb",
+        requested_with: str | None = "requested",
+        authed_headers: dict[str, str] | None = None,
+        session_closed: bool = False,
+    ) -> None:
+        self._session = SimpleNamespace(closed=session_closed)
+        self._headers = authed_headers or {"Authorization": "Bearer token"}
+        self._ensure_token = AsyncMock()
+        self._is_ducaheat = is_ducaheat
+        self._access_token = "token"
+        self.api_base = api_base
+        self.user_agent = "agent"
+        self.requested_with = requested_with
+
+    async def authed_headers(self) -> dict[str, str]:
+        return self._headers
+
+    async def refresh_token(self) -> None:
+        self._access_token = None
+        await self._ensure_token()
+
+
+class DummyCoordinator:
+    """Expose coordinator storage accessed by the websocket client."""
+
+    def __init__(self, *, data: dict[str, Any] | None = None) -> None:
+        self.data: dict[str, Any] = data if data is not None else {"device": {}}
+
+    def handle_ws_samples(
+        self, *_: Any, **__: Any
+    ) -> None:
+        return None
+
+
+class CoordinatorStub:
+    """Track websocket handler invocations for assertions."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, dict[str, Any]], float | None]] = []
+
+    def handle_ws_samples(
+        self,
+        dev_id: str,
+        updates: dict[str, dict[str, Any]],
+        *,
+        lease_seconds: float | None = None,
+    ) -> None:
+        self.calls.append((dev_id, updates, lease_seconds))
+
+
 def build_entry_runtime(
     *,
     hass: Any | None = None,

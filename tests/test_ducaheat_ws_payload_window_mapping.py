@@ -7,16 +7,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from conftest import build_entry_runtime
+from conftest import DummyREST, build_entry_runtime
 from custom_components.termoweb.backend import ducaheat_ws
 from homeassistant.core import HomeAssistant
-
-
-class DummyREST:
-    """Provide the minimal REST interface required by the websocket client."""
-
-    def __init__(self) -> None:
-        self._session = SimpleNamespace()
 
 
 def _make_client() -> ducaheat_ws.DucaheatWSClient:

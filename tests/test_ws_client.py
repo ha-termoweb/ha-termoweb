@@ -15,7 +15,7 @@ import pytest
 import logging
 import sys
 
-from conftest import build_entry_runtime
+from conftest import CoordinatorStub, DummyREST, build_entry_runtime
 from custom_components.termoweb.backend import ducaheat_ws
 from custom_components.termoweb.backend import termoweb_ws as module
 from custom_components.termoweb.backend import ws_client as base_ws
@@ -24,24 +24,6 @@ from custom_components.termoweb.backend.sanitize import (
     redact_token_fragment,
 )
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
-
-
-class DummyREST:
-    """Minimal REST client stub for websocket tests."""
-
-    def __init__(self, *, is_ducaheat: bool = False) -> None:
-        self._session = SimpleNamespace()
-        self._headers = {"Authorization": "Bearer token"}
-        self._ensure_token = AsyncMock()
-        self._is_ducaheat = is_ducaheat
-        self._access_token = "token"
-
-    async def authed_headers(self) -> dict[str, str]:
-        return self._headers
-
-    async def refresh_token(self) -> None:
-        self._access_token = None
-        await self._ensure_token()
 
 
 class DummyTask:
@@ -378,19 +360,6 @@ def test_forward_ws_sample_updates_guards_and_invalid_lease() -> None:
         "dev",
         {"pmo": {"samples": {"7": {"power": 2}}}},
     )
-
-    class CoordinatorStub:
-        def __init__(self) -> None:
-            self.calls: list[tuple[str, dict[str, Any], Any]] = []
-
-        def handle_ws_samples(
-            self,
-            dev_id: str,
-            updates: dict[str, dict[str, Any]],
-            *,
-            lease_seconds: float | None = None,
-        ) -> None:
-            self.calls.append((dev_id, updates, lease_seconds))
 
     coordinator = CoordinatorStub()
     runtime.energy_coordinator = coordinator

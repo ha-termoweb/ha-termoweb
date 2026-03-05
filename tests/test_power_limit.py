@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from conftest import FakeCoordinator, _install_stubs, build_entry_runtime
+from conftest import DummyREST, FakeCoordinator, _install_stubs, build_entry_runtime
 
 _install_stubs()
 
@@ -31,24 +31,6 @@ async_setup_entry = number_module.async_setup_entry
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-class DummyREST:
-    """Minimal REST client stub reused across tests."""
-
-    def __init__(self) -> None:
-        self._session = SimpleNamespace()
-        self._headers = {"Authorization": "Bearer token"}
-        self._ensure_token = AsyncMock()
-        self._is_ducaheat = False
-        self._access_token = "token"
-
-    async def authed_headers(self) -> dict[str, str]:
-        return self._headers
-
-    async def refresh_token(self) -> None:
-        self._access_token = None
-        await self._ensure_token()
 
 
 def _make_hass() -> HomeAssistant:
