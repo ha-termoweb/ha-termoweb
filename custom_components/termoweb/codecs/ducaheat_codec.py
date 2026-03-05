@@ -28,7 +28,6 @@ from .ducaheat_models import (
     LockWritePayload,
     ModeWritePayload,
     PriorityWritePayload,
-    SelectRequest,
     SetupPayload,
     StatusWritePayload,
 )
@@ -55,12 +54,6 @@ def decode_settings(payload: Any, *, node_type: NodeType) -> dict[str, Any]:
         return canonicalize_settings_payload(flattened)
 
     return canonicalize_settings_payload(payload)
-
-
-def encode_select_payload(select: bool) -> dict[str, Any]:
-    """Encode a payload that toggles physical node identification cues."""
-
-    return SelectRequest.model_validate({"select": select}).model_dump()
 
 
 def encode_mode_command(command: SetMode) -> dict[str, Any]:
@@ -165,29 +158,16 @@ def encode_extra_options_command(command: SetExtraOptions) -> dict[str, Any]:
 def encode_boost_command(command: AccumulatorCommand) -> dict[str, Any]:
     """Encode accumulator boost commands for the boost endpoint."""
 
-    boost_flag: bool
-    stemp_value: Any = None
-    units_value: str | None = None
-    minutes: Any = None
-    if isinstance(command, StartBoost):
-        boost_flag = True
-        stemp_value = command.stemp
-        units_value = command.units
-        minutes = command.boost_time
-    elif isinstance(command, StopBoost):
-        boost_flag = False
-        stemp_value = command.stemp
-        units_value = command.units
-        minutes = command.boost_time
-    else:  # pragma: no cover - defensive
+    if not isinstance(command, (StartBoost, StopBoost)):  # pragma: no cover - defensive
         raise TypeError(f"Unsupported boost command: {type(command).__name__}")
 
+    boost_flag = isinstance(command, StartBoost)
     payload = BoostPayload.model_validate(
         {
             "boost": boost_flag,
-            "boost_time": minutes,
-            "stemp": stemp_value,
-            "units": units_value,
+            "boost_time": command.boost_time,
+            "stemp": command.stemp,
+            "units": command.units,
         }
     )
     return payload.model_dump(exclude_none=True)

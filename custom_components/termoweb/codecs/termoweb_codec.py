@@ -150,33 +150,22 @@ def build_extra_options_payload(command: SetExtraOptions) -> dict[str, Any]:
 def build_boost_payload(command: AccumulatorCommand) -> dict[str, Any]:
     """Encode accumulator boost commands for TermoWeb."""
 
-    boost_flag: bool
-    stemp_value: str | float | None
-    units_value: str | None
-    minutes: int | None
-    if isinstance(command, StartBoost):
-        boost_flag = True
-        stemp_value = command.stemp
-        units_value = command.units
-        minutes = validate_boost_minutes(command.boost_time)
-    elif isinstance(command, StopBoost):
-        boost_flag = False
-        stemp_value = command.stemp
-        units_value = command.units
-        minutes = validate_boost_minutes(command.boost_time)
-    else:  # pragma: no cover - defensive guard
+    if not isinstance(command, (StartBoost, StopBoost)):  # pragma: no cover - defensive guard
         raise TypeError(f"Unsupported boost command: {type(command).__name__}")
+
+    boost_flag = isinstance(command, StartBoost)
+    minutes = validate_boost_minutes(command.boost_time)
 
     payload: dict[str, Any] = {"boost": boost_flag}
     if minutes is not None:
         payload["boost_time"] = minutes
-    if stemp_value is not None:
+    if command.stemp is not None:
         try:
-            payload["stemp"] = format_temperature(stemp_value, label="stemp")
+            payload["stemp"] = format_temperature(command.stemp, label="stemp")
         except ValueError as err:
-            raise ValueError(f"Invalid stemp value: {stemp_value!r}") from err
-    if units_value is not None:
-        payload["units"] = validate_units(units_value, trim=True)
+            raise ValueError(f"Invalid stemp value: {command.stemp!r}") from err
+    if command.units is not None:
+        payload["units"] = validate_units(command.units, trim=True)
 
     model = AcmBoostWritePayload.model_validate(payload)
     return model.model_dump(exclude_none=True)
