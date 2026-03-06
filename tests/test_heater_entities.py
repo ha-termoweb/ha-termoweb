@@ -786,3 +786,530 @@ def test_boost_runtime_helpers_guard_invalid_structures() -> None:
         )
         == heater_module.DEFAULT_BOOST_DURATION
     )
+
+
+# ---------------------------------------------------------------------------
+# Coverage expansion: HeaterPlatformDetails properties
+# ---------------------------------------------------------------------------
+
+
+def test_heater_platform_details_addrs_by_type() -> None:
+    """addrs_by_type should return addresses grouped by node type."""
+    raw_nodes = [
+        {"type": "htr", "addr": "1", "name": "Living"},
+        {"type": "htr", "addr": "2", "name": "Bedroom"},
+        {"type": "acm", "addr": "3"},
+    ]
+    inventory = Inventory("dev", build_node_inventory(raw_nodes))
+    details = heater_module.HeaterPlatformDetails(
+        inventory=inventory,
+        default_name_simple=lambda addr: f"Heater {addr}",
+    )
+
+    addrs = details.addrs_by_type
+    assert "htr" in addrs
+    assert set(addrs["htr"]) == {"1", "2"}
+    assert "acm" in addrs
+    assert addrs["acm"] == ["3"]
+
+
+def test_heater_platform_details_resolve_name() -> None:
+    """resolve_name should delegate to inventory.resolve_heater_name."""
+    raw_nodes = [{"type": "htr", "addr": "1", "name": "Living Room"}]
+    inventory = Inventory("dev", build_node_inventory(raw_nodes))
+    details = heater_module.HeaterPlatformDetails(
+        inventory=inventory,
+        default_name_simple=lambda addr: f"Heater {addr}",
+    )
+    assert details.resolve_name("htr", "1") == "Living Room"
+
+
+# ---------------------------------------------------------------------------
+# Coverage expansion: Boost temperature storage
+# ---------------------------------------------------------------------------
+
+
+def test_boost_temperature_store_create_false() -> None:
+    """_boost_temperature_store should return empty when create=False."""
+    hass = HomeAssistant()
+    runtime = build_entry_runtime(hass=hass, entry_id="entry-t", dev_id="dev-t")
+    store = entities_heater_module._boost_temperature_store(runtime, create=False)
+    assert store == {}
+
+
+def test_boost_temperature_store_create_true() -> None:
+    """_boost_temperature_store should return runtime store when create=True."""
+    hass = HomeAssistant()
+    runtime = build_entry_runtime(hass=hass, entry_id="entry-t", dev_id="dev-t")
+    store = entities_heater_module._boost_temperature_store(runtime, create=True)
+    assert store is runtime.boost_temperature
+
+
+def test_get_boost_temperature_roundtrip() -> None:
+    """get/set boost temperature should roundtrip correctly."""
+    hass = HomeAssistant()
+    entry_id = "entry-bt"
+    runtime = build_entry_runtime(hass=hass, entry_id=entry_id, dev_id="dev-bt")
+
+    assert heater_module.get_boost_temperature(hass, entry_id, "acm", "01") is None
+
+    heater_module.set_boost_temperature(hass, entry_id, "acm", "01", 25.5)
+    assert heater_module.get_boost_temperature(hass, entry_id, "ACM", " 01 ") == 25.5
+
+
+def test_get_boost_temperature_missing_runtime() -> None:
+    """get_boost_temperature should return None when runtime is absent."""
+    hass = HomeAssistant()
+    assert heater_module.get_boost_temperature(hass, "missing", "acm", "01") is None
+
+
+def test_set_boost_temperature_missing_runtime() -> None:
+    """set_boost_temperature should silently return when runtime is absent."""
+    hass = HomeAssistant()
+    heater_module.set_boost_temperature(hass, "missing", "acm", "01", 20.0)
+    # No exception raised
+
+
+def test_get_boost_temperature_invalid_identifiers() -> None:
+    """get_boost_temperature should return None for empty identifiers."""
+    hass = HomeAssistant()
+    runtime = build_entry_runtime(hass=hass, entry_id="entry-inv", dev_id="dev")
+    assert heater_module.get_boost_temperature(hass, "entry-inv", "", "01") is None
+    assert heater_module.get_boost_temperature(hass, "entry-inv", "acm", "") is None
+
+
+def test_set_boost_temperature_invalid_identifiers() -> None:
+    """set_boost_temperature should silently return for empty identifiers."""
+    hass = HomeAssistant()
+    runtime = build_entry_runtime(hass=hass, entry_id="entry-inv2", dev_id="dev")
+    heater_module.set_boost_temperature(hass, "entry-inv2", "", "01", 20.0)
+    heater_module.set_boost_temperature(hass, "entry-inv2", "acm", "", 20.0)
+    assert runtime.boost_temperature == {}
+
+
+def test_get_boost_temperature_non_mapping_bucket() -> None:
+    """get_boost_temperature should return None when bucket is not a mapping."""
+    hass = HomeAssistant()
+    runtime = build_entry_runtime(hass=hass, entry_id="entry-nm", dev_id="dev")
+    runtime.boost_temperature = {"acm": "not-a-dict"}  # type: ignore[assignment]
+    assert heater_module.get_boost_temperature(hass, "entry-nm", "acm", "01") is None
+
+
+def test_resolve_boost_temperature() -> None:
+    """resolve_boost_temperature should return stored or default."""
+    hass = HomeAssistant()
+    entry_id = "entry-rt"
+    runtime = build_entry_runtime(hass=hass, entry_id=entry_id, dev_id="dev")
+
+    assert heater_module.resolve_boost_temperature(hass, entry_id, "acm", "01") is None
+    assert heater_module.resolve_boost_temperature(
+        hass, entry_id, "acm", "01", default=22.0
+    ) == 22.0
+
+    heater_module.set_boost_temperature(hass, entry_id, "acm", "01", 30.0)
+    assert heater_module.resolve_boost_temperature(hass, entry_id, "acm", "01") == 30.0
+
+
+# ---------------------------------------------------------------------------
+# Coverage expansion: Climate entity ID storage
+# ---------------------------------------------------------------------------
+
+
+def test_climate_entity_store_create_false() -> None:
+    """_climate_entity_store should return empty when create=False."""
+    hass = HomeAssistant()
+    runtime = build_entry_runtime(hass=hass, entry_id="entry-c", dev_id="dev")
+    store = entities_heater_module._climate_entity_store(runtime, create=False)
+    assert store == {}
+
+
+def test_register_climate_entity_id_roundtrip() -> None:
+    """register/resolve climate entity ID should roundtrip."""
+    hass = HomeAssistant()
+    entry_id = "entry-climate"
+    runtime = build_entry_runtime(hass=hass, entry_id=entry_id, dev_id="dev")
+
+    assert heater_module.resolve_climate_entity_id(hass, entry_id, "htr", "01") is None
+
+    heater_module.register_climate_entity_id(
+        hass, entry_id, "htr", "01", "climate.heater_01"
+    )
+    assert (
+        heater_module.resolve_climate_entity_id(hass, entry_id, "HTR", " 01 ")
+        == "climate.heater_01"
+    )
+
+
+def test_clear_climate_entity_id() -> None:
+    """clear_climate_entity_id should remove the stored entity ID."""
+    hass = HomeAssistant()
+    entry_id = "entry-clear"
+    runtime = build_entry_runtime(hass=hass, entry_id=entry_id, dev_id="dev")
+
+    heater_module.register_climate_entity_id(
+        hass, entry_id, "htr", "01", "climate.heater_01"
+    )
+    assert heater_module.resolve_climate_entity_id(hass, entry_id, "htr", "01") is not None
+
+    heater_module.clear_climate_entity_id(hass, entry_id, "htr", "01")
+    assert heater_module.resolve_climate_entity_id(hass, entry_id, "htr", "01") is None
+
+
+def test_register_climate_entity_id_empty_entity_id() -> None:
+    """register_climate_entity_id should do nothing when entity_id is empty."""
+    hass = HomeAssistant()
+    entry_id = "entry-empty-eid"
+    runtime = build_entry_runtime(hass=hass, entry_id=entry_id, dev_id="dev")
+
+    heater_module.register_climate_entity_id(hass, entry_id, "htr", "01", "")
+    heater_module.register_climate_entity_id(hass, entry_id, "htr", "01", None)
+    assert runtime.climate_entities == {}
+
+
+def test_register_climate_entity_id_missing_runtime() -> None:
+    """register_climate_entity_id should silently return on missing runtime."""
+    hass = HomeAssistant()
+    heater_module.register_climate_entity_id(hass, "missing", "htr", "01", "climate.x")
+    # No error raised
+
+
+def test_clear_climate_entity_id_missing_runtime() -> None:
+    """clear_climate_entity_id should silently return on missing runtime."""
+    hass = HomeAssistant()
+    heater_module.clear_climate_entity_id(hass, "missing", "htr", "01")
+    # No error raised
+
+
+def test_resolve_climate_entity_id_missing_runtime() -> None:
+    """resolve_climate_entity_id should return None on missing runtime."""
+    hass = HomeAssistant()
+    assert heater_module.resolve_climate_entity_id(hass, "missing", "htr", "01") is None
+
+
+def test_register_climate_entity_id_invalid_identifiers() -> None:
+    """register_climate_entity_id should skip empty type/addr."""
+    hass = HomeAssistant()
+    entry_id = "entry-inv-clim"
+    runtime = build_entry_runtime(hass=hass, entry_id=entry_id, dev_id="dev")
+
+    heater_module.register_climate_entity_id(hass, entry_id, "", "01", "climate.x")
+    heater_module.register_climate_entity_id(hass, entry_id, "htr", "", "climate.x")
+    assert runtime.climate_entities == {}
+
+
+def test_clear_climate_entity_id_invalid_identifiers() -> None:
+    """clear_climate_entity_id should skip empty type/addr."""
+    hass = HomeAssistant()
+    entry_id = "entry-clr-inv"
+    runtime = build_entry_runtime(hass=hass, entry_id=entry_id, dev_id="dev")
+
+    heater_module.register_climate_entity_id(
+        hass, entry_id, "htr", "01", "climate.x"
+    )
+    # These should be no-ops
+    heater_module.clear_climate_entity_id(hass, entry_id, "", "01")
+    heater_module.clear_climate_entity_id(hass, entry_id, "htr", "")
+    assert heater_module.resolve_climate_entity_id(hass, entry_id, "htr", "01") == "climate.x"
+
+
+def test_resolve_climate_entity_id_invalid_identifiers() -> None:
+    """resolve_climate_entity_id should return None for empty type/addr."""
+    hass = HomeAssistant()
+    entry_id = "entry-res-inv"
+    runtime = build_entry_runtime(hass=hass, entry_id=entry_id, dev_id="dev")
+    assert heater_module.resolve_climate_entity_id(hass, entry_id, "", "01") is None
+    assert heater_module.resolve_climate_entity_id(hass, entry_id, "htr", "") is None
+
+
+def test_resolve_climate_entity_id_non_mapping_bucket() -> None:
+    """resolve_climate_entity_id should return None for non-mapping bucket."""
+    hass = HomeAssistant()
+    entry_id = "entry-nm-clim"
+    runtime = build_entry_runtime(hass=hass, entry_id=entry_id, dev_id="dev")
+    runtime.climate_entities = {"htr": "not-a-dict"}  # type: ignore[assignment]
+    assert heater_module.resolve_climate_entity_id(hass, entry_id, "htr", "01") is None
+
+
+def test_clear_climate_entity_id_non_mapping_bucket() -> None:
+    """clear_climate_entity_id should handle non-mapping bucket gracefully."""
+    hass = HomeAssistant()
+    entry_id = "entry-nm-clr"
+    runtime = build_entry_runtime(hass=hass, entry_id=entry_id, dev_id="dev")
+    runtime.climate_entities = {"htr": "not-a-dict"}  # type: ignore[assignment]
+    heater_module.clear_climate_entity_id(hass, entry_id, "htr", "01")
+    # Should not raise
+
+
+# ---------------------------------------------------------------------------
+# Coverage expansion: iter_boostable_heater_nodes
+# ---------------------------------------------------------------------------
+
+
+def test_iter_boostable_heater_nodes_filters_by_type() -> None:
+    """iter_boostable_heater_nodes should filter by node_types argument."""
+    raw_nodes = [
+        {"type": "htr", "addr": "1", "name": "Heater"},
+        {"type": "acm", "addr": "2", "name": "Accumulator"},
+    ]
+    inventory = Inventory("dev", build_node_inventory(raw_nodes))
+    details = heater_module.HeaterPlatformDetails(
+        inventory=inventory,
+        default_name_simple=lambda addr: f"Node {addr}",
+    )
+
+    # Only request acm type
+    results = list(heater_module.iter_boostable_heater_nodes(details, node_types=["acm"]))
+    assert len(results) == 1
+    assert results[0][0] == "acm"
+
+
+def test_iter_boostable_heater_nodes_string_node_types() -> None:
+    """iter_boostable_heater_nodes should handle a single string node_types."""
+    raw_nodes = [
+        {"type": "acm", "addr": "1"},
+    ]
+    inventory = Inventory("dev", build_node_inventory(raw_nodes))
+    details = heater_module.HeaterPlatformDetails(
+        inventory=inventory,
+        default_name_simple=lambda addr: f"Node {addr}",
+    )
+
+    results = list(heater_module.iter_boostable_heater_nodes(details, node_types="acm"))
+    assert len(results) == 1
+    assert results[0][0] == "acm"
+
+
+def test_iter_boostable_heater_nodes_accumulators_only() -> None:
+    """accumulators_only should only yield acm type nodes."""
+    raw_nodes = [
+        {"type": "htr", "addr": "1"},
+        {"type": "acm", "addr": "2"},
+    ]
+    inventory = Inventory("dev", build_node_inventory(raw_nodes))
+    details = heater_module.HeaterPlatformDetails(
+        inventory=inventory,
+        default_name_simple=lambda addr: f"Node {addr}",
+    )
+
+    results = list(heater_module.iter_boostable_heater_nodes(details, accumulators_only=True))
+    # Only acm nodes should appear (htr doesn't have boost)
+    for r in results:
+        assert r[0] == "acm"
+
+
+# ---------------------------------------------------------------------------
+# Coverage expansion: log_skipped_nodes
+# ---------------------------------------------------------------------------
+
+
+def test_log_skipped_nodes_with_inventory(caplog: pytest.LogCaptureFixture) -> None:
+    """log_skipped_nodes should log skipped addresses."""
+    caplog.set_level("DEBUG")
+    raw_nodes = [
+        {"type": "thm", "addr": "T1"},
+        {"type": "htr", "addr": "1"},
+    ]
+    inventory = Inventory("dev", build_node_inventory(raw_nodes))
+
+    heater_module.log_skipped_nodes(
+        "sensor",
+        inventory,
+        skipped_types=("thm",),
+    )
+    assert "thm" in caplog.text
+    assert "T1" in caplog.text
+
+
+def test_log_skipped_nodes_empty_platform_name(caplog: pytest.LogCaptureFixture) -> None:
+    """log_skipped_nodes should handle empty platform name."""
+    caplog.set_level("DEBUG")
+    raw_nodes = [{"type": "pmo", "addr": "01"}]
+    inventory = Inventory("dev", build_node_inventory(raw_nodes))
+
+    heater_module.log_skipped_nodes("", inventory, skipped_types=("pmo",))
+    assert "platform" in caplog.text
+
+
+def test_log_skipped_nodes_with_details(caplog: pytest.LogCaptureFixture) -> None:
+    """log_skipped_nodes should accept HeaterPlatformDetails."""
+    caplog.set_level("DEBUG")
+    raw_nodes = [{"type": "pmo", "addr": "01"}]
+    inventory = Inventory("dev", build_node_inventory(raw_nodes))
+    details = heater_module.HeaterPlatformDetails(
+        inventory=inventory,
+        default_name_simple=lambda addr: addr,
+    )
+    heater_module.log_skipped_nodes("climate", details, skipped_types=("pmo",))
+    assert "pmo" in caplog.text
+
+
+def test_log_skipped_nodes_none_inventory() -> None:
+    """log_skipped_nodes should return early when inventory is None."""
+    heater_module.log_skipped_nodes("sensor", None, skipped_types=("thm",))
+    # No error raised
+
+
+# ---------------------------------------------------------------------------
+# Coverage expansion: build_settings_resolver
+# ---------------------------------------------------------------------------
+
+
+def test_build_settings_resolver_with_domain_view() -> None:
+    """Settings resolver should read from domain view."""
+    from custom_components.termoweb.domain import DomainStateStore
+    from custom_components.termoweb.domain.ids import NodeId as DomainNodeId, NodeType as DomainNodeType
+    from custom_components.termoweb.domain.view import DomainStateView
+
+    store = DomainStateStore([DomainNodeId(DomainNodeType.HEATER, "01")])
+    store.apply_full_snapshot("htr", "01", {"mode": "comfort"})
+    view = DomainStateView("dev", store)
+    coordinator = SimpleNamespace(domain_view=view)
+
+    resolver = heater_module.build_settings_resolver(coordinator, "dev", "htr", "01")
+    state = resolver()
+    assert state is not None
+    assert state.mode == "comfort"
+
+
+def test_build_settings_resolver_no_domain_view() -> None:
+    """Settings resolver should return None without domain view."""
+    coordinator = SimpleNamespace(domain_view=None)
+    resolver = heater_module.build_settings_resolver(coordinator, "dev", "htr", "01")
+    assert resolver() is None
+
+
+# ---------------------------------------------------------------------------
+# Coverage expansion: HeaterNodeBase edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_heater_node_base_thermostat_state() -> None:
+    """thermostat_state should return ThermostatState when available."""
+    from custom_components.termoweb.domain.state import ThermostatState, DomainStateStore
+    from custom_components.termoweb.domain.ids import NodeId as DomainNodeId, NodeType as DomainNodeType
+
+    raw_nodes = [{"type": "thm", "addr": "T1"}]
+    inventory = Inventory("dev", build_node_inventory(raw_nodes))
+    store = DomainStateStore([DomainNodeId(DomainNodeType.THERMOSTAT, "T1")])
+    store.apply_full_snapshot("thm", "T1", {"batt_level": 4})
+    view = heater_module.DomainStateView("dev", store)
+
+    coordinator = SimpleNamespace(
+        data={"dev": {"settings": {"thm": {"T1": {"batt_level": 4}}}}},
+        domain_view=view,
+        inventory=inventory,
+    )
+    heater = HeaterNodeBase(
+        coordinator, "entry", "dev", "T1", None,
+        node_type="thm", inventory=inventory,
+    )
+    ts = heater.thermostat_state()
+    assert isinstance(ts, ThermostatState)
+
+
+def test_heater_node_base_power_monitor_state() -> None:
+    """power_monitor_state should return None when not a power monitor."""
+    coordinator = SimpleNamespace(data={}, domain_view=None)
+    heater = HeaterNodeBase(coordinator, "entry", "dev", "01", "Heater")
+    assert heater.power_monitor_state() is None
+
+
+def test_heater_node_base_units_default() -> None:
+    """_units should default to 'C' when state units is absent."""
+    coordinator = SimpleNamespace(data={})
+    heater = HeaterNodeBase(coordinator, "entry", "dev", "01", "Heater")
+    assert heater._units() == "C"
+
+
+def test_heater_node_base_units_fahrenheit() -> None:
+    """_units should return 'F' when state has units='F'."""
+    from custom_components.termoweb.domain.state import DomainStateStore
+    from custom_components.termoweb.domain.ids import NodeId as DomainNodeId, NodeType as DomainNodeType
+
+    raw_nodes = [{"type": "htr", "addr": "01"}]
+    inventory = Inventory("dev", build_node_inventory(raw_nodes))
+    store = DomainStateStore([DomainNodeId(DomainNodeType.HEATER, "01")])
+    store.apply_full_snapshot("htr", "01", {"units": "F"})
+    view = heater_module.DomainStateView("dev", store)
+
+    coordinator = SimpleNamespace(domain_view=view, inventory=inventory)
+    heater = HeaterNodeBase(
+        coordinator, "entry", "dev", "01", "Heater",
+        node_type="htr", inventory=inventory,
+    )
+    assert heater._units() == "F"
+
+
+def test_heater_node_base_units_unknown() -> None:
+    """_units should default to 'C' for unknown unit values."""
+    from custom_components.termoweb.domain.state import DomainStateStore
+    from custom_components.termoweb.domain.ids import NodeId as DomainNodeId, NodeType as DomainNodeType
+
+    raw_nodes = [{"type": "htr", "addr": "01"}]
+    inventory = Inventory("dev", build_node_inventory(raw_nodes))
+    store = DomainStateStore([DomainNodeId(DomainNodeType.HEATER, "01")])
+    store.apply_full_snapshot("htr", "01", {"units": "K"})
+    view = heater_module.DomainStateView("dev", store)
+
+    coordinator = SimpleNamespace(domain_view=view, inventory=inventory)
+    heater = HeaterNodeBase(
+        coordinator, "entry", "dev", "01", "Heater",
+        node_type="htr", inventory=inventory,
+    )
+    assert heater._units() == "C"
+
+
+# ---------------------------------------------------------------------------
+# Coverage expansion: heater_platform_details_for_entry non-standard inventory
+# ---------------------------------------------------------------------------
+
+
+def test_heater_platform_details_non_standard_inventory(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Non-Inventory objects with correct attributes should be accepted with warning."""
+    caplog.set_level("ERROR")
+
+    class FakeInventory:
+        nodes_by_type = {}
+        heater_address_map = ({}, {})
+
+        def resolve_heater_name(self, *a, **k):
+            return "name"
+
+        def iter_heater_platform_metadata(self, *a, **k):
+            return iter([])
+
+    runtime = build_entry_runtime(
+        entry_id="entry-ns",
+        dev_id="dev-ns",
+        allow_missing_inventory=True,
+    )
+    runtime.inventory = FakeInventory()  # type: ignore[assignment]
+
+    details = heater_module.heater_platform_details_for_entry(
+        runtime,
+        default_name_simple=lambda addr: addr,
+    )
+    assert details is not None
+    assert "non-standard inventory" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Coverage expansion: derive_boost_state edge - boost_end_iso without dt
+# ---------------------------------------------------------------------------
+
+
+def test_derive_boost_state_iso_without_datetime(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When boost_end_iso is set but boost_end_dt is None, should parse it."""
+    base_now = datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(dt_util, "now", lambda: base_now)
+
+    # Use a coordinator with isoformat that works but force ISO-only path
+    settings = {
+        "boost_active": True,
+        "boost_end_datetime": datetime(2024, 1, 1, 1, 0, tzinfo=timezone.utc),
+    }
+    state = heater_module.derive_boost_state(settings, SimpleNamespace())
+    assert state.end_datetime is not None
+    assert state.end_iso is not None

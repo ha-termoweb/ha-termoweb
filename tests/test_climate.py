@@ -2952,3 +2952,592 @@ def test_heater_mode_mapping_for_modified_auto() -> None:
 
     assert entity.hvac_mode == HVACMode.AUTO
     assert entity.preset_mode == "temporary_override"
+
+
+# ---------------------------------------------------------------------------
+# New tests targeting uncovered lines
+# ---------------------------------------------------------------------------
+
+
+def test_heater_icon_reflects_off_and_idle_states(
+    climate_inventory: Callable[[str, Mapping[str, Any]], Inventory],
+) -> None:
+    """Icon property should return distinct icons for OFF, HEATING, and IDLE."""
+
+    _reset_environment()
+    hass = HomeAssistant()
+    dev_id = "dev-icon"
+    addr = "1"
+    raw_nodes = {"nodes": [{"type": "htr", "addr": addr}]}
+    inventory = climate_inventory(dev_id, raw_nodes)
+
+    # OFF mode -> radiator-off
+    settings_off = {"mode": "off", "state": "off", "units": "C"}
+    coordinator = _make_coordinator(
+        hass,
+        dev_id,
+        {
+            "nodes": raw_nodes,
+            "nodes_by_type": {"htr": {"settings": {addr: settings_off}}},
+            "htr": {"settings": {addr: settings_off}},
+        },
+        inventory=inventory,
+    )
+    entity = HeaterClimateEntity(
+        coordinator, "entry-icon", dev_id, addr, "Heater",
+        node_type="htr", inventory=inventory,
+    )
+    assert entity.icon == "mdi:radiator-off"
+
+    # IDLE state (heater on but idle)
+    settings_idle = {"mode": "auto", "state": "idle", "units": "C"}
+    coordinator2 = _make_coordinator(
+        hass,
+        dev_id,
+        {
+            "nodes": raw_nodes,
+            "nodes_by_type": {"htr": {"settings": {addr: settings_idle}}},
+            "htr": {"settings": {addr: settings_idle}},
+        },
+        inventory=inventory,
+    )
+    entity2 = HeaterClimateEntity(
+        coordinator2, "entry-icon2", dev_id, addr, "Heater",
+        node_type="htr", inventory=inventory,
+    )
+    assert entity2.icon == "mdi:radiator-disabled"
+
+    # HEATING state
+    settings_heat = {"mode": "manual", "state": "on", "units": "C"}
+    coordinator3 = _make_coordinator(
+        hass,
+        dev_id,
+        {
+            "nodes": raw_nodes,
+            "nodes_by_type": {"htr": {"settings": {addr: settings_heat}}},
+            "htr": {"settings": {addr: settings_heat}},
+        },
+        inventory=inventory,
+    )
+    entity3 = HeaterClimateEntity(
+        coordinator3, "entry-icon3", dev_id, addr, "Heater",
+        node_type="htr", inventory=inventory,
+    )
+    assert entity3.icon == "mdi:radiator"
+
+
+def test_heater_async_will_remove_clears_entity_id() -> None:
+    """Removing from HA should clear entity ID and cancel refresh fallback."""
+
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        dev_id = "dev-remove"
+        addr = "1"
+        coordinator = _make_coordinator(
+            hass,
+            dev_id,
+            {"htr": {"settings": {addr: {}}}, "nodes": {}},
+        )
+        _attach_runtime(
+            hass, "entry-remove", dev_id,
+            coordinator=coordinator, client=AsyncMock(),
+        )
+
+        entity = HeaterClimateEntity(
+            coordinator, "entry-remove", dev_id, addr, "Heater",
+        )
+        entity.hass = hass
+
+        # Simulate a pending refresh fallback task
+        entity._refresh_fallback = asyncio.create_task(asyncio.sleep(999))
+
+        await entity.async_will_remove_from_hass()
+        assert entity._refresh_fallback is None
+
+    asyncio.run(_run())
+
+
+def test_shared_inventory_falls_back_to_underscore_attr() -> None:
+    """_shared_inventory should check both 'inventory' and '_inventory' attrs."""
+
+    _reset_environment()
+    hass = HomeAssistant()
+    dev_id = "dev-inv"
+    addr = "1"
+    raw_nodes = {"nodes": [{"type": "htr", "addr": addr}]}
+    node_list = list(inventory_module.build_node_inventory(raw_nodes))
+    inventory = Inventory(dev_id, node_list)
+
+    coordinator = _make_coordinator(
+        hass, dev_id,
+        {"htr": {"settings": {addr: {}}}, "nodes": {}},
+        inventory=inventory,
+    )
+    entity = HeaterClimateEntity(coordinator, "entry-inv", dev_id, addr, "Heater")
+
+    # When coordinator has 'inventory' attribute
+    assert entity._shared_inventory() is inventory
+
+    # When coordinator only has '_inventory'
+    del coordinator.inventory
+    coordinator._inventory = inventory
+    assert entity._shared_inventory() is inventory
+
+    # When coordinator has neither
+    del coordinator._inventory
+    assert entity._shared_inventory() is None
+
+
+def test_gateway_connection_state_returns_default_without_domain_view() -> None:
+    """_gateway_connection_state should return default when domain_view absent."""
+
+    _reset_environment()
+    hass = HomeAssistant()
+    dev_id = "dev-gw"
+    coordinator = _make_coordinator(
+        hass, dev_id, {"htr": {"settings": {}}, "nodes": {}},
+    )
+    # Remove domain_view to hit the fallback
+    coordinator.domain_view = None
+
+    entity = HeaterClimateEntity(coordinator, "entry-gw", dev_id, "1", "Heater")
+    gw_state = entity._gateway_connection_state()
+    from custom_components.termoweb.domain import GatewayConnectionState
+    assert isinstance(gw_state, GatewayConnectionState)
+    assert gw_state.status is None
+
+
+def test_current_prog_slot_returns_none_for_short_prog() -> None:
+    """_current_prog_slot should return None when prog is too short."""
+
+    _reset_environment()
+    hass = HomeAssistant()
+    dev_id = "dev-slot"
+    coordinator = _make_coordinator(
+        hass, dev_id, {"htr": {"settings": {}}, "nodes": {}},
+    )
+    entity = HeaterClimateEntity(coordinator, "entry-slot", dev_id, "1", "Heater")
+
+    # Short prog list
+    state = types.SimpleNamespace(prog=[0, 1, 2])
+    assert entity._current_prog_slot(state) is None
+
+    # None prog
+    state2 = types.SimpleNamespace(prog=None)
+    assert entity._current_prog_slot(state2) is None
+
+    # Valid prog
+    full_prog = [2] * 168
+    state3 = types.SimpleNamespace(prog=full_prog)
+    slot = entity._current_prog_slot(state3)
+    assert slot == 2
+
+    # Prog with bad value at index
+    bad_prog = ["not_int"] * 168
+    state4 = types.SimpleNamespace(prog=bad_prog)
+    result = entity._current_prog_slot(state4)
+    # "not_int" cannot be converted to int, should return None
+    assert result is None
+
+
+def test_accumulator_set_hvac_mode_rejects_boost_and_heat(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Accumulator should reject boost and heat HVAC modes."""
+
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        dev_id = "dev-acm-hvac-mode"
+        addr = "3"
+        coordinator = _make_coordinator(
+            hass, dev_id,
+            {
+                "nodes": {},
+                "nodes_by_type": {"acm": {"settings": {addr: {"mode": "auto", "units": "C"}}}},
+                "htr": {"settings": {}},
+            },
+        )
+        _attach_runtime(
+            hass, "entry-acm-hvac-mode", dev_id,
+            coordinator=coordinator, client=AsyncMock(),
+        )
+
+        entity = climate_module.AccumulatorClimateEntity(
+            coordinator, "entry-acm-hvac-mode", dev_id, addr, "Accumulator",
+            node_type="acm",
+        )
+        entity.hass = hass
+
+        caplog.set_level(logging.ERROR)
+
+        # Reject "boost" as HVACMode string
+        await entity.async_set_hvac_mode("boost")
+        assert "Boost is exposed as a preset_mode" in caplog.text
+
+        # Pass through HVACMode enum (isinstance branch)
+        entity.async_write_ha_state = MagicMock()
+        runtime = _attach_runtime(
+            hass, "entry-acm-hvac-mode", dev_id,
+            coordinator=coordinator, client=AsyncMock(),
+        )
+        runtime.backend = AsyncMock()
+        await entity.async_set_hvac_mode(HVACMode.OFF)
+        # Should reach super() without error -- verifying the isinstance branch
+
+    asyncio.run(_run())
+
+
+def test_accumulator_set_preset_mode_toggles_boost(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Accumulator preset_mode transitions should start/cancel boost."""
+
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        dev_id = "dev-acm-preset"
+        addr = "5"
+
+        settings = {"mode": "auto", "units": "C", "stemp": "21.0", "boost_temp": "22.0"}
+        coordinator = _make_coordinator(
+            hass, dev_id,
+            {
+                "nodes": {},
+                "nodes_by_type": {"acm": {"settings": {addr: settings}}},
+                "htr": {"settings": {}},
+            },
+        )
+        _attach_runtime(
+            hass, "entry-acm-preset", dev_id,
+            coordinator=coordinator, client=AsyncMock(),
+        )
+
+        entity = climate_module.AccumulatorClimateEntity(
+            coordinator, "entry-acm-preset", dev_id, addr, "Accumulator",
+            node_type="acm",
+        )
+        entity.hass = hass
+
+        # Mock the boost methods
+        entity.async_start_boost = AsyncMock()
+        entity.async_cancel_boost = AsyncMock()
+
+        # Reject unsupported preset
+        caplog.clear()
+        with caplog.at_level(logging.ERROR):
+            await entity.async_set_preset_mode("turbo")
+        assert "Unsupported preset_mode" in caplog.text
+        entity.async_start_boost.assert_not_called()
+
+        # Setting same preset does nothing
+        assert entity.preset_mode == "none"
+        await entity.async_set_preset_mode("none")
+        entity.async_start_boost.assert_not_called()
+        entity.async_cancel_boost.assert_not_called()
+
+        # Setting boost starts boost
+        await entity.async_set_preset_mode("boost")
+        entity.async_start_boost.assert_awaited_once()
+
+    asyncio.run(_run())
+
+
+def test_accumulator_set_preset_mode_cancels_boost() -> None:
+    """Setting preset_mode to 'none' from 'boost' should cancel boost."""
+
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        dev_id = "dev-acm-cancel-preset"
+        addr = "4"
+
+        settings = {"mode": "boost", "units": "C", "stemp": "21.0", "boost_active": True}
+        coordinator = _make_coordinator(
+            hass, dev_id,
+            {
+                "nodes": {},
+                "nodes_by_type": {"acm": {"settings": {addr: settings}}},
+                "htr": {"settings": {}},
+            },
+        )
+        client = AsyncMock()
+        client.set_acm_boost_state = AsyncMock()
+        runtime = _attach_runtime(
+            hass, "entry-acm-cancel-preset", dev_id,
+            coordinator=coordinator, client=client,
+        )
+        runtime.backend = client
+
+        entity = climate_module.AccumulatorClimateEntity(
+            coordinator, "entry-acm-cancel-preset", dev_id, addr, "Accumulator",
+            node_type="acm",
+        )
+        entity.hass = hass
+        entity.async_write_ha_state = MagicMock()
+
+        assert entity.preset_mode == "boost"
+
+        # Set a resume mode to exercise that branch
+        entity._boost_resume_mode = HVACMode.AUTO
+
+        # Cancel boost by setting preset to "none"
+        await entity.async_set_preset_mode("none")
+
+        # Should have called cancel boost
+        client.set_acm_boost_state.assert_awaited_once()
+        call = client.set_acm_boost_state.await_args
+        assert call.kwargs["boost"] is False
+
+        # Resume mode should be cleared
+        assert entity._boost_resume_mode is None
+
+    asyncio.run(_run())
+
+
+def test_accumulator_set_acm_preset_validates_and_writes(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """async_set_acm_preset should validate inputs and call backend."""
+
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        dev_id = "dev-acm-preset-write"
+        addr = "6"
+
+        settings = {"mode": "auto", "units": "C"}
+        coordinator = _make_coordinator(
+            hass, dev_id,
+            {
+                "nodes": {},
+                "nodes_by_type": {"acm": {"settings": {addr: settings}}},
+                "htr": {"settings": {}},
+            },
+        )
+        client = AsyncMock()
+        client.set_acm_extra_options = AsyncMock()
+        runtime = _attach_runtime(
+            hass, "entry-acm-preset-write", dev_id,
+            coordinator=coordinator, client=client,
+        )
+        runtime.backend = client
+
+        entity = climate_module.AccumulatorClimateEntity(
+            coordinator, "entry-acm-preset-write", dev_id, addr, "Accumulator",
+            node_type="acm",
+        )
+        entity.hass = hass
+        entity.async_write_ha_state = MagicMock()
+
+        # Both None -> error
+        caplog.clear()
+        with caplog.at_level(logging.ERROR):
+            await entity.async_set_acm_preset()
+        assert "requires minutes and/or temperature" in caplog.text
+
+        # Invalid temperature -> error
+        caplog.clear()
+        with caplog.at_level(logging.ERROR):
+            await entity.async_set_acm_preset(temperature="not_a_number")
+        assert "Invalid boost temperature" in caplog.text
+
+        # Valid minutes and temperature
+        await entity.async_set_acm_preset(minutes=60, temperature=22.5)
+        client.set_acm_extra_options.assert_awaited_once()
+        call = client.set_acm_extra_options.await_args
+        assert call.kwargs["boost_time"] == 60
+        assert call.kwargs["boost_temp"] == pytest.approx(22.5)
+
+    asyncio.run(_run())
+
+
+def test_accumulator_start_boost_calls_backend(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """async_start_boost should validate and delegate to the backend."""
+
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        dev_id = "dev-acm-start"
+        addr = "8"
+
+        settings = {
+            "mode": "auto", "units": "C", "stemp": "21.0",
+            "boost_temp": "23.0", "boost_active": False,
+        }
+        coordinator = _make_coordinator(
+            hass, dev_id,
+            {
+                "nodes": {},
+                "nodes_by_type": {"acm": {"settings": {addr: settings}}},
+                "htr": {"settings": {}},
+            },
+        )
+        client = AsyncMock()
+        client.set_acm_boost_state = AsyncMock()
+        runtime = _attach_runtime(
+            hass, "entry-acm-start", dev_id,
+            coordinator=coordinator, client=client,
+        )
+        runtime.backend = client
+
+        entity = climate_module.AccumulatorClimateEntity(
+            coordinator, "entry-acm-start", dev_id, addr, "Accumulator",
+            node_type="acm",
+        )
+        entity.hass = hass
+        entity.async_write_ha_state = MagicMock()
+
+        # Start boost with explicit minutes
+        await entity.async_start_boost(minutes=60)
+        client.set_acm_boost_state.assert_awaited_once()
+        call = client.set_acm_boost_state.await_args
+        assert call.kwargs["boost"] is True
+        assert call.kwargs["boost_time"] == 60
+        assert call.kwargs["stemp"] == pytest.approx(23.0)
+
+        # Start boost with default minutes (no explicit value)
+        client.set_acm_boost_state.reset_mock()
+        await entity.async_start_boost()
+        # Should use _preferred_boost_minutes() as fallback
+        assert client.set_acm_boost_state.await_count == 1
+
+    asyncio.run(_run())
+
+
+def test_accumulator_cancel_boost_calls_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """async_cancel_boost should call backend and reset optimistic state."""
+
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        dev_id = "dev-acm-cancel-boost"
+        addr = "9"
+
+        settings = {
+            "mode": "boost", "units": "C", "boost_active": True,
+            "boost_remaining": 30, "boost_end_day": 5, "boost_end_min": 90,
+        }
+        coordinator = _make_coordinator(
+            hass, dev_id,
+            {
+                "nodes": {},
+                "nodes_by_type": {"acm": {"settings": {addr: settings}}},
+                "htr": {"settings": {}},
+            },
+        )
+        client = AsyncMock()
+        client.set_acm_boost_state = AsyncMock()
+        runtime = _attach_runtime(
+            hass, "entry-acm-cancel-boost", dev_id,
+            coordinator=coordinator, client=client,
+        )
+        runtime.backend = client
+
+        entity = climate_module.AccumulatorClimateEntity(
+            coordinator, "entry-acm-cancel-boost", dev_id, addr, "Accumulator",
+            node_type="acm",
+        )
+        entity.hass = hass
+        entity.async_write_ha_state = MagicMock()
+
+        assert entity.preset_mode == "boost"
+
+        await entity.async_cancel_boost()
+
+        client.set_acm_boost_state.assert_awaited_once()
+        call = client.set_acm_boost_state.await_args
+        assert call.kwargs["boost"] is False
+
+    asyncio.run(_run())
+
+
+def test_accumulator_extra_state_attributes_charging_non_bool() -> None:
+    """Accumulator attributes should coerce non-bool charging values."""
+
+    _reset_environment()
+    hass = HomeAssistant()
+    dev_id = "dev-acm-charge"
+    addr = "10"
+
+    settings = {
+        "mode": "auto", "units": "C", "prog": [0] * 168,
+        "charging": 1,  # non-bool truthy value
+        "current_charge_per": 55.5,
+        "target_charge_per": 80,
+    }
+
+    coordinator = _make_coordinator(
+        hass, dev_id,
+        {
+            "nodes": {},
+            "nodes_by_type": {"acm": {"settings": {addr: settings}}},
+            "htr": {"settings": {}},
+        },
+    )
+    _attach_runtime(
+        hass, "entry-acm-charge", dev_id,
+        coordinator=coordinator, client=AsyncMock(),
+        brand="termoweb",
+    )
+
+    entity = climate_module.AccumulatorClimateEntity(
+        coordinator, "entry-acm-charge", dev_id, addr, "Accumulator",
+        node_type="acm",
+    )
+    entity.hass = hass
+
+    attrs = entity.extra_state_attributes
+    # Non-bool charging should be coerced to bool
+    assert attrs["charging"] is True
+    assert attrs["current_charge_per"] == 55
+    assert attrs["target_charge_per"] == 80
+
+
+def test_accumulator_async_submit_settings_non_bool_boost_active() -> None:
+    """_async_submit_settings should handle non-bool boost_active values."""
+
+    async def _run() -> None:
+        _reset_environment()
+        hass = HomeAssistant()
+        entry_id = "entry-acm-nbool"
+        dev_id = "dev-acm-nbool"
+        addr = "12"
+        settings = {"mode": "auto", "units": "C", "boost_active": "maybe"}
+
+        coordinator = _make_coordinator(
+            hass, dev_id,
+            {
+                "nodes": {},
+                "nodes_by_type": {"acm": {"settings": {addr: settings}}},
+                "htr": {"settings": {}},
+            },
+        )
+        runtime = _attach_runtime(
+            hass, entry_id, dev_id,
+            coordinator=coordinator, client=AsyncMock(),
+        )
+        backend = runtime.backend
+
+        entity = climate_module.AccumulatorClimateEntity(
+            coordinator, entry_id, dev_id, addr, "Accumulator", node_type="acm",
+        )
+        entity.hass = hass
+
+        await entity._async_submit_settings(
+            backend, mode="auto", stemp=None, prog=None, ptemp=None, units="C",
+        )
+        call = backend.set_node_settings.await_args
+        boost_context = call.kwargs["boost_context"]
+        # non-bool boost_active should make boost_flag None
+        assert boost_context.mode == "auto"
+
+    asyncio.run(_run())

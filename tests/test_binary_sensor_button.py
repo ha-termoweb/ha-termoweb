@@ -639,3 +639,368 @@ def _metadata_for(action: str) -> heater_module.BoostButtonMetadata:
         if metadata.action == action:
             return metadata
     raise AssertionError(f"metadata for action={action!r} not found")
+
+
+# ---------------------------------------------------------------------------
+# New tests targeting uncovered lines
+# ---------------------------------------------------------------------------
+
+
+def test_accumulator_boost_button_aborts_when_no_stored_minutes(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """AccumulatorBoostButton.async_press should abort when minutes is None."""
+
+    async def _run() -> None:
+        caplog.set_level(logging.ERROR)
+        hass = HomeAssistant()
+        entry_id = "entry-no-min"
+        dev_id = "device-no-min"
+        coordinator = types.SimpleNamespace(hass=hass, data={})
+        hass.services = types.SimpleNamespace(async_call=AsyncMock())
+
+        monkeypatch.setattr(
+            button_module, "resolve_boost_runtime_minutes", lambda *_: None,
+        )
+        monkeypatch.setattr(
+            entities_button_module, "resolve_boost_runtime_minutes", lambda *_: None,
+        )
+
+        context = _make_boost_context(entry_id, dev_id, addr="3", name="Hallway")
+        button = AccumulatorBoostButton(
+            coordinator, context, _metadata_for("start"),
+        )
+        button.hass = hass
+
+        caplog.clear()
+        await button.async_press()
+        assert "Boost start requires a stored duration" in caplog.text
+        hass.services.async_call.assert_not_called()
+
+    asyncio.run(_run())
+
+
+def test_accumulator_boost_button_aborts_when_no_stored_temperature(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """AccumulatorBoostButton.async_press should abort when temperature is None."""
+
+    async def _run() -> None:
+        caplog.set_level(logging.ERROR)
+        hass = HomeAssistant()
+        entry_id = "entry-no-temp"
+        dev_id = "device-no-temp"
+        coordinator = types.SimpleNamespace(hass=hass, data={})
+        hass.services = types.SimpleNamespace(async_call=AsyncMock())
+
+        monkeypatch.setattr(
+            button_module, "resolve_boost_runtime_minutes", lambda *_: 120,
+        )
+        monkeypatch.setattr(
+            entities_button_module, "resolve_boost_runtime_minutes", lambda *_: 120,
+        )
+        monkeypatch.setattr(
+            button_module, "resolve_boost_temperature",
+            lambda *_args, **_kwargs: None,
+        )
+        monkeypatch.setattr(
+            entities_button_module, "resolve_boost_temperature",
+            lambda *_args, **_kwargs: None,
+        )
+
+        context = _make_boost_context(entry_id, dev_id, addr="4", name="Kitchen")
+        button = AccumulatorBoostButton(
+            coordinator, context, _metadata_for("start"),
+        )
+        button.hass = hass
+
+        caplog.clear()
+        await button.async_press()
+        assert "Boost start requires a stored temperature" in caplog.text
+        hass.services.async_call.assert_not_called()
+
+    asyncio.run(_run())
+
+
+def test_accumulator_boost_cancel_button_calls_cancel_service() -> None:
+    """AccumulatorBoostCancelButton.async_press should call the cancel service."""
+
+    async def _run() -> None:
+        hass = HomeAssistant()
+        entry_id = "entry-cancel-press"
+        dev_id = "device-cancel-press"
+        addr = "6"
+        hass.services = types.SimpleNamespace(async_call=AsyncMock())
+
+        context = _make_boost_context(entry_id, dev_id, addr=addr, name="Office")
+        coordinator = FakeCoordinator(
+            hass,
+            dev_id=dev_id,
+            data={
+                dev_id: {
+                    "settings": {"acm": {addr: {"boost_active": True}}},
+                }
+            },
+            inventory=context.inventory,
+        )
+        button = AccumulatorBoostCancelButton(
+            coordinator, context, _metadata_for("cancel"),
+        )
+        button.hass = hass
+        button.async_write_ha_state = MagicMock()
+
+        await button.async_press()
+
+        hass.services.async_call.assert_awaited_once_with(
+            DOMAIN,
+            entities_button_module._SERVICE_CANCEL_ACCUMULATOR_BOOST,
+            {
+                "entry_id": entry_id,
+                "dev_id": dev_id,
+                "node_type": "acm",
+                "addr": addr,
+            },
+            blocking=True,
+        )
+
+    asyncio.run(_run())
+
+
+def test_accumulator_boost_cancel_button_handles_missing_hass() -> None:
+    """Cancel button should silently return when hass is None."""
+
+    async def _run() -> None:
+        context = _make_boost_context(
+            "entry-guard", "device-guard", addr="7", name="Hallway",
+        )
+        coordinator = types.SimpleNamespace(hass=None, data={})
+        button = AccumulatorBoostCancelButton(
+            coordinator, context, _metadata_for("cancel"),
+        )
+        button.hass = None
+
+        # Should not raise
+        await button.async_press()
+
+    asyncio.run(_run())
+
+
+def test_accumulator_boost_cancel_button_logs_service_not_found(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancel button should log ServiceNotFound errors."""
+
+    async def _run() -> None:
+        caplog.set_level(logging.ERROR)
+        hass = HomeAssistant()
+        coordinator = types.SimpleNamespace(hass=hass, data={})
+        hass.services = types.SimpleNamespace(async_call=AsyncMock(
+            side_effect=button_module.ServiceNotFound("termoweb", "cancel_boost"),
+        ))
+
+        monkeypatch.setattr(
+            "homeassistant.helpers.translation.async_get_exception_message",
+            lambda *args, **kwargs: "service_not_found",
+            raising=False,
+        )
+
+        context = _make_boost_context("entry-err", "device-err", addr="8", name="Room")
+        button = AccumulatorBoostCancelButton(
+            coordinator, context, _metadata_for("cancel"),
+        )
+        button.hass = hass
+
+        caplog.clear()
+        await button.async_press()
+        assert "Boost cancel service unavailable" in caplog.text
+
+    asyncio.run(_run())
+
+
+def test_flash_display_button_device_info_varies_by_node_type() -> None:
+    """DisplayFlashButton.device_info should report correct model per node type."""
+
+    coordinator = types.SimpleNamespace(hass=None, _inventory=Inventory("dev", []))
+
+    # Heater node
+    htr_context = entities_button_module.DisplayFlashContext(
+        entry_id="e", dev_id="dev", node_type="htr", addr="1", name="Heater 1",
+    )
+    htr_button = DisplayFlashButton(coordinator, htr_context)
+    assert htr_button.device_info["model"] == "Heater"
+
+    # Accumulator node
+    acm_context = entities_button_module.DisplayFlashContext(
+        entry_id="e", dev_id="dev", node_type="acm", addr="2", name="Acc 2",
+    )
+    acm_button = DisplayFlashButton(coordinator, acm_context)
+    assert acm_button.device_info["model"] == "Accumulator"
+
+    # Thermostat node (default fallback)
+    thm_context = entities_button_module.DisplayFlashContext(
+        entry_id="e", dev_id="dev", node_type="thm", addr="3", name="Thm 3",
+    )
+    thm_button = DisplayFlashButton(coordinator, thm_context)
+    assert thm_button.device_info["model"] == "Thermostat"
+
+
+def test_flash_display_button_handles_press_error(
+    heater_hass_data,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """DisplayFlashButton.async_press should raise HomeAssistantError on failure."""
+
+    async def _run() -> None:
+        from homeassistant.exceptions import HomeAssistantError
+
+        hass = HomeAssistant()
+        entry = types.SimpleNamespace(entry_id="entry-flash-err")
+        dev_id = "device-flash-err"
+        backend = types.SimpleNamespace(
+            set_node_display_select=AsyncMock(side_effect=RuntimeError("network")),
+        )
+        coordinator = types.SimpleNamespace(
+            hass=hass, _inventory=Inventory(dev_id, []),
+        )
+
+        heater_hass_data(
+            hass,
+            entry.entry_id,
+            dev_id,
+            coordinator,
+            extra={"brand": "termoweb", "backend": backend},
+            inventory=Inventory(dev_id, [HeaterNode(name="Heater", addr="7")]),
+        )
+
+        context = entities_button_module.DisplayFlashContext(
+            entry_id=entry.entry_id,
+            dev_id=dev_id,
+            node_type="htr",
+            addr="7",
+            name="Heater",
+        )
+        button = DisplayFlashButton(coordinator, context)
+        button.hass = hass
+
+        caplog.set_level(logging.ERROR)
+        with pytest.raises(HomeAssistantError, match="Unable to flash"):
+            await button.async_press()
+        assert "Display flash failed" in caplog.text
+
+    asyncio.run(_run())
+
+
+def test_flash_display_button_skips_press_without_hass() -> None:
+    """DisplayFlashButton.async_press should do nothing when hass is None."""
+
+    async def _run() -> None:
+        coordinator = types.SimpleNamespace(hass=None, _inventory=Inventory("dev", []))
+        context = entities_button_module.DisplayFlashContext(
+            entry_id="e", dev_id="dev", node_type="htr", addr="1", name="H",
+        )
+        button = DisplayFlashButton(coordinator, context)
+        button.hass = None
+
+        # Should not raise
+        await button.async_press()
+
+    asyncio.run(_run())
+
+
+def test_flash_display_button_available_depends_on_inventory() -> None:
+    """DisplayFlashButton.available should reflect inventory membership."""
+
+    inventory = Inventory("dev", [HeaterNode(name="Heater", addr="1")])
+    coordinator = types.SimpleNamespace(hass=None, _inventory=inventory)
+
+    context = entities_button_module.DisplayFlashContext(
+        entry_id="e", dev_id="dev", node_type="htr", addr="1", name="Heater",
+    )
+    button = DisplayFlashButton(coordinator, context)
+    assert button.available is True
+
+    # Missing node -> not available
+    context_missing = entities_button_module.DisplayFlashContext(
+        entry_id="e", dev_id="dev", node_type="htr", addr="99", name="Missing",
+    )
+    button_missing = DisplayFlashButton(coordinator, context_missing)
+    assert button_missing.available is False
+
+    # No inventory attr -> not available
+    coordinator_empty = types.SimpleNamespace(hass=None)
+    button_no_inv = DisplayFlashButton(coordinator_empty, context)
+    assert button_no_inv.available is False
+
+
+def test_build_boost_button_raises_for_unknown_action() -> None:
+    """_build_boost_button should raise ValueError for unsupported actions."""
+
+    coordinator = types.SimpleNamespace(hass=None, data={})
+    context = _make_boost_context("entry", "dev", addr="1", name="Acc")
+    bad_metadata = heater_module.BoostButtonMetadata(
+        minutes=60,
+        unique_suffix="unknown",
+        label="Unknown",
+        icon="mdi:help",
+        action="unknown",
+    )
+
+    with pytest.raises(ValueError, match="Unsupported boost button action"):
+        entities_button_module._build_boost_button(bad_metadata, coordinator, context)
+
+
+def test_accumulator_boost_base_device_info() -> None:
+    """AccumulatorBoostButtonBase.device_info should expose accumulator metadata."""
+
+    coordinator = types.SimpleNamespace(hass=None, data={})
+    context = _make_boost_context("entry-info", "dev-info", addr="5", name="Storage")
+    button = AccumulatorBoostButton(
+        coordinator, context, _metadata_for("start"),
+    )
+
+    info = button.device_info
+    assert info["model"] == "Accumulator"
+    assert info["manufacturer"] == "TermoWeb"
+    assert ("termoweb", "dev-info", "5") in info["identifiers"]
+    assert info["name"] == "Storage"
+
+
+def test_accumulator_boost_base_coordinator_state() -> None:
+    """AccumulatorBoostButtonBase._coordinator_state should resolve domain state."""
+
+    addr = "3"
+    context = _make_boost_context("entry-cs", "dev-cs", addr=addr, name="Hall")
+    coordinator = FakeCoordinator(
+        HomeAssistant(),
+        dev_id="dev-cs",
+        data={
+            "dev-cs": {
+                "settings": {"acm": {addr: {"boost_active": False}}},
+            }
+        },
+        inventory=context.inventory,
+    )
+    button = AccumulatorBoostButton(
+        coordinator, context, _metadata_for("start"),
+    )
+
+    state = button._coordinator_state()
+    assert state is not None
+    assert button._coordinator_boost_active() is False
+
+
+def test_accumulator_boost_base_service_minutes_default_is_none() -> None:
+    """AccumulatorBoostButtonBase._service_minutes should default to None."""
+
+    coordinator = types.SimpleNamespace(hass=None, data={})
+    context = _make_boost_context("entry-min", "dev-min", addr="1", name="Acc")
+
+    # Using the base class indirectly via AccumulatorBoostCancelButton
+    # which does not override _service_minutes
+    button = AccumulatorBoostCancelButton(
+        coordinator, context, _metadata_for("cancel"),
+    )
+    assert button._service_minutes is None
