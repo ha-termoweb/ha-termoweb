@@ -351,6 +351,21 @@ class RESTClient:
         else:
             path = f"/api/v2/devs/{dev_id}/{node_type}/{addr}/settings"
         data = await self._request("GET", path, headers=headers)
+        if isinstance(data, dict):
+            _LOGGER.debug(
+                "Raw API response keys for %s/%s: %s",
+                node_type,
+                addr,
+                sorted(data.keys()),
+            )
+            if "max_power" in data:
+                _LOGGER.debug(
+                    "Raw max_power for %s/%s: %r (type=%s)",
+                    node_type,
+                    addr,
+                    data["max_power"],
+                    type(data["max_power"]).__name__,
+                )
         decoded = decode_node_settings(node_type, data)
         self._log_non_htr_payload(
             node_type=node_type,

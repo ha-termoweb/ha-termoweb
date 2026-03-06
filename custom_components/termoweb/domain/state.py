@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, fields
+import logging
 import typing
 from typing import Any
 
 from .energy import EnergySnapshot
 from .ids import NodeId, NodeType
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _copy_sequence(value: Any) -> list[Any] | None:
@@ -151,6 +154,18 @@ def canonicalize_settings_payload(payload: Mapping[str, typing.Any]) -> dict[str
     status = payload.get("status")
     if isinstance(status, Mapping):
         _merge(status)
+
+    top_keys = set(payload.keys())
+    status_payload = payload.get("status")
+    if isinstance(status_payload, Mapping):
+        top_keys |= set(status_payload.keys())
+    dropped = top_keys - _SETTING_FIELD_NAMES - {"status"}
+    if dropped:
+        _LOGGER.debug(
+            "canonicalize_settings_payload dropping keys: %s",
+            sorted(dropped),
+        )
+
     return canonical
 
 
