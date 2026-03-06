@@ -1769,3 +1769,614 @@ def test_heater_energy_timeout(
             await coord.async_refresh()
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# EnergyStateCoordinator._resolve_inventory edge cases (lines 1258-1264)
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_inventory_rejects_non_inventory(
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """_resolve_inventory should raise TypeError for non-Inventory candidate."""
+
+    hass = HomeAssistant()
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+    coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+
+    with pytest.raises(TypeError, match="unavailable"):
+        coord._resolve_inventory("not-an-inventory")  # type: ignore[arg-type]
+
+
+def test_resolve_inventory_no_cached_inventory(
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """_resolve_inventory should raise TypeError when both are None."""
+
+    hass = HomeAssistant()
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+    coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+    coord._inventory = None
+
+    with pytest.raises(TypeError, match="unavailable"):
+        coord._resolve_inventory(None)
+
+
+# ---------------------------------------------------------------------------
+# _node_id_for invalid inputs (lines 1273-1278)
+# ---------------------------------------------------------------------------
+
+
+def test_node_id_for_invalid_type() -> None:
+    """_node_id_for should return None for invalid node types."""
+
+    assert EnergyStateCoordinator._node_id_for("zzz", "1") is None
+
+
+def test_node_id_for_invalid_addr() -> None:
+    """_node_id_for should return None for invalid addresses."""
+
+    assert EnergyStateCoordinator._node_id_for("htr", "") is None
+
+
+# ---------------------------------------------------------------------------
+# _prefill_energy_buckets from cached last (line 1335, 1344)
+# ---------------------------------------------------------------------------
+
+
+def test_prefill_energy_buckets_uses_last_cache(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """_prefill_energy_buckets should use _last cache for energy."""
+
+    hass = HomeAssistant()
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+    coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+    coord._last = {("htr", "A"): (100.0, 5.0)}
+
+    targets_by_type = {"htr": ["A"]}
+    energy: dict[str, dict[str, float]] = {}
+    power: dict[str, dict[str, float]] = {}
+    coord._prefill_energy_buckets("dev", targets_by_type, energy, power)
+    assert energy["htr"]["A"] == 5.0
+
+
+# ---------------------------------------------------------------------------
+# _build_snapshot: skip None node_id (line 1366)
+# ---------------------------------------------------------------------------
+
+
+def test_build_snapshot_skips_invalid_node_id(
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """_build_snapshot should skip nodes where _node_id_for returns None."""
+
+    hass = HomeAssistant()
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+    coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+
+    targets = {"zzz": ["A"]}
+    energy = {"zzz": {"A": 1.0}}
+    power: dict[str, dict[str, float]] = {}
+    snap = coord._build_snapshot(
+        "dev", targets, energy, power,
+        source="test", updated_at=1.0, ws_deadline=None,
+    )
+    assert len(snap.metrics) == 0
+
+
+# ---------------------------------------------------------------------------
+# metrics_by_type: wrong dev_id (lines 1389-1392)
+# ---------------------------------------------------------------------------
+
+
+def test_metrics_by_type_wrong_dev_id(
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """metrics_by_type should return empty dict for mismatched dev_id."""
+
+    hass = HomeAssistant()
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+    coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+    coord.data = build_empty_snapshot("other")
+    assert coord.metrics_by_type("htr") == {}
+
+
+# ---------------------------------------------------------------------------
+# _process_energy_sample edge cases (lines 1480, 1490-1491, 1498-1499)
+# ---------------------------------------------------------------------------
+
+
+def test_process_energy_sample_negative_scale(
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """_process_energy_sample should use 1000.0 for non-positive scale."""
+
+    hass = HomeAssistant()
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+    coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+    coord._counter_scales["htr"] = -1.0
+
+    energy_bucket: dict[str, float] = {}
+    power_bucket: dict[str, float] = {}
+    coord._process_energy_sample("htr", "A", 100.0, 5000.0, energy_bucket, power_bucket)
+    assert energy_bucket["A"] == 5.0
+
+
+def test_process_energy_sample_counter_reset_prune_power(
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """Counter reset with prune_power should clear power bucket."""
+
+    hass = HomeAssistant()
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+    coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+
+    energy_bucket: dict[str, float] = {}
+    power_bucket: dict[str, float] = {"A": 100.0}
+
+    coord._process_energy_sample("htr", "A", 100.0, 5000.0, energy_bucket, power_bucket)
+    result = coord._process_energy_sample(
+        "htr", "A", 200.0, 1000.0, energy_bucket, power_bucket, prune_power=True
+    )
+    assert result is True
+    assert "A" not in power_bucket
+
+
+def test_process_energy_sample_dt_zero_prune(
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """Equal timestamps with prune_power should remove power."""
+
+    hass = HomeAssistant()
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+    coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+
+    energy_bucket: dict[str, float] = {}
+    power_bucket: dict[str, float] = {"A": 100.0}
+
+    coord._process_energy_sample("htr", "A", 100.0, 5000.0, energy_bucket, power_bucket)
+    coord._process_energy_sample(
+        "htr", "A", 100.0, 6000.0, energy_bucket, power_bucket, prune_power=True
+    )
+    assert "A" not in power_bucket
+
+
+# ---------------------------------------------------------------------------
+# _extract_sample_point edge cases (lines 1602-1623)
+# ---------------------------------------------------------------------------
+
+
+def test_extract_sample_point_nested_samples() -> None:
+    """_extract_sample_point should recurse into 'samples' key."""
+
+    result = EnergyStateCoordinator._extract_sample_point(
+        {"samples": {"t": 100.0, "counter": 500}}
+    )
+    assert result == (100.0, 500.0)
+
+
+def test_extract_sample_point_counter_mapping() -> None:
+    """_extract_sample_point should handle counter as a mapping."""
+
+    result = EnergyStateCoordinator._extract_sample_point(
+        {"t": 100.0, "counter": {"value": 500}}
+    )
+    assert result == (100.0, 500.0)
+
+
+def test_extract_sample_point_counter_mapping_counter_key() -> None:
+    """_extract_sample_point should try counter.counter key."""
+
+    result = EnergyStateCoordinator._extract_sample_point(
+        {"t": 100.0, "counter": {"counter": 500}}
+    )
+    assert result == (100.0, 500.0)
+
+
+def test_extract_sample_point_counter_max_fallback() -> None:
+    """_extract_sample_point should use counter_max fallback."""
+
+    result = EnergyStateCoordinator._extract_sample_point({"t": 100.0, "counter_max": 300})
+    assert result == (100.0, 300.0)
+
+
+def test_extract_sample_point_counter_min_fallback() -> None:
+    """_extract_sample_point should use counter_min fallback."""
+
+    result = EnergyStateCoordinator._extract_sample_point({"t": 100.0, "counter_min": 200})
+    assert result == (100.0, 200.0)
+
+
+def test_extract_sample_point_value_fallback() -> None:
+    """_extract_sample_point should fall back to 'value' key."""
+
+    result = EnergyStateCoordinator._extract_sample_point({"t": 100.0, "value": 700})
+    assert result == (100.0, 700.0)
+
+
+def test_extract_sample_point_no_counter() -> None:
+    """_extract_sample_point should return None when no counter found."""
+
+    assert EnergyStateCoordinator._extract_sample_point({"t": 100.0}) is None
+
+
+def test_extract_sample_point_no_t() -> None:
+    """_extract_sample_point should return None when no 't' found."""
+
+    assert EnergyStateCoordinator._extract_sample_point({"counter": 100}) is None
+
+
+def test_extract_sample_point_list_latest() -> None:
+    """_extract_sample_point should pick the latest sample from a list."""
+
+    result = EnergyStateCoordinator._extract_sample_point([
+        {"t": 100.0, "counter": 500},
+        {"t": 200.0, "counter": 600},
+        {"t": 150.0, "counter": 550},
+    ])
+    assert result == (200.0, 600.0)
+
+
+def test_extract_sample_point_non_iterable() -> None:
+    """_extract_sample_point should return None for non-iterable."""
+
+    assert EnergyStateCoordinator._extract_sample_point(42) is None
+    assert EnergyStateCoordinator._extract_sample_point("string") is None
+
+
+def test_extract_sample_point_counter_mapping_min_max() -> None:
+    """_extract_sample_point: counter mapping min/max."""
+
+    result = EnergyStateCoordinator._extract_sample_point(
+        {"t": 100.0, "counter": {"min": 200, "max": 300}}
+    )
+    assert result == (100.0, 300.0)
+
+
+# ---------------------------------------------------------------------------
+# handle_ws_samples edge cases (lines 1635, 1654-1655, 1674-1701)
+# ---------------------------------------------------------------------------
+
+
+def test_handle_ws_samples_wrong_dev_id(
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """handle_ws_samples should return early for wrong dev_id."""
+
+    hass = HomeAssistant()
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+    coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+    coord.handle_ws_samples("other", {"htr": {"A": {"t": 100, "counter": 1000}}})
+
+
+def test_handle_ws_samples_no_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """handle_ws_samples should return when inventory resolve fails."""
+
+    hass = HomeAssistant()
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+    coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+
+    monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
+    coord._inventory = None
+    coord.handle_ws_samples("dev", {"htr": {"A": {"t": 100, "counter": 1000}}})
+
+
+def test_handle_ws_samples_untracked_type(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """handle_ws_samples should skip untracked node types."""
+
+    hass = HomeAssistant()
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+    coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+
+    monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
+    coord.handle_ws_samples("dev", {"thm": {"A": {"t": 100, "counter": 1000}}})
+
+
+def test_handle_ws_samples_untracked_addr(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """handle_ws_samples should skip untracked addresses."""
+
+    hass = HomeAssistant()
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+    coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+
+    monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
+    coord.handle_ws_samples("dev", {"htr": {"Z": {"t": 100, "counter": 1000}}})
+
+
+def test_handle_ws_samples_with_existing_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """handle_ws_samples should incorporate existing snapshot metrics."""
+
+    hass = HomeAssistant()
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+    coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+
+    monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
+    coord.handle_ws_samples("dev", {"htr": {"A": {"t": 100, "counter": 1000}}})
+
+    monkeypatch.setattr(coord_module, "time_mod", lambda: 2000.0)
+    coord.handle_ws_samples("dev", {"htr": {"A": {"t": 200, "counter": 2000}}})
+
+    snapshot = coerce_snapshot(coord.data)
+    assert snapshot is not None
+    metrics = snapshot.metrics_for_type("htr")
+    assert "A" in metrics
+
+
+# ---------------------------------------------------------------------------
+# merge_samples_for_window edge cases (lines 1740-1820)
+# ---------------------------------------------------------------------------
+
+
+def test_merge_samples_wrong_dev_id(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """merge_samples_for_window should return early for wrong dev_id."""
+
+    async def _run() -> None:
+        hass = HomeAssistant()
+        inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+        coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+        monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
+        await coord.merge_samples_for_window("other", {})
+
+    asyncio.run(_run())
+
+
+def test_merge_samples_no_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """merge_samples_for_window should return when inventory resolve fails."""
+
+    async def _run() -> None:
+        hass = HomeAssistant()
+        inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+        coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+        coord._inventory = None
+        monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
+        await coord.merge_samples_for_window("dev", {})
+
+    asyncio.run(_run())
+
+
+def test_merge_samples_with_existing_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """merge_samples_for_window should incorporate existing snapshot."""
+
+    async def _run() -> None:
+        hass = HomeAssistant()
+        inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+        coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+        monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
+        coord.handle_ws_samples("dev", {"htr": {"A": {"t": 50, "counter": 500}}})
+
+        samples = {
+            ("htr", "A"): [
+                {"timestamp": 100.0, "energy_wh": 1000.0},
+                {"timestamp": 200.0, "energy_wh": 2000.0},
+            ]
+        }
+        await coord.merge_samples_for_window("dev", samples)
+
+        snapshot = coerce_snapshot(coord.data)
+        assert snapshot is not None
+
+    asyncio.run(_run())
+
+
+def test_merge_samples_bad_descriptor(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """merge_samples_for_window should skip non-tuple descriptors."""
+
+    async def _run() -> None:
+        hass = HomeAssistant()
+        inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+        coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+        monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
+        await coord.merge_samples_for_window("dev", {
+            "bad": [{"timestamp": 100.0, "energy_wh": 1000.0}],  # type: ignore[dict-item]
+        })
+
+    asyncio.run(_run())
+
+
+def test_merge_samples_empty_type(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """merge_samples_for_window should skip empty type/addr."""
+
+    async def _run() -> None:
+        hass = HomeAssistant()
+        inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+        coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+        monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
+        await coord.merge_samples_for_window("dev", {
+            ("", "A"): [{"timestamp": 100.0, "energy_wh": 1000.0}],
+        })
+
+    asyncio.run(_run())
+
+
+def test_merge_samples_untracked_addr(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """merge_samples_for_window should skip untracked addresses."""
+
+    async def _run() -> None:
+        hass = HomeAssistant()
+        inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+        coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+        monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
+        await coord.merge_samples_for_window("dev", {
+            ("htr", "Z"): [{"timestamp": 100.0, "energy_wh": 1000.0}],
+        })
+
+    asyncio.run(_run())
+
+
+def test_merge_samples_non_mapping_record(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """merge_samples_for_window should skip non-Mapping records."""
+
+    async def _run() -> None:
+        hass = HomeAssistant()
+        inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+        coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+        monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
+        await coord.merge_samples_for_window("dev", {
+            ("htr", "A"): ["not-a-mapping"],
+        })
+
+    asyncio.run(_run())
+
+
+def test_merge_samples_datetime_ts(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """merge_samples_for_window should convert datetime ts values."""
+
+    async def _run() -> None:
+        hass = HomeAssistant()
+        inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+        coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+        monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
+
+        ts_dt = datetime(2024, 1, 1, 0, 0, tzinfo=UTC)
+        samples = {
+            ("htr", "A"): [
+                {"ts": ts_dt, "energy_wh": 1000.0},
+                {"ts": datetime(2024, 1, 1, 1, 0, tzinfo=UTC), "energy_wh": 2000.0},
+            ]
+        }
+        await coord.merge_samples_for_window("dev", samples)
+        snapshot = coerce_snapshot(coord.data)
+        assert snapshot is not None
+
+    asyncio.run(_run())
+
+
+def test_merge_samples_no_energy_wh(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """merge_samples_for_window should skip records without energy_wh."""
+
+    async def _run() -> None:
+        hass = HomeAssistant()
+        inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+        coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+        monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
+        await coord.merge_samples_for_window("dev", {
+            ("htr", "A"): [{"timestamp": 100.0}],
+        })
+
+    asyncio.run(_run())
+
+
+def test_merge_samples_no_timestamp(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """merge_samples_for_window should skip records without timestamp."""
+
+    async def _run() -> None:
+        hass = HomeAssistant()
+        inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+        coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+        monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
+        await coord.merge_samples_for_window("dev", {
+            ("htr", "A"): [{"energy_wh": 1000.0}],
+        })
+
+    asyncio.run(_run())
+
+
+def test_merge_samples_empty_prepared(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_from_map: Callable[
+        [Mapping[str, Iterable[str]] | None, str], coord_module.Inventory
+    ],
+) -> None:
+    """merge_samples_for_window should skip when all records are invalid."""
+
+    async def _run() -> None:
+        hass = HomeAssistant()
+        inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev")
+        coord = EnergyStateCoordinator(hass, types.SimpleNamespace(), "dev", inventory)
+        monkeypatch.setattr(coord_module, "time_mod", lambda: 1000.0)
+        await coord.merge_samples_for_window("dev", {
+            ("htr", "A"): [{"energy_wh": None, "timestamp": 100.0}],
+        })
+
+    asyncio.run(_run())
