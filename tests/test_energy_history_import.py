@@ -1017,3 +1017,492 @@ async def test_import_enforces_monotonic_sum_at_seam(
     assert len(initial_rows) >= 2
     _, seam_rewrite = stored_stats[-1]
     assert seam_rewrite == [{"start": import_end_dt + timedelta(hours=1), "sum": 6.5}]
+
+
+# ---------------------------------------------------------------------------
+# _store_statistics edge cases (lines 113, 117)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_store_statistics_empty_stats(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_store_statistics should return early for empty stats list (line 113)."""
+
+    calls: list[Any] = []
+
+    async def _capture(*args: Any) -> None:
+        calls.append(args)
+
+    monkeypatch.setattr(
+        energy.recorder_stats, "async_import_statistics", _capture, raising=False
+    )
+
+    await energy._store_statistics(object(), {"statistic_id": "sensor.test"}, [])
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_store_statistics_missing_stat_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_store_statistics should raise for missing/invalid statistic_id (line 117)."""
+
+    with pytest.raises(ValueError, match="statistic_id"):
+        await energy._store_statistics(object(), {}, [{"start": "x", "sum": 1.0}])
+
+    with pytest.raises(ValueError, match="statistic_id"):
+        await energy._store_statistics(
+            object(), {"statistic_id": "nope"}, [{"start": "x", "sum": 1.0}]
+        )
+
+
+# ---------------------------------------------------------------------------
+# _collect_statistics: empty period (line 158)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_collect_statistics_empty_period(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_collect_statistics should return empty list for empty period (line 158)."""
+
+    async def _empty_period(*args: Any, **kwargs: Any) -> dict:
+        return {}
+
+    monkeypatch.setattr(energy, "_statistics_during_period", _empty_period)
+
+    result = await energy._collect_statistics(
+        object(),
+        "sensor.test",
+        datetime(2024, 1, 1, tzinfo=UTC),
+        datetime(2024, 1, 2, tzinfo=UTC),
+    )
+    assert result == []
+
+
+# ---------------------------------------------------------------------------
+# _enforce_monotonic_sum edge cases (lines 175, 182, 197-198, 202)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_enforce_monotonic_sum_no_dot_in_entity_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_enforce_monotonic_sum should return early if no dot in entity_id (line 175)."""
+
+    await energy._enforce_monotonic_sum(
+        object(), "nope", datetime.now(UTC), datetime.now(UTC)
+    )
+
+
+@pytest.mark.asyncio
+async def test_enforce_monotonic_sum_no_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_enforce_monotonic_sum should return early with empty rows (line 182)."""
+
+    async def _empty_collect(*args: Any, **kwargs: Any) -> list:
+        return []
+
+    monkeypatch.setattr(energy, "_collect_statistics", _empty_collect)
+
+    await energy._enforce_monotonic_sum(
+        object(), "sensor.test", datetime.now(UTC), datetime.now(UTC)
+    )
+
+
+@pytest.mark.asyncio
+async def test_enforce_monotonic_sum_with_non_monotonic_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_enforce_monotonic_sum should rewrite non-monotonic sums (lines 197-198, 202)."""
+
+    now = datetime(2024, 1, 1, tzinfo=UTC)
+    rows = [
+        {"start": now, "sum": None, "state": None},  # sum=None, skipped by first pass
+        {"start": now + timedelta(hours=1), "sum": 5.0, "state": 5.0},
+        {"start": now + timedelta(hours=2), "sum": 3.0, "state": 3.0},  # decrease!
+        {"start": now + timedelta(hours=3), "sum": "invalid", "state": None},  # bad
+    ]
+
+    async def _fake_collect(*args: Any, **kwargs: Any) -> list:
+        return rows
+
+    stored: list[tuple[dict, list]] = []
+
+    async def _fake_store(hass: Any, metadata: dict, stats: list) -> None:
+        stored.append((metadata, stats))
+
+    class _FakeRegistry:
+        def async_get(self, entity_id: str) -> Any:
+            return SimpleNamespace(original_name="Test")
+
+    monkeypatch.setattr(energy, "_collect_statistics", _fake_collect)
+    monkeypatch.setattr(energy, "_store_statistics", _fake_store)
+    monkeypatch.setattr(
+        energy.er, "async_get", lambda hass: _FakeRegistry(), raising=False
+    )
+
+    await energy._enforce_monotonic_sum(object(), "sensor.test", now, now + timedelta(hours=3))
+
+    assert len(stored) == 1
+    _, rewrites = stored[0]
+    # The decrease at hour 2 and the invalid at hour 3 should both be rewritten to 5.0
+    assert len(rewrites) == 2
+    assert all(r["sum"] == 5.0 for r in rewrites)
+
+
+# ---------------------------------------------------------------------------
+# _statistics_during_period (line 78)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_statistics_during_period_calls_recorder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_statistics_during_period should call recorder with correct params (line 78)."""
+
+    captured: dict[str, Any] = {}
+
+    async def _fake_get_stats(
+        hass: Any,
+        start_time: Any,
+        end_time: Any,
+        statistic_ids: Any,
+        period: str = "hour",
+        types: set[str] | None = None,
+    ) -> dict:
+        captured["start"] = start_time
+        captured["end"] = end_time
+        captured["ids"] = statistic_ids
+        captured["period"] = period
+        captured["types"] = types
+        return {}
+
+    monkeypatch.setattr(
+        energy.recorder_stats,
+        "async_get_statistics_during_period",
+        _fake_get_stats,
+        raising=False,
+    )
+
+    start = datetime(2024, 1, 1, tzinfo=UTC)
+    end = datetime(2024, 1, 2, tzinfo=UTC)
+    result = await energy._statistics_during_period(
+        object(), start, end, {"sensor.test"}
+    )
+    assert result == {}
+    assert captured["period"] == "hour"
+    assert captured["types"] == {"state", "sum"}
+
+
+# ---------------------------------------------------------------------------
+# async_import_energy_history: various guard branches
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_import_energy_history_rejects_non_inventory_nodes(
+    stub_hass,
+    inventory_from_map,
+) -> None:
+    """Importer should raise TypeError for non-Inventory nodes argument (line 266)."""
+
+    entry = _StubConfigEntry("entry-type-guard")
+    stub_hass.config_entries.add(entry)
+
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev-type-guard")
+    build_entry_runtime(
+        hass=stub_hass,
+        entry_id=entry.entry_id,
+        dev_id="dev-type-guard",
+        inventory=inventory,
+        client=_RecordingClient(),
+        config_entry=entry,
+    )
+
+    with pytest.raises(TypeError, match="Inventory instance"):
+        await energy.async_import_energy_history(
+            stub_hass,
+            entry,
+            nodes="not-an-inventory",  # type: ignore[arg-type]
+            rate_limit=_ImmediateRateLimiter(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_import_energy_history_no_inventory_in_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_hass,
+    inventory_from_map,
+) -> None:
+    """Importer should log error when inventory is missing from runtime (lines 275-279)."""
+
+    entry = _StubConfigEntry("entry-no-inv")
+    stub_hass.config_entries.add(entry)
+
+    runtime = build_entry_runtime(
+        hass=stub_hass,
+        entry_id=entry.entry_id,
+        dev_id="dev-no-inv",
+        allow_missing_inventory=True,
+        client=_RecordingClient(),
+        config_entry=entry,
+    )
+    runtime.inventory = None
+
+    monkeypatch.setattr(energy, "datetime", _FixedDatetime, raising=False)
+
+    await energy.async_import_energy_history(
+        stub_hass,
+        entry,
+        rate_limit=_ImmediateRateLimiter(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_import_energy_history_already_imported(
+    stub_hass,
+    inventory_from_map,
+) -> None:
+    """Importer should return early when already imported (line 441-442)."""
+
+    entry = _StubConfigEntry("entry-done")
+    entry.options[energy.OPTION_ENERGY_HISTORY_IMPORTED] = True
+    stub_hass.config_entries.add(entry)
+
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev-done")
+    client = _RecordingClient()
+    build_entry_runtime(
+        hass=stub_hass,
+        entry_id=entry.entry_id,
+        dev_id="dev-done",
+        inventory=inventory,
+        client=client,
+        config_entry=entry,
+    )
+
+    await energy.async_import_energy_history(
+        stub_hass,
+        entry,
+        rate_limit=_ImmediateRateLimiter(),
+    )
+    assert client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_import_energy_history_day_chunk_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_hass,
+    inventory_from_map,
+) -> None:
+    """Importer should handle invalid/negative/large day_chunk_hours (lines 377-394)."""
+
+    entry = _StubConfigEntry("entry-chunk")
+    stub_hass.config_entries.add(entry)
+
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev-chunk")
+    client = _RecordingClient()
+    build_entry_runtime(
+        hass=stub_hass,
+        entry_id=entry.entry_id,
+        dev_id="dev-chunk",
+        inventory=inventory,
+        client=client,
+        config_entry=entry,
+    )
+
+    monkeypatch.setattr(energy, "datetime", _FixedDatetime, raising=False)
+    monkeypatch.setattr(energy.er, "async_get", lambda hass: None, raising=False)
+
+    # Test negative day_chunk_hours (should default to 24)
+    await energy.async_import_energy_history(
+        stub_hass,
+        entry,
+        rate_limit=_ImmediateRateLimiter(),
+        max_days=1,
+        day_chunk_hours=-5,
+    )
+    assert client.calls  # Should still work with default
+
+    # Reset
+    client.calls.clear()
+    entry.options.pop(energy.OPTION_ENERGY_HISTORY_IMPORTED, None)
+
+    # Test > 24 (should be capped to 24)
+    await energy.async_import_energy_history(
+        stub_hass,
+        entry,
+        rate_limit=_ImmediateRateLimiter(),
+        max_days=1,
+        day_chunk_hours=48,
+    )
+
+
+@pytest.mark.asyncio
+async def test_import_energy_history_no_entity_id(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_hass,
+    inventory_from_map,
+) -> None:
+    """Importer should continue when no entity_id is found (lines 578-610)."""
+
+    entry = _StubConfigEntry("entry-no-entity")
+    stub_hass.config_entries.add(entry)
+
+    base_ts = 1_700_000_000
+
+    class _SampleClient:
+        async def get_node_samples(self, *args: Any) -> list[dict[str, int]]:
+            return [{"t": base_ts, "counter": 1000}]
+
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev-no-entity")
+    build_entry_runtime(
+        hass=stub_hass,
+        entry_id=entry.entry_id,
+        dev_id="dev-no-entity",
+        inventory=inventory,
+        client=_SampleClient(),
+        config_entry=entry,
+    )
+
+    monkeypatch.setattr(energy, "datetime", _FixedDatetime, raising=False)
+    # Return None for all entity lookups
+    monkeypatch.setattr(energy.er, "async_get", lambda hass: None, raising=False)
+
+    await energy.async_import_energy_history(
+        stub_hass,
+        entry,
+        rate_limit=_ImmediateRateLimiter(),
+        max_days=1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_import_energy_history_no_valid_timestamps(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_hass,
+    inventory_from_map,
+) -> None:
+    """Importer should handle samples with no valid timestamps (lines 585-610)."""
+
+    entry = _StubConfigEntry("entry-bad-ts")
+    stub_hass.config_entries.add(entry)
+
+    class _SampleClient:
+        async def get_node_samples(self, *args: Any) -> list[dict[str, Any]]:
+            return [{"t": "invalid", "counter": 1000}]
+
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev-bad-ts")
+    build_entry_runtime(
+        hass=stub_hass,
+        entry_id=entry.entry_id,
+        dev_id="dev-bad-ts",
+        inventory=inventory,
+        client=_SampleClient(),
+        config_entry=entry,
+    )
+
+    monkeypatch.setattr(energy, "datetime", _FixedDatetime, raising=False)
+
+    class _FakeRegistry:
+        def async_get_entity_id(self, *args: Any) -> str:
+            return "sensor.test"
+
+        def async_get(self, *args: Any) -> Any:
+            return SimpleNamespace(original_name="Test")
+
+    monkeypatch.setattr(
+        energy.er, "async_get", lambda hass: _FakeRegistry(), raising=False
+    )
+
+    await energy.async_import_energy_history(
+        stub_hass,
+        entry,
+        rate_limit=_ImmediateRateLimiter(),
+        max_days=1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_import_energy_history_empty_stats_after_processing(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_hass,
+    inventory_from_map,
+) -> None:
+    """Importer should handle the case when stats list is empty after processing (lines 819-845)."""
+
+    entry = _StubConfigEntry("entry-empty-stats")
+    stub_hass.config_entries.add(entry)
+
+    base_ts = 1_700_000_000
+    # Only one sample = no delta to compute
+    samples = [{"t": base_ts, "counter": 1000}]
+
+    class _SampleClient:
+        async def get_node_samples(self, *args: Any) -> list[dict[str, int]]:
+            return samples
+
+    inventory = inventory_from_map({"htr": ["A"]}, dev_id="dev-empty-stats")
+    build_entry_runtime(
+        hass=stub_hass,
+        entry_id=entry.entry_id,
+        dev_id="dev-empty-stats",
+        inventory=inventory,
+        client=_SampleClient(),
+        config_entry=entry,
+    )
+
+    monkeypatch.setattr(energy, "datetime", _FixedDatetime, raising=False)
+
+    class _FakeRegistry:
+        def async_get_entity_id(self, *args: Any) -> str:
+            return "sensor.test_energy"
+
+        def async_get(self, *args: Any) -> Any:
+            return SimpleNamespace(original_name="Test Energy")
+
+    monkeypatch.setattr(
+        energy.er, "async_get", lambda hass: _FakeRegistry(), raising=False
+    )
+
+    async def _empty_period(*args: Any, **kwargs: Any) -> dict:
+        return {}
+
+    async def _fake_clear(*args: Any, **kwargs: Any) -> str:
+        return "delete"
+
+    monkeypatch.setattr(energy, "_statistics_during_period", _empty_period)
+    monkeypatch.setattr(energy, "_clear_statistics", _fake_clear)
+
+    stored: list[Any] = []
+
+    async def _capture_store(hass: Any, metadata: dict, stats: list) -> None:
+        stored.append(stats)
+
+    monkeypatch.setattr(energy, "_store_statistics", _capture_store, raising=False)
+
+    await energy.async_import_energy_history(
+        stub_hass,
+        entry,
+        rate_limit=_ImmediateRateLimiter(),
+        max_days=1,
+    )
+
+    # With only one sample, previous_kwh is set but no delta computed
+    # Stats should be empty and no statistics written
+    assert stored == []
+
+
+@pytest.mark.asyncio
+async def test_import_energy_history_no_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_hass,
+) -> None:
+    """Importer should handle missing runtime gracefully (lines 259-261)."""
+
+    entry = _StubConfigEntry("entry-no-runtime")
+    stub_hass.config_entries.add(entry)
+
+    await energy.async_import_energy_history(
+        stub_hass,
+        entry,
+        rate_limit=_ImmediateRateLimiter(),
+    )

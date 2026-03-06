@@ -1000,3 +1000,839 @@ def test_wrap_logger_suppresses_manual_update_debug() -> None:
     proxy.debug("Retained %s", "entry")
 
     assert inner.debug_calls == [("Retained %s", ("entry",))]
+
+
+# ---------------------------------------------------------------------------
+# StateCoordinator constructor: inventory type guard (lines 217-218)
+# ---------------------------------------------------------------------------
+
+
+def test_coordinator_requires_inventory_instance(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """StateCoordinator should raise TypeError when inventory is not an Inventory."""
+
+    hass = HomeAssistant()
+    with pytest.raises(TypeError, match="Inventory instance"):
+        coord_module.StateCoordinator(
+            hass,
+            client=AsyncMock(),
+            base_interval=30,
+            dev_id="dev",
+            device=build_device_metadata_payload("dev"),
+            nodes=None,
+            inventory="not-an-inventory",  # type: ignore[arg-type]
+        )
+
+
+# ---------------------------------------------------------------------------
+# Properties: device_metadata, gateway_name, gateway_model (lines 239, 245, 251)
+# ---------------------------------------------------------------------------
+
+
+def test_coordinator_metadata_properties(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """device_metadata, gateway_name, gateway_model properties should return expected values."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": []})
+    device = build_device_metadata_payload("dev", name="My Device", model="TW100")
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=device,
+        nodes=None,
+        inventory=inventory,
+    )
+
+    assert coordinator.device_metadata is device
+    assert coordinator.gateway_name == "My Device"
+    assert coordinator.gateway_model == "TW100"
+
+
+# ---------------------------------------------------------------------------
+# apply_energy_snapshot edge cases (lines 278, 299, 301, 304, 307)
+# ---------------------------------------------------------------------------
+
+
+def test_apply_energy_snapshot_rejects_non_snapshot(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """apply_energy_snapshot should silently ignore non-EnergySnapshot values."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": []})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inventory,
+    )
+    # Should not raise
+    coordinator.apply_energy_snapshot("not-a-snapshot")  # type: ignore[arg-type]
+    coordinator.apply_energy_snapshot(None)  # type: ignore[arg-type]
+
+
+def test_apply_energy_snapshot_wrong_dev_id(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """apply_energy_snapshot should ignore snapshots for a different device."""
+
+    from custom_components.termoweb.domain.energy import EnergySnapshot
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": []})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inventory,
+    )
+    snapshot = EnergySnapshot(dev_id="other", metrics={}, updated_at=1.0, ws_deadline=None)
+    coordinator.apply_energy_snapshot(snapshot)
+
+
+def test_apply_energy_snapshot_no_inventory(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """apply_energy_snapshot should skip when inventory is missing."""
+
+    from custom_components.termoweb.domain.energy import EnergySnapshot
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": []})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inventory,
+    )
+    coordinator._inventory = None
+    snapshot = EnergySnapshot(dev_id="dev", metrics={}, updated_at=1.0, ws_deadline=None)
+    coordinator.apply_energy_snapshot(snapshot)
+
+
+# ---------------------------------------------------------------------------
+# _filtered_settings_payload (line 345)
+# ---------------------------------------------------------------------------
+
+
+def test_filtered_settings_payload_non_mapping(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """_filtered_settings_payload should return empty dict for non-Mapping."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": []})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inventory,
+    )
+    assert coordinator._filtered_settings_payload("not a dict") == {}  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# _instant_power_key empty normalization (line 361)
+# ---------------------------------------------------------------------------
+
+
+def test_instant_power_key_empty_values(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """_instant_power_key should return None for empty type or addr."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": []})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inventory,
+    )
+    assert coordinator._instant_power_key("", "01") is None
+    assert coordinator._instant_power_key("htr", "") is None
+
+
+# ---------------------------------------------------------------------------
+# _record_instant_power: non-numeric watts, NaN, same-value-same-ts (lines 396-424)
+# ---------------------------------------------------------------------------
+
+
+def test_record_instant_power_non_numeric_watts(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """_record_instant_power should reject non-numeric watts (line 399)."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": []})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inventory,
+    )
+    assert coordinator._record_instant_power("htr", "01", "not-a-number", source="rest") is False  # type: ignore[arg-type]
+
+
+def test_record_instant_power_nan_and_negative(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """_record_instant_power should reject NaN and negative watts (lines 403, 406)."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": []})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inventory,
+    )
+    assert coordinator._record_instant_power("htr", "01", float("nan"), source="rest") is False
+    assert coordinator._record_instant_power("htr", "01", -5.0, source="rest") is False
+
+
+def test_record_instant_power_duplicate_same_ts_source(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """_record_instant_power: same source + older/same timestamp skips (lines 412, 424)."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": []})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inventory,
+    )
+    assert coordinator._record_instant_power("htr", "01", 50.0, timestamp=100.0, source="rest") is True
+    # Same source, same timestamp, same watts => skip (line 424)
+    assert coordinator._record_instant_power("htr", "01", 50.0, timestamp=100.0, source="rest") is False
+    # Same source, older timestamp => skip (line 412)
+    assert coordinator._record_instant_power("htr", "01", 60.0, timestamp=99.0, source="rest") is False
+
+
+def test_record_instant_power_default_timestamp(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """_record_instant_power should use time.time() when no timestamp given (line 406)."""
+
+    import time
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": []})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inventory,
+    )
+    monkeypatch.setattr(time, "time", lambda: 5000.0)
+    assert coordinator._record_instant_power("htr", "01", 75.0, source="rest") is True
+    entry = coordinator.instant_power_entry("htr", "01")
+    assert entry is not None
+    assert entry.timestamp == 5000.0
+
+
+# ---------------------------------------------------------------------------
+# handle_instant_power_update: non-int/float watts (line 449)
+# ---------------------------------------------------------------------------
+
+
+def test_handle_instant_power_update_non_numeric(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """handle_instant_power_update should ignore non-numeric watts (line 449)."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": []})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inventory,
+    )
+    coordinator.handle_instant_power_update("dev", "htr", "01", "not-a-number")  # type: ignore[arg-type]
+    assert coordinator.instant_power_entry("htr", "01") is None
+
+
+# ---------------------------------------------------------------------------
+# instant_power_entry with None key (line 470)
+# ---------------------------------------------------------------------------
+
+
+def test_instant_power_entry_bad_key(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """instant_power_entry should return None for invalid node key (line 470)."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": []})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inventory,
+    )
+    assert coordinator.instant_power_entry("", "01") is None
+
+
+# ---------------------------------------------------------------------------
+# _should_skip_rest_power (line 483)
+# ---------------------------------------------------------------------------
+
+
+def test_should_skip_rest_power_ws_fresh(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """_should_skip_rest_power should return True when WS data is fresh (line 483+)."""
+
+    import time as time_mod
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": []})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inventory,
+    )
+    monkeypatch.setattr(time_mod, "time", lambda: 1000.0)
+    coordinator.handle_instant_power_update("dev", "htr", "01", 50.0, timestamp=1000.0)
+
+    monkeypatch.setattr(time_mod, "time", lambda: 1010.0)
+    assert coordinator._should_skip_rest_power("htr", "01") is True
+
+    # After the interval, should not skip
+    monkeypatch.setattr(time_mod, "time", lambda: 2000.0)
+    assert coordinator._should_skip_rest_power("htr", "01") is False
+
+
+# ---------------------------------------------------------------------------
+# update_nodes: inventory rebinding and None inventory (lines 826-828)
+# ---------------------------------------------------------------------------
+
+
+def test_update_nodes_inventory_rebinding_raises(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """update_nodes should raise ValueError when rebinding inventory (line 819-820)."""
+
+    hass = HomeAssistant()
+    inv1 = inventory_builder("dev", {"nodes": [{"type": "htr", "addr": "1"}]})
+    inv2 = inventory_builder("dev", {"nodes": [{"type": "htr", "addr": "2"}]})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inv1,
+    )
+
+    with pytest.raises(ValueError, match="rebinding"):
+        coordinator.update_nodes(inventory=inv2)
+
+
+def test_update_nodes_none_inventory_clears_state(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """update_nodes with non-Inventory should clear state (lines 826-828)."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": [{"type": "htr", "addr": "1"}]})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inventory,
+    )
+
+    # Force a re-init with inventory=None by removing existing inventory first
+    coordinator._inventory = None
+    coordinator.update_nodes(inventory=None)
+    assert coordinator._inventory is None
+    assert coordinator._state_store is None
+
+
+# ---------------------------------------------------------------------------
+# _node_ids_from_inventory: various node shapes (lines 843-859)
+# ---------------------------------------------------------------------------
+
+
+def test_node_ids_from_inventory_with_mapping_nodes(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """_node_ids_from_inventory should handle mapping-style nodes (lines 843-844)."""
+
+    hass = HomeAssistant()
+    # Build inventory with valid and invalid nodes
+    inventory = inventory_builder("dev", {
+        "nodes": [
+            {"type": "htr", "addr": "1"},
+            {"type": "acm", "addr": "2"},
+        ]
+    })
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inventory,
+    )
+
+    node_ids = coordinator._node_ids_from_inventory(inventory)
+    types = {nid.node_type.value for nid in node_ids}
+    assert "htr" in types
+    assert "acm" in types
+
+
+# ---------------------------------------------------------------------------
+# _ensure_state_store: reset path (line 869)
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_state_store_resets_existing(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """_ensure_state_store should reset existing store (line 869)."""
+
+    hass = HomeAssistant()
+    inv = inventory_builder("dev", {"nodes": [{"type": "htr", "addr": "1"}]})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inv,
+    )
+    store = coordinator._state_store
+    assert store is not None
+    # Call again -- should reset the same store
+    result = coordinator._ensure_state_store(inv)
+    assert result is store  # same object
+
+
+# ---------------------------------------------------------------------------
+# handle_ws_deltas (lines 883-908)
+# ---------------------------------------------------------------------------
+
+
+def test_handle_ws_deltas_wrong_dev_id(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """handle_ws_deltas should skip when dev_id does not match (line 883)."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": [{"type": "htr", "addr": "1"}]})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inventory,
+    )
+    coordinator.handle_ws_deltas("other", [])
+    # No error means it returned early
+
+
+def test_handle_ws_deltas_no_inventory(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """handle_ws_deltas should skip when inventory is missing (line 887)."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": []})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inventory,
+    )
+    coordinator._inventory = None
+    coordinator.handle_ws_deltas("dev", [])
+
+
+def test_handle_ws_deltas_no_store(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """handle_ws_deltas should create store when missing (line 891)."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": [{"type": "htr", "addr": "1"}]})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inventory,
+    )
+    # Force store to None
+    coordinator._state_store = None
+    delta = NodeSettingsDelta(
+        node_id=NodeId(NodeType.HEATER, "1"),
+        changes={"mode": "auto"},
+    )
+    coordinator.handle_ws_deltas("dev", [delta])
+    assert coordinator._state_store is not None
+
+
+def test_handle_ws_deltas_skips_non_settings_delta(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """handle_ws_deltas should skip non-NodeSettingsDelta (line 896)."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": [{"type": "htr", "addr": "1"}]})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inventory,
+    )
+    # Should not raise and should not publish (no applied deltas)
+    coordinator.handle_ws_deltas("dev", ["not-a-delta"])  # type: ignore[list-item]
+
+
+def test_handle_ws_deltas_replace_mode(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """handle_ws_deltas with replace=True should replace full snapshot (line 908)."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": [{"type": "htr", "addr": "1"}]})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes={"nodes": [{"type": "htr", "addr": "1"}]},
+        inventory=inventory,
+    )
+    delta = NodeSettingsDelta(
+        node_id=NodeId(NodeType.HEATER, "1"),
+        changes={"mode": "manual", "stemp": "21.0"},
+    )
+    coordinator.handle_ws_deltas("dev", [delta], replace=True)
+    state = _state_payload(coordinator, "htr", "1")
+    assert state is not None
+    assert state["mode"] == "manual"
+
+
+# ---------------------------------------------------------------------------
+# apply_entity_patch: new state creation for acm/thm/pmo (lines 948-966, 976, 993-994)
+# ---------------------------------------------------------------------------
+
+
+def test_apply_entity_patch_creates_accumulator_state(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """apply_entity_patch should create AccumulatorState for acm node (lines 959-960)."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": [{"type": "acm", "addr": "1"}]})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes={"nodes": [{"type": "acm", "addr": "1"}]},
+        inventory=inventory,
+    )
+
+    def _mutator(state: Any) -> None:
+        state.mode = "boost"
+        state.boost_active = True
+        state.boost_end_day = 2
+        state.boost_end_min = 60
+
+    result = coordinator.apply_entity_patch("acm", "1", _mutator)
+    assert result is True
+    state = _state_payload(coordinator, "acm", "1")
+    assert state is not None
+    assert state["mode"] == "boost"
+    assert state["boost_active"] is True
+    # boost fields changed => boost_end_datetime and boost_minutes_delta should be cleared (line 993-994)
+    assert state.get("boost_end_datetime") is None
+    assert state.get("boost_minutes_delta") is None
+
+
+def test_apply_entity_patch_creates_thermostat_state(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """apply_entity_patch should create ThermostatState for thm node (lines 961-962)."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": [{"type": "thm", "addr": "1"}]})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes={"nodes": [{"type": "thm", "addr": "1"}]},
+        inventory=inventory,
+    )
+
+    def _mutator(state: Any) -> None:
+        state.mode = "auto"
+
+    result = coordinator.apply_entity_patch("thm", "1", _mutator)
+    assert result is True
+
+
+def test_apply_entity_patch_creates_power_monitor_state(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """apply_entity_patch should create PowerMonitorState for pmo node (lines 963-964)."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": [{"type": "pmo", "addr": "1"}]})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes={"nodes": [{"type": "pmo", "addr": "1"}]},
+        inventory=inventory,
+    )
+
+    def _mutator(state: Any) -> None:
+        state.power = 150.0
+
+    result = coordinator.apply_entity_patch("pmo", "1", _mutator)
+    assert result is True
+
+
+def test_apply_entity_patch_creates_heater_state(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """apply_entity_patch should create HeaterState for htr node (line 966)."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": [{"type": "htr", "addr": "1"}]})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes={"nodes": [{"type": "htr", "addr": "1"}]},
+        inventory=inventory,
+    )
+
+    def _mutator(state: Any) -> None:
+        state.mode = "auto"
+
+    result = coordinator.apply_entity_patch("htr", "1", _mutator)
+    assert result is True
+
+
+def test_apply_entity_patch_no_store_returns_false(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """apply_entity_patch should return False when store or inventory is missing (line 920)."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": []})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inventory,
+    )
+    coordinator._inventory = None
+    result = coordinator.apply_entity_patch("htr", "1", lambda s: None)
+    assert result is False
+
+
+def test_apply_entity_patch_unknown_type_returns_false(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """apply_entity_patch should return False for unresolvable node type (line 927)."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {"nodes": [{"type": "htr", "addr": "1"}]})
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes=None,
+        inventory=inventory,
+    )
+    result = coordinator.apply_entity_patch("", "1", lambda s: None)
+    assert result is False
+
+
+def test_apply_entity_patch_multi_type_node(
+    inventory_builder: Callable[
+        [str, Mapping[str, Any] | None, Iterable[Any] | None], coord_module.Inventory
+    ],
+) -> None:
+    """apply_entity_patch with shared addr should patch multiple types (lines 948-951)."""
+
+    hass = HomeAssistant()
+    inventory = inventory_builder("dev", {
+        "nodes": [
+            {"type": "htr", "addr": "1"},
+            {"type": "acm", "addr": "1"},
+        ]
+    })
+    coordinator = coord_module.StateCoordinator(
+        hass,
+        client=AsyncMock(),
+        base_interval=30,
+        dev_id="dev",
+        device=build_device_metadata_payload("dev"),
+        nodes={"nodes": [{"type": "htr", "addr": "1"}, {"type": "acm", "addr": "1"}]},
+        inventory=inventory,
+    )
+
+    def _mutator(state: Any) -> None:
+        state.mode = "manual"
+
+    result = coordinator.apply_entity_patch("htr", "1", _mutator)
+    assert result is True
+
+
+# ---------------------------------------------------------------------------
+# _wrap_logger: isEnabledFor with real logger (line 1884)
+# ---------------------------------------------------------------------------
+
+
+def test_wrap_logger_is_enabled_for_with_real_logger() -> None:
+    """_wrap_logger.isEnabledFor should delegate to inner logger (line 1884)."""
+
+    import logging
+
+    logger = logging.getLogger("test_coordinator_wrap")
+    logger.setLevel(logging.DEBUG)
+    proxy = coord_module._wrap_logger(logger)
+    assert proxy.isEnabledFor(logging.DEBUG) is True
+    assert proxy.isEnabledFor(logging.CRITICAL) is True
