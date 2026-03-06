@@ -6,4 +6,4 @@ from .entities import switch as _switch
 from .entities.switch import *  # noqa: F403
 
 _iter_lockable_inventory_nodes = _switch._iter_lockable_inventory_nodes  # noqa: SLF001
-_build_settings_resolver = _switch._build_settings_resolver  # noqa: SLF001
+build_settings_resolver = _switch.build_settings_resolver
