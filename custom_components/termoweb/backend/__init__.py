@@ -5,7 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from .base import Backend, BackendCapabilities, HttpClientProto, WsClientProto
-from .factory import backend_capabilities, create_backend, create_rest_client
+from .factory import (
+    backend_capabilities,
+    create_backend,
+    create_radio_client,
+    create_rest_client,
+)
 
 __all__ = [
     "Backend",
@@ -13,10 +18,12 @@ __all__ = [
     "DucaheatBackend",
     "DucaheatRESTClient",
     "HttpClientProto",
+    "RadioBackend",
     "TermoWebBackend",
     "WsClientProto",
     "backend_capabilities",
     "create_backend",
+    "create_radio_client",
     "create_rest_client",
 ]
 
@@ -34,6 +41,11 @@ def __getattr__(name: str) -> Any:
         value = mapping[name]
         globals()[name] = value
         return value
+    if name == "RadioBackend":
+        from .radio_backend import RadioBackend  # noqa: PLC0415
+
+        globals()[name] = RadioBackend
+        return RadioBackend
     if name == "TermoWebBackend":
         from .termoweb import TermoWebBackend  # noqa: PLC0415
 

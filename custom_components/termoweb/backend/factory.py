@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
+from typing import TYPE_CHECKING, Any
+
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import aiohttp_client
 
 from custom_components.termoweb.const import (
+    BRAND_RADIO,
     get_brand_api_base,
     get_brand_basic_auth,
     uses_ducaheat_backend,
@@ -14,10 +18,17 @@ from custom_components.termoweb.const import (
 from .base import Backend, BackendCapabilities, HttpClientProto
 from .rest_client import RESTClient
 
+if TYPE_CHECKING:
+    from .radio_client import RadioClient
+
 
 def _backend_class(brand: str) -> type[Backend]:
     """Return the backend class serving the given brand."""
 
+    if brand == BRAND_RADIO:
+        from .radio_backend import RadioBackend  # noqa: PLC0415
+
+        return RadioBackend
     if uses_ducaheat_backend(brand):
         from . import DucaheatBackend  # noqa: PLC0415
 
@@ -38,6 +49,16 @@ def backend_capabilities(brand: str) -> BackendCapabilities:
     """Return the optional features the brand's backend supports."""
 
     return _backend_class(brand).capabilities
+
+
+def create_radio_client(
+    host: str, port: int, dialect: str, nodes: Iterable[Mapping[str, Any]]
+) -> RadioClient:
+    """Return a radio client for the gateway at ``host:port`` and its stored nodes."""
+
+    from .radio_client import RadioClient  # noqa: PLC0415
+
+    return RadioClient(host, port, dialect, nodes)
 
 
 def create_rest_client(
