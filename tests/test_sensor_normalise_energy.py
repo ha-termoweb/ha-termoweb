@@ -84,10 +84,11 @@ def test_normalise_energy_value(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("brand", ["termoweb", "radio"])
 async def test_async_setup_entry_handles_missing_power_monitors(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, brand: str
 ) -> None:
-    """Sensor setup should tolerate inventories without power monitors."""
+    """Sensor setup tolerates missing power monitors and skips what the backend lacks."""
 
     module = importlib.import_module("custom_components.termoweb.sensor")
     entities_sensor_module = importlib.import_module(
@@ -160,9 +161,12 @@ async def test_async_setup_entry_handles_missing_power_monitors(
         _unexpected_power_monitor,
     )
 
+    heater_kwargs: list[dict[str, object]] = []
+
     def _create_heater_sensors_stub(
-        *_args: object, **_kwargs: object
+        *_args: object, **kwargs: object
     ) -> tuple[str, ...]:
+        heater_kwargs.append(kwargs)
         return ("temp-sensor", "energy-sensor", "power-sensor")
 
     monkeypatch.setattr(module, "_create_heater_sensors", _create_heater_sensors_stub)
@@ -201,6 +205,7 @@ async def test_async_setup_entry_handles_missing_power_monitors(
         client=object(),
         energy_coordinator=energy_coordinator,
         inventory=inventory,
+        brand=brand,
     )
 
     added_entities: list[object] = []
@@ -216,7 +221,12 @@ async def test_async_setup_entry_handles_missing_power_monitors(
         "energy-sensor",
         "power-sensor",
     ]
-    assert any(isinstance(entity, _DummyTotalEnergy) for entity in added_entities)
+    cloud = brand != "radio"
+    assert heater_kwargs[0]["include_energy"] is cloud
+    has_total = any(isinstance(e, _DummyTotalEnergy) for e in added_entities)
+    assert has_total is cloud
+    has_info = any(type(e).__name__ == "InstallationInfoSensor" for e in added_entities)
+    assert has_info is cloud
 
 
 def test_power_monitor_available_uses_inventory_has_node(

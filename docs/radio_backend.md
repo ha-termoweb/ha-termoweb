@@ -217,12 +217,12 @@ reconnects; it does no harm.
 | Display flash button | ❌ | Button exists and shows an error; needs a `5E 01` builder. |
 | Heater priority numbers | ❌ | Not created. |
 | Installation power limit | ❌ | Not created, not polled. |
-| Energy and power sensors | ❌ | Created but stay unknown: no energy counter is known for dialect B (`BC` returns the power record). Gating them needs a follow-up. |
+| Energy and power sensors | ❌ | Not created (`energy` capability off): no energy counter is known for dialect B (`BC` returns the power record). |
 | Energy history import service | ❌ | Logs "not supported by this backend" for radio entries. |
 | Hourly samples poller | ❌ | Gets `{}`. |
 | Gateway connectivity binary sensor | ✅ | From the listener's health tracker. |
 | Websocket debug probe service | ❌ | Not applicable. |
-| Geo data / device location | ❌ | None. |
+| Geo data / device location | ❌ | Not applicable; the location sensor is not created (`geo_data` capability off). |
 | Gateway RTC | ✅ | Local time. |
 
 ## Known gaps
@@ -234,7 +234,6 @@ reconnects; it does no harm.
 - Display flash (`5E 01`): add a builder to `protocol.py`, then implement it.
 - Energy counter: dialect A has `BC` → `BD` + u32 Wh; dialect B unknown. Not
   used by this backend yet.
-- Energy/power sensor entities are still created for radio entries.
 
 ## Setup (config flow)
 

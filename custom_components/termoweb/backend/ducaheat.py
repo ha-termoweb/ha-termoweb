@@ -992,7 +992,9 @@ class DucaheatRESTClient(RESTClient):
 class DucaheatBackend(Backend):
     """Backend wiring for Ducaheat brand accounts."""
 
-    capabilities = BackendCapabilities(lock=True, priority=True, energy_history=True)
+    capabilities = BackendCapabilities(
+        lock=True, priority=True, energy_history=True, energy=True, geo_data=True
+    )
 
     def _should_cancel_boost(self, context: BoostContext | None) -> bool:
         """Return True when accumulator updates should cancel boost."""

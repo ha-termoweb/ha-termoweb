@@ -18,6 +18,7 @@ from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from custom_components.termoweb.backend.factory import backend_capabilities
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.coordinator import EnergyStateCoordinator
 from custom_components.termoweb.domain.view import DomainStateView
@@ -149,6 +150,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     runtime = require_runtime(hass, entry.entry_id)
     coordinator = runtime.coordinator
     dev_id = runtime.dev_id
+    capabilities = backend_capabilities(runtime.brand)
     domain_view = getattr(coordinator, "domain_view", None)
     if not isinstance(domain_view, DomainStateView):
         domain_view = None
@@ -255,6 +257,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 base_name,
                 node_type=canonical_type,
                 inventory=heater_details.inventory,
+                include_energy=capabilities.energy,
             )
         )
 
@@ -305,25 +308,27 @@ async def async_setup_entry(hass, entry, async_add_entities):
         skipped_types=("thm",),
     )
 
-    uid_total = f"{DOMAIN}:{dev_id}:energy_total"
-    new_entities.append(
-        InstallationTotalEnergySensor(
-            energy_coordinator,
-            entry.entry_id,
-            dev_id,
-            uid_total,
-            heater_details,
-            domain_view,
+    if capabilities.energy:
+        uid_total = f"{DOMAIN}:{dev_id}:energy_total"
+        new_entities.append(
+            InstallationTotalEnergySensor(
+                energy_coordinator,
+                entry.entry_id,
+                dev_id,
+                uid_total,
+                heater_details,
+                domain_view,
+            )
         )
-    )
 
-    new_entities.append(
-        InstallationInfoSensor(
-            coordinator,
-            entry.entry_id,
-            dev_id,
+    if capabilities.geo_data:
+        new_entities.append(
+            InstallationInfoSensor(
+                coordinator,
+                entry.entry_id,
+                dev_id,
+            )
         )
-    )
 
     if new_entities:
         _LOGGER.debug("Adding %d TermoWeb sensors", len(new_entities))
@@ -791,6 +796,7 @@ def _create_heater_sensors(
     *,
     node_type: str | None = None,
     inventory: Inventory | None = None,
+    include_energy: bool = True,
     temperature_cls: type[HeaterTemperatureSensor] = HeaterTemperatureSensor,
     energy_cls: type[HeaterEnergyTotalSensor] = HeaterEnergyTotalSensor,
     power_cls: type[HeaterPowerSensor] = HeaterPowerSensor,
@@ -886,7 +892,7 @@ def _create_heater_sensors(
             )
         )
 
-    if target_type != "thm":
+    if target_type != "thm" and include_energy:
         energy_unique_id = build_heater_energy_unique_id(
             dev_id,
             target_type,
