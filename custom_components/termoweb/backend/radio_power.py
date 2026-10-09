@@ -172,6 +172,45 @@ class PowerManager:
         return to_off, to_restore
 
 
+MAX_INTEGRATION_GAP_S = 900.0  # never extrapolate a reading further than this
+
+
+class EnergyEstimator:
+    """Estimate each heater's energy in Wh from its heating flag and duty.
+
+    Between two power records a heater is taken to draw rated power x duty
+    while its heating flag is set (the duty byte matched a house meter's
+    pulse ratio), else nothing. The counter starts at 0 when Home Assistant
+    starts; the energy coordinator treats a lower counter as a reset.
+    """
+
+    def __init__(self, rated_power: Callable[[int], float | None]) -> None:
+        """Use ``rated_power(addr)`` (watts or None) for every integration step."""
+
+        self._rated_power = rated_power
+        self._last: dict[int, tuple[float, float]] = {}  # addr -> (time, fraction)
+        self._wh: dict[int, float] = {}
+
+    def observe(self, addr: int, heating: bool, duty_pct: int, now: float) -> None:
+        """Add the energy since the last observation, then store the new state."""
+
+        previous = self._last.get(addr)
+        rated = self._rated_power(addr)
+        if previous is not None and rated is not None:
+            since, fraction = previous
+            seconds = min(max(now - since, 0.0), MAX_INTEGRATION_GAP_S)
+            self._wh[addr] = self._wh.get(addr, 0.0) + rated * fraction * seconds / 3600
+        elif rated is not None:
+            self._wh.setdefault(addr, 0.0)
+        duty = duty_pct / 100 if 0 < duty_pct <= 100 else 1.0
+        self._last[addr] = (now, duty if heating else 0.0)
+
+    def counter_wh(self, addr: int) -> float | None:
+        """Return the estimated Wh counter, or None while the power is unknown."""
+
+        return self._wh.get(addr)
+
+
 def _int_map(raw: Any) -> dict[int, int]:
     """Return ``{"6": 1500}``-style mappings with integer keys and values."""
 
@@ -186,4 +225,4 @@ def _int_map(raw: Any) -> dict[int, int]:
     return result
 
 
-__all__ = ["PowerManager"]
+__all__ = ["EnergyEstimator", "PowerManager"]

@@ -31,7 +31,7 @@ from custom_components.termoweb.inventory import Inventory
 from .radio import protocol
 from .radio.link import RadioLinkError, ReceivedFrame
 from .radio_client import RadioClient, RadioCommandError, radio_addr
-from .ws_client import _WSStatusMixin
+from .ws_client import _WSStatusMixin, forward_ws_sample_updates
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -204,6 +204,7 @@ class RadioListener(_WSStatusMixin):
             )
             if settings:
                 self._push(node_type, addr, settings)
+            await self._push_energy(node_type, addr)
         await self._client.async_balance_power()
 
     # --- unsolicited heater frames ------------------------------------------
@@ -273,7 +274,24 @@ class RadioListener(_WSStatusMixin):
         record = await self._client.read_power_record(radio_id)
         if record is not None:
             self._push(node_type, addr, settings_from_power_record(record))
+            await self._push_energy(node_type, addr)
         await self._client.async_balance_power()
+
+    async def _push_energy(self, node_type: str, addr: str) -> None:
+        """Hand the heater's latest estimated energy counter to the energy sensors."""
+
+        samples = await self._client.get_node_samples(
+            self.dev_id, (node_type, addr), 0, 0
+        )
+        if samples:
+            forward_ws_sample_updates(
+                self.hass,
+                self.entry_id,
+                self.dev_id,
+                {node_type: {addr: samples[-1]}},
+                logger=_LOGGER,
+                log_prefix="Radio",
+            )
 
     def _push(self, node_type: str, addr: str, settings: Mapping[str, Any]) -> None:
         """Send one settings delta to the coordinator and mark the payload fresh."""

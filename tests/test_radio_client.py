@@ -674,6 +674,22 @@ async def test_power_limit_edge_cases(caplog) -> None:
 
 
 @pytest.mark.asyncio
+async def test_samples_report_the_estimated_energy_counter() -> None:
+    """With a heater's power known, each power-record read feeds the Wh estimate."""
+
+    client, links, clock = make_client()
+    assert await client.get_node_samples("dev", ("htr", "6"), 0, 1) == []
+    client.note_max_power(HEATER, 1500.0)
+    link = await client.async_connect()
+    link.reply(0xBC, bytes.fromhex("BDDB002CE43A0C0100"))  # heating, duty 12 %
+    await client.read_power_record(HEATER)
+    clock.now += 600
+    await client.read_power_record(HEATER)
+    (sample,) = await client.get_node_samples("dev", ("htr", "6"), 0, 1)
+    assert sample["counter"] == pytest.approx(1500 * 0.12 * 600 / 3600, abs=1e-3)
+
+
+@pytest.mark.asyncio
 async def test_unsupported_features() -> None:
     """Cloud-only features raise or report "no data" per call site."""
 
@@ -681,7 +697,6 @@ async def test_unsupported_features() -> None:
     for call in (client.set_acm_extra_options("dev", "7", boost_time=60),):
         with pytest.raises(RadioUnsupportedError, match="not supported over the radio"):
             await call
-    assert await client.get_node_samples("dev", ("htr", "6"), 0, 1) == []
     assert await client.get_geo_data("dev") is None
     assert links == []
 

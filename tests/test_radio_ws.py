@@ -288,6 +288,33 @@ async def test_power_request_over_the_limit_switches_the_heater_off() -> None:
 
 
 @pytest.mark.asyncio
+async def test_energy_estimate_is_pushed_to_the_energy_sensors(monkeypatch) -> None:
+    """Each power-record read forwards the estimated Wh counter like a WS sample."""
+
+    forwarded: list[tuple] = []
+    monkeypatch.setattr(
+        radio_ws,
+        "forward_ws_sample_updates",
+        lambda hass, entry_id, dev_id, updates, **kw: forwarded.append(
+            (entry_id, dev_id, updates)
+        ),
+    )
+    listener, client, links, coordinator, sleeper, runtime, _ = build()
+    client.note_max_power(6, 1500.0)
+    listener.start()
+    await settle()
+    link = links[0]
+    link.reply(0xBC, POWER_RECORD_HEATING)
+    link.deliver(received(HEATER, POWER_REQUEST))
+    await settle(60)
+
+    (entry_id, dev_id, updates), *_ = forwarded
+    assert (entry_id, dev_id) == ("entry", DEV_ID)
+    assert set(updates) == {"htr"} and "counter" in updates["htr"]["6"]
+    await listener.stop()
+
+
+@pytest.mark.asyncio
 async def test_frames_without_usable_content() -> None:
     """Undecodable reports are confirmed but push nothing; noise is ignored."""
 

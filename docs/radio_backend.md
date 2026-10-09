@@ -147,7 +147,7 @@ re-reads it.
 | `get_power_limit` | None ("no data"); never polled (`power_limit` False) | ❌ |
 | `set_power_limit` | `RadioUnsupportedError`; entity not created | ❌ |
 | `set_acm_extra_options` | `RadioUnsupportedError` (accumulator boost defaults) | ❌ |
-| `get_node_samples` | `[]` ("no data"): heaters keep no history. The energy coordinator then logs "no samples" and moves on. | ❌ |
+| `get_node_samples` | One sample: the estimated Wh counter (see Local power manager); `[]` while the heater's power is unknown. No history. | 🟡 |
 | `get_geo_data` | None ("no data"); setup treats it as optional | ❌ |
 | `get_rtc_time` | Home Assistant local time as `{"y","n","d","h","m","s"}`, the cloud shape. The radio station is the heaters' clock master. | ✅ |
 
@@ -217,7 +217,7 @@ reconnects; it does no harm.
 | Display flash button | 🟡 | `5E 01`: dialect A answers `5F 55`; a dialect-B heater acks it (no reply record). The visible flash on dialect B is not yet confirmed. |
 | Heater priority numbers | 🟡 | Local power manager (see below). Higher numbers win. |
 | Installation power limit | 🟡 | Local power manager (see below). Needs each heater's power: reported by dialect-A heaters, entered in the options for dialect B. |
-| Energy and power sensors | ❌ | Not created (`energy` capability off): no energy counter is known for dialect B (`BC` returns the power record). |
+| Energy and power sensors | 🟡 | Estimated: rated power × duty while the heating flag is set, integrated between power records. Needs each heater's power (options). Starts at 0 when Home Assistant starts. |
 | Energy history import service | ❌ | Logs "not supported by this backend" for radio entries. |
 | Hourly samples poller | ❌ | Gets `{}`. |
 | Gateway connectivity binary sensor | ✅ | From the listener's health tracker. |
@@ -248,6 +248,16 @@ power manager (`backend/radio_power.py`) sheds load:
 Higher priority numbers win. While switched off, a heater shows as Off in Home
 Assistant.
 
+Energy: the heaters keep no energy counter on the radio, so the client
+estimates one (`EnergyEstimator`). Between two power records a heater draws
+its power × duty (byte 6 of the record, ≈ the measured pulse ratio) while its
+heating flag is set, and nothing otherwise; a gap longer than 15 minutes is
+cut off. The counter feeds the normal energy and power sensors through
+`get_node_samples`, and the listener pushes it to the energy sensors after
+every power-record read (the energy coordinator itself polls only hourly). It
+restarts at 0 when Home Assistant restarts, which the
+energy sensors treat as a meter reset.
+
 Settings live in the entry options (`radio_power`): the limit and priorities
 are set through the usual number entities; each heater's power in watts is set
 in the integration's options (**Configure**). Dialect-A heaters report their
@@ -261,8 +271,9 @@ own power in `BE`, which is used when no power is entered.
 - Keypad lock on dialect B: acked; whether the keypad locks is not yet confirmed.
 - Boost, runback and EASY on dialect B: `D2` answers `D3 00 00`, `D6` answers `D7 19`, `D4` is ack only; no effect seen. Their meaning is unknown.
 - Display flash on dialect-B heaters: the command is acked, the visible flash is not yet confirmed.
-- Energy counter: dialect A has `BC` → `BD` + u32 Wh; dialect B unknown. Not
-  used by this backend yet.
+- Energy counter: dialect A has `BC` → `BD` + u32 Wh (not used yet; the
+  estimate is used for both dialects); dialect B has none, so energy is
+  estimated.
 
 ## Setup (config flow)
 

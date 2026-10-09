@@ -217,7 +217,7 @@ def test_backend_capabilities_follow_the_backend_class() -> None:
             lock=True, priority=True, energy_history=True, energy=True, geo_data=True
         )
     radio = backend_capabilities("radio")
-    assert not radio.energy and not radio.geo_data
+    assert radio.energy and not radio.geo_data  # estimated energy, no location
     assert Backend.capabilities == BackendCapabilities()
     backend = create_backend(brand=BRAND_DUCAHEAT, client=DummyHttpClient())
     assert backend.capabilities is backend_capabilities(BRAND_DUCAHEAT)

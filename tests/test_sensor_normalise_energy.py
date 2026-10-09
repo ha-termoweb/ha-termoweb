@@ -222,9 +222,8 @@ async def test_async_setup_entry_handles_missing_power_monitors(
         "power-sensor",
     ]
     cloud = brand != "radio"
-    assert heater_kwargs[0]["include_energy"] is cloud
-    has_total = any(isinstance(e, _DummyTotalEnergy) for e in added_entities)
-    assert has_total is cloud
+    assert heater_kwargs[0]["include_energy"] is True  # radio: estimated energy
+    assert any(isinstance(e, _DummyTotalEnergy) for e in added_entities)
     has_info = any(type(e).__name__ == "InstallationInfoSensor" for e in added_entities)
     assert has_info is cloud
 

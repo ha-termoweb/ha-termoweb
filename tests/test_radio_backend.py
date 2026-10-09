@@ -49,7 +49,11 @@ def test_capabilities_switch_off_cloud_only_features() -> None:
     assert factory.backend_capabilities(BRAND_RADIO) == _mod(
         ".base"
     ).BackendCapabilities(
-        lock=True, power_limit=True, priority=True, energy_history=False
+        lock=True,
+        power_limit=True,
+        priority=True,
+        energy_history=False,
+        energy=True,
     )
     assert make_backend().capabilities is factory.backend_capabilities(BRAND_RADIO)
 
