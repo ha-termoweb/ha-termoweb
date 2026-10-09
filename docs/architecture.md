@@ -20,7 +20,8 @@ integration. **v2.0.2** is the clean release of this architecture.
 - **Vendor isolation.** TermoWeb vs Ducaheat differences exist only in
   backend/planner/codec modules. Entities and platforms remain vendor-agnostic:
   where a feature exists on only some backends (the lock platform, the
-  installation power limit), callers ask `backend_capabilities(brand)` for the
+  installation power limit, heater priority, energy history import), callers
+  ask `backend_capabilities(brand)` for the
   backend's declared `BackendCapabilities` instead of testing the brand.
 - **Pydantic on the wire only.** Payload parsing/serialization uses Pydantic
   models; domain state is plain dataclasses or standard Python types.
@@ -94,6 +95,12 @@ flowchart LR
         Socket[Socket.IO / Engine.IO]
     end
 
+    subgraph LAN[Local radio · brand "radio"]
+        RadioClient[RadioClient + RadioListener]
+        Gateway[ESP32 radio gateway · TCP 2323]
+        Heaters[Heaters · 869 MHz]
+    end
+
     User --> Setup
     Setup --> Runtime
     Runtime --> Inventory
@@ -104,12 +111,32 @@ flowchart LR
     REST --> Deltas
     Socket --> Deltas
 
+    Backend -. radio brand .-> RadioClient
+    RadioClient <--> Gateway
+    Gateway <--> Heaters
+    RadioClient --> Deltas
+
     Inventory --> Store
     Deltas --> Store
     Store --> View
     View --> Entities
     View --> Services
 ```
+
+## Radio backend
+
+The `radio` brand reaches heaters directly through a home-built ESP32 +
+CC1101 gateway on the LAN instead of a cloud. It follows the same boundary:
+`backend/radio/` holds the framing and payload protocol, `codecs/radio_codec.py`
+maps radio records to the canonical settings dict, `planner/radio_planner.py`
+orders writes, and `backend/radio_client.py` / `radio_ws.py` /
+`radio_backend.py` implement `HttpClientProto`, `WsClientProto` and `Backend`.
+`RadioListener` takes the websocket client's place: it answers heater traffic,
+reads every heater periodically and pushes `NodeSettingsDelta`s through
+`coordinator.handle_ws_deltas`, with the same health tracker that suspends
+coordinator polling. Cloud-only features are switched off with
+`BackendCapabilities` (`priority`, `energy_history`, `power_limit`, `lock`).
+See `radio_backend.md` for the capability matrix.
 
 ## Operational constraints
 

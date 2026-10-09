@@ -25,6 +25,7 @@ CONF_BRAND: Final = "brand"
 BRAND_TERMOWEB: Final = "termoweb"
 BRAND_DUCAHEAT: Final = "ducaheat"
 BRAND_TEVOLVE: Final = "tevolve"
+BRAND_RADIO: Final = "radio"  # local ESP32 radio gateway, no cloud
 DEFAULT_BRAND: Final = BRAND_TERMOWEB
 
 BRAND_LABELS: Final[Mapping[str, str]] = {

@@ -137,6 +137,8 @@ class BackendCapabilities:
 
     lock: bool = False
     power_limit: bool = False
+    priority: bool = False
+    energy_history: bool = False
 
 
 class Backend(ABC):

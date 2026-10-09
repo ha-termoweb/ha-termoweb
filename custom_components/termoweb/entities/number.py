@@ -131,7 +131,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
         runtime,
         default_name_simple=default_name,
     )
-    for node_type, _node, addr_str, base_name in heater_details.iter_metadata():
+    priority_nodes = (
+        heater_details.iter_metadata()
+        if backend_capabilities(runtime.brand).priority
+        else ()
+    )
+    for node_type, _node, addr_str, base_name in priority_nodes:
         canonical_type = normalize_node_type(node_type, use_default_when_falsey=True)
         canonical_addr = normalize_node_addr(addr_str, use_default_when_falsey=True)
         if not canonical_type or not canonical_addr:

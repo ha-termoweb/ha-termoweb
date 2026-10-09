@@ -500,3 +500,31 @@ async def test_async_setup_entry_creates_number_entities(
         assert getattr(entity, "_attr_has_entity_name", None) is True
         assert getattr(entity, "_attr_entity_category", None) is not None
         assert getattr(entity, "entity_id", None) is None
+
+
+@pytest.mark.asyncio
+async def test_async_setup_entry_skips_priority_without_capability() -> None:
+    """A backend without priority/power-limit capabilities gets no such numbers."""
+
+    hass = HomeAssistant()
+    entry_id = "entry-radio-number"
+    dev_id = "dev-radio-number"
+    raw_nodes = [{"addr": "6", "name": "Heater 6", "type": "htr"}]
+    inventory = heater_module.Inventory(dev_id, build_node_inventory(raw_nodes))
+    build_entry_runtime(
+        hass=hass,
+        entry_id=entry_id,
+        dev_id=dev_id,
+        inventory=inventory,
+        coordinator=FakeCoordinator(hass, dev_id=dev_id),
+        brand="radio",
+    )
+    calls: list[list[object]] = []
+
+    await async_setup_entry(
+        hass,
+        type("entry", (), {"entry_id": entry_id})(),
+        calls.append,
+    )
+
+    assert calls == []

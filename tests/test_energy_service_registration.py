@@ -138,3 +138,31 @@ async def test_service_logs_rejected_filters(
 
     import_fn.assert_called_once()
     assert "import_energy_history task failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_service_skips_backends_without_energy_history(
+    inventory_from_map, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Entries whose backend has no energy history are skipped with an error."""
+
+    services = _StubServices(existing=False)
+    hass = SimpleNamespace(services=services, data={energy.DOMAIN: {}})
+    entry = SimpleNamespace(entry_id="entry-radio")
+    build_entry_runtime(
+        hass=hass,
+        entry_id=entry.entry_id,
+        dev_id="dev-radio",
+        inventory=inventory_from_map({"htr": ["6"]}, dev_id="dev-radio"),
+        config_entry=entry,
+        brand="radio",
+    )
+    import_fn = AsyncMock()
+
+    await async_register_import_energy_history_service(hass, import_fn)
+    _, _, handler = services.registrations[0]
+    with caplog.at_level(logging.ERROR):
+        await handler(SimpleNamespace(data={}))
+
+    import_fn.assert_not_called()
+    assert "not supported by this backend" in caplog.text
