@@ -1,7 +1,7 @@
 {
   "config": {
     "step": {
-      "user": {
+      "cloud": {
         "title": "Подключение к семейным обогревателям TermoWeb",
         "description": "Версия: {version}\n\nВыберите марку TermoWeb или Ducaheat и введите учетные данные.",
         "data": {

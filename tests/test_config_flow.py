@@ -133,7 +133,7 @@ def test_async_step_reconfigure_missing_entry_aborts() -> None:
     assert result == {"type": "abort", "reason": "no_config_entry"}
 
 
-def test_async_step_user_initial_form(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_async_step_cloud_initial_form(monkeypatch: pytest.MonkeyPatch) -> None:
     hass = HomeAssistant()
     flow = _create_flow(hass)
 
@@ -142,10 +142,10 @@ def test_async_step_user_initial_form(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(config_flow, "async_get_integration_version", fake_version)
 
-    result = asyncio.run(flow.async_step_user())
+    result = asyncio.run(flow.async_step_cloud())
 
     assert result["type"] == "form"
-    assert result["step_id"] == "user"
+    assert result["step_id"] == "cloud"
     assert result["errors"] == {}
     assert result["description_placeholders"] == {"version": "1.2.3"}
 
@@ -156,7 +156,7 @@ def test_async_step_user_initial_form(monkeypatch: pytest.MonkeyPatch) -> None:
         _schema_default(schema, "poll_interval")
 
 
-def test_async_step_user_success(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_async_step_cloud_success(monkeypatch: pytest.MonkeyPatch) -> None:
     hass = HomeAssistant()
     flow = _create_flow(hass)
 
@@ -174,7 +174,7 @@ def test_async_step_user_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config_flow, "_validate_login", fake_validate)
 
     result = asyncio.run(
-        flow.async_step_user(
+        flow.async_step_cloud(
             {
                 "brand": config_flow.BRAND_DUCAHEAT,
                 "username": "  new_user  ",
@@ -194,7 +194,7 @@ def test_async_step_user_success(monkeypatch: pytest.MonkeyPatch) -> None:
     }
 
 
-def test_async_step_user_success_tevolve(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_async_step_cloud_success_tevolve(monkeypatch: pytest.MonkeyPatch) -> None:
     hass = HomeAssistant()
     flow = _create_flow(hass)
 
@@ -212,7 +212,7 @@ def test_async_step_user_success_tevolve(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(config_flow, "_validate_login", fake_validate)
 
     result = asyncio.run(
-        flow.async_step_user(
+        flow.async_step_cloud(
             {
                 "brand": config_flow.BRAND_TEVOLVE,
                 "username": "  tv_user  ",
@@ -241,7 +241,7 @@ def test_async_step_user_success_tevolve(monkeypatch: pytest.MonkeyPatch) -> Non
         (lambda: RuntimeError("boom"), "unknown"),
     ],
 )
-def test_async_step_user_errors(
+def test_async_step_cloud_errors(
     monkeypatch: pytest.MonkeyPatch, raised_factory: Any, expected: str
 ) -> None:
     hass = HomeAssistant()
@@ -263,7 +263,7 @@ def test_async_step_user_errors(
         "username": "  trouble  ",
         "password": "pw",
     }
-    result = asyncio.run(flow.async_step_user(user_input))
+    result = asyncio.run(flow.async_step_cloud(user_input))
 
     assert result["type"] == "form"
     assert result["errors"] == {"base": expected}

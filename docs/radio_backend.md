@@ -229,23 +229,42 @@ reconnects; it does no harm.
   used by this backend yet.
 - Energy/power sensor entities are still created for radio entries.
 
-## What PR 4 must do
+## Setup (config flow)
 
-- Config flow: ask for host and port, then work out the dialect and the
-  network id from the heater's own traffic. A dialect-B network id belongs to
-  one installation (there is no default), and registration and power-request
-  frames carry it in bytes 1-2. Then scan for heaters, and store the dialect,
-  the network id and the node list as `[{"type": "htr", "addr": "<decimal radio id>", "name": ...}]`.
-  Store addresses as plain decimal strings without leading zeros (`"6"`, not
-  `"06"`): the listener matches heater frames by `str(src)`.
-- Setup: build the client with `create_radio_client(host, port, dialect, nodes, network_id)`
-  and the backend with `create_backend(brand=BRAND_RADIO, client=...)` instead
-  of `create_rest_client`; skip username/password.
-- `list_devices` connects to the gateway and raises `RadioLinkError` when it
-  cannot, or `RadioError` when the gateway reports no MAC. Map both to
-  `ConfigEntryNotReady` (the current handler only catches
-  `TimeoutError`/`ClientError`/`BackendRateLimitError`).
-- Unload: `RadioListener.stop()` closes the gateway connection.
-- Do not add `"radio"` to `BRAND_LABELS` without a separate flow branch; the
-  cloud login form would offer it.
-- Manifest: no new requirements (the radio package uses only asyncio).
+The first step is a menu: **cloud** (the existing brand + login form) or
+**radio**.
+
+The radio form asks for host, port (2323), an optional dialect (`auto`, `A`,
+`B`) and an optional network id (4 hex digits).
+
+1. `probe_gateway` connects with auto-ack off (nothing is transmitted) and
+   reads the gateway MAC from the `# Q` line. The MAC becomes the `dev_id`
+   and the entry's unique id (`radio:<mac>`). No MAC → error
+   `no_gateway_mac`.
+2. `radio_discover` is a progress step running `discover_radio`:
+   - with a dialect and a known network id (given, or dialect A's fixed
+     `1B30`), it skips listening;
+   - otherwise `discovery.discover_network` alternates 30 s listening windows
+     over dialects B then A, up to 3 minutes. Every CRC-valid data frame
+     gives the network id (bytes 1-2) and its sender. Dialect-B network ids
+     belong to one installation, so there is no default to fall back on;
+   - `discovery.probe_heaters` sends `B8` to addresses 2-32 plus every
+     sender heard. Addresses that answer with a status record are the
+     heaters.
+3. The entry stores `brand: radio`, `host`, `port`, `dialect`, `network_id`
+   (hex) and `nodes` as `[{"type": "htr", "addr": "6", "name": "Heater 6"}]`.
+   Addresses are plain decimal strings: the listener matches frames by
+   `str(src)`.
+
+Errors: `cannot_connect_radio`, `no_gateway_mac`, `no_traffic`,
+`no_heaters`, `invalid_network_id`.
+
+Reconfigure changes host and port. With **Scan for heaters again** it
+re-runs the scan with the stored dialect and network id, and replaces the
+node list.
+
+Setup builds the client with `create_radio_client(host, port, dialect, nodes,
+network_id)`. `RadioLinkError` and `RadioError` from `list_devices` raise
+`ConfigEntryNotReady`, so Home Assistant retries while the gateway is
+offline. Unload stops the listener, which closes the connection.
+

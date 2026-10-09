@@ -1,7 +1,7 @@
 {
   "config": {
     "step": {
-      "user": {
+      "cloud": {
         "title": "Koble til TermoWeb-familiens varmeovner",
         "description": "Versjon: {version}\n\nVelg TermoWeb- eller Ducaheat-merke, og skriv inn kontoinformasjonen din.",
         "data": {

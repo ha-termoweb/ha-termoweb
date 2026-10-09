@@ -1,7 +1,7 @@
 {
   "config": {
     "step": {
-      "user": {
+      "cloud": {
         "title": "Liity TermoWeb-perheen lämmittimiin",
         "description": "Versio: {version}__\n\nValitse TermoWeb- tai Ducaheat-tuotemerkki ja anna tilitietosi.",
         "data": {

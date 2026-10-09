@@ -1,7 +1,7 @@
 {
   "config": {
     "step": {
-      "user": {
+      "cloud": {
         "title": "TermoWeb aile ısıtıcılarına bağlanın",
         "description": "Versiyon: {version}\n\nTermoWeb veya Ducaheat markanızı seçin ve hesap kimlik bilgilerinizi girin.",
         "data": {

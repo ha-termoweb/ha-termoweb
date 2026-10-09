@@ -2,6 +2,14 @@
   "config": {
     "step": {
       "user": {
+        "title": "How do your heaters connect?",
+        "description": "Choose the cloud account if you use the TermoWeb, Ducaheat or Tevolve app. Choose the radio gateway if you built the ESP32 radio gateway and want to control the heaters locally, without the cloud.",
+        "menu_options": {
+          "cloud": "Cloud account (TermoWeb, Ducaheat or Tevolve app)",
+          "radio": "Local radio gateway (ESP32 + CC1101)"
+        }
+      },
+      "cloud": {
         "title": "Connect to TermoWeb family heaters",
         "description": "Choose your TermoWeb, Ducaheat, or Tevolve brand and enter your account credentials. Tevolve uses the Ducaheat backend.",
         "data": {
@@ -9,10 +17,41 @@
           "username": "Email",
           "password": "Password"
         }
+      },
+      "radio": {
+        "title": "Connect to the radio gateway",
+        "description": "Enter the IP address of your ESP32 radio gateway. Leave the dialect on \"auto\" and the network id empty: the integration listens to your heaters to learn them. This can take up to 3 minutes. Keep the gateway near the heaters.",
+        "data": {
+          "host": "Gateway IP address",
+          "port": "Port",
+          "dialect": "Radio dialect",
+          "network_id": "Network id (4 hex digits, optional)"
+        }
+      },
+      "radio_discover": { "title": "Looking for your heaters" },
+      "reconfigure_radio": {
+        "title": "Change the radio gateway",
+        "description": "Change the gateway address. Tick \"Scan for heaters again\" if you added or removed a heater.",
+        "data": {
+          "host": "Gateway IP address",
+          "port": "Port",
+          "rescan": "Scan for heaters again"
+        }
       }
     },
-    "error": {},
-    "abort": {}
+    "error": {
+      "cannot_connect_radio": "Cannot connect to the radio gateway. Check the IP address and port, and that the gateway is powered on.",
+      "no_gateway_mac": "The radio gateway did not report its MAC address. Update the gateway firmware.",
+      "no_traffic": "No heater radio traffic was heard. Move the gateway closer to a heater and try again, or enter the dialect and network id.",
+      "no_heaters": "No heater answered. Move the gateway closer to the heaters and try again.",
+      "invalid_network_id": "The network id must be 4 hex digits, for example 1A2B."
+    },
+    "abort": {
+      "already_configured": "This gateway is already set up.",
+      "reconfigure_successful": "The settings were saved.",
+      "no_config_entry": "The integration entry was not found."
+    },
+    "progress": { "radio_discover": "Listening for heater radio traffic, then checking each heater. This can take up to 3 minutes." }
   },
   "options": {
     "step": {
@@ -53,7 +92,9 @@
       "accumulator_current_charge": { "name": "Current charge" },
       "accumulator_target_charge": { "name": "Target charge" }
     },
-    "lock": { "child_lock": { "name": "Child lock" } }
+    "lock": {
+      "child_lock": { "name": "Child lock" }
+    }
   },
   "services": {
     "set_acm_preset": {

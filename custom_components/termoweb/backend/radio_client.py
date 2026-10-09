@@ -96,7 +96,7 @@ def radio_addr(addr: Any) -> int:
     return value
 
 
-def _dev_id_from_mac(mac: str | None) -> str | None:
+def dev_id_from_mac(mac: str | None) -> str | None:
     """Return a MAC as lowercase hex without separators, or None."""
 
     if not mac:
@@ -387,7 +387,7 @@ class RadioClient:
         """Return the radio gateway as the single device, keyed by its MAC."""
 
         info = (await self.async_connect()).gateway_info
-        dev_id = _dev_id_from_mac(None if info is None else info.mac)
+        dev_id = dev_id_from_mac(None if info is None else info.mac)
         if info is None or dev_id is None:
             raise RadioError("the radio gateway did not report its MAC address")
         return [
@@ -558,5 +558,6 @@ __all__ = [
     "RadioCommandError",
     "RadioError",
     "RadioUnsupportedError",
+    "dev_id_from_mac",
     "radio_addr",
 ]

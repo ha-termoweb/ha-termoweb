@@ -1,7 +1,7 @@
 {
   "config": {
     "step": {
-      "user": {
+      "cloud": {
         "title": "Povežite se s grijačima TermoWeb obitelji",
         "description": "Verzija: {version}\n\nOdaberite svoju TermoWeb ili Ducaheat marku i unesite vjerodajnice računa.",
         "data": {

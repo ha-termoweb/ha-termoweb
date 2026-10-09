@@ -8,6 +8,8 @@ custom_components/termoweb/__init__.py :: _async_probe_unknown_node_types
     Log discovery probes for node types not yet supported.
 custom_components/termoweb/__init__.py :: async_list_devices
     Call ``list_devices`` logging auth/connection issues consistently.
+custom_components/termoweb/__init__.py :: _create_client
+    Return the cloud REST client, or the radio gateway client for radio entries.
 custom_components/termoweb/__init__.py :: async_setup_entry
     Set up the TermoWeb integration for a config entry.
 custom_components/termoweb/__init__.py :: async_setup_entry._async_handle_hass_stop
@@ -790,10 +792,38 @@ custom_components/termoweb/config_flow.py :: _login_schema
     Build the login form schema with provided defaults.
 custom_components/termoweb/config_flow.py :: _validate_login
     Ensure the provided credentials authenticate successfully.
+custom_components/termoweb/config_flow.py :: RadioSetupError.__init__
+    Store the error key.
+custom_components/termoweb/config_flow.py :: _radio_schema
+    Build the radio gateway form schema with provided defaults.
+custom_components/termoweb/config_flow.py :: _reconfigure_radio_schema
+    Build the radio reconfigure schema: address plus an optional re-scan.
+custom_components/termoweb/config_flow.py :: parse_network_id
+    Return 4 hex digits as two bytes, None when blank; raise ValueError otherwise.
+custom_components/termoweb/config_flow.py :: probe_gateway
+    Connect to the radio gateway without transmitting; return its ``dev_id``.
+custom_components/termoweb/config_flow.py :: discover_radio
+    Learn the network (unless given), then confirm heaters by address.
+custom_components/termoweb/config_flow.py :: radio_entry_data
+    Return config entry data for a discovered radio installation.
+custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.__init__
+    Initialise radio discovery state.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow._handle_login_workflow
     Handle shared login form validation and error handling.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_user
+    Offer the cloud account or the local radio gateway.
+custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_cloud
     Collect credentials and create the config entry.
+custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_radio
+    Collect the radio gateway address, then discover the heater network.
+custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_radio_discover
+    Listen for heater traffic and scan heaters while showing progress.
+custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_radio_finish
+    Create (or update) the radio entry, or return to the form with the error.
+custom_components/termoweb/config_flow.py :: TermoWebConfigFlow._reconfigure_entry
+    Return the entry being reconfigured, or None during initial setup.
+custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_reconfigure_radio
+    Change the gateway address; optionally scan for heaters again.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_reconfigure
     Reconfigure username/password (no use_push).
 custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.__init__
@@ -1965,6 +1995,14 @@ custom_components/termoweb/backend/radio/link.py :: RadioLink._fail_waiters
     Fail and forget every pending waiter.
 custom_components/termoweb/backend/radio/link.py :: RadioLink._wait
     Return ``future``'s result, or None if the injected sleep finishes first.
+custom_components/termoweb/backend/radio/discovery.py :: listen_once
+    Listen in ``dialect`` for up to ``window_s``; return the first network heard.
+custom_components/termoweb/backend/radio/discovery.py :: listen_once._on_frame
+    Record the network id and sender of every valid data frame.
+custom_components/termoweb/backend/radio/discovery.py :: discover_network
+    Alternate listening windows across ``dialects`` until a network is heard.
+custom_components/termoweb/backend/radio/discovery.py :: probe_heaters
+    Return the status of every candidate address that answers a ``B8`` request.
 custom_components/termoweb/backend/radio_backend.py :: RadioBackend.create_ws_client
     Return the radio listener that plays the websocket client's role.
 custom_components/termoweb/backend/radio_backend.py :: RadioBackend.fetch_hourly_samples
@@ -1975,7 +2013,7 @@ custom_components/termoweb/backend/radio_client.py :: _local_now
     Return Home Assistant's local time; the radio station is the clock master.
 custom_components/termoweb/backend/radio_client.py :: radio_addr
     Return a node address as a radio id 1-254 (decimal string in the inventory).
-custom_components/termoweb/backend/radio_client.py :: _dev_id_from_mac
+custom_components/termoweb/backend/radio_client.py :: dev_id_from_mac
     Return a MAC as lowercase hex without separators, or None.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.__init__
     Store the gateway address, dialect and stored node list; nothing connects.

@@ -1,7 +1,7 @@
 {
   "config": {
     "step": {
-      "user": {
+      "cloud": {
         "title": "Pripojenie k ohrievačom rodiny TermoWeb",
         "description": "Verzia: {version}\n\nVyberte si značku TermoWeb alebo Ducaheat a zadajte prihlasovacie údaje k účtu.",
         "data": {

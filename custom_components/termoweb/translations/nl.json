@@ -1,7 +1,7 @@
 {
   "config": {
     "step": {
-      "user": {
+      "cloud": {
         "title": "Verbinding maken met TermoWeb familieverwarmers",
         "description": "Versie: {version}\n\nKies uw merk TermoWeb of Ducaheat en voer uw accountgegevens in.",
         "data": {
