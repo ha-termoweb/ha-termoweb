@@ -4,16 +4,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from .base import Backend, HttpClientProto, WsClientProto
-from .factory import create_backend, create_rest_client
+from .base import Backend, BackendCapabilities, HttpClientProto, WsClientProto
+from .factory import backend_capabilities, create_backend, create_rest_client
 
 __all__ = [
     "Backend",
+    "BackendCapabilities",
     "DucaheatBackend",
     "DucaheatRESTClient",
     "HttpClientProto",
     "TermoWebBackend",
     "WsClientProto",
+    "backend_capabilities",
     "create_backend",
     "create_rest_client",
 ]

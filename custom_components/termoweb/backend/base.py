@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
 import typing
-from typing import Any, Protocol
+from typing import Any, ClassVar, Protocol
 
 from homeassistant.util import dt as dt_util
 
@@ -131,8 +131,18 @@ class BoostContext:
     mode: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class BackendCapabilities:
+    """Optional features a backend supports, so nothing outside backend/ branches on brand."""
+
+    lock: bool = False
+    power_limit: bool = False
+
+
 class Backend(ABC):
     """Base class for brand-specific integration backends."""
+
+    capabilities: ClassVar[BackendCapabilities] = BackendCapabilities()
 
     def __init__(self, *, brand: str, client: HttpClientProto) -> None:
         """Initialize backend metadata."""

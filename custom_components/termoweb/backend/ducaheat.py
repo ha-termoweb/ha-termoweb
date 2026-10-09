@@ -12,6 +12,7 @@ from aiohttp import ClientResponseError
 
 from custom_components.termoweb.backend.base import (
     Backend,
+    BackendCapabilities,
     BoostContext,
     WsClientProto,
     fetch_normalised_hourly_samples,
@@ -990,6 +991,8 @@ class DucaheatRESTClient(RESTClient):
 
 class DucaheatBackend(Backend):
     """Backend wiring for Ducaheat brand accounts."""
+
+    capabilities = BackendCapabilities(lock=True)
 
     def _should_cancel_boost(self, context: BoostContext | None) -> bool:
         """Return True when accumulator updates should cancel boost."""

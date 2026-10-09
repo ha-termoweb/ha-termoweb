@@ -258,8 +258,12 @@ custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._run_resub
     Attempt a single subscription refresh after a resubscribe request.
 custom_components/termoweb/backend/ducaheat_ws.py :: DucaheatWSClient._replay_subscription_paths
     Replay cached subscription paths after a reconnect.
+custom_components/termoweb/backend/factory.py :: _backend_class
+    Return the backend class serving the given brand.
 custom_components/termoweb/backend/factory.py :: create_backend
     Create a backend for the given brand.
+custom_components/termoweb/backend/factory.py :: backend_capabilities
+    Return the optional features the brand's backend supports.
 custom_components/termoweb/backend/factory.py :: create_rest_client
     Return a REST client configured for the selected brand.
 custom_components/termoweb/backend/rest_client.py :: RESTClient.__init__

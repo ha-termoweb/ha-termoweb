@@ -22,7 +22,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.event import async_call_later
 
-from .backend import Backend, create_backend, create_rest_client
+from .backend import Backend, backend_capabilities, create_backend, create_rest_client
 from .backend.debug import build_unknown_node_probe_requests
 from .backend.rest_client import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend.sanitize import redact_text
@@ -35,7 +35,6 @@ from .const import (
     DOMAIN,
     MIN_POLL_INTERVAL,
     signal_ws_status,
-    uses_ducaheat_backend,
 )
 from .coordinator import (
     DeviceMetadata,
@@ -68,9 +67,9 @@ LOCK_PLATFORMS = ["lock"]
 
 
 def _platforms_for_brand(brand: str) -> list[str]:
-    """Return entity platforms enabled for the configured brand."""
+    """Return entity platforms enabled for the configured brand's backend."""
 
-    if uses_ducaheat_backend(brand):
+    if backend_capabilities(brand).lock:
         return [*PLATFORMS, *LOCK_PLATFORMS]
     return list(PLATFORMS)
 
