@@ -10,6 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from custom_components.termoweb import energy as energy_module
+from custom_components.termoweb.backend.factory import backend_capabilities
 from custom_components.termoweb.const import DOMAIN
 from custom_components.termoweb.energy import (
     async_import_energy_history as _async_import_energy_history_impl,
@@ -112,6 +113,12 @@ async def async_register_import_energy_history_service(
             if not isinstance(runtime, EntryRuntime):
                 continue
             ent = runtime.config_entry
+            if not backend_capabilities(runtime.brand).energy_history:
+                logger.error(
+                    "%s: energy history import is not supported by this backend",
+                    runtime.dev_id,
+                )
+                continue
             inventory = runtime.inventory
             if not isinstance(inventory, Inventory):
                 entry_entry_id = getattr(ent, "entry_id", "<unknown>")

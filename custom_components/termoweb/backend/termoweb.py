@@ -25,7 +25,9 @@ TermoWebWSClient = getattr(termoweb_ws, "TermoWebWSClient", WebSocketClient)
 class TermoWebBackend(Backend):
     """Backend for the TermoWeb brand."""
 
-    capabilities = BackendCapabilities(power_limit=True)
+    capabilities = BackendCapabilities(
+        power_limit=True, priority=True, energy_history=True
+    )
 
     def _resolve_ws_client_cls(self) -> type[WsClientProto]:
         """Return the websocket client class for TermoWeb."""
