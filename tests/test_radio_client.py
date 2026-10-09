@@ -547,6 +547,30 @@ async def test_lock_toggle() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dialect_b_lock_is_ack_only_and_remembered() -> None:
+    """A dialect-B heater acks BA without a reply; the written state is reported."""
+
+    client, links, _ = make_client()
+    link = await client.async_connect()
+    link.replies.pop(0xBA)  # dialect B sends no BB record
+    assert "lock" not in await client.get_node_settings("dev", ("htr", "6"))
+    await client.set_node_lock("dev", ("htr", "6"), lock=True)
+    assert (await client.get_node_settings("dev", ("htr", "6")))["lock"] is True
+
+
+@pytest.mark.asyncio
+async def test_dialect_a_lock_needs_its_reply() -> None:
+    """Dialect A still requires BB 55; nothing is remembered when it fails."""
+
+    client, links, _ = make_client("A")
+    link = await client.async_connect()
+    link.replies.pop(0xBA)
+    with pytest.raises(RadioCommandError, match="sent no reply"):
+        await client.set_node_lock("dev", ("htr", "6"), lock=True)
+    assert "lock" not in await client.get_node_settings("dev", ("htr", "6"))
+
+
+@pytest.mark.asyncio
 async def test_heater_boost_toggle_and_accumulator_boost_unsupported(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

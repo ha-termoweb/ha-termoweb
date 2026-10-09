@@ -43,13 +43,13 @@ def test_brand_constant_and_backend_class() -> None:
 
 
 def test_capabilities_switch_off_cloud_only_features() -> None:
-    """No lock, power limit, priority or energy history over radio."""
+    """Radio: keypad lock; no power limit, priority or energy history."""
 
     factory = _mod(".factory")
     assert factory.backend_capabilities(BRAND_RADIO) == _mod(
         ".base"
     ).BackendCapabilities(
-        lock=False, power_limit=False, priority=False, energy_history=False
+        lock=True, power_limit=False, priority=False, energy_history=False
     )
     assert make_backend().capabilities is factory.backend_capabilities(BRAND_RADIO)
 

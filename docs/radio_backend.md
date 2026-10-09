@@ -42,7 +42,7 @@ decoders in `backend/radio/protocol.py` return frozen dataclasses.
 
 | Flag | Radio | Cloud | Gates |
 |---|---|---|---|
-| `lock` | False | Ducaheat only | lock platform |
+| `lock` | True (keypad lock) | Ducaheat only | lock platform |
 | `power_limit` | False | TermoWeb only | power-limit number, coordinator power-limit poll |
 | `priority` | False | True | heater priority number entities |
 | `energy_history` | False | True | `import_energy_history` service (logs an error and skips the entry) |
@@ -70,7 +70,7 @@ derived or guessed.
 | `mtemp` | full status record (E6/E4/E5/E3) | one-decimal string | 🟡 dialect A; ❌ the dialect-B short record has no room temperature |
 | `stemp` | full status record; for the dialect-B short record it is derived (see below) | one-decimal string | 🟡 dialect A; ✅ dialect B |
 | `state` | full record flag `01`; dialect B: power record byte 7 (`BC` → `BD`, read when the status lacks it, and 90 s after each `BF 01` grant) | `"on"` / `"off"` | 🟡 dialect A; ✅ dialect B |
-| `lock` | full record flag `02` | bool | 🟡 dialect A; ❌ dialect B |
+| `lock` | full record flag `02`; dialect B: the last lock state written (the short record has none) | bool | 🟡 dialect A; 🟡 dialect B |
 | `max_power` | full record power, or the dialect-A `BE hi lo` power request (deciwatts) | float watts | 🟡 dialect A; ❌ dialect B (its power record carries no power) |
 
 Mode: radio `03` is a temporary override that ends at the next program slot.
@@ -140,7 +140,7 @@ re-reads it.
 | `get_nodes(dev_id)` | `{"nodes": [...]}` from the node list stored in the config entry | ✅ |
 | `get_node_settings` | see "Canonical mapping (reads)" | ✅ / 🟡 |
 | `set_node_settings` | see "Canonical mapping (writes)" | 🟡 |
-| `set_node_lock` | `BA 01` / `BA 00`, verdict `BB 55`. No entity uses it (capability `lock` is False). | 🟡 |
+| `set_node_lock` | `BA 01` / `BA 00`; dialect A requires `BB 55`, dialect B only acks. The written state is remembered for records without a lock flag. | 🟡 |
 | `set_acm_boost_state` | heater: `D2 01` / `D2 00`, verdict `D3 55`; the heater uses its own boost time and temperature. Accumulator: `RadioUnsupportedError`. No current entity calls it for heaters. | 🟡 heater, ❌ accumulator |
 | `set_node_display_select` | `select=True`: `5E 01`; dialect A must answer `5F 55`, dialect B only acks. `select=False`: no-op. | 🟡 |
 | `set_node_priority` | `RadioUnsupportedError`; entities not created (`priority` False) | ❌ |
@@ -211,7 +211,7 @@ reconnects; it does no harm.
 | Climate entity: mode, target temperature, presets, schedule | 🟡 | Dialect B: mode, presets and schedule writes ✅; target temperature writes ❌ and target/current temperature stay unknown (short status record). Dialect A: 🟡. |
 | Climate HVAC action (heating / idle) | 🟡 / ✅ | Dialect A: full status record flags. Dialect B: power record byte 7, verified against a house meter. |
 | Temporary override (`modified_auto`) | 🟡 / ❌ | `B4 03` in dialect A; unknown in dialect B. |
-| Child lock entity | ❌ | Lock state not readable on dialect B; capability off. |
+| Child lock entity | 🟡 | `BA 01`/`BA 00`. A dialect-B heater acks it without a reply and does not report the lock, so the entity shows the last state written (unknown until first used). The keypad effect on dialect B is not yet confirmed. |
 | Heater boost | 🟡 (client only) | No heater boost entity exists today. |
 | Accumulator boost, boost defaults | ❌ | Unknown on radio. |
 | Display flash button | 🟡 | `5E 01`: dialect A answers `5F 55`; a dialect-B heater acks it (no reply record). The visible flash on dialect B is not yet confirmed. |
@@ -230,7 +230,8 @@ reconnects; it does no harm.
 - Room temperature on dialect-B heaters: no record is proven to carry it.
 - Temporary-override writes on dialect-B heaters: `B4` is acked but ignored,
   and no other override write is known.
-- Lock, boost and the other toggles are unverified on a dialect-B heater.
+- Keypad lock on dialect B: acked; whether the keypad locks is not yet confirmed.
+- Boost, runback and EASY on dialect B: `D2` answers `D3 00 00`, `D6` answers `D7 19`, `D4` is ack only; no effect seen. Their meaning is unknown.
 - Display flash on dialect-B heaters: the command is acked, the visible flash is not yet confirmed.
 - Energy counter: dialect A has `BC` → `BD` + u32 Wh; dialect B unknown. Not
   used by this backend yet.

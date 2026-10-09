@@ -2076,7 +2076,7 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient.set_node_setti
 custom_components/termoweb/backend/radio_client.py :: RadioClient.set_acm_boost_state
     Toggle a heater's boost (``D2``); accumulator boost is not known on radio.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.set_node_lock
-    Toggle the heater's keypad lock (``BA``).
+    Toggle the heater's keypad lock (``BA``) and remember what was written.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.set_node_display_select
     Flash the heater's display (``5E 01``); there is nothing to deselect.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.set_node_priority
