@@ -135,7 +135,9 @@ orders writes, and `backend/radio_client.py` / `radio_ws.py` /
 reads every heater periodically and pushes `NodeSettingsDelta`s through
 `coordinator.handle_ws_deltas`, with the same health tracker that suspends
 coordinator polling. Cloud-only features are switched off with
-`BackendCapabilities` (`priority`, `energy_history`, `power_limit`, `lock`).
+`BackendCapabilities` (`priority`, `energy_history`, `power_limit`, `lock`,
+`energy` for the heater energy/power and installation total sensors,
+`geo_data` for the installation location sensor).
 See `radio_backend.md` for the capability matrix.
 
 ## Operational constraints

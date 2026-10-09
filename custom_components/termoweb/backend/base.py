@@ -139,6 +139,8 @@ class BackendCapabilities:
     power_limit: bool = False
     priority: bool = False
     energy_history: bool = False
+    energy: bool = False  # heater energy/power and installation total sensors
+    geo_data: bool = False  # installation location sensor
 
 
 class Backend(ABC):

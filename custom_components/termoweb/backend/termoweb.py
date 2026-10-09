@@ -26,7 +26,11 @@ class TermoWebBackend(Backend):
     """Backend for the TermoWeb brand."""
 
     capabilities = BackendCapabilities(
-        power_limit=True, priority=True, energy_history=True
+        power_limit=True,
+        priority=True,
+        energy_history=True,
+        energy=True,
+        geo_data=True,
     )
 
     def _resolve_ws_client_cls(self) -> type[WsClientProto]:

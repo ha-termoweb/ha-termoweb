@@ -691,6 +691,22 @@ def test_create_heater_sensors_thermostat_no_energy():
     assert type(sensors[0]).__name__ == "HeaterTemperatureSensor"
 
 
+def test_create_heater_sensors_without_energy_capability():
+    """A backend without energy data gets only the heater temperature sensor."""
+    dev_id = "dev-radio"
+    inventory = Inventory(dev_id, build_node_inventory({"nodes": [{"type": "htr", "addr": "6"}]}))
+    coordinator = SimpleNamespace(data={}, inventory=inventory)
+    energy_coordinator = SimpleNamespace(data={}, inventory=inventory, last_update_success=True)
+
+    sensors = _create_heater_sensors(
+        coordinator, energy_coordinator, None,
+        "entry-1", dev_id, "6", "Heater 6",
+        node_type="htr", inventory=inventory, include_energy=False,
+    )
+
+    assert [type(sensor).__name__ for sensor in sensors] == ["HeaterTemperatureSensor"]
+
+
 # ---------------------------------------------------------------------------
 # Coverage expansion: _create_boost_sensors
 # ---------------------------------------------------------------------------
