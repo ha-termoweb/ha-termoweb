@@ -1,0 +1,136 @@
+# Termoweb radio gateway
+#
+# What this is:
+#   An ESP32 board with a CC1101 868 MHz radio module that talks to Sun Ray /
+#   Termoweb electric heaters over their own radio link. Home Assistant
+#   connects to it over your WiFi network (TCP port 2323). It replaces the
+#   Termoweb Smart App Gateway and the USB nanoCUL stick.
+#   Step-by-step guide: docs/radio_gateway.md
+#
+# Radio notice:
+#   This device TRANSMITS on 869.525 MHz, in the European 869.4-869.65 MHz
+#   short-range-device band. Only use it where that band is allowed. You are
+#   the operator of the transmitter.
+#
+# Wiring (CC1101 module pin -> ESP32-S3 pin). These are the defaults below.
+#
+#   CC1101   ESP32-S3   What it does
+#   ------   --------   ------------------------------
+#   VCC      3V3        power, 3.3 V ONLY (5 V destroys the module)
+#   GND      GND        ground
+#   SCK      GPIO12     SPI clock
+#   MOSI     GPIO11     SPI data to the radio  (module may label it SI)
+#   MISO     GPIO14     SPI data from the radio (module may label it SO)
+#   CSN      GPIO10     chip select            (module may label it CS)
+#   GDO0     GPIO9      "frame finished" signal
+#   GDO2     GPIO13     "data waiting" signal
+#
+# Using a plain ESP32 (not an S3) instead?
+#   Change the substitutions below to these values:
+#     board: esp32dev     variant: esp32     flash_size: 4MB
+#     sck_pin: "18"   mosi_pin: "23"   miso_pin: "19"   csn_pin: "5"
+#     gdo0_pin: "4"   gdo2_pin: "16"
+#   WARNING: on a plain ESP32, GPIO 6, 7, 8, 9, 10 and 11 are wired to the
+#   board's flash memory. Never connect the radio to them; the board will not
+#   start. (The ESP32-S3 defaults above are safe on an S3.)
+#
+# Secrets: add these three lines to your ESPHome secrets.yaml:
+#   wifi_ssid: "your WiFi name"
+#   wifi_password: "your WiFi password"
+#   api_encryption_key: "<a key from https://esphome.io/components/api/>"
+
+substitutions:
+  device_name: termoweb-radio
+  friendly_name: Termoweb Radio
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 16MB
+  sck_pin: "12"
+  mosi_pin: "11"
+  miso_pin: "14"
+  csn_pin: "10"
+  gdo0_pin: "9"
+  gdo2_pin: "13"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  includes:
+    # termoweb_radio.h must sit next to this file in your ESPHome folder.
+    - termoweb_radio.h
+  on_boot:
+    # Late in boot, after WiFi is set up. Starts the radio and the TCP server.
+    priority: -100
+    then:
+      - lambda: |-
+          termoweb::radio.set_pins(${sck_pin}, ${mosi_pin}, ${miso_pin}, ${csn_pin}, ${gdo0_pin}, ${gdo2_pin});
+          termoweb::radio.start();
+
+esp32:
+  board: ${board}
+  variant: ${variant}
+  flash_size: ${flash_size}
+  framework:
+    type: esp-idf
+
+# INFO shows start-up and status lines. Change to DEBUG to also see every
+# radio frame in the ESPHome log.
+logger:
+  level: INFO
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # If WiFi fails, the board opens its own hotspot with this name so you can
+  # enter the WiFi details again.
+  ap:
+    ssid: "${friendly_name} Fallback"
+
+captive_portal:
+
+button:
+  - platform: restart
+    name: "Restart"
+
+sensor:
+  - platform: uptime
+    name: "Uptime"
+  - platform: wifi_signal
+    name: "WiFi signal"
+    update_interval: 60s
+  - platform: template
+    name: "Frames received"
+    icon: mdi:radio-tower
+    accuracy_decimals: 0
+    state_class: total_increasing
+    update_interval: 60s
+    lambda: |-
+      return (float) termoweb::radio.frames_received();
+
+binary_sensor:
+  - platform: template
+    name: "Home Assistant link"
+    device_class: connectivity
+    lambda: |-
+      return termoweb::radio.client_connected();
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      # The address to enter in the Termoweb integration (port 2323).
+      name: "IP address"
+    mac_address:
+      name: "MAC address"
+  - platform: template
+    name: "Firmware"
+    entity_category: diagnostic
+    update_interval: 3600s
+    lambda: |-
+      return termoweb::radio.version();
