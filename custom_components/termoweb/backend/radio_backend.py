@@ -23,7 +23,11 @@ class RadioBackend(Backend):
     """Backend that serves the integration over the local radio gateway."""
 
     capabilities = BackendCapabilities(
-        lock=True, power_limit=True, priority=True, energy_history=False
+        lock=True,
+        power_limit=True,
+        priority=True,
+        energy_history=False,
+        energy=True,
     )
 
     def create_ws_client(

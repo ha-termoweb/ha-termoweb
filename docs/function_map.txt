@@ -2094,7 +2094,7 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient.set_power_limi
 custom_components/termoweb/backend/radio_client.py :: RadioClient.set_acm_extra_options
     Raise: accumulator boost defaults are not known on radio.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.get_node_samples
-    Return no samples: heaters keep no energy history.
+    Return the latest estimated Wh counter as one sample (no history).
 custom_components/termoweb/backend/radio_client.py :: RadioClient.get_geo_data
     Return None: the radio gateway has no account location.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.get_rtc_time
@@ -2127,6 +2127,12 @@ custom_components/termoweb/backend/radio_power.py :: PowerManager.clear_shed
     Forget a shed heater (restored, or its mode was changed by the user).
 custom_components/termoweb/backend/radio_power.py :: PowerManager.plan
     Return (heaters to switch off, (heater, mode) pairs to restore).
+custom_components/termoweb/backend/radio_power.py :: EnergyEstimator.__init__
+    Use ``rated_power(addr)`` (watts or None) for every integration step.
+custom_components/termoweb/backend/radio_power.py :: EnergyEstimator.observe
+    Add the energy since the last observation, then store the new state.
+custom_components/termoweb/backend/radio_power.py :: EnergyEstimator.counter_wh
+    Return the estimated Wh counter, or None while the power is unknown.
 custom_components/termoweb/backend/radio_power.py :: _int_map
     Return ``{"6": 1500}``-style mappings with integer keys and values.
 custom_components/termoweb/backend/radio_ws.py :: RadioListener.__init__
@@ -2161,6 +2167,8 @@ custom_components/termoweb/backend/radio_ws.py :: RadioListener._reply
     Await a station reply; a heater that misses it simply repeats.
 custom_components/termoweb/backend/radio_ws.py :: RadioListener._grant_power
     Acknowledge a power request, push the heating state, apply the power limit.
+custom_components/termoweb/backend/radio_ws.py :: RadioListener._push_energy
+    Hand the heater's latest estimated energy counter to the energy sensors.
 custom_components/termoweb/backend/radio_ws.py :: RadioListener._push
     Send one settings delta to the coordinator and mark the payload fresh.
 custom_components/termoweb/codecs/radio_codec.py :: _temperature

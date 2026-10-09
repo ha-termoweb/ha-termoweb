@@ -41,7 +41,7 @@ from custom_components.termoweb.planner.radio_planner import (
 from .radio import protocol
 from .radio.dialect import DIALECTS, Dialect, Frame, build_frame
 from .radio.link import DEFAULT_PORT, GatewayInfo, RadioLink, RadioLinkError
-from .radio_power import PowerManager
+from .radio_power import EnergyEstimator, PowerManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -157,6 +157,7 @@ class RadioClient:
         self._programs: dict[int, tuple[float, list[int] | None]] = {}
         self._locks: dict[int, bool] = {}  # last lock written, for records without it
         self.power = power or PowerManager()
+        self.energy = EnergyEstimator(self.power.rated_power)
 
     # --- connection ----------------------------------------------------------
 
@@ -420,6 +421,7 @@ class RadioClient:
         record = protocol.decode_power_record(reply.payload)
         if record is not None:
             self.power.note_heating(addr, record.heating)
+            self.energy.observe(addr, record.heating, record.duty_pct, self._clock())
         return record
 
     async def _program(self, addr: int) -> list[int] | None:
@@ -635,10 +637,14 @@ class RadioClient:
         node: NodeDescriptor,
         start: float,
         stop: float,
-    ) -> list[dict[str, str | int]]:
-        """Return no samples: heaters keep no energy history."""
+    ) -> list[dict[str, float]]:
+        """Return the latest estimated Wh counter as one sample (no history)."""
 
-        return []
+        _node_type, addr = self._resolve_node(node)
+        counter = self.energy.counter_wh(addr)
+        if counter is None:
+            return []
+        return [{"t": time.time(), "counter": round(counter, 3)}]
 
     async def get_geo_data(self, dev_id: str) -> None:
         """Return None: the radio gateway has no account location."""

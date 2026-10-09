@@ -6,7 +6,11 @@ import logging
 
 import pytest
 
-from custom_components.termoweb.backend.radio_power import PowerManager
+from custom_components.termoweb.backend.radio_power import (
+    MAX_INTEGRATION_GAP_S,
+    EnergyEstimator,
+    PowerManager,
+)
 
 MANUAL, AUTO, OFF = 2, 1, 4
 
@@ -109,3 +113,24 @@ def test_in_memory_settings_without_callbacks() -> None:
     power.set_power_limit(1200)
     assert power.power_limit == 1200
     assert PowerManager(lambda: None).power_limit is None
+
+
+def test_energy_estimate_integrates_rated_power_times_duty() -> None:
+    """Wh grows by rated x duty while heating; idle, unknown power and gaps are bounded."""
+
+    rated = {6: 1500.0}
+    energy = EnergyEstimator(rated.get)
+    assert energy.counter_wh(6) is None
+    energy.observe(6, True, 12, 0.0)  # first sight: counter starts at 0
+    assert energy.counter_wh(6) == 0.0
+    energy.observe(6, False, 0, 3600.0)  # heated at 12 % for the hour before
+    assert energy.counter_wh(6) == pytest.approx(
+        1500 * 0.12 * MAX_INTEGRATION_GAP_S / 3600
+    )
+    energy.observe(6, True, 0, 3700.0)  # idle interval adds nothing
+    before = energy.counter_wh(6)
+    energy.observe(6, True, 0, 3800.0)  # heating without a duty byte: full power
+    assert energy.counter_wh(6) == pytest.approx(before + 1500 * 100 / 3600)
+    energy.observe(7, True, 50, 0.0)
+    energy.observe(7, True, 50, 100.0)
+    assert energy.counter_wh(7) is None  # power unknown: no counter
