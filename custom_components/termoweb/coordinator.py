@@ -19,6 +19,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
+from .backend.factory import backend_capabilities
 from .backend.rest_client import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend.sanitize import mask_identifier
 from .boost import coerce_int, resolve_boost_end_from_fields
@@ -26,7 +27,6 @@ from .const import (
     BRAND_TERMOWEB,
     HTR_ENERGY_UPDATE_INTERVAL,
     MIN_POLL_INTERVAL,
-    uses_ducaheat_backend,
 )
 from .domain.energy import (
     EnergyNodeMetrics,
@@ -1169,7 +1169,7 @@ class StateCoordinator(
                 )
 
             # Poll installation power limit for TermoWeb brands
-            if not uses_ducaheat_backend(self._brand) and self._entry_id:
+            if backend_capabilities(self._brand).power_limit and self._entry_id:
                 try:
                     power_limit = await self.client.get_power_limit(dev_id)
                     runtime = require_runtime(self.hass, self._entry_id)

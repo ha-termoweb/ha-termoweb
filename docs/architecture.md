@@ -18,7 +18,10 @@ integration. **v2.0.2** is the clean release of this architecture.
 - **One canonical state pipeline.** Device updates flow through a single path:
   inventory snapshot → domain deltas → `DomainStateStore` → `DomainStateView`.
 - **Vendor isolation.** TermoWeb vs Ducaheat differences exist only in
-  backend/planner/codec modules. Entities and platforms remain vendor-agnostic.
+  backend/planner/codec modules. Entities and platforms remain vendor-agnostic:
+  where a feature exists on only some backends (the lock platform, the
+  installation power limit), callers ask `backend_capabilities(brand)` for the
+  backend's declared `BackendCapabilities` instead of testing the brand.
 - **Pydantic on the wire only.** Payload parsing/serialization uses Pydantic
   models; domain state is plain dataclasses or standard Python types.
 

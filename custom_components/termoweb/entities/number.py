@@ -15,7 +15,8 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from ..boost import ALLOWED_BOOST_MINUTES, coerce_boost_minutes
-from ..const import DOMAIN, uses_ducaheat_backend
+from ..backend.factory import backend_capabilities
+from ..const import DOMAIN
 from ..i18n import async_get_fallback_translations, attach_fallbacks, format_fallback
 from ..identifiers import build_gateway_entity_unique_id, build_heater_entity_unique_id
 from ..inventory import (
@@ -152,7 +153,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         )
 
     # Installation-wide power limit (TermoWeb only)
-    if not uses_ducaheat_backend(runtime.brand):
+    if backend_capabilities(runtime.brand).power_limit:
         power_limit_uid = build_gateway_entity_unique_id(dev_id, "power_limit")
         new_entities.append(
             PowerLimitNumber(

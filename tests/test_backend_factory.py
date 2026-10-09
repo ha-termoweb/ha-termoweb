@@ -193,3 +193,23 @@ def test_termoweb_backend_resolves_non_type(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(termoweb_backend, "TermoWebWSClient", object())
     resolved = backend._resolve_ws_client_cls()
     assert resolved is termoweb_backend.WebSocketClient
+
+
+def test_backend_capabilities_follow_the_backend_class() -> None:
+    """Optional features are declared per backend class, looked up by brand."""
+
+    from custom_components.termoweb.backend import (
+        BackendCapabilities,
+        backend_capabilities,
+    )
+    from custom_components.termoweb.backend.base import Backend
+    from custom_components.termoweb.const import BRAND_TERMOWEB
+
+    assert backend_capabilities(BRAND_TERMOWEB) == BackendCapabilities(
+        power_limit=True
+    )
+    for brand in (BRAND_DUCAHEAT, BRAND_TEVOLVE):
+        assert backend_capabilities(brand) == BackendCapabilities(lock=True)
+    assert Backend.capabilities == BackendCapabilities()
+    backend = create_backend(brand=BRAND_DUCAHEAT, client=DummyHttpClient())
+    assert backend.capabilities is backend_capabilities(BRAND_DUCAHEAT)

@@ -10,6 +10,7 @@ from typing import Any
 from custom_components.termoweb.backend import termoweb_ws
 from custom_components.termoweb.backend.base import (
     Backend,
+    BackendCapabilities,
     WsClientProto,
     fetch_normalised_hourly_samples,
 )
@@ -23,6 +24,8 @@ TermoWebWSClient = getattr(termoweb_ws, "TermoWebWSClient", WebSocketClient)
 
 class TermoWebBackend(Backend):
     """Backend for the TermoWeb brand."""
+
+    capabilities = BackendCapabilities(power_limit=True)
 
     def _resolve_ws_client_cls(self) -> type[WsClientProto]:
         """Return the websocket client class for TermoWeb."""

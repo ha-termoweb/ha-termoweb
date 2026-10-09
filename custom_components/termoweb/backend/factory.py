@@ -11,21 +11,33 @@ from custom_components.termoweb.const import (
     uses_ducaheat_backend,
 )
 
-from .base import Backend, HttpClientProto
+from .base import Backend, BackendCapabilities, HttpClientProto
 from .rest_client import RESTClient
+
+
+def _backend_class(brand: str) -> type[Backend]:
+    """Return the backend class serving the given brand."""
+
+    if uses_ducaheat_backend(brand):
+        from . import DucaheatBackend  # noqa: PLC0415
+
+        return DucaheatBackend
+
+    from . import TermoWebBackend  # noqa: PLC0415
+
+    return TermoWebBackend
 
 
 def create_backend(*, brand: str, client: HttpClientProto) -> Backend:
     """Create a backend for the given brand."""
 
-    if uses_ducaheat_backend(brand):
-        from . import DucaheatBackend  # noqa: PLC0415
+    return _backend_class(brand)(brand=brand, client=client)
 
-        return DucaheatBackend(brand=brand, client=client)
 
-    from . import TermoWebBackend  # noqa: PLC0415
+def backend_capabilities(brand: str) -> BackendCapabilities:
+    """Return the optional features the brand's backend supports."""
 
-    return TermoWebBackend(brand=brand, client=client)
+    return _backend_class(brand).capabilities
 
 
 def create_rest_client(
