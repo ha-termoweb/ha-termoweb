@@ -381,7 +381,7 @@ def test_radio_addr_rejects_out_of_range(bad) -> None:
 async def test_set_node_settings_sends_verified_frames_in_order() -> None:
     """Presets, program and manual setpoint each get an accepted verdict."""
 
-    client, links, clock = make_client()
+    client, links, clock = make_client("A")
     await client.get_node_settings("dev", ("htr", "6"))  # fills the program cache
     links[0].sent.clear()
 
@@ -412,9 +412,9 @@ async def test_set_node_settings_sends_verified_frames_in_order() -> None:
     ],
 )
 async def test_mode_writes(mode, stemp, payload) -> None:
-    """Mode strings from climate.py map to B4 writes."""
+    """Mode strings from climate.py map to B4 writes in dialect A."""
 
-    client, links, _ = make_client()
+    client, links, _ = make_client("A")
     await client.set_node_settings("dev", ("htr", "6"), mode=mode, stemp=stemp)
     assert links[0].payloads() == [bytes.fromhex(payload)]
 
@@ -423,7 +423,7 @@ async def test_mode_writes(mode, stemp, payload) -> None:
 async def test_write_failures_raise_clear_errors() -> None:
     """Missing ack, missing reply, rejection and odd verdicts all raise."""
 
-    client, links, _ = make_client()
+    client, links, _ = make_client("A")
     link = await client.async_connect()
 
     link.no_ack.add(HEATER)
@@ -442,6 +442,46 @@ async def test_write_failures_raise_clear_errors() -> None:
     link.reply(0xB4, b"\xb5\x99")
     with pytest.raises(RadioCommandError, match="unknown answer"):
         await client.set_node_settings("dev", ("htr", "6"), mode="auto")
+
+
+@pytest.mark.asyncio
+async def test_dialect_b_settings_write_merges_presets_and_mode() -> None:
+    """Dialect B re-reads status, then sends one B6 with presets + mode and a 24-slot B2."""
+
+    client, links, _ = make_client()
+    await client.set_node_settings(
+        "dev", ("htr", "6"), mode="off", prog=DAY * 7, ptemp=[7.0, 16.5, 21.0]
+    )
+    payloads = links[0].payloads()
+    assert payloads[:2] == [b"\xb8", bytes.fromhex("B60E212A04")]
+    assert payloads[2][0] == 0xB2 and len(payloads[2]) == 43
+    assert len(payloads) == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kwargs", "b6"),
+    [
+        ({"mode": "auto"}, "B621252A01"),  # presets kept from status B9 21 25 2A 02
+        ({"ptemp": [7.0, 16.5, 21.0]}, "B60E212A02"),  # mode kept from status
+    ],
+)
+async def test_dialect_b_keeps_unchanged_fields_from_status(kwargs, b6) -> None:
+    """A mode-only or preset-only write re-sends the other fields as read."""
+
+    client, links, _ = make_client()
+    await client.set_node_settings("dev", ("htr", "6"), **kwargs)
+    assert links[0].payloads() == [b"\xb8", bytes.fromhex(b6)]
+
+
+@pytest.mark.asyncio
+async def test_dialect_b_setpoint_write_is_unsupported() -> None:
+    """Dialect B ignores B4 and reports no setpoint, so setpoint writes are refused."""
+
+    client, links, _ = make_client()
+    with pytest.raises(RadioUnsupportedError, match="Setpoint writes on dialect B"):
+        await client.set_node_settings("dev", ("htr", "6"), mode="manual", stemp=21.0)
+    assert links == [] or links[0].sent == []
 
 
 @pytest.mark.asyncio

@@ -4,8 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from custom_components.termoweb.backend.radio import protocol
+from custom_components.termoweb.backend.radio.dialect import DIALECT_A, Dialect
 from custom_components.termoweb.codecs.common import validate_units
-from custom_components.termoweb.codecs.radio_codec import RADIO_UNITS, encode_command
+from custom_components.termoweb.codecs.radio_codec import (
+    RADIO_UNITS,
+    encode_command,
+    encode_preset_mode_write,
+)
 from custom_components.termoweb.domain.commands import (
     BaseCommand,
     SetMode,
@@ -52,10 +58,51 @@ def plan_settings(
     return commands
 
 
-def plan_commands(commands: list[BaseCommand]) -> list[PlannedRadioWrite]:
+def needs_status(commands: list[BaseCommand], dialect: Dialect) -> bool:
+    """Return True when ``dialect`` must re-send current values for ``commands``."""
+
+    return dialect.mode_in_preset_write and any(
+        isinstance(command, (SetPresetTemps, SetMode)) for command in commands
+    )
+
+
+def validate_commands(commands: list[BaseCommand], dialect: Dialect) -> None:
+    """Raise ValueError if any of ``commands`` cannot be encoded for ``dialect``."""
+
+    for command in commands:
+        encode_command(command, dialect)
+
+
+def plan_commands(
+    commands: list[BaseCommand],
+    dialect: Dialect = DIALECT_A,
+    status: protocol.StatusRecord | None = None,
+) -> list[PlannedRadioWrite]:
     """Return the radio payloads for ``commands``, validating every one first."""
 
-    return [PlannedRadioWrite(encode_command(command)) for command in commands]
+    if not needs_status(commands, dialect):
+        return [
+            PlannedRadioWrite(encode_command(command, dialect)) for command in commands
+        ]
+    if status is None:
+        raise ValueError("preset and mode writes need the heater's current status")
+    presets = next((c.presets for c in commands if isinstance(c, SetPresetTemps)), None)
+    mode = next((c.mode for c in commands if isinstance(c, SetMode)), None)
+    planned = [
+        PlannedRadioWrite(encode_preset_mode_write(status, presets=presets, mode=mode))
+    ]
+    planned.extend(
+        PlannedRadioWrite(encode_command(command, dialect))
+        for command in commands
+        if not isinstance(command, (SetPresetTemps, SetMode))
+    )
+    return planned
 
 
-__all__ = ["PlannedRadioWrite", "plan_commands", "plan_settings"]
+__all__ = [
+    "PlannedRadioWrite",
+    "needs_status",
+    "plan_commands",
+    "plan_settings",
+    "validate_commands",
+]

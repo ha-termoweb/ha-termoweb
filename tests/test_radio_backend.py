@@ -109,8 +109,13 @@ async def test_base_backend_delegates_writes_to_radio_client() -> None:
 
     backend = make_backend()
     link = await backend.client.async_connect()
-    link.reply(0xB4, b"\xb5\x55")
+    link.reply(0xB8, bytes.fromhex("B921252A02"))
+    link.reply(0xB6, b"\xb7\x55")
     link.reply(0xBA, b"\xbb\x55")
     await backend.set_node_settings("dev", ("htr", "6"), mode="auto")
     await backend.set_node_lock("dev", ("htr", "6"), lock=True)
-    assert link.payloads() == [b"\xb4\x01", b"\xba\x01"]
+    assert link.payloads() == [
+        b"\xb8",
+        bytes.fromhex("B621252A01"),
+        b"\xba\x01",
+    ]

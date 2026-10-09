@@ -99,17 +99,27 @@ then sends one frame per command. Each frame must be acked by the heater
 (link layer) and answered `<opcode+1> 55`. No ack, no answer, `56`
 (rejected) or any other answer raises `RadioCommandError`; entities log it.
 
-| Argument | Radio payload | Status |
+| Argument | Dialect A payload | Dialect B payload |
 |---|---|---|
-| `ptemp` | `B6 af eco comfort` (half degrees, strictly increasing, 7–35 °C) | 🟡 |
-| `prog` | `B2` + 84 bytes, 48 slots a day, Sunday first | 🟡 |
-| `mode="manual"` + `stemp` | `B4 02 <half-degrees>` (manual setpoint) | 🟡 |
-| `mode="modified_auto"` + `stemp` | `B4 03 <half-degrees>` (temporary override) | 🟡 |
-| `stemp` alone | `B4 02 <half-degrees>` (manual setpoint) | 🟡 |
-| `mode` alone: `auto` / `manual` (`heat`) / `off` | `B4 01` / `B4 02` / `B4 04` | 🟡 |
-| `mode="modified_auto"` without `stemp`; `auto`/`off` with `stemp` | ValueError before sending | — |
-| `units` other than `"C"` | ValueError before sending | — |
-| `boost_time`, `cancel_boost` | `RadioUnsupportedError` | ❌ |
+| `ptemp` | `B6 af eco comfort` (half degrees, strictly increasing, 7–35 °C) 🟡 | `B6 af eco comfort mode`, mode re-sent from a fresh status read ✅ |
+| `prog` | `B2` + 84 bytes, 48 slots a day, Sunday first 🟡 | `B2` + 42 bytes, 24 slots a day, Sunday first ✅ |
+| `mode` alone: `auto` / `manual` (`heat`) / `off` | `B4 01` / `B4 02` / `B4 04` 🟡 | `B6 af eco comfort mode`, presets re-sent from a fresh status read ✅ (`B4` is acked but ignored) |
+| `ptemp` + `mode` together | two writes 🟡 | one `B6` ✅ |
+| `mode="manual"` + `stemp`, or `stemp` alone | `B4 02 <half-degrees>` (manual setpoint) 🟡 | `RadioUnsupportedError` ❌ |
+| `mode="modified_auto"` + `stemp` | `B4 03 <half-degrees>` (temporary override) 🟡 | `RadioUnsupportedError` ❌ |
+| `mode="modified_auto"` without `stemp`; `auto`/`off` with `stemp` | ValueError before sending | ValueError before sending |
+| `units` other than `"C"` | ValueError before sending | ValueError before sending |
+| `boost_time`, `cancel_boost` | `RadioUnsupportedError` ❌ | `RadioUnsupportedError` ❌ |
+
+A dialect-B preset or mode write first reads the status (`B8`), because `B6`
+always carries all three presets and the mode. Every value is validated before
+that read, so an invalid write sends nothing. A preset-only write while the
+heater is in temporary override (`03`) raises ValueError: `03` cannot be
+re-sent.
+
+The dialect-B rows were verified on the reference heater by writing back its
+current values, and by switching it to off and back to manual: the status
+record followed each `B6`, and `B4 04` left the mode unchanged.
 
 After a program write the cached program is dropped, so the next read
 re-reads it.
@@ -190,9 +200,9 @@ reconnects; it does no harm.
 
 | Cloud feature | Radio | Notes |
 |---|---|---|
-| Climate entity: mode, target temperature, presets, schedule | 🟡 | Writes proven in dialect A only. On dialect-B heaters target and current temperature stay unknown (short status record). |
+| Climate entity: mode, target temperature, presets, schedule | 🟡 | Dialect B: mode, presets and schedule writes ✅; target temperature writes ❌ and target/current temperature stay unknown (short status record). Dialect A: 🟡. |
 | Climate HVAC action (heating / idle) | 🟡 / ❌ | Needs the full status record. |
-| Temporary override (`modified_auto`) | 🟡 | `B4 03`. |
+| Temporary override (`modified_auto`) | 🟡 / ❌ | `B4 03` in dialect A; unknown in dialect B. |
 | Child lock entity | ❌ | Lock state not readable on dialect B; capability off. |
 | Heater boost | 🟡 (client only) | No heater boost entity exists today. |
 | Accumulator boost, boost defaults | ❌ | Unknown on radio. |
@@ -211,7 +221,9 @@ reconnects; it does no harm.
 
 - Room temperature and setpoint on dialect-B heaters: no record seen so far
   carries them (see `ops/esp32/README.md`).
-- Every write is unverified on a dialect-B heater.
+- Setpoint and temporary-override writes on dialect-B heaters: `B4` is acked
+  but ignored, and the status record has no setpoint.
+- Lock, boost and the other toggles are unverified on a dialect-B heater.
 - Display flash (`5E 01`): add a builder to `protocol.py`, then implement it.
 - Energy counter: dialect A has `BC` → `BD` + u32 Wh; dialect B unknown. Not
   used by this backend yet.

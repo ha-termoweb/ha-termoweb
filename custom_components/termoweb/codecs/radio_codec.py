@@ -13,6 +13,7 @@ import math
 from typing import Any
 
 from custom_components.termoweb.backend.radio import protocol
+from custom_components.termoweb.backend.radio.dialect import DIALECT_A, Dialect
 from custom_components.termoweb.codecs.common import format_temperature
 from custom_components.termoweb.domain.commands import (
     BaseCommand,
@@ -130,7 +131,49 @@ def _normalise_mode(mode: str | None) -> str | None:
     return None if mode is None else str(mode).strip().lower()
 
 
-def encode_command(command: BaseCommand) -> bytes:
+def _mode_code(mode: str | None) -> int:
+    """Return the radio mode byte for a canonical mode, raising ValueError otherwise."""
+
+    mode = _normalise_mode(mode)
+    if mode == OVERRIDE_MODE:
+        raise ValueError("modified_auto needs a setpoint")
+    code = MODE_TO_RADIO.get(mode or "")
+    if code is None:
+        raise ValueError(f"mode {mode!r} is not supported over radio")
+    return code
+
+
+def _presets(presets: Sequence[Any]) -> tuple[float, float, float]:
+    """Return ``[cold, night, day]`` as three Celsius floats, raising ValueError."""
+
+    if isinstance(presets, (str, bytes)) or len(presets) != 3:
+        raise ValueError("ptemp must be three values [cold, night, day]")
+    anti_frost, eco, comfort = (_celsius(value, "preset") for value in presets)
+    return anti_frost, eco, comfort
+
+
+def encode_preset_mode_write(
+    status: protocol.StatusRecord,
+    *,
+    presets: Sequence[Any] | None = None,
+    mode: str | None = None,
+) -> bytes:
+    """Return ``B6 <af> <eco> <comfort> <mode>``, unchanged fields taken from ``status``."""
+
+    if presets is None:
+        values = (status.anti_frost_c, status.eco_c, status.comfort_c)
+    else:
+        values = _presets(presets)
+    if mode is not None:
+        code = _mode_code(mode)
+    elif status.mode_code in protocol.SETTABLE_MODES:
+        code = status.mode_code
+    else:
+        raise ValueError(f"current mode {status.mode!r} cannot be re-sent with presets")
+    return protocol.write_presets(*values, code)
+
+
+def encode_command(command: BaseCommand, dialect: Dialect = DIALECT_A) -> bytes:
     """Return the radio payload for one canonical write command."""
 
     if isinstance(command, SetSetpoint):
@@ -142,27 +185,16 @@ def encode_command(command: BaseCommand) -> bytes:
             return protocol.set_override(celsius)
         return protocol.set_setpoint(celsius)
     if isinstance(command, SetMode):
-        mode = _normalise_mode(command.mode)
-        if mode == OVERRIDE_MODE:
-            raise ValueError("modified_auto needs a setpoint")
-        code = MODE_TO_RADIO.get(mode or "")
-        if code is None:
-            raise ValueError(f"mode {command.mode!r} is not supported over radio")
-        return protocol.set_mode(code)
+        return protocol.set_mode(_mode_code(command.mode))
     if isinstance(command, SetPresetTemps):
-        if isinstance(command.presets, (str, bytes)) or len(command.presets) != 3:
-            raise ValueError("ptemp must be three values [cold, night, day]")
-        anti_frost, eco, comfort = (
-            _celsius(value, "preset") for value in command.presets
-        )
-        return protocol.write_presets(anti_frost, eco, comfort)
+        return protocol.write_presets(*_presets(command.presets))
     if isinstance(command, SetProgram):
         prog = validate_prog(command.program)
         days = [
             prog[day * HOURS_PER_DAY : (day + 1) * HOURS_PER_DAY]
             for day in range(protocol.DAYS_PER_WEEK)
         ]
-        return protocol.write_program(days)
+        return protocol.write_program(days, wire_slots=dialect.program_write_slots)
     if isinstance(command, SetLock):
         return protocol.set_toggle(protocol.TOGGLE_LOCK, bool(command.lock))
     raise TypeError(f"Unsupported radio command: {type(command).__name__}")
@@ -174,6 +206,7 @@ __all__ = [
     "PROGRAM_LEN",
     "RADIO_UNITS",
     "encode_command",
+    "encode_preset_mode_write",
     "prog_from_program",
     "settings_from_power_request",
     "settings_from_status",

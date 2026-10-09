@@ -2011,6 +2011,8 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient._resolve_node
     Return ``(node_type, radio id)`` for a node descriptor.
 custom_components/termoweb/backend/radio_client.py :: RadioClient._node_type_for
     Return the stored node type for radio id ``addr``.
+custom_components/termoweb/backend/radio_client.py :: RadioClient._read_status
+    Return the heater's decoded ``B8`` status; raise on no ack or reply.
 custom_components/termoweb/backend/radio_client.py :: RadioClient._program
     Return the heater's ``prog``, re-reading it after ``program_refresh_s``.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.list_devices
@@ -2087,11 +2089,21 @@ custom_components/termoweb/codecs/radio_codec.py :: _celsius
     Return ``value`` as a finite float, raising ValueError otherwise.
 custom_components/termoweb/codecs/radio_codec.py :: _normalise_mode
     Return a lower-case canonical mode string, or None.
+custom_components/termoweb/codecs/radio_codec.py :: _mode_code
+    Return the radio mode byte for a canonical mode, raising ValueError otherwise.
+custom_components/termoweb/codecs/radio_codec.py :: _presets
+    Return ``[cold, night, day]`` as three Celsius floats, raising ValueError.
+custom_components/termoweb/codecs/radio_codec.py :: encode_preset_mode_write
+    Return ``B6 <af> <eco> <comfort> <mode>``, unchanged fields taken from ``status``.
 custom_components/termoweb/codecs/radio_codec.py :: encode_command
     Return the radio payload for one canonical write command.
 custom_components/termoweb/planner/radio_planner.py :: PlannedRadioWrite.opcode
     Return the write opcode, the first payload byte.
 custom_components/termoweb/planner/radio_planner.py :: plan_settings
     Return the commands for a settings write: presets, program, then mode.
+custom_components/termoweb/planner/radio_planner.py :: needs_status
+    Return True when ``dialect`` must re-send current values for ``commands``.
+custom_components/termoweb/planner/radio_planner.py :: validate_commands
+    Raise ValueError if any of ``commands`` cannot be encoded for ``dialect``.
 custom_components/termoweb/planner/radio_planner.py :: plan_commands
     Return the radio payloads for ``commands``, validating every one first.

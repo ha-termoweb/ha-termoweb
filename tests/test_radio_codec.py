@@ -6,6 +6,7 @@ import pytest
 from fake_radio_link import POWER_REQUEST, PROGRAM_HOURLY, STATUS_SHORT
 
 from custom_components.termoweb.backend.radio import protocol as p
+from custom_components.termoweb.backend.radio.dialect import DIALECT_A, DIALECT_B
 from custom_components.termoweb.codecs import radio_codec as codec
 from custom_components.termoweb.domain.commands import (
     SetLock,
@@ -189,3 +190,44 @@ def test_planner_rejects_fahrenheit_and_bad_units() -> None:
         planner.plan_settings(mode="auto", units="F")
     with pytest.raises(ValueError, match="Invalid units"):
         planner.plan_settings(mode="auto", units="K")
+
+
+def test_encode_program_dialect_b_uses_24_slots() -> None:
+    """Dialect B writes the 42-byte hourly form that echoes the B1 read."""
+
+    record = p.decode_program(PROGRAM_HOURLY)
+    prog = codec.prog_from_program(record)
+    payload = codec.encode_command(SetProgram(prog), DIALECT_B)
+    assert payload == b"\xb2" + PROGRAM_HOURLY[1:]
+
+
+def test_preset_mode_write_fills_gaps_from_status() -> None:
+    """B6 carries presets and mode; whichever is not written comes from status."""
+
+    status = p.decode_status(STATUS_SHORT)  # 16.5/18.5/21.0, manual
+    encode = codec.encode_preset_mode_write
+    assert encode(status, mode="off") == bytes.fromhex("B621252A04")
+    assert encode(status, presets=[7, 16, 20]) == bytes.fromhex("B60E202802")
+    assert encode(status, presets=[7, 16, 20], mode="auto")[-1] == p.MODE_AUTO
+    override = p.decode_status(STATUS_SHORT[:4] + bytes([p.MODE_OVERRIDE]))
+    with pytest.raises(ValueError, match="cannot be re-sent"):
+        encode(override, presets=[7, 16, 20])
+    with pytest.raises(ValueError, match="needs a setpoint"):
+        encode(status, mode="modified_auto")
+
+
+def test_planner_dialect_b_merges_presets_and_mode() -> None:
+    """One B6 replaces the separate preset and mode writes; status is required."""
+
+    commands = planner.plan_settings(mode="auto", ptemp=[7.0, 16.5, 21.0])
+    assert planner.needs_status(commands, DIALECT_B)
+    assert not planner.needs_status(commands, DIALECT_A)
+    assert not planner.needs_status([SetProgram(DAY * 7)], DIALECT_B)
+    status = p.decode_status(STATUS_SHORT)
+    planned = planner.plan_commands(commands, DIALECT_B, status)
+    assert [w.payload for w in planned] == [bytes.fromhex("B60E212A01")]
+    with pytest.raises(ValueError, match="current status"):
+        planner.plan_commands(commands, DIALECT_B)
+    planner.validate_commands(commands, DIALECT_B)
+    with pytest.raises(ValueError, match="not supported"):
+        planner.validate_commands([SetMode("eco")], DIALECT_B)

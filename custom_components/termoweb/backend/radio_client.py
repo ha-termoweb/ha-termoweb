@@ -22,15 +22,17 @@ from custom_components.termoweb.codecs.radio_codec import (
     prog_from_program,
     settings_from_status,
 )
-from custom_components.termoweb.domain.commands import SetLock, SetProgram
+from custom_components.termoweb.domain.commands import SetLock
 from custom_components.termoweb.inventory import (
     NodeDescriptor,
     normalize_node_addr,
     normalize_node_type,
 )
 from custom_components.termoweb.planner.radio_planner import (
+    needs_status,
     plan_commands,
     plan_settings,
+    validate_commands,
 )
 
 from .radio import protocol
@@ -349,6 +351,14 @@ class RadioClient:
                 continue
         return None
 
+    async def _read_status(self, addr: int) -> protocol.StatusRecord:
+        """Return the heater's decoded ``B8`` status; raise on no ack or reply."""
+
+        reply = await self._exchange(addr, protocol.request_status(), STATUS_REPLY_LENS)
+        record = protocol.decode_status(reply.payload)
+        assert record is not None  # the reply predicate only accepts B9 records
+        return record
+
     async def _program(self, addr: int) -> list[int] | None:
         """Return the heater's ``prog``, re-reading it after ``program_refresh_s``."""
 
@@ -402,14 +412,10 @@ class RadioClient:
 
         _node_type, addr = self._resolve_node(node)
         try:
-            reply = await self._exchange(
-                addr, protocol.request_status(), STATUS_REPLY_LENS
-            )
+            record = await self._read_status(addr)
         except (RadioLinkError, RadioCommandError) as err:
             _LOGGER.debug("Status read from heater %s failed: %s", addr, err)
             return None
-        record = protocol.decode_status(reply.payload)
-        assert record is not None  # the reply predicate only accepts B9 records
         settings = settings_from_status(record)
         prog = await self._program(addr)
         if prog is not None:
@@ -435,13 +441,21 @@ class RadioClient:
 
         if boost_time is not None or cancel_boost:
             raise RadioUnsupportedError("Boost through a settings write")
+        if stemp is not None and self._dialect.mode_in_preset_write:
+            raise RadioUnsupportedError(
+                f"Setpoint writes on dialect {self._dialect.name} heaters"
+            )
         _node_type, addr = self._resolve_node(node)
         commands = plan_settings(
             mode=mode, stemp=stemp, prog=prog, ptemp=ptemp, units=units
         )
-        for command, planned in zip(commands, plan_commands(commands), strict=True):
+        status = None
+        if needs_status(commands, self._dialect):
+            validate_commands(commands, self._dialect)  # before anything goes on air
+            status = await self._read_status(addr)
+        for planned in plan_commands(commands, self._dialect, status):
             await self._write(addr, planned.payload)
-            if isinstance(command, SetProgram):
+            if planned.opcode == protocol.OP_PROGRAM_WRITE:
                 self._programs.pop(addr, None)
         _LOGGER.info("Radio settings written to heater %s", addr)
 
