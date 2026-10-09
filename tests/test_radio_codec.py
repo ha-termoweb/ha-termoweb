@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 from fake_radio_link import POWER_REQUEST, PROGRAM_HOURLY, STATUS_SHORT
 
@@ -96,11 +98,12 @@ def test_program_with_split_half_hours_is_omitted() -> None:
 
 
 def test_power_request_maps_max_power() -> None:
-    """A dialect-B BE power request carries the full-load power in deciwatts."""
+    """Only dialect A's BE carries the full-load power; dialect B's maps to nothing."""
 
-    request = p.decode_power_request(POWER_REQUEST)
-
-    assert codec.settings_from_power_request(request) == {"max_power": 1143.3}
+    request = p.decode_power_request(bytes([p.OP_POWER_REQUEST, 0x1D, 0x66]))
+    assert codec.settings_from_power_request(request) == {"max_power": 752.6}
+    request_b = p.decode_power_request(POWER_REQUEST)
+    assert codec.settings_from_power_request(request_b) == {}
 
 
 @pytest.mark.parametrize(
@@ -231,3 +234,42 @@ def test_planner_dialect_b_merges_presets_and_mode() -> None:
     planner.validate_commands(commands, DIALECT_B)
     with pytest.raises(ValueError, match="not supported"):
         planner.validate_commands([SetMode("eco")], DIALECT_B)
+
+
+def test_derived_setpoint_follows_mode_and_program() -> None:
+    """Manual heats to comfort, auto to the current slot's preset, off to nothing."""
+
+    short = p.decode_status(STATUS_SHORT)  # 16.5/18.5/21.0, manual
+    monday_3am = datetime(2026, 10, 5, 3, 0)  # DAY: night (eco) until 05:00
+    monday_noon = datetime(2026, 10, 5, 12, 0)  # DAY: day (comfort)
+    prog = DAY * 7
+    assert codec.derived_setpoint(short, prog, monday_3am) == 21.0
+
+    def with_mode(code: int) -> p.StatusRecord:
+        return p.decode_status(STATUS_SHORT[:4] + bytes([code]))
+
+    auto = with_mode(p.MODE_AUTO)
+    assert codec.derived_setpoint(auto, prog, monday_3am) == 18.5
+    assert codec.derived_setpoint(auto, prog, monday_noon) == 21.0
+    cold = [0] * 168
+    assert codec.derived_setpoint(auto, cold, monday_noon) == 16.5
+    assert codec.derived_setpoint(auto, None, monday_noon) is None
+    assert codec.derived_setpoint(with_mode(p.MODE_OFF), prog, monday_noon) is None
+    full = p.decode_status(STATUS_E6)
+    assert codec.derived_setpoint(full, prog, monday_3am) == 22.0
+
+
+def test_preset_mode_write_with_setpoint() -> None:
+    """A setpoint becomes comfort with mode manual; other modes are refused."""
+
+    status = p.decode_status(STATUS_SHORT)
+    encode = codec.encode_preset_mode_write
+    assert encode(status, setpoint=23.0) == bytes.fromhex("B621252E02")
+    assert encode(status, setpoint=23.0, mode="heat") == bytes.fromhex("B621252E02")
+    assert encode(status, presets=[7, 16, 20], setpoint=22) == bytes.fromhex(
+        "B60E202C02"
+    )
+    with pytest.raises(ValueError, match="cannot be written together"):
+        encode(status, setpoint=23.0, mode="off")
+    with pytest.raises(ValueError, match="invalid setpoint"):
+        encode(status, setpoint="warm")

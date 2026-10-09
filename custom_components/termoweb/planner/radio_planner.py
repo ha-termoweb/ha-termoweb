@@ -62,7 +62,8 @@ def needs_status(commands: list[BaseCommand], dialect: Dialect) -> bool:
     """Return True when ``dialect`` must re-send current values for ``commands``."""
 
     return dialect.mode_in_preset_write and any(
-        isinstance(command, (SetPresetTemps, SetMode)) for command in commands
+        isinstance(command, (SetPresetTemps, SetMode, SetSetpoint))
+        for command in commands
     )
 
 
@@ -88,13 +89,21 @@ def plan_commands(
         raise ValueError("preset and mode writes need the heater's current status")
     presets = next((c.presets for c in commands if isinstance(c, SetPresetTemps)), None)
     mode = next((c.mode for c in commands if isinstance(c, SetMode)), None)
+    setpoint_command = next((c for c in commands if isinstance(c, SetSetpoint)), None)
+    setpoint = None
+    if setpoint_command is not None:
+        setpoint, mode = setpoint_command.setpoint, setpoint_command.mode
     planned = [
-        PlannedRadioWrite(encode_preset_mode_write(status, presets=presets, mode=mode))
+        PlannedRadioWrite(
+            encode_preset_mode_write(
+                status, presets=presets, mode=mode, setpoint=setpoint
+            )
+        )
     ]
     planned.extend(
         PlannedRadioWrite(encode_command(command, dialect))
         for command in commands
-        if not isinstance(command, (SetPresetTemps, SetMode))
+        if not isinstance(command, (SetPresetTemps, SetMode, SetSetpoint))
     )
     return planned
 

@@ -229,7 +229,7 @@ class RadioListener(_WSStatusMixin):
         elif kind is protocol.Unsolicited.POWER_REQUEST:
             self._spawn(self._client.async_send(frame.src, protocol.power_verdict()))
             request = protocol.decode_power_request(payload)
-            if request is not None:
+            if request is not None and request.measured_power_w is not None:
                 self._client.note_max_power(frame.src, request.measured_power_w)
                 self._push(node_type, addr, settings_from_power_request(request))
         elif kind is protocol.Unsolicited.REPORT:
