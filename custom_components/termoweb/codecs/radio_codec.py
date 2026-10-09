@@ -115,9 +115,12 @@ def settings_from_power_request(request: protocol.PowerRequest) -> dict[str, Any
 
 
 def settings_from_power_record(record: protocol.PowerRecord) -> dict[str, Any]:
-    """Return the heating ``state`` carried by a dialect-B power record."""
+    """Return the heating ``state`` and room temperature of a dialect-B power record."""
 
-    return {"state": "on" if record.heating else "off"}
+    return {
+        "state": "on" if record.heating else "off",
+        "mtemp": _temperature(record.room_temp_c),
+    }
 
 
 def validate_prog(prog: Sequence[Any]) -> list[int]:

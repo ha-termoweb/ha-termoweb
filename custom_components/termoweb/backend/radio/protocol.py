@@ -543,6 +543,7 @@ class PowerRecord:
     heating: bool
     mains_voltage_v: float
     duty_pct: int
+    room_temp_c: float  # byte 1, tenths of a degree
     raw: bytes
 
 
@@ -558,6 +559,7 @@ def decode_power_record(payload: bytes) -> PowerRecord | None:
         heating=payload[7] == POWER_RECORD_HEATING,
         mains_voltage_v=int.from_bytes(payload[4:6], "little") / 64,
         duty_pct=payload[6],
+        room_temp_c=payload[1] / 10,
         raw=payload,
     )
 

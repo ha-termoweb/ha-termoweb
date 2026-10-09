@@ -245,6 +245,7 @@ async def test_get_node_settings_maps_status_and_program() -> None:
         "prog": DAY * 7,
         "stemp": "21.0",  # manual: the heater heats to its comfort preset
         "state": "off",  # from the BC power record: not heating
+        "mtemp": "22.0",  # power record byte 1
         "priority": 0,  # local power manager default
     }
     assert links[0].sent == [(HEATER, b"\xb8"), (HEATER, b"\xb0"), (HEATER, b"\xbc")]

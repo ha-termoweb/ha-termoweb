@@ -2182,7 +2182,7 @@ custom_components/termoweb/codecs/radio_codec.py :: prog_from_program
 custom_components/termoweb/codecs/radio_codec.py :: settings_from_power_request
     Return the canonical ``max_power`` carried by a heater power request, if any.
 custom_components/termoweb/codecs/radio_codec.py :: settings_from_power_record
-    Return the heating ``state`` carried by a dialect-B power record.
+    Return the heating ``state`` and room temperature of a dialect-B power record.
 custom_components/termoweb/codecs/radio_codec.py :: validate_prog
     Return ``prog`` as 168 slot codes 0/1/2, raising ValueError otherwise.
 custom_components/termoweb/codecs/radio_codec.py :: _celsius

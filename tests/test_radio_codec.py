@@ -280,5 +280,5 @@ def test_power_record_maps_heating_state() -> None:
 
     heating = p.decode_power_record(bytes.fromhex("BDDB002CE43A0C0100"))
     idle = p.decode_power_record(bytes.fromhex("BDDC002C783A000000"))
-    assert codec.settings_from_power_record(heating) == {"state": "on"}
-    assert codec.settings_from_power_record(idle) == {"state": "off"}
+    assert codec.settings_from_power_record(heating) == {"state": "on", "mtemp": "21.9"}
+    assert codec.settings_from_power_record(idle) == {"state": "off", "mtemp": "22.0"}

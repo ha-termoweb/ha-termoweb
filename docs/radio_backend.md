@@ -67,7 +67,7 @@ derived or guessed.
 | `ptemp` | status presets | `[anti_frost, eco, comfort]` = `[cold, night, day]`, strings with one decimal (`"16.5"`), like the cloud | ✅ read |
 | `prog` | `B1` program reply | 168 ints, **Monday 00:00 first**, values 0/1/2 | ✅ read (24-slot), 🟡 (48-slot) |
 | `units` | fixed | `"C"`; the radio carries every temperature in half degrees Celsius | ✅ |
-| `mtemp` | full status record (E6/E4/E5/E3) | one-decimal string | 🟡 dialect A; ❌ the dialect-B short record has no room temperature |
+| `mtemp` | full status record (E6/E4/E5/E3); dialect B: power record byte 1 (tenths of a degree) | one-decimal string | 🟡 dialect A; ✅ dialect B |
 | `stemp` | full status record; for the dialect-B short record it is derived (see below) | one-decimal string | 🟡 dialect A; ✅ dialect B |
 | `state` | full record flag `01`; dialect B: power record byte 7 (`BC` → `BD`, read when the status lacks it, and 90 s after each `BF 01` grant) | `"on"` / `"off"` | 🟡 dialect A; ✅ dialect B |
 | `lock` | full record flag `02`; dialect B: the last lock state written (the short record has none) | bool | 🟡 dialect A; 🟡 dialect B |
@@ -265,7 +265,6 @@ own power in `BE`, which is used when no power is entered.
 
 ## Known gaps
 
-- Room temperature on dialect-B heaters: no record is proven to carry it.
 - Temporary-override writes on dialect-B heaters: `B4` is acked but ignored,
   and no other override write is known.
 - Keypad lock on dialect B: acked; whether the keypad locks is not yet confirmed.
