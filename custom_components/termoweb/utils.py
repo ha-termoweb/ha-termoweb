@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.loader import async_get_integration as loader_async_get_integration
 
-from .const import DOMAIN, get_brand_label
+from .const import DOMAIN, get_brand_configuration_url, get_brand_label
 from .i18n import format_fallback
 from .inventory import normalize_node_addr
 from .runtime import EntryRuntime, require_runtime
@@ -77,6 +77,15 @@ def apply_entry_device_overrides(
     return info
 
 
+def _set_configuration_url(info: DeviceInfo, entry_data: EntryRuntime | None) -> None:
+    """Link the device to the brand's web portal; the local radio has none."""
+
+    brand = entry_data.brand if entry_data is not None else None
+    url = get_brand_configuration_url(brand)
+    if url is not None:
+        info["configuration_url"] = url
+
+
 def build_installation_device_info(
     hass: HomeAssistant | None,
     entry_id: str | None,
@@ -85,15 +94,14 @@ def build_installation_device_info(
     """Return canonical ``DeviceInfo`` for the installation (top-level site)."""
 
     identifiers = {(DOMAIN, str(dev_id), "site")}
+    entry_data = _entry_gateway_record(hass, entry_id)
     info: DeviceInfo = DeviceInfo(
         identifiers=identifiers,
         manufacturer="TermoWeb",
         name="Site",
         model="Site",
-        configuration_url="https://control.termoweb.net",
     )
-
-    entry_data = _entry_gateway_record(hass, entry_id)
+    _set_configuration_url(info, entry_data)
     info = apply_entry_device_overrides(info, entry_data)
 
     if entry_data is None:
@@ -131,9 +139,9 @@ def build_gateway_device_info(
         manufacturer=brand_label,
         name=f"{brand_label} Gateway",
         model="Gateway/Controller",
-        configuration_url="https://control.termoweb.net",
         via_device=(DOMAIN, str(dev_id), "site"),
     )
+    _set_configuration_url(info, entry_data)
 
     info = apply_entry_device_overrides(
         info, entry_data, include_version=include_version

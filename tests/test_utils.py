@@ -22,6 +22,7 @@ from custom_components.termoweb.utils import (
     _entry_gateway_record,
     async_get_integration_version,
     build_gateway_device_info,
+    build_installation_device_info,
     build_power_monitor_device_info,
     float_or_none,
 )
@@ -157,6 +158,33 @@ def test_build_gateway_device_info_uses_brand_and_version() -> None:
 
     assert info["manufacturer"] == "Ducaheat"
     assert info["sw_version"] == "7"
+
+
+def test_radio_gateway_device_has_radio_name_and_no_cloud_link() -> None:
+    """A radio entry's gateway is "Radio Gateway" and links to no cloud portal."""
+
+    hass = types.SimpleNamespace(data={DOMAIN: {}})
+    build_entry_runtime(hass=hass, entry_id="entry", dev_id="dev", brand="radio")
+
+    gateway = build_gateway_device_info(hass, "entry", "dev")
+    site = build_installation_device_info(hass, "entry", "dev")
+
+    assert gateway["name"] == "Radio Gateway"
+    assert "configuration_url" not in gateway
+    assert "configuration_url" not in site
+
+
+def test_cloud_devices_link_to_the_web_portal() -> None:
+    """Cloud entries keep the TermoWeb portal link on both devices."""
+
+    hass = types.SimpleNamespace(data={DOMAIN: {}})
+    build_entry_runtime(hass=hass, entry_id="entry", dev_id="dev", brand="termoweb")
+
+    for info in (
+        build_gateway_device_info(hass, "entry", "dev"),
+        build_installation_device_info(hass, "entry", "dev"),
+    ):
+        assert info["configuration_url"] == "https://control.termoweb.net"
 
 
 def test_build_gateway_device_info_respects_include_version_flag() -> None:
