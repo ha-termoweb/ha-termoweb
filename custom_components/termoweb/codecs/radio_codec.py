@@ -114,6 +114,12 @@ def settings_from_power_request(request: protocol.PowerRequest) -> dict[str, Any
     return {"max_power": request.measured_power_w}
 
 
+def settings_from_power_record(record: protocol.PowerRecord) -> dict[str, Any]:
+    """Return the heating ``state`` carried by a dialect-B power record."""
+
+    return {"state": "on" if record.heating else "off"}
+
+
 def validate_prog(prog: Sequence[Any]) -> list[int]:
     """Return ``prog`` as 168 slot codes 0/1/2, raising ValueError otherwise."""
 
@@ -237,6 +243,7 @@ __all__ = [
     "encode_command",
     "encode_preset_mode_write",
     "prog_from_program",
+    "settings_from_power_record",
     "settings_from_power_request",
     "settings_from_status",
     "validate_prog",

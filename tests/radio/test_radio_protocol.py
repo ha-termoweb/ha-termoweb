@@ -426,3 +426,19 @@ def test_classify_unsolicited_frames() -> None:
     assert p.classify_unsolicited(reg) is u.REGISTRATION
     assert p.classify_unsolicited(plain) is u.UNKNOWN
     assert str(u.REPORT) == "report"
+
+
+def test_power_record_decodes_heating_voltage_and_duty() -> None:
+    """Dialect-B BE/BD records: byte 7 heating flag, bytes 4-5 LE mains /64, byte 6 duty."""
+    idle = p.decode_power_record(bytes.fromhex("BEDC002C783A000000"))
+    assert idle.heating is False and idle.duty_pct == 0
+    assert idle.mains_voltage_v == pytest.approx(0x3A78 / 64)  # 233.9 V
+    heating = p.decode_power_record(bytes.fromhex("BDDB002CE43A0C0100"))
+    assert heating.heating is True and heating.duty_pct == 12
+    assert heating.raw[0] == 0xBD
+    for bad in (
+        A_ENERGY,
+        bytes([0xBE, 0x1D, 0x66]),
+        bytes.fromhex("B921252A02") + bytes(4),
+    ):
+        assert p.decode_power_record(bad) is None

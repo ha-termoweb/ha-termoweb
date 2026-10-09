@@ -137,11 +137,24 @@ every field it does not carry.
 
 ### Dialect-B power record (`BE ..` and the `BD ..` reply to `BC`)
 
-Examples: `BE DB 00 2C F0 39 00 00 00`, `BE DA 00 2C A9 39 0B 01 00`.
+`<op> b1 00 2C <v lo> <v hi> <duty> <heating> 00`, for example
+`BE DC 00 2C 78 3A 00 00 00` (idle) and `BD DB 00 2C E4 3A 0C 01 00`
+(heating).
 
-- Bytes 3–4, big-endian: measured full-load power in deciwatts
-  (`2C F0` = 1150.4 W).
-- Bytes 1–2 and 5–8: unknown. The decoder keeps them raw.
+The fields were checked against a whole-house energy meter during a heat test:
+
+- Byte 7: `01` while the element heats under a granted `BF 01`, else `00`.
+  The heater heats in duty pulses (about 9 s of ~1.5 kW every 80 s), only
+  while this flag is set. The grant expires: the flag drops to `00`, the
+  heater sends a new `BE`, and it heats again after the next `BF 01`.
+- Bytes 4–5, little-endian ÷ 64: mains voltage in volts (`78 3A` = 233.9 V).
+  It tracked the meter's voltage, including the dips during heating pulses.
+- Byte 6: probably the duty in percent (`0C` while heating ~11 % of the
+  time). Not proven.
+- Bytes 2–3: always `00 2C`. Byte 1: changes in single steps between
+  `DA` and `DF`; unproven.
+- The record carries no power value. An earlier reading of bytes 3–4 as
+  deciwatts (`2C F0` ≈ 1150 W) was a coincidence of the constant `2C`.
 
 ### Program record
 

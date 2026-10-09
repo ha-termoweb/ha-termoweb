@@ -22,6 +22,7 @@ from custom_components.termoweb.codecs.common import format_temperature
 from custom_components.termoweb.codecs.radio_codec import (
     derived_setpoint,
     prog_from_program,
+    settings_from_power_record,
     settings_from_status,
 )
 from custom_components.termoweb.domain.commands import SetLock
@@ -50,6 +51,7 @@ STATUS_REPLY_LENS = (
     protocol.STATUS_E6_LEN,
     protocol.STATUS_E4_LEN,
 )
+POWER_RECORD_REPLY_LENS = (protocol.POWER_REQUEST_B_LEN,)  # dialect-B BD record
 PROGRAM_REPLY_LENS = (
     protocol.PROGRAM_HOURLY_PAYLOAD_LEN,
     protocol.PROGRAM_HALF_HOURLY_PAYLOAD_LEN,
@@ -361,6 +363,18 @@ class RadioClient:
         assert record is not None  # the reply predicate only accepts B9 records
         return record
 
+    async def read_power_record(self, addr: int) -> protocol.PowerRecord | None:
+        """Return the heater's dialect-B power record (``BC`` → ``BD``), or None."""
+
+        try:
+            reply = await self._exchange(
+                addr, protocol.request_energy(), POWER_RECORD_REPLY_LENS
+            )
+        except (RadioLinkError, RadioCommandError) as err:
+            _LOGGER.debug("Power record read from heater %s failed: %s", addr, err)
+            return None
+        return protocol.decode_power_record(reply.payload)
+
     async def _program(self, addr: int) -> list[int] | None:
         """Return the heater's ``prog``, re-reading it after ``program_refresh_s``."""
 
@@ -426,6 +440,10 @@ class RadioClient:
             setpoint = derived_setpoint(record, prog, _local_now())
             if setpoint is not None:
                 settings["stemp"] = format_temperature(setpoint)
+        if "state" not in settings:
+            power = await self.read_power_record(addr)
+            if power is not None:
+                settings.update(settings_from_power_record(power))
         if "max_power" not in settings and addr in self._max_power:
             settings["max_power"] = self._max_power[addr]
         return settings

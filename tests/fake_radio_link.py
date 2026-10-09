@@ -31,6 +31,8 @@ IDENTITY_SHORT = bytes.fromhex("5B55010203040506070809" + b"X123456".hex())
 PROGRAM_HOURLY = bytes.fromhex("B155" + "6AAAAAAA9555" * 6 + "6AAAAAAA95")
 REGISTRATION = bytes.fromhex("50")
 POWER_REQUEST = bytes.fromhex("BEDA002CA9390B0100")
+POWER_RECORD_IDLE = bytes.fromhex("BDDC002C783A000000")  # BC reply: not heating
+POWER_RECORD_HEATING = bytes.fromhex("BDDB002CE43A0C0100")  # granted, heating
 CLOCK_ACCEPTED = bytes.fromhex("5355")
 
 

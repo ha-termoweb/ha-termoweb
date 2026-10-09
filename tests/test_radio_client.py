@@ -12,6 +12,7 @@ from fake_radio_link import (
     HEATER,
     NET,
     IDENTITY_SHORT,
+    POWER_RECORD_IDLE,
     PROGRAM_HOURLY,
     STATUS_SHORT,
     FakeRadioLink,
@@ -59,6 +60,7 @@ def make_client(dialect: str = "B", **kwargs):
         link = FakeRadioLink(host, port, dialect, **kw)
         link.reply(0xB8, STATUS_SHORT)
         link.reply(0xB0, PROGRAM_HOURLY)
+        link.reply(0xBC, POWER_RECORD_IDLE)
         for opcode in (0xB2, 0xB4, 0xB6, 0xBA, 0xD2):
             link.reply(opcode, bytes([opcode + 1, 0x55]))
         link.reply(0x51, CLOCK_ACCEPTED)
@@ -242,8 +244,9 @@ async def test_get_node_settings_maps_status_and_program() -> None:
         "mode": "manual",
         "prog": DAY * 7,
         "stemp": "21.0",  # manual: the heater heats to its comfort preset
+        "state": "off",  # from the BC power record: not heating
     }
-    assert links[0].sent == [(HEATER, b"\xb8"), (HEATER, b"\xb0")]
+    assert links[0].sent == [(HEATER, b"\xb8"), (HEATER, b"\xb0"), (HEATER, b"\xbc")]
 
 
 @pytest.mark.asyncio
@@ -399,7 +402,7 @@ async def test_set_node_settings_sends_verified_frames_in_order() -> None:
     assert [p[0] for p in links[0].payloads()] == [0xB6, 0xB2, 0xB4]
     assert links[0].payloads()[-1] == bytes.fromhex("B4022A")
     await client.get_node_settings("dev", ("htr", "6"))
-    assert links[0].payloads()[-1] == b"\xb0"  # program re-read after a write
+    assert links[0].payloads()[-2:] == [b"\xb0", b"\xbc"]  # program re-read
 
 
 @pytest.mark.asyncio
@@ -639,3 +642,15 @@ async def test_async_send_requires_an_ack() -> None:
     links[0].no_ack.add(HEATER)
     with pytest.raises(RadioCommandError, match="did not acknowledge BF 01"):
         await client.async_send(HEATER, b"\xbf\x01")
+
+
+@pytest.mark.asyncio
+async def test_power_record_read_failure_leaves_state_out() -> None:
+    """A heater that does not answer BC simply has no heating state this poll."""
+
+    client, links, _ = make_client()
+    link = await client.async_connect()
+    link.replies.pop(0xBC)
+    settings = await client.get_node_settings("dev", ("htr", "6"))
+    assert "state" not in settings
+    assert await client.read_power_record(HEATER) is None

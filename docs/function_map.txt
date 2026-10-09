@@ -1937,6 +1937,8 @@ custom_components/termoweb/backend/radio/protocol.py :: decode_energy
     Decode ``BD`` + u32 Wh (5 bytes) or the 9-byte dialect-B ``BD`` power record.
 custom_components/termoweb/backend/radio/protocol.py :: _deciwatts
     Return big-endian deciwatts as watts.
+custom_components/termoweb/backend/radio/protocol.py :: decode_power_record
+    Decode a dialect-B ``BE`` or ``BD`` power record (9 bytes), else None.
 custom_components/termoweb/backend/radio/protocol.py :: decode_power_request
     Decode ``BE <hi> <lo>`` (dialect A) or the 9-byte ``BE`` record (dialect B).
 custom_components/termoweb/backend/radio/protocol.py :: classify_unsolicited
@@ -2051,6 +2053,8 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient._node_type_for
     Return the stored node type for radio id ``addr``.
 custom_components/termoweb/backend/radio_client.py :: RadioClient._read_status
     Return the heater's decoded ``B8`` status; raise on no ack or reply.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.read_power_record
+    Return the heater's dialect-B power record (``BC`` → ``BD``), or None.
 custom_components/termoweb/backend/radio_client.py :: RadioClient._program
     Return the heater's ``prog``, re-reading it after ``program_refresh_s``.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.list_devices
@@ -2111,6 +2115,8 @@ custom_components/termoweb/backend/radio_ws.py :: RadioListener._spawn
     Run a station reply in the background, logging its failure.
 custom_components/termoweb/backend/radio_ws.py :: RadioListener._reply
     Await a station reply; a heater that misses it simply repeats.
+custom_components/termoweb/backend/radio_ws.py :: RadioListener._grant_power
+    Grant a power request, then push the heating state the heater reports.
 custom_components/termoweb/backend/radio_ws.py :: RadioListener._push
     Send one settings delta to the coordinator and mark the payload fresh.
 custom_components/termoweb/codecs/radio_codec.py :: _temperature
@@ -2123,6 +2129,8 @@ custom_components/termoweb/codecs/radio_codec.py :: prog_from_program
     Return the 168-slot Monday-first ``prog``, or None if any hour is unknown.
 custom_components/termoweb/codecs/radio_codec.py :: settings_from_power_request
     Return the canonical ``max_power`` carried by a heater power request, if any.
+custom_components/termoweb/codecs/radio_codec.py :: settings_from_power_record
+    Return the heating ``state`` carried by a dialect-B power record.
 custom_components/termoweb/codecs/radio_codec.py :: validate_prog
     Return ``prog`` as 168 slot codes 0/1/2, raising ValueError otherwise.
 custom_components/termoweb/codecs/radio_codec.py :: _celsius
