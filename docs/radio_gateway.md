@@ -150,14 +150,16 @@ The device page also shows:
 3. Enter the gateway's IP address from step 4. Keep the port at **2323**.
 4. Leave **Radio dialect** on **auto** and **Network id** empty.
 5. Press **Submit** and wait. The integration listens to your heaters to learn
-   their radio network. This takes up to 3 minutes. Then it checks every
-   heater it can reach.
+   their radio network. This takes up to 6 minutes. Then it checks every
+   heater it can reach. Heaters talk when they start heating, so turn one
+   heater's temperature up before you press **Submit**.
 6. When it finishes, your heaters appear under **Devices**.
 
 If you see "No heater radio traffic was heard":
 
+- Turn one heater's temperature up so that it starts heating. A heater that
+  wants heat talks every few minutes.
 - Move the gateway closer to a heater (a few metres is best) and try again.
-- Heaters talk only every few minutes. Trying again often helps.
 
 If you added or removed a heater later, open the integration, choose
 **Reconfigure**, and tick **Scan for heaters again**.

@@ -244,8 +244,13 @@ The radio form asks for host, port (2323), an optional dialect (`auto`, `A`,
 2. `radio_discover` is a progress step running `discover_radio`:
    - with a dialect and a known network id (given, or dialect A's fixed
      `1B30`), it skips listening;
-   - otherwise `discovery.discover_network` alternates 30 s listening windows
-     over dialects B then A, up to 3 minutes. Every CRC-valid data frame
+   - otherwise `discovery.discover_network` alternates 10 s listening windows
+     over dialects B then A, up to 6 minutes. A heater that wants heat sends
+     a power-request spell about every 5 minutes: 5 frames over about 27 s,
+     never more than 8 s apart. A 10 s window that overlaps a spell therefore
+     catches a frame, and with ~21 s per A+B cycle every spell overlaps a
+     window of each dialect. An associated heater that does not want heat
+     may stay silent. Every CRC-valid data frame
      gives the network id (bytes 1-2) and its sender. Dialect-B network ids
      belong to one installation, so there is no default to fall back on;
    - `discovery.probe_heaters` sends `B8` to addresses 2-32 plus every

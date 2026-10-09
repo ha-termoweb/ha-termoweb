@@ -21,8 +21,8 @@ _LOGGER = logging.getLogger(__name__)
 
 LISTEN_PLACEHOLDER_NET = b"\x00\x00"  # never transmitted: listening sends nothing
 DISCOVERY_DIALECTS: tuple[Dialect, ...] = (DIALECT_B, DIALECT_A)
-LISTEN_WINDOW_S = 30.0
-LISTEN_TOTAL_S = 180.0
+LISTEN_WINDOW_S = 10.0  # longer than the gap between frames in a spell (< 8 s)
+LISTEN_TOTAL_S = 360.0  # a heater that wants heat asks every few minutes
 LISTEN_GRACE_S = 5.0  # keep listening this long after the first frame
 POLL_STEP_S = 0.5
 SCAN_ADDRESSES: tuple[int, ...] = tuple(range(2, 33))
