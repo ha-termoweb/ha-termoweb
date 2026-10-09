@@ -9,7 +9,7 @@ from typing import Any
 from aiohttp import ClientError
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 import voluptuous as vol
 
@@ -200,6 +200,12 @@ class TermoWebConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Initial setup and (optional) reconfigure without use_push."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> TermoWebOptionsFlow:
+        """Return the options flow handler for this config entry."""
+        return TermoWebOptionsFlow(config_entry)
 
     def __init__(self) -> None:
         """Initialise radio discovery state."""
@@ -529,8 +535,3 @@ class TermoWebOptionsFlow(config_entries.OptionsFlow):
             data_schema=schema,
             description_placeholders={"version": ver},
         )
-
-
-async def async_get_options_flow(config_entry: ConfigEntry):
-    """Return the options flow handler for this config entry."""
-    return TermoWebOptionsFlow(config_entry)

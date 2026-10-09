@@ -810,6 +810,8 @@ custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.__init__
     Initialise radio discovery state.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow._handle_login_workflow
     Handle shared login form validation and error handling.
+custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_get_options_flow
+    Return the options flow handler for this config entry.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_user
     Offer the cloud account or the local radio gateway.
 custom_components/termoweb/config_flow.py :: TermoWebConfigFlow.async_step_cloud
@@ -830,8 +832,6 @@ custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.__init__
     Store the entry being configured.
 custom_components/termoweb/config_flow.py :: TermoWebOptionsFlow.async_step_init
     Show or process the debug options form.
-custom_components/termoweb/config_flow.py :: async_get_options_flow
-    Return the options flow handler for this config entry.
 custom_components/termoweb/const.py :: get_brand_api_base
     Return API base URL for the selected brand.
 custom_components/termoweb/const.py :: get_brand_basic_auth
