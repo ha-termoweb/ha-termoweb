@@ -171,6 +171,7 @@ async def test_start_connects_refreshes_and_reports_health() -> None:
             "ptemp": ["16.5", "18.5", "21.0"],
             "mode": "manual",
             "prog": DAY * 7,
+            "stemp": "21.0",
         }
     ]
     assert coordinator.deltas[1].node_id.node_type is NodeType.ACCUMULATOR
@@ -204,7 +205,8 @@ async def test_registration_power_request_and_reports() -> None:
     coordinator.deltas.clear()
 
     link.deliver(received(HEATER, REGISTRATION))
-    link.deliver(received(HEATER, POWER_REQUEST))
+    link.deliver(received(HEATER, POWER_REQUEST))  # dialect B: granted, no power
+    link.deliver(received(HEATER, bytes([p.OP_POWER_REQUEST, 0x1D, 0x66])))  # A form
     link.deliver(received(HEATER, bytes([p.OP_REPORT]) + STATUS_E6))
     wire = p._pack_slots([0] * 24 + DAY * 6)  # noqa: SLF001 - Sunday cold
     link.deliver(received(HEATER, bytes([p.OP_REPORT, 0xB1]) + wire))
@@ -213,15 +215,16 @@ async def test_registration_power_request_and_reports() -> None:
     assert link.sent == [
         (6, bytes.fromhex("511A0A0905103409")),
         (6, b"\xbf\x01"),
+        (6, b"\xbf\x01"),
         (6, b"\x57\x55"),
         (6, b"\x57\x55"),
     ]
     changes = coordinator.changes_for("6")
-    assert changes[0] == {"max_power": 1143.3}
+    assert changes[0] == {"max_power": 752.6}
     assert changes[1]["mode"] == "modified_auto" and changes[1]["mtemp"] == "20.4"
     assert changes[2] == {"prog": DAY * 6 + [0] * 24}
     # The noted power fills in later status reads that lack it.
-    assert (await client.get_node_settings(DEV_ID, ("htr", "6")))["max_power"] == 1143.3
+    assert (await client.get_node_settings(DEV_ID, ("htr", "6")))["max_power"] == 752.6
 
     await listener.stop()
 

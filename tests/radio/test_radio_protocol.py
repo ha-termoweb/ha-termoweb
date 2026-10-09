@@ -362,10 +362,8 @@ def test_energy_forms() -> None:
     """Dialect A carries a Wh counter; dialect B's BD reply is a power record."""
     a = p.decode_energy(A_ENERGY)
     assert a.energy_wh == 1620009
-    assert a.measured_power_w is None
     b = p.decode_energy(B_ENERGY)
     assert b.energy_wh is None
-    assert b.measured_power_w == 1150.4
     assert b.raw == B_ENERGY
     for bad in (b"", b"\xbd", bytes([0xBD]) + bytes(5), B_HEATER_REPORT):
         assert p.decode_energy(bad) is None
@@ -377,14 +375,14 @@ def test_energy_forms() -> None:
 @pytest.mark.parametrize(
     ("payload", "form", "watts"),
     [
-        (B_HEATER_REPORT, "B", 1150.4),
-        (bytes.fromhex("BEDA002CA9390B0100"), "B", 1143.3),
-        (bytes.fromhex("BEDA002CC8390B0100"), "B", 1146.4),
+        (B_HEATER_REPORT, "B", None),
+        (bytes.fromhex("BEDA002CA9390B0100"), "B", None),
+        (bytes.fromhex("BEDA002CC8390B0100"), "B", None),
         (bytes([0xBE, 0x1D, 0x66]), "A", 752.6),
     ],
 )
 def test_power_request_forms(payload, form, watts) -> None:
-    """Both BE forms decode the measured full-load power and keep the raw bytes."""
+    """Dialect A carries the full-load power; dialect B's fields are not decoded."""
     record = p.decode_power_request(payload)
     assert record.form == form
     assert record.measured_power_w == watts

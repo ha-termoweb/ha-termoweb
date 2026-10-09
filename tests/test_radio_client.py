@@ -241,6 +241,7 @@ async def test_get_node_settings_maps_status_and_program() -> None:
         "ptemp": ["16.5", "18.5", "21.0"],
         "mode": "manual",
         "prog": DAY * 7,
+        "stemp": "21.0",  # manual: the heater heats to its comfort preset
     }
     assert links[0].sent == [(HEATER, b"\xb8"), (HEATER, b"\xb0")]
 
@@ -475,13 +476,35 @@ async def test_dialect_b_keeps_unchanged_fields_from_status(kwargs, b6) -> None:
 
 
 @pytest.mark.asyncio
-async def test_dialect_b_setpoint_write_is_unsupported() -> None:
-    """Dialect B ignores B4 and reports no setpoint, so setpoint writes are refused."""
+async def test_dialect_b_override_write_is_unsupported() -> None:
+    """Dialect B has no known temporary-override write."""
 
     client, links, _ = make_client()
-    with pytest.raises(RadioUnsupportedError, match="Setpoint writes on dialect B"):
-        await client.set_node_settings("dev", ("htr", "6"), mode="manual", stemp=21.0)
+    with pytest.raises(RadioUnsupportedError, match="Temporary override on dialect B"):
+        await client.set_node_settings(
+            "dev", ("htr", "6"), mode="modified_auto", stemp=21.0
+        )
     assert links == [] or links[0].sent == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", [None, "manual", "heat"])
+async def test_dialect_b_setpoint_is_written_as_comfort(mode) -> None:
+    """A manual target becomes B6 with comfort = target and mode manual."""
+
+    client, links, _ = make_client()
+    await client.set_node_settings("dev", ("htr", "6"), mode=mode, stemp=23.0)
+    assert links[0].payloads() == [b"\xb8", bytes.fromhex("B621252E02")]
+
+
+@pytest.mark.asyncio
+async def test_dialect_b_setpoint_must_stay_above_eco() -> None:
+    """Comfort must stay above eco, so a target at or below eco is refused."""
+
+    client, links, _ = make_client()
+    with pytest.raises(ValueError, match="presets must"):
+        await client.set_node_settings("dev", ("htr", "6"), stemp=18.5)
+    assert bytes.fromhex("B6") not in [p[:1] for p in links[0].payloads()]
 
 
 @pytest.mark.asyncio

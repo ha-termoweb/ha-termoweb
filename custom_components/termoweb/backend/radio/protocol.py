@@ -475,8 +475,7 @@ def decode_identity(payload: bytes) -> IdentityRecord | None:
 class EnergyRecord:
     """A ``BD`` reply to ``BC``: a Wh counter (dialect A) or a power record (dialect B)."""
 
-    energy_wh: int | None  # dialect A only
-    measured_power_w: float | None  # dialect-B power record only
+    energy_wh: int | None  # dialect A only; dialect B's power record has no counter
     raw: bytes
 
 
@@ -486,9 +485,9 @@ def decode_energy(payload: bytes) -> EnergyRecord | None:
     if not payload or payload[0] != ENERGY_MARKER:
         return None
     if len(payload) == ENERGY_A_LEN:
-        return EnergyRecord(int.from_bytes(payload[1:5], "big"), None, payload)
+        return EnergyRecord(int.from_bytes(payload[1:5], "big"), payload)
     if len(payload) == ENERGY_B_LEN:
-        return EnergyRecord(None, _deciwatts(payload[3:5]), payload)
+        return EnergyRecord(None, payload)
     return None
 
 
@@ -500,8 +499,8 @@ class PowerRequest:
     """A heater's ``BE`` power request, answered with ``BF 01`` (power_verdict)."""
 
     form: str  # "A" (3 bytes) or "B" (9 bytes)
-    measured_power_w: float  # full-load power the element will draw
-    raw: bytes  # unknown bytes (dialect B 1-2 and 5-8) stay here
+    measured_power_w: float | None  # dialect A: full-load power; B: not carried
+    raw: bytes  # dialect B's fields are not yet understood and stay here
 
 
 def _deciwatts(data: bytes) -> float:
@@ -517,7 +516,7 @@ def decode_power_request(payload: bytes) -> PowerRequest | None:
     if len(payload) == POWER_REQUEST_A_LEN:
         return PowerRequest("A", _deciwatts(payload[1:3]), payload)
     if len(payload) == POWER_REQUEST_B_LEN:
-        return PowerRequest("B", _deciwatts(payload[3:5]), payload)
+        return PowerRequest("B", None, payload)
     return None
 
 
