@@ -101,7 +101,7 @@ DIALECT_B = Dialect(
     firmware_mode=1,
     program_write_slots=24,
     mode_in_preset_write=True,
-    ack_only_opcodes=frozenset({0x5E}),  # 5E 01 flash display
+    ack_only_opcodes=frozenset({0x5E, 0xBA}),  # flash display, keypad lock
 )
 
 DIALECTS: dict[str, Dialect] = {d.name: d for d in (DIALECT_A, DIALECT_B)}

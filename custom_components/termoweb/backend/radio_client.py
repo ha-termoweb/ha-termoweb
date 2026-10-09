@@ -147,6 +147,7 @@ class RadioClient:
         self._exchange_lock = asyncio.Lock()
         self._disconnect_callbacks: list[Callable[[], None]] = []
         self._programs: dict[int, tuple[float, list[int] | None]] = {}
+        self._locks: dict[int, bool] = {}  # last lock written, for records without it
         self._max_power: dict[int, float] = {}
 
     # --- connection ----------------------------------------------------------
@@ -452,6 +453,8 @@ class RadioClient:
             power = await self.read_power_record(addr)
             if power is not None:
                 settings.update(settings_from_power_record(power))
+        if "lock" not in settings and addr in self._locks:
+            settings["lock"] = self._locks[addr]
         if "max_power" not in settings and addr in self._max_power:
             settings["max_power"] = self._max_power[addr]
         return settings
@@ -519,11 +522,12 @@ class RadioClient:
     async def set_node_lock(
         self, dev_id: str, node: NodeDescriptor, *, lock: bool
     ) -> None:
-        """Toggle the heater's keypad lock (``BA``)."""
+        """Toggle the heater's keypad lock (``BA``) and remember what was written."""
 
         _node_type, addr = self._resolve_node(node)
         (planned,) = plan_commands([SetLock(lock)])
-        await self._write(addr, planned.payload)
+        await self._command(addr, planned.payload)
+        self._locks[addr] = lock
 
     async def set_node_display_select(
         self, dev_id: str, node: NodeDescriptor, *, select: bool
