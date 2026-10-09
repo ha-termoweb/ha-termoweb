@@ -14,6 +14,7 @@ from conftest import build_entry_runtime
 from fake_radio_link import (
     CLOCK_ACCEPTED,
     HEATER,
+    NET,
     POWER_REQUEST,
     PROGRAM_HOURLY,
     REGISTRATION,
@@ -100,7 +101,9 @@ def build(nodes=NODES):
         links.append(link)
         return link
 
-    client = RadioClient("radio.local", 2323, "B", nodes, link_factory=factory)
+    client = RadioClient(
+        "radio.local", 2323, "B", nodes, network_id=NET, link_factory=factory
+    )
     client.reply_timeout = 0.01
     hass = SimpleNamespace(data={})
     inventory = Inventory(DEV_ID, build_node_inventory(nodes))

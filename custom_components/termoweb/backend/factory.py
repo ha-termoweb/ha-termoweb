@@ -52,13 +52,17 @@ def backend_capabilities(brand: str) -> BackendCapabilities:
 
 
 def create_radio_client(
-    host: str, port: int, dialect: str, nodes: Iterable[Mapping[str, Any]]
+    host: str,
+    port: int,
+    dialect: str,
+    nodes: Iterable[Mapping[str, Any]],
+    network_id: bytes | None,
 ) -> RadioClient:
     """Return a radio client for the gateway at ``host:port`` and its stored nodes."""
 
     from .radio_client import RadioClient  # noqa: PLC0415
 
-    return RadioClient(host, port, dialect, nodes)
+    return RadioClient(host, port, dialect, nodes, network_id=network_id)
 
 
 def create_rest_client(

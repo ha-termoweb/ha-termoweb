@@ -7,7 +7,7 @@ import importlib
 from types import SimpleNamespace
 
 import pytest
-from fake_radio_link import FakeRadioLink
+from fake_radio_link import NET, FakeRadioLink
 
 from custom_components.termoweb.const import BRAND_RADIO
 from custom_components.termoweb.inventory import Inventory, build_node_inventory
@@ -26,7 +26,7 @@ def make_backend():
     """Return a radio backend over a fake-linked client."""
 
     client = _mod(".radio_client").RadioClient(
-        "radio.local", 2323, "B", NODES, link_factory=FakeRadioLink
+        "radio.local", 2323, "B", NODES, network_id=NET, link_factory=FakeRadioLink
     )
     backend = _mod(".factory").create_backend(brand=BRAND_RADIO, client=client)
     assert isinstance(backend, _mod(".radio_backend").RadioBackend)
@@ -57,10 +57,14 @@ def test_capabilities_switch_off_cloud_only_features() -> None:
 def test_create_radio_client_helper() -> None:
     """The factory helper builds a lazily connecting client for PR 4's setup."""
 
-    client = _mod("").create_radio_client("10.0.0.5", 2323, "A", NODES)
+    client = _mod("").create_radio_client("10.0.0.5", 2323, "A", NODES, None)
     assert isinstance(client, _mod(".radio_client").RadioClient)
     assert client.dialect.name == "A"
     assert client.link is None
+    client = _mod("").create_radio_client("10.0.0.5", 2323, "B", NODES, NET)
+    assert client.dialect.name == "B"
+    with pytest.raises(ValueError, match="explicit network_id"):
+        _mod("").create_radio_client("10.0.0.5", 2323, "B", NODES, None)
 
 
 def test_create_ws_client_returns_listener() -> None:

@@ -10,6 +10,7 @@ import pytest
 from fake_radio_link import (
     CLOCK_ACCEPTED,
     HEATER,
+    NET,
     IDENTITY_SHORT,
     PROGRAM_HOURLY,
     STATUS_SHORT,
@@ -65,6 +66,7 @@ def make_client(dialect: str = "B", **kwargs):
         links.append(link)
         return link
 
+    kwargs.setdefault("network_id", NET if dialect.upper() == "B" else None)
     client = RadioClient(
         "radio.local", 2323, dialect, NODES, link_factory=factory, clock=clock, **kwargs
     )
@@ -85,13 +87,16 @@ def _fixed_time(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_constructor_validates_dialect_and_defaults_port() -> None:
     """Dialect names are case-insensitive; unknown ones fail fast."""
 
-    client = RadioClient("h", 0, " b ", [])
+    client = RadioClient("h", 0, " b ", [], network_id=NET)
     assert client.dialect is DIALECT_B
     assert client._port == 2323  # noqa: SLF001
     assert client.link is None and not client.connected
     assert client.gateway_info is None
     with pytest.raises(ValueError, match="unknown radio dialect"):
-        RadioClient("h", 2323, "C", [])
+        RadioClient("h", 2323, "C", [], network_id=NET)
+    with pytest.raises(ValueError, match="explicit network_id"):
+        RadioClient("h", 2323, "B", [], network_id=None)
+    assert RadioClient("h", 2323, "A", [], network_id=None).dialect is DIALECT_A
 
 
 @pytest.mark.asyncio
@@ -105,6 +110,7 @@ async def test_connects_lazily_once_and_reconnects_after_a_drop() -> None:
     assert await client.async_connect() is link
     assert link.connects == 1 and client.connected
     assert (link.host, link.port, link.station_id) == ("radio.local", 2323, 1)
+    assert link.network_id == NET
     assert client.gateway_info == gateway_info()
 
     link.drop()
