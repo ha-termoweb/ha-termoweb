@@ -11,11 +11,12 @@ is **not yet selectable** in the config flow; PR 4 wires up setup.
 
 Legend:
 
-- ✅ works on the reference heater (dialect B, node 06)
+- ✅ verified on a real dialect-B heater through the ESP32 gateway
 - 🟡 implemented, the protocol is known (dialect A), not yet verified on a
   dialect-B heater
 - 🔬 partly known
 - ❌ not available over radio; the "Radio behaviour" column says what happens
+- ➖ not applicable to a local radio gateway
 
 ## Modules
 
@@ -209,21 +210,21 @@ reconnects; it does no harm.
 
 | Cloud feature | Radio | Notes |
 |---|---|---|
-| Climate entity: mode, target temperature, presets, schedule | 🟡 | Dialect B: mode, presets and schedule writes ✅; target temperature writes ❌ and target/current temperature stay unknown (short status record). Dialect A: 🟡. |
+| Climate entity: mode, target temperature, presets, schedule | 🟡 / ✅ | Dialect B, verified on a real heater: off / manual / program modes, the three presets, the weekly schedule, the target temperature (read and written as the heater's own setpoint) and the current room temperature. Dialect A: 🟡 (from ha-termoweb-local, not tested here). |
 | Climate HVAC action (heating / idle) | 🟡 / ✅ | Dialect A: full status record flags. Dialect B: power record byte 7, verified against a house meter. |
 | Temporary override (`modified_auto`) | 🟡 / ✅ | `B4 03` in dialect A; `B6 .. 03 <setpoint>` in dialect B (ended by the heater at the next program change). |
 | Child lock entity | 🟡 | `BA 01`/`BA 00`. A dialect-B heater acks it without a reply and does not report the lock, so the entity shows the last state written (unknown until first used). The keypad effect on dialect B is not yet confirmed. |
 | Heater boost | 🟡 (client only) | No heater boost entity exists today. |
-| Accumulator boost, boost defaults | ❌ | Unknown on radio. |
+| Accumulator boost, boost defaults | ❌ | Unknown on radio; no accumulator was available to test. |
 | Display flash button | 🟡 | `5E 01`: dialect A answers `5F 55`; a dialect-B heater acks it (no reply record). The visible flash on dialect B is not yet confirmed. |
-| Heater priority numbers | 🟡 | Local power manager (see below). Higher numbers win. |
-| Installation power limit | 🟡 | Local power manager (see below). Needs each heater's power: reported by dialect-A heaters, entered in the options for dialect B. |
-| Energy and power sensors | 🟡 | Estimated: rated power × duty while the heating flag is set, integrated between power records. Needs each heater's power (options). Starts at 0 when Home Assistant starts. |
-| Energy history import service | ❌ | Logs "not supported by this backend" for radio entries. |
-| Hourly samples poller | ❌ | Gets `{}`. |
+| Heater priority numbers | ✅ | Local power manager (see below). Higher numbers win. |
+| Installation power limit | ✅ | Local power manager (see below), verified with a house meter. Needs each heater's power: reported by dialect-A heaters, entered in the options for dialect B. |
+| Energy and power sensors | ✅ (estimated) | Within ~4 % of a house meter over a heating episode. Estimated: rated power × duty while the heating flag is set, integrated between power records. Needs each heater's power (options). Starts at 0 when Home Assistant starts. |
+| Energy history import service | ➖ | Not applicable: radio heaters keep no energy history to import. Logs "not supported by this backend". |
+| Hourly samples poller | ➖ | Not needed: the listener pushes the energy estimate live; the poller gets `{}`. |
 | Gateway connectivity binary sensor | ✅ | From the listener's health tracker. |
-| Websocket debug probe service | ❌ | Not applicable. |
-| Geo data / device location | ❌ | Not applicable; the location sensor is not created (`geo_data` capability off). |
+| Websocket debug probe service | ➖ | Not applicable. |
+| Geo data / device location | ➖ | Not applicable; the location sensor is not created (`geo_data` capability off). |
 | Gateway RTC | ✅ | Local time. |
 
 ## Local power manager
