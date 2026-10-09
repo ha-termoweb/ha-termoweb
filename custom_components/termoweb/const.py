@@ -97,10 +97,22 @@ def get_brand_basic_auth(brand: str) -> str:
     return BRAND_BASIC_AUTH.get(brand, BASIC_AUTH_B64)
 
 
+RADIO_BRAND_LABEL: Final = "Radio"  # not in BRAND_LABELS: that feeds the login form
+CLOUD_CONFIGURATION_URL: Final = "https://control.termoweb.net"
+
+
 def get_brand_label(brand: str) -> str:
     """Return human-readable brand label."""
 
+    if brand == BRAND_RADIO:
+        return RADIO_BRAND_LABEL
     return BRAND_LABELS.get(brand, BRAND_LABELS[BRAND_TERMOWEB])
+
+
+def get_brand_configuration_url(brand: str | None) -> str | None:
+    """Return the web portal URL for a cloud brand; None for the local radio."""
+
+    return None if brand == BRAND_RADIO else CLOUD_CONFIGURATION_URL
 
 
 def get_brand_user_agent(brand: str) -> str:

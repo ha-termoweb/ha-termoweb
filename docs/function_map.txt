@@ -838,6 +838,8 @@ custom_components/termoweb/const.py :: get_brand_basic_auth
     Return Base64-encoded client credentials for the brand.
 custom_components/termoweb/const.py :: get_brand_label
     Return human-readable brand label.
+custom_components/termoweb/const.py :: get_brand_configuration_url
+    Return the web portal URL for a cloud brand; None for the local radio.
 custom_components/termoweb/const.py :: get_brand_user_agent
     Return the preferred User-Agent string for the brand.
 custom_components/termoweb/const.py :: get_brand_requested_with
@@ -1788,6 +1790,8 @@ custom_components/termoweb/utils.py :: _entry_gateway_record
     Return the mapping storing integration data for ``entry_id``.
 custom_components/termoweb/utils.py :: apply_entry_device_overrides
     Return device info with brand and version overrides.
+custom_components/termoweb/utils.py :: _set_configuration_url
+    Link the device to the brand's web portal; the local radio has none.
 custom_components/termoweb/utils.py :: build_gateway_device_info
     Return canonical ``DeviceInfo`` for the TermoWeb gateway.
 custom_components/termoweb/utils.py :: build_power_monitor_device_info
