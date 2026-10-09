@@ -471,7 +471,7 @@ def test_options_flow_init_and_submit(
         options={"poll_interval": 10, "debug": False},
     )
 
-    options_flow = asyncio.run(config_flow.async_get_options_flow(entry))
+    options_flow = config_flow.TermoWebConfigFlow.async_get_options_flow(entry)
     options_flow.hass = hass
 
     async def fake_version(_hass: HomeAssistant) -> str:
