@@ -93,11 +93,13 @@ A reply's first payload byte is the request opcode + 1. A two-byte
 
 | Payload | Direction | Meaning | A | B |
 |---|---|---|---|---|
-| `B4 01` / `B4 02` / `B4 04` | station → heater | mode auto / manual / off, reply `B5 55` | A | ? |
+| `B4 01` / `B4 02` / `B4 04` | station → heater | mode auto / manual / off, reply `B5 55`. Dialect B acks it but ignores it: no reply, mode unchanged | A | ignored |
 | `B4 02 <half-deg>` | station → heater | manual setpoint, 7–35 C | A | ? |
 | `B4 03 <half-deg>` | station → heater | temporary override setpoint | A | ? |
-| `B6 <af> <eco> <comfort>` | station → heater | preset temperatures, strictly increasing, reply `B7 55` | A | ? |
-| `B2` + 84 bytes | station → heater | weekly program write, 48 slots/day, Sunday first, reply `B3 55` | A | ? |
+| `B6 <af> <eco> <comfort>` | station → heater | preset temperatures, strictly increasing, reply `B7 55` | A | rejected |
+| `B6 <af> <eco> <comfort> <mode>` | station → heater | presets plus mode (01/02/04); dialect B's only mode write, reply `B7 55` | ? | B |
+| `B2` + 84 bytes | station → heater | weekly program write, 48 slots/day, Sunday first, reply `B3 55` | A | rejected |
+| `B2` + 42 bytes | station → heater | weekly program write, 24 slots/day, same layout as the `B1` read, reply `B3 55` | ? | B |
 | `D2` / `D4` / `D6` / `BA` `01|00` | station → heater | boost / runback / EASY / keypad lock toggles, reply `<op+1> 55` | A | ? |
 | `C4` + 8 bytes | station → heater | advanced setup record, reply `C5 55/56` | A | ? |
 | `5E 01` | station → heater | flash display, reply `5F 55` | A | ? |

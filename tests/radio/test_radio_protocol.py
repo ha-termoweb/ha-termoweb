@@ -150,6 +150,33 @@ def test_write_program_validation() -> None:
         p.write_program([[3] * 24] * 7)
 
 
+def test_write_presets_with_mode() -> None:
+    """Dialect B appends the mode to B6 (verified: B6 21 25 2A 04 sets off)."""
+    assert p.write_presets(16.5, 18.5, 21.0, p.MODE_OFF) == bytes.fromhex("B621252A04")
+    assert p.write_presets(16.5, 18.5, 21.0, p.MODE_MANUAL) == bytes.fromhex(
+        "B621252A02"
+    )
+    with pytest.raises(ValueError, match="mode"):
+        p.write_presets(16.5, 18.5, 21.0, p.MODE_OVERRIDE)
+
+
+def test_write_program_hourly_wire_echoes_dialect_b_read() -> None:
+    """A 24-slot write of the decoded B1 record is B2 + the same 42 bytes (B3 55)."""
+    record = p.decode_program(B_PROGRAM)
+    week = [
+        record.hourly_monday_first[d * 24 : (d + 1) * 24]
+        for d in range(p.DAYS_PER_WEEK)
+    ]
+    assert p.write_program(week, wire_slots=p.SLOTS_HOURLY) == b"\xb2" + B_PROGRAM[1:]
+    half = [[slot for slot in day for _ in range(2)] for day in week]
+    assert p.write_program(half, wire_slots=p.SLOTS_HOURLY) == b"\xb2" + B_PROGRAM[1:]
+    half[0] = [2] + half[0][1:]
+    with pytest.raises(ValueError, match="half-hour"):
+        p.write_program(half, wire_slots=p.SLOTS_HOURLY)
+    with pytest.raises(ValueError, match="wire_slots"):
+        p.write_program(week, wire_slots=12)
+
+
 def test_rotate_week_round_trip_and_validation() -> None:
     """Rotation to the wire and back is the identity; wrong sizes raise."""
     week = list(range(7 * 24))

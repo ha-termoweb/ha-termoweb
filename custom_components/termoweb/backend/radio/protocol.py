@@ -85,7 +85,7 @@ SLOTS_HOURLY = 24
 SLOTS_HALF_HOURLY = 48
 SLOT_CODES = (0, 1, 2)  # cold / night (eco) / day (comfort)
 PROGRAM_HOURLY_PAYLOAD_LEN = 43  # B1 + 42 bytes (C9 class)
-PROGRAM_HALF_HOURLY_PAYLOAD_LEN = 85  # B1 + 84 bytes (9F class, and every B2 write)
+PROGRAM_HALF_HOURLY_PAYLOAD_LEN = 85  # B1 + 84 bytes (9F class, dialect-A B2 writes)
 _PROGRAM_RESOLUTION = {
     PROGRAM_HOURLY_PAYLOAD_LEN: SLOTS_HOURLY,
     PROGRAM_HALF_HOURLY_PAYLOAD_LEN: SLOTS_HALF_HOURLY,
@@ -149,8 +149,10 @@ def set_override(celsius: float) -> bytes:
     return bytes([OP_WRITE, SUB_OVERRIDE, _half_degrees(celsius)])
 
 
-def write_presets(anti_frost_c: float, eco_c: float, comfort_c: float) -> bytes:
-    """Return ``B6 <anti-frost> <eco> <comfort>``; values strictly increasing."""
+def write_presets(
+    anti_frost_c: float, eco_c: float, comfort_c: float, mode_code: int | None = None
+) -> bytes:
+    """Return ``B6 <anti-frost> <eco> <comfort> [<mode>]``; values strictly increasing."""
     values = (anti_frost_c, eco_c, comfort_c)
     for value in values:
         if not math.isfinite(value) or abs(value * 2 - round(value * 2)) > 1e-9:
@@ -160,7 +162,10 @@ def write_presets(anti_frost_c: float, eco_c: float, comfort_c: float) -> bytes:
             "presets must satisfy "
             f"{MIN_SETPOINT_C} <= anti-frost < eco < comfort <= {MAX_SETPOINT_C}"
         )
-    return bytes([OP_PRESET_WRITE, *(_half_degrees(v) for v in values)])
+    if mode_code is not None and mode_code not in SETTABLE_MODES:
+        raise ValueError(f"mode {mode_code!r} is not one of auto/manual/off")
+    tail = () if mode_code is None else (mode_code,)
+    return bytes([OP_PRESET_WRITE, *(_half_degrees(v) for v in values), *tail])
 
 
 def set_toggle(opcode: int, on: bool) -> bytes:
@@ -190,8 +195,10 @@ def sync_clock(when: datetime, registering: bool, dialect: Dialect) -> bytes:
     return bytes([prefix, *fields]) + dialect.eb_clock_suffix
 
 
-def write_program(week_slots: Sequence[Sequence[int]]) -> bytes:
-    """Return ``B2`` + 84 bytes from 7 Monday-first days of 24 or 48 slot codes."""
+def write_program(
+    week_slots: Sequence[Sequence[int]], wire_slots: int = SLOTS_HALF_HOURLY
+) -> bytes:
+    """Return ``B2`` + 84 (48-slot) or 42 (24-slot) bytes from 7 Monday-first days."""
     if len(week_slots) != DAYS_PER_WEEK:
         raise ValueError(f"expected {DAYS_PER_WEEK} days, got {len(week_slots)}")
     resolution = len(week_slots[0])
@@ -199,10 +206,16 @@ def write_program(week_slots: Sequence[Sequence[int]]) -> bytes:
         len(day) != resolution for day in week_slots
     ):
         raise ValueError("each day needs 24 (hourly) or 48 (half-hourly) slots")
-    if resolution == SLOTS_HOURLY:
+    if wire_slots not in (SLOTS_HOURLY, SLOTS_HALF_HOURLY):
+        raise ValueError(f"wire_slots must be 24 or 48, got {wire_slots!r}")
+    if resolution == SLOTS_HOURLY and wire_slots == SLOTS_HALF_HOURLY:
         week_slots = [[slot for slot in day for _ in range(2)] for day in week_slots]
+    elif resolution == SLOTS_HALF_HOURLY and wire_slots == SLOTS_HOURLY:
+        if any(day[0::2] != day[1::2] for day in week_slots):
+            raise ValueError("half-hour changes cannot be sent in a 24-slot write")
+        week_slots = [day[0::2] for day in week_slots]
     flat = [slot for day in week_slots for slot in day]
-    wire = rotate_week(flat, SLOTS_HALF_HOURLY, to_wire=True)
+    wire = rotate_week(flat, wire_slots, to_wire=True)
     return bytes([OP_PROGRAM_WRITE]) + _pack_slots(wire)
 
 

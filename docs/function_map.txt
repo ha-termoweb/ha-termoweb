@@ -1848,7 +1848,7 @@ custom_components/termoweb/backend/radio/protocol.py :: set_mode
 custom_components/termoweb/backend/radio/protocol.py :: set_override
     Return ``B4 03 <half-degrees>``: temporary override setpoint, 7-35 C.
 custom_components/termoweb/backend/radio/protocol.py :: write_presets
-    Return ``B6 <anti-frost> <eco> <comfort>``; values strictly increasing.
+    Return ``B6 <anti-frost> <eco> <comfort> [<mode>]``; values strictly increasing.
 custom_components/termoweb/backend/radio/protocol.py :: set_toggle
     Return ``<opcode> 01|00`` for the boost/runback/EASY/lock toggles.
 custom_components/termoweb/backend/radio/protocol.py :: confirm_report
@@ -1856,7 +1856,7 @@ custom_components/termoweb/backend/radio/protocol.py :: confirm_report
 custom_components/termoweb/backend/radio/protocol.py :: sync_clock
     Return the EB clock sync ``5x YY MM DD DOW HH MM SS`` plus the dialect suffix.
 custom_components/termoweb/backend/radio/protocol.py :: write_program
-    Return ``B2`` + 84 bytes from 7 Monday-first days of 24 or 48 slot codes.
+    Return ``B2`` + 84 (48-slot) or 42 (24-slot) bytes from 7 Monday-first days.
 custom_components/termoweb/backend/radio/protocol.py :: power_verdict
     Return ``BF 01`` (granted) or ``BF 00``, the reply to a BE power request.
 custom_components/termoweb/backend/radio/protocol.py :: request_status

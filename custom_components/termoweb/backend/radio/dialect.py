@@ -71,6 +71,8 @@ class Dialect:
     crc: Callable[[bytes], int] = field(repr=False)
     eb_clock_suffix: bytes
     firmware_mode: int  # argument of the gateway's ``Y`` command
+    program_write_slots: int  # slots per day in a ``B2`` program write
+    mode_in_preset_write: bool  # True: ``B6`` carries the mode; ``B4`` mode is ignored
 
 
 DIALECT_A = Dialect(
@@ -82,6 +84,8 @@ DIALECT_A = Dialect(
     crc=crc16_ccitt_a,
     eb_clock_suffix=b"\x03",
     firmware_mode=0,
+    program_write_slots=48,
+    mode_in_preset_write=False,
 )
 
 DIALECT_B = Dialect(
@@ -93,6 +97,8 @@ DIALECT_B = Dialect(
     crc=crc16_modbus,
     eb_clock_suffix=b"",
     firmware_mode=1,
+    program_write_slots=24,
+    mode_in_preset_write=True,
 )
 
 DIALECTS: dict[str, Dialect] = {d.name: d for d in (DIALECT_A, DIALECT_B)}

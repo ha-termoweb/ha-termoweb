@@ -60,6 +60,8 @@ def test_dialect_table() -> None:
     assert (DIALECT_A.eb_clock_suffix, DIALECT_B.eb_clock_suffix) == (b"\x03", b"")
     assert DIALECT_A.network_id == bytes.fromhex("1B30")
     assert DIALECT_B.network_id is None
+    assert (DIALECT_A.program_write_slots, DIALECT_B.program_write_slots) == (48, 24)
+    assert not DIALECT_A.mode_in_preset_write and DIALECT_B.mode_in_preset_write
     assert "crc" not in repr(DIALECT_A)
 
 
