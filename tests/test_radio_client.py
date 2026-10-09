@@ -566,12 +566,31 @@ async def test_heater_boost_toggle_and_accumulator_boost_unsupported(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("dialect", "reply"), [("A", True), ("B", False)])
+async def test_flash_display(dialect, reply) -> None:
+    """5E 01 needs 5F 55 in dialect A; dialect B only acks it. Deselect is a no-op."""
+
+    client, links, _ = make_client(dialect)
+    link = await client.async_connect()
+    link.reply(0x5E, b"\x5f\x55")
+    await client.set_node_display_select("dev", ("htr", "6"), select=False)
+    assert link.sent == []
+    await client.set_node_display_select("dev", ("htr", "6"), select=True)
+    assert link.payloads() == [b"\x5e\x01"]
+    link.replies.pop(0x5E)
+    if reply:
+        with pytest.raises(RadioCommandError, match="sent no reply"):
+            await client.set_node_display_select("dev", ("htr", "6"), select=True)
+    else:
+        await client.set_node_display_select("dev", ("htr", "6"), select=True)
+
+
+@pytest.mark.asyncio
 async def test_unsupported_features() -> None:
     """Cloud-only features raise or report "no data" per call site."""
 
     client, links, _ = make_client()
     for call in (
-        client.set_node_display_select("dev", ("htr", "6"), select=True),
         client.set_node_priority("dev", ("htr", "6"), priority=3),
         client.set_power_limit("dev", power_limit=3000),
         client.set_acm_extra_options("dev", "7", boost_time=60),

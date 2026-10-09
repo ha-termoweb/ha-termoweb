@@ -73,6 +73,7 @@ class Dialect:
     firmware_mode: int  # argument of the gateway's ``Y`` command
     program_write_slots: int  # slots per day in a ``B2`` program write
     mode_in_preset_write: bool  # True: ``B6`` carries the mode; ``B4`` mode is ignored
+    ack_only_opcodes: frozenset[int]  # writes the heater acks without a reply record
 
 
 DIALECT_A = Dialect(
@@ -86,6 +87,7 @@ DIALECT_A = Dialect(
     firmware_mode=0,
     program_write_slots=48,
     mode_in_preset_write=False,
+    ack_only_opcodes=frozenset(),
 )
 
 DIALECT_B = Dialect(
@@ -99,6 +101,7 @@ DIALECT_B = Dialect(
     firmware_mode=1,
     program_write_slots=24,
     mode_in_preset_write=True,
+    ack_only_opcodes=frozenset({0x5E}),  # 5E 01 flash display
 )
 
 DIALECTS: dict[str, Dialect] = {d.name: d for d in (DIALECT_A, DIALECT_B)}
