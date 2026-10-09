@@ -436,6 +436,7 @@ def test_power_record_decodes_heating_voltage_and_duty() -> None:
     assert idle.mains_voltage_v == pytest.approx(0x3A78 / 64)  # 233.9 V
     heating = p.decode_power_record(bytes.fromhex("BDDB002CE43A0C0100"))
     assert heating.heating is True and heating.duty_pct == 12
+    assert heating.room_temp_c == 21.9 and idle.room_temp_c == 22.0
     assert heating.raw[0] == 0xBD
     for bad in (
         A_ENERGY,

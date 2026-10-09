@@ -151,8 +151,9 @@ The fields were checked against a whole-house energy meter during a heat test:
   It tracked the meter's voltage, including the dips during heating pulses.
 - Byte 6: probably the duty in percent (`0C` while heating ~11 % of the
   time). Not proven.
-- Bytes 2–3: always `00 2C`. Byte 1: changes in single steps between
-  `DA` and `DF`; unproven.
+- Byte 1: room temperature in tenths of a degree (`DB` = 21.9 °C). Checked
+  against a reference sensor placed next to the heater's probe.
+- Bytes 2–3: always `00 2C`.
 - The record carries no power value. An earlier reading of bytes 3–4 as
   deciwatts (`2C F0` ≈ 1150 W) was a coincidence of the constant `2C`.
 
