@@ -1807,3 +1807,155 @@ custom_components/termoweb/entities/lock.py :: _build_settings_resolver
     Return callable resolving the domain state for a node.
 custom_components/termoweb/entities/lock.py :: _build_settings_resolver._resolver
     Return the coordinator state for the node when available.
+custom_components/termoweb/backend/radio/dialect.py :: crc16_ccitt_a
+    Return dialect A's CRC-16/CCITT (poly 0x1021, init 0x1D0F, xorout 0xFFFF).
+custom_components/termoweb/backend/radio/dialect.py :: crc16_modbus
+    Return dialect B's CRC-16/MODBUS (reflected poly 0xA001, init 0xFFFF).
+custom_components/termoweb/backend/radio/dialect.py :: keystream
+    Return the first ``length`` bytes of dialect A's PN9 keystream, MSB-first.
+custom_components/termoweb/backend/radio/dialect.py :: whiten
+    XOR ``data`` with the PN9 keystream; scrambling and descrambling are identical.
+custom_components/termoweb/backend/radio/dialect.py :: Frame.ok
+    Return True when both the length byte and the CRC verify.
+custom_components/termoweb/backend/radio/dialect.py :: Frame.is_ack
+    Return True for a valid 8-byte link-layer ack (flags 0x80, no payload).
+custom_components/termoweb/backend/radio/dialect.py :: _to_air
+    Apply the dialect's whitening (if any) to logical bytes.
+custom_components/termoweb/backend/radio/dialect.py :: _to_logical
+    Remove the dialect's whitening (if any) from on-air bytes.
+custom_components/termoweb/backend/radio/dialect.py :: encode
+    Return on-air bytes for logical bytes 1..n-3 (net id through payload).
+custom_components/termoweb/backend/radio/dialect.py :: frame_total_length
+    Return the total on-air length implied by a frame's first air byte.
+custom_components/termoweb/backend/radio/dialect.py :: decode
+    Decode on-air bytes, verifying length and CRC; never raises on bad input.
+custom_components/termoweb/backend/radio/dialect.py :: build_frame
+    Return on-air bytes for a data frame; path defaults to (src, dst, 0, 0, 0).
+custom_components/termoweb/backend/radio/dialect.py :: build_ack
+    Return on-air bytes for the ack ``acker`` sends for a frame from ``sender``.
+custom_components/termoweb/backend/radio/dialect.py :: _network_id
+    Return a validated two-byte network id, defaulting to the dialect's own.
+custom_components/termoweb/backend/radio/dialect.py :: detect_dialect
+    Return the first dialect under which ``air`` has a valid length and CRC.
+custom_components/termoweb/backend/radio/protocol.py :: _half_degrees
+    Return ``celsius`` in half degrees, the wire unit for temperatures.
+custom_components/termoweb/backend/radio/protocol.py :: _check_setpoint
+    Raise ValueError unless ``celsius`` lies within the accepted setpoint range.
+custom_components/termoweb/backend/radio/protocol.py :: set_setpoint
+    Return ``B4 02 <half-degrees>``: manual setpoint, 7-35 C.
+custom_components/termoweb/backend/radio/protocol.py :: set_mode
+    Return ``B4 <mode>`` for auto (01), manual (02) or off (04).
+custom_components/termoweb/backend/radio/protocol.py :: set_override
+    Return ``B4 03 <half-degrees>``: temporary override setpoint, 7-35 C.
+custom_components/termoweb/backend/radio/protocol.py :: write_presets
+    Return ``B6 <anti-frost> <eco> <comfort>``; values strictly increasing.
+custom_components/termoweb/backend/radio/protocol.py :: set_toggle
+    Return ``<opcode> 01|00`` for the boost/runback/EASY/lock toggles.
+custom_components/termoweb/backend/radio/protocol.py :: confirm_report
+    Return ``57 55``, the confirmation sent after every ``56`` report.
+custom_components/termoweb/backend/radio/protocol.py :: sync_clock
+    Return the EB clock sync ``5x YY MM DD DOW HH MM SS`` plus the dialect suffix.
+custom_components/termoweb/backend/radio/protocol.py :: write_program
+    Return ``B2`` + 84 bytes from 7 Monday-first days of 24 or 48 slot codes.
+custom_components/termoweb/backend/radio/protocol.py :: power_verdict
+    Return ``BF 01`` (granted) or ``BF 00``, the reply to a BE power request.
+custom_components/termoweb/backend/radio/protocol.py :: request_status
+    Return the ``B8`` status request.
+custom_components/termoweb/backend/radio/protocol.py :: request_program
+    Return the ``B0`` program read request.
+custom_components/termoweb/backend/radio/protocol.py :: request_energy
+    Return the ``BC`` energy counter request.
+custom_components/termoweb/backend/radio/protocol.py :: request_identity
+    Return the ``5A`` identity request.
+custom_components/termoweb/backend/radio/protocol.py :: request_advanced
+    Return the ``DA`` advanced-setup record request.
+custom_components/termoweb/backend/radio/protocol.py :: reply_predicate
+    Return a predicate matching a reply to ``opcode`` (first byte opcode + 1).
+custom_components/termoweb/backend/radio/protocol.py :: reply_predicate._matches
+    Return True when ``frame`` carries the expected reply payload.
+custom_components/termoweb/backend/radio/protocol.py :: reply_verdict
+    Return True/False for an ``<opcode+1> 55|56`` reply, else None.
+custom_components/termoweb/backend/radio/protocol.py :: StatusRecord.mode
+    Return the mode name, or None for an unknown code.
+custom_components/termoweb/backend/radio/protocol.py :: decode_status
+    Decode an E5/E3 report, E6/E4 status reply or short ``B9`` record.
+custom_components/termoweb/backend/radio/protocol.py :: ProgramRecord.slots_monday_first
+    Return ``slots`` rotated to Monday-first day order.
+custom_components/termoweb/backend/radio/protocol.py :: ProgramRecord.hourly_monday_first
+    Return ``hourly`` rotated to Monday-first day order.
+custom_components/termoweb/backend/radio/protocol.py :: ProgramRecord.hourly_only
+    Return True when no hour is split into two different half hours.
+custom_components/termoweb/backend/radio/protocol.py :: rotate_week
+    Rotate a flat week between Monday-first and the wire's Sunday-first order.
+custom_components/termoweb/backend/radio/protocol.py :: _unpack_slots
+    Expand 2-bit slot codes, MSB first; the unused code 3 becomes None.
+custom_components/termoweb/backend/radio/protocol.py :: _pack_slots
+    Pack slot codes four to a byte, MSB first; raise on an unknown code.
+custom_components/termoweb/backend/radio/protocol.py :: decode_program
+    Decode a ``B1`` program reply (43 or 85 bytes) or a ``56 B1`` program report.
+custom_components/termoweb/backend/radio/protocol.py :: IdentityRecord.ascii_serial
+    Return the short form's trailing printable-ASCII run, or None.
+custom_components/termoweb/backend/radio/protocol.py :: decode_identity
+    Decode a ``5B 77`` (E0) or ``5B 55`` (short) identity reply.
+custom_components/termoweb/backend/radio/protocol.py :: decode_energy
+    Decode ``BD`` + u32 Wh (5 bytes) or the 9-byte dialect-B ``BD`` power record.
+custom_components/termoweb/backend/radio/protocol.py :: _deciwatts
+    Return big-endian deciwatts as watts.
+custom_components/termoweb/backend/radio/protocol.py :: decode_power_request
+    Decode ``BE <hi> <lo>`` (dialect A) or the 9-byte ``BE`` record (dialect B).
+custom_components/termoweb/backend/radio/protocol.py :: classify_unsolicited
+    Classify a frame (or bare payload) a heater sent without being asked.
+custom_components/termoweb/backend/radio/link.py :: _int_or_none
+    Return ``text`` parsed as an int, or None when it is not one.
+custom_components/termoweb/backend/radio/link.py :: _float_or_none
+    Return ``text`` parsed as a float, or None when it is not one.
+custom_components/termoweb/backend/radio/link.py :: parse_rx_line
+    Parse ``RX <micros> <rssi> <lqi> <crc> <HEX>`` into (air, rssi, lqi, micros).
+custom_components/termoweb/backend/radio/link.py :: parse_query_line
+    Parse ``# Q termoweb_rx <ver> key=value ...`` into a GatewayInfo.
+custom_components/termoweb/backend/radio/link.py :: RadioLink.__init__
+    Store connection parameters; nothing is opened until connect().
+custom_components/termoweb/backend/radio/link.py :: RadioLink.dialect
+    Return the dialect this link frames and decodes with.
+custom_components/termoweb/backend/radio/link.py :: RadioLink.station_id
+    Return this station's own radio id.
+custom_components/termoweb/backend/radio/link.py :: RadioLink.network_id
+    Return the two-byte network id used for frames and firmware auto-acks.
+custom_components/termoweb/backend/radio/link.py :: RadioLink.connected
+    Return True while the socket is open and the reader is running.
+custom_components/termoweb/backend/radio/link.py :: RadioLink.connect
+    Open the socket, configure the gateway and return its ``Q`` status.
+custom_components/termoweb/backend/radio/link.py :: RadioLink._handshake
+    Await the banner, send the setup commands and return the ``Q`` line.
+custom_components/termoweb/backend/radio/link.py :: RadioLink.close
+    Close the socket and stop the reader; pending waits fail.
+custom_components/termoweb/backend/radio/link.py :: RadioLink._close_writer
+    Close the stream writer, ignoring errors from an already dead socket.
+custom_components/termoweb/backend/radio/link.py :: RadioLink.add_listener
+    Register ``callback`` for every decoded RX frame; return a remover.
+custom_components/termoweb/backend/radio/link.py :: RadioLink.add_listener._remove
+    Unregister the callback; safe to call more than once.
+custom_components/termoweb/backend/radio/link.py :: RadioLink.send_frame
+    Transmit ``air`` and wait for ``dst``'s ack, retrying up to ``retries`` times.
+custom_components/termoweb/backend/radio/link.py :: RadioLink.request
+    Send ``payload`` to ``dst`` and return its first reply matching ``predicate``.
+custom_components/termoweb/backend/radio/link.py :: RadioLink._transmit
+    Write ``T<hex>`` and await ``TX``; resend once on a bad-hex TXERR.
+custom_components/termoweb/backend/radio/link.py :: RadioLink._send_command
+    Write one command line, keeping at least MIN_COMMAND_GAP_S between commands.
+custom_components/termoweb/backend/radio/link.py :: RadioLink._read_loop
+    Read gateway lines until EOF or error, dispatching each one.
+custom_components/termoweb/backend/radio/link.py :: RadioLink._dispatch
+    Route one gateway line to waiters and listeners.
+custom_components/termoweb/backend/radio/link.py :: RadioLink._resolve
+    Complete every pending waiter whose predicate accepts ``item``.
+custom_components/termoweb/backend/radio/link.py :: RadioLink._add_line_waiter
+    Register a future for the next line matching ``predicate``.
+custom_components/termoweb/backend/radio/link.py :: RadioLink._add_frame_waiter
+    Register a future for the next RX frame matching ``predicate``.
+custom_components/termoweb/backend/radio/link.py :: RadioLink._drop_waiter
+    Forget a waiter and cancel it if still pending.
+custom_components/termoweb/backend/radio/link.py :: RadioLink._fail_waiters
+    Fail and forget every pending waiter.
+custom_components/termoweb/backend/radio/link.py :: RadioLink._wait
+    Return ``future``'s result, or None if the injected sleep finishes first.
