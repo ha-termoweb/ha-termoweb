@@ -142,7 +142,7 @@ re-reads it.
 | `set_node_settings` | see "Canonical mapping (writes)" | 🟡 |
 | `set_node_lock` | `BA 01` / `BA 00`, verdict `BB 55`. No entity uses it (capability `lock` is False). | 🟡 |
 | `set_acm_boost_state` | heater: `D2 01` / `D2 00`, verdict `D3 55`; the heater uses its own boost time and temperature. Accumulator: `RadioUnsupportedError`. No current entity calls it for heaters. | 🟡 heater, ❌ accumulator |
-| `set_node_display_select` | `RadioUnsupportedError`. The flash opcode `5E 01` is documented for dialect A but has no builder in `backend/radio/protocol.py` yet. | ❌ (follow-up) |
+| `set_node_display_select` | `select=True`: `5E 01`; dialect A must answer `5F 55`, dialect B only acks. `select=False`: no-op. | 🟡 |
 | `set_node_priority` | `RadioUnsupportedError`; entities not created (`priority` False) | ❌ |
 | `get_power_limit` | None ("no data"); never polled (`power_limit` False) | ❌ |
 | `set_power_limit` | `RadioUnsupportedError`; entity not created | ❌ |
@@ -214,7 +214,7 @@ reconnects; it does no harm.
 | Child lock entity | ❌ | Lock state not readable on dialect B; capability off. |
 | Heater boost | 🟡 (client only) | No heater boost entity exists today. |
 | Accumulator boost, boost defaults | ❌ | Unknown on radio. |
-| Display flash button | ❌ | Button exists and shows an error; needs a `5E 01` builder. |
+| Display flash button | 🟡 | `5E 01`: dialect A answers `5F 55`; a dialect-B heater acks it (no reply record). The visible flash on dialect B is not yet confirmed. |
 | Heater priority numbers | ❌ | Not created. |
 | Installation power limit | ❌ | Not created, not polled. |
 | Energy and power sensors | ❌ | Not created (`energy` capability off): no energy counter is known for dialect B (`BC` returns the power record). |
@@ -231,7 +231,7 @@ reconnects; it does no harm.
 - Temporary-override writes on dialect-B heaters: `B4` is acked but ignored,
   and no other override write is known.
 - Lock, boost and the other toggles are unverified on a dialect-B heater.
-- Display flash (`5E 01`): add a builder to `protocol.py`, then implement it.
+- Display flash on dialect-B heaters: the command is acked, the visible flash is not yet confirmed.
 - Energy counter: dialect A has `BC` → `BD` + u32 Wh; dialect B unknown. Not
   used by this backend yet.
 

@@ -32,6 +32,7 @@ OP_CLOCK_REGISTERING = 0x51
 OP_CLOCK_STEADY = 0x52
 OP_CONFIRM_REPORT = 0x57
 OP_REPORT = 0x56  # leading marker of every unsolicited report
+OP_FLASH_DISPLAY = 0x5E
 
 TOGGLE_BOOST = 0xD2
 TOGGLE_RUNBACK = 0xD4
@@ -173,6 +174,11 @@ def set_toggle(opcode: int, on: bool) -> bytes:
     if opcode not in TOGGLE_OPCODES:
         raise ValueError(f"opcode {opcode!r} is not a known toggle")
     return bytes([opcode, 0x01 if on else 0x00])
+
+
+def flash_display() -> bytes:
+    """Return ``5E 01``: flash the heater's display to identify it."""
+    return bytes([OP_FLASH_DISPLAY, 0x01])
 
 
 def confirm_report() -> bytes:

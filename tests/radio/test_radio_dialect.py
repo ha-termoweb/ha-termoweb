@@ -62,6 +62,8 @@ def test_dialect_table() -> None:
     assert DIALECT_B.network_id is None
     assert (DIALECT_A.program_write_slots, DIALECT_B.program_write_slots) == (48, 24)
     assert not DIALECT_A.mode_in_preset_write and DIALECT_B.mode_in_preset_write
+    assert DIALECT_A.ack_only_opcodes == frozenset()
+    assert DIALECT_B.ack_only_opcodes == frozenset({0x5E})
     assert "crc" not in repr(DIALECT_A)
 
 

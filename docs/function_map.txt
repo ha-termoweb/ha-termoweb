@@ -1891,6 +1891,8 @@ custom_components/termoweb/backend/radio/protocol.py :: write_presets
     Return ``B6 <anti-frost> <eco> <comfort> [<mode>]``; values strictly increasing.
 custom_components/termoweb/backend/radio/protocol.py :: set_toggle
     Return ``<opcode> 01|00`` for the boost/runback/EASY/lock toggles.
+custom_components/termoweb/backend/radio/protocol.py :: flash_display
+    Return ``5E 01``: flash the heater's display to identify it.
 custom_components/termoweb/backend/radio/protocol.py :: confirm_report
     Return ``57 55``, the confirmation sent after every ``56`` report.
 custom_components/termoweb/backend/radio/protocol.py :: sync_clock
@@ -2045,6 +2047,8 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient._exchange
     Send ``payload`` to ``addr`` and return its reply; raise on no ack or reply.
 custom_components/termoweb/backend/radio_client.py :: RadioClient._write
     Send a write and require the heater's ``<opcode+1> 55`` verdict.
+custom_components/termoweb/backend/radio_client.py :: RadioClient._command
+    Send a write: ack-only in this dialect, else require ``<opcode+1> 55``.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_send
     Send a payload that has no reply (e.g. ``BF 01``, ``57 55``); require its ack.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.async_sync_clock
@@ -2074,7 +2078,7 @@ custom_components/termoweb/backend/radio_client.py :: RadioClient.set_acm_boost_
 custom_components/termoweb/backend/radio_client.py :: RadioClient.set_node_lock
     Toggle the heater's keypad lock (``BA``).
 custom_components/termoweb/backend/radio_client.py :: RadioClient.set_node_display_select
-    Raise: the display flash opcode is not implemented in the radio package.
+    Flash the heater's display (``5E 01``); there is nothing to deselect.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.set_node_priority
     Raise: radio has no power-manager priority.
 custom_components/termoweb/backend/radio_client.py :: RadioClient.get_power_limit

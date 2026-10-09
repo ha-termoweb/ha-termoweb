@@ -93,6 +93,7 @@ def test_toggles_and_simple_payloads() -> None:
     with pytest.raises(ValueError, match="toggle"):
         p.set_toggle(0xB4, True)
     assert p.confirm_report() == b"\x57\x55"
+    assert p.flash_display() == b"\x5e\x01"
     assert p.power_verdict() == b"\xbf\x01"
     assert p.power_verdict(granted=False) == b"\xbf\x00"
     assert p.request_status() == b"\xb8"

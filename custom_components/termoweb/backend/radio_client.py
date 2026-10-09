@@ -302,6 +302,14 @@ class RadioClient:
                 f"heater {addr} {outcome} command {payload.hex(' ').upper()}"
             )
 
+    async def _command(self, addr: int, payload: bytes) -> None:
+        """Send a write: ack-only in this dialect, else require ``<opcode+1> 55``."""
+
+        if payload[0] in self._dialect.ack_only_opcodes:
+            await self.async_send(addr, payload)
+        else:
+            await self._write(addr, payload)
+
     async def async_send(self, addr: int, payload: bytes) -> None:
         """Send a payload that has no reply (e.g. ``BF 01``, ``57 55``); require its ack."""
 
@@ -520,9 +528,12 @@ class RadioClient:
     async def set_node_display_select(
         self, dev_id: str, node: NodeDescriptor, *, select: bool
     ) -> None:
-        """Raise: the display flash opcode is not implemented in the radio package."""
+        """Flash the heater's display (``5E 01``); there is nothing to deselect."""
 
-        raise RadioUnsupportedError("Display flash")
+        if not select:
+            return
+        _node_type, addr = self._resolve_node(node)
+        await self._command(addr, protocol.flash_display())
 
     async def set_node_priority(
         self, dev_id: str, node: NodeDescriptor, *, priority: int

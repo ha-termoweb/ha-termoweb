@@ -102,7 +102,7 @@ A reply's first payload byte is the request opcode + 1. A two-byte
 | `B2` + 42 bytes | station → heater | weekly program write, 24 slots/day, same layout as the `B1` read, reply `B3 55` | ? | B |
 | `D2` / `D4` / `D6` / `BA` `01|00` | station → heater | boost / runback / EASY / keypad lock toggles, reply `<op+1> 55` | A | ? |
 | `C4` + 8 bytes | station → heater | advanced setup record, reply `C5 55/56` | A | ? |
-| `5E 01` | station → heater | flash display, reply `5F 55` | A | ? |
+| `5E 01` | station → heater | flash display, reply `5F 55` (dialect B: ack only) | A | B (acked) |
 | `57 55` | station → heater | confirm a `56 ..` report | A | ? |
 | `51|52 YY MM DD DOW HH MM SS [03]` | station → heater | clock sync (`51` while registering), DOW 0 = Sunday, reply `53 55` | A (9 bytes) | B (8 bytes; the 9-byte form gets `53 56`) |
 | `BF 01` | station → heater | grant a `BE` power request | A | B (the repeats stop) |
