@@ -63,6 +63,10 @@ MODE_NAMES: dict[int, str] = {
 }
 
 SETTABLE_MODES = frozenset({MODE_AUTO, MODE_MANUAL, MODE_OFF})
+# Dialect B's B6 also takes 03, a temporary override the heater ends itself at
+# the next program change; manual and override carry their own setpoint byte.
+PRESET_WRITE_MODES = SETTABLE_MODES | {MODE_OVERRIDE}
+SETPOINT_MODES = frozenset({MODE_MANUAL, MODE_OVERRIDE})
 
 # --- status flag bits (E5/E6/E4 flag byte) -----------------------------------
 
@@ -151,9 +155,17 @@ def set_override(celsius: float) -> bytes:
 
 
 def write_presets(
-    anti_frost_c: float, eco_c: float, comfort_c: float, mode_code: int | None = None
+    anti_frost_c: float,
+    eco_c: float,
+    comfort_c: float,
+    mode_code: int | None = None,
+    setpoint_c: float | None = None,
 ) -> bytes:
-    """Return ``B6 <anti-frost> <eco> <comfort> [<mode>]``; values strictly increasing."""
+    """Return ``B6 <anti-frost> <eco> <comfort> [<mode> [<setpoint>]]``.
+
+    Presets must be strictly increasing. Dialect B takes the manual or override
+    target as a sixth byte (verified: the heater's active setpoint follows it).
+    """
     values = (anti_frost_c, eco_c, comfort_c)
     for value in values:
         if not math.isfinite(value) or abs(value * 2 - round(value * 2)) > 1e-9:
@@ -163,9 +175,14 @@ def write_presets(
             "presets must satisfy "
             f"{MIN_SETPOINT_C} <= anti-frost < eco < comfort <= {MAX_SETPOINT_C}"
         )
-    if mode_code is not None and mode_code not in SETTABLE_MODES:
-        raise ValueError(f"mode {mode_code!r} is not one of auto/manual/off")
-    tail = () if mode_code is None else (mode_code,)
+    if mode_code is not None and mode_code not in PRESET_WRITE_MODES:
+        raise ValueError(f"mode {mode_code!r} is not one of auto/manual/override/off")
+    tail: tuple[int, ...] = () if mode_code is None else (mode_code,)
+    if setpoint_c is not None:
+        if mode_code not in SETPOINT_MODES:
+            raise ValueError("a setpoint needs mode manual or override")
+        _check_setpoint(setpoint_c)
+        tail = (*tail, _half_degrees(setpoint_c))
     return bytes([OP_PRESET_WRITE, *(_half_degrees(v) for v in values), *tail])
 
 
@@ -533,17 +550,19 @@ POWER_RECORD_HEATING = 0x01
 
 @dataclass(frozen=True)
 class PowerRecord:
-    """Dialect B's 9-byte ``BE``/``BD`` record: ``<op> b1 00 2C <v lo> <v hi> <duty> <heating> 00``.
+    """Dialect B's 9-byte ``BE``/``BD`` record.
 
-    Byte 7 is 01 while the element is heating under a granted ``BF 01`` (it
-    matched a house meter's 1.5 kW duty pulses exactly); bytes 4-5 are the mains
-    voltage in 1/64 V; byte 6 is probably the duty in percent.
+    ``<op> <room> 00 <setpoint> <v lo> <v hi> <duty> <heating> 00``: room
+    temperature in tenths of a degree, the active setpoint in half degrees,
+    mains voltage in 1/64 V, duty in percent, and 01 while heating (checked
+    against a house meter and a reference thermometer).
     """
 
     heating: bool
     mains_voltage_v: float
     duty_pct: int
     room_temp_c: float  # byte 1, tenths of a degree
+    setpoint_c: float  # byte 3, half degrees: the target the heater works to
     raw: bytes
 
 
@@ -560,6 +579,7 @@ def decode_power_record(payload: bytes) -> PowerRecord | None:
         mains_voltage_v=int.from_bytes(payload[4:6], "little") / 64,
         duty_pct=payload[6],
         room_temp_c=payload[1] / 10,
+        setpoint_c=payload[3] / 2,
         raw=payload,
     )
 

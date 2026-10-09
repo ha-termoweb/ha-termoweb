@@ -18,9 +18,7 @@ from typing import Any
 
 from homeassistant.util import dt as dt_util
 
-from custom_components.termoweb.codecs.common import format_temperature
 from custom_components.termoweb.codecs.radio_codec import (
-    derived_setpoint,
     prog_from_program,
     settings_from_power_record,
     settings_from_status,
@@ -485,10 +483,6 @@ class RadioClient:
         prog = await self._program(addr)
         if prog is not None:
             settings["prog"] = prog
-        if "stemp" not in settings:
-            setpoint = derived_setpoint(record, prog, _local_now())
-            if setpoint is not None:
-                settings["stemp"] = format_temperature(setpoint)
         if "state" not in settings:
             power = await self.read_power_record(addr)
             if power is not None:
@@ -520,14 +514,6 @@ class RadioClient:
 
         if boost_time is not None or cancel_boost:
             raise RadioUnsupportedError("Boost through a settings write")
-        if (
-            stemp is not None
-            and self._dialect.mode_in_preset_write
-            and str(mode or "").strip().lower() == "modified_auto"
-        ):
-            raise RadioUnsupportedError(
-                f"Temporary override on dialect {self._dialect.name} heaters"
-            )
         _node_type, addr = self._resolve_node(node)
         await self._write_settings(
             addr, mode=mode, stemp=stemp, prog=prog, ptemp=ptemp, units=units

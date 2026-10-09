@@ -175,9 +175,9 @@ async def test_start_connects_refreshes_and_reports_health() -> None:
             "ptemp": ["16.5", "18.5", "21.0"],
             "mode": "manual",
             "prog": DAY * 7,
-            "stemp": "21.0",
             "state": "off",
             "mtemp": "22.0",
+            "stemp": "22.0",
             "priority": 0,
         }
     ]
@@ -226,7 +226,7 @@ async def test_registration_power_request_and_reports() -> None:
     assert sent.count(b"\x57\x55") == 2
     changes = coordinator.changes_for("6")
     assert {"max_power": 752.6} in changes
-    assert {"state": "off", "mtemp": "22.0"} in changes
+    assert {"state": "off", "mtemp": "22.0", "stemp": "22.0"} in changes
     assert any(
         c.get("mode") == "modified_auto" and c["mtemp"] == "20.4" for c in changes
     )
@@ -251,7 +251,9 @@ async def test_granted_heater_reports_heating() -> None:
     link.deliver(received(HEATER, POWER_REQUEST))
     await settle()
 
-    assert coordinator.changes_for("6") == [{"state": "on", "mtemp": "21.9"}]
+    assert coordinator.changes_for("6") == [
+        {"state": "on", "mtemp": "21.9", "stemp": "22.0"}
+    ]
     link.replies.pop(0xBC)
     coordinator.deltas.clear()
     link.deliver(received(HEATER, POWER_REQUEST))  # record read fails: no push

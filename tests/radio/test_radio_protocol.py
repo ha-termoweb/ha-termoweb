@@ -157,8 +157,20 @@ def test_write_presets_with_mode() -> None:
     assert p.write_presets(16.5, 18.5, 21.0, p.MODE_MANUAL) == bytes.fromhex(
         "B621252A02"
     )
+    # Verified on a dialect-B heater: the sixth byte sets the active setpoint
+    # (manual or temporary override); mode 03 ends at the next program change.
+    assert p.write_presets(16.5, 18.5, 21.0, p.MODE_OVERRIDE, 24.0) == bytes.fromhex(
+        "B621252A0330"
+    )
+    assert p.write_presets(16.5, 18.5, 21.0, p.MODE_MANUAL, 23.0) == bytes.fromhex(
+        "B621252A022E"
+    )
     with pytest.raises(ValueError, match="mode"):
-        p.write_presets(16.5, 18.5, 21.0, p.MODE_OVERRIDE)
+        p.write_presets(16.5, 18.5, 21.0, 7)
+    with pytest.raises(ValueError, match="manual or override"):
+        p.write_presets(16.5, 18.5, 21.0, p.MODE_AUTO, 23.0)
+    with pytest.raises(ValueError, match="outside"):
+        p.write_presets(16.5, 18.5, 21.0, p.MODE_MANUAL, 36.0)
 
 
 def test_write_program_hourly_wire_echoes_dialect_b_read() -> None:
@@ -437,6 +449,7 @@ def test_power_record_decodes_heating_voltage_and_duty() -> None:
     heating = p.decode_power_record(bytes.fromhex("BDDB002CE43A0C0100"))
     assert heating.heating is True and heating.duty_pct == 12
     assert heating.room_temp_c == 21.9 and idle.room_temp_c == 22.0
+    assert heating.setpoint_c == 22.0
     assert heating.raw[0] == 0xBD
     for bad in (
         A_ENERGY,

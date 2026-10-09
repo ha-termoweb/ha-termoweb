@@ -97,7 +97,7 @@ A reply's first payload byte is the request opcode + 1. A two-byte
 | `B4 02 <half-deg>` | station → heater | manual setpoint, 7–35 C | A | ? |
 | `B4 03 <half-deg>` | station → heater | temporary override setpoint | A | ? |
 | `B6 <af> <eco> <comfort>` | station → heater | preset temperatures, strictly increasing, reply `B7 55` | A | rejected |
-| `B6 <af> <eco> <comfort> <mode>` | station → heater | presets plus mode (01/02/04); dialect B's only mode write, reply `B7 55` | ? | B |
+| `B6 <af> <eco> <comfort> <mode> [<setpoint>]` | station → heater | presets plus mode (01 program / 02 manual / 03 temporary override / 04 off), and for 02/03 the target setpoint in half degrees; dialect B's only mode and setpoint write, reply `B7 55`. Mode 03 ends at the next program change. | ? | B |
 | `B2` + 84 bytes | station → heater | weekly program write, 48 slots/day, Sunday first, reply `B3 55` | A | rejected |
 | `B2` + 42 bytes | station → heater | weekly program write, 24 slots/day, same layout as the `B1` read, reply `B3 55` | ? | B |
 | `D2` / `D4` / `D6` / `BA` `01|00` | station → heater | boost / runback / EASY / keypad lock toggles, reply `<op+1> 55` | A | ? |
@@ -137,25 +137,27 @@ every field it does not carry.
 
 ### Dialect-B power record (`BE ..` and the `BD ..` reply to `BC`)
 
-`<op> b1 00 2C <v lo> <v hi> <duty> <heating> 00`, for example
+`<op> <room> 00 <setpoint> <v lo> <v hi> <duty> <heating> 00`, for example
 `BE DC 00 2C 78 3A 00 00 00` (idle) and `BD DB 00 2C E4 3A 0C 01 00`
 (heating).
 
 The fields were checked against a whole-house energy meter during a heat test:
 
-- Byte 7: `01` while the element heats under a granted `BF 01`, else `00`.
-  The heater heats in duty pulses (about 9 s of ~1.5 kW every 80 s), only
-  while this flag is set. The grant expires: the flag drops to `00`, the
-  heater sends a new `BE`, and it heats again after the next `BF 01`.
+- Byte 7: `01` while the element heats, else `00`; the heater heats in duty
+  pulses while this flag is set. Heating follows the active setpoint against
+  the room temperature: answering `BE` with `BF 01` or `BF 00` made no
+  visible difference.
 - Bytes 4–5, little-endian ÷ 64: mains voltage in volts (`78 3A` = 233.9 V).
   It tracked the meter's voltage, including the dips during heating pulses.
-- Byte 6: probably the duty in percent (`0C` while heating ~11 % of the
-  time). Not proven.
+- Byte 6: duty in percent (`0C` while heating ~11 % of the time, `64` =
+  100 % right after a large setpoint step).
 - Byte 1: room temperature in tenths of a degree (`DB` = 21.9 °C). Checked
   against a reference sensor placed next to the heater's probe.
-- Bytes 2–3: always `00 2C`.
+- Byte 3 (byte 2 is `00`): the active setpoint in half degrees: the manual
+  setpoint in manual mode, the slot preset in program mode, the override
+  target in override (`2C` = 22.0 °C manual, `25` = 18.5 °C night slot).
 - The record carries no power value. An earlier reading of bytes 3–4 as
-  deciwatts (`2C F0` ≈ 1150 W) was a coincidence of the constant `2C`.
+  deciwatts (`2C F0` ≈ 1150 W) was a coincidence of the 22.0 °C setpoint.
 
 ### Program record
 
