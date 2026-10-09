@@ -1,7 +1,7 @@
 {
   "config": {
     "step": {
-      "user": {
+      "cloud": {
         "title": "Σύνδεση με τις θερμάστρες της οικογένειας TermoWeb",
         "description": "Έκδοση: {version}\n\nΕπιλέξτε τη μάρκα TermoWeb ή Ducaheat και εισαγάγετε τα διαπιστευτήρια του λογαριασμού σας.",
         "data": {

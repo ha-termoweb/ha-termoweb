@@ -1,7 +1,7 @@
 {
   "config": {
     "step": {
-      "user": {
+      "cloud": {
         "title": "Conéctate a los calentadores de la familia TermoWeb",
         "description": "Versión: {version}\n\nElija su marca TermoWeb o Ducaheat e introduzca las credenciales de su cuenta.",
         "data": {

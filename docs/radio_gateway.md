@@ -144,15 +144,31 @@ The device page also shows:
 
 ## Step 5: connect the integration
 
-In the Termoweb integration, use the gateway's address with port 2323, in
-this form:
+1. In Home Assistant, go to **Settings → Devices & Services → Add Integration**
+   and search for **TermoWeb**.
+2. Choose **Local radio gateway (ESP32 + CC1101)**.
+3. Enter the gateway's IP address from step 4. Keep the port at **2323**.
+4. Leave **Radio dialect** on **auto** and **Network id** empty.
+5. Press **Submit** and wait. The integration listens to your heaters to learn
+   their radio network. This takes up to 6 minutes. Then it checks every
+   heater it can reach. Heaters talk when they start heating, so turn one
+   heater's temperature up before you press **Submit**.
+6. When it finishes, your heaters appear under **Devices**.
 
-```
-socket://192.168.1.57:2323
-```
+If you see "No heater radio traffic was heard":
+
+- Turn one heater's temperature up so that it starts heating. A heater that
+  wants heat talks every few minutes.
+- Move the gateway closer to a heater (a few metres is best) and try again.
+
+If you added or removed a heater later, open the integration, choose
+**Reconfigure**, and tick **Scan for heaters again**.
 
 Only one program can use the gateway at a time. If a second program
 connects, the first one is disconnected.
+
+What works over the radio, and what does not yet, is listed in
+[the radio backend reference](radio_backend.md).
 
 ## For developers: the line protocol
 

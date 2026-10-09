@@ -28,6 +28,14 @@ BRAND_TEVOLVE: Final = "tevolve"
 BRAND_RADIO: Final = "radio"  # local ESP32 radio gateway, no cloud
 DEFAULT_BRAND: Final = BRAND_TERMOWEB
 
+# Radio entries: the gateway address plus what discovery learned from the air
+CONF_HOST: Final = "host"
+CONF_PORT: Final = "port"
+CONF_DIALECT: Final = "dialect"
+CONF_NETWORK_ID: Final = "network_id"  # 4 hex digits
+CONF_NODES: Final = "nodes"
+RADIO_GATEWAY_LABEL: Final = "Radio gateway"
+
 BRAND_LABELS: Final[Mapping[str, str]] = {
     BRAND_TERMOWEB: "TermoWeb",
     BRAND_DUCAHEAT: "Ducaheat",

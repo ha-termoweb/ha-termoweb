@@ -1,7 +1,7 @@
 {
   "config": {
     "step": {
-      "user": {
+      "cloud": {
         "title": "Csatlakozás a TermoWeb családi fűtőberendezésekhez",
         "description": "Változat: {version}\n\nVálassza ki a TermoWeb vagy Ducaheat márkát, és adja meg a fiókja hitelesítő adatait.",
         "data": {

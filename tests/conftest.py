@@ -1453,6 +1453,32 @@ def _install_stubs() -> None:
         def async_abort(self, *, reason: str) -> FlowResult:
             return FlowResult({"type": "abort", "reason": reason})
 
+        def async_show_menu(
+            self, *, step_id: str, menu_options: list[str]
+        ) -> FlowResult:
+            return FlowResult(
+                {"type": "menu", "step_id": step_id, "menu_options": menu_options}
+            )
+
+        def async_show_progress(
+            self,
+            *,
+            step_id: str,
+            progress_action: str,
+            progress_task: asyncio.Task[Any] | None = None,
+        ) -> FlowResult:
+            return FlowResult(
+                {
+                    "type": "progress",
+                    "step_id": step_id,
+                    "progress_action": progress_action,
+                    "progress_task": progress_task,
+                }
+            )
+
+        def async_show_progress_done(self, *, next_step_id: str) -> FlowResult:
+            return FlowResult({"type": "progress_done", "step_id": next_step_id})
+
     class OptionsFlow:
         def async_show_form(
             self,

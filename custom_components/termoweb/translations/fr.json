@@ -1,7 +1,7 @@
 {
   "config": {
     "step": {
-      "user": {
+      "cloud": {
         "title": "Se connecter aux chauffages de la famille TermoWeb",
         "description": "Version : {version}\n\nChoisissez votre marque TermoWeb ou Ducaheat et entrez vos identifiants de compte.",
         "data": {

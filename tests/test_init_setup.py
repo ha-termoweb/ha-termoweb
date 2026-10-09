@@ -743,6 +743,48 @@ def test_async_setup_entry_transient_errors(
         asyncio.run(_run())
 
 
+@pytest.mark.parametrize("error_case", ["link", "radio"])
+def test_async_setup_entry_radio_gateway_unreachable(
+    termoweb_init: Any,
+    stub_hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    error_case: str,
+) -> None:
+    created: list[tuple[Any, ...]] = []
+
+    class UnreachableRadio(BaseFakeClient):
+        async def list_devices(self) -> list[dict[str, Any]]:
+            if error_case == "link":
+                raise termoweb_init.RadioLinkError("cannot connect")
+            raise termoweb_init.RadioError("no MAC")
+
+    def fake_create(*args: Any) -> Any:
+        created.append(args)
+        return UnreachableRadio(None, "", "")
+
+    monkeypatch.setattr(termoweb_init, "create_radio_client", fake_create)
+    nodes = [{"type": "htr", "addr": "6", "name": "Heater 6"}]
+    entry = ConfigEntry(
+        "radio",
+        data={
+            "brand": "radio",
+            "host": "10.0.0.5",
+            "port": "2323",
+            "dialect": "B",
+            "network_id": "1234",
+            "nodes": nodes,
+        },
+    )
+    stub_hass.config_entries.add(entry)
+
+    async def _run() -> None:
+        await termoweb_init.async_setup_entry(stub_hass, entry)
+
+    with pytest.raises(ConfigEntryNotReady):
+        asyncio.run(_run())
+    assert created == [("10.0.0.5", 2323, "B", nodes, bytes.fromhex("1234"))]
+
+
 def test_async_setup_entry_no_devices(
     termoweb_init: Any, stub_hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
 ) -> None:

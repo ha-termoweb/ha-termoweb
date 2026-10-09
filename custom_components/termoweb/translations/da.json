@@ -1,7 +1,7 @@
 {
   "config": {
     "step": {
-      "user": {
+      "cloud": {
         "title": "Opret forbindelse til TermoWeb-familiens varmeapparater",
         "description": "Version: {version}\n\nVælg dit TermoWeb- eller Ducaheat-mærke, og indtast dine kontooplysninger.",
         "data": {

@@ -139,6 +139,7 @@ class RadioLink:
         *,
         station_id: int = 1,
         network_id: bytes | None = None,
+        auto_ack: bool = True,
         clock: Callable[[], float] = time.monotonic,
         sleep: Sleep = asyncio.sleep,
         open_connection: OpenConnection = asyncio.open_connection,
@@ -157,6 +158,7 @@ class RadioLink:
         if net is None:
             raise ValueError(f"dialect {dialect.name} needs an explicit network_id")
         self._network_id = bytes(net)
+        self._auto_ack = auto_ack
         if len(self._network_id) != 2:
             raise ValueError("network_id must be exactly two bytes")
         self._clock = clock
@@ -249,7 +251,7 @@ class RadioLink:
         _LOGGER.debug("Gateway banner: %s", banner_line)
         for command in (
             f"I{self._station_id:02X}",
-            "A1",
+            "A1" if self._auto_ack else "A0",
             f"Y{self._dialect.firmware_mode}",
             f"N{self._network_id.hex().upper()}",
         ):

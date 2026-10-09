@@ -1,7 +1,7 @@
 {
   "config": {
     "step": {
-      "user": {
+      "cloud": {
         "title": "Prisijunkite prie \"TermoWeb\" šeimos šildytuvų",
         "description": "Versija: {version}\n\nPasirinkite \"TermoWeb\" arba \"Ducaheat\" prekės ženklą ir įveskite savo paskyros duomenis.",
         "data": {

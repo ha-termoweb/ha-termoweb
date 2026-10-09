@@ -22,14 +22,28 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.event import async_call_later
 
-from .backend import Backend, backend_capabilities, create_backend, create_rest_client
+from .backend import (
+    Backend,
+    backend_capabilities,
+    create_backend,
+    create_radio_client,
+    create_rest_client,
+)
 from .backend.debug import build_unknown_node_probe_requests
+from .backend.radio import RadioLinkError
+from .backend.radio_client import RadioError
 from .backend.rest_client import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend.sanitize import redact_text
 from .const import (
     BRAND_DUCAHEAT as BRAND_DUCAHEAT,
+    BRAND_RADIO,
     BRAND_TEVOLVE as BRAND_TEVOLVE,
     CONF_BRAND,
+    CONF_DIALECT,
+    CONF_HOST,
+    CONF_NETWORK_ID,
+    CONF_NODES,
+    CONF_PORT,
     DEFAULT_BRAND,
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
@@ -180,15 +194,34 @@ async def async_list_devices(client: RESTClient) -> Any:
     except BackendAuthError as err:
         _LOGGER.info("list_devices auth error: %s", err)
         raise
-    except (TimeoutError, ClientError, BackendRateLimitError) as err:
+    except (
+        TimeoutError,
+        ClientError,
+        BackendRateLimitError,
+        RadioLinkError,
+        RadioError,
+    ) as err:
         _LOGGER.info("list_devices connection error: %s", err)
         raise
 
 
+def _create_client(hass: HomeAssistant, entry: ConfigEntry, brand: str) -> Any:
+    """Return the cloud REST client, or the radio gateway client for radio entries."""
+
+    data = entry.data
+    if brand == BRAND_RADIO:
+        return create_radio_client(
+            data[CONF_HOST],
+            int(data[CONF_PORT]),
+            data[CONF_DIALECT],
+            data.get(CONF_NODES, []),
+            bytes.fromhex(data[CONF_NETWORK_ID]),
+        )
+    return create_rest_client(hass, data["username"], data["password"], brand)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  # noqa: C901
     """Set up the TermoWeb integration for a config entry."""
-    username = entry.data["username"]
-    password = entry.data["password"]
     base_interval = int(DEFAULT_POLL_INTERVAL)
     if "poll_interval" in entry.data or "poll_interval" in entry.options:
         new_data = dict(entry.data)
@@ -215,13 +248,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:  #
 
     version = await _async_get_integration_version(hass)
 
-    client = create_rest_client(hass, username, password, brand)
+    client = _create_client(hass, entry, brand)
     backend = create_backend(brand=brand, client=client)
     try:
         devices = await async_list_devices(client)
     except BackendAuthError as err:
         raise ConfigEntryAuthFailed from err
-    except (TimeoutError, ClientError, BackendRateLimitError) as err:
+    except (
+        TimeoutError,
+        ClientError,
+        BackendRateLimitError,
+        RadioLinkError,
+        RadioError,
+    ) as err:
         raise ConfigEntryNotReady from err
 
     if not devices:

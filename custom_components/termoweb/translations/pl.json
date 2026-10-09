@@ -1,7 +1,7 @@
 {
   "config": {
     "step": {
-      "user": {
+      "cloud": {
         "title": "Połącz się z grzejnikami rodzinnymi TermoWeb",
         "description": "Wersja: {version}\n\nWybierz markę TermoWeb lub Ducaheat i wprowadź dane logowania do konta.",
         "data": {

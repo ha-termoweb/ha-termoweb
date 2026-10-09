@@ -115,11 +115,15 @@ ha-termoweb/ha-termoweb
 1) In Home Assistant go to **Settings → Devices & Services → Add Integration** and search **TermoWeb**,
    or click:
    [![Open your Home Assistant instance and start setting up the integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=termoweb)
-2) Choose your **Brand**. This picks the correct backend automatically, so you do **not** need to enter a portal URL manually.
-3) Enter the account **Email** used for the TermoWeb / Ducaheat / Tevolve app.
-4) Enter the account **Password**.
-5) Complete the wizard. Heaters will appear under **Devices**; add them to dashboards or use them in automations.
-6) Copy the custom card for a dashboard element that allows you to program presets and weekly schedule across heaters. 
+2) Choose how your heaters connect:
+   - **Cloud account**: you use the TermoWeb, Ducaheat or Tevolve app. Go to step 3.
+   - **Local radio gateway**: you built the ESP32 radio gateway. Follow
+     [Radio gateway: build your own with an ESP32](docs/radio_gateway.md), step 5, then go to step 6.
+3) Choose your **Brand**. This picks the correct backend automatically, so you do **not** need to enter a portal URL manually.
+4) Enter the account **Email** used for the TermoWeb / Ducaheat / Tevolve app.
+5) Enter the account **Password**.
+6) Complete the wizard. Heaters will appear under **Devices**; add them to dashboards or use them in automations.
+7) Copy the custom card for a dashboard element that allows you to program presets and weekly schedule across heaters. 
 ---
 
 ## Tips
