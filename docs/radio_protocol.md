@@ -4,7 +4,7 @@ Technical reference for `custom_components/termoweb/backend/radio/`. This
 package talks to TermoWeb / Sun Ray RF heaters directly over radio, through
 an ESP32-S3 + CC1101 radio gateway. It does not use the TermoWeb cloud.
 
-The package is not yet used by the integration.
+The radio backend (`docs/radio_backend.md`) uses this package.
 
 ## 1. Radio
 

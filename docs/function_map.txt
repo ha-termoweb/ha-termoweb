@@ -264,6 +264,8 @@ custom_components/termoweb/backend/factory.py :: create_backend
     Create a backend for the given brand.
 custom_components/termoweb/backend/factory.py :: backend_capabilities
     Return the optional features the brand's backend supports.
+custom_components/termoweb/backend/factory.py :: create_radio_client
+    Return a radio client for the gateway at ``host:port`` and its stored nodes.
 custom_components/termoweb/backend/factory.py :: create_rest_client
     Return a REST client configured for the selected brand.
 custom_components/termoweb/backend/rest_client.py :: RESTClient.__init__
@@ -1963,3 +1965,133 @@ custom_components/termoweb/backend/radio/link.py :: RadioLink._fail_waiters
     Fail and forget every pending waiter.
 custom_components/termoweb/backend/radio/link.py :: RadioLink._wait
     Return ``future``'s result, or None if the injected sleep finishes first.
+custom_components/termoweb/backend/radio_backend.py :: RadioBackend.create_ws_client
+    Return the radio listener that plays the websocket client's role.
+custom_components/termoweb/backend/radio_backend.py :: RadioBackend.fetch_hourly_samples
+    Return no samples: radio heaters keep no energy history.
+custom_components/termoweb/backend/radio_client.py :: RadioUnsupportedError.__init__
+    Build the standard "not supported over the radio gateway" message.
+custom_components/termoweb/backend/radio_client.py :: _local_now
+    Return Home Assistant's local time; the radio station is the clock master.
+custom_components/termoweb/backend/radio_client.py :: radio_addr
+    Return a node address as a radio id 1-254 (decimal string in the inventory).
+custom_components/termoweb/backend/radio_client.py :: _dev_id_from_mac
+    Return a MAC as lowercase hex without separators, or None.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.__init__
+    Store the gateway address, dialect and stored node list; nothing connects.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.dialect
+    Return the radio dialect this client frames with.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.link
+    Return the shared link, or None before the first use.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.connected
+    Return True while the gateway connection is open.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.gateway_info
+    Return the gateway's last ``Q`` status, if connected once.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.async_connect
+    Return the shared link, opening the gateway connection if needed.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.async_close
+    Close the gateway connection if one is open.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.add_disconnect_listener
+    Call ``callback`` when an established gateway connection drops.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.add_disconnect_listener._remove
+    Unregister the callback; safe to call more than once.
+custom_components/termoweb/backend/radio_client.py :: RadioClient._handle_disconnect
+    Fan a link disconnect out to every registered listener.
+custom_components/termoweb/backend/radio_client.py :: RadioClient._exchange
+    Send ``payload`` to ``addr`` and return its reply; raise on no ack or reply.
+custom_components/termoweb/backend/radio_client.py :: RadioClient._write
+    Send a write and require the heater's ``<opcode+1> 55`` verdict.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.async_send
+    Send a payload that has no reply (e.g. ``BF 01``, ``57 55``); require its ack.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.async_sync_clock
+    Send the EB clock sync (``51`` while registering, else ``52``); require ``53 55``.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.note_max_power
+    Remember a heater's measured full-load power from its power requests.
+custom_components/termoweb/backend/radio_client.py :: RadioClient._resolve_node
+    Return ``(node_type, radio id)`` for a node descriptor.
+custom_components/termoweb/backend/radio_client.py :: RadioClient._node_type_for
+    Return the stored node type for radio id ``addr``.
+custom_components/termoweb/backend/radio_client.py :: RadioClient._program
+    Return the heater's ``prog``, re-reading it after ``program_refresh_s``.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.list_devices
+    Return the radio gateway as the single device, keyed by its MAC.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.get_nodes
+    Return the stored heater list in the cloud ``{"nodes": [...]}`` shape.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.get_node_settings
+    Return canonical settings from B8 status (+ B0 program), or None if silent.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.set_node_settings
+    Write presets, program and mode/setpoint, each verified by the heater.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.set_acm_boost_state
+    Toggle a heater's boost (``D2``); accumulator boost is not known on radio.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.set_node_lock
+    Toggle the heater's keypad lock (``BA``).
+custom_components/termoweb/backend/radio_client.py :: RadioClient.set_node_display_select
+    Raise: the display flash opcode is not implemented in the radio package.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.set_node_priority
+    Raise: radio has no power-manager priority.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.get_power_limit
+    Return None: radio has no installation power limit to read.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.set_power_limit
+    Raise: radio has no installation power limit.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.set_acm_extra_options
+    Raise: accumulator boost defaults are not known on radio.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.get_node_samples
+    Return no samples: heaters keep no energy history.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.get_geo_data
+    Return None: the radio gateway has no account location.
+custom_components/termoweb/backend/radio_client.py :: RadioClient.get_rtc_time
+    Return local time in the cloud RTC shape; the station is the clock master.
+custom_components/termoweb/backend/radio_ws.py :: RadioListener.__init__
+    Store collaborators; nothing runs until start().
+custom_components/termoweb/backend/radio_ws.py :: RadioListener.start
+    Start the background task (idempotent) and return it.
+custom_components/termoweb/backend/radio_ws.py :: RadioListener.stop
+    Cancel the task and pending replies, then close the gateway link.
+custom_components/termoweb/backend/radio_ws.py :: RadioListener.is_running
+    Return True while the background task runs.
+custom_components/termoweb/backend/radio_ws.py :: RadioListener._status_should_reset_health
+    Clear healthy tracking whenever the gateway is not connected.
+custom_components/termoweb/backend/radio_ws.py :: RadioListener._run
+    Connect, serve the gateway until it drops, back off and reconnect.
+custom_components/termoweb/backend/radio_ws.py :: RadioListener._next_backoff
+    Return the next reconnect delay.
+custom_components/termoweb/backend/radio_ws.py :: RadioListener._detach
+    Remove the frame and disconnect listeners from the link.
+custom_components/termoweb/backend/radio_ws.py :: RadioListener._on_disconnect
+    Report the dropped gateway connection at once.
+custom_components/termoweb/backend/radio_ws.py :: RadioListener._heaters
+    Return ``(node_type, addr)`` for every heater-like inventory node.
+custom_components/termoweb/backend/radio_ws.py :: RadioListener._node_type_for
+    Return the inventory node type for heater address ``addr``.
+custom_components/termoweb/backend/radio_ws.py :: RadioListener._refresh_all
+    Send each heater a keepalive clock sync and read its status.
+custom_components/termoweb/backend/radio_ws.py :: RadioListener._on_frame
+    Dispatch a frame a heater sent to this station.
+custom_components/termoweb/backend/radio_ws.py :: RadioListener._spawn
+    Run a station reply in the background, logging its failure.
+custom_components/termoweb/backend/radio_ws.py :: RadioListener._reply
+    Await a station reply; a heater that misses it simply repeats.
+custom_components/termoweb/backend/radio_ws.py :: RadioListener._push
+    Send one settings delta to the coordinator and mark the payload fresh.
+custom_components/termoweb/codecs/radio_codec.py :: _temperature
+    Return a temperature in the cloud codec's one-decimal string form.
+custom_components/termoweb/codecs/radio_codec.py :: settings_from_status
+    Return canonical settings carried by a decoded status record.
+custom_components/termoweb/codecs/radio_codec.py :: prog_from_program
+    Return the 168-slot Monday-first ``prog``, or None if any hour is unknown.
+custom_components/termoweb/codecs/radio_codec.py :: settings_from_power_request
+    Return the canonical ``max_power`` carried by a heater power request.
+custom_components/termoweb/codecs/radio_codec.py :: validate_prog
+    Return ``prog`` as 168 slot codes 0/1/2, raising ValueError otherwise.
+custom_components/termoweb/codecs/radio_codec.py :: _celsius
+    Return ``value`` as a finite float, raising ValueError otherwise.
+custom_components/termoweb/codecs/radio_codec.py :: _normalise_mode
+    Return a lower-case canonical mode string, or None.
+custom_components/termoweb/codecs/radio_codec.py :: encode_command
+    Return the radio payload for one canonical write command.
+custom_components/termoweb/planner/radio_planner.py :: PlannedRadioWrite.opcode
+    Return the write opcode, the first payload byte.
+custom_components/termoweb/planner/radio_planner.py :: plan_settings
+    Return the commands for a settings write: presets, program, then mode.
+custom_components/termoweb/planner/radio_planner.py :: plan_commands
+    Return the radio payloads for ``commands``, validating every one first.
