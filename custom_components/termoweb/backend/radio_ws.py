@@ -19,6 +19,7 @@ from homeassistant.core import HomeAssistant
 
 from custom_components.termoweb.codecs.radio_codec import (
     prog_from_program,
+    settings_from_power_record,
     settings_from_power_request,
     settings_from_status,
 )
@@ -34,6 +35,7 @@ from .ws_client import _WSStatusMixin
 
 _LOGGER = logging.getLogger(__name__)
 
+GRANT_SETTLE_S = 90.0  # heating starts ~70-90 s after BF 01 (meter-verified)
 REFRESH_INTERVAL_S = 120.0  # keepalive clock sync + status read; heaters need <=150 s
 PAYLOAD_STALE_AFTER_S = 3 * REFRESH_INTERVAL_S
 RECONNECT_BACKOFF_S = (5.0, 10.0, 30.0, 120.0, 300.0)
@@ -55,6 +57,7 @@ class RadioListener(_WSStatusMixin):
         inventory: Inventory | None,
         refresh_interval: float = REFRESH_INTERVAL_S,
         sleep: Sleep = asyncio.sleep,
+        grant_settle_s: float = GRANT_SETTLE_S,
     ) -> None:
         """Store collaborators; nothing runs until start()."""
 
@@ -68,6 +71,7 @@ class RadioListener(_WSStatusMixin):
         self._inventory = inventory
         self._refresh_interval = refresh_interval
         self._sleep = sleep
+        self._grant_settle_s = grant_settle_s
         self._task: asyncio.Task[None] | None = None
         self._jobs: set[asyncio.Task[Any]] = set()
         self._remove_frame_listener: Callable[[], None] | None = None
@@ -227,7 +231,7 @@ class RadioListener(_WSStatusMixin):
             _LOGGER.info("Heater %s registered; sending clock sync", addr)
             self._spawn(self._client.async_sync_clock(frame.src, registering=True))
         elif kind is protocol.Unsolicited.POWER_REQUEST:
-            self._spawn(self._client.async_send(frame.src, protocol.power_verdict()))
+            self._spawn(self._grant_power(node_type, addr, frame.src))
             request = protocol.decode_power_request(payload)
             if request is not None and request.measured_power_w is not None:
                 self._client.note_max_power(frame.src, request.measured_power_w)
@@ -259,6 +263,15 @@ class RadioListener(_WSStatusMixin):
             await coro
         except (RadioLinkError, RadioCommandError) as err:
             _LOGGER.debug("Radio station reply failed: %s", err)
+
+    async def _grant_power(self, node_type: str, addr: str, radio_id: int) -> None:
+        """Grant a power request, then push the heating state the heater reports."""
+
+        await self._client.async_send(radio_id, protocol.power_verdict())
+        await asyncio.sleep(self._grant_settle_s)
+        record = await self._client.read_power_record(radio_id)
+        if record is not None:
+            self._push(node_type, addr, settings_from_power_record(record))
 
     def _push(self, node_type: str, addr: str, settings: Mapping[str, Any]) -> None:
         """Send one settings delta to the coordinator and mark the payload fresh."""

@@ -520,6 +520,42 @@ def decode_power_request(payload: bytes) -> PowerRequest | None:
     return None
 
 
+# --- dialect-B power record --------------------------------------------------
+
+POWER_RECORD_HEATING = 0x01
+
+
+@dataclass(frozen=True)
+class PowerRecord:
+    """Dialect B's 9-byte ``BE``/``BD`` record: ``<op> b1 00 2C <v lo> <v hi> <duty> <heating> 00``.
+
+    Byte 7 is 01 while the element is heating under a granted ``BF 01`` (it
+    matched a house meter's 1.5 kW duty pulses exactly); bytes 4-5 are the mains
+    voltage in 1/64 V; byte 6 is probably the duty in percent.
+    """
+
+    heating: bool
+    mains_voltage_v: float
+    duty_pct: int
+    raw: bytes
+
+
+def decode_power_record(payload: bytes) -> PowerRecord | None:
+    """Decode a dialect-B ``BE`` or ``BD`` power record (9 bytes), else None."""
+    payload = bytes(payload)
+    if len(payload) != POWER_REQUEST_B_LEN or payload[0] not in (
+        OP_POWER_REQUEST,
+        ENERGY_MARKER,
+    ):
+        return None
+    return PowerRecord(
+        heating=payload[7] == POWER_RECORD_HEATING,
+        mains_voltage_v=int.from_bytes(payload[4:6], "little") / 64,
+        duty_pct=payload[6],
+        raw=payload,
+    )
+
+
 # --- unsolicited -------------------------------------------------------------
 
 

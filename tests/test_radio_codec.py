@@ -273,3 +273,12 @@ def test_preset_mode_write_with_setpoint() -> None:
         encode(status, setpoint=23.0, mode="off")
     with pytest.raises(ValueError, match="invalid setpoint"):
         encode(status, setpoint="warm")
+
+
+def test_power_record_maps_heating_state() -> None:
+    """The dialect-B power record's heating flag becomes the canonical state."""
+
+    heating = p.decode_power_record(bytes.fromhex("BDDB002CE43A0C0100"))
+    idle = p.decode_power_record(bytes.fromhex("BDDC002C783A000000"))
+    assert codec.settings_from_power_record(heating) == {"state": "on"}
+    assert codec.settings_from_power_record(idle) == {"state": "off"}

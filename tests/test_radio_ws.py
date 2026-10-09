@@ -15,6 +15,8 @@ from fake_radio_link import (
     CLOCK_ACCEPTED,
     HEATER,
     NET,
+    POWER_RECORD_HEATING,
+    POWER_RECORD_IDLE,
     POWER_REQUEST,
     PROGRAM_HOURLY,
     REGISTRATION,
@@ -96,6 +98,7 @@ def build(nodes=NODES):
         link = FakeRadioLink(host, port, dialect, **kw)
         link.reply(0xB8, STATUS_SHORT)
         link.reply(0xB0, PROGRAM_HOURLY)
+        link.reply(0xBC, POWER_RECORD_IDLE)
         link.reply(0x51, CLOCK_ACCEPTED)
         link.reply(0x52, CLOCK_ACCEPTED)
         links.append(link)
@@ -121,6 +124,7 @@ def build(nodes=NODES):
         inventory=inventory,
         refresh_interval=REFRESH,
         sleep=sleeper,
+        grant_settle_s=0,
     )
     dispatched = MagicMock()
     listener._dispatcher_mock = dispatched  # noqa: SLF001
@@ -172,6 +176,7 @@ async def test_start_connects_refreshes_and_reports_health() -> None:
             "mode": "manual",
             "prog": DAY * 7,
             "stemp": "21.0",
+            "state": "off",
         }
     ]
     assert coordinator.deltas[1].node_id.node_type is NodeType.ACCUMULATOR
@@ -212,20 +217,44 @@ async def test_registration_power_request_and_reports() -> None:
     link.deliver(received(HEATER, bytes([p.OP_REPORT, 0xB1]) + wire))
     await settle()
 
-    assert link.sent == [
-        (6, bytes.fromhex("511A0A0905103409")),
-        (6, b"\xbf\x01"),
-        (6, b"\xbf\x01"),
-        (6, b"\x57\x55"),
-        (6, b"\x57\x55"),
-    ]
+    sent = [payload for _addr, payload in link.sent]
+    assert sent.count(bytes.fromhex("511A0A0905103409")) == 1
+    assert sent.count(b"\xbf\x01") == 2  # both power requests granted
+    assert sent.count(b"\xbc") == 2  # then each heating state is read back
+    assert sent.count(b"\x57\x55") == 2
     changes = coordinator.changes_for("6")
-    assert changes[0] == {"max_power": 752.6}
-    assert changes[1]["mode"] == "modified_auto" and changes[1]["mtemp"] == "20.4"
-    assert changes[2] == {"prog": DAY * 6 + [0] * 24}
+    assert {"max_power": 752.6} in changes
+    assert {"state": "off"} in changes
+    assert any(
+        c.get("mode") == "modified_auto" and c["mtemp"] == "20.4" for c in changes
+    )
+    assert {"prog": DAY * 6 + [0] * 24} in changes
     # The noted power fills in later status reads that lack it.
     assert (await client.get_node_settings(DEV_ID, ("htr", "6")))["max_power"] == 752.6
 
+    await listener.stop()
+
+
+@pytest.mark.asyncio
+async def test_granted_heater_reports_heating() -> None:
+    """After BF 01 the heater's power record flags heating; that becomes state on."""
+
+    listener, client, links, coordinator, sleeper, runtime, _ = build()
+    listener.start()
+    await settle()
+    link = links[0]
+    link.reply(0xBC, POWER_RECORD_HEATING)
+    coordinator.deltas.clear()
+
+    link.deliver(received(HEATER, POWER_REQUEST))
+    await settle()
+
+    assert coordinator.changes_for("6") == [{"state": "on"}]
+    link.replies.pop(0xBC)
+    coordinator.deltas.clear()
+    link.deliver(received(HEATER, POWER_REQUEST))  # record read fails: no push
+    await settle(60)
+    assert coordinator.changes_for("6") == []
     await listener.stop()
 
 
