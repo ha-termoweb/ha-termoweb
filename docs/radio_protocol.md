@@ -151,8 +151,11 @@ The fields were checked against a whole-house energy meter during a heat test:
   It tracked the meter's voltage, including the dips during heating pulses.
 - Byte 6: duty in percent (`0C` while heating ~11 % of the time, `64` =
   100 % right after a large setpoint step).
-- Byte 1: room temperature in tenths of a degree (`DB` = 21.9 °C). Checked
-  against a reference sensor placed next to the heater's probe.
+- Byte 1: the heater's own room-temperature probe, in tenths of a degree
+  (`DB` = 21.9 °C): the value the heater regulates on. Against a reference
+  sensor placed next to the probe it agreed within 0.3 °C while the heater was
+  idle, and read about 1 °C higher for an hour after a heating spell, as the
+  warm heater body heats its probe.
 - Byte 3 (byte 2 is `00`): the active setpoint in half degrees: the manual
   setpoint in manual mode, the slot preset in program mode, the override
   target in override (`2C` = 22.0 °C manual, `25` = 18.5 °C night slot).

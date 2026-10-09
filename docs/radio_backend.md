@@ -68,7 +68,7 @@ derived or guessed.
 | `ptemp` | status presets | `[anti_frost, eco, comfort]` = `[cold, night, day]`, strings with one decimal (`"16.5"`), like the cloud | ✅ read |
 | `prog` | `B1` program reply | 168 ints, **Monday 00:00 first**, values 0/1/2 | ✅ read (24-slot), 🟡 (48-slot) |
 | `units` | fixed | `"C"`; the radio carries every temperature in half degrees Celsius | ✅ |
-| `mtemp` | full status record (E6/E4/E5/E3); dialect B: power record byte 1 (tenths of a degree) | one-decimal string | 🟡 dialect A; ✅ dialect B |
+| `mtemp` | full status record (E6/E4/E5/E3); dialect B: power record byte 1, the heater's own probe (tenths of a degree; reads up to ~1 °C high for a while after heating) | one-decimal string | 🟡 dialect A; ✅ dialect B |
 | `stemp` | full status record; dialect B: power record byte 3, the heater's active setpoint (half degrees) | one-decimal string | 🟡 dialect A; ✅ dialect B |
 | `state` | full record flag `01`; dialect B: power record byte 7 (`BC` → `BD`, read when the status lacks it, and 90 s after each `BF 01` grant) | `"on"` / `"off"` | 🟡 dialect A; ✅ dialect B |
 | `lock` | full record flag `02`; dialect B: the last lock state written (the short record has none) | bool | 🟡 dialect A; 🟡 dialect B |
