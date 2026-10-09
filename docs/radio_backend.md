@@ -68,7 +68,7 @@ derived or guessed.
 | `prog` | `B1` program reply | 168 ints, **Monday 00:00 first**, values 0/1/2 | ✅ read (24-slot), 🟡 (48-slot) |
 | `units` | fixed | `"C"`; the radio carries every temperature in half degrees Celsius | ✅ |
 | `mtemp` | full status record (E6/E4/E5/E3); dialect B: power record byte 1 (tenths of a degree) | one-decimal string | 🟡 dialect A; ✅ dialect B |
-| `stemp` | full status record; for the dialect-B short record it is derived (see below) | one-decimal string | 🟡 dialect A; ✅ dialect B |
+| `stemp` | full status record; dialect B: power record byte 3, the heater's active setpoint (half degrees) | one-decimal string | 🟡 dialect A; ✅ dialect B |
 | `state` | full record flag `01`; dialect B: power record byte 7 (`BC` → `BD`, read when the status lacks it, and 90 s after each `BF 01` grant) | `"on"` / `"off"` | 🟡 dialect A; ✅ dialect B |
 | `lock` | full record flag `02`; dialect B: the last lock state written (the short record has none) | bool | 🟡 dialect A; 🟡 dialect B |
 | `max_power` | full record power, or the dialect-A `BE hi lo` power request (deciwatts) | float watts | 🟡 dialect A; ❌ dialect B (its power record carries no power) |
@@ -84,12 +84,14 @@ whose two half hours differ in some hour has no faithful hourly form, so
 `prog` is omitted (and the read is not repeated within the hour).
 
 Target temperature on dialect-B heaters: the short status record has no
-setpoint. In manual mode the heater heats to its comfort preset (verified:
-raising comfort to 23.0 °C made the heater ask for power about 70 s later;
-`B4 02 <setpoint>` was ignored). So `stemp` is comfort in manual mode, and in
-auto mode the preset of the current program slot (the heater's own rule);
-off and temporary override report no `stemp`. A target-temperature write is
-one `B6` with comfort = target and mode manual; it must stay above eco.
+setpoint, but the power record does. Byte 3 is the heater's active setpoint:
+the manual setpoint in manual mode (its own value, not a preset), the current
+program slot's preset in program mode, and the override target in temporary
+override. A target is written as a sixth `B6` byte with mode 02 (manual) or 03
+(temporary override, which the heater ends at the next program change); the
+presets are re-sent unchanged. Verified: byte 3 followed every write, and an
+override to 24 °C in a night slot made the heater heat at full duty within
+30 s. `B4 02 <setpoint>` is ignored by these heaters.
 
 Missing keys: the coordinator stores each poll with replace semantics, so the
 client keeps the last program it read and the last `BE` power value and puts
@@ -113,17 +115,16 @@ then sends one frame per command. Each frame must be acked by the heater
 | `prog` | `B2` + 84 bytes, 48 slots a day, Sunday first 🟡 | `B2` + 42 bytes, 24 slots a day, Sunday first ✅ |
 | `mode` alone: `auto` / `manual` (`heat`) / `off` | `B4 01` / `B4 02` / `B4 04` 🟡 | `B6 af eco comfort mode`, presets re-sent from a fresh status read ✅ (`B4` is acked but ignored) |
 | `ptemp` + `mode` together | two writes 🟡 | one `B6` ✅ |
-| `mode="manual"` (or `heat`) + `stemp`, or `stemp` alone | `B4 02 <half-degrees>` (manual setpoint) 🟡 | `B6 af eco <stemp> 02`: the target becomes the comfort preset, mode manual ✅ |
-| `mode="modified_auto"` + `stemp` | `B4 03 <half-degrees>` (temporary override) 🟡 | `RadioUnsupportedError` ❌ (no override write known) |
+| `mode="manual"` (or `heat`) + `stemp`, or `stemp` alone | `B4 02 <half-degrees>` (manual setpoint) 🟡 | `B6 af eco comfort 02 <stemp>`: manual setpoint, presets unchanged ✅ |
+| `mode="modified_auto"` + `stemp` | `B4 03 <half-degrees>` (temporary override) 🟡 | `B6 af eco comfort 03 <stemp>`: temporary override, ended by the heater at the next program change ✅ |
 | `mode="modified_auto"` without `stemp`; `auto`/`off` with `stemp` | ValueError before sending | ValueError before sending |
 | `units` other than `"C"` | ValueError before sending | ValueError before sending |
 | `boost_time`, `cancel_boost` | `RadioUnsupportedError` ❌ | `RadioUnsupportedError` ❌ |
 
 A dialect-B preset or mode write first reads the status (`B8`), because `B6`
 always carries all three presets and the mode. Every value is validated before
-that read, so an invalid write sends nothing. A preset-only write while the
-heater is in temporary override (`03`) raises ValueError: `03` cannot be
-re-sent.
+that read, so an invalid write sends nothing. A preset-only write keeps the
+current mode, including a temporary override (`03`).
 
 The dialect-B rows were verified on the reference heater by writing back its
 current values, and by switching it to off and back to manual: the status
@@ -210,7 +211,7 @@ reconnects; it does no harm.
 |---|---|---|
 | Climate entity: mode, target temperature, presets, schedule | 🟡 | Dialect B: mode, presets and schedule writes ✅; target temperature writes ❌ and target/current temperature stay unknown (short status record). Dialect A: 🟡. |
 | Climate HVAC action (heating / idle) | 🟡 / ✅ | Dialect A: full status record flags. Dialect B: power record byte 7, verified against a house meter. |
-| Temporary override (`modified_auto`) | 🟡 / ❌ | `B4 03` in dialect A; unknown in dialect B. |
+| Temporary override (`modified_auto`) | 🟡 / ✅ | `B4 03` in dialect A; `B6 .. 03 <setpoint>` in dialect B (ended by the heater at the next program change). |
 | Child lock entity | 🟡 | `BA 01`/`BA 00`. A dialect-B heater acks it without a reply and does not report the lock, so the entity shows the last state written (unknown until first used). The keypad effect on dialect B is not yet confirmed. |
 | Heater boost | 🟡 (client only) | No heater boost entity exists today. |
 | Accumulator boost, boost defaults | ❌ | Unknown on radio. |
@@ -265,8 +266,6 @@ own power in `BE`, which is used when no power is entered.
 
 ## Known gaps
 
-- Temporary-override writes on dialect-B heaters: `B4` is acked but ignored,
-  and no other override write is known.
 - Keypad lock on dialect B: acked; whether the keypad locks is not yet confirmed.
 - Boost, runback and EASY on dialect B: `D2` answers `D3 00 00`, `D6` answers `D7 19`, `D4` is ack only; no effect seen. Their meaning is unknown.
 - Display flash on dialect-B heaters: the command is acked, the visible flash is not yet confirmed.

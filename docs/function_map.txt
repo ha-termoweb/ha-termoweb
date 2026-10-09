@@ -1890,7 +1890,7 @@ custom_components/termoweb/backend/radio/protocol.py :: set_mode
 custom_components/termoweb/backend/radio/protocol.py :: set_override
     Return ``B4 03 <half-degrees>``: temporary override setpoint, 7-35 C.
 custom_components/termoweb/backend/radio/protocol.py :: write_presets
-    Return ``B6 <anti-frost> <eco> <comfort> [<mode>]``; values strictly increasing.
+    Return ``B6 <anti-frost> <eco> <comfort> [<mode> [<setpoint>]]``.
 custom_components/termoweb/backend/radio/protocol.py :: set_toggle
     Return ``<opcode> 01|00`` for the boost/runback/EASY/lock toggles.
 custom_components/termoweb/backend/radio/protocol.py :: flash_display
@@ -2175,14 +2175,12 @@ custom_components/termoweb/codecs/radio_codec.py :: _temperature
     Return a temperature in the cloud codec's one-decimal string form.
 custom_components/termoweb/codecs/radio_codec.py :: settings_from_status
     Return canonical settings carried by a decoded status record.
-custom_components/termoweb/codecs/radio_codec.py :: derived_setpoint
-    Return the target a status implies: comfort in manual, the slot preset in auto.
 custom_components/termoweb/codecs/radio_codec.py :: prog_from_program
     Return the 168-slot Monday-first ``prog``, or None if any hour is unknown.
 custom_components/termoweb/codecs/radio_codec.py :: settings_from_power_request
     Return the canonical ``max_power`` carried by a heater power request, if any.
 custom_components/termoweb/codecs/radio_codec.py :: settings_from_power_record
-    Return the heating ``state`` and room temperature of a dialect-B power record.
+    Return heating ``state``, room temperature and active setpoint of a power record.
 custom_components/termoweb/codecs/radio_codec.py :: validate_prog
     Return ``prog`` as 168 slot codes 0/1/2, raising ValueError otherwise.
 custom_components/termoweb/codecs/radio_codec.py :: _celsius
@@ -2194,7 +2192,7 @@ custom_components/termoweb/codecs/radio_codec.py :: _mode_code
 custom_components/termoweb/codecs/radio_codec.py :: _presets
     Return ``[cold, night, day]`` as three Celsius floats, raising ValueError.
 custom_components/termoweb/codecs/radio_codec.py :: encode_preset_mode_write
-    Return ``B6 <af> <eco> <comfort> <mode>``, unchanged fields taken from ``status``.
+    Return ``B6 <af> <eco> <comfort> <mode> [<setpoint>]``; gaps come from ``status``.
 custom_components/termoweb/codecs/radio_codec.py :: encode_command
     Return the radio payload for one canonical write command.
 custom_components/termoweb/planner/radio_planner.py :: PlannedRadioWrite.opcode

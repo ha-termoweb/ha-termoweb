@@ -213,8 +213,10 @@ def test_preset_mode_write_fills_gaps_from_status() -> None:
     assert encode(status, presets=[7, 16, 20]) == bytes.fromhex("B60E202802")
     assert encode(status, presets=[7, 16, 20], mode="auto")[-1] == p.MODE_AUTO
     override = p.decode_status(STATUS_SHORT[:4] + bytes([p.MODE_OVERRIDE]))
+    assert encode(override, presets=[7, 16, 20]) == bytes.fromhex("B60E202803")
+    unknown = p.decode_status(STATUS_SHORT[:4] + bytes([0x07]))
     with pytest.raises(ValueError, match="cannot be re-sent"):
-        encode(override, presets=[7, 16, 20])
+        encode(unknown, presets=[7, 16, 20])
     with pytest.raises(ValueError, match="needs a setpoint"):
         encode(status, mode="modified_auto")
 
@@ -236,38 +238,19 @@ def test_planner_dialect_b_merges_presets_and_mode() -> None:
         planner.validate_commands([SetMode("eco")], DIALECT_B)
 
 
-def test_derived_setpoint_follows_mode_and_program() -> None:
-    """Manual heats to comfort, auto to the current slot's preset, off to nothing."""
-
-    short = p.decode_status(STATUS_SHORT)  # 16.5/18.5/21.0, manual
-    monday_3am = datetime(2026, 10, 5, 3, 0)  # DAY: night (eco) until 05:00
-    monday_noon = datetime(2026, 10, 5, 12, 0)  # DAY: day (comfort)
-    prog = DAY * 7
-    assert codec.derived_setpoint(short, prog, monday_3am) == 21.0
-
-    def with_mode(code: int) -> p.StatusRecord:
-        return p.decode_status(STATUS_SHORT[:4] + bytes([code]))
-
-    auto = with_mode(p.MODE_AUTO)
-    assert codec.derived_setpoint(auto, prog, monday_3am) == 18.5
-    assert codec.derived_setpoint(auto, prog, monday_noon) == 21.0
-    cold = [0] * 168
-    assert codec.derived_setpoint(auto, cold, monday_noon) == 16.5
-    assert codec.derived_setpoint(auto, None, monday_noon) is None
-    assert codec.derived_setpoint(with_mode(p.MODE_OFF), prog, monday_noon) is None
-    full = p.decode_status(STATUS_E6)
-    assert codec.derived_setpoint(full, prog, monday_3am) == 22.0
-
-
 def test_preset_mode_write_with_setpoint() -> None:
-    """A setpoint becomes comfort with mode manual; other modes are refused."""
+    """A target is the sixth B6 byte, with mode manual or override; presets stay."""
 
     status = p.decode_status(STATUS_SHORT)
     encode = codec.encode_preset_mode_write
-    assert encode(status, setpoint=23.0) == bytes.fromhex("B621252E02")
-    assert encode(status, setpoint=23.0, mode="heat") == bytes.fromhex("B621252E02")
+    assert encode(status, setpoint=23.0) == bytes.fromhex("B621252A022E")
+    assert encode(status, setpoint=23.0, mode="heat") == bytes.fromhex("B621252A022E")
+    assert encode(status, setpoint=24.0, mode="modified_auto") == bytes.fromhex(
+        "B621252A0330"
+    )
+    assert encode(status, setpoint=18.0) == bytes.fromhex("B621252A0224")  # below eco
     assert encode(status, presets=[7, 16, 20], setpoint=22) == bytes.fromhex(
-        "B60E202C02"
+        "B60E2028022C"
     )
     with pytest.raises(ValueError, match="cannot be written together"):
         encode(status, setpoint=23.0, mode="off")
@@ -280,5 +263,11 @@ def test_power_record_maps_heating_state() -> None:
 
     heating = p.decode_power_record(bytes.fromhex("BDDB002CE43A0C0100"))
     idle = p.decode_power_record(bytes.fromhex("BDDC002C783A000000"))
-    assert codec.settings_from_power_record(heating) == {"state": "on", "mtemp": "21.9"}
-    assert codec.settings_from_power_record(idle) == {"state": "off", "mtemp": "22.0"}
+    assert codec.settings_from_power_record(heating) == {
+        "state": "on",
+        "mtemp": "21.9",
+        "stemp": "22.0",
+    }
+    assert codec.settings_from_power_record(idle)["stemp"] == "22.0"
+    night = p.decode_power_record(bytes.fromhex("BDD30025713B000000"))
+    assert codec.settings_from_power_record(night)["stemp"] == "18.5"

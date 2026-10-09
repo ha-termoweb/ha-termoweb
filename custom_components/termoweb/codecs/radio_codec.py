@@ -9,7 +9,6 @@ onto radio payloads. A key is only emitted when the record carries its value.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
 import math
 from typing import Any
 
@@ -82,21 +81,6 @@ def settings_from_status(record: protocol.StatusRecord) -> dict[str, Any]:
     return settings
 
 
-def derived_setpoint(
-    record: protocol.StatusRecord, prog: Sequence[int] | None, now: datetime
-) -> float | None:
-    """Return the target a status implies: comfort in manual, the slot preset in auto."""
-
-    if record.setpoint_c is not None:
-        return record.setpoint_c
-    if record.mode_code == protocol.MODE_MANUAL:
-        return record.comfort_c
-    if record.mode_code == protocol.MODE_AUTO and prog is not None:
-        presets = (record.anti_frost_c, record.eco_c, record.comfort_c)
-        return presets[prog[now.weekday() * HOURS_PER_DAY + now.hour]]
-    return None
-
-
 def prog_from_program(record: protocol.ProgramRecord) -> list[int] | None:
     """Return the 168-slot Monday-first ``prog``, or None if any hour is unknown."""
 
@@ -115,11 +99,12 @@ def settings_from_power_request(request: protocol.PowerRequest) -> dict[str, Any
 
 
 def settings_from_power_record(record: protocol.PowerRecord) -> dict[str, Any]:
-    """Return the heating ``state`` and room temperature of a dialect-B power record."""
+    """Return heating ``state``, room temperature and active setpoint of a power record."""
 
     return {
         "state": "on" if record.heating else "off",
         "mtemp": _temperature(record.room_temp_c),
+        "stemp": _temperature(record.setpoint_c),
     }
 
 
@@ -186,28 +171,35 @@ def encode_preset_mode_write(
     mode: str | None = None,
     setpoint: Any = None,
 ) -> bytes:
-    """Return ``B6 <af> <eco> <comfort> <mode>``, unchanged fields taken from ``status``.
+    """Return ``B6 <af> <eco> <comfort> <mode> [<setpoint>]``; gaps come from ``status``.
 
-    A manual ``setpoint`` is written as the comfort preset with mode manual: a
-    dialect-B heater in manual mode heats to its comfort preset.
+    A target temperature is the heater's own setpoint byte, written with mode
+    manual, or with mode 03 (temporary override, which the heater ends at the
+    next program change) for ``modified_auto``. The presets are not touched.
     """
 
     if presets is None:
         values = (status.anti_frost_c, status.eco_c, status.comfort_c)
     else:
         values = _presets(presets)
+    target = None
     if setpoint is not None:
-        if _normalise_mode(mode) not in (None, "manual", "heat"):
+        normalised = _normalise_mode(mode)
+        if normalised not in _SETPOINT_MODES:
             raise ValueError(f"a setpoint cannot be written together with mode {mode}")
-        values = (values[0], values[1], _celsius(setpoint, "setpoint"))
-        mode = "manual"
-    if mode is not None:
+        target = _celsius(setpoint, "setpoint")
+        code = (
+            protocol.MODE_OVERRIDE
+            if normalised == OVERRIDE_MODE
+            else protocol.MODE_MANUAL
+        )
+    elif mode is not None:
         code = _mode_code(mode)
-    elif status.mode_code in protocol.SETTABLE_MODES:
+    elif status.mode_code in protocol.PRESET_WRITE_MODES:
         code = status.mode_code
     else:
         raise ValueError(f"current mode {status.mode!r} cannot be re-sent with presets")
-    return protocol.write_presets(*values, code)
+    return protocol.write_presets(*values, code, target)
 
 
 def encode_command(command: BaseCommand, dialect: Dialect = DIALECT_A) -> bytes:
@@ -242,7 +234,6 @@ __all__ = [
     "MODE_TO_RADIO",
     "PROGRAM_LEN",
     "RADIO_UNITS",
-    "derived_setpoint",
     "encode_command",
     "encode_preset_mode_write",
     "prog_from_program",
