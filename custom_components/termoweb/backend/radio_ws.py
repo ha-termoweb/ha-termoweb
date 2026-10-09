@@ -35,7 +35,7 @@ from .ws_client import _WSStatusMixin
 
 _LOGGER = logging.getLogger(__name__)
 
-GRANT_SETTLE_S = 3.0  # the heater sets its heating flag shortly after BF 01
+GRANT_SETTLE_S = 90.0  # heating starts ~70-90 s after BF 01 (meter-verified)
 REFRESH_INTERVAL_S = 120.0  # keepalive clock sync + status read; heaters need <=150 s
 PAYLOAD_STALE_AFTER_S = 3 * REFRESH_INTERVAL_S
 RECONNECT_BACKOFF_S = (5.0, 10.0, 30.0, 120.0, 300.0)

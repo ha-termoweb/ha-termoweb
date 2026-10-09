@@ -69,7 +69,7 @@ derived or guessed.
 | `units` | fixed | `"C"`; the radio carries every temperature in half degrees Celsius | ✅ |
 | `mtemp` | full status record (E6/E4/E5/E3) | one-decimal string | 🟡 dialect A; ❌ the dialect-B short record has no room temperature |
 | `stemp` | full status record; for the dialect-B short record it is derived (see below) | one-decimal string | 🟡 dialect A; ✅ dialect B |
-| `state` | full record flag `01`; dialect B: power record byte 7 (`BC` → `BD`, read when the status lacks it, and a few seconds after each `BF 01` grant) | `"on"` / `"off"` | 🟡 dialect A; ✅ dialect B |
+| `state` | full record flag `01`; dialect B: power record byte 7 (`BC` → `BD`, read when the status lacks it, and 90 s after each `BF 01` grant) | `"on"` / `"off"` | 🟡 dialect A; ✅ dialect B |
 | `lock` | full record flag `02` | bool | 🟡 dialect A; ❌ dialect B |
 | `max_power` | full record power, or the dialect-A `BE hi lo` power request (deciwatts) | float watts | 🟡 dialect A; ❌ dialect B (its power record carries no power) |
 
@@ -166,7 +166,7 @@ gateway. The gateway firmware sends the link-layer acks itself.
 | Heater frame | Station reply | Integration effect | Status |
 |---|---|---|---|
 | registration `50` | EB `51` clock sync, dialect suffix (`dialect.eb_clock_suffix`: dialect B has no trailing `03`; the 9-byte form is rejected `53 56`) | — | ✅ |
-| power request `BE ..` | `BF 01` (grant), then a `BC` read 3 s later | dialect A: `max_power` delta (kept for later reads); dialect B: `state` delta from the power record | ✅ |
+| power request `BE ..` | `BF 01` (grant), then a `BC` read 90 s later | dialect A: `max_power` delta (kept for later reads); dialect B: `state` delta from the power record read 90 s later | ✅ |
 | report `56 B9 ..` | `57 55` | status delta (full record) | 🟡 |
 | program report `56 B1 ..` | `57 55` | `prog` delta | 🟡 |
 | route probe (tag `06`), acks, unknown frames, frames from nodes not in the inventory | none | ignored | ✅ |
