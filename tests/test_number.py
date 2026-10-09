@@ -503,8 +503,8 @@ async def test_async_setup_entry_creates_number_entities(
 
 
 @pytest.mark.asyncio
-async def test_async_setup_entry_skips_priority_without_capability() -> None:
-    """A backend without priority/power-limit capabilities gets no such numbers."""
+async def test_async_setup_entry_radio_gets_local_priority_and_limit() -> None:
+    """The radio backend's local power manager brings priority and limit numbers."""
 
     hass = HomeAssistant()
     entry_id = "entry-radio-number"
@@ -527,4 +527,7 @@ async def test_async_setup_entry_skips_priority_without_capability() -> None:
         calls.append,
     )
 
-    assert calls == []
+    assert [type(e).__name__ for e in calls[0]] == [
+        "HeaterPriorityNumber",
+        "PowerLimitNumber",
+    ]

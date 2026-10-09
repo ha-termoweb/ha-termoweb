@@ -481,7 +481,7 @@ def test_options_flow_init_and_submit(
 
     initial = asyncio.run(options_flow.async_step_init())
     assert initial["type"] == "form"
-    assert initial["description_placeholders"] == {"version": "6.6.6"}
+    assert initial["description_placeholders"] == {"version": "6.6.6", "heaters": ""}
 
     schema = initial["data_schema"]
     assert _schema_default(schema, "debug") is False

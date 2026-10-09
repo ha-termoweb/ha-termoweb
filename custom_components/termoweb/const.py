@@ -34,6 +34,9 @@ CONF_PORT: Final = "port"
 CONF_DIALECT: Final = "dialect"
 CONF_NETWORK_ID: Final = "network_id"  # 4 hex digits
 CONF_NODES: Final = "nodes"
+CONF_RADIO_POWER: Final = (
+    "radio_power"  # options: power manager limit/priority/rated power
+)
 RADIO_GATEWAY_LABEL: Final = "Radio gateway"
 
 BRAND_LABELS: Final[Mapping[str, str]] = {

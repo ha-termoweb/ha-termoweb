@@ -43,8 +43,8 @@ decoders in `backend/radio/protocol.py` return frozen dataclasses.
 | Flag | Radio | Cloud | Gates |
 |---|---|---|---|
 | `lock` | True (keypad lock) | Ducaheat only | lock platform |
-| `power_limit` | False | TermoWeb only | power-limit number, coordinator power-limit poll |
-| `priority` | False | True | heater priority number entities |
+| `power_limit` | True (local power manager) | TermoWeb only | power-limit number, coordinator power-limit poll |
+| `priority` | True (local power manager) | True | heater priority number entities |
 | `energy_history` | False | True | `import_energy_history` service (logs an error and skips the entry) |
 
 `priority` and `energy_history` are new in this PR. Both cloud backends
@@ -166,7 +166,7 @@ gateway. The gateway firmware sends the link-layer acks itself.
 | Heater frame | Station reply | Integration effect | Status |
 |---|---|---|---|
 | registration `50` | EB `51` clock sync, dialect suffix (`dialect.eb_clock_suffix`: dialect B has no trailing `03`; the 9-byte form is rejected `53 56`) | — | ✅ |
-| power request `BE ..` | `BF 01` (grant), then a `BC` read 90 s later | dialect A: `max_power` delta (kept for later reads); dialect B: `state` delta from the power record read 90 s later | ✅ |
+| power request `BE ..` | `BF 01` (an acknowledgement; `BF 00` does not stop heating), then a `BC` read 90 s later and the power-limit check | dialect A: `max_power` delta (kept for later reads); dialect B: `state` delta from the power record read 90 s later | ✅ |
 | report `56 B9 ..` | `57 55` | status delta (full record) | 🟡 |
 | program report `56 B1 ..` | `57 55` | `prog` delta | 🟡 |
 | route probe (tag `06`), acks, unknown frames, frames from nodes not in the inventory | none | ignored | ✅ |
@@ -215,8 +215,8 @@ reconnects; it does no harm.
 | Heater boost | 🟡 (client only) | No heater boost entity exists today. |
 | Accumulator boost, boost defaults | ❌ | Unknown on radio. |
 | Display flash button | 🟡 | `5E 01`: dialect A answers `5F 55`; a dialect-B heater acks it (no reply record). The visible flash on dialect B is not yet confirmed. |
-| Heater priority numbers | ❌ | Not created. |
-| Installation power limit | ❌ | Not created, not polled. |
+| Heater priority numbers | 🟡 | Local power manager (see below). Higher numbers win. |
+| Installation power limit | 🟡 | Local power manager (see below). Needs each heater's power: reported by dialect-A heaters, entered in the options for dialect B. |
 | Energy and power sensors | ❌ | Not created (`energy` capability off): no energy counter is known for dialect B (`BC` returns the power record). |
 | Energy history import service | ❌ | Logs "not supported by this backend" for radio entries. |
 | Hourly samples poller | ❌ | Gets `{}`. |
@@ -224,6 +224,34 @@ reconnects; it does no harm.
 | Websocket debug probe service | ❌ | Not applicable. |
 | Geo data / device location | ❌ | Not applicable; the location sensor is not created (`geo_data` capability off). |
 | Gateway RTC | ✅ | Local time. |
+
+## Local power manager
+
+The cloud gateway keeps an installation under its power limit. On the radio,
+a heater's `BE` power request is only acknowledged by `BF`: a dialect-B heater
+heats whether the answer is `BF 01` or `BF 00` (checked against a house meter:
+eleven 1.5 kW heating pulses after eleven `BF 00` answers). The station always
+answers `BF 01`. The lever that does stop heating is the mode, so the local
+power manager (`backend/radio_power.py`) sheds load:
+
+- After every power-record read and every refresh, it adds up the power of the
+  heaters reporting heating (power record byte 7, or the status flags).
+- Over the limit, the heating heaters with the lowest priority are switched off
+  (`B6 .. 04`, or `B4 04` in dialect A) until the rest fit. Their previous mode
+  is stored in the entry options, so a restart does not lose it.
+- When there is room again, switched-off heaters get their previous mode back,
+  highest priority first, while each one's power fits. A temporary override
+  comes back as program mode. Removing the limit restores every heater.
+- A heater whose power is unknown is never switched off. Changing a switched-off
+  heater's mode or target in Home Assistant hands it back to the user.
+
+Higher priority numbers win. While switched off, a heater shows as Off in Home
+Assistant.
+
+Settings live in the entry options (`radio_power`): the limit and priorities
+are set through the usual number entities; each heater's power in watts is set
+in the integration's options (**Configure**). Dialect-A heaters report their
+own power in `BE`, which is used when no power is entered.
 
 ## Known gaps
 

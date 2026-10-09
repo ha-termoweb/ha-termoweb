@@ -41,6 +41,7 @@ from custom_components.termoweb.planner.radio_planner import (
 from .radio import protocol
 from .radio.dialect import DIALECTS, Dialect, Frame, build_frame
 from .radio.link import DEFAULT_PORT, GatewayInfo, RadioLink, RadioLinkError
+from .radio_power import PowerManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,6 +52,12 @@ STATUS_REPLY_LENS = (
     protocol.STATUS_E6_LEN,
     protocol.STATUS_E4_LEN,
 )
+# Mode to give back to a heater the power manager switched off (override -> program).
+RESTORE_MODES: dict[int, str] = {
+    protocol.MODE_AUTO: "auto",
+    protocol.MODE_MANUAL: "manual",
+    protocol.MODE_OVERRIDE: "auto",
+}
 POWER_RECORD_REPLY_LENS = (protocol.POWER_REQUEST_B_LEN,)  # dialect-B BD record
 PROGRAM_REPLY_LENS = (
     protocol.PROGRAM_HOURLY_PAYLOAD_LEN,
@@ -126,6 +133,7 @@ class RadioClient:
         station_id: int = 1,
         link_factory: LinkFactory = RadioLink,
         clock: Callable[[], float] = time.monotonic,
+        power: PowerManager | None = None,
     ) -> None:
         """Store the gateway address, dialect and stored node list; nothing connects."""
 
@@ -148,7 +156,7 @@ class RadioClient:
         self._disconnect_callbacks: list[Callable[[], None]] = []
         self._programs: dict[int, tuple[float, list[int] | None]] = {}
         self._locks: dict[int, bool] = {}  # last lock written, for records without it
-        self._max_power: dict[int, float] = {}
+        self.power = power or PowerManager()
 
     # --- connection ----------------------------------------------------------
 
@@ -334,7 +342,34 @@ class RadioClient:
     def note_max_power(self, addr: int, watts: float) -> None:
         """Remember a heater's measured full-load power from its power requests."""
 
-        self._max_power[addr] = watts
+        self.power.note_reported_power(addr, watts)
+
+    async def async_balance_power(self) -> None:
+        """Switch heaters off or back on as the power manager plans."""
+
+        to_off, to_restore = self.power.plan()
+        for addr in to_off:
+            try:
+                status = await self._read_status(addr)
+                if status.mode_code == protocol.MODE_OFF:
+                    continue
+                await self._write_settings(addr, mode="off")
+            except (RadioLinkError, RadioCommandError) as err:
+                _LOGGER.error(
+                    "Power limit: could not switch heater %s off: %s", addr, err
+                )
+                continue
+            self.power.mark_shed(addr, status.mode_code)
+        for addr, mode_code in to_restore:
+            mode = RESTORE_MODES.get(mode_code)
+            try:
+                if mode is not None:
+                    await self._write_settings(addr, mode=mode)
+            except (RadioLinkError, RadioCommandError) as err:
+                _LOGGER.error("Power limit: could not restore heater %s: %s", addr, err)
+                continue
+            _LOGGER.info("Power limit: heater %s back to %s", addr, mode)
+            self.power.clear_shed(addr)
 
     # --- node helpers --------------------------------------------------------
 
@@ -382,7 +417,10 @@ class RadioClient:
         except (RadioLinkError, RadioCommandError) as err:
             _LOGGER.debug("Power record read from heater %s failed: %s", addr, err)
             return None
-        return protocol.decode_power_record(reply.payload)
+        record = protocol.decode_power_record(reply.payload)
+        if record is not None:
+            self.power.note_heating(addr, record.heating)
+        return record
 
     async def _program(self, addr: int) -> list[int] | None:
         """Return the heater's ``prog``, re-reading it after ``program_refresh_s``."""
@@ -455,8 +493,12 @@ class RadioClient:
                 settings.update(settings_from_power_record(power))
         if "lock" not in settings and addr in self._locks:
             settings["lock"] = self._locks[addr]
-        if "max_power" not in settings and addr in self._max_power:
-            settings["max_power"] = self._max_power[addr]
+        if "state" in settings:
+            self.power.note_heating(addr, settings["state"] == "on")
+        rated = self.power.rated_power(addr)
+        if "max_power" not in settings and rated is not None:
+            settings["max_power"] = rated
+        settings["priority"] = self.power.priority(addr)
         return settings
 
     async def set_node_settings(
@@ -485,6 +527,25 @@ class RadioClient:
                 f"Temporary override on dialect {self._dialect.name} heaters"
             )
         _node_type, addr = self._resolve_node(node)
+        await self._write_settings(
+            addr, mode=mode, stemp=stemp, prog=prog, ptemp=ptemp, units=units
+        )
+        if mode is not None or stemp is not None:
+            self.power.clear_shed(addr)  # the user's choice wins over a shed
+        _LOGGER.info("Radio settings written to heater %s", addr)
+
+    async def _write_settings(
+        self,
+        addr: int,
+        *,
+        mode: str | None = None,
+        stemp: float | None = None,
+        prog: list[int] | None = None,
+        ptemp: list[float] | None = None,
+        units: str = "C",
+    ) -> None:
+        """Plan, validate and send a settings write, each frame verified."""
+
         commands = plan_settings(
             mode=mode, stemp=stemp, prog=prog, ptemp=ptemp, units=units
         )
@@ -496,7 +557,6 @@ class RadioClient:
             await self._write(addr, planned.payload)
             if planned.opcode == protocol.OP_PROGRAM_WRITE:
                 self._programs.pop(addr, None)
-        _LOGGER.info("Radio settings written to heater %s", addr)
 
     async def set_acm_boost_state(
         self,
@@ -542,19 +602,20 @@ class RadioClient:
     async def set_node_priority(
         self, dev_id: str, node: NodeDescriptor, *, priority: int
     ) -> None:
-        """Raise: radio has no power-manager priority."""
+        """Store a heater's priority for the local power manager."""
 
-        raise RadioUnsupportedError("Heater priority")
+        _node_type, addr = self._resolve_node(node)
+        self.power.set_priority(addr, priority)
 
     async def get_power_limit(self, dev_id: str) -> int | None:
-        """Return None: radio has no installation power limit to read."""
+        """Return the local power manager's installation limit in W (0 = no limit)."""
 
-        return None
+        return self.power.power_limit or 0
 
     async def set_power_limit(self, dev_id: str, *, power_limit: int) -> None:
-        """Raise: radio has no installation power limit."""
+        """Set the local power manager's installation limit (W); 0 removes it."""
 
-        raise RadioUnsupportedError("The installation power limit")
+        self.power.set_power_limit(int(power_limit))
 
     async def set_acm_extra_options(
         self,

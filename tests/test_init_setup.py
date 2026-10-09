@@ -758,8 +758,8 @@ def test_async_setup_entry_radio_gateway_unreachable(
                 raise termoweb_init.RadioLinkError("cannot connect")
             raise termoweb_init.RadioError("no MAC")
 
-    def fake_create(*args: Any) -> Any:
-        created.append(args)
+    def fake_create(*args: Any, power: Any = None) -> Any:
+        created.append((*args, power))
         return UnreachableRadio(None, "", "")
 
     monkeypatch.setattr(termoweb_init, "create_radio_client", fake_create)
@@ -782,7 +782,13 @@ def test_async_setup_entry_radio_gateway_unreachable(
 
     with pytest.raises(ConfigEntryNotReady):
         asyncio.run(_run())
-    assert created == [("10.0.0.5", 2323, "B", nodes, bytes.fromhex("1234"))]
+    assert [args[:5] for args in created] == [
+        ("10.0.0.5", 2323, "B", nodes, bytes.fromhex("1234"))
+    ]
+    power = created[0][5]
+    power.set_power_limit(1800)  # saved into the entry options
+    assert entry.options["radio_power"]["power_limit"] == 1800
+    assert power.power_limit == 1800
 
 
 def test_async_setup_entry_no_devices(
