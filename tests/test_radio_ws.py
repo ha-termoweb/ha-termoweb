@@ -177,6 +177,7 @@ async def test_start_connects_refreshes_and_reports_health() -> None:
             "prog": DAY * 7,
             "stemp": "21.0",
             "state": "off",
+            "priority": 0,
         }
     ]
     assert coordinator.deltas[1].node_id.node_type is NodeType.ACCUMULATOR
@@ -255,6 +256,34 @@ async def test_granted_heater_reports_heating() -> None:
     link.deliver(received(HEATER, POWER_REQUEST))  # record read fails: no push
     await settle(60)
     assert coordinator.changes_for("6") == []
+    await listener.stop()
+
+
+@pytest.mark.asyncio
+async def test_power_request_over_the_limit_switches_the_heater_off() -> None:
+    """A heater that heats over the power limit is acked, read, then switched off."""
+
+    listener, client, links, coordinator, sleeper, runtime, _ = build()
+    listener.start()
+    await settle()
+    link = links[0]
+    await client.set_power_limit(DEV_ID, power_limit=1000)
+    client.note_max_power(6, 1500.0)
+    link.reply(0xBC, POWER_RECORD_HEATING)
+    link.reply(0xB6, b"\xb7\x55")
+    link.sent.clear()
+
+    link.deliver(received(HEATER, POWER_REQUEST))
+    await settle(60)
+
+    assert [p for _a, p in link.sent] == [
+        b"\xbf\x01",
+        b"\xbc",
+        b"\xb8",
+        b"\xb8",
+        bytes.fromhex("B621252A04"),
+    ]
+    assert client.power.shed() == {6: 2}
     await listener.stop()
 
 

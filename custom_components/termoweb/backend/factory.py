@@ -20,6 +20,7 @@ from .rest_client import RESTClient
 
 if TYPE_CHECKING:
     from .radio_client import RadioClient
+    from .radio_power import PowerManager
 
 
 def _backend_class(brand: str) -> type[Backend]:
@@ -57,12 +58,14 @@ def create_radio_client(
     dialect: str,
     nodes: Iterable[Mapping[str, Any]],
     network_id: bytes | None,
+    *,
+    power: PowerManager | None = None,
 ) -> RadioClient:
     """Return a radio client for the gateway at ``host:port`` and its stored nodes."""
 
     from .radio_client import RadioClient  # noqa: PLC0415
 
-    return RadioClient(host, port, dialect, nodes, network_id=network_id)
+    return RadioClient(host, port, dialect, nodes, network_id=network_id, power=power)
 
 
 def create_rest_client(

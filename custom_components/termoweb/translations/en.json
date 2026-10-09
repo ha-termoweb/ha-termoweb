@@ -61,7 +61,7 @@
     "step": {
       "init": {
         "title": "TermoWeb Options",
-        "description": "Version: {version}",
+        "description": "Version: {version}\n\n{heaters}",
         "data": { "debug": "Enable debug helpers" }
       }
     }

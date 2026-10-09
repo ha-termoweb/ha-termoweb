@@ -245,6 +245,7 @@ async def test_get_node_settings_maps_status_and_program() -> None:
         "prog": DAY * 7,
         "stemp": "21.0",  # manual: the heater heats to its comfort preset
         "state": "off",  # from the BC power record: not heating
+        "priority": 0,  # local power manager default
     }
     assert links[0].sent == [(HEATER, b"\xb8"), (HEATER, b"\xb0"), (HEATER, b"\xbc")]
 
@@ -610,18 +611,76 @@ async def test_flash_display(dialect, reply) -> None:
 
 
 @pytest.mark.asyncio
+async def test_power_limit_switches_a_heater_off_and_back() -> None:
+    """Over the limit the heater is switched off (B6 .. 04); without it, restored."""
+
+    client, links, _ = make_client()
+    link = await client.async_connect()
+    assert await client.get_power_limit("dev") == 0  # no limit; entity stays usable
+    await client.set_power_limit("dev", power_limit=1000)
+    await client.set_node_priority("dev", ("htr", "6"), priority=3)
+    assert await client.get_power_limit("dev") == 1000
+    client.note_max_power(HEATER, 1500.0)
+    link.reply(0xBC, bytes.fromhex("BDDB002CE43A0C0100"))  # heating
+    await client.read_power_record(HEATER)
+    link.sent.clear()
+
+    await client.async_balance_power()
+    assert link.payloads() == [b"\xb8", b"\xb8", bytes.fromhex("B621252A04")]
+    assert client.power.shed() == {HEATER: 2}  # manual, to restore later
+    settings = await client.get_node_settings("dev", ("htr", "6"))
+    assert settings["priority"] == 3 and settings["max_power"] == 1500.0
+
+    link.sent.clear()
+    await client.set_power_limit("dev", power_limit=0)
+    await client.async_balance_power()
+    assert link.payloads() == [b"\xb8", bytes.fromhex("B621252A02")]
+    assert client.power.shed() == {}
+
+
+@pytest.mark.asyncio
+async def test_power_limit_edge_cases(caplog) -> None:
+    """Already off: nothing to do; radio errors are logged; the user's mode wins."""
+
+    client, links, _ = make_client()
+    link = await client.async_connect()
+    await client.set_power_limit("dev", power_limit=1000)
+    client.note_max_power(HEATER, 1500.0)
+    client.power.note_heating(HEATER, True)
+    link.reply(0xB8, bytes.fromhex("B921252A04"))  # the heater is already off
+    await client.async_balance_power()
+    assert client.power.shed() == {}
+
+    link.replies.pop(0xB8)  # status read fails
+    with caplog.at_level(logging.ERROR):
+        await client.async_balance_power()
+    assert "could not switch heater 6 off" in caplog.text
+
+    client.power.mark_shed(HEATER, 1)
+    await client.set_power_limit("dev", power_limit=0)
+    with caplog.at_level(logging.ERROR):
+        await client.async_balance_power()  # restore fails: stays shed
+    assert "could not restore heater 6" in caplog.text
+    assert client.power.shed() == {HEATER: 1}
+
+    link.reply(0xB8, STATUS_SHORT)
+    client.power.mark_shed(HEATER, 4)  # unknown restore mode: just forget it
+    await client.async_balance_power()
+    assert client.power.shed() == {}
+
+    client.power.mark_shed(HEATER, 2)
+    await client.set_node_settings("dev", ("htr", "6"), mode="auto")
+    assert client.power.shed() == {}  # the user's own mode change wins
+
+
+@pytest.mark.asyncio
 async def test_unsupported_features() -> None:
     """Cloud-only features raise or report "no data" per call site."""
 
     client, links, _ = make_client()
-    for call in (
-        client.set_node_priority("dev", ("htr", "6"), priority=3),
-        client.set_power_limit("dev", power_limit=3000),
-        client.set_acm_extra_options("dev", "7", boost_time=60),
-    ):
+    for call in (client.set_acm_extra_options("dev", "7", boost_time=60),):
         with pytest.raises(RadioUnsupportedError, match="not supported over the radio"):
             await call
-    assert await client.get_power_limit("dev") is None
     assert await client.get_node_samples("dev", ("htr", "6"), 0, 1) == []
     assert await client.get_geo_data("dev") is None
     assert links == []

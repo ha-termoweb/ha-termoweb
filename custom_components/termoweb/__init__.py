@@ -32,6 +32,7 @@ from .backend import (
 from .backend.debug import build_unknown_node_probe_requests
 from .backend.radio import RadioLinkError
 from .backend.radio_client import RadioError
+from .backend.radio_power import PowerManager
 from .backend.rest_client import BackendAuthError, BackendRateLimitError, RESTClient
 from .backend.sanitize import redact_text
 from .const import (
@@ -44,6 +45,7 @@ from .const import (
     CONF_NETWORK_ID,
     CONF_NODES,
     CONF_PORT,
+    CONF_RADIO_POWER,
     DEFAULT_BRAND,
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
@@ -210,12 +212,23 @@ def _create_client(hass: HomeAssistant, entry: ConfigEntry, brand: str) -> Any:
 
     data = entry.data
     if brand == BRAND_RADIO:
+
+        def _save_power(settings: dict[str, Any]) -> None:
+            """Store the power manager's settings in the entry options."""
+
+            hass.config_entries.async_update_entry(
+                entry, options={**entry.options, CONF_RADIO_POWER: settings}
+            )
+
         return create_radio_client(
             data[CONF_HOST],
             int(data[CONF_PORT]),
             data[CONF_DIALECT],
             data.get(CONF_NODES, []),
             bytes.fromhex(data[CONF_NETWORK_ID]),
+            power=PowerManager(
+                lambda: entry.options.get(CONF_RADIO_POWER), _save_power
+            ),
         )
     return create_rest_client(hass, data["username"], data["password"], brand)
 

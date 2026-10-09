@@ -24,6 +24,7 @@ from .backend.radio.discovery import (
 )
 from .backend.radio.link import DEFAULT_PORT as RADIO_DEFAULT_PORT
 from .backend.radio_client import dev_id_from_mac
+from .backend.radio_power import KEY_RATED_POWER
 from .backend.rest_client import BackendAuthError, BackendRateLimitError
 from .const import (
     BRAND_DUCAHEAT,
@@ -37,6 +38,7 @@ from .const import (
     CONF_NETWORK_ID,
     CONF_NODES,
     CONF_PORT,
+    CONF_RADIO_POWER,
     DEFAULT_BRAND,
     DOMAIN,
     RADIO_GATEWAY_LABEL,
@@ -80,6 +82,8 @@ async def _validate_login(
 
 
 DIALECT_AUTO = "auto"
+RATED_POWER_FIELD = "rated_power_"  # + radio address, in the radio options form
+MAX_RATED_POWER_W = 10000
 CONF_RESCAN = "rescan"
 
 
@@ -518,20 +522,46 @@ class TermoWebOptionsFlow(config_entries.OptionsFlow):
         self.entry = entry
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
-        """Show or process the debug options form."""
+        """Show or process the options form: debug, plus heater power for radio."""
+        radio_addrs = (
+            [str(node.get("addr")) for node in self.entry.data.get(CONF_NODES, [])]
+            if self.entry.data.get(CONF_BRAND) == BRAND_RADIO
+            else []
+        )
+        power = dict(self.entry.options.get(CONF_RADIO_POWER) or {})
         if user_input is not None:
-            return self.async_create_entry(
-                title="",
-                data={"debug": bool(user_input.get("debug", False))},
-            )
+            data: dict[str, Any] = {"debug": bool(user_input.get("debug", False))}
+            if radio_addrs:
+                data = {**self.entry.options, **data}
+                data[CONF_RADIO_POWER] = {
+                    **power,
+                    KEY_RATED_POWER: {
+                        addr: int(user_input.get(f"{RATED_POWER_FIELD}{addr}", 0))
+                        for addr in radio_addrs
+                    },
+                }
+            return self.async_create_entry(title="", data=data)
 
         debug_default = bool(
             self.entry.options.get("debug", self.entry.data.get("debug", False))
         )
-        schema = vol.Schema({vol.Optional("debug", default=debug_default): bool})
+        fields: dict[Any, Any] = {vol.Optional("debug", default=debug_default): bool}
+        rated = power.get(KEY_RATED_POWER) or {}
+        for addr in radio_addrs:
+            fields[
+                vol.Optional(
+                    f"{RATED_POWER_FIELD}{addr}", default=int(rated.get(addr) or 0)
+                )
+            ] = vol.All(vol.Coerce(int), vol.Range(min=0, max=MAX_RATED_POWER_W))
         ver = await _get_version(self.hass)
+        heaters = (
+            "Heater power in watts (0 = unknown), used by the power limit: "
+            + ", ".join(f"{RATED_POWER_FIELD}{a} = heater {a}" for a in radio_addrs)
+            if radio_addrs
+            else ""
+        )
         return self.async_show_form(
             step_id="init",
-            data_schema=schema,
-            description_placeholders={"version": ver},
+            data_schema=vol.Schema(fields),
+            description_placeholders={"version": ver, "heaters": heaters},
         )

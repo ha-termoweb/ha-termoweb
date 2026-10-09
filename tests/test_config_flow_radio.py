@@ -344,3 +344,24 @@ async def test_discover_radio_paths(monkeypatch) -> None:
     calls_result.update(sighting=sighting_b, heaters={})
     with pytest.raises(config_flow.RadioSetupError, match="no_heaters"):
         await config_flow.discover_radio("gw", 1, "auto", None)
+
+
+@pytest.mark.asyncio
+async def test_radio_options_store_heater_rated_power() -> None:
+    hass = HomeAssistant()
+    entry = _radio_entry(hass)
+    entry.options = {"radio_power": {"power_limit": 2000, "rated_power": {"6": 1200}}}
+    flow = config_flow.TermoWebOptionsFlow(entry)
+    flow.hass = hass
+
+    form = await flow.async_step_init()
+    fields = {str(getattr(k, "schema", k)): k for k in form["data_schema"].schema}
+    default = fields["rated_power_6"].default
+    assert (default() if callable(default) else default) == 1200
+    assert "rated_power_6 = heater 6" in form["description_placeholders"]["heaters"]
+
+    result = await flow.async_step_init({"debug": True, "rated_power_6": 1500})
+    assert result["data"] == {
+        "debug": True,
+        "radio_power": {"power_limit": 2000, "rated_power": {"6": 1500}},
+    }

@@ -185,7 +185,7 @@ class RadioListener(_WSStatusMixin):
         return "htr" if "htr" in types else min(types)
 
     async def _refresh_all(self) -> None:
-        """Send each heater a keepalive clock sync and read its status."""
+        """Keepalive clock sync and status read for each heater; then apply the power limit."""
 
         for node_type, addr in self._heaters():
             try:
@@ -204,6 +204,7 @@ class RadioListener(_WSStatusMixin):
             )
             if settings:
                 self._push(node_type, addr, settings)
+        await self._client.async_balance_power()
 
     # --- unsolicited heater frames ------------------------------------------
 
@@ -265,13 +266,14 @@ class RadioListener(_WSStatusMixin):
             _LOGGER.debug("Radio station reply failed: %s", err)
 
     async def _grant_power(self, node_type: str, addr: str, radio_id: int) -> None:
-        """Grant a power request, then push the heating state the heater reports."""
+        """Acknowledge a power request, push the heating state, apply the power limit."""
 
         await self._client.async_send(radio_id, protocol.power_verdict())
         await asyncio.sleep(self._grant_settle_s)
         record = await self._client.read_power_record(radio_id)
         if record is not None:
             self._push(node_type, addr, settings_from_power_record(record))
+        await self._client.async_balance_power()
 
     def _push(self, node_type: str, addr: str, settings: Mapping[str, Any]) -> None:
         """Send one settings delta to the coordinator and mark the payload fresh."""
