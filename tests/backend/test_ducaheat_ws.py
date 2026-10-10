@@ -628,22 +628,17 @@ async def test_subscribe_telemetry_tracks_success_and_failure(
 ) -> None:
     """Subscription attempts count successes and failures in the ws state."""
     client._ws = StubWebSocket()
-    client._inventory = None
-    emit = AsyncMock()
+    emit = AsyncMock(side_effect=[RuntimeError("send failed"), None, None])
     monkeypatch.setattr(client, "_emit_sio", emit)
 
-    with pytest.raises(TypeError):
-        await client._subscribe_feeds(now=10.0)
+    assert await client._subscribe_feeds(now=10.0) == 0
 
     state = runtime.ws_state[DEV_ID]
     assert state["subscribe_attempts_total"] == 1
     assert state["subscribe_fail_total"] == 1
     assert state["subscribe_success_total"] == 0
-    assert client._pending_subscribe is False
-    emit.assert_not_awaited()
+    assert client._pending_subscribe is True
 
-    client._inventory = runtime.inventory
-    client._pending_subscribe = True
     assert await client._subscribe_feeds(now=200.0) == 2
 
     assert state["subscribe_attempts_total"] == 2

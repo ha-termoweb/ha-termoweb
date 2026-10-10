@@ -383,7 +383,7 @@ async def test_brand_headers(hass: HomeAssistant, brand: str) -> None:
 
 @both_clients
 async def test_nodes_to_deltas(hass: HomeAssistant, brand: str) -> None:
-    """Node payloads become deltas; unknown nodes and missing inventory are skipped."""
+    """Node payloads become deltas; nodes outside the inventory are skipped."""
     runtime = make_runtime(hass)
     client = _client(hass, brand, runtime)
     nodes = {
@@ -399,7 +399,7 @@ async def test_nodes_to_deltas(hass: HomeAssistant, brand: str) -> None:
         "bogus": {"settings": {"1": {"mode": "auto"}}},
     }
 
-    deltas = client._nodes_to_deltas(nodes, inventory=runtime.inventory)
+    deltas = client._nodes_to_deltas(nodes)
 
     assert len(deltas) == 1
     assert deltas[0].node_id == NodeId(NodeType.HEATER, "1")
@@ -410,8 +410,7 @@ async def test_nodes_to_deltas(hass: HomeAssistant, brand: str) -> None:
     assert "unknown" not in payload
     assert "samples" not in payload
     unknown_node = {"htr": {"settings": {"2": {"mode": "auto"}}}}
-    assert client._nodes_to_deltas(unknown_node, inventory=runtime.inventory) == []
-    assert client._nodes_to_deltas(nodes, inventory=None) == []
+    assert client._nodes_to_deltas(unknown_node) == []
 
 
 @both_clients
@@ -422,8 +421,7 @@ async def test_apply_deltas_reaches_the_state_store(
     runtime = make_runtime(hass)
     client = _client(hass, brand, runtime)
     deltas = client._nodes_to_deltas(
-        {"htr": {"settings": {"1": {"mode": "auto", "stemp": "21.5"}}}},
-        inventory=runtime.inventory,
+        {"htr": {"settings": {"1": {"mode": "auto", "stemp": "21.5"}}}}
     )
 
     client._apply_deltas_to_store(deltas, replace=False)
@@ -541,8 +539,6 @@ async def test_coerce_nodes_list(hass: HomeAssistant, brand: str) -> None:
     assert client._coerce_nodes_list([{"type": "htr", "addr": "9"}]) is None
     for not_a_list in (None, {"htr": {}}, "text", b"bytes", 5):
         assert client._coerce_nodes_list(not_a_list) is None
-    client._inventory = None
-    assert client._coerce_nodes_list(entries) is None
 
 
 @both_clients

@@ -74,7 +74,13 @@ def test_create_ws_client_requires_radio_client() -> None:
     radio_backend = _mod(".radio_backend").RadioBackend
     backend = radio_backend(brand=BRAND_RADIO, client=SimpleNamespace())
     with pytest.raises(TypeError, match="RadioClient"):
-        backend.create_ws_client(SimpleNamespace(data={}), "e", "d", SimpleNamespace())
+        backend.create_ws_client(
+            SimpleNamespace(data={}),
+            "e",
+            "d",
+            SimpleNamespace(),
+            inventory=Inventory("d", build_node_inventory(NODES)),
+        )
 
 
 @pytest.mark.asyncio
