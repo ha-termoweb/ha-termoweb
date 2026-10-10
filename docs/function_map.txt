@@ -1546,8 +1546,6 @@ custom_components/termoweb/sensor.py :: HeaterBoostEndSensor.__init__
     Initialise the boost end timestamp sensor.
 custom_components/termoweb/sensor.py :: HeaterBoostEndSensor.native_value
     Return the boost end timestamp.
-custom_components/termoweb/sensor.py :: HeaterBoostEndSensor.state
-    Return the Home Assistant state value for the boost end sensor.
 custom_components/termoweb/sensor.py :: HeaterBoostEndSensor.extra_state_attributes
     Return metadata about the boost session.
 custom_components/termoweb/sensor.py :: _create_heater_sensors

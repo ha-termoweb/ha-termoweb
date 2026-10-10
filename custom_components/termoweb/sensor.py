@@ -12,7 +12,7 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.const import STATE_UNKNOWN, UnitOfTime
+from homeassistant.const import UnitOfTime
 from homeassistant.core import callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
@@ -594,20 +594,6 @@ class HeaterBoostEndSensor(HeaterNodeBase, SensorEntity):
 
         state = self.boost_state()
         return state.end_datetime
-
-    @property
-    def state(self) -> StateType:  # type: ignore[override]
-        """Return the Home Assistant state value for the boost end sensor."""
-
-        ha_state = super().state
-        state = self.boost_state()
-        if ha_state in (STATE_UNKNOWN, None):
-            end_dt = state.end_datetime
-            if end_dt is not None:
-                return end_dt.isoformat()
-            if state.end_label:
-                return state.end_label
-        return ha_state
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
